@@ -144,7 +144,7 @@ must look under `net/instaweb/rewriter/`.
 | `system/` | System abstractions (admin UI, cache backends) |
 | `automatic/` | ProxyFetch - standalone rewriting engine shared by all deployment modes |
 
-The admin console is a Svelte/Vite single-page app under `pagespeed/system/console/`. Its compiled output, `pagespeed/system/console/admin_console.html`, is a **GENERATED single-file Vite bundle — DO NOT EDIT BY HAND.** Edit the SPA source under `pagespeed/system/console/src/` and rebuild via `pagespeed/system/console/build.sh`; the checked-in bundle is guarded by `pagespeed/system/console/check-no-drift.sh` (run in the maintainer CI as `console-drift`) against `pagespeed/system/console/admin_console.html.srchash`.
+The admin console is a Svelte/Vite single-page app under `pagespeed/system/console/`. Its compiled output, `pagespeed/system/console/admin_console.html`, is a **GENERATED single-file Vite bundle — DO NOT EDIT BY HAND.** Edit the SPA source under `pagespeed/system/console/src/` and rebuild via `pagespeed/system/console/build.sh`; the checked-in bundle is guarded by `pagespeed/system/console/check-no-drift.sh` (run in the maintainer CI as the console-drift step group of the `guards` job) against `pagespeed/system/console/admin_console.html.srchash`.
 
 ### Key Abstractions
 
@@ -640,6 +640,7 @@ leaves the build green while the real code is untouched.
 - **Release-note gate (a blocking check, `release-note-guard` in the maintainer CI).** A PR touching `pagespeed/`, `net/`, or `install/` — excluding tests, `BUILD` files, and `*.md` — must also touch `RELEASE_NOTES.md` (in-development section at the top) **or** `CHANGELOG.md` (under `## [Unreleased]`); either satisfies it. Note `pagespeed/iis/` is product code here and is **not** exempt (the formatting scripts exclude it, this gate does not).
 - If the change is genuinely invisible to users, waive it with a mandatory reason in a commit message or the PR body: `Release-Note: none - <why this is invisible to users>` (`-`, `:`, en dash or em dash all work; the reason must be at least 12 characters).
 - Check it locally before pushing: `bash tools/ci/check_release_note.sh --base origin/master --head HEAD` (self-test: `--self-test`).
+- The GitHub release body is generated, not hand-written: `tools/ci/release_highlights.sh` takes the `## Highlights` section of the tag's `# mod_pagespeed <version> Release Notes` entry in `RELEASE_NOTES.md`, and the Create Release step fails when it is missing or empty. `tools/ci/release_sha256sums.sh` builds the release `SHA256SUMS` (one sorted row per uploaded asset, `~` written as `.` as GitHub stores it). The release stays a draft until the smokes pass.
 
 ## Debugging Methodology
 

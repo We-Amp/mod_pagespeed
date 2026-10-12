@@ -1,7 +1,7 @@
 THIRD-PARTY-NOTICES
 ===================
 
-WeAmp.PageSpeed.Sidecar (mod_pagespeed 1.15) — the ASP.NET Core nginx sidecar —
+WeAmp.PageSpeed.Sidecar (mod_pagespeed) — the ASP.NET Core nginx sidecar —
 redistributes the third-party software listed below. The native package
 (WeAmp.PageSpeed.Sidecar.NativeAssets.Linux) physically ships, per Linux runtime
 identifier (linux-x64, linux-arm64): a bundled nginx executable, and
@@ -16,7 +16,7 @@ This software is based in part on the work of the Independent JPEG Group.
 BUNDLED NATIVE BINARIES (shipped as files in the package)
 ===============================================================================
 
-nginx 1.30.4  (the bundled reverse-proxy executable, built without an SSL module —
+nginx 1.30.5  (the bundled reverse-proxy executable, built without an SSL module —
                no libssl/libcrypto host dependency)
   License: BSD-2-Clause
   Copyright (c) 2002-2024 Igor Sysoev
@@ -112,6 +112,26 @@ Chromium base (incl. dmg_fp/dtoa, dynamic_annotations, superfasthash, NSPR-deriv
   1998-2000 Netscape Communications Corporation; 2010 Paul Hsieh
   https://chromium.googlesource.com/chromium/src/+/main/LICENSE
 
+curl (libcurl) 8.22.0
+  License: curl
+  Copyright (c) 1996-2026 Daniel Stenberg and many contributors
+  https://curl.se/docs/copyright.html
+
+libmemcached 1.1.4
+  License: BSD-3-Clause
+  Copyright (c) Brian Aker / awesomized
+  https://github.com/awesomized/libmemcached
+
+libavif 1.4.2
+  License: BSD-2-Clause
+  Copyright (c) Joe Drago and libavif contributors
+  https://github.com/AOMediaCodec/libavif
+
+aom (libaom) 3.12.0
+  License: BSD-2-Clause
+  Copyright (c) Alliance for Open Media
+  https://aomedia.googlesource.com/aom/
+
 base64 (René Nyffenegger)
   License: Zlib
   Copyright (c) 2004-2008 René Nyffenegger
@@ -119,6 +139,8 @@ base64 (René Nyffenegger)
 The PageSpeed engine derives from Apache PageSpeed (mod_pagespeed); its complete
 upstream third-party attribution is reproduced in the bundled NOTICE file and at
 https://github.com/apache/incubator-pagespeed-mod/blob/master/NOTICE .
+The complete third-party notice for the module, with full license texts, is
+https://github.com/We-Amp/mod_pagespeed/blob/master/THIRD-PARTY-NOTICES .
 
 
 ===============================================================================

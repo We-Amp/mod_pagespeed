@@ -1836,6 +1836,120 @@ TEST_F(ImageTest, AnimatedGifToWebpTest) {
                               true);
 }
 
+// kCradle has 36 frames. An animation over the frame cap is left unconverted;
+// one at the cap is still converted.
+TEST_F(ImageTest, AnimatedGifOverFrameCapNotConverted) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  options->webp_animated_quality = 25;
+  options->allow_webp_animated = true;
+  options->preferred_webp = WEBP_ANIMATED;
+  options->max_animated_frames = 35;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kCradle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kGif, image->content_type()->type());
+  EXPECT_EQ(buffer, image->Contents());
+  conversion_var_checker.Test(0, 0, 0,  // gif
+                              0, 0, 0,  // png
+                              0, 0, 0,  // jpeg
+                              0, 0, 1,  // gif animated
+                              true);
+}
+
+// Same cap on the animated GIF to AVIF path.
+TEST_F(ImageTest, AnimatedGifOverFrameCapNotConvertedToAvif) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  options->preferred_avif =
+      pagespeed::image_compression::LIBAVIF_ANIMATED;
+  options->allow_avif_animated = true;
+  options->avif_animated_quality = 50;
+  options->max_animated_frames = 35;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kCradle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kGif, image->content_type()->type());
+  EXPECT_EQ(buffer, image->Contents());
+  EXPECT_EQ(1, conversion_var_checker.AvifFailures(
+                   Image::ConversionVariables::FROM_GIF_ANIMATED));
+  EXPECT_EQ(0, conversion_var_checker.AvifSuccesses(
+                   Image::ConversionVariables::FROM_GIF_ANIMATED));
+  EXPECT_EQ(0, conversion_var_checker.AvifTimeouts(
+                   Image::ConversionVariables::FROM_GIF_ANIMATED));
+}
+
+TEST_F(ImageTest, AnimatedGifAtFrameCapConverted) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  options->webp_animated_quality = 25;
+  options->allow_webp_animated = true;
+  options->preferred_webp = WEBP_ANIMATED;
+  options->max_animated_frames = 36;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kCradle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kWebp, image->content_type()->type());
+  conversion_var_checker.Test(0, 0, 0,  // gif
+                              0, 0, 0,  // png
+                              0, 0, 0,  // jpeg
+                              0, 1, 0,  // gif animated
+                              true);
+}
+
+TEST_F(ImageTest, AnimatedGifFrameCapDisabled) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  options->webp_animated_quality = 25;
+  options->allow_webp_animated = true;
+  options->preferred_webp = WEBP_ANIMATED;
+  options->max_animated_frames = 0;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kCradle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kWebp, image->content_type()->type());
+}
+
+// Animated GIF to WebP conversion shares the per-image conversion-attempt
+// budget with the other conversions.
+TEST_F(ImageTest, AnimatedGifToWebpHonoursConversionAttemptLimit) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  ConversionVarChecker conversion_var_checker(options);
+  options->webp_animated_quality = 25;
+  options->allow_webp_animated = true;
+  options->preferred_webp = WEBP_ANIMATED;
+  // Pre-exhaust the budget (kMaxConversionAttempts is 3).
+  options->conversions_attempted = 3;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kCradle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kGif, image->content_type()->type());
+  EXPECT_EQ(buffer, image->Contents());
+  EXPECT_EQ(3, options->conversions_attempted);
+  conversion_var_checker.Test(0, 0, 0,  // gif
+                              0, 0, 0,  // png
+                              0, 0, 0,  // jpeg
+                              0, 0, 0,  // gif animated
+                              true);
+}
+
+TEST_F(ImageTest, AnimatedGifToWebpConsumesConversionAttempt) {
+  Image::CompressionOptions* options = new Image::CompressionOptions;
+  options->webp_animated_quality = 25;
+  options->allow_webp_animated = true;
+  options->preferred_webp = WEBP_ANIMATED;
+
+  GoogleString buffer;
+  ImagePtr image(ReadFromFileWithOptions(kCradle, &buffer, options));
+  image->output_size();
+  EXPECT_EQ(ContentType::kWebp, image->content_type()->type());
+  EXPECT_EQ(1, options->conversions_attempted);
+}
+
 }  // namespace
 
 // ----------------------------------------------------------------------------

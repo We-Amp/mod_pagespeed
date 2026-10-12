@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/d/replace/x","rule":"description-replace","kind":"description","mode":"enforce","action":"replace","reason":"present","defect":"description-multiple","before":"fnv1a64:3018cd19bf898cd6","after":"Description for /d/replace/x"}

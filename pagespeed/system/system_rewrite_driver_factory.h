@@ -22,6 +22,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <vector>
 
@@ -43,6 +44,7 @@ class MessageHandler;
 class NamedLockManager;
 class NonceGenerator;
 class ProcessContext;
+class RulePackStore;
 class ServerContext;
 class SharedCircularBuffer;
 class SharedMemStatistics;
@@ -169,6 +171,9 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   void StopCacheActivity() override;
 
   SystemCaches* caches() { return caches_.get(); }
+
+  // The rule packs of this process (a RulePackStore), created on first use.
+  RulePackProvider* rule_pack_provider() override;
 
   virtual void set_message_buffer_size(int x) { message_buffer_size_ = x; }
 
@@ -470,6 +475,11 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // re-resolution that changes nothing does not repeat itself.
   int logged_rewrite_threads_;
   int logged_expensive_rewrite_threads_;
+
+  // The per-process rule pack cache and decision logs; see
+  // rule_pack_provider().
+  std::once_flag rule_pack_store_once_;
+  std::unique_ptr<RulePackStore> rule_pack_store_;
 
   SystemRewriteDriverFactory(const SystemRewriteDriverFactory&) = delete;
   SystemRewriteDriverFactory& operator=(const SystemRewriteDriverFactory&) =

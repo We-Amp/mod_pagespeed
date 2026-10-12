@@ -1,0 +1,14 @@
+{
+  "url": "https://fixture.test/lh/replace/mixed",
+  "pack": "pack.link-header.json",
+  "origin_headers": [
+    [
+      "Content-Type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "Link",
+      "<https://fixture.test/old>; rel=\"canonical preload\"; as=style"
+    ]
+  ]
+}

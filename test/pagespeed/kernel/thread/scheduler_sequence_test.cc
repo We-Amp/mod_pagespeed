@@ -31,6 +31,7 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/scheduler.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -83,10 +84,19 @@ class SchedulerSequenceTest : public WorkerTestBase {
 
   void SetDone() { done_ = true; }
 
+  void StepWallClockBack() {
+    timer_.StepWallClockBackUs(10 * kTimeoutMs * Timer::kMsUs);
+  }
+
   void Add10Tasks() {
     for (int i = 0; i < 10; ++i) {
       sequence_->Add(new Increment(i + 1, &count_));
     }
+  }
+
+  void AddStepWallClockBackTask() {
+    sequence_->Add(
+        MakeFunction(this, &SchedulerSequenceTest::StepWallClockBack));
   }
 
   void AddSetDoneTask() {
@@ -139,6 +149,23 @@ TEST_F(SchedulerSequenceTest, Timeout) {
   }
   EXPECT_EQ(10, count_);
   EXPECT_FALSE(done_);
+}
+
+// A backward wall-clock step while tasks run must not stretch the timeout:
+// RunTasksUntil measures its deadline on the monotonic clock, so it waits for
+// the remaining kTimeoutMs of monotonic time and no longer.
+TEST_F(SchedulerSequenceTest, TimeoutIgnoresBackwardWallClockStep) {
+  AddStepWallClockBackTask();
+  const int64 start_us = timer_.NowUs();
+  {
+    ScopedMutex lock(scheduler_.mutex());
+    EXPECT_FALSE(sequence_->RunTasksUntil(kTimeoutMs, &done_));
+  }
+  EXPECT_FALSE(done_);
+  // Wall time: stepped back by 10 timeouts, then advanced by exactly one.
+  EXPECT_EQ(start_us - 10 * kTimeoutMs * Timer::kMsUs +
+                kTimeoutMs * Timer::kMsUs,
+            timer_.NowUs());
 }
 
 TEST_F(SchedulerSequenceTest, RunOnRequestThreadThenSwitch) {

@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/d/repair/empty","rule":"description-repair","kind":"description","mode":"enforce","action":"fill","reason":"empty","defect":"description-missing","before":"","after":"Description for /d/repair/empty"}

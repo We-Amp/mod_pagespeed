@@ -136,6 +136,21 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pin for the rule_packs options: registered once in RewriteOptions,
+# and the nginx options class must leave both names to it (nginx cannot be
+# linked into a unit test; see above).
+pagespeed_cc_test(
+    name = "ngx_rule_pack_options_pin_test",
+    srcs = ["ngx_rule_pack_options_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_rewrite_options_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Source pin for the in-place recorder seam: the retype is behaviour-free, so
 # there is nothing to execute, and the port cannot be linked into a test (see
 # above). The test reads the nginx sources and pins that the recorder is

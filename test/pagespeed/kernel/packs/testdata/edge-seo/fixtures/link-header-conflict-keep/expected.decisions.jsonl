@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/lh/keep/conflict","rule":"link-keep","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/lh/keep/conflict"}
+{"host":"fixture.test","path":"/lh/keep/conflict","rule":"link-keep","kind":"canonical","mode":"enforce","action":"none","reason":"header_conflict","defect":"canonical-header-conflict","before":"fnv1a64:2c90b8daeeee4381","after":"","header":true}

@@ -188,6 +188,13 @@ run_tests() {
     export PAGESPEED_SECONDARY_CACHE_DIR="${PAGESPEED_SECONDARY_CACHE_DIR:-/var/cache/mod_pagespeed_secondary}"
     export PAGESPEED_DOC_ROOT="${PAGESPEED_DOC_ROOT:-/var/www/html}"
     export PAGESPEED_STATS_LOG="${PAGESPEED_STATS_LOG:-/var/log/pagespeed/stats_log_global}"
+    # Lane fixtures rule_packs / rule_pack_log: the rulepacks*.example.com
+    # vhosts are on the secondary port, and the decision log is under LogDir.
+    export PAGESPEED_RULE_PACKS_PORT="${PAGESPEED_RULE_PACKS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    export PAGESPEED_RULE_PACK_LOG_DIR="${PAGESPEED_RULE_PACK_LOG_DIR:-/var/log/pagespeed}"
+    # Lane fixture daemon_arm: the optimizer worker's notification socket
+    # (setup_apache_test.sh), probed by conftest before the fixture is believed.
+    export PAGESPEED_DAEMON_SOCKET="${PAGESPEED_DAEMON_SOCKET:-/tmp/apache_pagespeed_test/daemon/notify.sock}"
     log_info "Lane fixtures: ${PAGESPEED_LANE_FIXTURES:-<none>}"
 
     log_info "Test server: http://$PAGESPEED_HOST:$PAGESPEED_PORT"

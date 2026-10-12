@@ -21,6 +21,7 @@
 
 #include <unistd.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
@@ -34,6 +35,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
@@ -139,6 +141,55 @@ class CurlTestFetch : public AsyncFetch {
 
   CurlTestFetch(const CurlTestFetch&) = delete;
   CurlTestFetch& operator=(const CurlTestFetch&) = delete;
+};
+
+// Clears the proxy variables libcurl reads, so a fetch that must go direct is
+// not affected by the environment of the machine running the test.
+class ScopedNoEnvironmentProxy {
+ public:
+  ScopedNoEnvironmentProxy()
+      : https_proxy_("https_proxy", ""),
+        https_proxy_upper_("HTTPS_PROXY", ""),
+        all_proxy_("all_proxy", ""),
+        all_proxy_upper_("ALL_PROXY", "") {}
+
+ private:
+  ScopedEnv https_proxy_;
+  ScopedEnv https_proxy_upper_;
+  ScopedEnv all_proxy_;
+  ScopedEnv all_proxy_upper_;
+};
+
+// A Timer whose wall clock runs backward: every NowUs() reading is one second
+// earlier than the previous one, as if the host clock were being stepped back
+// repeatedly. The monotonic clock is the real one.
+class BackwardWallClockTimer : public Timer {
+ public:
+  int64 NowUs() const override {
+    return real_.NowUs() - kStepBackUs * (++wall_reads_);
+  }
+  // A fake monotonic clock that advances a known 50 ms per reading, so the
+  // test can tell a monotonic duration from one clamped up from a negative
+  // wall-clock delta.
+  int64 NowMonotonicUs() const override {
+    return kMonotonicStepUs * (++monotonic_reads_);
+  }
+  void SleepUs(int64 us) override { real_.SleepUs(us); }
+
+ private:
+  static const int64 kStepBackUs = 1000 * 1000;
+  static const int64 kMonotonicStepUs = 50 * 1000;
+  PosixTimer real_;
+  mutable std::atomic<int64> wall_reads_{0};
+  mutable std::atomic<int64> monotonic_reads_{0};
+};
+
+// Same backward-running wall clock, but with no independent monotonic source:
+// NowMonotonicUs() falls back to NowUs(), like any Timer that does not
+// override it.
+class WallClockOnlyBackwardTimer : public BackwardWallClockTimer {
+ public:
+  int64 NowMonotonicUs() const override { return NowUs(); }
 };
 
 }  // namespace
@@ -671,6 +722,63 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsKeepsUrlHostWithEnvironmentProxy) {
   ValidateMonitoringStats(1, 0);
 }
 
+TEST_F(CurlUrlAsyncFetcherTest,
+       TestHttpsFailsWhenHostHeaderNameNotInCertificate) {
+  ScopedNoEnvironmentProxy no_environment_proxy;
+  // The Host header's name goes out as SNI and is checked against the
+  // certificate, so a name the certificate does not cover must fail the
+  // fetch even though the URL's address is reachable. This server's
+  // certificate names only pagespeed.test.
+  GoogleString ca_file = StrCat(GTestTempDir(), "/curl_test_host_name_neg.pem");
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  ASSERT_TRUE(
+      file_system.WriteFile(ca_file.c_str(), kTestHostNameCertPem, &handler));
+  CurlTestServer server(CurlTestServer::kHttps, CurlTestServer::kHostName,
+                        thread_system_.get());
+  ASSERT_TRUE(server.StartAndWait());
+  curl_fetcher_->SetHttpsOptions("enable");
+  curl_fetcher_->SetSslCertificatesFile(ca_file);
+  int index = AddTestUrl(StrCat("https://", server.host_port(), "/html"), "");
+  request_headers(index)->Add(
+      HttpAttributes::kHost,
+      StrCat("other.test:", IntegerToString(server.port())));
+  TestHttpsFails(index, index);
+  ValidateMonitoringStats(0, 1);
+  EXPECT_EQ(1,
+            statistics_->GetVariable(CurlStats::kCurlFetchCertErrors)->Get());
+  server.ShutDown();
+}
+
+TEST_F(CurlUrlAsyncFetcherTest, TestHttpsUsesHostHeaderNameForIpv6Literal) {
+  ScopedNoEnvironmentProxy no_environment_proxy;
+  // Same as TestHttpsUsesHostHeaderName with the server named by an IPv6
+  // literal: the URL's host is "[::1]", the connection must still go there.
+  CurlTestServer server(CurlTestServer::kHttps, CurlTestServer::kHostName,
+                        thread_system_.get());
+  server.set_ipv6(true);
+  if (!server.StartAndWait()) {
+    server.ShutDown();
+    GTEST_SKIP() << "no IPv6 loopback on this host";
+  }
+  GoogleString ca_file = StrCat(GTestTempDir(), "/curl_test_host_name_v6.pem");
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  ASSERT_TRUE(
+      file_system.WriteFile(ca_file.c_str(), kTestHostNameCertPem, &handler));
+  curl_fetcher_->SetHttpsOptions("enable");
+  curl_fetcher_->SetSslCertificatesFile(ca_file);
+  int index = AddTestUrl(StrCat("https://", server.host_port(), "/html"),
+                         "<!DOCTYPE html>");
+  request_headers(index)->Add(
+      HttpAttributes::kHost,
+      StrCat("pagespeed.test:", IntegerToString(server.port())));
+  StartFetches(index, index);
+  ExpectHttpsSucceeds(index);
+  ValidateMonitoringStats(1, 0);
+  server.ShutDown();
+}
+
 TEST_F(CurlUrlAsyncFetcherTest, TestHttpsSucceedsWhenEnabled) {
   curl_fetcher_->SetHttpsOptions("enable,allow_self_signed");
   EXPECT_TRUE(curl_fetcher_->SupportsHttps());
@@ -723,6 +831,23 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsFailsWhenProxyRefusesConnect) {
   ValidateMonitoringStats(0, 1);
 }
 
+TEST_F(CurlUrlAsyncFetcherTest, TestRefusedProxyConnectIsExplainedInLog) {
+  // The failure line says why, not only libcurl's generic error text: the
+  // proxy's status for CONNECT and libcurl's own description.
+  ScopedEnv https_proxy("https_proxy", StrCat("http://", test_host_));
+  ScopedEnv no_proxy("no_proxy", "example.invalid");
+  curl_fetcher_->SetHttpsOptions("enable");
+  TestHttpsFails(StrCat("https://", https_host_, "/html"));
+  GoogleString text;
+  StringWriter text_writer(&text);
+  message_handler_.Dump(&text_writer);
+  EXPECT_NE(GoogleString::npos, text.find("proxy CONNECT response 405"))
+      << text;
+  EXPECT_NE(GoogleString::npos,
+            text.find("CONNECT tunnel failed, response 405"))
+      << text;
+}
+
 // ---- Connection refused tests (matching Serf) ----
 
 TEST_F(CurlUrlAsyncFetcherTest, ThreadedConnectionRefusedNoDetail) {
@@ -763,6 +888,36 @@ TEST_F(CurlUrlAsyncFetcherTest,
   ASSERT_TRUE(fetches_[index]->IsDone());
   EXPECT_EQ(HttpStatus::kNotFound, response_headers(index)->status_code());
   ValidateMonitoringStats(0, 1);
+}
+
+// ---- Interim (1xx) responses ----
+
+// A 1xx interim response ends with a blank line of its own. It must not be
+// taken for the end of the final response's headers.
+TEST_F(CurlUrlAsyncFetcherTest, InterimResponseIsSkipped) {
+  for (const char* code : {"100", "103"}) {
+    int index =
+        AddTestUrl(StrCat("http://", test_host_, "/interim/", code), "");
+    StartFetches(index, index);
+    ASSERT_EQ(1, WaitTillDone(index, index)) << code;
+    EXPECT_TRUE(fetches_[index]->success()) << code;
+    EXPECT_EQ(HttpStatus::kOK, response_headers(index)->status_code()) << code;
+    EXPECT_STREQ("yes", response_headers(index)->Lookup1("X-Final")) << code;
+    // The interim response's headers are not the final response's.
+    EXPECT_FALSE(response_headers(index)->Has("Link")) << code;
+    EXPECT_STREQ("<!DOCTYPE html><html><body>final</body></html>\n",
+                 contents(index))
+        << code;
+  }
+}
+
+// 101 Switching Protocols is the final response, not an interim one.
+TEST_F(CurlUrlAsyncFetcherTest, SwitchingProtocolsIsFinal) {
+  int index = AddTestUrl(StrCat("http://", test_host_, "/interim/101"), "");
+  StartFetches(index, index);
+  ASSERT_EQ(1, WaitTillDone(index, index));
+  EXPECT_EQ(101, response_headers(index)->status_code());
+  EXPECT_STREQ("test", response_headers(index)->Lookup1("Upgrade"));
 }
 
 // ---- Content length tracking (matching Serf) ----
@@ -886,6 +1041,49 @@ TEST_F(CurlUrlAsyncFetcherTest, SecondFetcherCoexistsAndFetches) {
   EXPECT_TRUE(TestFetch(kModpagespeedSite, kModpagespeedSite));
 }
 
+// Regression test for #1168: the fetch-duration statistic must come from the
+// monotonic clock. With a wall clock that runs backward, the old wall-clock
+// delta was negative, which trips DCHECK_LE(0, non_negative_delta) in
+// Variable::Add in debug builds.
+TEST_F(CurlUrlAsyncFetcherTest, FetchDurationUsesMonotonicClock) {
+  BackwardWallClockTimer stepping_timer;
+  CurlUrlAsyncFetcher stepping_fetcher("", thread_system_.get(),
+                                       statistics_.get(), &stepping_timer,
+                                       fetcher_timeout_ms_, &message_handler_);
+  int index = AddTestUrl(StrCat("http://", test_host_, "/get"), "");
+  CurlTestFetch* fetch = fetches_[index];
+  fetch->Reset();
+  stepping_fetcher.Fetch(urls_[index], &message_handler_, fetch);
+  ASSERT_EQ(1, WaitTillDone(index, index));
+  EXPECT_TRUE(fetch->success());
+  stepping_fetcher.ShutDown();
+
+  const int64 duration_ms =
+      statistics_->GetVariable(CurlStats::kCurlFetchTimeDurationMs)->Get();
+  // Two monotonic readings 50 ms apart; a clamp alone would give 0.
+  EXPECT_LE(50, duration_ms);
+  EXPECT_GT(fetcher_timeout_ms_, duration_ms);
+}
+
+// A Timer with no monotonic source (wall clock only) that steps backward must
+// still never record a negative duration: the delta is clamped at zero.
+TEST_F(CurlUrlAsyncFetcherTest, FetchDurationClampedWithoutMonotonicClock) {
+  WallClockOnlyBackwardTimer stepping_timer;
+  CurlUrlAsyncFetcher stepping_fetcher("", thread_system_.get(),
+                                       statistics_.get(), &stepping_timer,
+                                       fetcher_timeout_ms_, &message_handler_);
+  int index = AddTestUrl(StrCat("http://", test_host_, "/get"), "");
+  CurlTestFetch* fetch = fetches_[index];
+  fetch->Reset();
+  stepping_fetcher.Fetch(urls_[index], &message_handler_, fetch);
+  ASSERT_EQ(1, WaitTillDone(index, index));
+  EXPECT_TRUE(fetch->success());
+  stepping_fetcher.ShutDown();
+
+  EXPECT_EQ(
+      0, statistics_->GetVariable(CurlStats::kCurlFetchTimeDurationMs)->Get());
+}
+
 TEST_F(CurlUrlAsyncFetcherTest, SequentialFetcherCreateDestroy) {
   for (int i = 0; i < 3; ++i) {
     CurlUrlAsyncFetcher extra("", thread_system_.get(), nullptr /* statistics */,
@@ -976,6 +1174,24 @@ TEST_F(CurlUrlAsyncFetcherTestWithTunnel, TestHttpsThroughProxy) {
   curl_fetcher_->SetHttpsOptions("enable");
   TestHttpsSucceeds(StrCat("https://", https_host_, "/html"),
                     "<!DOCTYPE html>");
+  ValidateMonitoringStats(1, 0);
+  EXPECT_EQ(1, tunnel_->tunnels());
+}
+
+TEST_F(CurlUrlAsyncFetcherTestWithTunnel,
+       TestHttpsKeepsUrlHostWithConfiguredProxy) {
+  // With a configured proxy the URL's host is not replaced by the Host
+  // header's name (the proxy sees the URL's address in CONNECT): the fetch of
+  // an IP URL with another name in the Host header goes through the tunnel and
+  // is checked against the certificate for the URL's address.
+  curl_fetcher_->SetHttpsOptions("enable");
+  int index =
+      AddTestUrl(StrCat("https://", https_host_, "/html"), "<!DOCTYPE html>");
+  request_headers(index)->Add(
+      HttpAttributes::kHost,
+      StrCat("pagespeed.test:", IntegerToString(https_ca_server_->port())));
+  StartFetches(index, index);
+  ExpectHttpsSucceeds(index);
   ValidateMonitoringStats(1, 0);
   EXPECT_EQ(1, tunnel_->tunnels());
 }

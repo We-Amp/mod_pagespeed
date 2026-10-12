@@ -183,6 +183,8 @@ Description: nginx module to optimize web content (mod_pagespeed 1.15)
  practices automatically. Pinned to the exact stock nginx version it was built
  against — nginx refuses to load a dynamic module built for a different
  version.
+ .
+ Agent install recipe: https://modpagespeed.com/recipes/nginx.md
 EOF
 chmod 644 "${STAGEDIR}/DEBIAN/control"
 

@@ -1,6 +1,6 @@
 # WeAmp.PageSpeed.Sidecar
 
-Add **mod_pagespeed 1.15** to your ASP.NET Core app with two lines of middleware. Your
+Add **mod_pagespeed** to your ASP.NET Core app with two lines of middleware. Your
 Kestrel server stays the public front door — it owns the listening socket, auth, and
 routing exactly like a normal ASP.NET Core app. A bundled, matched nginx with the
 ngx_pagespeed module runs on loopback behind your app, optimizing responses before they
@@ -21,7 +21,7 @@ the default **Inverse** topology (see
 [Sidecar modes](#sidecar-modes) for the classic front-proxy alternative).
 
 > **Linux only** (`linux-x64`, `linux-arm64`). Not sure which edition fits? See
-> [mod_pagespeed 1.15 vs ModPageSpeed 2.0](https://modpagespeed.com/pricing). On Windows,
+> [mod_pagespeed vs ModPageSpeed 2.0](https://modpagespeed.com/pricing). On Windows,
 > use the IIS module; on macOS or in containers where bundling nginx isn't wanted, use
 > [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore)
 > (ModPageSpeed 2.0). The bundled nginx module includes the opt-in AVIF filters. Enable
@@ -273,8 +273,8 @@ Apache License 2.0. See the bundled `LICENSE` file.
 | Windows | ❌ use the IIS module |
 | macOS / other | ❌ use [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore) (ModPageSpeed 2.0) |
 
-See [mod_pagespeed 1.15 vs ModPageSpeed 2.0 — which fits](https://modpagespeed.com/pricing)
-and the [mod_pagespeed 1.15 overview](https://modpagespeed.com/1.1/).
+See [mod_pagespeed vs ModPageSpeed 2.0 — which fits](https://modpagespeed.com/pricing)
+and the [mod_pagespeed overview](https://modpagespeed.com/1.1/).
 
 ---
 

@@ -33,8 +33,8 @@ load(":zlib_compat.bzl", "zlib_ng_alias_repository")
 # justification) — a new C/C++ dep cannot land unscanned. When you add or bump a
 # dep, update its cpe-map.yaml release_date.
 
-ENVOY_COMMIT = "f97695a50e11f5ff6719e129a466bf9204b64a7f"  # v1.37.5 - 2026-06-26 CVE batch (defense-in-depth; mpp's compiled extension set was already unaffected — see tools/dependency/cve-ignore.yaml). ABI-compat pins (BoringSSL/zlib-ng below) unchanged v1.37.2->v1.37.5.
-ENVOY_SHA = "b517189c09755bcf24a0e04376f4f329df83aad03ed014857a506c74ce9c103f"
+ENVOY_COMMIT = "cf413bdb37b36d3ffbe570b8a48760abe2b588f5"  # v1.37.6 - fixes the 2026-08-26 advisory batch (13 CVEs). ABI-compat pins (BoringSSL/zlib-ng below) unchanged v1.37.5->v1.37.6.
+ENVOY_SHA = "60a4cc0ebced36c78f7fd7f8e7bdaea38d62c1ce933f0efc59bc531e2f47d263"
 
 # Standalone zlib-ng — replaces @envoy//bazel:zlib for non-Envoy builds.
 ZLIB_NG_VERSION = "2.3.2"
@@ -843,8 +843,6 @@ cc_library(
         strip_prefix = "apr-%s" % APR_COMMIT,
         url = "https://github.com/apache/apr/archive/%s.tar.gz" % APR_COMMIT,
         build_file_content = apr_build_rule,
-        patches = ["apr.patch"],
-        patch_args = ["-p1"],
         sha256 = APR_SHA,
     )
 

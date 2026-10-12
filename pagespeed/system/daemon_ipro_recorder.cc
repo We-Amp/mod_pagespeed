@@ -318,6 +318,14 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     if (decision.verdict == DaemonRecordVerdict::kRefuse) {
       break;
     }
+    if (decision.params.content_type == kPsContentHtml) {
+      // The daemon serves no HTML on these ports, so nothing is stored or
+      // sent to the worker for it.
+      outcome.verdict = DaemonRecordVerdict::kRefuse;
+      outcome.reason = daemon_record_reason::kHtmlClassicChain;
+      outcome.notify_mask = 0;
+      break;
+    }
 
     DaemonRecordWriter writer(abi_, cache_);
     if (writer.Begin(input, decision) != kPsOk) {

@@ -73,7 +73,11 @@ if [ ! -f "$CERTS/server.crt" ] || \
     -addext "subjectAltName=DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1" \
     2>/dev/null
 fi
-pkill -x nginx 2>/dev/null; sleep 1
+# Stop a leftover nginx from a previous run of this smoke only (its own pid
+# file); other nginx processes on the host belong to other lanes or users.
+if [ -s "$CONF_DIR/nginx.pid" ]; then
+  kill "$(cat "$CONF_DIR/nginx.pid")" 2>/dev/null; sleep 1
+fi
 
 rm -rf "$CONF_DIR" /tmp/protocol-race-cache
 mkdir -p "$CONF_DIR/logs" /tmp/protocol-race-cache
@@ -144,7 +148,11 @@ EOF
 
 "$NGINX_BIN" -p "$CONF_DIR" -c "$CONF_DIR/nginx.conf" || { echo "FAIL: nginx would not start"; exit 1; }
 sleep 1
-WORKER_BEFORE=$(pgrep -x nginx | sort | tr '\n' ' ')
+# Compare only this smoke's own nginx (master + its workers); other nginx
+# processes on the host (other CI lanes, developer instances) are not ours.
+MASTER_PID=$(cat "$CONF_DIR/nginx.pid" 2>/dev/null)
+own_pids() { { echo "$MASTER_PID"; pgrep -P "$MASTER_PID"; } | sort | tr '\n' ' '; }
+WORKER_BEFORE=$(own_pids)
 URL="https://localhost:$FRONT_PORT/mod_pagespeed_example"
 
 # Sanity: pagespeed must actually be active on the front.
@@ -190,7 +198,7 @@ for PROTO in $PROTOCOLS; do
   fi
 done
 
-WORKER_AFTER=$(pgrep -x nginx | sort | tr '\n' ' ')
+WORKER_AFTER=$(own_pids)
 [ "$WORKER_BEFORE" = "$WORKER_AFTER" ] || fail "worker set changed: '$WORKER_BEFORE' -> '$WORKER_AFTER'"
 
 RCOUNT=$(grep -cE "http request count is zero" "$CONF_DIR/logs/error.log" || true)
@@ -201,7 +209,7 @@ CRASH=$(grep -cE "exited on signal|signal [0-9]+ .SIG(SEGV|ABRT|BUS|ILL|FPE)|Che
 FINAL=$("$CURL" -sk --http2 -o /dev/null -w "%{http_code}" "$URL/index.html")
 [ "$FINAL" = "200" ] || fail "final sanity fetch returned $FINAL"
 
-pkill -x nginx 2>/dev/null
+kill "$MASTER_PID" 2>/dev/null
 if [ "$FAILURES" -eq 0 ]; then
   echo "PASS: protocol proxy IPRO race smoke ($PROTOCOLS)"
   exit 0

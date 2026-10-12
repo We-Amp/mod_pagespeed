@@ -72,6 +72,7 @@ class CurlFetch : public PoolElement<CurlFetch> {
   CURL* curl_handle() const { return curl_handle_; }
   const GoogleString& url() const { return url_; }
   size_t bytes_received() const { return bytes_received_; }
+  // Monotonic-clock reading (Timer::NowMonotonicMs), not a wall-clock time.
   int64 fetch_start_ms() const { return fetch_start_ms_; }
   int64 TimeDuration() const;
 
@@ -82,6 +83,7 @@ class CurlFetch : public PoolElement<CurlFetch> {
                               void* userdata);
 
   void FixUserAgent();
+  GoogleString FailureDetail() const;
 
   const GoogleString url_;
   CurlUrlAsyncFetcher* fetcher_;
@@ -96,9 +98,11 @@ class CurlFetch : public PoolElement<CurlFetch> {
   size_t header_bytes_received_;
   int64 fetch_start_ms_;
   int64 fetch_end_ms_;
+  bool fetch_finished_;
   GoogleString unix_socket_path_;
-  int64 timeout_ms_ = 0;                // 0: use the fetcher's timeout
-  size_t max_response_body_bytes_ = 0;  // 0: use the compile-time cap
+  int64 timeout_ms_ = 0;                     // 0: use the fetcher's timeout
+  size_t max_response_body_bytes_ = 0;       // 0: use the compile-time cap
+  char error_buffer_[CURL_ERROR_SIZE] = {};  // CURLOPT_ERRORBUFFER
 
   CurlFetch(const CurlFetch&) = delete;
   CurlFetch& operator=(const CurlFetch&) = delete;

@@ -1,0 +1,4 @@
+{"host":"fixture.test","path":"/j/final/b","rule":"canonical-jsonld","kind":"canonical","mode":"enforce","action":"none","reason":"present","defect":"","before":"","after":""}
+{"host":"fixture.test","path":"/j/final/b","rule":"title-jsonld","kind":"title","mode":"enforce","action":"none","reason":"present","defect":"","before":"","after":""}
+{"host":"fixture.test","path":"/j/final/b","rule":"description-jsonld","kind":"description","mode":"enforce","action":"none","reason":"present","defect":"","before":"","after":""}
+{"host":"fixture.test","path":"/j/final/b","rule":"jsonld-final","kind":"jsonld","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"WebPage"}

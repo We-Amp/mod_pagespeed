@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -33,6 +34,7 @@
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rule_pack_provider.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "net/instaweb/util/public/property_store.h"
@@ -53,9 +55,14 @@
 #include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/packs/matcher.h"
+#include "pagespeed/kernel/packs/pack.h"
+#include "pagespeed/kernel/packs/pack_host.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/admin_daemon_handler.h"
 #include "pagespeed/system/daemon_reader.h"
+#include "pagespeed/system/rule_pack_admin_view.h"
+#include "pagespeed/system/rule_pack_decision_log.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_rewrite_options.h"
@@ -110,6 +117,32 @@ bool GateCacheAction(AsyncFetch* fetch, MessageHandler* handler) {
     return false;
   }
   return true;
+}
+
+// A pack id names a directory of the decision log; the store only logs under
+// ids of this shape, and so does the page read them.
+bool IsSafeLogComponent(const std::string& id) {
+  if (id.empty() || id == "." || id == "..") return false;
+  for (char c : id) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                    c == '-' || c == '_' || c == '.';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+const char* RulePackStateName(RulePackStatus::State state) {
+  switch (state) {
+    case RulePackStatus::State::kLoaded:
+      return "loaded";
+    case RulePackStatus::State::kFailedKeepingEarlier:
+      return "failed-keeping-earlier";
+    case RulePackStatus::State::kRefused:
+      return "refused";
+    case RulePackStatus::State::kNone:
+      break;
+  }
+  return "none";
 }
 
 // A per-vhost console may only touch URLs of the host it serves.
@@ -623,6 +656,117 @@ void AdminSite::PrintConfig(AdminSource source, AsyncFetch* fetch,
   WriteJsonResponse(fetch, json, timer_, message_handler_);
 }
 
+void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
+                              const RewriteOptions& options,
+                              const QueryParams& query_params,
+                              AsyncFetch* fetch, ServerContext* server_context,
+                              Statistics* stats) {
+  const RequestHeaders* request = fetch->request_headers();
+  const RequestHeaders::Method method =
+      request != nullptr ? request->method() : RequestHeaders::kGet;
+  if (method != RequestHeaders::kGet && method != RequestHeaders::kHead) {
+    fetch->response_headers()->Add(HttpAttributes::kAllow, "GET, HEAD");
+    WriteJsonError(fetch, HttpStatus::kMethodNotAllowed, "method not allowed",
+                   message_handler_);
+    return;
+  }
+  auto param = [&query_params](const char* name) {
+    GoogleString value;
+    if (!query_params.Lookup1Unescaped(name, &value)) value.clear();
+    return std::string(value);
+  };
+
+  rule_pack_view::Page page;
+  page.scope = is_global ? "global" : "vhost";
+  page.host =
+      static_cast<SystemServerContext*>(server_context)->hostname_identifier();
+  page.filter_enabled = options.Enabled(RewriteOptions::kRulePacks);
+  page.pack_file = options.rule_pack_file();
+  page.mode = options.rule_pack_mode() == RewriteOptions::kRulePackModeEnforce
+                  ? "enforce"
+                  : "report";
+  page.limit = rule_pack_view::ClampLimit(param("limit"));
+  page.filter.rule = param("rule");
+  page.filter.action = param("action");
+  page.filter.reason = param("reason");
+  if (!is_global)
+    page.filter.host = pagespeed::packs::NormalizeHost(
+        std::string_view(request_host.data(), request_host.size()));
+
+  RulePackProvider* provider = server_context->rule_pack_provider();
+  if (provider != nullptr && !page.pack_file.empty()) {
+    const RulePackStatus status = provider->Status(page.pack_file);
+    page.state = RulePackStateName(status.state);
+    page.last_event_ms = status.last_event_ms;
+    page.last_error = status.last_error;
+    if (status.loaded.pack != nullptr) {
+      const pagespeed::packs::PackInfo& info = status.loaded.pack->info;
+      page.pack.present = true;
+      page.pack.id = info.id;
+      page.pack.version = info.version;
+      page.pack.publisher = info.publisher;
+      page.pack.sha256 = status.loaded.sha256;
+      page.pack.warnings = status.warnings;
+    }
+  } else {
+    page.state = "none";
+  }
+
+  if (stats != nullptr) {
+    page.have_counters = true;
+    for (int i = 0; i < pagespeed::packs::kCounterCount; ++i) {
+      const std::string_view name = pagespeed::packs::CounterName(
+          static_cast<pagespeed::packs::Counter>(i));
+      Variable* variable =
+          stats->FindVariable(StringPiece(name.data(), name.size()));
+      page.counters.emplace_back(std::string(name),
+                                 variable == nullptr ? 0 : variable->Get());
+    }
+  }
+
+  const SystemRewriteOptions* system_options =
+      SystemRewriteOptions::DynamicCast(&options);
+  const std::string log_dir =
+      system_options == nullptr ? std::string() : system_options->log_dir();
+  page.log_date = RulePackDecisionLog::UtcDate(timer_->NowMs());
+  if (log_dir.empty()) {
+    page.log_off = true;
+  } else if (page.pack_file.empty()) {
+    page.no_pack_file = true;
+  } else {
+    // The loader accepts one pack id, and the log is shared by all server
+    // processes, so the tail does not depend on this process's pack.
+    std::string id(pagespeed::packs::kPackId);
+    if (page.pack.present && page.pack.id != id) id = page.pack.id;
+    if (IsSafeLogComponent(id)) {
+      const std::string path = log_dir + "/packs/" + id + "/" +
+                               RulePackDecisionLog::FileName(page.log_date);
+      page.tail = rule_pack_view::ReadDecisionLogTail(
+          path, std::numeric_limits<size_t>::max());
+    }
+  }
+
+  const bool raw = param("raw") == "1";
+  ResponseHeaders* headers = fetch->response_headers();
+  headers->SetStatusAndReason(HttpStatus::kOK);
+  headers->Add(HttpAttributes::kContentType,
+               raw ? "text/plain; charset=utf-8" : "text/html; charset=utf-8");
+  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Add("X-Content-Type-Options", "nosniff");
+  headers->Add("PageSpeed", "off");
+  if (!raw) {
+    headers->Add("X-Frame-Options", "DENY");
+    headers->Add("Referrer-Policy", "no-referrer");
+    headers->Add("Content-Security-Policy",
+                 "default-src 'none'; style-src 'unsafe-inline'; "
+                 "frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+  }
+  fetch->Write(
+      raw ? rule_pack_view::RenderRaw(page) : rule_pack_view::RenderHtml(page),
+      message_handler_);
+  fetch->Done(true);
+}
+
 void AdminSite::MessageHistoryHandler(const RewriteOptions& options,
                                       AdminSource source,
                                       const QueryParams& query_params,
@@ -840,6 +984,9 @@ void AdminSite::AdminPage(
                   *options, is_global,
                   static_cast<SystemServerContext*>(server_context)
                       ->hostname_identifier());
+    } else if (leaf == "rule_packs") {
+      RulePacksPage(is_global, stripped_gurl.Host(), *options, query_params,
+                    fetch, server_context, stats);
     } else if (leaf == "console") {
       ConsoleHandler(*global_system_rewrite_options, *options, kPageSpeedAdmin,
                      query_params, fetch, statistics);

@@ -1,0 +1,22 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "A pack with no link_header rule, for the early-flush system test"
+  },
+  "sites": [
+    { "host": "rulepacks-nolink.example.com", "mode": "enforce" }
+  ],
+  "defaults": { "paths": ["/**"] },
+  "rules": [
+    {
+      "id": "canonical-keep",
+      "kind": "canonical",
+      "enforce": true,
+      "match": { "paths": ["/mod_pagespeed_test/rule_packs/**"] },
+      "value": { "template": "https://rulepacks-nolink.example.com{path}" },
+      "on_present": "keep"
+    }
+  ]
+}

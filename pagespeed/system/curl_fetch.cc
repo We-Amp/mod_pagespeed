@@ -19,9 +19,15 @@
 
 #include "pagespeed/system/curl_fetch.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#endif
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 
@@ -84,8 +90,9 @@ CurlFetch::CurlFetch(const GoogleString& url, AsyncFetch* async_fetch,
       headers_complete_(false),
       bytes_received_(0),
       header_bytes_received_(0),
-      fetch_start_ms_(timer->NowMs()),
-      fetch_end_ms_(0) {}
+      fetch_start_ms_(timer->NowMonotonicMs()),
+      fetch_end_ms_(0),
+      fetch_finished_(false) {}
 
 CurlFetch::~CurlFetch() {
   if (request_headers_list_ != nullptr) {
@@ -108,6 +115,10 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
   }
 
   curl_easy_setopt(curl_handle_, CURLOPT_URL, url_.c_str());
+  // libcurl's own words for a failure, e.g. "CONNECT tunnel failed, response
+  // 405"; read in Done() for the log. Must live as long as the handle.
+  error_buffer_[0] = '\0';
+  curl_easy_setopt(curl_handle_, CURLOPT_ERRORBUFFER, error_buffer_);
   curl_easy_setopt(curl_handle_, CURLOPT_WRITEFUNCTION, WriteCallback);
   curl_easy_setopt(curl_handle_, CURLOPT_WRITEDATA, this);
   curl_easy_setopt(curl_handle_, CURLOPT_HEADERFUNCTION, HeaderCallback);
@@ -290,7 +301,8 @@ bool CurlFetch::InitCurl(CurlUrlAsyncFetcher* fetcher) {
 }
 
 void CurlFetch::Done(CURLcode result) {
-  fetch_end_ms_ = timer_->NowMs();
+  fetch_end_ms_ = timer_->NowMonotonicMs();
+  fetch_finished_ = true;
 
   CurlFetchCompletionResult completion_result;
   if (result == CURLE_OK) {
@@ -330,8 +342,9 @@ void CurlFetch::Done(CURLcode result) {
         result == CURLE_SSL_ISSUER_ERROR) {
       fetcher_->IncrementCertErrors();
     }
-    message_handler_->Message(kWarning, "Fetch failed (%s): %s",
-                              curl_easy_strerror(result), url_.c_str());
+    message_handler_->Message(kWarning, "Fetch failed (%s)%s: %s",
+                              curl_easy_strerror(result),
+                              FailureDetail().c_str(), url_.c_str());
   }
 
   bool success = (result == CURLE_OK);
@@ -352,9 +365,35 @@ void CurlFetch::Done(CURLcode result) {
   fetcher_->FetchComplete(this);
 }
 
+// What libcurl knows about a failed transfer beyond curl_easy_strerror(): its
+// error buffer text and, when a proxy refused CONNECT, that answer's status
+// (a 2xx means the tunnel was fine and the failure is elsewhere).
+// Logging only.
+GoogleString CurlFetch::FailureDetail() const {
+  GoogleString detail;
+  if (error_buffer_[0] != '\0') {
+    detail = error_buffer_;
+  }
+  long connect_code = 0;
+  if (curl_easy_getinfo(curl_handle_, CURLINFO_HTTP_CONNECTCODE,
+                        &connect_code) == CURLE_OK &&
+      connect_code >= 300) {
+    if (!detail.empty()) {
+      detail += "; ";
+    }
+    StrAppend(&detail, "proxy CONNECT response ",
+              IntegerToString(connect_code));
+  }
+  return detail.empty() ? detail : StrCat(" [", detail, "]");
+}
+
 int64 CurlFetch::TimeDuration() const {
-  if (fetch_end_ms_ > 0) {
-    return fetch_end_ms_ - fetch_start_ms_;
+  if (fetch_finished_) {
+    // Both readings come from the monotonic clock, so this cannot go
+    // negative on a wall-clock step. Timer subclasses without a monotonic
+    // source fall back to the wall clock, so clamp as well: the value feeds
+    // Variable::Add, which asserts on negative deltas in debug builds.
+    return std::max<int64>(0, fetch_end_ms_ - fetch_start_ms_);
   }
   return 0;
 }
@@ -368,7 +407,9 @@ size_t CurlFetch::HeaderCallback(char* buffer, size_t size, size_t nmemb,
     return total;
   }
 
-  // Reject responses with excessive total header size to prevent OOM.
+  // Reject responses with excessive total header size to prevent OOM. This
+  // intentionally accumulates across interim (1xx) responses too, so a flood
+  // of them is bounded.
   fetch->header_bytes_received_ += total;
   if (fetch->header_bytes_received_ > kMaxHeaderBytes) {
     fetch->message_handler_->Message(
@@ -389,6 +430,13 @@ size_t CurlFetch::HeaderCallback(char* buffer, size_t size, size_t nmemb,
     long response_code = 0;
     curl_easy_getinfo(fetch->curl_handle_, CURLINFO_RESPONSE_CODE,
                       &response_code);
+    if (response_code >= 100 && response_code < 200 && response_code != 101) {
+      // An interim response (100 Continue, 103 Early Hints, ...) ends with a
+      // blank line of its own, but the final response follows: drop the
+      // interim headers and keep reading. 101 Switching Protocols is final.
+      fetch->async_fetch_->response_headers()->Clear();
+      return total;
+    }
     fetch->async_fetch_->response_headers()->set_status_code(
         static_cast<int>(response_code));
     fetch->headers_complete_ = true;

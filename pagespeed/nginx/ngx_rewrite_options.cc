@@ -98,6 +98,7 @@ const char* const server_only_options[] = {
     "LoadFromFileMatch",
     "LoadFromFileRule",
     "LoadFromFileRuleMatch",
+    "RulePackTrustKey",
     "UseNativeFetcher",
     "NativeFetcherMaxKeepaliveRequests"};
 

@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/lh/keep/a,b","rule":"link-keep","kind":"canonical","mode":"enforce","action":"none","reason":"equal","defect":"","before":"","after":""}
+{"host":"fixture.test","path":"/lh/keep/a,b","rule":"link-keep","kind":"canonical","mode":"enforce","action":"none","reason":"equal","defect":"","before":"","after":"","header":true}

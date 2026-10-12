@@ -1,0 +1,61 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "Fixture pack for the canonical Link response header"
+  },
+  "sites": [
+    {
+      "host": "fixture.test",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "link-keep",
+      "kind": "canonical",
+      "enforce": true,
+      "on_present": "keep",
+      "link_header": "match",
+      "match": {
+        "paths": [
+          "/lh/keep/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test{path}"
+      }
+    },
+    {
+      "id": "link-repair",
+      "kind": "canonical",
+      "enforce": true,
+      "on_present": "repair",
+      "link_header": "match",
+      "match": {
+        "paths": [
+          "/lh/repair/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test{path}"
+      }
+    },
+    {
+      "id": "link-replace",
+      "kind": "canonical",
+      "enforce": true,
+      "on_present": "replace",
+      "link_header": "match",
+      "match": {
+        "paths": [
+          "/lh/replace/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test{path}"
+      }
+    }
+  ]
+}

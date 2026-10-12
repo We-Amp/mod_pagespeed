@@ -58,9 +58,36 @@ filegroup(
 
 pagespeed_cc_test(
     name = "rewriter",
-    srcs = glob(["*_test.cc"]),
+    srcs = glob(
+        ["*_test.cc"],
+        exclude = ["rule_pack_fixture_test.cc"],
+    ),
     data = [":testdata"],
-    deps = ["//test/net/instaweb/rewriter:test_base"],
+    deps = [
+        "//pagespeed/kernel/packs:pack_loader",
+        "//test/net/instaweb/rewriter:test_base",
+    ],
+)
+
+# The rule-pack fixtures through the real driver chain (the kernel-level run
+# is //test/pagespeed/kernel/packs:fixture_runner_test).
+pagespeed_cc_test(
+    name = "rule_pack_fixture_test",
+    srcs = ["rule_pack_fixture_test.cc"],
+    data = [
+        "//install:rule_packs_testdata",
+        "//test/pagespeed/kernel/packs:testdata",
+    ],
+    shard_count = 8,
+    deps = [
+        "//pagespeed/kernel/packs:decision",
+        "//pagespeed/kernel/packs:pack",
+        "//pagespeed/kernel/packs:pack_loader",
+        "//pagespeed/kernel/packs:url_norm",
+        "//test/net/instaweb/rewriter:test_base",
+        "//test/pagespeed/kernel/packs:fixture_runner",
+        "@com_google_absl//absl/strings",
+    ],
 )
 
 pagespeed_cc_test(

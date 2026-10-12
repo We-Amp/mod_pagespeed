@@ -667,7 +667,8 @@ void RewriteDriverFactory::ShutDown() {
 
   // Now get active RewriteDrivers for each manager to wrap up.
   int timeout_secs = 5;
-  int64 cutoff_time_ms = timer_->NowMs() + timeout_secs * Timer::kSecondMs;
+  int64 cutoff_time_ms =
+      timer_->NowMonotonicMs() + timeout_secs * Timer::kSecondMs;
 
   for (ServerContextSet::iterator p = server_contexts_.begin();
        p != server_contexts_.end(); ++p) {

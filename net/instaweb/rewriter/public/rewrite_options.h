@@ -53,6 +53,7 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
+#include "pagespeed/kernel/packs/signature_format.h"
 #include "pagespeed/kernel/util/copy_on_write.h"
 
 namespace net_instaweb {
@@ -207,6 +208,7 @@ class RewriteOptions {
     kRewriteJavascriptInline,
     kRewriteStyleAttributes,
     kRewriteStyleAttributesWithUrl,
+    kRulePacks,
     // Accepted-but-inert; nothing consumes the enabled bits.
     kSplitHtmlDeprecated,
     kSplitHtmlHelperDeprecated,
@@ -269,6 +271,15 @@ class RewriteOptions {
     // Legacy behavior: blank out the src and restore it with an injected
     // JavaScript loader.
     kLazyloadImagesModeJs,
+  };
+
+  // Directive-level mode of the rule_packs filter. A rule changes the page
+  // only when this, the matching site in the pack and the rule itself all say
+  // enforce; otherwise the filter records what the rule would do and leaves
+  // the page as it is.
+  enum RulePackMode {
+    kRulePackModeReport,
+    kRulePackModeEnforce,
   };
 
   // Any new Option added should have a corresponding name here that must be
@@ -346,6 +357,7 @@ class RewriteOptions {
   static const char kImageLimitOptimizedPercent[];
   static const char kImageLimitRenderedAreaPercent[];
   static const char kImageLimitResizeAreaPercent[];
+  static const char kImageMaxAnimatedFrames[];
   static const char kImageMaxRewritesAtOnce[];
   static const char kImagePreserveURLs[];
   static const char kImageProvenanceCarry[];
@@ -431,6 +443,10 @@ class RewriteOptions {
   static const char kRewriteLevel[];
   static const char kRewriteRandomDropPercentage[];
   static const char kRewriteUncacheableResources[];
+  static const char kRulePackFile[];
+  static const char kRulePackMode[];
+  static const char kRulePackRequireSigned[];
+  static const char kRulePackTrustKey[];
   static const char kRunningExperiment[];
   static const char kServeStaleIfFetchError[];
   static const char kServeStaleWhileRevalidateThresholdSec[];
@@ -863,6 +879,7 @@ class RewriteOptions {
   static const int64 kDefaultImageWebpAnimatedRecompressQuality;
   static const int64 kDefaultImageWebpRecompressQualityForSmallScreens;
   static const int64 kDefaultImageWebpTimeoutMs;
+  static const int64 kDefaultImageMaxAnimatedFrames;
   // AVIF defaults. Quality default mirrors the WebP default
   // shape (-1 falls back to ImageRecompressionQuality); see the spike outcome
   // (quality ~50-60) for the encoder default applied in image.cc.
@@ -1511,6 +1528,7 @@ class RewriteOptions {
   static bool ParseFromString(StringPiece value_string, EnabledEnum* value);
   static bool ParseFromString(StringPiece value_string,
                               LazyloadImagesMode* value);
+  static bool ParseFromString(StringPiece value_string, RulePackMode* value);
   static bool ParseFromString(StringPiece value_string, int* value) {
     return StringToInt(value_string, value);
   }
@@ -2344,6 +2362,12 @@ class RewriteOptions {
     set_option(x, &image_webp_quality_for_save_data_);
   }
 
+  int64 image_max_animated_frames() const {
+    return image_max_animated_frames_.value();
+  }
+  void set_image_max_animated_frames(int64 x) {
+    set_option(x, &image_max_animated_frames_);
+  }
   int64 image_webp_timeout_ms() const { return image_webp_timeout_ms_.value(); }
   void set_image_webp_timeout_ms(int64 x) {
     set_option(x, &image_webp_timeout_ms_);
@@ -2687,6 +2711,30 @@ class RewriteOptions {
   void set_amp_link_pattern(const GoogleString& id) {
     set_option(id, &amp_link_pattern_);
   }
+
+  // The rule pack file of this server or virtual host; empty when none.
+  const GoogleString& rule_pack_file() const { return rule_pack_file_.value(); }
+  void set_rule_pack_file(const GoogleString& x) {
+    set_option(x, &rule_pack_file_);
+  }
+  RulePackMode rule_pack_mode() const { return rule_pack_mode_.value(); }
+  void set_rule_pack_mode(RulePackMode x) { set_option(x, &rule_pack_mode_); }
+  // Whether the rule_packs filter refuses a pack that is not signed with a
+  // key listed by RulePackTrustKey.
+  bool rule_pack_require_signed() const {
+    return rule_pack_require_signed_.value();
+  }
+  void set_rule_pack_require_signed(bool x) {
+    set_option(x, &rule_pack_require_signed_);
+  }
+  // The keys RulePackTrustKey listed, sorted by key id.
+  const std::vector<pagespeed::packs::TrustKey>& rule_pack_trust_keys() const {
+    return rule_pack_trust_keys_;
+  }
+  // Adds (or, for a key id already listed by this scope with the same key,
+  // accepts again) a trusted key. On failure sets *msg and returns false.
+  bool AddRulePackTrustKey(StringPiece key_id, StringPiece base64,
+                           GoogleString* msg);
 
   bool honor_csp() const { return honor_csp_.value(); }
   void set_honor_csp(bool x) { set_option(x, &honor_csp_); }
@@ -3603,6 +3651,7 @@ class RewriteOptions {
   static GoogleString ToString(const GoogleString& x) { return x; }
   static GoogleString ToString(RewriteLevel x);
   static GoogleString ToString(LazyloadImagesMode x);
+  static GoogleString ToString(RulePackMode x);
   static GoogleString ToString(const ResourceCategorySet& x);
   static GoogleString ToString(const BeaconUrl& beacon_url);
   static GoogleString ToString(const MobTheme& mob_theme);
@@ -3759,6 +3808,7 @@ class RewriteOptions {
   RangeBoundedOption<int64, -1, 100> image_webp_animated_recompress_quality_;
   RangeBoundedOption<int64, -1, 100> image_webp_quality_for_save_data_;
   Option<int64> image_webp_timeout_ms_;
+  Option<int64> image_max_animated_frames_;
 
   // Options related to AVIF compression, mirroring the WebP members above.
   RangeBoundedOption<int64, -1, 100> image_avif_recompress_quality_;
@@ -4170,6 +4220,18 @@ class RewriteOptions {
   // TODO(sjnickerson): Make this Option<AmpLinkPattern> so that parsing and
   // validation can happen up front.
   Option<GoogleString> amp_link_pattern_;
+
+  // The rule pack applied by the rule_packs filter, and the directive-level
+  // mode it runs in. Server scope: a per-directory configuration must not be
+  // able to point the server at another file.
+  Option<GoogleString> rule_pack_file_;
+  Option<RulePackMode> rule_pack_mode_;
+  Option<bool> rule_pack_require_signed_;
+  // Sorted by key id. Not an Option: merged key by key, not part of the
+  // options signature (like custom_fetch_headers_).
+  std::vector<pagespeed::packs::TrustKey> rule_pack_trust_keys_;
+  // Keys set directly in this scope, for the per-scope limit.
+  size_t rule_pack_trust_keys_set_here_ = 0;
 
   // Whether our CSP support is on or not.
   Option<bool> honor_csp_;

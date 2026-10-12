@@ -83,6 +83,7 @@ class RewriteOptions;
 class RewriteOptionsManager;
 class RewriteQuery;
 class RewriteStats;
+class RulePackProvider;
 class SHA1Signature;
 class Scheduler;
 class StaticAssetManager;
@@ -609,6 +610,11 @@ class ServerContext {
   // be set to 'false' as that command is intended only for reosurces, not
   // for HTML.
   virtual bool ProxiesHtml() const = 0;
+
+  // Where the rule_packs filter of this server gets its pack and sends its
+  // decisions; null when there is none. By default the factory's per-process
+  // provider.
+  virtual RulePackProvider* rule_pack_provider();
 
   // Makes a new RequestProperties.
   RequestProperties* NewRequestProperties();

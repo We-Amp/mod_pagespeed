@@ -269,7 +269,7 @@ test.describe("the optimizer's log as a source", () => {
     );
     await expect(page.getByTestId("logs-source-filter")).toHaveCount(0);
     await expect(page.getByText("Fetch of https://www.example.test/a.css failed")).toBeVisible();
-    await expect(page.locator(".nav-item")).toHaveCount(10);
+    await expect(page.locator(".nav-item")).toHaveCount(11);
     await expect(page.getByRole("link", { name: "Logs", exact: true })).toBeVisible();
   });
 

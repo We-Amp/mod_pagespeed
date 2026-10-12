@@ -1,3 +1,124 @@
+# mod_pagespeed 2.3.0 Release Notes
+
+**Release date:** 2026-10-12
+**Status:** Stable
+**Packages:** module `mod-pagespeed` 1.18.0-r1 + `pagespeed-optimizer` 1.18.0 (the source tree is versioned 2.3.0; the signed packages carry the 1.18.0 pairing).
+
+## Highlights
+
+- **mod_pagespeed 1.18.0 adds rule packs and is a security and reliability
+  update, released together with the optimizer and installed as a matching
+  pair.** The native packages of both parts are versioned 1.18.0; the
+  product as a whole is 2.3.0. Rule packs let the module add or correct the
+  canonical link, title, meta description, hreflang cluster and JSON-LD of
+  your pages from a JSON file, in report mode first. The release stops some
+  animated images from tying up a server worker, updates Envoy for the Envoy
+  filter, and fixes stale copies of changed CSS, JavaScript and image files
+  in the optimizer. On Apache, nginx and IIS the optimizer no longer serves
+  HTML; see *Action required when upgrading*. **Update recommended.**
+
+- **Security: resource exhaustion, image optimization.** Some animated
+  images could tie up a server worker. Animated image conversion now stops at
+  a configurable frame limit. Affected: releases up to and including 1.17.0
+  with image conversion enabled. **Update recommended.** Animations above the
+  limit are no longer converted; see *Action required when upgrading*.
+
+- **Security: Envoy filter dependency.** The Envoy filter builds against
+  Envoy 1.37.6, which fixes the Envoy security advisories published on
+  2026-08-26. Affected: the Envoy filter in releases up to and including
+  1.17.0, built against Envoy 1.37.5 or older. **Update recommended.**
+
+- **Rule packs (new, off by default).** The `rule_packs` filter applies one
+  JSON pack per server or virtual host on Apache, nginx and IIS. A pack can
+  add a missing canonical link, title, meta description, hreflang cluster or
+  JSON-LD block, remove duplicates, and keep the canonical `Link` response
+  header in line with the page. It starts in report mode, which changes
+  nothing and writes a decision log; a rule changes pages only when the
+  server, the site and the rule all say enforce. Packs can be signed with
+  Ed25519 and checked against keys you trust (`RulePackRequireSigned`, off by
+  default). A read-only Rule packs admin page shows the loaded pack, the
+  statistics and the newest decision-log lines. A free edge-SEO pack
+  template ships with the optimizer source (`packs/edge-seo/pack.example.json`);
+  it is unsigned and lists placeholder values to replace. See the rule packs
+  guide.
+
+- **With the optimizer: a changed CSS, JavaScript or image file is served in
+  its new version right away.** Before, the previous version could be sent
+  until the old copy's cache lifetime ran out, for CSS and JavaScript to
+  every client, and for the WebP and AVIF copies of images (and the gzip and
+  brotli copies with `DaemonServeStoredEncodings on`) to the clients that
+  receive them. Resetting the optimizer's cache after each deploy is no
+  longer needed.
+
+- **Apache: HEAD requests and empty-body HTML responses keep the origin's
+  response headers** (`Link`, `Set-Cookie` and others).
+
+- **Fixes on all servers.** The built-in fetcher uses the origin's final
+  response instead of a `100 Continue` or `103 Early Hints` interim
+  response, and its failure log lines now carry libcurl's explanation and a
+  proxy's answer to `CONNECT`. Fetch, rewrite and shutdown deadlines no
+  longer change when the system clock is adjusted. JavaScript with a comment
+  between a generator `*` and a method named `await` or `yield` is now
+  minified. On Windows, AVIF conversion (and WebP conversion with a WebP
+  time limit) is no longer abandoned as timed out right away.
+
+- **Debian and Ubuntu: upgrades keep a module or conf you disabled
+  disabled.** `a2dismod` and `a2disconf` choices survive upgrades and
+  `dpkg-reconfigure`.
+
+## Action required when upgrading
+
+- **Breaking: the optimizer no longer serves HTML on Apache, nginx and IIS.**
+  Every HTML response is rewritten by the module's filter chain; CSS,
+  JavaScript and images are served by the optimizer as before. HTML no longer
+  gets the optimizer's own HTML improvements (such as critical CSS and LCP
+  hints); it keeps the module's own HTML rewriting. On a host with the
+  optimizer enabled, `ipro_daemon_fallthrough` now rises on HTML requests;
+  adjust any alert on that statistic.
+
+- **Breaking: animated images with more than 200 frames are no longer
+  converted.** The new `ImageMaxAnimatedFrames` (default 200; 0 or a negative
+  value disables the limit) can be set in the server, virtual-host or
+  directory configuration, but not through query parameters or request
+  headers. Raise it if you rely on converting longer animations.
+
+- **Debian and Ubuntu: if you removed the package with 1.17.0 or earlier and
+  reinstall it, run `a2enmod pagespeed` once.** Newer removals are
+  re-enabled automatically. The package does not restart Apache: run
+  `systemctl restart apache2` after the first install.
+
+## Packaging and platform notes
+
+- **Versions.** The native packages of the module and the optimizer are
+  versioned 1.18.0; the product as a whole is 2.3.0. Install the module and
+  the optimizer as the matching pair the packages already require.
+
+- **Release assets.** Each release now also carries its software bill of
+  materials (`pagespeed-1.1-<version>.spdx.json`, SPDX) and its
+  vulnerability exploitability statements (`pagespeed-1.1-<version>.vex.json`,
+  OpenVEX), signed like the packages. `SHA256SUMS` lists each file once under
+  its download name, so `sha256sum -c SHA256SUMS` works on the downloaded
+  files as they are. The nginx module tarball and the legacy IIS zip now
+  carry `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES`, as the deb and rpm
+  packages already do.
+
+- **Linux.** The optimizer's Debian package no longer aborts configuration
+  when `systemctl daemon-reload` fails during install or upgrade; the RPM
+  scriptlet is guarded the same way.
+
+- **Windows and IIS.** Rule packs are configured at the top level of the
+  site's `pagespeed.config`, not inside a `host:` match block; keep the pack
+  outside the web root, readable by the application pool identity.
+
+- **Envoy.** The Envoy filter builds against Envoy 1.37.6.
+  `RulePackTrustKey` is not available on Envoy.
+
+- **NuGet sidecar.** The bundled nginx is updated to 1.30.5 (CVE-2026-90439
+  in the HTTP/3 module; the bundled nginx is not built with HTTP/3 and was not
+  affected).
+
+---
+
 # mod_pagespeed 2.2.0 Release Notes
 
 **Release date:** 2026-10-06

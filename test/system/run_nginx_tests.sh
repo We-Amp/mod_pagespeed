@@ -740,6 +740,74 @@ EOF
 EOF
     fi
 
+    # Lane fixtures rule_packs and rule_pack_log: the name-based servers
+    # system/test_rule_packs.py talks to, on the main port (server_name picks
+    # the block; the main block above stays the default server). The rule_packs
+    # filter is on by name with the pack under
+    # install/mod_pagespeed_test/rule_packs/, and no other filter runs. The pack
+    # lists the first two hosts; the third is not in it. The decision log goes to
+    # LogDir (generate_nginx_config above), in packs/<pack id>/.
+    if [ "$NO_MODULE" = false ]; then
+        local pack_host pack_mode
+        for pack_host in rulepacks.example.com:enforce rulepacks-report.example.com:report rulepacks-unlisted.example.com:enforce; do
+            pack_mode="${pack_host##*:}"
+            pack_host="${pack_host%%:*}"
+            cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name $pack_host;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed EnableFilters rule_packs;
+        pagespeed RulePackFile $DOC_ROOT/mod_pagespeed_test/rule_packs/pack.json;
+        pagespeed RulePackMode $pack_mode;
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+
+EOF
+        done
+
+        # Lane fixture rule_pack_signing: RulePackRequireSigned on with the
+        # throwaway public key the signed pack was signed with (only the public
+        # half is in the repo). rulepacks-signed serves the signed pack and must
+        # use it; rulepacks-require serves the unsigned pack and must refuse it.
+        local sign_key="kmWxckbPeJHh+oHxLYsRIzee4Dtzao80H2kyiYR7NdU="
+        local sign_host sign_pack
+        for sign_host in rulepacks-signed.example.com:signed/pack.json rulepacks-require.example.com:pack.json; do
+            sign_pack="${sign_host##*:}"
+            sign_host="${sign_host%%:*}"
+            cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name $sign_host;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed EnableFilters rule_packs;
+        pagespeed RulePackFile $DOC_ROOT/mod_pagespeed_test/rule_packs/$sign_pack;
+        pagespeed RulePackMode enforce;
+        pagespeed RulePackTrustKey test-publisher $sign_key;
+        pagespeed RulePackRequireSigned on;
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+
+EOF
+        done
+    fi
+
     # Add HTTPS server block if TLS certs are available
     if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
         cat >> "$NGINX_CONFIG_FILE" << EOF
@@ -1017,17 +1085,24 @@ run_tests() {
     export PAGESPEED_REDIRECT_ORIGIN_LOG="$NGINX_LOG_DIR/redirect_origin.access.log"
     # Where the handler access-rule tests reach the restricted server block.
     export PAGESPEED_HANDLER_ACL_PORT="$NGINX_HANDLER_ACL_PORT"
+    # Where the rulepacks*.example.com servers listen (lane fixture
+    # rule_packs), and the LogDir holding the rule-pack decision log (lane
+    # fixture rule_pack_log).
+    export PAGESPEED_RULE_PACKS_PORT="$NGINX_PORT"
+    export PAGESPEED_RULE_PACK_LOG_DIR="$NGINX_LOG_DIR"
 
     # Lane fixtures this lane provides (test/system/conftest.py
     # KNOWN_LANE_FIXTURES): cache_flush -- PAGESPEED_CACHE_DIR above is the
     # runner-owned FileCachePath; stats_log -- StatisticsLogging on with
     # LogDir $NGINX_LOG_DIR (generate_nginx_config); option_response_headers
-    # -- the add_header option_headers/ locations (generate_nginx_config).
+    # -- the add_header option_headers/ locations (generate_nginx_config);
+    # rule_packs, rule_pack_log and rule_pack_signing -- the
+    # rulepacks*.example.com servers (generate_nginx_config).
     export PAGESPEED_STATS_LOG="${PAGESPEED_STATS_LOG:-$NGINX_LOG_DIR/stats_log_dummy_hostname:-3}"
     if [ "$NO_MODULE" = true ]; then
         export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-}"
     else
-        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers}"
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing}"
     fi
 
     # HTTPS configuration for TLS tests

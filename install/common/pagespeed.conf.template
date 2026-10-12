@@ -214,6 +214,11 @@
     # default value is -1:
     # ModPagespeedWebpTimeoutMs 5000
     #
+    # Maximum number of frames in an animated image that will be converted.
+    # Animations with more frames are served unconverted. 0 or a negative
+    # value disables the limit. The default value is 200:
+    # ModPagespeedImageMaxAnimatedFrames 200
+    #
     # Percent of original image size below which optimized images are retained:
     # ModPagespeedImageLimitOptimizedPercent 100
     #

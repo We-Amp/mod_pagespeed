@@ -418,6 +418,11 @@
     "the quality. Use -1 to ignore the Save-Data header.", true) \
   X(kDefaultImageWebpTimeoutMs, image_webp_timeout_ms_, "wt", \
     kImageWebpTimeoutMs, kLegacyProcessScope, nullptr, true) \
+  X(kDefaultImageMaxAnimatedFrames, image_max_animated_frames_, "imaf", \
+    kImageMaxAnimatedFrames, kDirectoryScope, \
+    "Maximum number of frames in an animated image that will be converted. " \
+    "Animations with more frames are served unconverted. 0 or a negative " \
+    "value disables the limit.", true) \
   X(kDefaultImageAvifRecompressQuality, \
     image_avif_recompress_quality_, "iav", \
     kImageAvifRecompressionQuality, kQueryScope, \

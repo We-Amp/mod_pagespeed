@@ -625,3 +625,61 @@ pagespeed_cc_test(
     ],
 )
 
+# The rule_packs decision log: dedup, the daily cap, retention, the date
+# rollover, and whole lines from several processes (threads on Windows)
+# appending to one file.
+pagespeed_cc_test(
+    name = "rule_pack_decision_log_test",
+    srcs = ["rule_pack_decision_log_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/system:rule_pack_decision_log",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# The Rule packs admin page: the bounded read of the decision-log tail, the
+# row filters and the escaped rendering.
+pagespeed_cc_test(
+    name = "rule_pack_admin_view_test",
+    srcs = ["rule_pack_admin_view_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//test/pagespeed/system:test_base_core",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+# The per-process rule pack cache: lazy loading, the recheck interval,
+# reload on change, a bad reload keeping the last good pack, two paths to
+# one file, and the decision-log line and key.
+pagespeed_cc_test(
+    name = "rule_pack_signature_test",
+    srcs = ["rule_pack_signature_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/packs:signature_format",
+        "//pagespeed/system:rule_pack_signature",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+pagespeed_cc_test(
+    name = "rule_pack_store_test",
+    srcs = ["rule_pack_store_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/packs:decision",
+        "//pagespeed/kernel/packs:kind_registry",
+        "//pagespeed/kernel/packs:pack",
+        "//pagespeed/kernel/packs:signature_format",
+        "//pagespeed/kernel/packs:template",
+        "//test/net/instaweb/rewriter:test_base",
+        "//test/pagespeed/system:test_base_core",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/strings",
+    ],
+)

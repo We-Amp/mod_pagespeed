@@ -1,7 +1,8 @@
 # Minimal repros — tokenizer minifier corpus spike (2026-07-21)
 
 Clean-room, hand-minimal repros for the shapes the corpus run surfaced.
-Every file here parses in node (verify: `node --check <file>`; `.mjs` via
+Every file here parses in node, except `n5-generator-comment-idempotence.js`
+(see its table row); verify: `node --check <file>`; `.mjs` via
 `node --input-type=module --check < <file>`).
 
 Expected behavior per file, verified with:
@@ -32,6 +33,8 @@ bazel-bin/tools/js-minify-corpus/js_minify_probe --mode=tokenizer <file> /tmp/ou
 | `n6-arrow-try-catch.js` | `() => { try {} catch (e) {} }` | try/catch (or try/finally) inside an arrow body |
 | `n6-arrow-for-in.js` | `() => { for (var k in o) {} }` | for/for-in/for-of inside an arrow body |
 | `n6-arrow-while.js` | `() => { while (c) {} }` | while/do-while/switch inside an arrow body |
+| `n5-generator-comment-await.js` | `{*/**/await(){}, y:1}` | generator method with a comment between `*` and a keyword name; valid input |
+| `n5-generator-comment-idempotence.js` | `({*/**/a` + newline + `{z` | **deliberately not valid JavaScript** (minimized fuzz artifact for the idempotence axis); pinned by the goldens and the cross-product gate only, no parseable shape reproduces the newline-dependent difference |
 
 ## Known residual families (disclosed; included as controls)
 

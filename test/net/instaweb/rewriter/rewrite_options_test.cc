@@ -867,6 +867,184 @@ TEST_F(RewriteOptionsTest, AllDoesNotImplyStripScrips) {
   EXPECT_FALSE(options_.Enabled(RewriteOptions::kStripScripts));
 }
 
+// rule_packs applies an operator-written file; no rewrite level may turn it
+// on, only its name.
+TEST_F(RewriteOptionsTest, RulePacksIsOnlyEverOnByName) {
+  options_.SetRewriteLevel(RewriteOptions::kAllFilters);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRulePacks));
+  options_.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRulePacks));
+  options_.SetRewriteLevel(RewriteOptions::kOptimizeForBandwidth);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRulePacks));
+  options_.SetRewriteLevel(RewriteOptions::kMobilizeFilters);
+  EXPECT_FALSE(options_.Enabled(RewriteOptions::kRulePacks));
+
+  NullMessageHandler handler;
+  options_.SetRewriteLevel(RewriteOptions::kAllFilters);
+  ASSERT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("rule_packs", &handler));
+  EXPECT_TRUE(options_.Enabled(RewriteOptions::kRulePacks));
+  EXPECT_EQ(RewriteOptions::kRulePacks,
+            RewriteOptions::LookupFilter("rule_packs"));
+  EXPECT_STREQ("rpk", RewriteOptions::FilterId(RewriteOptions::kRulePacks));
+  EXPECT_EQ(RewriteOptions::kRulePacks,
+            RewriteOptions::LookupFilterById("rpk"));
+  EXPECT_STREQ("Rule Packs",
+               RewriteOptions::FilterName(RewriteOptions::kRulePacks));
+}
+
+TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
+  EXPECT_TRUE(options_.rule_pack_file().empty());
+  EXPECT_EQ(RewriteOptions::kRulePackModeReport, options_.rule_pack_mode());
+
+  NullMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName1(
+          "RulePackFile", "/etc/pagespeed/packs/site.json", &msg, &handler));
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", options_.rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("RulePackMode", "Enforce", &msg,
+                                                &handler));
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, options_.rule_pack_mode());
+  // A misspelled mode is a configuration error, never a silent default.
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            options_.ParseAndSetOptionFromName1("RulePackMode", "enforc", &msg,
+                                                &handler));
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, options_.rule_pack_mode());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("RulePackMode", "report", &msg,
+                                                &handler));
+  EXPECT_EQ(RewriteOptions::kRulePackModeReport, options_.rule_pack_mode());
+
+  RewriteOptions::RulePackMode mode;
+  EXPECT_FALSE(RewriteOptions::ParseFromString("", &mode));
+  EXPECT_TRUE(RewriteOptions::ParseFromString("ENFORCE", &mode));
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, mode);
+  EXPECT_TRUE(RewriteOptions::ParseFromString("report", &mode));
+  EXPECT_EQ(RewriteOptions::kRulePackModeReport, mode);
+  // The value prints by name (debug output, the admin pages).
+  GoogleString value;
+  const char* id = nullptr;
+  bool was_set = false;
+  ASSERT_TRUE(options_.OptionValue(RewriteOptions::kRulePackMode, &id, &was_set,
+                                   &value));
+  EXPECT_STREQ("rpkm", id);
+  EXPECT_EQ("report", value);
+
+  // Both are server scoped and survive a merge and a clone.
+  for (const char* name :
+       {RewriteOptions::kRulePackFile, RewriteOptions::kRulePackMode,
+        RewriteOptions::kRulePackRequireSigned}) {
+    const RewriteOptions::PropertyBase* property =
+        RewriteOptions::LookupOptionByName(name);
+    ASSERT_TRUE(property != nullptr) << name;
+    EXPECT_EQ(RewriteOptions::kServerScope, property->scope()) << name;
+    EXPECT_TRUE(property->help_text() != nullptr) << name;
+  }
+  options_.set_rule_pack_mode(RewriteOptions::kRulePackModeEnforce);
+  RewriteOptions merged(&thread_system_);
+  merged.Merge(options_);
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", merged.rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, merged.rule_pack_mode());
+  std::unique_ptr<RewriteOptions> clone(options_.Clone());
+  EXPECT_EQ("/etc/pagespeed/packs/site.json", clone->rule_pack_file());
+  EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, clone->rule_pack_mode());
+}
+
+// Neither option changes what is cached: both stay out of the signature.
+TEST_F(RewriteOptionsTest, RulePackOptionsAreNotInTheSignature) {
+  std::unique_ptr<RewriteOptions> with(options_.Clone());
+  with->set_rule_pack_file("/etc/pagespeed/packs/site.json");
+  with->set_rule_pack_mode(RewriteOptions::kRulePackModeEnforce);
+  options_.ComputeSignature();
+  with->ComputeSignature();
+  EXPECT_EQ(options_.signature(), with->signature());
+}
+
+TEST_F(RewriteOptionsTest, RulePackSigningOptionsParseAndMerge) {
+  const char kKeyA[] = "fuRqJ3FnXonzbp8KuLy7yWR8oZU8Yue62CUrstW39Z4=";
+  const char kKeyB[] = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+  NullMessageHandler null_handler;
+  MessageHandler* handler = &null_handler;
+  GoogleString msg;
+  EXPECT_FALSE(options_.rule_pack_require_signed());
+  EXPECT_TRUE(options_.rule_pack_trust_keys().empty());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kRulePackRequireSigned, "on", &msg, handler));
+  EXPECT_TRUE(options_.rule_pack_require_signed());
+
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName2(
+                RewriteOptions::kRulePackTrustKey, "b-publisher", kKeyB, &msg,
+                handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName2(
+                RewriteOptions::kRulePackTrustKey, "a-publisher", kKeyA, &msg,
+                handler));
+  // The same pair again is accepted.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName2(
+                RewriteOptions::kRulePackTrustKey, "a-publisher", kKeyA, &msg,
+                handler));
+  ASSERT_EQ(2u, options_.rule_pack_trust_keys().size());
+  EXPECT_EQ("a-publisher", options_.rule_pack_trust_keys()[0].key_id);
+  EXPECT_EQ(32u, options_.rule_pack_trust_keys()[0].public_key.size());
+
+  auto expect_invalid = [&](const char* id, const char* key,
+                            const char* message) {
+    GoogleString m;
+    EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+              options_.ParseAndSetOptionFromName2(
+                  RewriteOptions::kRulePackTrustKey, id, key, &m, handler))
+        << id;
+    EXPECT_EQ(message, m);
+  };
+  expect_invalid("Bad_Id", kKeyA,
+                 "RulePackTrustKey: the key id must match [a-z0-9-]{1,64}");
+  expect_invalid("c-publisher", "short",
+                 "RulePackTrustKey: the public key must be the base64 of 32 "
+                 "bytes (44 characters)");
+  expect_invalid("a-publisher", kKeyB,
+                 "RulePackTrustKey: key id \"a-publisher\" is already set to "
+                 "another key");
+  for (int i = 2; i < 16; ++i) {
+    EXPECT_EQ(RewriteOptions::kOptionOk,
+              options_.ParseAndSetOptionFromName2(
+                  RewriteOptions::kRulePackTrustKey,
+                  StrCat("k", i), kKeyA, &msg, handler));
+  }
+  expect_invalid("k99", kKeyA, "RulePackTrustKey: at most 16 keys");
+
+  // A virtual host's key overrides a global one of the same id; the list
+  // stays sorted; the limit does not apply to the merged list.
+  RewriteOptions vhost(&thread_system_);
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
+                                             "a-publisher", kKeyB, &msg,
+                                             handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
+                                             "0-first", kKeyA, &msg, handler));
+  RewriteOptions merged(&thread_system_);
+  merged.Merge(options_);
+  merged.Merge(vhost);
+  ASSERT_EQ(17u, merged.rule_pack_trust_keys().size());
+  EXPECT_EQ("0-first", merged.rule_pack_trust_keys()[0].key_id);
+  EXPECT_EQ("a-publisher", merged.rule_pack_trust_keys()[1].key_id);
+  EXPECT_NE(options_.rule_pack_trust_keys()[0].public_key,
+            merged.rule_pack_trust_keys()[1].public_key);
+  EXPECT_TRUE(merged.rule_pack_require_signed());
+
+  // Neither is part of the signature.
+  RewriteOptions plain(&thread_system_);
+  plain.ComputeSignature();
+  options_.ComputeSignature();
+  EXPECT_EQ(plain.signature(), options_.signature());
+}
+
 TEST_F(RewriteOptionsTest, ExplicitlyEnabledDangerousFilters) {
   options_.SetRewriteLevel(RewriteOptions::kAllFilters);
   options_.EnableFilter(RewriteOptions::kStripScripts);
@@ -1067,6 +1245,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kImageLimitOptimizedPercent,
       RewriteOptions::kImageLimitRenderedAreaPercent,
       RewriteOptions::kImageLimitResizeAreaPercent,
+      RewriteOptions::kImageMaxAnimatedFrames,
       RewriteOptions::kImageMaxRewritesAtOnce,
       RewriteOptions::kImagePreserveURLs,
       RewriteOptions::kPreserveImageProvenance,
@@ -1150,6 +1329,9 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kRewriteLevel,
       RewriteOptions::kRewriteRandomDropPercentage,
       RewriteOptions::kRewriteUncacheableResources,
+      RewriteOptions::kRulePackFile,
+      RewriteOptions::kRulePackMode,
+      RewriteOptions::kRulePackRequireSigned,
       RewriteOptions::kRunningExperiment,
       RewriteOptions::kServeStaleIfFetchError,
       RewriteOptions::kServeStaleWhileRevalidateThresholdSec,
@@ -3775,6 +3957,25 @@ TEST_F(RewriteOptionsTest, OptionsScopeApplications) {
       &msg, &handler);
   EXPECT_EQ("", msg);
   EXPECT_EQ(result, RewriteOptions::kOptionNameUnknown);
+}
+
+// ImageMaxAnimatedFrames bounds the work spent on one animation, so a request
+// must not be able to raise or disable it through the query or headers.
+TEST_F(RewriteOptionsTest, ImageMaxAnimatedFramesNotSettableFromQuery) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  RewriteOptions options(&thread_system_);
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options.ParseAndSetOptionFromNameWithScope(
+                RewriteOptions::kImageMaxAnimatedFrames, "0",
+                RewriteOptions::kQueryScope, &msg, &handler));
+  EXPECT_EQ(RewriteOptions::kDefaultImageMaxAnimatedFrames,
+            options.image_max_animated_frames());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options.ParseAndSetOptionFromNameWithScope(
+                RewriteOptions::kImageMaxAnimatedFrames, "50",
+                RewriteOptions::kDirectoryScope, &msg, &handler));
+  EXPECT_EQ(50, options.image_max_animated_frames());
 }
 
 TEST_F(RewriteOptionsTest, ParseFloats) {

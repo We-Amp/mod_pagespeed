@@ -20,7 +20,7 @@ Walks the given directory for ``*.vex.json`` files. For each file:
     is open-ended (as every pre-existing statement was). Same convention as
     pagespeed-optimizer's tools/ci/validate-vex.py — keep the two in sync.
 
-Exit 0 if the directory contains no VEX file (the security-gates job
+Exit 0 if the directory contains no VEX file (the Pool guards job
 documents that this is allowed and grype will run without suppressions).
 
 Exit 1 on any structural problem; prints a GitHub-Actions ``::error file=``

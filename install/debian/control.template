@@ -12,3 +12,5 @@ Depends: ${shlibs:Depends}, @@DEPENDS@@
 Architecture: @@ARCHITECTURE@@
 Description: @@SHORTDESC@@
  @@FULLDESC@@
+ .
+ Agent install recipe: https://modpagespeed.com/recipes/apache.md

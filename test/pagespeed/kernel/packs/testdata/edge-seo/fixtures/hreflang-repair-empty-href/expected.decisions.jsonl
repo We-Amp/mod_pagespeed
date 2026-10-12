@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/h/repair/en/page","rule":"hreflang-repair","kind":"hreflang","mode":"enforce","action":"replace","reason":"empty","defect":"hreflang-invalid","before":"fnv1a64:c2efcc18f052f295","after":"en=https://fixture.test/h/repair/en/page, x-default=https://fixture.test/h/repair/en/page","removed":"en= (empty)"}

@@ -29,6 +29,7 @@
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rule_pack_provider.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/apache/apache_server_context.h"
@@ -203,6 +204,25 @@ void InstawebContext::Flush() {
   if (html_detector_.already_decided() && started_parse_) {
     rewrite_driver_->Flush();
   }
+}
+
+bool InstawebContext::FlushWouldSendEditableHeaders() const {
+  if (sent_headers_ || html_detector_.already_decided()) {
+    // Headers already went out; or the body is known, so either Flush()
+    // reaches the driver and its filters learn that the headers are no longer
+    // writable, or it is not HTML and nothing edits the headers any more.
+    return false;
+  }
+  const RewriteOptions* options = rewrite_driver_->options();
+  if (!options->Enabled(RewriteOptions::kRulePacks) ||
+      options->rule_pack_file().empty()) {
+    return false;
+  }
+  // Only a pack with a canonical `link_header` rule edits the headers.
+  const RulePackProvider* provider =
+      rewrite_driver_->server_context()->rule_pack_provider();
+  return provider != nullptr &&
+         provider->PackEditsLinkHeader(options->rule_pack_file());
 }
 
 void InstawebContext::Finish() {

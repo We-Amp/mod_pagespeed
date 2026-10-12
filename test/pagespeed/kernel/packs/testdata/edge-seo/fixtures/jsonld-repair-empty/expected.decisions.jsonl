@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/j/repair/c","rule":"jsonld-repair","kind":"jsonld","mode":"enforce","action":"replace","reason":"empty","defect":"jsonld-invalid","before":"fnv1a64:cbf29ce484222325","after":"Organization","removed":"unparsable block (empty)"}

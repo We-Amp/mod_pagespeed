@@ -15,3 +15,11 @@ GIT_COMMIT text eol=lf
 # also matches pagespeed/kernel/html/ at depth and `git archive` of the HTML
 # kernel silently produces an empty tarball.
 /html/ export-ignore
+
+# Rule-pack fixtures and the rule-pack filter fuzz seeds are byte-exact test
+# data, and some cases are about CRLF line endings: never convert them.
+test/pagespeed/kernel/packs/testdata/edge-seo/fixtures/** -text
+tools/rule-pack-filter-corpus/seeds/** -text
+
+# Signed bytes: never normalise line endings.
+install/mod_pagespeed_test/rule_packs/signed/* -text

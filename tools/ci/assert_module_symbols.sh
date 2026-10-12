@@ -129,6 +129,11 @@ allowed_undefined() {
   # toolchains that still emit it (seen in the client library).
   echo "all weak exact __register_frame_info"
   echo "all weak exact __deregister_frame_info"
+  # Thread-local init functions (_ZTH...), referenced weakly by code that
+  # reads a thread_local defined in another translation unit (RE2's set.cc
+  # reads re2::hooks::context); the reference resolves to 0 when the variable
+  # needs no dynamic initialisation, so no host symbol is needed.
+  echo "all weak prefix _ZTH"
 }
 
 # Crypto symbol families: a DIAGNOSTIC label on names assertion 2 rejects, so
@@ -455,7 +460,8 @@ Symbol table '"'"'.dynsym'"'"' contains 700 entries:
     und WEAK '__gmon_start__';  und WEAK '_ITM_registerTMCloneTable'
     und WEAK '_ITM_deregisterTMCloneTable'; und WEAK '_ITM_RU1'
     und WEAK '_ZGTtnam';        und WEAK '_ZGTtdlPv'
-    und WEAK '__gcov_dump';     und WEAK '__gcov_flush')"
+    und WEAK '__gcov_dump';     und WEAK '__gcov_flush'
+    und WEAK '_ZTHN3re25hooks7contextE')"
   undef_apache="${undef_common}
 $(und GLOBAL ap_hook_post_config; und GLOBAL ap_ssl_var_lookup
   und GLOBAL ap_random_insecure_bytes; und GLOBAL apr__SHA256_Init
@@ -602,9 +608,10 @@ $(und GLOBAL ceil)" "${def_apache}"
 
   # Runtime hooks must be weak.
   set_mock "${needed_ok}" "${undef_apache}
-$(und GLOBAL __gcov_other; und GLOBAL _ITM_strong)" "${def_apache}"
+$(und GLOBAL __gcov_other; und GLOBAL _ITM_strong; und GLOBAL _ZTHN3foo3barE)" "${def_apache}"
   run_case "a strong reference to a weak-only hook fails" apache 2 \
-    "=   __gcov_other  ${NOT_ALLOWED}" "=   _ITM_strong  ${NOT_ALLOWED}"
+    "=   __gcov_other  ${NOT_ALLOWED}" "=   _ITM_strong  ${NOT_ALLOWED}" \
+    "=   _ZTHN3foo3barE  ${NOT_ALLOWED}"
 
   # Versions: the version is what is judged, and the name before it is
   # reported whole.

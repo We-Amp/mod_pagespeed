@@ -1,0 +1,1 @@
+{"pack":{"id":"edge-seo","version":"0.1.0"},"rules":{},"sites":[{"host":"www.example.com","mode":"enforce"}],"tables":{"canonicals":{"/p?id=1":"https://www.example.com/p/one"},"hreflang":[{"de":"https://www.example.com/de/","en":"https://www.example.com/en/"}],"titles":{"/":"Home"}}}

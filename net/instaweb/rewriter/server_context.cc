@@ -931,7 +931,7 @@ void ServerContext::ShutDownDrivers(int64 cutoff_time_ms) {
 
   for (RewriteDriver* active : active_rewrite_drivers_) {
     // <= 0 wait means forever, so we must guard against that.
-    int64 wait_ms = cutoff_time_ms - timer_->NowMs();
+    int64 wait_ms = cutoff_time_ms - timer_->NowMonotonicMs();
     if (wait_ms <= 0) {
       wait_ms = 1;
     }
@@ -1055,6 +1055,10 @@ RewriteOptions* ServerContext::GetCustomOptions(RequestHeaders* request_headers,
   url_namer()->ConfigureCustomOptions(*request_headers, custom_options.get());
 
   return custom_options.release();
+}
+
+RulePackProvider* ServerContext::rule_pack_provider() {
+  return factory_->rule_pack_provider();
 }
 
 GoogleString ServerContext::GetRewriteOptionsSignatureHash(

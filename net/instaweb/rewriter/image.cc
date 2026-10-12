@@ -388,6 +388,21 @@ class ImageImpl : public Image {
 
   bool ConvertAnimatedGifToWebp(bool has_transparency);
 
+  // True (and logs) if an animation has more frames than the configured cap, in
+  // which case it must be left unconverted.
+  bool FrameCapExceeded(
+      const pagespeed::image_compression::ImageSpec& image_spec) {
+    const int64 cap = options_->max_animated_frames;
+    if (cap > 0 && image_spec.num_frames > cap) {
+      PS_LOG_INFO(handler_,
+                  "Not converting animation with %s frames (limit is %s).",
+                  Integer64ToString(image_spec.num_frames).c_str(),
+                  Integer64ToString(cap).c_str());
+      return true;
+    }
+    return false;
+  }
+
   const GoogleString file_prefix_;
   std::unique_ptr<MessageHandler> handler_;
   bool changed_;
@@ -1179,7 +1194,9 @@ bool ImageImpl::ConvertAnimatedGifToWebp(bool has_transparency) {
   pagespeed::image_compression::ImageSpec image_spec;
   pagespeed::image_compression::FrameSpec frame_spec;
   const void* scan_row = nullptr;
+  bool frame_cap_exceeded = false;
   if (reader->GetImageSpec(&image_spec, &status) &&
+      !(frame_cap_exceeded = FrameCapExceeded(image_spec)) &&
       writer->PrepareImage(&image_spec, &status)) {
     while (reader->HasMoreFrames() && reader->PrepareNextFrame(&status) &&
            reader->GetFrameSpec(&frame_spec, &status) &&
@@ -1191,12 +1208,16 @@ bool ImageImpl::ConvertAnimatedGifToWebp(bool has_transparency) {
       }
     }
   }
-  writer->FinalizeWrite(&status);
+  // The writer was never prepared for an over-cap animation, so there is
+  // nothing to finalize.
+  if (!frame_cap_exceeded) {
+    writer->FinalizeWrite(&status);
+  }
 
   timeout_handler.Stop();
   bool was_timed_out = timeout_handler.was_timed_out();
   int64 time_elapsed_ms = timeout_handler.time_elapsed_ms();
-  bool ok = status.Success();
+  bool ok = status.Success() && !frame_cap_exceeded;
 
   UpdateConversionStats(ok, was_timed_out, false /* overran_budget */,
                         time_elapsed_ms,
@@ -1359,7 +1380,9 @@ bool ImageImpl::RewriteToAvif(
   pagespeed::image_compression::ImageSpec image_spec;
   pagespeed::image_compression::FrameSpec frame_spec;
   const void* scan_row = nullptr;
+  bool frame_cap_exceeded = false;
   const bool prepared = reader->GetImageSpec(&image_spec, &status) &&
+                        !(frame_cap_exceeded = FrameCapExceeded(image_spec)) &&
                         writer->PrepareImage(&image_spec, &status);
   // Whether PrepareImage() refused the image up front because its estimated
   // encode cost did not fit avif_conversion_timeout_ms. This has to be latched
@@ -1381,10 +1404,14 @@ bool ImageImpl::RewriteToAvif(
       }
     }
   }
-  writer->FinalizeWrite(&status);
+  // An over-cap animation is rejected on purpose; the writer was never
+  // prepared, so do not finalize it (that would log a spurious error).
+  if (!frame_cap_exceeded) {
+    writer->FinalizeWrite(&status);
+  }
 
   timeout_handler.Stop();
-  bool ok = status.Success();
+  bool ok = status.Success() && !frame_cap_exceeded;
   // SEMANTIC CHANGE, deliberate: this counter no longer means only "an encode
   // was started and ran out of time". For a still image it now also -- in
   // practice, always -- means "an encode was REFUSED before it started,
@@ -1555,7 +1582,7 @@ inline bool ImageImpl::ComputeOutputContentsFromGifOrPng(
   }
 
   if (output_type == IMAGE_WEBP_ANIMATED) {
-    ok = ConvertAnimatedGifToWebp(has_transparency);
+    ok = MayConvert() && ConvertAnimatedGifToWebp(has_transparency);
   } else {
     if (output_type == IMAGE_WEBP ||
         output_type == IMAGE_WEBP_LOSSLESS_OR_ALPHA) {

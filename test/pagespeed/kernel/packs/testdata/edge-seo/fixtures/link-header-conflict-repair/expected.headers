@@ -1,0 +1,4 @@
+Content-Type: text/html; charset=utf-8
+Link: </static/app.css>; rel=preload; as=style, <https://cdn.test>; rel=preconnect
+Link: <https://fixture.test/amp>; rel=amphtml
+Link: <https://fixture.test/lh/repair/conflict>; rel="canonical"

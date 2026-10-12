@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-06T10:03:39Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-12T12:00:00Z",
   "creationInfo": {
-    "created": "2026-10-06T10:03:39Z",
+    "created": "2026-10-12T12:00:00Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -16,14 +16,28 @@
     {
       "SPDXID": "SPDXRef-Package-pagespeed-1.1",
       "name": "pagespeed-1.1",
-      "versionInfo": "1.17.0",
+      "versionInfo": "1.18.0",
       "supplier": "Organization: We-Amp B.V.",
       "downloadLocation": "https://github.com/We-Amp/mod_pagespeed",
       "filesAnalyzed": false,
       "licenseConcluded": "Apache-2.0",
       "licenseDeclared": "Apache-2.0",
       "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
-      "externalRefs": []
+      "externalRefs": [],
+      "comment": "Covers the source release plus the binary artefacts; the binaries exclude pagespeed/envoy/ (the source-only Envoy filter)."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-pagespeed-envoy-filter-source",
+      "name": "pagespeed-envoy-filter-source",
+      "versionInfo": "1.18.0",
+      "supplier": "Organization: We-Amp B.V.",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
+      "externalRefs": [],
+      "comment": "Source-only: the Envoy filter port (pagespeed/envoy/) is carried by the signed source tarball and is excluded from every shipped binary build (.bazelignore). Its dependencies (Envoy) are not contained in any binary artefact of pagespeed-1.1."
     },
     {
       "SPDXID": "SPDXRef-Package-abseil-cpp",
@@ -172,7 +186,7 @@
     {
       "SPDXID": "SPDXRef-Package-envoy",
       "name": "envoy",
-      "versionInfo": "f97695a50e11f5ff6719e129a466bf9204b64a7f",
+      "versionInfo": "cf413bdb37b36d3ffbe570b8a48760abe2b588f5",
       "supplier": "Organization: The Envoy Project Authors",
       "downloadLocation": "https://github.com/envoyproxy/envoy",
       "filesAnalyzed": false,
@@ -183,9 +197,10 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.37.5"
+          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.37.6"
         }
-      ]
+      ],
+      "comment": "Required only by the source-only Envoy filter; not contained in any binary artefact."
     },
     {
       "SPDXID": "SPDXRef-Package-hiredis",
@@ -538,7 +553,7 @@
     {
       "SPDXID": "SPDXRef-Package-nginx",
       "name": "nginx",
-      "versionInfo": "1.30.4",
+      "versionInfo": "1.30.5",
       "supplier": "Organization: Nginx, Inc. / F5",
       "downloadLocation": "https://nginx.org/",
       "filesAnalyzed": false,
@@ -592,6 +607,11 @@
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-pagespeed-envoy-filter-source"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-abseil-cpp"
     },
@@ -631,7 +651,7 @@
       "relatedSpdxElement": "SPDXRef-Package-spdlog"
     },
     {
-      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+      "spdxElementId": "SPDXRef-Package-pagespeed-envoy-filter-source",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-envoy"
     },

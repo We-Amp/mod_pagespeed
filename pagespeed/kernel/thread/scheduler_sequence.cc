@@ -59,7 +59,7 @@ bool Scheduler::Sequence::RunTasksUntil(int64 timeout_ms, bool* done) {
   scheduler_->mutex()->DCheckLocked();
   DCHECK(forwarding_sequence_ == nullptr);
   Timer* timer = scheduler_->timer();
-  int64 start_time_ms = timer->NowMs();
+  int64 start_time_ms = timer->NowMonotonicMs();
   int64 end_ms = timeout_ms + start_time_ms;
   while (!*done) {
     if (!work_queue_.empty()) {
@@ -69,7 +69,7 @@ bool Scheduler::Sequence::RunTasksUntil(int64 timeout_ms, bool* done) {
       function->CallRun();
       scheduler_->mutex()->Lock();
     } else {
-      int64 now_ms = timer->NowMs();
+      int64 now_ms = timer->NowMonotonicMs();
       int64 remaining_ms = end_ms - now_ms;
       if (remaining_ms <= 0) {
         return false;

@@ -50,6 +50,7 @@ pagespeed_cc_test(
         "apache_mmap_bucket_test.cc",
         "apache_mpm_detection_test.cc",
         "apache_writer_test.cc",
+        "apr_timer_test.cc",
         "daemon_seam_test.cc",
         "header_util_test.cc",
         "in_place_not_modified_vary_fetch_test.cc",

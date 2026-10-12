@@ -1082,7 +1082,42 @@ class TestLaneFixtureGate:
             "compressed_metadata_cache", "cache_flush", "doc_root_scratch",
             "secondary_vhosts", "external_origin", "flush_origin",
             "experiment_framework", "remote_config", "option_response_headers",
+            "rule_packs", "rule_pack_log", "rule_pack_signing", "daemon_arm",
         })
+
+    def test_daemon_worker_is_only_believed_while_its_socket_answers(self):
+        import os
+        import shutil
+        import socket
+        import tempfile
+        import conftest
+        # A short directory: AF_UNIX paths are limited to ~104 bytes (macOS).
+        workdir = tempfile.mkdtemp(prefix="ds", dir="/tmp")
+        try:
+            self._check_daemon_probe(os.path.join(workdir, "n.sock"), socket, conftest)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    @staticmethod
+    def _check_daemon_probe(path, socket, conftest):
+        assert conftest.daemon_worker_reachable("") is False
+        assert conftest.daemon_worker_reachable(path) is False
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            listener.bind(path)
+            listener.listen(1)
+            assert conftest.daemon_worker_reachable(path) is True
+        finally:
+            listener.close()
+        assert conftest.daemon_worker_reachable(path) is False
+
+    def test_require_mode_needs_daemon_arm_advertised(self):
+        import conftest
+        import pytest
+        conftest.require_daemon_lane_advertised("stats_log", "")
+        conftest.require_daemon_lane_advertised("stats_log,daemon_arm", "require")
+        with pytest.raises(pytest.UsageError):
+            conftest.require_daemon_lane_advertised("stats_log", "require")
 
     def test_parse_ignores_blanks_and_spaces(self):
         import conftest

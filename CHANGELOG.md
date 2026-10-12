@@ -7,6 +7,178 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-12
+
+### Security
+
+- **Image optimization: some animated images could tie up a server worker
+  (resource exhaustion).** Animated image conversion now stops at a
+  configurable frame limit. Affects releases up to and including 1.17.0 with
+  image conversion enabled. **Update recommended.** Animations above the
+  limit are no longer converted; see the breaking-change note under Changed.
+- **Envoy filter: dependency updated to Envoy 1.37.6.** It fixes the Envoy
+  security advisories published on 2026-08-26. Releases up to and including
+  1.17.0 build the Envoy filter against Envoy 1.37.5 or older, which lack
+  these fixes. **Update recommended.**
+- **The nginx bundled with the NuGet sidecar package is updated to 1.30.5.**
+  It carries the upstream fix for CVE-2026-90439 in nginx's HTTP/3 module.
+  The bundled nginx is not built with HTTP/3, so it was not affected; the
+  update keeps vulnerability scans clean.
+
+### Fixed
+
+- On Apache, a HEAD request or an empty-body HTML response no longer loses the
+  origin's `Link`, `Set-Cookie` and other response headers.
+- JavaScript minification now handles a comment between the `*` of an object
+  or class generator method and its name (for example `{ */* c */await(){} }`).
+  Such scripts were previously left unminified when the method was named
+  `await` or `yield`; they are now minified like the same code without the
+  comment.
+- The Debian/Ubuntu package upgrade no longer re-enables the module, or the
+  `pagespeed_libraries` and `pagespeed_daemon` confs, that you disabled with
+  `a2dismod` or `a2disconf`. They are enabled on a first install or a
+  reinstall after removal (the daemon conf is also enabled once when upgrading
+  from a release that did not ship it); upgrades and `dpkg-reconfigure` leave
+  your choice alone. The package does not restart Apache: run
+  `systemctl restart apache2` after the first install. If you removed the
+  package with 1.17.0 or earlier and reinstall it, run `a2enmod pagespeed`
+  once; newer removals are re-enabled automatically.
+- The built-in fetcher no longer takes a `100 Continue` or `103 Early Hints`
+  interim response for the final response: the origin's real status and
+  headers are used. Before, such a fetch completed with the interim status and
+  headers only.
+- The log line for a fetch that failed in the built-in fetcher now carries
+  libcurl's own explanation and, when a proxy refused the `CONNECT` request of
+  an HTTPS fetch, the proxy's answer to `CONNECT`, for example
+  `proxy CONNECT response 405`.
+- Fetch, rewrite and shutdown deadlines are no longer cut short or stretched
+  when the system clock is adjusted.
+- On Windows, AVIF conversion (and WebP conversion when a WebP time limit is
+  set) is no longer abandoned as timed out right away.
+- The release `SHA256SUMS` file lists each downloadable file once, under the
+  name it has on the release page, so `sha256sum -c SHA256SUMS` works on the
+  downloaded files as they are. Earlier releases could list a file twice, or
+  under a name with `~` where the download has `.`.
+
+### Added
+
+- **Rule packs.** The new `rule_packs` filter applies a rule pack, a JSON file
+  of rules for the head of your HTML pages, on Apache, nginx and IIS. See the
+  rule packs guide.
+  - What it does and how to turn it on. A rule can add a missing canonical
+    link, title, meta description, hreflang cluster or JSON-LD block and
+    remove exact duplicates (`keep`, the default), also remove unusable,
+    empty or misplaced copies (`repair`), or make the page carry exactly the
+    rule's value (`replace`). A canonical rule can also keep the
+    `Link: rel="canonical"` response header in line with the page. Nothing
+    else in the page is edited, and applying a pack fetches nothing over the
+    network. The pack id must be `edge-seo`; one pack file per server or
+    virtual host. The filter is off by default and in no rewrite level: turn
+    it on with `EnableFilters rule_packs` and point `RulePackFile` at the
+    pack, both in the server or virtual-host scope (Apache:
+    `ModPagespeedEnableFilters rule_packs` and `ModPagespeedRulePackFile`;
+    nginx: in the `server` block; IIS: at the top level of the site's
+    `pagespeed.config`). `RulePackFile` and `RulePackMode` cannot be set in
+    `.htaccess`, `<Directory>`, an nginx `location` block or an IIS match
+    block; in `.htaccess` such a line makes Apache answer 500 for that
+    directory.
+  - Modes and enforcement. A pack starts in report mode: it records what it
+    would change and serves the page unchanged. A rule changes pages only
+    when `RulePackMode enforce`, the site's `mode` and the rule's `enforce`
+    all say so. A pack that fails to load leaves the last good pack in use
+    (or the filter off when there is none), and the filter is designed not
+    to fail a response: a page, or the part of a page, it cannot edit safely
+    is left as the origin sent it.
+  - Reload and cache signature. A changed pack file is picked up on a
+    reload, or by a server process the next time it needs the pack once
+    10 seconds have passed since its last check, so processes can disagree
+    for up to 10 seconds. Enabling the filter on a server changes its cache
+    signature, so that server's cached resources are rebuilt once.
+  - Apache early flush. On a host whose pack has a canonical rule with
+    `link_header` set to `match`, response headers go out with the first
+    body bytes or at the end of the response, not on an early flush, so that
+    the `Link` header can still be edited. An origin that flushes its headers
+    early to start browser preloads loses that head start on such a host; a
+    pack without that rule leaves early flushes alone, except that the first
+    response in each server process can still be held until the pack has
+    been read.
+  - Decision log. Decisions are written to
+    `<LogDir>/packs/<pack-id>/decisions-YYYY-MM-DD.jsonl` (UTC dates; repeats
+    are suppressed per process; count distinct keys, not lines): about
+    50 MiB per day across all server processes (after that the rest of the
+    day's lines are dropped and counted), the newest 14 calendar days kept
+    (today and 13 earlier), no log when `LogDir` is empty. Do not rotate or
+    delete the current day's file. Lines carry the request path with its
+    query string and, for removed elements, their values in clear text, but
+    no client address, cookies or user agent; files are created mode 0640 on
+    Linux and macOS. Treat the log like an access log. Requesting a page
+    with `?PageSpeedFilters=+debug` shows a comment before each change the
+    pack makes, or would make in report mode.
+  - Admin page. A read-only Rule packs page in the admin pages
+    (`/pagespeed_admin/rule_packs`), behind the same access restrictions as
+    the other admin pages and reachable from the admin console's sidebar. It
+    shows, for the virtual host you ask, whether the filter is on, the pack
+    file and mode, the pack the answering server process has loaded (id,
+    version, publisher, hash, load state, last load error), the
+    `rule_pack_*` statistics, two static links, to the packs catalogue and to
+    the documentation (the server makes no request for them), and the newest
+    lines of today's (UTC) decision log, filtered with `?rule=`, `?action=`,
+    `?reason=` and `?limit=` (default 100, up to 1000), or as plain text with
+    `?raw=1`.
+  - Statistics. `rule_pack_*` statistics, per virtual host with
+    `UsePerVHostStatistics on`, for pack loads and load errors, pages
+    evaluated, modified and that would be modified, pages skipped (host not
+    listed, no head, malformed head, not rewritable, size limit), decisions
+    applied and that would apply, late elements removed and left in place,
+    `Link` header changes, and decision-log lines written and dropped. There
+    are no per-rule counters; the decision log has the per-rule detail.
+  - Limits. A pack loads only within 1 MiB, 200 rules and 50,000 table
+    entries. A page gets at most 64 KiB of added content, and a value longer
+    than 2,048 bytes for a URL, 300 characters for a title, 1,000 characters
+    for a description or 16 KiB of expanded JSON-LD is not applied. The full
+    list is in the rule packs guide.
+  - Signed packs. A pack file may carry an Ed25519 signature in a `.sig`
+    sidecar; `RulePackTrustKey` names a trusted publisher key and
+    `RulePackRequireSigned` (off by default) refuses a pack without a valid
+    signature. With `RulePackRequireSigned` off, a pack without a valid
+    signature still loads and logs a warning once per file version per
+    server process; a second warning gives the reason when a signature file
+    is present but fails its check. Six `rule_pack_*` statistics count the
+    outcomes, and `tools/rule-packs/sign-pack.sh` in the source tree signs
+    and verifies packs. See the "Signed packs" section of the rule packs
+    guide.
+  - Licence fields. The `pack` object may carry a `license` object with an
+    `entitlement` name, an `expires` date (`YYYY-MM-DD`) and a `terms` URL
+    (`https://`). The module checks their format and writes them to the
+    server log (at info level) once per pack version per server process,
+    when that version is first used; they are informational and do not
+    change what the pack does. The top-level key `signature` is reserved; a
+    pack that uses it does not load.
+- Each release now also publishes its software bill of materials (SPDX) and
+  its vulnerability exploitability statements (OpenVEX) as release assets,
+  `pagespeed-1.1-<version>.spdx.json` and `pagespeed-1.1-<version>.vex.json`.
+  They are signed like the packages and listed in `SHA256SUMS`.
+- The nginx module tarball and the legacy IIS zip now carry `LICENSE`,
+  `NOTICE` and `THIRD-PARTY-NOTICES` at the top of the package directory, as
+  the deb and rpm packages already do.
+
+### Changed
+
+- **Breaking: the optimizer daemon no longer serves HTML on Apache, nginx and
+  IIS.** Every HTML response is rewritten by the module's filter chain. CSS,
+  JavaScript and images are served by the daemon as before. On a host with
+  the daemon enabled, the `ipro_daemon_fallthrough` statistic now rises on
+  HTML requests, and HTML no longer gets the optimizer's own HTML
+  improvements (such as critical CSS and LCP hints); it keeps the module's
+  own HTML rewriting.
+- **Breaking: animated images above a frame limit are no longer converted.**
+  An animated GIF with more frames than `ImageMaxAnimatedFrames` (default
+  200; 0 or a negative value disables the limit; it can be set in the
+  server, virtual-host or directory configuration, but not through query
+  parameters or request headers) is served unconverted. Animations with more
+  than 200 frames are therefore no longer converted unless you raise or
+  disable the limit.
+
 ## [2.2.0] - 2026-10-06
 
 ### Security

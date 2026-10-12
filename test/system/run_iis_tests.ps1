@@ -270,6 +270,15 @@ function Run-Tests {
     if ($UseFullIIS) {
         $env:PAGESPEED_HTTPS_HOST = "localhost"
         $env:PAGESPEED_HTTPS_PORT = "8443"
+        # Lane fixture rule_packs: setup_iis_full.ps1 turns rule_packs on in
+        # the site's pagespeed.config; the rulepacks*.example.com names are
+        # sent as Host headers to the site's own port.
+        if ($env:PAGESPEED_LANE_FIXTURES) {
+            $env:PAGESPEED_LANE_FIXTURES = "$($env:PAGESPEED_LANE_FIXTURES),rule_packs"
+        } else {
+            $env:PAGESPEED_LANE_FIXTURES = "rule_packs"
+        }
+        $env:PAGESPEED_RULE_PACKS_PORT = $env:PAGESPEED_PORT
     }
     # Force unbuffered output so CI runners see pytest progress in real-time
     $env:PYTHONUNBUFFERED = "1"
@@ -293,6 +302,7 @@ function Run-Tests {
         # Port-agnostic tests lifted out of iis\ (system\ is not collected
         # wholesale: it also holds secondary-vhost tests this lane cannot run).
         "$ScriptDir\system\test_admin_pages.py",
+        "$ScriptDir\system\test_rule_packs.py",
         "-v",
         "--tb=short"
     )

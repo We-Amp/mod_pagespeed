@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/j/repair/d","rule":"jsonld-repair","kind":"jsonld","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"Organization"}

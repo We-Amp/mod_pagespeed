@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/c/repair/empty","rule":"canonical-repair","kind":"canonical","mode":"enforce","action":"fill","reason":"empty","defect":"canonical-unusable","before":"","after":"https://fixture.test/c/repair/empty"}

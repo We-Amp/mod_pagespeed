@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/h/keep/en/page","rule":"hreflang-keep","kind":"hreflang","mode":"enforce","action":"dedupe","reason":"duplicate","defect":"","before":"fnv1a64:0eedc1a9f3cb4eb0","after":"","removed":"en=https://fixture.test/h/keep/en/page (duplicate); de=https://fixture.test/h/keep/de/page (duplicate)"}

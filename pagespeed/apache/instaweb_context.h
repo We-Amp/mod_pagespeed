@@ -86,6 +86,15 @@ class InstawebContext {
   void Flush();
   void Finish();
 
+  // True when a FLUSH bucket passed on now would make Apache send the response
+  // headers as the origin wrote them while a filter may still edit them: the
+  // rule_packs filter rewrites a Link header when it reaches the end of the
+  // head, so until the parser has seen data (a flush that arrives before the
+  // first body bytes, as a proxied origin's header write produces) the flush
+  // has nothing of ours to flush and is better held back. Only while the
+  // body is undecided: once it is known, a flush is passed on.
+  bool FlushWouldSendEditableHeaders() const;
+
   apr_bucket_brigade* bucket_brigade() const { return bucket_brigade_; }
   ContentEncoding content_encoding() const { return content_encoding_; }
   ApacheServerContext* apache_server_context() { return server_context_; }

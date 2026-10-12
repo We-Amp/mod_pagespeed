@@ -22,6 +22,30 @@ Routes (the path after /mod_pagespeed_test/flush_origin/):
   withflush                    X-My-PHP-Header: with_flush; the page head is
                                flushed as its own chunk before the text
   image_rewrite_with_flush     flush inside <li data-thumb="a.jpg">
+  split_head                   a flush inside <head>, after the charset meta
+                               and before anything else of the head; with
+                               ?canonical=wrong the first window also holds
+                               two conflicting canonical links, which the
+                               rule_packs filter can no longer remove; the
+                               response carries a Link header with a
+                               canonical entry, which the flushed headers
+                               keep
+  link_header                  one unflushed HTML response without a
+                               canonical, whose Link header has a preload, a
+                               stale canonical and a preconnect entry
+  link_header_late_body        link_header, but the response headers go out
+                               alone and the body follows 0.3 s later, as when
+                               an origin writes its headers before it renders
+                               the page
+  plain_text_html              text/html whose body is plain text, streamed
+                               in flushed chunks 0.5 s apart
+  early_flush_empty_body       headers flushed at once (Link, Set-Cookie and
+                               Cache-Control among them), then an empty chunked
+                               body 0.3 s later
+  empty_html                   200 text/html with Content-Length: 0, no
+                               flush, with Link, Set-Cookie and Cache-Control
+                               headers (also answers HEAD, with the headers
+                               of a non-empty page and no body)
   a.jpg                        <image-dir>/a.jpg
   gzip.css                     pre-gzipped CSS (Content-Encoding: gzip)
   content_type_present/        200 text/plain "This file should be proxied"
@@ -44,6 +68,25 @@ from urllib.parse import parse_qs, urlsplit
 # the proxy's non-blocking read of the backend comes up empty and the proxy
 # flushes what it has, as it would for a PHP page blocked after flush().
 FLUSH_PAUSE_S = 0.2
+
+# The Link header of the rule_packs routes: a preload that must survive, a
+# canonical the pack's rule disagrees with, and a preconnect that must too.
+LINK_HEADER_LINK = (
+    "</mod_pagespeed_test/rule_packs/app.css>; rel=preload; as=style, "
+    '<https://wrong.example.com/stale>; rel="canonical", '
+    "<https://cdn.example.net>; rel=preconnect"
+)
+# The headers of empty_html that a HEAD request or an empty body must keep.
+EMPTY_HTML_HEADERS = [
+    ("Link", "</mod_pagespeed_test/empty_html.css>; rel=preload; as=style"),
+    ("Set-Cookie", "origin_cookie=1; Path=/"),
+    ("Cache-Control", "private, max-age=60, must-revalidate"),
+]
+# split_head's: a canonical in the headers that the flushed headers keep.
+SPLIT_HEAD_LINK = (
+    "</mod_pagespeed_test/rule_packs/app.css>; rel=preload; as=style, "
+    "<https://wrong.example.com/split>; rel=canonical"
+)
 
 XHTML_HEAD = (
     '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" '
@@ -92,6 +135,19 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
 
     # -- routes ---------------------------------------------------------------
 
+    def do_HEAD(self):
+        route = urlsplit(self.path).path.lstrip("/")
+        if route == "empty_html":
+            # What GET would send, minus the body.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            for name, value in EMPTY_HTML_HEADERS:
+                self.send_header(name, value)
+            self.send_header("Content-Length", "120")
+            self.end_headers()
+        else:
+            self.send_error(404)
+
     def do_GET(self):
         parts = urlsplit(self.path)
         route = parts.path.lstrip("/")
@@ -133,6 +189,63 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
                 b'    <img src="a.jpg"/>\n   </li>\n</ul>\n</body>\n</html>\n'
             )
             self._end_chunks()
+        elif route == "split_head":
+            # The head is cut in two windows: the first one has gone out
+            # before the second starts. An element the filter needs to edit
+            # in the first window is out of reach; an insert into the still
+            # open head is not.
+            first = b'<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n'
+            if query.get("canonical", [""])[0] == "wrong":
+                first += (
+                    b'<link rel="canonical" href="https://wrong.example.com/a">\n'
+                    b'<link rel="canonical" href="https://wrong.example.com/b">\n'
+                )
+            self._start("text/html; charset=UTF-8", [("Link", SPLIT_HEAD_LINK)])
+            self._chunk(first, pause=FLUSH_PAUSE_S)
+            self._chunk(b"</head>\n<body>\n<p>A head split by a flush.</p>\n</body>\n</html>\n")
+            self._end_chunks()
+        elif route == "link_header":
+            # One window, no flush before the head closes: the response
+            # headers are still writable when the rule_packs filter decides.
+            body = (
+                b'<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n'
+                b"<title>A page whose Link header names another canonical</title>\n"
+                b"</head>\n<body>\n<p>The canonical is in the Link header only.</p>\n"
+                b"</body>\n</html>\n"
+            )
+            self._whole("text/html; charset=UTF-8", body, [("Link", LINK_HEADER_LINK)])
+        elif route == "link_header_late_body":
+            body = (
+                b'<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n'
+                b"<title>A page whose Link header names another canonical</title>\n"
+                b"</head>\n<body>\n<p>The canonical is in the Link header only.</p>\n"
+                b"</body>\n</html>\n"
+            )
+            self._start("text/html; charset=UTF-8", [("Link", LINK_HEADER_LINK)], length=len(body))
+            self.wfile.flush()
+            time.sleep(FLUSH_PAUSE_S + 0.1)
+            self.wfile.write(body)
+            self.wfile.flush()
+        elif route == "plain_text_html":
+            self._start("text/html; charset=UTF-8", [])
+            self.wfile.flush()
+            for i in range(3):
+                self._chunk(b"plain text chunk %d\n" % i, pause=0.5)
+            self._end_chunks()
+        elif route == "early_flush_empty_body":
+            self._start(
+                "text/html; charset=UTF-8",
+                [
+                    ("Link", LINK_HEADER_LINK),
+                    ("Set-Cookie", "origin_cookie=1; Path=/"),
+                    ("X-Origin-Header", "kept"),
+                ],
+            )
+            self.wfile.flush()
+            time.sleep(FLUSH_PAUSE_S + 0.1)
+            self._end_chunks()
+        elif route == "empty_html":
+            self._whole("text/html; charset=UTF-8", b"", EMPTY_HTML_HEADERS)
         elif route == "a.jpg":
             with open(os.path.join(self.server.image_dir, "a.jpg"), "rb") as f:
                 body = f.read()

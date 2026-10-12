@@ -347,12 +347,37 @@ cc_library(
         "//net/instaweb/util",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/cache",
+        "//pagespeed/kernel/packs:signature_format",
         "//third_party/css_parser",
         # option_context.cc signs the canonical option-context payload with
         # SHA-256.  Unconditional by design: the SHA1Signature path compiles
         # out under ENABLE_URL_SIGNATURES=0 and returns zeros, which would
         # collapse every option context into one.
         "@boringssl//:crypto",
+    ],
+)
+
+# The rule_packs filter on a RewriteDriver: the PackHost over the driver, the
+# per-document filter, and the per-process provider interface the server
+# implements (pagespeed/system: RulePackStore).
+cc_library(
+    name = "rule_packs",
+    srcs = ["rule_pack_host.cc"],
+    hdrs = [
+        "public/rule_pack_host.h",
+        "public/rule_pack_provider.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rewriter_core",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/html",
+        "//pagespeed/kernel/http",
+        "//pagespeed/kernel/packs:decision",
+        "//pagespeed/kernel/packs:pack",
+        "//pagespeed/kernel/packs:pack_host",
+        "//pagespeed/kernel/packs:rule_pack_filter",
+        "//pagespeed/kernel/packs:signature_format",
     ],
 )
 
@@ -468,6 +493,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":rewriter_core",
+        ":rule_packs",
         "//net/instaweb/spriter",
         "//pagespeed/kernel/image",
         "//pagespeed/kernel/js",

@@ -2,4 +2,15 @@
 # Cache and log directories (/var/cache/mod_pagespeed, /var/log/pagespeed)
 # are preserved on purpose (standard Unix convention).
 # See install documentation for cleanup instructions.
+
+# A purge forgets the a2en*/a2dis* state, so a later reinstall is a first
+# install again.
+if [ "$1" = "purge" ]; then
+    if command -v a2dismod >/dev/null 2>&1; then
+        a2dismod -p -q pagespeed >/dev/null 2>&1 || true
+    fi
+    if command -v a2disconf >/dev/null 2>&1; then
+        a2disconf -p -q pagespeed_libraries pagespeed_daemon >/dev/null 2>&1 || true
+    fi
+fi
 exit 0

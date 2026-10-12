@@ -14,12 +14,10 @@
 # VISIBLE on every run (stdout + the job Summary tab) and, with --max-age /
 # --enforce-age, ENFORCES it. The workflow enforces only on the scheduled job,
 # never on the PR job: a forgotten pin must redden the schedule, not someone's
-# PR. (The 2.0.41 readiness audit found this repo had NO age enforcement at
-# all — a pin nobody bumps is a gate that has quietly stopped working.)
+# PR. (A pin nobody bumps is a gate that has quietly stopped working.)
 #
-# Ported from pagespeed-optimizer's tools/sbom/provision-grype-db.sh so the 1.1
-# blocking npm gate has the same determinism guarantee. Kept in sync with
-# corp + pagespeed-optimizer; the pin JSON is the same shape.
+# This file is kept byte-identical across the repositories that carry it; the
+# pin JSON is the same shape in each. Change it in all copies together.
 #
 # Usage:
 #   GRYPE_DB_CACHE_DIR=<dir> tools/sbom/provision-grype-db.sh [--max-age N | --enforce-age]
@@ -35,7 +33,9 @@ PIN="${REPO_ROOT}/tools/sbom/grype-db-pin.json"
 MAX_AGE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --max-age) shift; MAX_AGE="${1:-}" ;;
+    --max-age)
+      [ "$#" -ge 2 ] || { echo "::error::--max-age needs a value (days)" >&2; exit 3; }
+      shift; MAX_AGE="$1" ;;
     --max-age=*) MAX_AGE="${1#*=}" ;;
     # --enforce-age means "use max_age_days from the pin file".
     --enforce-age) MAX_AGE="pin" ;;
@@ -69,10 +69,12 @@ else
   # dies on transient TLS corruption ("tls: bad record MAC" — root-caused
   # 2026-08-26 to the CI runners' USB-ethernet / virtualized-NIC
   # receive paths), turning a flaky link into a red gate. The import itself is
-  # offline: `grype db import <file>` never touches the network. Mirrors the
-  # same fix in the sibling provisioning script — keep the two in sync.
-  TMP_DB="$(mktemp -t grype-db.XXXXXX.tar.zst)"
-  trap 'rm -f "$TMP_DB"' EXIT
+  # offline: `grype db import <file>` never touches the network.
+  # grype picks its decompressor from the file suffix, and BSD/macOS mktemp
+  # drops a suffix after the XXXXXX, so keep the archive name inside a temp dir.
+  TMP_DIR="$(mktemp -d)"
+  TMP_DB="$TMP_DIR/$(basename "$DB_PATH")"
+  trap 'rm -rf "$TMP_DIR"' EXIT
   curl -fSL --retry 5 --retry-all-errors -C - -o "$TMP_DB" "${URL_BASE}/${DB_PATH}"
   if command -v sha256sum >/dev/null 2>&1; then
     ACTUAL="$(sha256sum "$TMP_DB" | awk '{print $1}')"
@@ -83,7 +85,7 @@ else
     || { echo "::error::checksum mismatch on downloaded DB (want $CHECKSUM, got sha256:$ACTUAL)" >&2; exit 3; }
   echo "[provision-grype-db] checksum verified ($CHECKSUM)"
   grype db import "$TMP_DB"
-  rm -f "$TMP_DB"
+  rm -rf "$TMP_DIR"
   trap - EXIT
   grype db status 2>/dev/null | grep -E 'Built|Status|Schema' || true
 fi

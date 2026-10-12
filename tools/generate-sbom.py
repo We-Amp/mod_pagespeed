@@ -24,6 +24,7 @@ The committed JS deps are the two bundled into admin_console.html
 Usage:
     tools/generate-sbom.py            # write sbom/pagespeed-1.1.spdx.json
     tools/generate-sbom.py --verify   # fail if the committed copy is stale
+    tools/generate-sbom.py --self-test  # assert source-only scoping (Envoy)
 """
 
 import json
@@ -70,6 +71,12 @@ def read_product_version():
 #   holder       copyright holder (free text)
 #   repo         github "owner/repo" for the PURL, or None (no github PURL)
 #   purl_version explicit PURL/tag version; None → use the resolved version
+#   source_only  optional; True for a dep that only the SOURCE tree needs
+#                (Envoy: pagespeed/envoy/ is .bazelignore'd out of every
+#                shipped build). It stays a package (same name and purl, so the
+#                notices, CPE/NVD matcher and VEX statements keep matching) but
+#                is NOT a dependency of the product: it hangs off the
+#                source-only filter package, see ENVOY_FILTER_SOURCE.
 # downloadLocation is derived from repo (github) or `url` (non-github).
 # ---------------------------------------------------------------------------
 CPP_DEPS = [
@@ -90,7 +97,8 @@ CPP_DEPS = [
     {"name": "spdlog", "version": {"key": "SPDLOG_VERSION"}, "license": "MIT",
      "holder": "Gabi Melman", "repo": "gabime/spdlog", "purl_version": "v1.17.0"},
     {"name": "envoy", "version": {"key": "ENVOY_COMMIT"}, "license": "Apache-2.0",
-     "holder": "The Envoy Project Authors", "repo": "envoyproxy/envoy", "purl_version": "v1.37.5"},
+     "holder": "The Envoy Project Authors", "repo": "envoyproxy/envoy", "purl_version": "v1.37.6",
+     "source_only": True},
     {"name": "hiredis", "version": {"key": "HIREDIS_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Salvatore Sanfilippo and contributors", "repo": "redis/hiredis", "purl_version": "v1.3.0"},
     {"name": "jsoncpp", "version": {"key": "JSONCPP_COMMIT"}, "license": "MIT",
@@ -154,10 +162,30 @@ CPP_DEPS = [
     # source, not a Bazel http_archive), so it is pinned inline as a literal. Keep this
     # lockstep with DEF_NGINX_VER (focal path) in install/nginx/build_module_in_container.sh
     # — the load-bearing pin the sidecar binary is actually built from.
-    {"name": "nginx", "version": {"literal": "1.30.4"}, "license": "BSD-2-Clause",
+    {"name": "nginx", "version": {"literal": "1.30.5"}, "license": "BSD-2-Clause",
      "holder": "Nginx, Inc. / F5", "repo": None,
      "download": "https://nginx.org/", "purl_version": None},
 ]
+
+# Source-only package standing for the Envoy filter port (pagespeed/envoy/).
+# It ships in the signed source tarball, not in any binary artefact (Apache
+# module, nginx module, IIS installer), so the product CONTAINS it as source
+# and it DEPENDS_ON the source_only deps; the product itself does not.
+ENVOY_FILTER_SOURCE = "pagespeed-envoy-filter-source"
+ENVOY_FILTER_COMMENT = (
+    "Source-only: the Envoy filter port (pagespeed/envoy/) is carried by the "
+    "signed source tarball and is excluded from every shipped binary build "
+    "(.bazelignore). Its dependencies (Envoy) are not contained in any "
+    "binary artefact of pagespeed-1.1."
+)
+SOURCE_ONLY_DEP_COMMENT = (
+    "Required only by the source-only Envoy filter; not contained in any "
+    "binary artefact."
+)
+ROOT_COMMENT = (
+    "Covers the source release plus the binary artefacts; the binaries "
+    "exclude pagespeed/envoy/ (the source-only Envoy filter)."
+)
 
 # ---------------------------------------------------------------------------
 # JavaScript runtime dependencies bundled into admin_console.html.
@@ -243,15 +271,25 @@ def generate_sbom():
         "licenseDeclared": "Apache-2.0",
         "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
         "externalRefs": [],
+        "comment": ROOT_COMMENT,
     }
 
     packages = [root_pkg]
     relationships = []
 
-    def add(pkg):
+    root_id = "SPDXRef-Package-pagespeed-1.1"
+    filter_pkg = make_package(
+        ENVOY_FILTER_SOURCE, root_pkg["versionInfo"], "Apache-2.0",
+        "(c) 2024-2026 We-Amp B.V.", "We-Amp B.V.", "NOASSERTION")
+    filter_pkg["comment"] = ENVOY_FILTER_COMMENT
+    filter_id = filter_pkg["SPDXID"]
+
+    def add(pkg, source_only=False):
         packages.append(pkg)
+        # A source-only dep is a dependency of the filter source, not of the
+        # shipped product.
         relationships.append({
-            "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
+            "spdxElementId": filter_id if source_only else root_id,
             "relationshipType": "DEPENDS_ON",
             "relatedSpdxElement": pkg["SPDXID"],
         })
@@ -268,14 +306,25 @@ def generate_sbom():
             purl_ver = dep.get("purl_version") or version
             purl = f"pkg:github/{repo}@{purl_ver}"
             download = download or f"https://github.com/{repo}"
-        add(make_package(dep["name"], version, dep["license"], dep["holder"],
-                         dep["holder"], download or "NOASSERTION", purl=purl))
+        pkg = make_package(dep["name"], version, dep["license"], dep["holder"],
+                           dep["holder"], download or "NOASSERTION", purl=purl)
+        if dep.get("source_only"):
+            pkg["comment"] = SOURCE_ONLY_DEP_COMMENT
+        add(pkg, source_only=bool(dep.get("source_only")))
 
     # --- JavaScript dependencies (bundled admin console) ---
     for name, version, lic_expr, holder, _url in JS_DEPS:
         add(make_package(name, version, lic_expr, holder, holder,
                          f"https://www.npmjs.com/package/{name}/v/{version}",
                          purl=f"pkg:npm/{name}@{version}"))
+
+    if any(d.get("source_only") for d in CPP_DEPS):
+        packages.insert(1, filter_pkg)
+        relationships.insert(0, {
+            "spdxElementId": root_id,
+            "relationshipType": "CONTAINS",
+            "relatedSpdxElement": filter_id,
+        })
 
     relationships.insert(0, {
         "spdxElementId": "SPDXRef-DOCUMENT",
@@ -302,7 +351,42 @@ def generate_sbom():
     }
 
 
+def self_test():
+    """Assert the source-only scoping: Envoy is never a product dependency."""
+    doc = generate_sbom()
+    root = "SPDXRef-Package-pagespeed-1.1"
+    ids = {p["name"]: p["SPDXID"] for p in doc["packages"]}
+    rels = {(r["spdxElementId"], r["relationshipType"], r["relatedSpdxElement"])
+            for r in doc["relationships"]}
+    fails = []
+    src_only = [d["name"] for d in CPP_DEPS if d.get("source_only")]
+    if not src_only:
+        print("FAIL: no dependency carries source_only", file=sys.stderr)
+        sys.exit(1)
+    if "envoy" not in src_only:
+        fails.append("envoy must be flagged source_only")
+    for name in src_only:
+        if (root, "DEPENDS_ON", ids[name]) in rels:
+            fails.append(f"{name}: product must not DEPENDS_ON a source-only dep")
+        if (ids[ENVOY_FILTER_SOURCE], "DEPENDS_ON", ids[name]) not in rels:
+            fails.append(f"{name}: filter source must DEPENDS_ON it")
+    if (root, "CONTAINS", ids[ENVOY_FILTER_SOURCE]) not in rels:
+        fails.append("product must CONTAIN the filter source package")
+    for d in CPP_DEPS:
+        if not d.get("source_only") and (root, "DEPENDS_ON", ids[d["name"]]) not in rels:
+            fails.append(f"{d['name']}: shipped dep lost its DEPENDS_ON")
+    if sum(p["name"] == "envoy" for p in doc["packages"]) != 1:
+        fails.append("envoy package must stay exactly once (VEX/notices match it)")
+    if fails:
+        print("\n".join("FAIL: " + f for f in fails), file=sys.stderr)
+        sys.exit(1)
+    print("generate-sbom self-test OK")
+    sys.exit(0)
+
+
 def main():
+    if "--self-test" in sys.argv:
+        self_test()
     verify = "--verify" in sys.argv
     doc = generate_sbom()
     output = json.dumps(doc, indent=2) + "\n"

@@ -2,8 +2,8 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
-import { routes, type NavGroup } from "$lib/routes";
-import { isNavActive, navKeyHint } from "./nav";
+import { SERVER_PAGE_LINKS, routes, type NavGroup } from "$lib/routes";
+import { isNavActive, navKeyHint, serverPageHref } from "./nav";
 
 const labels = (group: NavGroup, isGlobal: boolean) =>
   routes.filter((r) => r.group === group && r.hidden !== true && (r.globalOnly !== true || isGlobal)).map((r) => r.label);
@@ -23,6 +23,23 @@ describe("the sidebar", () => {
       expect(r.parent, r.path).toBeDefined();
       expect(routes.some((p) => p.path === r.parent && p.hidden !== true), r.path).toBe(true);
     }
+  });
+});
+
+describe("server-rendered page links", () => {
+  it("Rule packs follows the Module group's pages", () => {
+    expect(SERVER_PAGE_LINKS).toEqual([{ label: "Rule packs", group: "module", leaf: "rule_packs" }]);
+  });
+
+  it("no link shadows a route's label, so each sidebar name stays unique", () => {
+    for (const l of SERVER_PAGE_LINKS) expect(routes.some((r) => r.label === l.label), l.label).toBe(false);
+  });
+
+  it("points at the open console's own admin path", () => {
+    expect(serverPageHref("/pagespeed_admin", "rule_packs")).toBe("/pagespeed_admin/rule_packs");
+    expect(serverPageHref("/pagespeed_global_admin", "rule_packs")).toBe("/pagespeed_global_admin/rule_packs");
+    expect(serverPageHref("/secret-admin/", "rule_packs")).toBe("/secret-admin/rule_packs");
+    expect(serverPageHref("", "rule_packs")).toBe("/rule_packs");
   });
 });
 

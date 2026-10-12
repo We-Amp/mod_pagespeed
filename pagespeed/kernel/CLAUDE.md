@@ -15,6 +15,7 @@ here -- everything is portable.
 | `http/` | HTTP primitives: `ContentType`, `GoogleUrl`, `RequestHeaders`, `ResponseHeaders`, `CachingHeaders`, `BotChecker` |
 | `image/` | Image codec wrappers: GIF, PNG, JPEG, WebP readers/optimizers; scanline-based processing pipeline |
 | `js/` | JavaScript tokenizer, minifier (`JsMinify`), keyword tables |
+| `packs/` | Rule packs: pack model, strict JSON loader, matcher, templates, decision records, and the streaming `RulePackFilter` (an `HtmlParse` filter; the rewriter runs it as `rule_packs`) |
 | `sharedmem/` | Shared-memory abstractions: `InProcessSharedMem`, `SharedCircularBuffer`, `SharedMemStatistics`, `SharedMemLockManager` |
 | `thread/` | Threading primitives: `PthreadSharedMem`, `SchedulerThread`, `EventScheduler`, `EventDispatcher`, `QueuedWorkerPool` |
 | `util/` | Platform helpers, `NonceGenerator`, `CopyOnWrite`, `Gzip`, `ReEncoder` |
@@ -31,8 +32,9 @@ here -- everything is portable.
 ## Namespace
 
 All kernel code lives in `net_instaweb::` (legacy). JS minification uses
-`pagespeed::`. Do not introduce new uses of the `net_instaweb` namespace
-in new code; it is retained for backward compatibility.
+`pagespeed::`, and the rule-pack library uses `pagespeed::packs`. Do not
+introduce new uses of the `net_instaweb` namespace in new code; it is
+retained for backward compatibility.
 
 ## Shared Memory Implementations
 

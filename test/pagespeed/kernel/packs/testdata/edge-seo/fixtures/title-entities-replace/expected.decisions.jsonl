@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/t/replace/x","rule":"title-replace","kind":"title","mode":"enforce","action":"replace","reason":"present","defect":"","before":"fnv1a64:bf616e4ca79261eb","after":"Title for /t/replace/x"}

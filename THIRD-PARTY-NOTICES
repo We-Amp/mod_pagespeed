@@ -541,7 +541,7 @@ spdlog 1.17.0
     This software depends on the fmt lib (MIT License),
     and users must comply to its license: https://raw.githubusercontent.com/fmtlib/fmt/master/LICENSE
 
-envoy f97695a50e (v1.37.5)
+envoy cf413bdb37 (v1.37.6)
   License: Apache-2.0
   Copyright (c) The Envoy Project Authors
   https://github.com/envoyproxy/envoy
@@ -1808,11 +1808,11 @@ ASP.NET CORE SIDECAR (matched-pair web server; also attributed in
 aspnetcore/THIRD-PARTY-NOTICES inside the sidecar package)
 ===============================================================================
 
-nginx 1.30.4
+nginx 1.30.5
   License: BSD-2-Clause
   Copyright (c) Nginx, Inc. / F5
   https://nginx.org/
-  License text (LICENSE at the pinned release-1.30.4 tag):
+  License text (LICENSE at the pinned release-1.30.5 tag):
 
     Copyright (C) 2002-2021 Igor Sysoev
     Copyright (C) 2011-2026 Nginx, Inc.

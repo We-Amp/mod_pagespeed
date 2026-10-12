@@ -2,14 +2,44 @@
 
 case "$1" in
     configure)
-        test ! -e /etc/apache2/mods-enabled/pagespeed.load && \
-            a2enmod pagespeed
+        # Enable the module and its confs on a FRESH install only, never over
+        # an administrator's a2dismod / a2disconf. $2 is the previously
+        # configured version: empty on a first install and on a reinstall
+        # after a purge, but SET on an upgrade, on dpkg-reconfigure and on a
+        # reinstall after a plain remove (the package has conffiles, so it
+        # stays in state "rc"). prerm records its own disable with
+        # `a2dismod -m` / `a2disconf -m`, which a2query reports as 33
+        # ("disabled by a maintainer script"); an administrator's disable
+        # reports 32 and is left alone.
+        pkg_disabled() { # a2query-flag name
+            a2query "$1" "$2" >/dev/null 2>&1
+            test $? -eq 33
+        }
+        fresh=
+        test -z "$2" && fresh=1
+        mod_fresh="$fresh"
+        pkg_disabled -m pagespeed && mod_fresh=1
+        libs_fresh="$fresh"
+        pkg_disabled -c pagespeed_libraries && libs_fresh=1
+        # The daemon drop-in first shipped in 1.16.0; an upgrade from before
+        # that is its first install, so it is enabled once there too.
+        daemon_fresh="$fresh"
+        pkg_disabled -c pagespeed_daemon && daemon_fresh=1
+        if [ -z "$daemon_fresh" ] && dpkg --compare-versions "$2" lt 1.16.0
+        then
+            daemon_fresh=1
+        fi
+
+        if [ -n "$mod_fresh" ] && [ ! -e /etc/apache2/mods-enabled/pagespeed.load ]
+        then
+            a2enmod -m pagespeed
+        fi
 
         # Enable pagespeed_libraries.conf if it was installed.
         # Bazel builds may not include this file.
-        if [ -f /etc/apache2/conf-available/pagespeed_libraries.conf ]; then
+        if [ -n "$libs_fresh" ] && [ -f /etc/apache2/conf-available/pagespeed_libraries.conf ]; then
           if hash a2enconf 2> /dev/null; then
-            a2enconf pagespeed_libraries
+            a2enconf -m pagespeed_libraries
           elif [ -d /etc/apache2/conf.d/ ]; then
             if [ -e /etc/apache2/conf.d/pagespeed_libraries.conf ]; then
               echo "Not symlinking on top of existing pagespeed_libraries.conf"
@@ -25,11 +55,12 @@ case "$1" in
         # this package depends on, so an upgrade from a release without the
         # daemon reaches it without hand-editing. Same enable path as
         # pagespeed_libraries.conf. The file is a dpkg conffile, so operator
-        # edits survive upgrades; it documents how to opt out (comment out
-        # the directives -- a2enconf here runs on every configure).
-        if [ -f /etc/apache2/conf-available/pagespeed_daemon.conf ]; then
+        # edits survive upgrades; `a2disconf pagespeed_daemon` opts out and
+        # stays out across upgrades.
+        if [ -n "$daemon_fresh" ] && \
+           [ -f /etc/apache2/conf-available/pagespeed_daemon.conf ]; then
           if hash a2enconf 2> /dev/null; then
-            a2enconf pagespeed_daemon
+            a2enconf -m pagespeed_daemon
           elif [ -d /etc/apache2/conf.d/ ]; then
             if [ -e /etc/apache2/conf.d/pagespeed_daemon.conf ]; then
               echo "Not symlinking on top of existing pagespeed_daemon.conf"

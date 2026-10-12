@@ -60,6 +60,12 @@ def isCompileTarget(target, args):
   if not args.include_headers and isHeader(filename):
     return False
 
+  # *.inc files are X-macro tables that only parse when a .cc defines the
+  # macro and includes them. Bazel lists them in srcs, so they show up in the
+  # compdb, but linting one standalone is a guaranteed compile error.
+  if filename.endswith(".inc"):
+    return False
+
   if not args.include_genfiles:
     if filename.startswith("bazel-out/"):
       return False

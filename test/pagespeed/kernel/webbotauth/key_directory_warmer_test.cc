@@ -12,6 +12,7 @@
 
 #include "pagespeed/kernel/webbotauth/key_directory_warmer.h"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
+#include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/posix_timer.h"
@@ -26,6 +28,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -133,6 +136,40 @@ class DeferredFetcher : public UrlAsyncFetcher {
   GoogleString body_;
   int calls_ = 0;
   std::vector<Completer*> completers_;
+};
+
+// Accepts the fetch and never completes it until destruction, so the warmer's
+// bounded wait has to expire on its own.
+class HungFetcher : public UrlAsyncFetcher {
+ public:
+  ~HungFetcher() override {
+    for (AsyncFetch* fetch : pending_) {
+      fetch->Done(false);
+    }
+  }
+  void Fetch(const GoogleString& url, MessageHandler* handler,
+             AsyncFetch* fetch) override {
+    pending_.push_back(fetch);
+  }
+
+ private:
+  std::vector<AsyncFetch*> pending_;
+};
+
+// A Timer whose wall clock runs backward (each NowUs() reading is one second
+// earlier than the last, as when the host clock keeps being stepped back), with
+// the real monotonic clock.
+class BackwardWallClockTimer : public Timer {
+ public:
+  int64 NowUs() const override {
+    return real_.NowUs() - 1000 * 1000 * (++wall_reads_);
+  }
+  int64 NowMonotonicUs() const override { return real_.NowMonotonicUs(); }
+  void SleepUs(int64 us) override { real_.SleepUs(us); }
+
+ private:
+  PosixTimer real_;
+  mutable std::atomic<int64> wall_reads_{0};
 };
 
 class KeyDirectoryWarmerTest : public ::testing::Test {
@@ -248,6 +285,24 @@ TEST_F(KeyDirectoryWarmerTest, RefreshPrunesVanishedKid) {
   EXPECT_EQ(1, warmer.RefreshOnce());
   EXPECT_EQ(KeyLookupResult::kFound, ReadCacheOnly("k1").status);
   EXPECT_EQ(KeyLookupResult::kNotFound, ReadCacheOnly("k2").status);
+}
+
+// The bounded blocking-fetch wait is measured on the monotonic clock: with a
+// wall clock that keeps stepping backward it must still give up after
+// fetch_timeout_ms instead of waiting for a fetch that never completes.
+TEST_F(KeyDirectoryWarmerTest, FetchTimeoutIgnoresBackwardWallClock) {
+  HungFetcher fetcher;
+  BackwardWallClockTimer stepping_timer;
+  KeyDirectoryWarmer::Config cfg = BaseConfig();
+  cfg.fetch_timeout_ms = 100;
+  KeyDirectoryWarmer warmer(cfg, &fetcher, &cache_, thread_system_.get(),
+                            &stepping_timer, &handler_);
+  const int64 start_ms = timer_.NowMonotonicMs();
+  EXPECT_EQ(0, warmer.RefreshOnce());
+  const int64 elapsed_ms = timer_.NowMonotonicMs() - start_ms;
+  EXPECT_LE(100, elapsed_ms);
+  EXPECT_GT(5000, elapsed_ms);
+  EXPECT_EQ(KeyLookupResult::kNotFound, ReadCacheOnly("k1").status);
 }
 
 TEST_F(KeyDirectoryWarmerTest, EmptyAllowlistDoesNotFetch) {

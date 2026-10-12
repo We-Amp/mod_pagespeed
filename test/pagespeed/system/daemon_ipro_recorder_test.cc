@@ -756,6 +756,32 @@ TEST_F(DaemonIproRecorderTest, AnImageFallthroughCountsItsContentClass) {
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
 }
 
+// --- HTML is never recorded -------
+
+TEST_F(DaemonIproRecorderTest, HtmlIsNeverRecorded) {
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Replace(HttpAttributes::kContentType, "text/html");
+  headers.ComputeCaching();
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
+  EXPECT_STREQ(daemon_record_reason::kHtmlClassicChain, outcome.reason);
+  EXPECT_FALSE(outcome.stored);
+  EXPECT_FALSE(outcome.notified);
+  const GoogleString log = CallLog();
+  EXPECT_EQ(GoogleString::npos, log.find("write_original")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("notify ")) << log;
+}
+
+TEST_F(DaemonIproRecorderTest, AStylesheetIsStillRecorded) {
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  EXPECT_TRUE(outcome.stored);
+  EXPECT_TRUE(outcome.notified);
+}
+
 TEST_F(DaemonIproRecorderTest, AResponseThatBreaksBeforeTheGateCountsNothing) {
   // A private response breaks out of DoneAndSetHeaders before the class is
   // classified; its fall-through stays only in the serve-time total.

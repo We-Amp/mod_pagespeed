@@ -8,3 +8,9 @@
 # status_code value is never modified concurrently.
 race:AsyncExpectStringAsyncFetch::HandleHeadersComplete
 race:CachePutFetch::HandleDone
+
+# APR allocator_alloc() reads allocator->max_index without the allocator
+# mutex as a fast-path hint, then re-reads it under the lock before walking
+# the free list. A stale hint only costs a missed node reuse. Benign by
+# design upstream (still present on apr 1.7.x and trunk).
+race:allocator_alloc

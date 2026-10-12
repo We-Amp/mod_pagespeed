@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/c/replace/r","rule":"canonical-replace","kind":"canonical","mode":"enforce","action":"remove","reason":"conflict","defect":"canonical-multiple","before":"fnv1a64:ee77d8a933707484","after":""}

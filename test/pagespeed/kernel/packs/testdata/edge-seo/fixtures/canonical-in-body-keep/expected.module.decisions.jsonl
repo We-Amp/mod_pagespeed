@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/c/keep/body","rule":"canonical-keep","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/c/keep/body"}
+{"host":"fixture.test","path":"/c/keep/body","rule":"canonical-keep","kind":"canonical","mode":"enforce","action":"remove","reason":"late_conflict","defect":"","before":"fnv1a64:08679fd747232ad6","after":""}

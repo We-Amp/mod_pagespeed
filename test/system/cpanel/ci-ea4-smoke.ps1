@@ -247,9 +247,9 @@ function Test-Tcp22 {
 function Get-GuestIp {
     # Discover the guest's CURRENT IP by MAC from the host neighbor table, but
     # only ever return an address that actually answers on TCP/22. After a host
-    # reboot the Hyper-V Default Switch re-randomizes its /20, so the neighbor
+    # reboot the Hyper-V Default Switch re-randomizes its subnet, so the neighbor
     # table can carry STALE `Permanent` entries from a prior boot's lease whose
-    # IPs still fall inside the new /20. A plain `Select -First 1` would then hand
+    # IPs still fall inside the new subnet. A plain `Select -First 1` would then hand
     # back a DEAD address and Wait-Ssh would time out against a non-existent host
     # (the v1.15.0+r14 el8/el9 smoke failure: host rebooted, switch moved to
     # 192.0.2.0/24, two Permanent ARP entries per MAC, the stale one sorted

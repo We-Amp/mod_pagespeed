@@ -10,6 +10,7 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -332,6 +333,53 @@ TEST_F(IisConfigurationTest, DaemonOptionInMatchBlockRefused) {
   // Bound to the two directives, not to any two refusals.
   EXPECT_EQ(1, recorder.CountContaining("DaemonSocketPath"));
   EXPECT_EQ(1, recorder.CountContaining("DaemonVolumePath"));
+}
+
+// ==========================================================================
+// The rule_packs options (server scope)
+// ==========================================================================
+
+TEST_F(IisConfigurationTest, RulePackOptionsParseAndRoundTrip) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(
+      "pagespeed RulePackFile C:\\pagespeed\\packs\\site.json\n"
+      "pagespeed RulePackMode enforce\n",
+      "", &rwo);
+  EXPECT_EQ("C:\\pagespeed\\packs\\site.json", rwo.rule_pack_file());
+  EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeEnforce,
+            rwo.rule_pack_mode());
+
+  IisRewriteOptions merged(nullptr);
+  merged.Merge(rwo);
+  EXPECT_EQ("C:\\pagespeed\\packs\\site.json", merged.rule_pack_file());
+  EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeEnforce,
+            merged.rule_pack_mode());
+  std::unique_ptr<net_instaweb::RewriteOptions> clone(merged.Clone());
+  EXPECT_EQ("C:\\pagespeed\\packs\\site.json", clone->rule_pack_file());
+  EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeEnforce,
+            clone->rule_pack_mode());
+
+  // A misspelled mode is refused and leaves the default.
+  IisRewriteOptions bad(nullptr);
+  ParseAndGetConfig("pagespeed RulePackMode enforc\n", "", &bad);
+  EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeReport,
+            bad.rule_pack_mode());
+}
+
+// Server scope: a match block (per request) cannot point the server at a
+// pack file.
+TEST_F(IisConfigurationTest, RulePackFileInMatchBlockIgnored) {
+  std::string config_text =
+      "host:example\\.com\n"
+      "pagespeed RulePackFile C:\\pagespeed\\packs\\other.json\n";
+  ConfigurationFile* cf = Parse(config_text);
+  std::map<std::string, std::string> input;
+  input["host"] = "example.com";
+  input["config"] = "request";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ("", rwo.rule_pack_file());
 }
 
 // An UNQUOTED value with a space is three tokens, not one: the line is not a

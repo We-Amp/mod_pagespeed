@@ -56,6 +56,7 @@ class ServerContext;
 class RewriteDriver;
 class RewriteFilter;
 class RewriteOptions;
+class RulePackProvider;
 class Scheduler;
 class ThreadsafeCache;
 class Timer;
@@ -152,6 +153,15 @@ class TestRewriteDriverFactory : public RewriteDriverFactory {
 
   void ClearRewriterCallbackVector() { rewriter_callback_vector_.clear(); }
 
+  // The rule pack source of the test server contexts (not owned); none
+  // unless a test sets one.
+  RulePackProvider* rule_pack_provider() override {
+    return rule_pack_provider_;
+  }
+  void set_rule_pack_provider(RulePackProvider* provider) {
+    rule_pack_provider_ = provider;
+  }
+
   // By default this is false, but can be reset.
   bool UseBeaconResultsInFilters() const override {
     return use_beacon_results_in_filters_;
@@ -223,6 +233,7 @@ class TestRewriteDriverFactory : public RewriteDriverFactory {
   NamedLockManager* DefaultLockManager() override;
 
  private:
+  RulePackProvider* rule_pack_provider_ = nullptr;
   MockTimer* mock_timer_;          // owned by base class timer_.
   MockScheduler* mock_scheduler_;  // owned by RewriteDriverFactory::scheduler_.
   DelayCache* delay_cache_;

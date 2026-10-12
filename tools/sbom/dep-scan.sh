@@ -74,7 +74,7 @@
 # four committed lockfiles are clean at medium+ with NO VEX suppressions, so
 # the gate is honest rather than a filter over a triaged backlog. Images remain
 # report-only here (see dep-scan.yml). The curated medium+ gate in the CI workflow
-# (security-gates) / release.yml is unchanged and still authoritative for the
+# (the Pool guards job) / release.yml is unchanged and still authoritative for the
 # C/C++ SBOM.
 #
 # syft + grype must be on PATH at the pinned versions below.

@@ -1,0 +1,72 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "Fixture pack for a head rule next to a JSON-LD rule"
+  },
+  "sites": [
+    {
+      "host": "fixture.test",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "title-replace-head",
+      "kind": "title",
+      "enforce": true,
+      "on_present": "replace",
+      "match": {
+        "paths": [
+          "/hd/**"
+        ]
+      },
+      "value": {
+        "template": "New title"
+      }
+    },
+    {
+      "id": "jsonld-insert-body",
+      "kind": "jsonld",
+      "enforce": true,
+      "on_present": "keep",
+      "match": {
+        "paths": [
+          "/hd/**"
+        ]
+      },
+      "value": {
+        "template": "{\"@context\":\"https://schema.org\",\"@type\":\"Organization\",\"name\":\"Fixture\",\"url\":\"https://fixture.test/\"}"
+      }
+    },
+    {
+      "id": "title-replace-quoted",
+      "kind": "title",
+      "enforce": true,
+      "on_present": "replace",
+      "match": {
+        "paths": [
+          "/hdq/**"
+        ]
+      },
+      "value": {
+        "template": "New title"
+      }
+    },
+    {
+      "id": "jsonld-quote-title",
+      "kind": "jsonld",
+      "enforce": true,
+      "on_present": "keep",
+      "match": {
+        "paths": [
+          "/hdq/**"
+        ]
+      },
+      "value": {
+        "template": "{\"@context\":\"https://schema.org\",\"@type\":\"WebPage\",\"name\":\"{title}\"}"
+      }
+    }
+  ]
+}

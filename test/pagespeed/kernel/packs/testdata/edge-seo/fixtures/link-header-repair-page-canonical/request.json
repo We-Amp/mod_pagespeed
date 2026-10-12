@@ -1,0 +1,14 @@
+{
+  "url": "https://fixture.test/lh/repair/page",
+  "pack": "pack.link-header.json",
+  "origin_headers": [
+    [
+      "Content-Type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "Link",
+      "<https://fixture.test/stale>; rel=canonical"
+    ]
+  ]
+}

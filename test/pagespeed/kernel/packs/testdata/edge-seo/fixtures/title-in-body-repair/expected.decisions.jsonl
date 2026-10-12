@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/t/repair/b","rule":"title-repair","kind":"title","mode":"enforce","action":"replace","reason":"out_of_head","defect":"title-missing","before":"fnv1a64:f7dbe8a7c839a675","after":"Title for /t/repair/b"}

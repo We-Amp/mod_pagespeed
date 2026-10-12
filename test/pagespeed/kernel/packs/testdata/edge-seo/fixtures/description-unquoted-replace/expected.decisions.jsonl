@@ -1,0 +1,1 @@
+{"host":"fixture.test","path":"/d/q/z","rule":"description-quotes","kind":"description","mode":"enforce","action":"replace","reason":"present","defect":"","before":"fnv1a64:1a0fad1921d08076","after":"It's \"quoted\" & <b> /d/q/z"}

@@ -65,6 +65,15 @@ if [ -f "${SRCDIR}/scripts/build_nginx_with_pagespeed.sh" ]; then
   cp "${SRCDIR}/scripts/build_nginx_with_pagespeed.sh" "${PKGDIR}/"
 fi
 
+# License files, as the deb and rpm ship them
+for f in LICENSE NOTICE THIRD-PARTY-NOTICES; do
+  if [ ! -f "${SRCDIR}/${f}" ]; then
+    echo "ERROR: ${SRCDIR}/${f} not found"
+    exit 1
+  fi
+  cp "${SRCDIR}/${f}" "${PKGDIR}/${f}"
+done
+
 # Create sample config
 cat > "${PKGDIR}/pagespeed.conf.sample" << 'CONF'
 # Load the PageSpeed module (adjust path as needed)
@@ -231,6 +240,11 @@ per distro: Ubuntu 24.04 nginx 1.24.0, AlmaLinux 9 nginx 1.20.1).
 
 - Requires Linux ${ARCH_LABEL}
 
+## License
+
+\`LICENSE\` (Apache-2.0), \`NOTICE\` and \`THIRD-PARTY-NOTICES\` are in the
+top-level directory of this archive.
+
 ## More Information
 
 - https://github.com/we-amp/mod_pagespeed
@@ -240,5 +254,14 @@ EOF
 cd "${OUTPUTDIR}"
 tar czf "${PKGNAME}-linux-${ARCH_LABEL}.tar.gz" "${PKGNAME}/"
 rm -rf "${PKGDIR}"
+
+# Fail if the archive is missing any of the license files
+TARLIST="$(tar tzf "${PKGNAME}-linux-${ARCH_LABEL}.tar.gz")"
+for f in LICENSE NOTICE THIRD-PARTY-NOTICES; do
+  if ! grep -qx "${PKGNAME}/${f}" <<< "${TARLIST}"; then
+    echo "ERROR: ${PKGNAME}-linux-${ARCH_LABEL}.tar.gz is missing ${f}"
+    exit 1
+  fi
+done
 
 echo "Package created: ${OUTPUTDIR}/${PKGNAME}-linux-${ARCH_LABEL}.tar.gz"

@@ -969,15 +969,14 @@ bool InstawebHandler::HandleAsInPlace() {
     // declines to record one for the same reason.
     //
     // Recorded on every eligible MISS, not only on a cold one.  Re-recording
-    // REPLACES for a single writer, and a server is not one: every process
-    // holds its own handle on the shared volume, so for a hot URL concurrent
-    // writers are the steady state and superseded copies -- each a whole
-    // response body -- accumulate under that URL until the storage layer's
-    // chain ceiling refuses further writes.  The peer's own contract says to
-    // serialise such writers; there is no cross-process ordering available
-    // here to do it with.  That costs VOLUME as well as work, it does not
-    // come back down by itself, and it is one of the reasons the directives
-    // are documented as not yet ready to enable.
+    // REPLACES the previous copy: the superseded copy is unlinked as the
+    // replacement is written, and an entry that reaches the storage layer's
+    // limit on versions of one entry resets and accepts writes again rather
+    // than freezing.  Several server processes can still record the same URL
+    // at the same moment -- each holds its own handle on the shared volume --
+    // and there is no cross-process ordering available here to prevent that;
+    // the cost is the work of storing the body again, not growth that
+    // outlasts the replacement.
     if (ServeFromDaemonSubstrate()) {
       return true;
     }

@@ -382,8 +382,9 @@ With it on, for that server or virtual host:
   uncompressed copy, compressed by the server as before.
 * When no stored copy in the client's coding exists yet, the uncompressed
   optimized copy is served exactly as with the directive off.
-* HTML is always served uncompressed from the cache and compressed by the
-  server as before.
+* HTML is not served from the store on Apache, nginx or IIS: the module's
+  filter chain rewrites every HTML response, and the server compresses it as
+  before.
 
 A reverse proxy in front of the server (an nginx with `gzip on`, a CDN) does
 not compress a response that already carries `Content-Encoding`, so the stored
