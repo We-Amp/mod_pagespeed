@@ -65,6 +65,14 @@ class TestRulePackScope:
         )
         assert CANONICAL.findall(response.text) == [], response.text
 
+    def test_a_list_of_pack_files_in_a_match_block_is_refused(self, iis_site):
+        # multi/a.json and multi/b.json would insert a canonical, a title and
+        # a description for this host; both lines are refused in the block.
+        response = iis_site("rulepacks-multi.example.com").get(PAGE)
+        require_status_ok(response, "rulepacks-multi.example.com " + PAGE)
+        assert CANONICAL.findall(response.text) == [], response.text
+        assert "<title>" not in response.text, response.text
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

@@ -2621,6 +2621,9 @@ RewriteOptions::OptionSettingResult RewriteOptions::SetOptionFromNameInternal(
                   " cannot be set. Maximum allowed scope is ",
                   ScopeEnumToString(max_scope));
         return kOptionNameUnknown;
+      } else if (option == &rule_pack_file_) {
+        return AddRulePackFile(value, error_detail) ? kOptionOk
+                                                    : kOptionValueInvalid;
       } else if (!option->SetFromString(value, error_detail)) {
         return kOptionValueInvalid;
       } else {
@@ -3081,6 +3084,11 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
   for (int i = 0, n = src.custom_fetch_headers_.size(); i < n; ++i) {
     NameValue* nv = src.custom_fetch_headers_[i];
     AddCustomFetchHeader(nv->name, nv->value);
+  }
+  // A source that set RulePackFile replaces the list here; the generic option
+  // merge does the same for the first entry (rule_pack_file_).
+  if (src.rule_pack_files_set_here_ || !src.rule_pack_files_.empty()) {
+    rule_pack_files_ = src.rule_pack_files_;
   }
   // A source key replaces the key of the same id here, or is inserted in
   // order: a virtual host's key overrides a global one. The per-scope limit
@@ -3948,6 +3956,70 @@ void RewriteOptions::AddResourceHeader(const StringPiece& name,
 void RewriteOptions::AddCustomFetchHeader(const StringPiece& name,
                                           const StringPiece& value) {
   custom_fetch_headers_.push_back(new NameValue(name, value));
+}
+
+namespace {
+
+// Lexical normalisation for the duplicate check only: separators collapsed,
+// "." and ".." resolved, no file-system access. A backslash is a separator
+// only in a Windows-style path (drive letter or UNC prefix).
+std::string NormalizePackPath(StringPiece path) {
+  std::string p(path.data(), path.size());
+  const bool windows = (p.size() >= 2 && p[1] == ':') ||
+                       (p.size() >= 2 && p[0] == '\\' && p[1] == '\\');
+  if (windows) std::replace(p.begin(), p.end(), '\\', '/');
+  const bool absolute = !p.empty() && p[0] == '/';
+  std::vector<std::string> parts;
+  size_t pos = 0;
+  while (pos <= p.size()) {
+    size_t next = p.find('/', pos);
+    if (next == std::string::npos) next = p.size();
+    std::string part = p.substr(pos, next - pos);
+    pos = next + 1;
+    if (part.empty() || part == ".") continue;
+    if (part == "..") {
+      if (!parts.empty() && parts.back() != "..") {
+        parts.pop_back();
+        continue;
+      }
+      if (absolute) continue;
+    }
+    parts.push_back(part);
+  }
+  std::string out = absolute ? "/" : "";
+  for (size_t i = 0; i < parts.size(); ++i) {
+    if (i > 0) out += "/";
+    out += parts[i];
+  }
+  return out;
+}
+
+}  // namespace
+
+bool RewriteOptions::AddRulePackFile(StringPiece path, GoogleString* msg) {
+  if (!rule_pack_files_set_here_) {
+    // First line of this scope: it replaces anything inherited.
+    rule_pack_files_set_here_ = true;
+    rule_pack_files_.clear();
+  }
+  if (path.empty()) {
+    // An empty value clears the list, as it always cleared the single path.
+    rule_pack_files_.clear();
+    set_option(GoogleString(), &rule_pack_file_);
+    return true;
+  }
+  const std::string key = NormalizePackPath(path);
+  for (const GoogleString& existing : rule_pack_files_) {
+    if (NormalizePackPath(existing) == key) return true;
+  }
+  if (rule_pack_files_.size() >= kMaxRulePackFiles) {
+    *msg = StrCat("RulePackFile: at most ", IntegerToString(kMaxRulePackFiles),
+                  " rule pack files per configuration scope");
+    return false;
+  }
+  rule_pack_files_.push_back(GoogleString(path));
+  set_option(rule_pack_files_.front(), &rule_pack_file_);
+  return true;
 }
 
 bool RewriteOptions::AddRulePackTrustKey(StringPiece key_id, StringPiece base64,

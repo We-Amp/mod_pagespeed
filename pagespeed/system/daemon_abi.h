@@ -299,16 +299,15 @@ inline constexpr uint8_t kPsSentinelHeadersSidecar = 0x6C;
 // decode table instead, which is a weaker guarantee and is stated as one.
 //
 // WHAT CHANGED AT THE CURRENT PIN, because the original reason for this
-// mirror was sharper than the one that survives.  The scorer used to award
-// 200 to a variant whose format the client never advertised
-// (We-Amp/pagespeed-optimizer#1331), so the selection really did hand back AVIF
-// bytes to a client that asked for WebP and this module's disqualify was the
-// only thing standing between that and the wire.  The peer's own fix
-// (its #1334) now hard-disqualifies exactly that case, which makes the
-// disqualify here DEFENSE IN DEPTH rather than a workaround.  It stays, and
-// the mirror stays with it, for two reasons that do not depend on the defect:
-// the peer's scoring is not part of its published contract and may move
-// again, and a by-id read bypasses the scorer entirely -- so this module
+// mirror was sharper than the one that survives. The scorer used to award 200
+// to a variant whose format the client never advertised, so the selection
+// really did hand back AVIF bytes to a client that asked for WebP and this
+// module's disqualify was the only thing standing between that and the wire.
+// The peer's own fix (a later release) now hard-disqualifies exactly that case,
+// which makes the disqualify here DEFENSE IN DEPTH rather than a workaround. It
+// stays, and the mirror stays with it, for two reasons that do not depend on
+// the defect: the peer's scoring is not part of its published contract and may
+// move again, and a by-id read bypasses the scorer entirely -- so this module
 // still needs its own answer to a question the ABI does not export.
 inline constexpr uint32_t kPsMaskImageFormatShift = 0;
 inline constexpr uint32_t kPsMaskImageFormatBits = 0x03;

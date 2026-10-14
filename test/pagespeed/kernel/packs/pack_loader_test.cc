@@ -369,7 +369,7 @@ TEST(PackLoaderExampleTest, ExampleLoadsClean) {
   ASSERT_TRUE(p.ok()) << p.status();
   EXPECT_EQ(p->info.id, "edge-seo");
   EXPECT_EQ(p->info.version, "0.1.0");
-  EXPECT_EQ(p->info.engine_min, "1.18.0");
+  EXPECT_EQ(p->info.engine_min, "1.19.0");
   ASSERT_EQ(p->sites.size(), 2u);
   EXPECT_EQ(p->sites[0].host, "www.example.com");
   EXPECT_EQ(p->sites[0].mode, Mode::kReport);
@@ -439,7 +439,7 @@ TEST(PackLoaderExampleTest, ExampleRoundTripsThroughTheLoader) {
 }
 
 TEST(PackLoaderExampleTest, ExampleIsRefusedByAnOlderEngine) {
-  auto p = LoadPackFile(kExamplePath, "1.17.9");
+  auto p = LoadPackFile(kExamplePath, "1.18.9");
   ASSERT_FALSE(p.ok());
   EXPECT_NE(std::string(p.status().message()).find("pack.engine_min"),
             std::string::npos);
@@ -559,11 +559,25 @@ TEST(PackLoaderErrorTest, WrongTypes) {
 
 // ---- pack section -----------------------------------------------------------
 
-TEST(PackLoaderErrorTest, PackIdMustBeEdgeSeo) {
-  ExpectMutationError([](Json& j) { j["pack"]["id"] = "other"; },
-                      "pack.id: must be \"edge-seo\"");
-  ExpectMutationError([](Json& j) { j["pack"]["id"] = "Edge-SEO"; },
-                      "pack.id: must be \"edge-seo\"");
+TEST(PackLoaderErrorTest, PackIdMustMatchGrammar) {
+  const char* kMsg = "pack.id: must match [a-z0-9-]{1,64}";
+  for (const char* bad : {"Edge-SEO", "a_b", ""}) {
+    ExpectMutationError([&](Json& j) { j["pack"]["id"] = bad; }, kMsg);
+  }
+  ExpectMutationError(
+      [](Json& j) { j["pack"]["id"] = std::string(65, 'a'); }, kMsg);
+}
+
+TEST(PackLoaderTest, PackIdAcceptsGrammar) {
+  for (const std::string id : {std::string("edge-seo"),
+                               std::string("fixture-second"),
+                               std::string(64, 'a')}) {
+    Json j = Base();
+    j["pack"]["id"] = id;
+    auto p = Load(j);
+    ASSERT_TRUE(p.ok()) << p.status();
+    EXPECT_EQ(p->info.id, id);
+  }
 }
 
 TEST(PackLoaderErrorTest, VersionMustBeSemver) {
@@ -1208,13 +1222,13 @@ TEST(PackLoaderFileTest, ErrorsCarryTheFilePath) {
   const std::string path = ::testing::TempDir() + "/bad-pack.json";
   {
     std::ofstream out(path, std::ios::binary);
-    out << R"JSON({"pack":{"id":"x","version":"1.0.0"},"sites":[],"rules":[]})JSON";
+    out << R"JSON({"pack":{"id":"X","version":"1.0.0"},"sites":[],"rules":[]})JSON";
   }
   auto p = LoadPackFile(path, "");
   std::remove(path.c_str());
   ASSERT_FALSE(p.ok());
   EXPECT_EQ(std::string(p.status().message()),
-            path + ": pack.id: must be \"edge-seo\"");
+            path + ": pack.id: must match [a-z0-9-]{1,64}");
 }
 
 // ---- lint -------------------------------------------------------------------

@@ -1,0 +1,34 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "First of two packs on one virtual host (system test)"
+  },
+  "sites": [
+    {
+      "host": "rulepacks-multi.example.com",
+      "mode": "enforce"
+    },
+    {
+      "host": "rulepacks-multi-dup.example.com",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "multi-a-canonical",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mod_pagespeed_test/rule_packs/**"
+        ]
+      },
+      "value": {
+        "template": "https://rulepacks-multi.example.com{path}"
+      },
+      "on_present": "keep"
+    }
+  ]
+}

@@ -6,6 +6,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -113,6 +115,15 @@ class RulePackProvider {
                                 const pagespeed::packs::PageUrl& url,
                                 const pagespeed::packs::PackDecision& decision,
                                 int64_t now_ms, MessageHandler* handler) = 0;
+
+  // True the first time this process asks with `key`, false after: for the
+  // messages and counters that move once per process (a refused duplicate
+  // pack id, an overlap warning). Thread-safe.
+  bool FirstTime(const std::string& key);
+
+ private:
+  std::mutex once_mutex_;
+  std::set<std::string> once_keys_;
 };
 
 }  // namespace net_instaweb

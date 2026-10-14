@@ -1,0 +1,30 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.2.0",
+    "publisher": "local",
+    "description": "A second file with the id of the first (system test)"
+  },
+  "sites": [
+    {
+      "host": "rulepacks-multi-dup.example.com",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "multi-dup-title",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mod_pagespeed_test/rule_packs/**"
+        ]
+      },
+      "value": {
+        "template": "Duplicate title for {path}"
+      },
+      "on_present": "keep"
+    }
+  ]
+}

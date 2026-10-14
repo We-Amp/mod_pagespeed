@@ -385,3 +385,78 @@ export interface DaemonLogsResponse {
   [key: string]: unknown;
 }
 
+
+// ── Rule packs (rule_packs?json=1, schema 1) ─────────────────────────
+
+/** The licence fields of a pack: metadata text only. */
+export interface RulePackLicense {
+  label?: string;
+  expires?: string | null;
+  terms?: string | null;
+}
+
+/** One RulePackFile of the scope, in load order. */
+export interface RulePackEntry {
+  position?: number;
+  file?: string;
+  /** loaded | failed-keeping-earlier | refused | none | duplicate-id */
+  state?: string;
+  /** null when the file has not been read yet. */
+  id?: string | null;
+  version?: string | null;
+  publisher?: string | null;
+  /** null when the pack was not verified against a key. */
+  key_id?: string | null;
+  sha256?: string | null;
+  last_event_at?: string | null;
+  last_error?: string | null;
+  warnings?: string[];
+  license?: RulePackLicense | null;
+}
+
+/** One decision-log row. */
+export interface RulePackDecisionRow {
+  at?: string;
+  ts_ms?: number;
+  pack_id?: string;
+  pack_version?: string;
+  sha256_prefix?: string;
+  host?: string;
+  path?: string;
+  rule?: string;
+  kind?: string;
+  mode?: string;
+  action?: string;
+  reason?: string;
+  defect?: string;
+  before?: string;
+  after?: string;
+  removed?: string;
+  header?: boolean;
+  claimed_by?: string;
+}
+
+export interface RulePacksResponse {
+  schema?: number;
+  generated_at?: string;
+  host?: string;
+  scope?: string;
+  configuration?: {
+    filter_enabled?: boolean;
+    rule_pack_files?: string[];
+    rule_pack_mode?: string;
+    rule_pack_require_signed?: boolean;
+  };
+  packs?: RulePackEntry[];
+  overlap_warnings?: string[];
+  counters?: Record<string, number> | null;
+  decisions?: {
+    date?: string;
+    pack?: string | null;
+    limit?: number;
+    /** ok | missing | error | log_dir_not_set | no_pack_file */
+    status?: string;
+    error?: string | null;
+    rows?: RulePackDecisionRow[];
+  };
+}

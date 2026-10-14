@@ -10,6 +10,7 @@
 // be listed, with its reason, in fixture_runner_test.cc.
 //
 //   bazel run //test/pagespeed/kernel/packs:fixture_update -- --new <case>...
+//   bazel run //test/pagespeed/kernel/packs:fixture_update -- --multi --new <case>...
 //
 // writes expected.html / expected.decisions.jsonl (and expected.headers) of a
 // case that exists only in this module (a new directory with input.html and
@@ -25,16 +26,22 @@ int main(int argc, char** argv) {
   using pagespeed::packs::FixtureCase;
   const char* workspace = std::getenv("BUILD_WORKSPACE_DIRECTORY");
   const std::string root = workspace != nullptr ? workspace : ".";
-  const std::string dir =
+  std::string dir =
       root + "/test/pagespeed/kernel/packs/testdata/edge-seo/fixtures";
   bool new_case = false;
   int first = 1;
-  if (argc > 1 && std::string(argv[1]) == "--new") {
-    new_case = true;
+  if (argc > 2 && std::string(argv[1]) == "--multi") {
+    // The cases of several packs on one host (the pack files sit next to the
+    // case directories).
+    dir = root + "/test/pagespeed/kernel/packs/testdata/multi-pack";
     first = 2;
   }
+  if (argc > first && std::string(argv[first]) == "--new") {
+    new_case = true;
+    ++first;
+  }
   if (argc <= first) {
-    std::fprintf(stderr, "usage: fixture_update [--new] <case>...\n");
+    std::fprintf(stderr, "usage: fixture_update [--multi] [--new] <case>...\n");
     return 2;
   }
   int failures = 0;
@@ -48,6 +55,7 @@ int main(int argc, char** argv) {
       continue;
     }
     if (new_case && run->pack_file == "pack.json" &&
+        run->pack_files.size() == 1 &&
         pagespeed::packs::ReadFile(c.dir + "/expected.html").ok()) {
       std::fprintf(stderr,
                    "%s: a case of the shared pack with an expected.html; "

@@ -215,14 +215,18 @@ bool InstawebContext::FlushWouldSendEditableHeaders() const {
   }
   const RewriteOptions* options = rewrite_driver_->options();
   if (!options->Enabled(RewriteOptions::kRulePacks) ||
-      options->rule_pack_file().empty()) {
+      options->rule_pack_files().empty()) {
     return false;
   }
-  // Only a pack with a canonical `link_header` rule edits the headers.
+  // Only a pack with a canonical `link_header` rule edits the headers; any
+  // of the configured packs may be one.
   const RulePackProvider* provider =
       rewrite_driver_->server_context()->rule_pack_provider();
-  return provider != nullptr &&
-         provider->PackEditsLinkHeader(options->rule_pack_file());
+  if (provider == nullptr) return false;
+  for (const GoogleString& path : options->rule_pack_files()) {
+    if (provider->PackEditsLinkHeader(path)) return true;
+  }
+  return false;
 }
 
 void InstawebContext::Finish() {

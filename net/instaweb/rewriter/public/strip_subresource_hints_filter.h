@@ -20,7 +20,10 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_STRIP_SUBRESOURCE_HINTS_FILTER_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_STRIP_SUBRESOURCE_HINTS_FILTER_H_
 
+#include <set>
+
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
 
 namespace net_instaweb {
@@ -47,6 +50,9 @@ class StripSubresourceHintsFilter : public EmptyHtmlFilter {
   bool remove_style_;
   bool remove_image_;
   bool remove_any_;
+  // Original URLs of the <script type=module src> elements the previous
+  // request's dependency record says were rewritten; see ShouldStrip().
+  std::set<GoogleString> rewritten_module_urls_;
 
   StripSubresourceHintsFilter(const StripSubresourceHintsFilter&) = delete;
   StripSubresourceHintsFilter& operator=(const StripSubresourceHintsFilter&) =

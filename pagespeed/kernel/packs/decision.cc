@@ -65,6 +65,8 @@ std::string_view ReasonName(Reason reason) {
       return "header_conflict";
     case Reason::kHeadersFlushed:
       return "headers_flushed";
+    case Reason::kClaimed:
+      return "claimed";
   }
   return "present";
 }
@@ -112,7 +114,11 @@ std::string DecisionToJsonLine(std::string_view host, std::string_view path,
       ",\"after\":", Quote(d.after),
       d.removed.empty() ? std::string()
                         : absl::StrCat(",\"removed\":", Quote(d.removed)),
-      d.header ? ",\"header\":true" : "", "}");
+      d.header ? ",\"header\":true" : "",
+      d.claimed_by.empty()
+          ? std::string()
+          : absl::StrCat(",\"claimed_by\":", Quote(d.claimed_by)),
+      "}");
 }
 
 }  // namespace pagespeed::packs

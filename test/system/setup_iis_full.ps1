@@ -773,7 +773,12 @@ pagespeed FileCacheSizeKb 65536
         # rulepacks-report.example.com (report); every other host, localhost
         # included, is passed through. The match block sets a second pack for
         # one more host: IIS refuses it, so that host is not rewritten
-        # (iis/test_iis_rule_packs.py).
+        # (iis/test_iis_rule_packs.py). A second block lists two files for
+        # rulepacks-multi.example.com; both are refused the same way. The
+        # product accepts several RulePackFile lines at site scope; what stops
+        # a several-packs host here is this rig's single site with a wildcard
+        # binding, where per-host settings can only be match blocks. A second
+        # IIS site with its own root would host it (follow-up).
         $rulePackDir = "$WebRoot\mod_pagespeed_test\rule_packs"
         $pagespeedConfig += @"
 
@@ -782,6 +787,9 @@ pagespeed RulePackFile "$rulePackDir\pack.json"
 pagespeed RulePackMode enforce
 host:rulepacks-refused\.example\.com
 pagespeed RulePackFile "$rulePackDir\refused-pack.json"
+host:rulepacks-multi\.example\.com
+pagespeed RulePackFile "$rulePackDir\multi\a.json"
+pagespeed RulePackFile "$rulePackDir\multi\b.json"
 "@
 
         # Site-level config

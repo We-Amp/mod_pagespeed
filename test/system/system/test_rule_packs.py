@@ -12,6 +12,12 @@ PAGESPEED_RULE_PACKS_PORT (lane fixture "rule_packs"):
   rulepacks-report.example.com   rule_packs on, RulePackMode report
   rulepacks-unlisted.example.com rule_packs on, host not in the pack
 
+Several packs on one host (lane fixture "rule_pack_multi", multi/a.json and
+multi/b.json under the same directory):
+
+  rulepacks-multi.example.com      two RulePackFile lines, a.json then b.json
+  rulepacks-multi-dup.example.com  a.json, then dup.json with a's pack id
+
 Where the lane runs the chunked slow-flushing origin (lane fixture
 "flush_origin") the enforce host also serves it, to cut a page's head in two
 flush windows. Where the lane lets the test runner read the server's
@@ -53,6 +59,8 @@ DAEMON_HOST = "daemon.example.com"
 DAEMON_HTML_PATH = "/daemon_lane/lane.html"
 SIGNED_HOST = "rulepacks-signed.example.com"
 REQUIRE_HOST = "rulepacks-require.example.com"
+MULTI_HOST = "rulepacks-multi.example.com"
+MULTI_DUP_HOST = "rulepacks-multi-dup.example.com"
 FILTER_OFF = "PageSpeedFilters=-rule_packs"
 
 CANONICAL_RE = re.compile(r'<link rel="canonical" href="([^"]*)">')
@@ -418,6 +426,37 @@ class TestLinkHeader:
         html = _fetch(site, self.ROUTE, f"run={run}")
         assert _canonicals(html) == _link_targets(entries, "canonical"), (entries, html)
 
+    def test_apache_head_carries_the_origin_link_header_not_the_edited_one(
+        self, pack_site, server_config
+    ):
+        # A pack edits the Link header while it parses the HTML body, and a
+        # HEAD response has no body to parse. So on Apache a HEAD keeps the
+        # origin's Link header while the GET of the same URL gets the edited
+        # one (docs/rule-packs.md, "HEAD requests on Apache").
+        if server_config.server_type != "apache":
+            pytest.skip("the HEAD behaviour pinned here is the Apache one")
+        site = pack_site(ENFORCE_HOST)
+        run = _run_id()
+        url = f"{self.ROUTE}?run={run}"
+        get = site.get(url)
+        require_status_ok(get, f"GET {ENFORCE_HOST}{url}")
+        head = site.head(url)
+        require_status_ok(head, f"HEAD {ENFORCE_HOST}{url}")
+
+        get_entries = _link_entries(get.headers.get("Link", ""))
+        head_entries = _link_entries(head.headers.get("Link", ""))
+        assert _link_targets(get_entries, "canonical") == [f"https://{ENFORCE_HOST}{self.ROUTE}"], get_entries
+        assert _link_targets(head_entries, "canonical") == ["https://wrong.example.com/stale"], head_entries
+        # The other entries are the origin's on both.
+        assert self.PRELOAD in head_entries and self.PRECONNECT in head_entries, head_entries
+        assert self.PRELOAD in get_entries and self.PRECONNECT in get_entries, get_entries
+
+        # Observed: the module removes the origin's Content-Length on HTML it
+        # rewrites, so the HEAD reply carries none (not "0"); the GET reply
+        # carries the length of the body it sends.
+        assert head.headers.get("Content-Length") is None, head.headers
+        assert get.headers.get("Content-Length") == str(len(get.text.encode())), get.headers
+
     def test_the_report_host_leaves_the_header_as_the_origin_sent_it(self, pack_site, pack_stats):
         site = pack_site(REPORT_HOST)
         before = pack_stats(REPORT_HOST)
@@ -758,6 +797,236 @@ class TestDaemonServing:
         assert not response.header("X-Mod-Pagespeed") and not response.header("X-Page-Speed"), dict(
             response.headers
         )
+
+
+def _decision_lines_by_pack(host: str, path_prefix: str) -> Dict[str, List[dict]]:
+    """The decision-log lines of `host` under `path_prefix`, by the name of the
+    pack's directory under <LogDir>/packs/ (and the file each came from)."""
+    log_dir = os.environ.get("PAGESPEED_RULE_PACK_LOG_DIR")
+    if not log_dir:
+        pytest.fail("lane fixture rule_pack_log is provided but PAGESPEED_RULE_PACK_LOG_DIR is not set")
+    found: Dict[str, List[dict]] = {}
+    for name in sorted(glob.glob(os.path.join(log_dir, "packs", "*", "decisions-*.jsonl"))):
+        assert re.fullmatch(r"decisions-\d{4}-\d{2}-\d{2}\.jsonl", os.path.basename(name)), name
+        try:
+            with open(name, encoding="utf-8") as f:
+                text = f.read()
+        except PermissionError:
+            try:
+                text = subprocess.run(
+                    ["sudo", "-n", "cat", name], check=True, capture_output=True, text=True
+                ).stdout
+            except (OSError, subprocess.CalledProcessError):
+                pytest.skip(f"decision log {name} is not readable by the test runner")
+        pack_dir = os.path.basename(os.path.dirname(name))
+        for raw in text.splitlines():
+            entry = json.loads(raw)
+            if entry.get("host") == host and entry.get("path", "").startswith(path_prefix):
+                found.setdefault(pack_dir, []).append(entry)
+    return found
+
+
+@pytest.mark.requires_fixture("rule_packs", "rule_pack_multi")
+class TestSeveralPacksOnOneHost:
+    """Two RulePackFile lines on one virtual host: both packs run, in order,
+    and the first one owns a kind both of them carry.
+
+    a.json (id edge-seo) has a canonical rule; b.json (id fixture-second) has
+    title and description rules and a canonical rule of its own.
+    """
+
+    def test_packs_with_different_kinds_both_apply_on_the_first_request(self, pack_site):
+        site = pack_site(MULTI_HOST)
+        path = f"{PACK_DIR}/missing.html"
+        html = _fetch(site, path, f"run={_run_id()}")
+
+        assert _canonicals(html) == [f"https://{MULTI_HOST}{path}"], html
+        assert TITLE_RE.findall(html) == [f"Second title for {path}"], html
+        assert DESCRIPTION_RE.findall(html) == [f"Second description for {path}"], html
+        assert html.index('rel="canonical"') < html.index("</head>"), html
+
+    def test_the_first_pack_wins_a_kind_both_carry(self, pack_site, pack_stats):
+        site = pack_site(MULTI_HOST)
+        path = f"{PACK_DIR}/missing.html"
+        before = pack_stats(MULTI_HOST)
+        html = _fetch(site, path, f"run={_run_id()}")
+        after = pack_stats(MULTI_HOST)
+
+        # b.json's canonical rule (second.example.com) is held off the page.
+        assert _canonicals(html) == [f"https://{MULTI_HOST}{path}"], html
+        assert "second.example.com" not in html, html
+        assert_stat_delta(before, after, "rule_pack_decisions_claimed", 1)
+        assert_stat_delta(before, after, "rule_pack_decisions_applied", 3)
+
+    @pytest.mark.requires_fixture("rule_pack_log")
+    def test_every_pack_writes_its_own_decision_log(self, pack_site):
+        site = pack_site(MULTI_HOST)
+        run = _run_id()
+        path = f"{PACK_DIR}/missing.html"
+        _fetch(site, path, f"run={run}")
+        prefix = f"{path}?run={run}"
+        deadline = time.time() + 10.0
+        while True:
+            by_pack = _decision_lines_by_pack(MULTI_HOST, prefix)
+            if {"edge-seo", "fixture-second"} <= set(by_pack) or time.time() >= deadline:
+                break
+            time.sleep(0.2)
+
+        assert {"edge-seo", "fixture-second"} <= set(by_pack), by_pack
+        assert {l["rule"] for l in by_pack["edge-seo"]} == {"multi-a-canonical"}, by_pack
+        assert {l["rule"] for l in by_pack["fixture-second"]} == {
+            "multi-b-title",
+            "multi-b-description",
+            "multi-b-canonical",
+        }, by_pack
+        claimed = [l for l in by_pack["fixture-second"] if l["rule"] == "multi-b-canonical"]
+        assert len(claimed) == 1, claimed
+        assert claimed[0]["action"] == "none", claimed[0]
+        assert claimed[0]["reason"] == "claimed", claimed[0]
+        assert claimed[0]["claimed_by"] == "edge-seo", claimed[0]
+        # Only a claimed line names an owner.
+        assert all("claimed_by" not in l for l in by_pack["edge-seo"]), by_pack
+
+    def test_a_second_file_with_the_first_ones_pack_id_is_refused(self, pack_site, pack_stats):
+        site = pack_site(MULTI_DUP_HOST)
+        path = f"{PACK_DIR}/missing.html"
+        html = _fetch(site, path, f"run={_run_id()}")
+        after = pack_stats(MULTI_DUP_HOST)
+
+        # The first pack acts; the second file's title rule never does.
+        assert _canonicals(html) == [f"https://{MULTI_HOST}{path}"], html
+        assert TITLE_RE.findall(html) == [], html
+        assert "Duplicate title" not in html, html
+        # Moves once per process and file version.
+        assert after.get("rule_pack_refused_duplicate_id", 0) >= 1, after
+
+    def test_the_admin_json_lists_both_packs_in_order(self, pack_site, server_config):
+        site = pack_site(MULTI_HOST)
+        params = [] if (server_config.is_nginx or server_config.server_type == "envoy") else ["PageSpeed=off"]
+        url = f"{server_config.admin_path}/rule_packs?" + "&".join(params + ["json=1"])
+        path = f"{PACK_DIR}/missing.html"
+
+        # The configuration block is the same in every process; a pack is
+        # listed with its id once the process that answers has loaded it, so
+        # drive pages through the host until the answering process has.
+        deadline = time.time() + 15.0
+        status = {}
+        while time.time() < deadline:
+            _fetch(site, path, f"run={_run_id()}")
+            response = site.get(url)
+            require_status_ok(response, "rule_packs json")
+            assert response.headers.get("Content-Type", "").startswith("application/json"), response.headers
+            status = json.loads(response.text)
+            if [p["id"] for p in status["packs"]] == ["edge-seo", "fixture-second"]:
+                break
+            time.sleep(0.5)
+
+        assert status["schema"] == 1, status
+        config = status["configuration"]
+        assert config["filter_enabled"] is True, config
+        assert [f.rsplit("/", 1)[-1] for f in config["rule_pack_files"]] == ["a.json", "b.json"], config
+        assert config["rule_pack_mode"] == "enforce", config
+        assert config["rule_pack_require_signed"] is False, config
+        assert [p["id"] for p in status["packs"]] == ["edge-seo", "fixture-second"], status
+        assert [p["position"] for p in status["packs"]] == [0, 1], status
+        assert [p["file"] for p in status["packs"]] == config["rule_pack_files"], status
+        assert all(p["state"] == "loaded" for p in status["packs"]), status
+        assert all(len(p["sha256"]) == 64 for p in status["packs"]), status
+        assert "rule_pack_decisions_claimed" in (status["counters"] or {}), status
+
+
+@pytest.mark.requires_fixture("rule_packs")
+class TestPackListLimit:
+    """At most eight RulePackFile lines in one scope: a ninth makes the
+    configuration test fail (apachectl -t, nginx -t).
+
+    The check runs against a copy of the lane's configuration with one more
+    virtual host / server added, so the lane's own server is untouched. IIS
+    and Envoy are covered by their configuration unit tests.
+    """
+
+    LIMIT = 8
+
+    @staticmethod
+    def _apache_main_config(ctl: str):
+        """The main configuration file of the Apache this rig runs (from
+        `<ctl> -V`: HTTPD_ROOT and SERVER_CONFIG_FILE), or None."""
+        try:
+            out = subprocess.run(
+                ["sudo", "-n", ctl, "-V"], capture_output=True, text=True, timeout=60
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        root = re.search(r'-D HTTPD_ROOT="([^"]*)"', out)
+        conf = re.search(r'-D SERVER_CONFIG_FILE="([^"]*)"', out)
+        if not conf:
+            return None
+        path = conf.group(1)
+        if not os.path.isabs(path):
+            if not root:
+                return None
+            path = os.path.join(root.group(1), path)
+        return path if os.path.exists(path) else None
+
+    def _check(self, server_config, count: int):
+        files = [f"/nonexistent/packs/limit-{i}.json" for i in range(count)]
+        tmp = None
+        try:
+            if server_config.is_nginx:
+                binary = os.environ.get("PAGESPEED_NGINX_BINARY")
+                conf = os.environ.get("PAGESPEED_NGINX_CONFIG_FILE")
+                if not binary or not conf or not os.path.exists(conf):
+                    pytest.skip("the nginx binary / configuration of the lane are not known")
+                conf_dir = os.path.dirname(conf)
+                server = (
+                    "    server {\n        listen 65098;\n        server_name limit.example.com;\n"
+                    "        pagespeed on;\n"
+                    + "".join(f"        pagespeed RulePackFile {f};\n" for f in files)
+                    + "    }\n"
+                )
+                text = open(conf, encoding="utf-8").read()
+                head, sep, rest = text.partition("    server {")
+                assert sep, "no server block in the lane configuration"
+                tmp = os.path.join(conf_dir, f"limit-check-{os.getpid()}.conf")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(head + server + sep + rest)
+                command = [binary, "-t", "-p", conf_dir, "-c", tmp]
+            elif server_config.server_type == "apache":
+                ctl = os.environ.get("PAGESPEED_APACHE_CTL", "apache2ctl")
+                main_conf = self._apache_main_config(ctl)
+                if main_conf is None:
+                    pytest.skip("the main Apache configuration file of this rig is not known")
+                tmp = f"/tmp/limit-check-{os.getpid()}.conf"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(f"Include {main_conf}\n")
+                    f.write("<VirtualHost *:65098>\n  ServerName limit.example.com\n")
+                    for name in files:
+                        f.write(f"  ModPagespeedRulePackFile {name}\n")
+                    f.write("</VirtualHost>\n")
+                command = ["sudo", "-n", ctl, "-t", "-f", tmp]
+            else:
+                pytest.skip("configuration syntax check is driven for Apache and nginx only")
+            return subprocess.run(command, capture_output=True, text=True, timeout=60)
+        except FileNotFoundError:
+            pytest.skip("the server binary needed for the syntax check is not available")
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.unlink(tmp)
+
+    def test_eight_lines_in_one_scope_are_accepted(self, server_config):
+        result = self._check(server_config, self.LIMIT)
+        output = result.stdout + result.stderr
+        if "a password is required" in output:
+            pytest.skip("passwordless sudo is required to run the syntax check")
+        assert result.returncode == 0, output
+
+    def test_a_ninth_line_fails_the_configuration_test(self, server_config):
+        result = self._check(server_config, self.LIMIT + 1)
+        output = result.stdout + result.stderr
+        if "a password is required" in output:
+            pytest.skip("passwordless sudo is required to run the syntax check")
+        assert result.returncode != 0, output
+        assert "at most 8" in output, output
 
 
 if __name__ == "__main__":

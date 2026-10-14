@@ -33,6 +33,7 @@ export type Leaf =
   | "histograms"
   | "cache"
   | "graphs"
+  | "rule_packs"
   | "v1/daemon/health"
   | "v1/daemon/stats"
   | "v1/daemon/cooldowns"

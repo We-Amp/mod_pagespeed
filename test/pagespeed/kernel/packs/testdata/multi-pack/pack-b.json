@@ -1,0 +1,137 @@
+{
+  "pack": {
+    "id": "fixture-second",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "Second pack of two on one host"
+  },
+  "sites": [
+    {
+      "host": "fixture.test",
+      "mode": "enforce"
+    },
+    {
+      "host": "report.fixture.test",
+      "mode": "enforce"
+    },
+    {
+      "host": "b-only.fixture.test",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "b-title-disjoint",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/disjoint/**"
+        ]
+      },
+      "value": {
+        "template": "Title B for {path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "b-canonical-keep",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/keep-first/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/b{path}"
+      },
+      "on_present": "replace"
+    },
+    {
+      "id": "b-canonical-report",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/first-report/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/b{path}"
+      },
+      "on_present": "replace"
+    },
+    {
+      "id": "b-canonical-mismatch",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mismatch/**"
+        ]
+      },
+      "value": {
+        "template": "https://b-only.fixture.test/b{path}"
+      },
+      "on_present": "replace"
+    },
+    {
+      "id": "b-canonical-link",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/link/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/b{path}"
+      },
+      "on_present": "replace",
+      "link_header": "match"
+    },
+    {
+      "id": "b-title-jsonld",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/jsonld/**"
+        ]
+      },
+      "value": {
+        "template": "Title B for {path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "b-description-jsonld",
+      "kind": "description",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/jsonld/**"
+        ]
+      },
+      "value": {
+        "template": "Description B for {path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "b-title-split",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/split/**"
+        ]
+      },
+      "value": {
+        "template": "Title B for {path}"
+      },
+      "on_present": "replace"
+    }
+  ]
+}

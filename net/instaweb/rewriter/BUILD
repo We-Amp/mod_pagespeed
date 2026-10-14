@@ -374,10 +374,14 @@ cc_library(
         "//pagespeed/kernel/html",
         "//pagespeed/kernel/http",
         "//pagespeed/kernel/packs:decision",
+        "//pagespeed/kernel/packs:kind_registry",
         "//pagespeed/kernel/packs:pack",
         "//pagespeed/kernel/packs:pack_host",
+        "//pagespeed/kernel/packs:pack_overlap",
+        "//pagespeed/kernel/packs:rule_kind",
         "//pagespeed/kernel/packs:rule_pack_filter",
         "//pagespeed/kernel/packs:signature_format",
+        "@com_google_absl//absl/strings",
     ],
 )
 

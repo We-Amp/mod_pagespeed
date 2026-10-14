@@ -1,0 +1,7 @@
+{
+  "url": "https://report.fixture.test/first-report/page",
+  "packs": [
+    "pack-a.json",
+    "pack-b.json"
+  ]
+}

@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/disjoint/page","rule":"a-canonical-disjoint","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/disjoint/page"}
+{"host":"fixture.test","path":"/disjoint/page","rule":"b-title-disjoint","kind":"title","mode":"enforce","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Title B for /disjoint/page"}

@@ -1,0 +1,7 @@
+{
+  "url": "https://b-only.fixture.test/mismatch/page",
+  "packs": [
+    "pack-a.json",
+    "pack-b.json"
+  ]
+}

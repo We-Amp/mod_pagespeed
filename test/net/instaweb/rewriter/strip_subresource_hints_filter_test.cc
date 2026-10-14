@@ -22,9 +22,15 @@
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/util/public/mock_property_page.h"
+#include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
+#include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/opt/http/request_context.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
+#include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 
@@ -304,6 +310,22 @@ TEST_F(StripSubresourceHintsFilterTestPreserveScript, ScriptsPreserved) {
   static const char rewritten[] = "<link rel=preload as=script href=a.js>";
   ValidateStripSubresourceHint(source, rewritten);
 }
+TEST_F(StripSubresourceHintsFilterTest, ModulePreloadWithoutRecordKept) {
+  // No previous-request dependency record: nothing is known to be rewritten.
+  static const char source[] =
+      "<link rel=modulepreload href=a.js>"
+      "<link rel=modulepreload as=script href=b.js>";
+  ValidateStripSubresourceHint(source, source);
+}
+TEST_F(StripSubresourceHintsFilterTest, ModulePreloadExternalLinkKept) {
+  static const char source[] =
+      "<head>"
+      "<link rel=\"modulepreload\" href=\"http://www.example.com/test.js\"/>"
+      "</head>"
+      "<body><img src=\"1.jpg\"/></body>";
+  ValidateStripSubresourceHint(source, source);
+}
+
 TEST_F(StripSubresourceHintsFilterTestPreserveStyle, StylesPreserved) {
   static const char source[] =
       "<link rel=preload as=image href=a.jpg>"
@@ -374,6 +396,105 @@ TEST_F(StripSubresourceHintsFilterTestRewriteLevelCoreFilters, MultiResource) {
       "</head>"
       "<body></body>";
   ValidateExpected("multi_resource", source, rewritten);
+}
+
+// modulepreload hints are stripped only for modules the previous request
+// recorded as rewritten (the dependency data collected for hinting).
+class StripModulePreloadTest : public RewriteTestBase {
+ protected:
+  void SetUp() override {
+    RewriteTestBase::SetUp();
+    options()->EnableFilter(RewriteOptions::kHintPreloadSubresources);
+    options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+    pcache_ = rewrite_driver()->server_context()->page_property_cache();
+    const PropertyCache::Cohort* deps_cohort =
+        SetupCohort(pcache_, RewriteDriver::kDependenciesCohort);
+    server_context()->set_dependencies_cohort(deps_cohort);
+    ResetDriver();
+    SetResponseWithDefaultHeaders("entry.js", kContentTypeJavascript,
+                                  " var a  = 1", 200);
+    SetResponseWithDefaultHeaders("chunk.js", kContentTypeJavascript,
+                                  " var b  = 2", 200);
+  }
+
+  // Call after the test's option changes: freezes the options, then records
+  // entry.js as a module script the way a first request would.
+  void Record() {
+    rewrite_driver()->AddFilters();
+    // The first request has no record yet, so its modulepreload hint stays.
+    ValidateExpected("record",
+                     "<link rel=modulepreload href=entry.js>"
+                     "<script type=module src=entry.js></script>",
+                     options()->js_preserve_urls()
+                         ? "<link rel=modulepreload href=entry.js>"
+                           "<script type=module src=entry.js></script>"
+                         : "<link rel=modulepreload href=entry.js>"
+                           "<script type=module "
+                           "src=entry.js.pagespeed.jm.0.js></script>");
+    ResetDriver();
+  }
+
+  void ResetDriver() {
+    rewrite_driver()->Clear();
+    rewrite_driver()->set_request_context(
+        RequestContext::NewTestRequestContext(factory()->thread_system()));
+    page_ = NewMockPage(kTestDomain);
+    rewrite_driver()->set_property_page(page_);
+    pcache_->Read(page_);
+    rewrite_driver()->PropertyCacheSetupDone();
+    SetHtmlMimetype();
+  }
+
+  PropertyCache* pcache_;
+  PropertyPage* page_;
+};
+
+TEST_F(StripModulePreloadTest, RecordedEntryStrippedChunkKept) {
+  Record();
+  ValidateExpected(
+      "entry_and_chunk",
+      "<link rel=modulepreload href=entry.js>"
+      "<link rel=modulepreload href=chunk.js>"
+      "<script type=module src=entry.js></script>",
+      "<link rel=modulepreload href=chunk.js>"
+      "<script type=module src=entry.js.pagespeed.jm.0.js></script>");
+}
+
+TEST_F(StripModulePreloadTest, UpperCaseRelAndAsStripped) {
+  Record();
+  ValidateExpected(
+      "upper_case",
+      "<link REL=MODULEPRELOAD AS=SCRIPT href=entry.js>"
+      "<script type=module src=entry.js></script>",
+      "<script type=module src=entry.js.pagespeed.jm.0.js></script>");
+}
+
+TEST_F(StripModulePreloadTest, NonScriptAsKept) {
+  Record();
+  ValidateExpected(
+      "as_worker",
+      "<link rel=modulepreload as=worker href=entry.js>"
+      "<script type=module src=entry.js></script>",
+      "<link rel=modulepreload as=worker href=entry.js>"
+      "<script type=module src=entry.js.pagespeed.jm.0.js></script>");
+}
+
+TEST_F(StripModulePreloadTest, OtherOriginKept) {
+  Record();
+  ValidateExpected(
+      "other_origin",
+      "<link rel=modulepreload href=http://www.example.com/entry.js>"
+      "<script type=module src=entry.js></script>",
+      "<link rel=modulepreload href=http://www.example.com/entry.js>"
+      "<script type=module src=entry.js.pagespeed.jm.0.js></script>");
+}
+
+TEST_F(StripModulePreloadTest, PreserveJsUrlsKept) {
+  options()->set_js_preserve_urls(true);
+  Record();
+  ValidateNoChanges("preserve",
+                    "<link rel=modulepreload href=entry.js>"
+                    "<script type=module src=entry.js></script>");
 }
 
 }  // namespace net_instaweb

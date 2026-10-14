@@ -55,7 +55,6 @@ inline constexpr size_t kMaxGlobs = 2000;       // distinct globs in a pack
 inline constexpr size_t kMaxRegexBytes = 1024;
 inline constexpr int kMaxCaptureRefs = 9;  // {1}..{9}
 
-inline constexpr std::string_view kPackId = "edge-seo";
 inline constexpr std::string_view kHreflangTableName = "hreflang";
 
 // ---------------------------------------------------------------------------

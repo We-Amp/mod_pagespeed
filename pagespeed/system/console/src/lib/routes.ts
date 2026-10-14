@@ -49,9 +49,7 @@ export interface ServerPageLink {
   leaf: string;
 }
 
-export const SERVER_PAGE_LINKS: ReadonlyArray<ServerPageLink> = [
-  { label: "Rule packs", group: "module", leaf: "rule_packs" },
-];
+export const SERVER_PAGE_LINKS: ReadonlyArray<ServerPageLink> = [];
 
 export const routes: Route[] = [
   {
@@ -126,6 +124,14 @@ export const routes: Route[] = [
     icon: "cog",
     group: "module",
     component: () => import("../pages/Config.svelte"),
+  },
+  {
+    path: "#/rule-packs",
+    label: "Rule packs",
+    icon: "package",
+    group: "module",
+    hostAware: true,
+    component: () => import("../pages/RulePacks.svelte"),
   },
   {
     path: "#/optimizer",

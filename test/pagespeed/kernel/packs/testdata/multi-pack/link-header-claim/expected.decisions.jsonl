@@ -1,0 +1,3 @@
+{"host":"fixture.test","path":"/link/page","rule":"a-canonical-link","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/link/page"}
+{"host":"fixture.test","path":"/link/page","rule":"a-canonical-link","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"https://fixture.test/link/page","header":true}
+{"host":"fixture.test","path":"/link/page","rule":"b-canonical-link","kind":"canonical","mode":"enforce","action":"none","reason":"claimed","defect":"","before":"","after":"","claimed_by":"edge-seo"}

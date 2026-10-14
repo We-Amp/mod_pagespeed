@@ -109,6 +109,7 @@ SYSTEM_CORE_DEPS = [
     "//pagespeed/kernel/packs:pack",
     "//pagespeed/kernel/packs:matcher",
     "//pagespeed/kernel/packs:pack_host",
+    "//pagespeed/kernel/packs:pack_overlap",
     "//pagespeed/kernel/packs:pack_loader",
     "//pagespeed/kernel/packs:template",
     "//pagespeed/kernel/sharedmem",

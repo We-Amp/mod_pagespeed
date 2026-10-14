@@ -806,6 +806,36 @@ EOF
 
 EOF
         done
+
+        # Lane fixture rule_pack_multi: two pack files on one server (the first
+        # pack owns a kind both have), and a server whose second file has the
+        # id of the first (refused; the first pack still acts).
+        local multi_host multi_second
+        for multi_host in rulepacks-multi.example.com:b rulepacks-multi-dup.example.com:dup; do
+            multi_second="${multi_host##*:}"
+            multi_host="${multi_host%%:*}"
+            cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name $multi_host;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed EnableFilters rule_packs;
+        pagespeed RulePackFile $DOC_ROOT/mod_pagespeed_test/rule_packs/multi/a.json;
+        pagespeed RulePackFile $DOC_ROOT/mod_pagespeed_test/rule_packs/multi/$multi_second.json;
+        pagespeed RulePackMode enforce;
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+
+EOF
+        done
     fi
 
     # Add HTTPS server block if TLS certs are available
@@ -1096,13 +1126,13 @@ run_tests() {
     # runner-owned FileCachePath; stats_log -- StatisticsLogging on with
     # LogDir $NGINX_LOG_DIR (generate_nginx_config); option_response_headers
     # -- the add_header option_headers/ locations (generate_nginx_config);
-    # rule_packs, rule_pack_log and rule_pack_signing -- the
+    # rule_packs, rule_pack_log, rule_pack_signing and rule_pack_multi -- the
     # rulepacks*.example.com servers (generate_nginx_config).
     export PAGESPEED_STATS_LOG="${PAGESPEED_STATS_LOG:-$NGINX_LOG_DIR/stats_log_dummy_hostname:-3}"
     if [ "$NO_MODULE" = true ]; then
         export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-}"
     else
-        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing}"
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi}"
     fi
 
     # HTTPS configuration for TLS tests

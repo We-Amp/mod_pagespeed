@@ -46,6 +46,7 @@ struct Row {
   int64_t ts_ms = 0;
   std::string host, path, rule, kind, mode, action, reason, defect;
   std::string before, after, removed;
+  std::string claimed_by;    // the pack that owns the target; empty if none
   std::string pack, sha256;  // "id@version" and the 16-digit hash prefix
   bool header = false;
   std::string raw;  // the line as logged
@@ -61,10 +62,33 @@ struct Filter {
   bool Matches(const Row& row) const;
 };
 
+// The licence fields of a pack, shown as text only: nothing reads them to
+// decide anything.
+struct LicenseInfo {
+  bool present = false;
+  std::string label, expires, terms;
+};
+
 struct PackInfo {
   bool present = false;
   std::string id, version, publisher, sha256;
+  // The id of the key a verified signature was made with; empty when the
+  // pack was not verified.
+  std::string key_id;
+  LicenseInfo license;
   std::vector<std::string> warnings;
+};
+
+// One RulePackFile of the scope, in load order.
+struct PackEntry {
+  std::string file;
+  // loaded, failed-keeping-earlier, refused, none, or duplicate-id (the file
+  // holds a pack whose id an earlier file of the scope already has, so it is
+  // not used).
+  std::string state;
+  int64_t last_event_ms = -1;
+  std::string last_error;
+  PackInfo pack;
 };
 
 struct Page {
@@ -79,9 +103,21 @@ struct Page {
   PackInfo pack;
   bool have_counters = false;
   std::vector<std::pair<std::string, int64_t>> counters;
-  bool log_off = false;       // LogDir is not set
-  bool no_pack_file = false;  // RulePackFile is not set
-  std::string log_date;       // UTC day of the log shown
+  bool require_signed = false;  // RulePackRequireSigned
+  // Every RulePackFile of the scope, in load order (the fields above describe
+  // the first one).
+  std::vector<PackEntry> packs;
+  // Warnings about kinds that a later pack carries in another mode than the
+  // earlier pack that owns them.
+  std::vector<std::string> overlap_warnings;
+  // The pack whose decision log is shown (?pack=, else the first loaded
+  // pack); empty when the logs of the known packs are merged.
+  std::string tail_pack;
+  bool tail_pack_requested = false;  // ?pack= was given
+  int64_t now_ms = 0;                // for generated_at in the JSON
+  bool log_off = false;              // LogDir is not set
+  bool no_pack_file = false;         // RulePackFile is not set
+  std::string log_date;              // UTC day of the log shown
   Tail tail;
   size_t limit = kDefaultLimit;
   Filter filter;
@@ -92,6 +128,11 @@ struct Page {
 std::vector<Row> SelectRows(const Page& page);
 
 std::string RenderHtml(const Page& page);
+// The status of the scope as one JSON document with a "schema" integer:
+// snake_case keys, ISO-8601 UTC timestamps, the configuration, every pack in
+// load order, the overlap warnings, the counters and the selected decisions
+// (newest first). Keys are sorted, the text has no insignificant whitespace.
+std::string RenderJson(const Page& page);
 // The selected lines as logged, newest first, one per line.
 std::string RenderRaw(const Page& page);
 

@@ -26,6 +26,7 @@
 #include "gtest/gtest.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
 
 namespace net_instaweb {
@@ -174,7 +175,7 @@ TEST_F(EnvoyVHostConfigTest, DaemonApiSocketPathDefaultAndParse) {
 // The rule_packs options parse, merge and clone on the Envoy options class.
 TEST_F(EnvoyVHostConfigTest, RulePackOptionsParseAndRoundTrip) {
   auto options = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
-  EXPECT_TRUE(options->rule_pack_file().empty());
+  EXPECT_TRUE(options->rule_pack_files().empty());
   EXPECT_EQ(RewriteOptions::kRulePackModeReport, options->rule_pack_mode());
   GoogleString msg;
   EXPECT_EQ(
@@ -189,11 +190,47 @@ TEST_F(EnvoyVHostConfigTest, RulePackOptionsParseAndRoundTrip) {
                                                 &handler_));
   auto merged = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
   merged->Merge(*options);
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", merged->rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            merged->rule_pack_files());
   EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, merged->rule_pack_mode());
   std::unique_ptr<RewriteOptions> clone(merged->Clone());
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", clone->rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            clone->rule_pack_files());
   EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, clone->rule_pack_mode());
+}
+
+TEST_F(EnvoyVHostConfigTest, RulePackFileListPerScope) {
+  GoogleString msg;
+  auto global = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            global->ParseAndSetOptionFromName1("RulePackFile", "/p/g.json",
+                                               &msg, &handler_));
+  ASSERT_EQ(1u, global->rule_pack_files().size());
+
+  auto vhost = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost->ParseAndSetOptionFromName1("RulePackFile", "/p/a.json",
+                                              &msg, &handler_));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost->ParseAndSetOptionFromName1("RulePackFile", "/p/b.json",
+                                              &msg, &handler_));
+  auto merged = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
+  merged->Merge(*global);
+  merged->Merge(*vhost);
+  ASSERT_EQ(2u, merged->rule_pack_files().size());
+  EXPECT_EQ("/p/a.json", merged->rule_pack_files()[0]);
+  EXPECT_EQ("/p/b.json", merged->rule_pack_files()[1]);
+
+  for (int i = 3; i <= 8; ++i) {
+    ASSERT_EQ(RewriteOptions::kOptionOk,
+              vhost->ParseAndSetOptionFromName1(
+                  "RulePackFile", StrCat("/p/", IntegerToString(i), ".json"),
+                  &msg, &handler_));
+  }
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            vhost->ParseAndSetOptionFromName1("RulePackFile", "/p/9.json",
+                                              &msg, &handler_));
+  EXPECT_NE(GoogleString::npos, msg.find("at most 8"));
 }
 
 // Test that lower priority values are matched first.

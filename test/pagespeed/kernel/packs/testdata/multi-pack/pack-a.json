@@ -1,0 +1,119 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "First pack of two on one host"
+  },
+  "sites": [
+    {
+      "host": "fixture.test",
+      "mode": "enforce"
+    },
+    {
+      "host": "report.fixture.test",
+      "mode": "report"
+    }
+  ],
+  "rules": [
+    {
+      "id": "a-canonical-disjoint",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/disjoint/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test{path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "a-canonical-keep",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/keep-first/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/a{path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "a-canonical-report",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/first-report/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/a{path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "a-canonical-mismatch",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mismatch/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/a{path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "a-canonical-link",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/link/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test{path}"
+      },
+      "on_present": "keep",
+      "link_header": "match"
+    },
+    {
+      "id": "a-jsonld",
+      "kind": "jsonld",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/jsonld/**"
+        ]
+      },
+      "value": {
+        "template": "{\"@context\":\"https://schema.org\",\"@type\":\"Organization\",\"name\":\"Fixture\",\"url\":\"https://fixture.test/\"}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "a-title-split",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/split/**"
+        ]
+      },
+      "value": {
+        "template": "Title A for {path}"
+      },
+      "on_present": "replace"
+    }
+  ]
+}

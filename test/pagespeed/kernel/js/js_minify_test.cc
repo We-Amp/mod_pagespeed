@@ -1423,7 +1423,6 @@ TEST_F(JsMinifyTest, SemicolonInsertionFuncCall) {
 // SemicolonInsertionFuncCall above).  All assertions are new-minifier-only:
 // the deprecated legacy path is independently broken for this class and is
 // slated for deletion.
-// See https://github.com/We-Amp/pagespeed-optimizer/issues/1092
 
 TEST_F(JsMinifyTest, SemicolonInsertionPostfixParen) {
   // A `(` after a postfix operator starts a new statement, not a call, so

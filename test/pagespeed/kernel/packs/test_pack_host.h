@@ -84,6 +84,13 @@ class TestPackHost : public PackHost {
   }
   int64_t NowMs() const override { return 0; }
   bool debug_comments() const override { return debug_comments_; }
+  // Claims go to `claims` (shared with the hosts of the other packs on the
+  // same document); without one the host runs a single pack.
+  void set_claims(ClaimSet* claims) { claims_ = claims; }
+  const std::string* Claim(std::string_view target,
+                           std::string_view pack_id) override {
+    return claims_ == nullptr ? nullptr : claims_->Claim(target, pack_id);
+  }
 
   int64_t count(Counter counter) const {
     return counts_[static_cast<int>(counter)];
@@ -93,6 +100,7 @@ class TestPackHost : public PackHost {
 
  private:
   bool debug_comments_;
+  ClaimSet* claims_ = nullptr;
   bool has_headers_ = false;
   bool headers_flushed_ = false;
   TestHeaders headers_;

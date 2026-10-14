@@ -96,6 +96,36 @@ TEST(SignatureFormatTest, TrustFindAndFingerprint) {
   EXPECT_NE(a.Fingerprint(), b.Fingerprint());
 }
 
+TEST(SignatureFormatTest, BuiltInTrustKey) {
+  // No configured line: the built-in key is the whole list.
+  PackTrust none;
+  none.keys = WithBuiltInTrustKey({});
+  ASSERT_EQ(1u, none.keys.size());
+  EXPECT_EQ("we-amp", none.keys[0].key_id);
+  EXPECT_EQ(DecodeTrustKey(kBuiltInTrustKeyBase64), none.keys[0].public_key);
+  EXPECT_EQ(kEd25519PublicKeyBytes, none.keys[0].public_key.size());
+  EXPECT_NE(nullptr, none.Find("we-amp"));
+  // Any other id is an unknown key.
+  EXPECT_EQ(nullptr, none.Find("other"));
+
+  // A configured key adds to the built-in one; the list stays sorted.
+  PackTrust some;
+  some.keys = WithBuiltInTrustKey({TrustKey{"alpha", std::string(32, 'a')},
+                                   TrustKey{"zeta", std::string(32, 'z')}});
+  ASSERT_EQ(3u, some.keys.size());
+  EXPECT_EQ("alpha", some.keys[0].key_id);
+  EXPECT_EQ("we-amp", some.keys[1].key_id);
+  EXPECT_EQ("zeta", some.keys[2].key_id);
+  EXPECT_NE(nullptr, some.Find("alpha"));
+  EXPECT_NE(nullptr, some.Find("we-amp"));
+
+  // A configured key of the same id replaces the built-in one.
+  PackTrust over;
+  over.keys = WithBuiltInTrustKey({TrustKey{"we-amp", std::string(32, 'q')}});
+  ASSERT_EQ(1u, over.keys.size());
+  EXPECT_EQ(std::string(32, 'q'), over.keys[0].public_key);
+}
+
 TEST(SignatureFormatTest, StatusPhrases) {
   EXPECT_EQ("verified", SignatureStatusPhrase(SignatureStatus::kVerified));
   EXPECT_EQ("unsigned", SignatureStatusPhrase(SignatureStatus::kUnsigned));

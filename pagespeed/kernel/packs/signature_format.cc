@@ -8,6 +8,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
@@ -69,6 +71,22 @@ std::optional<PackSidecar> ParsePackSidecar(std::string_view text) {
 
 std::optional<std::string> DecodeTrustKey(std::string_view base64) {
   return DecodeExact(base64, 43, 1, kEd25519PublicKeyBytes);
+}
+
+std::vector<TrustKey> WithBuiltInTrustKey(std::vector<TrustKey> configured) {
+  auto it = std::lower_bound(
+      configured.begin(), configured.end(),
+      std::string_view(kBuiltInTrustKeyId),
+      [](const TrustKey& k, std::string_view id) { return k.key_id < id; });
+  if (it != configured.end() && it->key_id == kBuiltInTrustKeyId) {
+    return configured;
+  }
+  static const std::optional<std::string>* const key =
+      new std::optional<std::string>(DecodeTrustKey(kBuiltInTrustKeyBase64));
+  if (key->has_value()) {
+    configured.insert(it, TrustKey{kBuiltInTrustKeyId, **key});
+  }
+  return configured;
 }
 
 const TrustKey* PackTrust::Find(std::string_view key_id) const {

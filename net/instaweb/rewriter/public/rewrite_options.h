@@ -2712,11 +2712,26 @@ class RewriteOptions {
     set_option(id, &amp_link_pattern_);
   }
 
-  // The rule pack file of this server or virtual host; empty when none.
-  const GoogleString& rule_pack_file() const { return rule_pack_file_.value(); }
+  // Sets the rule pack files of this server or virtual host to the one file
+  // `x` (none when empty), replacing the inherited list.
   void set_rule_pack_file(const GoogleString& x) {
     set_option(x, &rule_pack_file_);
+    rule_pack_files_set_here_ = true;
+    rule_pack_files_.clear();
+    if (!x.empty()) rule_pack_files_.push_back(x);
   }
+  // Every rule pack file of this server or virtual host, in configuration
+  // order (the load order of the packs).
+  // Lines in one scope append; a scope that sets RulePackFile at least once
+  // replaces the inherited list.
+  const std::vector<GoogleString>& rule_pack_files() const {
+    return rule_pack_files_;
+  }
+  // Adds one RulePackFile line of the current scope. An entry whose
+  // lexically normalised path equals an earlier one is dropped; more than
+  // kMaxRulePackFiles distinct entries is an error (sets *msg, returns false).
+  bool AddRulePackFile(StringPiece path, GoogleString* msg);
+  static constexpr size_t kMaxRulePackFiles = 8;
   RulePackMode rule_pack_mode() const { return rule_pack_mode_.value(); }
   void set_rule_pack_mode(RulePackMode x) { set_option(x, &rule_pack_mode_); }
   // Whether the rule_packs filter refuses a pack that is not signed with a
@@ -4224,7 +4239,13 @@ class RewriteOptions {
   // The rule pack applied by the rule_packs filter, and the directive-level
   // mode it runs in. Server scope: a per-directory configuration must not be
   // able to point the server at another file.
+  // rule_pack_file_ always mirrors the first entry of rule_pack_files_.
   Option<GoogleString> rule_pack_file_;
+  // Not part of the options signature, like rule_pack_file_.
+  std::vector<GoogleString> rule_pack_files_;
+  // Whether a RulePackFile line was parsed in this scope (the first one
+  // replaces whatever was inherited).
+  bool rule_pack_files_set_here_ = false;
   Option<RulePackMode> rule_pack_mode_;
   Option<bool> rule_pack_require_signed_;
   // Sorted by key id. Not an Option: merged key by key, not part of the

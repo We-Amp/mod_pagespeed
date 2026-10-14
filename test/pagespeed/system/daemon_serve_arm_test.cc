@@ -30,18 +30,16 @@
 // positive tie).
 //
 // THE SCORER PLAYS BOTH GENERATIONS OF THE PEER'S FORMAT DISQUALIFY AND BOTH
-// ARE EXERCISED HERE, which is
-// what changed when the peer landed its own format disqualify
-// (We-Amp/pagespeed-optimizer#1334) and made this module's disqualify defense in
-// depth.  The DEFAULT is the older scorer, deliberately: a stand-in that
-// always disqualified would make the arm's own disqualify unreachable and
-// every assertion over it green by construction.  `PS_STUB_FORMAT_DISQUALIFY`
-// switches to the current one, and the cases that set it pin what a real
-// family now does -- an incompatible variant scores 0, the selection returns
-// nothing rather than something undecodable, and the arm reaches the durable
-// original by id.  That shape is unobservable on the parity rig at this pin
-// precisely because nothing there can any longer hand the module a format the
-// request did not advertise.
+// ARE EXERCISED HERE, which is what changed when the peer landed its own format
+// disqualify and made this module's disqualify defense in depth. The DEFAULT is
+// the older scorer, deliberately: a stand-in that always disqualified would
+// make the arm's own disqualify unreachable and every assertion over it green
+// by construction. `PS_STUB_FORMAT_DISQUALIFY` switches to the current one, and
+// the cases that set it pin what a real family now does -- an incompatible
+// variant scores 0, the selection returns nothing rather than something
+// undecodable, and the arm reaches the durable original by id. That shape is
+// unobservable on the parity rig at this pin precisely because nothing there
+// can any longer hand the module a format the request did not advertise.
 
 #include "pagespeed/system/daemon_record_arm.h"
 #include "pagespeed/system/daemon_serve_arm.h"
@@ -548,10 +546,10 @@ TEST_F(DaemonServeArmTest, ServesTheFormatExactVariant) {
 TEST_F(DaemonServeArmTest, RefusesAVariantTheRequestDidNotAdvertise) {
   // ONLY an AVIF variant exists and the client advertised WebP.  Against the
   // PRE-FIX peer -- which is what this stand-in plays by default -- the
-  // selection returns the AVIF one, because it scores 200, and the arm must
-  // not emit it.  This is We-Amp/pagespeed-optimizer#1331 not being inherited,
-  // and it is the case the peer's own #1334 has since removed at the source;
-  // the module's refusal is kept and exercised here because a scorer is not
+  // selection returns the AVIF one, because it scores 200, and the arm must not
+  // emit it. This is the peer's old scorer bug not being inherited, and it is
+  // the case the peer's own later fix has since removed at the source; the
+  // module's refusal is kept and exercised here because a scorer is not
   // published contract and a by-id read never goes through one.
   SetAlternates("0a:00:1");
   const DaemonServeDecision decision = Serve(Request("image/webp"));

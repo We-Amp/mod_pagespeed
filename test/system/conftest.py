@@ -119,6 +119,10 @@ KNOWN_LANE_FIXTURES = frozenset({
     # the rulepacks-nolink.example.com virtual host: a pack with no
     # link_header rule
     "rule_pack_no_link_header",
+    # the rulepacks-multi.example.com virtual host (two RulePackFile lines:
+    # multi/a.json and multi/b.json) and rulepacks-multi-dup.example.com (the
+    # second file has the id of the first)
+    "rule_pack_multi",
     # the optimizer daemon is configured, with its worker running, on the
     # rulepacks.example.com and daemon.example.com virtual hosts (in-place
     # daemon serving is on); the worker's socket is PAGESPEED_DAEMON_SOCKET

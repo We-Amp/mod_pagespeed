@@ -1,0 +1,3 @@
+{"host":"fixture.test","path":"/jsonld/page","rule":"a-jsonld","kind":"jsonld","mode":"enforce","action":"insert","reason":"absent","defect":"","before":"","after":"Organization"}
+{"host":"fixture.test","path":"/jsonld/page","rule":"b-title-jsonld","kind":"title","mode":"enforce","action":"insert","reason":"absent","defect":"title-missing","before":"","after":"Title B for /jsonld/page"}
+{"host":"fixture.test","path":"/jsonld/page","rule":"b-description-jsonld","kind":"description","mode":"enforce","action":"insert","reason":"absent","defect":"description-missing","before":"","after":"Description B for /jsonld/page"}

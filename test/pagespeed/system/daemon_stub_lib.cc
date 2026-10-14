@@ -471,11 +471,10 @@ struct StubWriteHandle {
 // selection the module's serve arm re-checks is one the peer performs, and
 // the re-check exists because the peer's scorer used to award no bonus for a
 // format mismatch and yet not REFUSE one -- a variant matching on the other
-// axes still scored 200 and won over nothing, so a WebP-only client was
-// handed AVIF (We-Amp/pagespeed-optimizer#1331).  The peer's own fix (its #1334)
-// hard-disqualifies that case, which makes the module's disqualify DEFENSE IN
-// DEPTH against the pinned daemon rather than the only thing standing between
-// undecodable bytes and the wire.
+// axes still scored 200 and won over nothing, so a WebP-only client was handed
+// AVIF. The peer's own later fix hard-disqualifies that case, which makes the
+// module's disqualify DEFENSE IN DEPTH against the pinned daemon rather than
+// the only thing standing between undecodable bytes and the wire.
 //
 // So the scorer below plays either generation and the DEFAULT IS THE OLDER
 // ONE, deliberately: a stand-in that always disqualified would make the
@@ -483,11 +482,11 @@ struct StubWriteHandle {
 // construction, which is precisely what the parity rig can no longer avoid at
 // the current pin.  `PS_STUB_FORMAT_DISQUALIFY=1` switches on the current
 // peer's format disqualify (its tie-break is not modelled -- no case here
-// scores a positive tie), which is how the "no compatible variant exists, so the selection
-// returns nothing and the arm reaches the durable original by id" path -- the
-// shape a real family now presents -- is pinned in the suite.  The SKIP of
-// the durable-originals class is faithful in both modes: `read_best` can
-// never return it, which is the trap the serve arm has to read around.
+// scores a positive tie), which is how the "no compatible variant exists, so
+// the selection returns nothing and the arm reaches the durable original by id"
+// path -- the shape a real family now presents -- is pinned in the suite. The
+// SKIP of the durable-originals class is faithful in both modes: `read_best`
+// can never return it, which is the trap the serve arm has to read around.
 //
 // The alternate table is declared by the test, one entry per comma:
 //

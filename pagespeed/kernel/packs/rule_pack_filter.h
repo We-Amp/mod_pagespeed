@@ -79,6 +79,16 @@ struct RulePackFilterOptions {
 // read (to report a conflicting origin `Link`) in report mode too, but only
 // an enforcing rule changes them.
 //
+// Several packs on one host. The host runs one filter per pack, in load
+// order, over the same document. When the filter selects a rule for the page
+// (DetermineEnabled) it claims the rule's target through PackHost::Claim():
+// the rule's kind and, for a `link_header: match` rule, the `Link` header. A
+// target an earlier pack already holds is not this filter's on the page: the
+// rule is dropped from the selection and records action `none`, reason
+// `claimed` and the holder's id, whatever the modes, and a claim stays held
+// even when the holder's plan is later dropped. A host that runs one pack
+// never answers a claim with another pack, so it never sees `claimed`.
+//
 // A rule changes the HTML only when its effective mode is `enforce` (the
 // lowest of the directive mode, the matching site's mode and the rule's own
 // opt-in). Otherwise the filter records what the rule would do and leaves the
@@ -146,6 +156,10 @@ class RulePackFilter : public net_instaweb::EmptyHtmlFilter {
   };
 
   void BeginPage();
+  // Claims the targets of the selected rules (see the class comment); a rule
+  // whose target another pack holds leaves the selection and gets its
+  // `claimed` decision.
+  void TakeClaims();
   void EndLogicalHead(net_instaweb::HtmlElement* ender);
   void DecideHead();
   void DecideDocumentEnd();
@@ -231,6 +245,15 @@ class RulePackFilter : public net_instaweb::EmptyHtmlFilter {
   // The decision about a rule's response header, by kind: logged after the
   // rule's own decisions.
   std::array<std::optional<PackDecision>, kKindCount> header_decision_{};
+  // The `claimed` decisions of the selected rules whose kind another pack
+  // holds, logged after every other decision of the page.
+  std::vector<PackDecision> claimed_;
+  // By kind: the pack that holds the `Link` header of this pack's rule;
+  // empty when the rule holds it (or has no header action).
+  std::array<std::string, kKindCount> header_claimed_by_{};
+  // Every selected rule was claimed: nothing to observe, only the claimed
+  // decisions to log when the document ends.
+  bool claimed_only_ = false;
 
   bool modified_ = false;
   bool headers_modified_ = false;

@@ -252,7 +252,7 @@ TEST_F(ApacheConfigTest, NoSubstrateDirectiveInTheStaticCommandTable) {
 // The rule_packs options: per virtual host, never per directory, and out of
 // the configuration the optimizer files its work under.
 TEST_F(ApacheConfigTest, RulePackOptionsParseAndRoundTrip) {
-  EXPECT_TRUE(config_.rule_pack_file().empty());
+  EXPECT_TRUE(config_.rule_pack_files().empty());
   EXPECT_EQ(RewriteOptions::kRulePackModeReport, config_.rule_pack_mode());
 
   ApacheConfig vhost("vhost", &thread_system_);
@@ -271,10 +271,12 @@ TEST_F(ApacheConfigTest, RulePackOptionsParseAndRoundTrip) {
 
   std::unique_ptr<ApacheConfig> merged(config_.Clone());
   merged->Merge(vhost);
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", merged->rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            merged->rule_pack_files());
   EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, merged->rule_pack_mode());
   std::unique_ptr<ApacheConfig> clone(merged->Clone());
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", clone->rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            clone->rule_pack_files());
   EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, clone->rule_pack_mode());
 
   // Server scope is what keeps the directives out of .htaccess and
@@ -294,6 +296,56 @@ TEST_F(ApacheConfigTest, RulePackOptionsParseAndRoundTrip) {
   ASSERT_EQ(OptionContextStatus::kOk,
             OptionContext::Compute(*clone, &context_on, &signature_on));
   EXPECT_EQ(context_off, context_on);
+}
+
+TEST_F(ApacheConfigTest, RulePackFileListPerScope) {
+  GoogleString msg;
+  NullMessageHandler handler;
+  ApacheConfig global("global", &thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            global.ParseAndSetOptionFromName1("RulePackFile", "/p/g.json",
+                                              &msg, &handler));
+  ASSERT_EQ(1u, global.rule_pack_files().size());
+
+  ApacheConfig vhost("vhost", &thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("RulePackFile", "/p/a.json", &msg,
+                                             &handler));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("RulePackFile", "/p/b.json", &msg,
+                                             &handler));
+  std::unique_ptr<ApacheConfig> merged(config_.Clone());
+  merged->Merge(global);
+  merged->Merge(vhost);
+  ASSERT_EQ(2u, merged->rule_pack_files().size());
+  EXPECT_EQ("/p/a.json", merged->rule_pack_files()[0]);
+  EXPECT_EQ("/p/b.json", merged->rule_pack_files()[1]);
+
+  // The ninth line is a configuration error.
+  for (int i = 3; i <= 8; ++i) {
+    ASSERT_EQ(RewriteOptions::kOptionOk,
+              vhost.ParseAndSetOptionFromName1(
+                  "RulePackFile", StrCat("/p/", IntegerToString(i), ".json"),
+                  &msg, &handler));
+  }
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            vhost.ParseAndSetOptionFromName1("RulePackFile", "/p/9.json", &msg,
+                                             &handler));
+  EXPECT_NE(GoogleString::npos, msg.find("at most 8"));
+
+  // Not allowed in .htaccess / <Directory>: a directory-scope parse refuses.
+  ApacheConfig dir("dir", &thread_system_);
+  EXPECT_NE(RewriteOptions::kOptionOk,
+            dir.ParseAndSetOptionFromNameWithScope(
+                "RulePackFile", "/p/x.json", RewriteOptions::kDirectoryScope,
+                &msg, &handler));
+  EXPECT_TRUE(dir.rule_pack_files().empty());
+
+  // Not part of the options signature.
+  GoogleString c1, s1, c2, s2;
+  ASSERT_EQ(OptionContextStatus::kOk, OptionContext::Compute(config_, &c1, &s1));
+  ASSERT_EQ(OptionContextStatus::kOk, OptionContext::Compute(*merged, &c2, &s2));
+  EXPECT_EQ(c1, c2);
 }
 
 TEST_F(ApacheConfigTest, Auth) {

@@ -5,6 +5,7 @@
 #define TEST_PAGESPEED_KERNEL_PACKS_FIXTURE_RUNNER_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -38,6 +39,12 @@ struct RunResult {
   // Empty unless the run was given origin headers.
   std::vector<HeaderLine> headers;
   bool headers_modified = false;
+  // For a run of several packs: the index (in load order) of the pack each
+  // decision belongs to; the decisions are those of the first pack, then
+  // those of the second, and so on. All zero for one pack.
+  std::vector<size_t> decision_pack;
+  // How often the host was told a rule was claimed (all packs together).
+  int64_t claimed_count = 0;
 };
 
 struct RunOptions {
@@ -58,6 +65,14 @@ absl::StatusOr<RunResult> RunPackOnHtml(std::shared_ptr<const Pack> pack,
                                         std::string_view html,
                                         const RunOptions& options);
 
+// Runs several packs, in this order, over the same document: one filter per
+// pack, one host (response headers and the claim set are shared), as a server
+// runs the packs of one virtual host. A pack whose id an earlier pack in the
+// list already has is left out, as the server refuses such a file.
+absl::StatusOr<RunResult> RunPacksOnHtml(
+    std::vector<std::shared_ptr<const Pack>> packs, std::string_view url,
+    std::string_view html, const RunOptions& options);
+
 // A fixture directory: input.html, request.json, expected.html,
 // expected.decisions.jsonl, and optionally expected.module.html /
 // expected.module.decisions.jsonl where the module deliberately differs.
@@ -68,6 +83,10 @@ absl::StatusOr<RunResult> RunPackOnHtml(std::shared_ptr<const Pack> pack,
 // response headers of the origin, in order; the host has none when absent)}.
 // A case with origin_headers also has expected.headers: the response headers
 // after the run, one "Name: value" line each.
+// "packs": ["a.json", "b.json"] runs several packs in that order instead (not
+// together with "pack"); the decisions of the run are those of the first pack,
+// then those of the second. A pack with an id an earlier one has is refused
+// by a server, so the kernel run leaves it out (see CaseRun::refused).
 struct FixtureCase {
   std::string name;
   std::string dir;
@@ -109,6 +128,19 @@ struct CaseRun {
   bool debug = false;                    // the request turns debug comments on
   Mode directive_mode = Mode::kEnforce;  // the request's directive mode
   std::string pack_file = "pack.json";   // next to the fixtures
+  // Every pack file of the request in load order (just `pack_file` for a
+  // request with one pack), and for each whether the host refuses it as a
+  // duplicate id.
+  std::vector<std::string> pack_files;
+  std::vector<bool> refused;
+  // The chunked reference of a run of several packs (empty for one pack): a
+  // pack's plan is dropped as a whole at the head or at the end of the
+  // document, so every way of dropping some of them is a state (see
+  // DropState), `drop_runs[i]` the whole-document run in which the packs of
+  // `drop_states[i]` still claim their targets but do not act. Use
+  // ChunkedOutcomeAllowedForPacks().
+  std::vector<std::vector<unsigned>> drop_states;
+  std::vector<RunResult> drop_runs;
   // The offsets the request's flush_every puts the flushes at (also in the
   // whole-document runs).
   std::vector<size_t> flush_cuts;
@@ -164,6 +196,26 @@ bool ChunkedOutcomeAllowed(
         same_html = nullptr,
     const std::string* head_only_html = nullptr,
     const std::string* document_only_html = nullptr);
+
+// Bits of a pack's drop state in a chunked run of several packs.
+inline constexpr unsigned kHeadDropped = 1;
+inline constexpr unsigned kDocumentDropped = 2;
+
+// `pack` with the rules of the dropped kinds only reporting: they still claim
+// their targets (a claim is held when the owner's plan drops) but change
+// nothing.
+std::shared_ptr<const Pack> ClaimOnlyPack(const Pack& pack, unsigned dropped);
+
+// The chunked property for several packs: the chunked run is the
+// whole-document run in which each pack either applied, or lost its head
+// plan, or its end-of-document plan, or both (`run.drop_states`), with the
+// decisions of a dropped plan saying not_rewritable, whichever way the
+// windows fall for each pack separately.
+bool ChunkedOutcomeAllowedForPacks(
+    const RunResult& whole, const CaseRun& run, const RunResult& chunked,
+    std::string_view chunked_roundtrip_html, std::string* why,
+    const std::function<bool(const std::string&, const std::string&)>&
+        same_html = nullptr);
 
 // `pack` without the rules of the kinds that decide at the end of the
 // document: what the head alone does.

@@ -26,14 +26,17 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "pagespeed/kernel/base/json.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -44,11 +47,13 @@
 #include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/packs/signature_format.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/admin_daemon_handler.h"
 #include "pagespeed/system/daemon_reader.h"
 #include "pagespeed/system/rule_pack_decision_log.h"
+#include "pagespeed/system/rule_pack_store.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
 #include "test/net/instaweb/rewriter/custom_rewrite_test_base.h"
@@ -435,6 +440,249 @@ TEST_F(AdminSiteTest, RulePacksPageShowsTheSharedLogBeforeThePackIsLoaded) {
   // The vhost shows only its own host's rows.
   EXPECT_EQ(GoogleString::npos, body.find("other.test</td>"));
   EXPECT_NE(GoogleString::npos, body.find("1 matching, newest first"));
+}
+
+// Without a loaded pack the page lists at most 8 pack log directories, in
+// sorted order.
+TEST_F(AdminSiteTest, RulePacksPageCapsTheListedLogDirectories) {
+  const std::filesystem::path log_dir =
+      std::filesystem::path(GTestTempDir()) / "rule_packs_admin_log_cap";
+  const std::string date = RulePackDecisionLog::UtcDate(timer()->NowMs());
+  std::filesystem::remove_all(log_dir);
+  for (int i = 0; i < 10; ++i) {
+    const std::string id = "fixture-" + std::to_string(i);
+    const std::filesystem::path day_dir = log_dir / "packs" / id;
+    std::filesystem::create_directories(day_dir);
+    std::ofstream out(day_dir / RulePackDecisionLog::FileName(date));
+    out << "{\"ts\":" << timer()->NowMs() << ",\"pack\":\"" << id
+        << "@0.1.0\",\"host\":\"example.com\",\"path\":\"/row-" << id
+        << "\",\"rule\":\"r\",\"action\":\"insert\"}\n";
+  }
+  SystemRewriteOptions options("t", thread_system_.get());
+  options.set_log_dir(log_dir.string());
+  options.set_rule_pack_file("/nonexistent/pack.json");
+
+  SystemServerContext* ssc =
+      static_cast<SystemServerContext*>(server_context_.get());
+  ssc->SetAdminSiteForTesting(std::make_unique<AdminSite>(
+      timer(), message_handler(), nullptr /* daemon_reader */));
+  GoogleUrl gurl("http://example.com/pagespeed_admin/rule_packs");
+  QueryParams query_params;
+  query_params.ParseFromUrl(gurl);
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  fetch.request_headers()->set_method(RequestHeaders::kGet);
+  ssc->AdminPage(false /* global */, gurl, query_params, &options, &fetch, "");
+  EXPECT_EQ(200, fetch.response_headers()->status_code());
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_NE(GoogleString::npos,
+              body.find("/row-fixture-" + std::to_string(i) + "<"))
+        << i;
+  }
+  EXPECT_EQ(GoogleString::npos, body.find("/row-fixture-8<"));
+  EXPECT_EQ(GoogleString::npos, body.find("/row-fixture-9<"));
+}
+
+namespace {
+
+std::string TestPackJson(const std::string& id, const std::string& site_mode,
+                         const std::string& extra_info) {
+  return absl::StrCat(R"({"pack":{"id":")", id, R"(","version":"0.1.0")",
+                      extra_info, R"(},"sites":[{"host":"example.com","mode":")",
+                      site_mode, R"("}],"rules":[{"id":"t","kind":"title",)",
+                      R"("enforce":true,"value":{"template":"T"}}]})");
+}
+
+}  // namespace
+
+// Several packs on one vhost: the page and the JSON list them in load order
+// with state and licence text, ?pack= picks the log tail.
+class RulePacksSeveralTest : public AdminSiteTest {
+ protected:
+  void SetUp() override {
+    AdminSiteTest::SetUp();
+    dir_ = std::filesystem::path(GTestTempDir()) / "rule_packs_admin_several";
+    std::filesystem::remove_all(dir_);
+    std::filesystem::create_directories(dir_);
+    log_dir_ = dir_ / "log";
+    store_ = std::make_unique<RulePackStore>(timer(), "1.18.0");
+    factory()->set_rule_pack_provider(store_.get());
+    ssc_ = static_cast<SystemServerContext*>(server_context_.get());
+    ssc_->SetAdminSiteForTesting(std::make_unique<AdminSite>(
+        timer(), message_handler(), nullptr /* daemon_reader */));
+  }
+  void TearDown() override {
+    factory()->set_rule_pack_provider(nullptr);
+    AdminSiteTest::TearDown();
+  }
+
+  std::string WriteFile(const std::string& name, const std::string& text) {
+    const std::string path = (dir_ / name).string();
+    std::ofstream(path) << text;
+    return path;
+  }
+
+  void Load(const std::string& path) {
+    RulePackProvider::LoadEvent event;
+    RulePackProvider::SignatureEvent signature;
+    store_->Get(path, pagespeed::packs::PackTrust(), message_handler(), &event,
+                &signature);
+  }
+
+  void WriteLog(const std::string& id, const std::string& path) {
+    const std::filesystem::path day_dir = log_dir_ / "packs" / id;
+    std::filesystem::create_directories(day_dir);
+    std::ofstream out(day_dir / RulePackDecisionLog::FileName(
+                                    RulePackDecisionLog::UtcDate(
+                                        timer()->NowMs())),
+                      std::ios::app);
+    out << "{\"ts\":" << timer()->NowMs() << ",\"pack\":\"" << id
+        << "@0.1.0\",\"host\":\"example.com\",\"path\":\"" << path
+        << "\",\"rule\":\"t\",\"action\":\"insert\"}\n";
+  }
+
+  // The body of the page at `query` for a vhost with `files`.
+  std::string Get(const std::vector<std::string>& files,
+                  const std::string& query, std::string* content_type) {
+    SystemRewriteOptions options("t", thread_system_.get());
+    options.set_log_dir(log_dir_.string());
+    options.set_rule_pack_mode(RewriteOptions::kRulePackModeEnforce);
+    GoogleString msg;
+    for (const std::string& file : files) {
+      EXPECT_TRUE(options.AddRulePackFile(file, &msg)) << msg;
+    }
+    GoogleUrl gurl("http://example.com/pagespeed_admin/rule_packs?" + query);
+    QueryParams query_params;
+    query_params.ParseFromUrl(gurl);
+    GoogleString body;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+    fetch.request_headers()->set_method(RequestHeaders::kGet);
+    ssc_->AdminPage(false /* global */, gurl, query_params, &options, &fetch,
+                    "");
+    EXPECT_EQ(200, fetch.response_headers()->status_code());
+    if (content_type != nullptr) {
+      *content_type =
+          std::string(fetch.response_headers()->Lookup1(
+              HttpAttributes::kContentType));
+    }
+    return body;
+  }
+
+  std::filesystem::path dir_, log_dir_;
+  std::unique_ptr<RulePackStore> store_;
+  SystemServerContext* ssc_ = nullptr;
+};
+
+TEST_F(RulePacksSeveralTest, TwoPacksAreListedInOrderWithStateAndLicenseText) {
+  const std::string a =
+      WriteFile("a.json", TestPackJson("edge-seo", "enforce", ""));
+  const std::string b = WriteFile(
+      "b.json",
+      TestPackJson("fixture-second", "report",
+                   R"(,"license":{"entitlement":"second-pack",)"
+                   R"("expires":"2027-10-31","terms":"https://e.example/t"})"));
+  Load(a);
+  Load(b);
+  WriteLog("edge-seo", "/from-a");
+  WriteLog("fixture-second", "/from-b");
+
+  std::string type;
+  const std::string json = Get({a, b}, "json=1", &type);
+  EXPECT_EQ("application/json; charset=utf-8", type);
+  Json::Value root;
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  std::istringstream in(json);
+  ASSERT_TRUE(Json::parseFromStream(builder, in, &root, &errors)) << errors;
+  EXPECT_EQ(1, root["schema"].asInt());
+  EXPECT_EQ("vhost", root["scope"].asString());
+  EXPECT_TRUE(root["configuration"]["filter_enabled"].isBool());
+  EXPECT_EQ("enforce", root["configuration"]["rule_pack_mode"].asString());
+  EXPECT_FALSE(root["configuration"]["rule_pack_require_signed"].asBool());
+  ASSERT_EQ(2u, root["configuration"]["rule_pack_files"].size());
+  EXPECT_EQ(a, root["configuration"]["rule_pack_files"][0].asString());
+  ASSERT_EQ(2u, root["packs"].size());
+  EXPECT_EQ(0, root["packs"][0]["position"].asInt());
+  EXPECT_EQ("edge-seo", root["packs"][0]["id"].asString());
+  EXPECT_EQ("loaded", root["packs"][0]["state"].asString());
+  EXPECT_TRUE(root["packs"][0]["license"].isNull());
+  EXPECT_EQ(64u, root["packs"][0]["sha256"].asString().size());
+  EXPECT_EQ(1, root["packs"][1]["position"].asInt());
+  EXPECT_EQ("fixture-second", root["packs"][1]["id"].asString());
+  EXPECT_EQ("second-pack", root["packs"][1]["license"]["label"].asString());
+  EXPECT_EQ("2027-10-31", root["packs"][1]["license"]["expires"].asString());
+  EXPECT_EQ(b, root["packs"][1]["file"].asString());
+  // The title kind runs enforce in the first and report in the second.
+  ASSERT_EQ(1u, root["overlap_warnings"].size());
+  EXPECT_NE(std::string::npos,
+            root["overlap_warnings"][0].asString().find("title owned by "
+                                                        "edge-seo (enforce)"));
+  EXPECT_TRUE(root["counters"].isObject());
+  EXPECT_TRUE(root["counters"].isMember("rule_pack_decisions_claimed"));
+  // The default tail is the first pack's.
+  EXPECT_EQ("edge-seo", root["decisions"]["pack"].asString());
+  ASSERT_EQ(1u, root["decisions"]["rows"].size());
+  EXPECT_EQ("/from-a", root["decisions"]["rows"][0]["path"].asString());
+
+  const std::string second = Get({a, b}, "json=1&pack=fixture-second", nullptr);
+  EXPECT_NE(std::string::npos, second.find("\"path\":\"/from-b\""));
+  EXPECT_EQ(std::string::npos, second.find("/from-a"));
+
+  const std::string html = Get({a, b}, "", &type);
+  EXPECT_EQ("text/html; charset=utf-8", type);
+  EXPECT_LT(html.find(">edge-seo<"), html.find(">fixture-second<"));
+  EXPECT_NE(std::string::npos,
+            html.find("second-pack, expires 2027-10-31, https://e.example/t"));
+  EXPECT_NE(std::string::npos, html.find("/from-a"));
+  EXPECT_EQ(std::string::npos, html.find(">/from-b<"));
+  const std::string html_b = Get({a, b}, "pack=fixture-second", nullptr);
+  EXPECT_NE(std::string::npos, html_b.find(">/from-b<"));
+}
+
+TEST_F(RulePacksSeveralTest, ADuplicateIdAndAMissingFileAreStates) {
+  const std::string a =
+      WriteFile("a.json", TestPackJson("edge-seo", "enforce", ""));
+  const std::string dup =
+      WriteFile("dup.json", TestPackJson("edge-seo", "report", ""));
+  const std::string gone = (dir_ / "gone.json").string();
+  Load(a);
+  Load(dup);
+  const std::string json = Get({a, dup, gone}, "json=1", nullptr);
+  Json::Value root;
+  std::istringstream in(json);
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  ASSERT_TRUE(Json::parseFromStream(builder, in, &root, &errors)) << errors;
+  ASSERT_EQ(3u, root["packs"].size());
+  EXPECT_EQ("loaded", root["packs"][0]["state"].asString());
+  // dup.json holds a pack with the id of the first: it is not used, and so
+  // takes no part in the overlap check. A file not looked at yet in this
+  // process has the state none.
+  EXPECT_EQ("duplicate-id", root["packs"][1]["state"].asString());
+  EXPECT_EQ("edge-seo", root["packs"][1]["id"].asString());
+  EXPECT_EQ("none", root["packs"][2]["state"].asString());
+  EXPECT_TRUE(root["packs"][2]["id"].isNull());
+  EXPECT_EQ(0u, root["overlap_warnings"].size());
+}
+
+TEST_F(RulePacksSeveralTest, TheRawFormOfOnePackIsTheLoggedLinesOnly) {
+  const std::string a =
+      WriteFile("a.json", TestPackJson("edge-seo", "enforce", ""));
+  Load(a);
+  WriteLog("edge-seo", "/one");
+  WriteLog("edge-seo", "/two");
+  std::string type;
+  const std::string raw = Get({a}, "raw=1", &type);
+  EXPECT_EQ("text/plain; charset=utf-8", type);
+  const std::string now = std::to_string(timer()->NowMs());
+  const std::string line = "{\"ts\":" + now +
+                           ",\"pack\":\"edge-seo@0.1.0\",\"host\":"
+                           "\"example.com\",\"path\":\"/";
+  EXPECT_EQ(line + "two\",\"rule\":\"t\",\"action\":\"insert\"}\n" + line +
+                "one\",\"rule\":\"t\",\"action\":\"insert\"}\n",
+            raw);
+  // ?raw=1 wins over ?json=1.
+  EXPECT_EQ(raw, Get({a}, "raw=1&json=1", nullptr));
 }
 
 // =============================================================================

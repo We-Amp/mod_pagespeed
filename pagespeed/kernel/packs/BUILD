@@ -47,6 +47,20 @@ cc_library(
     ],
 )
 
+# Which kinds two packs of one host both carry in different modes.
+cc_library(
+    name = "pack_overlap",
+    srcs = ["pack_overlap.cc"],
+    hdrs = ["pack_overlap.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":kind_registry",
+        ":pack",
+        ":rule_kind",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 # UTF-8 validation and UTF-8-safe HTML entity decoding.
 cc_library(
     name = "entity_decode",
