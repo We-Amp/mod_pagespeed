@@ -18,7 +18,10 @@ filegroup(
 # checks them without a server (//test/net/instaweb/rewriter:rule_pack_fixture_test).
 filegroup(
     name = "rule_packs_testdata",
-    srcs = glob(["mod_pagespeed_test/rule_packs/*"]),
+    srcs = glob([
+        "mod_pagespeed_test/rule_packs/*",
+        "mod_pagespeed_test/rule_packs/multi/*",
+    ]),
 )
 
 filegroup(

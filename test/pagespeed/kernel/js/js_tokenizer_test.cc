@@ -5482,7 +5482,6 @@ TEST_F(JsTokenizerTest, NestedArrowBodyAsi) {
 // UpdateExpression, to which no call or member access can attach, so a
 // linebreak before `(` or before a `.`-led numeric literal inserts a
 // semicolon even though the generic continuation set contains both.
-// See https://github.com/We-Amp/pagespeed-optimizer/issues/1092
 
 TEST_F(JsTokenizerTest, PostfixUpdateAsiParen) {
   // The kSemiInsert also proves the flag's lifetime: ConsumeOperator arms

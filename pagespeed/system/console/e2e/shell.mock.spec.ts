@@ -81,26 +81,15 @@ test.describe("Console shell", () => {
     await expect(page.locator(".nav-item")).toHaveCount(12);
   });
 
-  test("Rule packs links to the server-rendered page of the console that is open", async ({ page }) => {
+  test("Rule packs is a native console page, not a link to the server-rendered page", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", F.allReplies());
     await openConsole(page, "pagespeed_admin");
-    const vhost = page.getByRole("navigation", { name: "Console pages" }).getByRole("link", { name: "Rule packs" });
-    await expect(vhost).toHaveAttribute("href", "/pagespeed_admin/rule_packs");
-    await expect(vhost).not.toHaveAttribute("target", /.+/);
-    await expect(vhost).not.toHaveAttribute("aria-current", /.+/);
-  });
-
-  test("the whole-server console's Rule packs entry points at the global page", async ({ page }) => {
-    await mockAdmin(page, "pagespeed_global_admin", { ...F.allReplies(), config: F.CONFIG_GLOBAL });
-    await openConsole(page, "pagespeed_global_admin");
-    const global = page.getByRole("navigation", { name: "Console pages" }).getByRole("link", { name: "Rule packs" });
-    await expect(global).toHaveAttribute("href", "/pagespeed_global_admin/rule_packs");
-  });
-
-  test("a renamed admin path carries into the Rule packs entry", async ({ page }) => {
-    await mockAdmin(page, "renamed_admin", F.allReplies());
-    await openConsole(page, "renamed_admin");
-    await expect(page.getByRole("link", { name: "Rule packs" })).toHaveAttribute("href", "/renamed_admin/rule_packs");
+    const entry = page.getByRole("navigation", { name: "Console pages" }).getByRole("link", { name: "Rule packs" });
+    await expect(entry).toHaveAttribute("href", "#/rule-packs");
+    await entry.click();
+    await expect(page).toHaveURL(/#\/rule-packs$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Rule packs" })).toBeVisible();
+    await expect(entry).toHaveAttribute("aria-current", "page");
   });
 
   test("marks the current page for assistive technology", async ({ page }) => {

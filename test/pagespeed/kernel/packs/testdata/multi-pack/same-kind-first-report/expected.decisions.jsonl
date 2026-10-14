@@ -1,0 +1,2 @@
+{"host":"report.fixture.test","path":"/first-report/page","rule":"a-canonical-report","kind":"canonical","mode":"report","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://fixture.test/a/first-report/page"}
+{"host":"report.fixture.test","path":"/first-report/page","rule":"b-canonical-report","kind":"canonical","mode":"enforce","action":"none","reason":"claimed","defect":"","before":"","after":"","claimed_by":"edge-seo"}

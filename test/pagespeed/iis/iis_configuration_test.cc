@@ -345,17 +345,20 @@ TEST_F(IisConfigurationTest, RulePackOptionsParseAndRoundTrip) {
       "pagespeed RulePackFile C:\\pagespeed\\packs\\site.json\n"
       "pagespeed RulePackMode enforce\n",
       "", &rwo);
-  EXPECT_EQ("C:\\pagespeed\\packs\\site.json", rwo.rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"C:\\pagespeed\\packs\\site.json"},
+            rwo.rule_pack_files());
   EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeEnforce,
             rwo.rule_pack_mode());
 
   IisRewriteOptions merged(nullptr);
   merged.Merge(rwo);
-  EXPECT_EQ("C:\\pagespeed\\packs\\site.json", merged.rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"C:\\pagespeed\\packs\\site.json"},
+            merged.rule_pack_files());
   EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeEnforce,
             merged.rule_pack_mode());
   std::unique_ptr<net_instaweb::RewriteOptions> clone(merged.Clone());
-  EXPECT_EQ("C:\\pagespeed\\packs\\site.json", clone->rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"C:\\pagespeed\\packs\\site.json"},
+            clone->rule_pack_files());
   EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeEnforce,
             clone->rule_pack_mode());
 
@@ -364,6 +367,45 @@ TEST_F(IisConfigurationTest, RulePackOptionsParseAndRoundTrip) {
   ParseAndGetConfig("pagespeed RulePackMode enforc\n", "", &bad);
   EXPECT_EQ(net_instaweb::RewriteOptions::kRulePackModeReport,
             bad.rule_pack_mode());
+}
+
+TEST_F(IisConfigurationTest, RulePackFileListPerScope) {
+  IisRewriteOptions one(nullptr);
+  ParseAndGetConfig("pagespeed RulePackFile C:\\pagespeed\\packs\\a.json\n", "",
+                    &one);
+  ASSERT_EQ(1u, one.rule_pack_files().size());
+
+  IisRewriteOptions two(nullptr);
+  ParseAndGetConfig(
+      "pagespeed RulePackFile C:\\pagespeed\\packs\\a.json\n"
+      "pagespeed RulePackFile C:\\pagespeed\\packs\\b.json\n"
+      "pagespeed RulePackFile C:\\pagespeed\\packs\\..\\packs\\a.json\n",
+      "", &two);
+  ASSERT_EQ(2u, two.rule_pack_files().size());
+  EXPECT_EQ("C:\\pagespeed\\packs\\a.json", two.rule_pack_files()[0]);
+  EXPECT_EQ("C:\\pagespeed\\packs\\b.json", two.rule_pack_files()[1]);
+
+  // The site list replaces the global one (distinct paths, so an append
+  // would show).
+  IisRewriteOptions global(nullptr);
+  ParseAndGetConfig("pagespeed RulePackFile C:\\pagespeed\\packs\\g.json\n", "",
+                    &global);
+  IisRewriteOptions merged(nullptr);
+  merged.Merge(global);
+  merged.Merge(two);
+  ASSERT_EQ(2u, merged.rule_pack_files().size());
+  EXPECT_EQ("C:\\pagespeed\\packs\\a.json", merged.rule_pack_files()[0]);
+  EXPECT_EQ("C:\\pagespeed\\packs\\b.json", merged.rule_pack_files()[1]);
+
+  // The ninth distinct file is a configuration error: the list stays at 8.
+  std::string nine;
+  for (int i = 1; i <= 9; ++i) {
+    nine += "pagespeed RulePackFile C:\\pagespeed\\packs\\" +
+            std::to_string(i) + ".json\n";
+  }
+  IisRewriteOptions many(nullptr);
+  ParseAndGetConfig(nine, "", &many);
+  EXPECT_EQ(8u, many.rule_pack_files().size());
 }
 
 // Server scope: a match block (per request) cannot point the server at a
@@ -379,7 +421,7 @@ TEST_F(IisConfigurationTest, RulePackFileInMatchBlockIgnored) {
   IisRewriteOptions rwo(nullptr);
   TestConfigFileGetConfig(cf, input, rwo);
   TestConfigFileRelease(cf);
-  EXPECT_EQ("", rwo.rule_pack_file());
+  EXPECT_TRUE(rwo.rule_pack_files().empty());
 }
 
 // An UNQUOTED value with a space is three tokens, not one: the line is not a

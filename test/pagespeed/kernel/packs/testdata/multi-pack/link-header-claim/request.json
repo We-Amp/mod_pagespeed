@@ -1,0 +1,17 @@
+{
+  "url": "https://fixture.test/link/page",
+  "packs": [
+    "pack-a.json",
+    "pack-b.json"
+  ],
+  "origin_headers": [
+    [
+      "Content-Type",
+      "text/html; charset=utf-8"
+    ],
+    [
+      "Link",
+      "</static/app.css>; rel=preload; as=style"
+    ]
+  ]
+}

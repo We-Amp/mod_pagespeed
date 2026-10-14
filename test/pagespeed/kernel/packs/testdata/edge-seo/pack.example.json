@@ -3,7 +3,7 @@
     "id": "edge-seo",
     "version": "0.1.0",
     "publisher": "local",
-    "engine_min": "1.18.0",
+    "engine_min": "1.19.0",
     "description": "Head-element SEO fixes for example.com"
   },
   "sites": [

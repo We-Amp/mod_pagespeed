@@ -1,3 +1,241 @@
+# mod_pagespeed 2.4.0 Release Notes
+
+**Release date:** 2026-10-14
+**Status:** Stable
+**Packages:** module `mod-pagespeed` 1.19.0-r1 + `pagespeed-optimizer` 1.19.0 (the source tree is versioned 2.4.0; the signed packages carry the 1.19.0 pairing).
+
+## Highlights
+
+- **mod_pagespeed 2.4.0 (packages 1.19.0) lets a server run several rule
+  packs and is a security and reliability update for the module and the
+  optimizer worker, released together and installed as a matching pair.** In
+  the signed apt and yum repositories both parts carry the package version
+  1.19.0; 2.4.0 is the version of the container images and the NuGet
+  packages and the application version of the Helm chart (chart 0.3.8). In
+  the nginx module in the container images and Helm chart, cache hits now
+  carry the origin's security and CORS headers, including
+  `Content-Security-Policy`. That module also stops stale serves of
+  responses the origin marked `must-revalidate`, `proxy-revalidate` or
+  `s-maxage`, and serves the full stored response, not a bare `304`, to a
+  client that sent no conditional request after the origin confirms a stale
+  copy. The ASP.NET Core middleware now builds its ETag from the origin's
+  content. If you use rule packs, run the nginx module from the container
+  images or Helm chart, or use the ASP.NET Core middleware, read "Before you
+  upgrade". **Update recommended.**
+
+- **Security: security headers missing on cached responses, nginx.**
+  Responses served from the nginx module's cache could lack the origin's
+  security and CORS headers, such as `Content-Security-Policy`,
+  `X-Content-Type-Options` and `X-Frame-Options`. Affected: the nginx module
+  in the container images and Helm chart in releases up to and including
+  2.3.0. Fixed in 2.4.0. Update recommended. Responses cached before the
+  upgrade regain the headers as they expire; purge the cache after upgrading
+  to restore them at once (see "Before you upgrade").
+
+- **Rule packs (module).** Added: several packs per server. Repeat
+  `RulePackFile` (Apache: `ModPagespeedRulePackFile`) to load more than one
+  pack; Apache, nginx and IIS take the same repeated line. A scope takes at
+  most eight files, and a ninth is a configuration error. Two lines that
+  name the same path count once. A virtual host that sets `RulePackFile`
+  uses its own list and ignores the server-wide one; one that sets none
+  inherits the server-wide list.
+
+- Added: packs run in configuration order, and the first pack wins. When a
+  pack's rule applies to a page, that pack claims the kind of element (and,
+  for a canonical rule with `link_header: match`, the `Link` header). A
+  later pack's rule of the same kind changes nothing and is logged with
+  action `none`, reason `claimed` and a `claimed_by` field naming the first
+  pack. This holds in report mode too: a first pack in report mode keeps a
+  later pack in enforce mode off that kind. When two packs carry rules of
+  one kind in different modes, the server logs one `rule pack overlap`
+  warning per process that names the owning pack. Each pack reads the page
+  as the origin sent it and does not see what an earlier pack inserted.
+
+- Added: every pack on a server needs its own id. A file whose pack id is
+  already used by an earlier file is refused and logged once per process and
+  file version; the earlier pack keeps working.
+
+- Added: a pack id can be any 1 to 64 lowercase letters, digits or `-`, not
+  only `edge-seo`.
+
+- Added: each pack writes its own decision log under
+  `<LogDir>/packs/<pack-id>/`, and a `claimed` line goes to the log of the
+  pack that was kept off the page.
+
+- Added: two new statistics, `rule_pack_decisions_claimed` (a rule kept off
+  a page by an earlier pack) and `rule_pack_refused_duplicate_id` (a file
+  refused for a duplicate pack id).
+
+- Added: packs signed with the We-Amp publisher key (key id `we-amp`) verify
+  without a `RulePackTrustKey` line. `RulePackTrustKey` lines add your own
+  keys beside the built-in one, and a key you list with the id `we-amp`
+  replaces it. `RulePackRequireSigned` is unchanged.
+
+- Added: the Rule packs admin page (`/pagespeed_admin/rule_packs`) lists
+  every `RulePackFile` of the host in load order, with each pack's id,
+  version, publisher, SHA-256, load state, last error, warnings and licence
+  fields, and the overlap warnings. `?pack=<id>` picks the pack whose
+  decision log is shown. The page also shows `RulePackRequireSigned`.
+
+- Added: `/pagespeed_admin/rule_packs?json=1` returns the same status as one
+  JSON document for scripts and monitoring: the configuration, every pack,
+  the overlap warnings, the `rule_pack_*` statistics and the selected
+  decision-log lines. It carries a `schema` number (`1`) that changes only
+  when a key is removed or changes meaning.
+
+- Added: the admin console has a Rule packs view. It shows the
+  configuration, every pack in load order with its state, the overlap
+  warnings, the counters and the newest decisions, with filters by pack,
+  action, reason and rule. It replaces the console's link to the
+  server-rendered page, which stays available.
+
+- **HTML rewriting (module).** Fixed: with `hint_preload_subresources`
+  enabled, an author-written `<link rel=modulepreload>` hint is now removed
+  when it names a module script that has been rewritten (its URL changed),
+  so browsers no longer fetch the original module in addition to the
+  rewritten one. Hints for imported modules, whose URLs are never rewritten,
+  are kept.
+
+- **nginx (container images and Helm chart).** These items apply to the
+  nginx module in the container images and Helm chart; the native nginx
+  package (the 1.x module) is not affected by them.
+
+- Fixed: responses served from the nginx cache now carry the
+  `Content-Security-Policy`, `Access-Control-Allow-Origin`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Cross-Origin-*`,
+  `Permissions-Policy` and `Vary` headers the origin sent with them. This
+  holds for fresh cache hits, for stale copies served while a refresh is in
+  flight or while the origin returns an error, and for copies revalidated
+  with the origin. Previously these headers were missing on cache hits. When
+  the stored header lines of a cached URL cannot be read, the request is
+  fetched from the origin and the lines are stored again.
+
+- Fixed: nginx no longer serves a stale cached response whose origin sent
+  `must-revalidate`, `proxy-revalidate` or `s-maxage` while a refresh is in
+  flight or when the origin returns an error; those requests go to the
+  origin instead (RFC 9111 section 5.2.2). Sites that relied on stale serves
+  of such responses see a few more origin fetches around expiry.
+
+- Fixed: when the origin confirms that a stale cached response is still
+  current (a `304` to the module's own revalidation request), a client that
+  sent no conditional request now gets a normal `200` with the full body, as
+  RFC 9111 section 4.3.4 requires. Previously such a client could receive a
+  bodyless `304 Not Modified` it had not asked for. A client whose own
+  `If-None-Match` matches the response's ETag still receives a `304`.
+
+- Fixed: a stale response served because the origin returned a 5xx error now
+  carries the status line `HTTP/1.1 200 OK`. It used to carry the origin's
+  error status line together with the cached body.
+
+- Added: six counters on `/v1/metrics` show the effect of the header
+  handling: `pagespeed_headers_sidecar_fall_through_total` (responses not
+  cached because of such a header),
+  `pagespeed_headers_sidecar_never_optimized_total` (nonce-bearing
+  policies), `pagespeed_headers_sidecar_stored_total` (header blocks stored
+  with a cached copy), `pagespeed_headers_sidecar_write_failed_total`,
+  `pagespeed_headers_sidecar_replayed_total` (cache hits that sent stored
+  header lines) and `pagespeed_headers_sidecar_missing_total` (requests
+  fetched from the origin because the stored lines could not be read).
+
+- **Optimizer worker.** Fixed: when the optimizer worker improves HTML
+  served through the nginx module in the container images and Helm chart, it
+  now also honours a `Content-Security-Policy` the origin sent as a response
+  header, not only one in a `<meta>` tag. An inline element is added only
+  when every policy present allows it. Pages recorded without stored header
+  lines behave as before.
+
+## Action required when upgrading
+
+- Breaking (rule packs): every `RulePackFile` line of a scope is now loaded,
+  in order. Earlier releases used only the last one. In 1.18.0 every pack
+  had the id `edge-seo`, so on a host whose lines name two different files
+  the first file now runs and the second, the one earlier releases used, is
+  refused as a duplicate id. Remove any stray extra `RulePackFile` line
+  before you upgrade. A configuration with one `RulePackFile` line needs no
+  change: the pack, its id, the decision log path and line format, the
+  counters and the admin page's `?raw=1` output are as they were.
+
+- Changed (nginx, container images and Helm chart): the nginx module no
+  longer caches a response whose headers a cache hit could not reproduce. A
+  response that carries a header outside the set a cached copy can carry
+  (for example `X-Powered-By`, `X-Frame-Options` or a custom `X-` header) is
+  now passed through from the origin on every request instead of being
+  cached without that header. Responses whose `Content-Security-Policy`
+  contains a per-response nonce are never cached. Responses that carry only
+  `Content-Security-Policy`, `Access-Control-Allow-Origin`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Cross-Origin-*`,
+  `Permissions-Policy` and `Vary` beside the usual caching headers are
+  cached as before. An origin `Age` or `Accept-Ranges` header does not stop
+  a response from being cached. To keep caching a response that carries
+  another header, remove it with `proxy_hide_header`, or set it on the nginx
+  server with `add_header`, which nginx applies to cache hits as well. A
+  notice in the error log names the server and the header.
+
+- Changed (nginx, container images and Helm chart): upgrade the nginx module
+  and the optimizer worker together. The serve statistics file changes
+  format and is recreated once on upgrade, so the serve counters start from
+  zero. An upgraded module does not open the statistics file of an optimizer
+  that has not been upgraded yet, and records no serve statistics until the
+  optimizer is upgraded too; caching and serving are unaffected. An older
+  module keeps writing to the replaced file until nginx is reloaded.
+
+- Changed (nginx, container images and Helm chart): responses cached by an
+  earlier release regain the origin's headers as each cached URL next
+  expires. Responses the origin marks `no-cache` keep being revalidated and
+  regain the headers when their content changes. At that point the module
+  fetches the URL from the origin in full once instead of revalidating it,
+  so expect one full origin fetch per cached URL in the first cache lifetime
+  after upgrading. A re-recorded URL gets a new validator, so clients
+  receive the full response once instead of a `304`. To restore the headers
+  on every cached URL at once, purge the cache after upgrading. If you added
+  any of these headers with `add_header` to work around them missing on
+  cache hits, remove that workaround, or clients receive them twice.
+
+- Changed (ASP.NET Core middleware): entries that gain a content identity
+  get a new ETag once, so clients fetch them in full once after the upgrade.
+  Entries cached before the upgrade keep their old tag until they are
+  written again.
+
+## Packaging and platform notes
+
+- **Apache.** Changed: with rule packs on Apache, a `HEAD` response carries
+  the origin's `Link` header, not the one the pack writes for `GET`, because
+  the pack edits the header while it reads the HTML body. A crawler that
+  probes with `HEAD` can see a different canonical than a browser does.
+  Check canonicals with `GET`.
+
+- **Envoy.** Note: an Envoy virtual host still takes one `RulePackFile`. Put
+  the rules for that host in one pack file.
+
+- **Linux packages.** Fixed: the optimizer worker's deb and rpm packages no
+  longer repeat the cache notices on every configure once they no longer
+  apply. The notice about the old `v1` cache path now appears only while a
+  loaded web-server configuration file still names that path, and the notice
+  about a cold-started cache only while the worker has not yet written a
+  `v2` cache or the configuration still names a path from before 2.1. Each
+  notice is one line, so apt and dnf no longer cut it off, and it names the
+  directive to check: `pagespeed DaemonVolumePath` on nginx,
+  `ModPagespeedDaemonVolumePath` on Apache.
+
+- **ASP.NET Core middleware.** Fixed: the ETag the ASP.NET Core middleware
+  sends on a cache hit now includes the origin's content identity: its
+  stored content hash, or else the origin's own `ETag` and `Last-Modified`.
+  Before, two different responses cached in the same second with the same
+  length could share an ETag, so a client holding the older copy could get a
+  `304 Not Modified` for content that had changed. Entries with neither
+  signal keep the previous tag. See "Before you upgrade" for the one-time
+  ETag change.
+
+- Fixed: a request that carries both `If-None-Match` and `If-Modified-Since`
+  is now judged on `If-None-Match` alone, as RFC 9110 section 13.1.3
+  requires. Before, a client whose `If-None-Match` did not match could still
+  get a `304` through `If-Modified-Since`.
+
+- Known issue: the ASP.NET Core middleware still omits some of the origin's
+  response headers on cache hits; a fix is tracked.
+
+---
+
 # mod_pagespeed 2.3.0 Release Notes
 
 **Release date:** 2026-10-12

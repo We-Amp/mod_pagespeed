@@ -1,0 +1,7 @@
+{
+  "url": "https://fixture.test/split/page",
+  "packs": [
+    "pack-a.json",
+    "pack-b.json"
+  ]
+}

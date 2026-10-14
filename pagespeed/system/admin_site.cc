@@ -24,10 +24,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
 #include <set>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -58,6 +60,7 @@
 #include "pagespeed/kernel/packs/matcher.h"
 #include "pagespeed/kernel/packs/pack.h"
 #include "pagespeed/kernel/packs/pack_host.h"
+#include "pagespeed/kernel/packs/pack_overlap.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
 #include "pagespeed/system/admin_daemon_handler.h"
 #include "pagespeed/system/daemon_reader.h"
@@ -681,10 +684,15 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
   page.host =
       static_cast<SystemServerContext*>(server_context)->hostname_identifier();
   page.filter_enabled = options.Enabled(RewriteOptions::kRulePacks);
-  page.pack_file = options.rule_pack_file();
+  // The first pack file (the legacy single-pack fields describe it).
+  page.pack_file = options.rule_pack_files().empty()
+                       ? GoogleString()
+                       : options.rule_pack_files().front();
   page.mode = options.rule_pack_mode() == RewriteOptions::kRulePackModeEnforce
                   ? "enforce"
                   : "report";
+  page.require_signed = options.rule_pack_require_signed();
+  page.now_ms = timer_->NowMs();
   page.limit = rule_pack_view::ClampLimit(param("limit"));
   page.filter.rule = param("rule");
   page.filter.action = param("action");
@@ -693,21 +701,67 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
     page.filter.host = pagespeed::packs::NormalizeHost(
         std::string_view(request_host.data(), request_host.size()));
 
+  // Every pack file of the scope, in load order. A file whose pack has the
+  // id of an earlier file's pack is not used (the filter refuses it), so it
+  // is shown as such and left out of the overlap check.
   RulePackProvider* provider = server_context->rule_pack_provider();
-  if (provider != nullptr && !page.pack_file.empty()) {
-    const RulePackStatus status = provider->Status(page.pack_file);
-    page.state = RulePackStateName(status.state);
-    page.last_event_ms = status.last_event_ms;
-    page.last_error = status.last_error;
-    if (status.loaded.pack != nullptr) {
-      const pagespeed::packs::PackInfo& info = status.loaded.pack->info;
-      page.pack.present = true;
-      page.pack.id = info.id;
-      page.pack.version = info.version;
-      page.pack.publisher = info.publisher;
-      page.pack.sha256 = status.loaded.sha256;
-      page.pack.warnings = status.warnings;
+  std::vector<std::shared_ptr<const pagespeed::packs::Pack>> acting_keep;
+  std::vector<const pagespeed::packs::Pack*> acting;
+  for (const GoogleString& file : options.rule_pack_files()) {
+    rule_pack_view::PackEntry entry;
+    entry.file = file;
+    entry.state = "none";
+    if (provider != nullptr) {
+      const RulePackStatus status = provider->Status(file);
+      entry.state = RulePackStateName(status.state);
+      entry.last_event_ms = status.last_event_ms;
+      entry.last_error = status.last_error;
+      if (status.loaded.pack != nullptr) {
+        const pagespeed::packs::PackInfo& info = status.loaded.pack->info;
+        entry.pack.present = true;
+        entry.pack.id = info.id;
+        entry.pack.version = info.version;
+        entry.pack.publisher = info.publisher;
+        entry.pack.sha256 = status.loaded.sha256;
+        entry.pack.key_id = status.loaded.key_id;
+        entry.pack.warnings = status.warnings;
+        if (info.license.has_value()) {
+          entry.pack.license.present = true;
+          entry.pack.license.label = info.license->entitlement;
+          entry.pack.license.expires = info.license->expires;
+          entry.pack.license.terms = info.license->terms;
+        }
+        bool duplicate = false;
+        for (const auto& earlier : page.packs) {
+          duplicate = duplicate || (earlier.pack.present &&
+                                    earlier.state != "duplicate-id" &&
+                                    earlier.pack.id == info.id);
+        }
+        if (duplicate) {
+          entry.state = "duplicate-id";
+        } else {
+          acting_keep.push_back(status.loaded.pack);
+          acting.push_back(status.loaded.pack.get());
+        }
+      }
     }
+    page.packs.push_back(std::move(entry));
+  }
+  for (const pagespeed::packs::PackOverlap& overlap :
+       pagespeed::packs::FindOverlaps(
+           acting,
+           options.rule_pack_mode() == RewriteOptions::kRulePackModeEnforce
+               ? pagespeed::packs::Mode::kEnforce
+               : pagespeed::packs::Mode::kReport)) {
+    page.overlap_warnings.push_back(pagespeed::packs::OverlapMessage(
+        *acting[overlap.first], *acting[overlap.later], overlap));
+  }
+  if (!page.packs.empty()) {
+    const rule_pack_view::PackEntry& first = page.packs.front();
+    page.state = first.state;
+    page.last_event_ms = first.last_event_ms;
+    page.last_error = first.last_error;
+    page.pack = first.pack;
   } else {
     page.state = "none";
   }
@@ -734,23 +788,68 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
   } else if (page.pack_file.empty()) {
     page.no_pack_file = true;
   } else {
-    // The loader accepts one pack id, and the log is shared by all server
-    // processes, so the tail does not depend on this process's pack.
-    std::string id(pagespeed::packs::kPackId);
-    if (page.pack.present && page.pack.id != id) id = page.pack.id;
-    if (IsSafeLogComponent(id)) {
-      const std::string path = log_dir + "/packs/" + id + "/" +
-                               RulePackDecisionLog::FileName(page.log_date);
-      page.tail = rule_pack_view::ReadDecisionLogTail(
+    // The log is shared by all server processes, so the tail does not
+    // depend on this process having loaded the pack: ?pack=<id> names the
+    // pack, else the first loaded pack is used, and with none loaded every
+    // <LogDir>/packs/<id>/ directory whose name is a valid pack id.
+    std::vector<std::string> ids;
+    const std::string requested = param("pack");
+    if (!requested.empty()) {
+      page.tail_pack_requested = true;
+      page.tail_pack = requested;
+      ids.push_back(requested);
+    } else if (page.pack.present) {
+      page.tail_pack = page.pack.id;
+      ids.push_back(page.pack.id);
+    } else {
+      std::error_code ec;
+      std::filesystem::directory_iterator it(
+          std::filesystem::path(log_dir) / "packs", ec);
+      // Bounded: at most 256 directory entries are examined and 8 ids kept
+      // (the RulePackFile list maximum per scope), so the page reads a
+      // fixed number of tails however many directories exist.
+      int examined = 0;
+      for (;
+           !ec && it != std::filesystem::directory_iterator() && examined < 256;
+           it.increment(ec), ++examined) {
+        const std::string name = it->path().filename().string();
+        if (name.size() <= 64 &&
+            name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") ==
+                std::string::npos) {
+          ids.push_back(name);
+        }
+      }
+      std::sort(ids.begin(), ids.end());
+      if (ids.size() > 8) ids.resize(8);
+    }
+    bool first = true;
+    for (const std::string& id : ids) {
+      if (!IsSafeLogComponent(id)) continue;
+      const std::string path =
+          StrCat(log_dir, "/packs/", id, "/",
+                 RulePackDecisionLog::FileName(page.log_date));
+      rule_pack_view::Tail tail = rule_pack_view::ReadDecisionLogTail(
           path, std::numeric_limits<size_t>::max());
+      if (first) {
+        page.tail = std::move(tail);
+        first = false;
+      } else if (tail.status == rule_pack_view::Tail::Status::kOk) {
+        page.tail.status = tail.status;
+        page.tail.lines.insert(page.tail.lines.end(), tail.lines.begin(),
+                               tail.lines.end());
+      }
     }
   }
 
+  // ?raw=1 wins over ?json=1.
   const bool raw = param("raw") == "1";
+  const bool json = !raw && param("json") == "1";
   ResponseHeaders* headers = fetch->response_headers();
   headers->SetStatusAndReason(HttpStatus::kOK);
   headers->Add(HttpAttributes::kContentType,
-               raw ? "text/plain; charset=utf-8" : "text/html; charset=utf-8");
+               raw    ? "text/plain; charset=utf-8"
+               : json ? "application/json; charset=utf-8"
+                      : "text/html; charset=utf-8");
   headers->Add(HttpAttributes::kCacheControl, "no-store, private");
   headers->Add("X-Content-Type-Options", "nosniff");
   headers->Add("PageSpeed", "off");
@@ -761,9 +860,10 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
                  "default-src 'none'; style-src 'unsafe-inline'; "
                  "frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   }
-  fetch->Write(
-      raw ? rule_pack_view::RenderRaw(page) : rule_pack_view::RenderHtml(page),
-      message_handler_);
+  fetch->Write(raw    ? rule_pack_view::RenderRaw(page)
+               : json ? rule_pack_view::RenderJson(page)
+                      : rule_pack_view::RenderHtml(page),
+               message_handler_);
   fetch->Done(true);
 }
 

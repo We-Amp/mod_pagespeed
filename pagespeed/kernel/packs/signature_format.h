@@ -39,6 +39,13 @@ struct TrustKey {
   std::string key_id;
   std::string public_key;  // 32 raw bytes
 };
+// The publisher's public key, trusted without any configuration. This is the
+// only place the id and the key are written down. A key of the same id in the
+// configuration replaces it.
+inline constexpr char kBuiltInTrustKeyId[] = "we-amp";
+inline constexpr char kBuiltInTrustKeyBase64[] =
+    "UvEi0v+/GRy1SMPuDOsJzRCIHatVRXf40CtSoYre/GE=";
+
 struct PackTrust {
   bool require_signed = false;
   std::vector<TrustKey> keys;  // sorted by key_id, unique
@@ -48,6 +55,10 @@ struct PackTrust {
   // "<key_id>=<lowercase hex of the key>;" per key.
   std::string Fingerprint() const;
 };
+
+// `configured` (sorted by key id, unique) plus the built-in key, unless
+// `configured` already has that id. The result is sorted by key id.
+std::vector<TrustKey> WithBuiltInTrustKey(std::vector<TrustKey> configured);
 
 enum class SignatureStatus {
   kVerified,

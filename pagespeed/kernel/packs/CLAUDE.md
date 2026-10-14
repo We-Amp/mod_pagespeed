@@ -8,8 +8,9 @@ kernel code in namespace `pagespeed::packs`. It depends only on the HTML kernel
 a rewriter. `RulePackFilter` runs a pack over an `HtmlParse`. The rewriter
 runs it as the `rule_packs` filter (off by default and in no rewrite level):
 `net/instaweb/rewriter/rule_pack_host.cc` holds the `PackHost` over a
-`RewriteDriver` and the driver-side filter that fetches the pack per
-document; `pagespeed/system/rule_pack_store.cc` is the per-process pack cache
+`RewriteDriver` and the driver-side filter that fetches every configured
+pack per document and runs one `RulePackFilter` per pack, in load order, over
+a shared `ClaimSet`; `pagespeed/system/rule_pack_store.cc` is the per-process pack cache
 and `rule_pack_decision_log.cc` the decision log. The canonical, title and
 description kinds plan at head close, with hreflang; jsonld plans when the
 document ends.
@@ -32,7 +33,7 @@ document ends.
 | `planner_common.{h,cc}` | Page-time types (`PlanOp`, `RulePlan`, `PlanInput`, `PlanState`, `ElementView`) and pure helpers; independent of the registry |
 | `planner.{h,cc}` | `BuildPlan()`: the pure plan of one decision point; `ParsePageUrl()` |
 | `signature_format.{h,cc}` | The text formats of pack signing: the `.sig` sidecar parser, trust-key decoding, `PackTrust` (keys + `require_signed`), `SignatureStatus` and its log phrases. No crypto (verification is `pagespeed/system/rule_pack_signature`) |
-| `pack_host.{h,cc}` | `PackHost`: what the filter needs from its server (headers, counters, the decision sink) |
+| `pack_host.{h,cc}` | `PackHost`: what the filter needs from its server (headers, counters, the decision sink, claims); `ClaimSet`, the first-wins claims of the packs on one document |
 | `rule_pack_filter.{h,cc}` | `RulePackFilter`, the streaming `EmptyHtmlFilter` |
 | `rule_pack_filter_fuzz.cc` | Filter fuzz harness (fixed pack, fuzzed HTML, fuzzed flush windows); seeds in `tools/rule-pack-filter-corpus/` |
 | `rule_value_parser.{h,cc}` | The `value` object shape checks all kinds share; each kind passes a `ValueSpec` |
@@ -63,6 +64,7 @@ document ends.
   from the parsed tree).
 - **Errors** are `kInvalidArgument` with `<json path>: <reason>`; the loader adds
   the source name once, at the outermost level.
+- **Pack id** is any string matching `[a-z0-9-]{1,64}` (error `pack.id: must match [a-z0-9-]{1,64}`); the loaded id is `PackInfo::id`, and consumers (the admin page, the decision log directory) use it as loaded.
 - **Limits** live in `pack.h`. The fuzz harness checks only the rule count, a
   non-empty site list and a non-null kind on every rule of a loaded pack.
 - jsoncpp accepts raw control bytes inside strings (nlohmann rejected them).
@@ -152,6 +154,13 @@ longer rewritable (`HtmlParse::IsRewritable`). The filter is built around that:
 - **Debug comments** (`PackHost::debug_comments()`, the `debug` filter on a
   server) read `rule=<id> action=<a> mode=<m>` before each change, and
   `rule=<id> would=<a> mode=report` in report mode.
+- **Several packs** run as several filters over the same document, in load
+  order. At `DetermineEnabled` each selected rule claims `kind:<name>` (and
+  `header:link` for `link_header: match`) through `PackHost::Claim()`; a
+  target an earlier pack holds drops the rule from the selection and logs
+  `none` / `claimed` with `claimed_by`. Claims are cross-pack only, taken in
+  any mode and held when the owner's plan drops. A filter whose every rule
+  was claimed evaluates nothing and only logs its claims.
 - **The pack is fixed per filter.** A host that can see a new pack between
   documents builds a new filter for it (the rewriter does, per document), so
   the decisions a host logs always belong to the pack the filter holds.

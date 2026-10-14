@@ -197,8 +197,8 @@ absl::Status Loader::LoadInfo(const JsonValue& j) {
     PACKS_RETURN_IF_ERROR(LoadLicense(Member(j, "license")));
   }
 
-  if (info.id != kPackId) {
-    return JsonFail("pack.id", absl::StrCat("must be \"", kPackId, "\""));
+  if (!RE2::FullMatch(info.id, RuleIdRe())) {
+    return JsonFail("pack.id", "must match [a-z0-9-]{1,64}");
   }
   if (!RE2::FullMatch(info.version, SemverRe())) {
     return JsonFail("pack.version",

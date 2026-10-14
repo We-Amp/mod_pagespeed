@@ -98,6 +98,14 @@ XHTML_HEAD = (
 )
 
 
+LINK_HEADER_BODY = (
+    b'<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n'
+    b"<title>A page whose Link header names another canonical</title>\n"
+    b"</head>\n<body>\n<p>The canonical is in the Link header only.</p>\n"
+    b"</body>\n</html>\n"
+)
+
+
 class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "FlushOrigin/1.0"
@@ -145,6 +153,13 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header(name, value)
             self.send_header("Content-Length", "120")
             self.end_headers()
+        elif route == "link_header":
+            # What GET sends, minus the body.
+            self._start(
+                "text/html; charset=UTF-8",
+                [("Link", LINK_HEADER_LINK)],
+                length=len(LINK_HEADER_BODY),
+            )
         else:
             self.send_error(404)
 
@@ -207,13 +222,7 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
         elif route == "link_header":
             # One window, no flush before the head closes: the response
             # headers are still writable when the rule_packs filter decides.
-            body = (
-                b'<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n'
-                b"<title>A page whose Link header names another canonical</title>\n"
-                b"</head>\n<body>\n<p>The canonical is in the Link header only.</p>\n"
-                b"</body>\n</html>\n"
-            )
-            self._whole("text/html; charset=UTF-8", body, [("Link", LINK_HEADER_LINK)])
+            self._whole("text/html; charset=UTF-8", LINK_HEADER_BODY, [("Link", LINK_HEADER_LINK)])
         elif route == "link_header_late_body":
             body = (
                 b'<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n'

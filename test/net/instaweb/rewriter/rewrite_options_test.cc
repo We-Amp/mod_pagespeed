@@ -33,6 +33,7 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/packs/signature_format.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/message_handler_test_base.h"
@@ -894,7 +895,7 @@ TEST_F(RewriteOptionsTest, RulePacksIsOnlyEverOnByName) {
 }
 
 TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
-  EXPECT_TRUE(options_.rule_pack_file().empty());
+  EXPECT_TRUE(options_.rule_pack_files().empty());
   EXPECT_EQ(RewriteOptions::kRulePackModeReport, options_.rule_pack_mode());
 
   NullMessageHandler handler;
@@ -903,7 +904,8 @@ TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
       RewriteOptions::kOptionOk,
       options_.ParseAndSetOptionFromName1(
           "RulePackFile", "/etc/pagespeed/packs/site.json", &msg, &handler));
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", options_.rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            options_.rule_pack_files());
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("RulePackMode", "Enforce", &msg,
                                                 &handler));
@@ -946,11 +948,91 @@ TEST_F(RewriteOptionsTest, RulePackOptionsDefaultParseAndRoundTrip) {
   options_.set_rule_pack_mode(RewriteOptions::kRulePackModeEnforce);
   RewriteOptions merged(&thread_system_);
   merged.Merge(options_);
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", merged.rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            merged.rule_pack_files());
   EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, merged.rule_pack_mode());
   std::unique_ptr<RewriteOptions> clone(options_.Clone());
-  EXPECT_EQ("/etc/pagespeed/packs/site.json", clone->rule_pack_file());
+  EXPECT_EQ(std::vector<GoogleString>{"/etc/pagespeed/packs/site.json"},
+            clone->rule_pack_files());
   EXPECT_EQ(RewriteOptions::kRulePackModeEnforce, clone->rule_pack_mode());
+}
+
+// RulePackFile is a list: lines in one scope append in order, the first line
+// of a scope replaces an inherited list, the same path twice collapses, and a
+// ninth distinct file is a configuration error.
+TEST_F(RewriteOptionsTest, RulePackFileIsAList) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  EXPECT_TRUE(options_.rule_pack_files().empty());
+
+  // One line: a list of one.
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("RulePackFile", "/p/a.json",
+                                                &msg, &handler));
+  ASSERT_EQ(1u, options_.rule_pack_files().size());
+  EXPECT_EQ("/p/a.json", options_.rule_pack_files()[0]);
+
+  // A second line in the same scope appends.
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("RulePackFile", "/p/b.json",
+                                                &msg, &handler));
+  ASSERT_EQ(2u, options_.rule_pack_files().size());
+  EXPECT_EQ("/p/a.json", options_.rule_pack_files()[0]);
+  EXPECT_EQ("/p/b.json", options_.rule_pack_files()[1]);
+
+  // The same path spelled differently collapses to the first entry.
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                "RulePackFile", "/p//x/../a.json", &msg, &handler));
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("RulePackFile", "/p/./b.json",
+                                                &msg, &handler));
+  EXPECT_EQ(2u, options_.rule_pack_files().size());
+
+  // A scope that sets the option replaces the inherited list.
+  RewriteOptions vhost(&thread_system_);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("RulePackFile", "/p/c.json", &msg,
+                                             &handler));
+  RewriteOptions merged(&thread_system_);
+  merged.Merge(options_);
+  merged.Merge(vhost);
+  ASSERT_EQ(1u, merged.rule_pack_files().size());
+  EXPECT_EQ("/p/c.json", merged.rule_pack_files()[0]);
+  // A scope that does not set it inherits the list in order.
+  RewriteOptions untouched(&thread_system_);
+  RewriteOptions inherited(&thread_system_);
+  inherited.Merge(options_);
+  inherited.Merge(untouched);
+  ASSERT_EQ(2u, inherited.rule_pack_files().size());
+  EXPECT_EQ("/p/b.json", inherited.rule_pack_files()[1]);
+  std::unique_ptr<RewriteOptions> clone(options_.Clone());
+  EXPECT_EQ(options_.rule_pack_files(), clone->rule_pack_files());
+
+  // The ninth distinct file is refused with a clear message.
+  RewriteOptions many(&thread_system_);
+  for (int i = 1; i <= 8; ++i) {
+    ASSERT_EQ(RewriteOptions::kOptionOk,
+              many.ParseAndSetOptionFromName1(
+                  "RulePackFile", StrCat("/p/", IntegerToString(i), ".json"),
+                  &msg, &handler))
+        << i;
+  }
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            many.ParseAndSetOptionFromName1("RulePackFile", "/p/9.json", &msg,
+                                            &handler));
+  EXPECT_NE(GoogleString::npos, msg.find("at most 8 rule pack files"));
+  EXPECT_EQ(8u, many.rule_pack_files().size());
+  // A repeat of an existing path is not a ninth file.
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            many.ParseAndSetOptionFromName1("RulePackFile", "/p/1.json", &msg,
+                                            &handler));
+}
+
+TEST_F(RewriteOptionsTest, RulePackFileListIsNotSettableFromAQuery) {
+  EXPECT_EQ(RewriteOptions::kOptionNameUnknown,
+            options_.SetOptionFromQuery("RulePackFile", "/p/a.json"));
+  EXPECT_TRUE(options_.rule_pack_files().empty());
 }
 
 // Neither option changes what is cached: both stay out of the signature.
@@ -961,6 +1043,27 @@ TEST_F(RewriteOptionsTest, RulePackOptionsAreNotInTheSignature) {
   options_.ComputeSignature();
   with->ComputeSignature();
   EXPECT_EQ(options_.signature(), with->signature());
+}
+
+TEST_F(RewriteOptionsTest, RulePackTrustListGainsBuiltInKey) {
+  NullMessageHandler handler;
+  GoogleString msg;
+  // The option itself lists only what the configuration names.
+  EXPECT_TRUE(options_.rule_pack_trust_keys().empty());
+  EXPECT_EQ(1u, pagespeed::packs::WithBuiltInTrustKey(
+                    options_.rule_pack_trust_keys())
+                    .size());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName2(
+                RewriteOptions::kRulePackTrustKey, "a-publisher",
+                "fuRqJ3FnXonzbp8KuLy7yWR8oZU8Yue62CUrstW39Z4=", &msg,
+                &handler));
+  ASSERT_EQ(1u, options_.rule_pack_trust_keys().size());
+  const std::vector<pagespeed::packs::TrustKey> effective =
+      pagespeed::packs::WithBuiltInTrustKey(options_.rule_pack_trust_keys());
+  ASSERT_EQ(2u, effective.size());
+  EXPECT_EQ("a-publisher", effective[0].key_id);
+  EXPECT_EQ("we-amp", effective[1].key_id);
 }
 
 TEST_F(RewriteOptionsTest, RulePackSigningOptionsParseAndMerge) {

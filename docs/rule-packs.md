@@ -17,8 +17,10 @@ records what it would change and changes nothing.
 - It handles five kinds of head element: `canonical`, `title`, `description`,
   `hreflang` and `jsonld` (and, when asked, the `Link` response header for the
   canonical). It does not edit anything else in the page.
-- One pack file per server (virtual host or site). The pack id must be
-  `edge-seo`; the loader rejects any other id.
+- A server (virtual host or site) can load one pack file or several, up to
+  eight; see [Several packs on one server](#several-packs-on-one-server). A
+  pack id is 1 to 64 lowercase letters, digits or `-`, and is unique on the
+  server.
 - The pack is data, not code; applying it fetches nothing over the network. A
   pack can be signed, but does not have to be; see [Signed packs](#signed-packs).
 - It is designed not to fail a response: a pack that does not load, a page it
@@ -77,7 +79,8 @@ Top-level keys: `pack`, `sites` and `rules` are required; `defaults` and
 `tables` are optional. Unknown keys, repeated keys and unknown placeholders are
 load errors, so a typo cannot quietly become a different rule.
 
-- `pack`: `id` (must be `edge-seo`) and `version` (`MAJOR.MINOR.PATCH`, or the pack fails to load) are required. Optional:
+- `pack`: `id` (`[a-z0-9-]`, 1 to 64 characters, unique among the packs of one
+  server; it names the pack's log directory) and `version` (`MAJOR.MINOR.PATCH`, or the pack fails to load) are required. Optional:
   `publisher` (default `local`), `description`, and `engine_min`, a module
   version the pack needs; an older module refuses to load it. `publisher` is
   also the key id a signed pack is signed with (see [Signed packs](#signed-packs)).
@@ -182,12 +185,98 @@ On IIS, set the options at the top level of `pagespeed.config`, not inside a
 `host:` match block. Keep the pack outside the site's web root; the application
 pool identity needs read access.
 
+To load more than one pack, repeat `RulePackFile`; see the next section.
+
 The serving process reads the pack the first time it needs it, not when the
 configuration is parsed. A graceful restart or reload picks up a changed file.
 As a safety net a process that needs the pack checks the file again once 10
 seconds have passed since its last check, and reloads it when the content
 changed, so processes can disagree for up to 10 seconds. If a new file fails to
 load, the process keeps the last good pack and logs the error.
+
+## Several packs on one server
+
+Repeat `RulePackFile` to load more than one pack on a server. Each line adds
+one file:
+
+```apache
+<VirtualHost *:443>
+  ServerName www.example.com
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /etc/pagespeed/packs/seo.json
+  ModPagespeedRulePackFile /etc/pagespeed/packs/extras.json
+  ModPagespeedRulePackMode report
+</VirtualHost>
+```
+
+nginx and IIS take the same repeated line (`pagespeed RulePackFile ...`).
+
+- **Limits.** At most eight files per configuration scope; a ninth is a
+  configuration error. Two lines that name the same path (after `.`, `..` and
+  repeated separators are resolved) count once. A link to a file is not
+  resolved when the configuration is read; it is caught by the duplicate id
+  rule below.
+- **Scope.** A virtual host that sets `RulePackFile` at least once uses its own
+  list and ignores the server-wide one. A virtual host that sets none inherits
+  the server-wide list.
+- **Order.** The packs load and run in the order of the lines. The decision
+  log, the admin page and the claims below all use this order.
+- **Ids.** Every pack on a server needs its own id. A file whose id is already
+  used by an earlier file is refused: it logs `rule pack refused (duplicate
+  id)` once per process and file version, and counts
+  `rule_pack_refused_duplicate_id`. The earlier pack keeps working.
+- **Each pack decides alone.** A pack applies its own `sites`, `defaults` and
+  modes, and reads the page as the origin sent it. A pack does not see what an
+  earlier pack inserted.
+- **Claims: the first pack wins.** When a pack's rule is selected for a page
+  (its site lists the host and the rule's paths match), the pack claims that
+  kind of element on the page. For `link_header: match` rules it also claims
+  the `Link` header. A later pack's rule of a claimed kind changes nothing and
+  logs action `none` with reason `claimed` and `claimed_by`, the id of the
+  owner (see [Decision log](#decision-log)). Claims are per page and do not
+  depend on modes or on how the response is chunked. A pack never claims
+  against itself: two rules of one kind in one pack behave as before.
+- **Report mode still owns.** A pack in report mode keeps a later pack in
+  enforce mode off the same kind. When two packs carry rules of one kind and
+  their modes differ, in either order, the server logs one warning per
+  process:
+  `rule pack overlap: <kind> owned by <first id> (report) before <later id>
+  (enforce); the later pack will not act on it`. The admin page and the JSON
+  status show the warning. List the pack you want to act first, or move the
+  kind out of the other pack.
+- **Empty value.** `RulePackFile` with an empty value clears the inherited list.
+- **Repeated lines.** Earlier releases used only the last `RulePackFile` line
+  of a scope. Now every line is kept, so check your configuration for a stray
+  second line before you upgrade.
+- **Envoy.** An Envoy virtual host takes one `RulePackFile`. Put the rules of
+  that host in one pack file. Apache, nginx and IIS take the full list.
+
+### Upgrading
+
+A configuration written for a single pack needs no change. One `RulePackFile`
+line is a list of one; the pack, its id (including `edge-seo`), the decision
+log path and line format, the counters and the admin page's `?raw=1` output are
+as they were. A host with one pack never logs `claimed`.
+
+### Page counters with two packs
+
+The page counters (`rule_pack_pages_evaluated`, `..._modified`,
+`..._would_modify` and the skipped ones) move once for each pack that
+evaluated the page. Take a page with no canonical and no title, in enforce
+mode. Pack A has a canonical rule. Pack B has a title rule and a canonical
+rule.
+
+| Counter | Change for this page |
+|---|---|
+| `rule_pack_pages_evaluated` | +2 (A and B) |
+| `rule_pack_pages_modified` | +2 |
+| `rule_pack_decisions_applied` | +2 (A's canonical, B's title) |
+| `rule_pack_decisions_claimed` | +1 (B's canonical, owned by A) |
+
+Now take a pack C, listed after A, whose only rule is a canonical rule. C has
+nothing left to evaluate on that page: it adds no page counters, only one
+`rule_pack_decisions_claimed` and one `claimed` line in its own log. For
+per-pack numbers, count the lines in each pack's decision log.
 
 ## When decisions are made, per kind
 
@@ -250,6 +339,20 @@ preloads loses that head start. A pack without such a rule does not change when
 headers go out. The first response in each server process can still be held until
 the pack has been read.
 
+### HEAD requests on Apache
+
+A pack edits the `Link` header while it parses the HTML body, and a `HEAD`
+response has no body. So on Apache a `HEAD` request returns the origin's `Link`
+header, and the `GET` of the same URL returns the edited one. A crawler that
+probes with `HEAD` can see a different canonical than a browser does. To see
+what the pack serves, use `GET`.
+
+The other `Link` entries (preload, preconnect, ...) are the origin's on both.
+The module removes the origin's `Content-Length` from HTML it rewrites, so a
+`HEAD` response to such a page carries no `Content-Length` header (not `0`),
+while the `GET` response can carry the length of the body it sends. Do not rely
+on a `HEAD` response for the size of a page.
+
 ## Daemon servers
 
 On Apache, nginx and IIS the optimizer daemon serves no HTML, and the module
@@ -261,8 +364,10 @@ daemon behaviour.
 
 ## Decision log
 
-Where: `<LogDir>/packs/<pack-id>/decisions-YYYY-MM-DD.jsonl`, with a UTC date,
-`LogDir` is the existing option and
+Where: `<LogDir>/packs/<pack-id>/decisions-YYYY-MM-DD.jsonl`, with a UTC date.
+Each pack on a server has its own directory, named by its id, and a rule's
+lines go to the log of the pack it belongs to, so a `claimed` line is in the
+log of the later pack. `LogDir` is the existing option and
 must be writable by the server user. On Linux and macOS the files are created
 with mode 0640 (readers need the server's group); on Windows they inherit the
 directory's ACL. With an empty `LogDir` there is no log (the
@@ -273,10 +378,27 @@ since the epoch), `pack` (`id@version`), `sha256` (first 16 hex digits of the
 pack file's hash), `host`, `path` (with the query, cut at 300 bytes), `rule`,
 `kind`, `mode`, `action` (`insert`, `fill`, `replace`, `remove`, `dedupe`,
 `none`), `reason` (such as `equal`, `present`, `late_conflict`,
-`not_rewritable`), `defect` (always present, empty when none), `before` (a hash),
-`after` (cut at 200 bytes), and `removed` when elements were removed. The line
-for the `Link` header action carries `"header": true`. Page values are hashed,
-except `removed`, which holds page values (hrefs, `@type`s) in clear text.
+`not_rewritable`, `claimed`), `claimed_by` (only on a `claimed` line: the id of
+the pack that owns the kind), `defect` (always present, empty when none),
+`before` (a hash), `after` (cut at 200 bytes), and `removed` when elements were
+removed. The line for the `Link` header action carries `"header": true`. Page
+values are hashed, except `removed`, which holds page values (hrefs, `@type`s)
+in clear text.
+
+When a host runs more than one pack, the packs load in configuration order and
+the first pack whose rule is selected for a page (its site lists the host and
+the rule's path scope matches) owns that rule's kind on the page; for a
+`link_header: match` rule it also owns the `Link` header. A later pack's rule
+of the same kind acts on nothing and logs action `none`, reason `claimed`, and
+`claimed_by` with the id of the owning pack. Ownership does not depend on the
+modes: a first pack that only reports still keeps a later enforcing pack off
+the kind, and it keeps it even when its own change is dropped as
+`not_rewritable`. Two rules of one kind in the same pack never log `claimed`
+(the first matching rule wins, as with one pack), so a host with one pack never
+sees the reason or the `claimed_by` field. When two packs on a host carry rules
+of the same kind and their modes differ, in either order, one warning per process
+says which pack owns it: `rule pack overlap: <kind> owned by <first id>
+(report) before <later id> (enforce); the later pack will not act on it`.
 
 The log does not record the client address, cookies or user agent. The path is
 logged with its query string, so treat the log as you would an access log.
@@ -311,7 +433,11 @@ On the statistics page; per virtual host with `UsePerVHostStatistics on`.
   `rule_pack_pages_would_modify`
 - Pages skipped: `rule_pack_pages_skipped_host_not_listed`, `..._no_head`,
   `..._malformed_head`, `..._not_rewritable`, `..._size_limit`
-- Decisions: `rule_pack_decisions_applied`, `rule_pack_decisions_would_apply`
+- Decisions: `rule_pack_decisions_applied`, `rule_pack_decisions_would_apply`,
+  `rule_pack_decisions_claimed` (a rule kept off a page by an earlier pack)
+- Duplicate pack ids: `rule_pack_refused_duplicate_id` (a file whose pack has
+  the id of a pack loaded earlier on the host; once per process and file
+  version)
 - Late elements: `rule_pack_late_removed`, `rule_pack_late_unremovable`
 - Header (move only with the Link header action): `rule_pack_headers_set`,
   `rule_pack_headers_flushed`
@@ -319,6 +445,9 @@ On the statistics page; per virtual host with `UsePerVHostStatistics on`.
 - `rule_pack_pages_skipped_error` is reserved and always 0.
 
 There are no per-rule counters. Per-rule numbers come from the decision log.
+With several packs on a host the page counters move once for each pack that
+evaluated the page (see [Page counters with two packs](#page-counters-with-two-packs));
+per-pack numbers come from the decision log too.
 
 ## Limits
 
@@ -381,7 +510,9 @@ else in the file makes the signature unreadable.
 the server trusts. The key is 44 base64 characters (32 bytes). You can repeat
 the directive, up to 16 keys per server or virtual host. A virtual host adds to
 the server's keys, and a virtual host key with the same id replaces the server's.
-There is no built-in key: a server trusts only the keys you list.
+Packs signed by the We-Amp publisher key (key id `we-amp`) verify without a
+`RulePackTrustKey` line; the directive adds your own keys, and a key you list
+with the id `we-amp` replaces the built-in one.
 `RulePackRequireSigned on|off` (default `off`) decides what happens to a pack
 that fails the check. Both directives are server-scoped, like `RulePackFile`: they cannot be
 set in `.htaccess`, `<Directory>`, an nginx `location` block or an IIS match
@@ -408,7 +539,7 @@ that fails names the reason.
 1. `unsigned`: there is no `.sig` file.
 2. `signature unreadable`: the sidecar cannot be read or is not in the format above.
 3. `publisher mismatch`: the key id in the sidecar is not the pack's `publisher`.
-4. `unknown key`: no `RulePackTrustKey` for that key id.
+4. `unknown key`: that key id is neither the built-in `we-amp` key nor listed by a `RulePackTrustKey`.
 5. `bad signature`: the signature does not match the pack's bytes and that key.
 
 A pack that passes all five is `verified`. The check runs when the file is
@@ -489,12 +620,14 @@ page.
 For the virtual host the request reached, it shows:
 
 - whether the `rule_packs` filter is enabled, `RulePackFile` and `RulePackMode`;
-- the pack the server process that answers has loaded: id, version,
-  publisher, SHA-256, load state (loaded, failed and keeping the earlier pack,
-  refused, none), the time of the last load event, the last load error and the
-  loader's warnings. Looking at the page never loads a pack: a process that
-  has not yet served a page that needs the pack shows none, and another
-  process can show a different state;
+- every `RulePackFile` of the host, in load order, and for each the pack the
+  server process that answers has loaded: id, version, publisher, SHA-256,
+  load state (loaded, failed and keeping the earlier pack, refused, none, or
+  duplicate id for a file whose pack id an earlier file already uses), the
+  time of the last load event, the last load error and the loader's warnings;
+  the overlap warnings between packs. Looking at the page never loads a pack:
+  a process that has not yet served a page that needs the pack shows none, and
+  another process can show a different state;
 - the `rule_pack_*` statistics;
 - two static links, to the packs catalogue and to this documentation; the server makes
   no request for them;
@@ -504,11 +637,38 @@ For the virtual host the request reached, it shows:
   lines of that host; the whole-server admin page shows every host.
 
 Query parameters: `?rule=`, `?action=` and `?reason=` keep only matching
-lines; `?limit=` caps the number of lines shown (default 100, at most 1000);
-`?raw=1` returns the selected lines as plain text, one JSON object per line.
+lines; `?pack=<id>` selects the pack whose log is shown (default: the pack of the first
+`RulePackFile`, if this process has loaded it; otherwise the logs of the pack
+directories under `<LogDir>/packs/` are merged, looking at no more than 256
+directory entries and 8 pack ids); `?limit=` caps the number of lines shown (default 100, at most 1000);
+`?raw=1` returns the selected lines as plain text, one JSON object per line
+(for a host with one pack, the same text as before).
 The page reads at most the last 1 MiB of the day file, so on a busy day the
 oldest lines of the day are not shown. With an empty `LogDir` the page says the
 log is off.
+
+### JSON status
+
+`/pagespeed_admin/rule_packs?json=1` returns the same status as one JSON
+document (`application/json`), for scripts and monitoring. It takes the same
+`?pack=`, `?rule=`, `?action=`, `?reason=` and `?limit=` parameters. The top
+level keys are:
+
+| Key | Content |
+|---|---|
+| `schema` | `1`. It changes only when a key is removed or changes meaning; new keys can appear without a change. |
+| `scope`, `host`, `generated_at` | The scope the page describes, its host, an ISO-8601 UTC time. |
+| `configuration` | `filter_enabled`, `rule_pack_files` (in load order), `rule_pack_mode`, `rule_pack_require_signed`. |
+| `packs` | One object per file, in load order: `position`, `file`, `state`, `id`, `version`, `publisher`, `key_id`, `sha256`, `last_event_at`, `last_error`, `warnings`, `license` (the pack's `license` object as written in the file, or `null`). `state` is one of `loaded`, `failed-keeping-earlier`, `refused`, `none` or `duplicate-id`. |
+| `overlap_warnings` | The overlap warnings, as text. |
+| `counters` | The `rule_pack_*` statistics, or `null` when statistics are off. |
+| `decisions` | `date`, `pack`, `limit`, `status`, `error` and `rows`. `status` is `ok`, `log_dir_not_set`, `no_pack_file`, `error` or `missing`; `error` is `null` unless `status` is `error`. `rows` are the selected log lines, newest first for one pack. In the merged listing (see `?pack=` above) the per-pack tails are joined in id order and reversed, so rows are not in time order across packs. A row has `at`, `ts_ms`, `pack_id`, `pack_version`, `sha256_prefix`, `host`, `path`, `rule`, `kind`, `mode`, `action`, `reason`, `defect`, `before`, `after`, `claimed_by` (`null` unless the reason is `claimed`), `removed` and `header`. |
+
+Keys are snake_case. A pack that this process has not loaded yet has `null`
+for `id`, `version`, `publisher` and `sha256`, as on the HTML page.
+
+The admin console has a Rule packs view with the same status and a shorter
+decision table.
 
 ## Operating it
 
@@ -534,6 +694,9 @@ log is off.
   well-formed head, which is only evaluated once a rule matched (`no_head`,
   `malformed_head`); (6) the mode is not still report at one of the three
   levels.
+- A second pack does nothing. Check the log of the later pack for `claimed`
+  lines (an earlier pack owns the kind), the error log for `rule pack refused
+  (duplicate id)`, and the overlap warning in the admin page.
 - The pack did not load. `rule_pack_load_errors` goes up and the error log has a
   warning, `rule pack <path> (sha256=<64 hex>) failed to load: <path>: <json
   path>: <reason>; keeping the pack loaded earlier` (or `; the rule_packs filter

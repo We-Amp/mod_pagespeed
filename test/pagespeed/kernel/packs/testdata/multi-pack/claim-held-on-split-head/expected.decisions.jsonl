@@ -1,0 +1,2 @@
+{"host":"fixture.test","path":"/split/page","rule":"a-title-split","kind":"title","mode":"enforce","action":"replace","reason":"present","defect":"","before":"fnv1a64:d321d294c5e49e24","after":"Title A for /split/page"}
+{"host":"fixture.test","path":"/split/page","rule":"b-title-split","kind":"title","mode":"enforce","action":"none","reason":"claimed","defect":"","before":"","after":"","claimed_by":"edge-seo"}

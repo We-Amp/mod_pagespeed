@@ -136,6 +136,9 @@ void RulePackFilter::BeginPage() {
   late_.fill(LateState());
   norms_.fill(NormCache());
   header_decision_.fill(std::nullopt);
+  claimed_.clear();
+  for (std::string& holder : header_claimed_by_) holder.clear();
+  claimed_only_ = false;
   modified_ = false;
   headers_modified_ = false;
   would_modify_ = false;
@@ -167,6 +170,17 @@ void RulePackFilter::DetermineEnabled(GoogleString* disabled_reason) {
     *disabled_reason = "rule_packs: no rule for this path";
     return;
   }
+  TakeClaims();
+  if (!claimed_.empty()) {
+    any = false;
+    for (const auto& hit : selection_.by_kind) any = any || hit.has_value();
+    if (!any) {
+      // Only the claimed decisions to log, at the end of the document.
+      claimed_only_ = true;
+      set_is_enabled(true);
+      return;
+    }
+  }
   // A kind that decides at the end of the document may quote the head values
   // the document ends with, even those no rule of the pack selects for this
   // path: they are read off the page.
@@ -178,6 +192,34 @@ void RulePackFilter::DetermineEnabled(GoogleString* disabled_reason) {
   }
   active_ = true;
   set_is_enabled(true);
+}
+
+void RulePackFilter::TakeClaims() {
+  for (const RuleKind* kind : AllKinds()) {
+    const size_t i = KindIndex(kind);
+    std::optional<RuleHit>& hit = selection_.by_kind[i];
+    if (!hit.has_value()) continue;
+    const Rule& rule = *hit->rule;
+    const std::string* holder =
+        host_->Claim(absl::StrCat("kind:", kind->name()), pack_->info.id);
+    if (holder != nullptr) {
+      PackDecision d;
+      d.rule_id = rule.id;
+      d.kind = kind;
+      d.mode =
+          EffectiveMode(directive_mode_, selection_.site->mode, rule.enforce);
+      d.action = Action::kNone;
+      d.reason = Reason::kClaimed;
+      d.claimed_by = *holder;
+      claimed_.push_back(std::move(d));
+      hit.reset();
+      continue;
+    }
+    if (rule.link_header == LinkHeaderMode::kMatch) {
+      holder = host_->Claim("header:link", pack_->info.id);
+      if (holder != nullptr) header_claimed_by_[i] = *holder;
+    }
+  }
 }
 
 void RulePackFilter::StartDocument() {
@@ -434,6 +476,14 @@ void RulePackFilter::ApplyHeaders(const PagePlan& plan) {
     d.mode = rp.decision.mode;
     d.header = true;
     const size_t i = KindIndex(rp.decision.kind);
+    if (!header_claimed_by_[i].empty()) {
+      // An earlier pack keeps the header in line with its own rule.
+      d.action = Action::kNone;
+      d.reason = Reason::kClaimed;
+      d.claimed_by = header_claimed_by_[i];
+      header_decision_[i] = std::move(d);
+      continue;
+    }
     if (headers_flushed_) {
       d.action = Action::kNone;
       d.reason = Reason::kHeadersFlushed;
@@ -820,6 +870,7 @@ void RulePackFilter::Report() {
       break;
   }
   for (const PackDecision& d : decisions_) {
+    if (d.reason == Reason::kClaimed) host_->Count(Counter::kDecisionsClaimed);
     if (d.action == Action::kNone || d.reason == Reason::kNotRewritable) {
       continue;
     }
@@ -836,12 +887,26 @@ void RulePackFilter::Report() {
 }
 
 void RulePackFilter::EndDocument() {
+  if (claimed_only_) {
+    // The page was not evaluated by this pack: no page counters, only the
+    // rules that another pack kept off it.
+    claimed_only_ = false;
+    decisions_ = std::move(claimed_);
+    claimed_.clear();
+    for (const PackDecision& d : decisions_) {
+      host_->Count(Counter::kDecisionsClaimed);
+      host_->Decision(url_, d);
+    }
+    return;
+  }
   if (!active_) return;
   if (text_element_ != nullptr) FinishTextElement();
   if (!head_decided_) DecideHead();
   DecideDocumentEnd();
   FinalizeHeadDecisions();
   FinalizeDocumentDecisions();
+  for (PackDecision& d : claimed_) decisions_.push_back(std::move(d));
+  claimed_.clear();
   Report();
   active_ = false;
 }

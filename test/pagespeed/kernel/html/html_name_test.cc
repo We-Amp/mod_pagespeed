@@ -55,9 +55,9 @@ TEST_F(HtmlNameTest, TemplateKeyword) {
 TEST_F(HtmlNameTest, ConvergedKeywordUnion) {
   // Keywords converged with ModPageSpeed 2.0's html_name table:
   // living-standard attributes/tags 2.0 once lacked, plus the 1.15-internal
-  // data-pagespeed-srcset-url-hashes.  The 2.0 table adopts the same union
-  // (We-Amp/pagespeed-optimizer#1140), keeping the two Keyword enums identical
-  // so a single canonical html_name (#1130 vendoring) is ordinal-preserving.
+  // data-pagespeed-srcset-url-hashes. The 2.0 table adopts the same union,
+  // keeping the two Keyword enums identical so a single canonical html_name is
+  // ordinal-preserving.
   EXPECT_EQ(HtmlName::kAllowfullscreen, HtmlName::Lookup("allowfullscreen"));
   EXPECT_EQ(HtmlName::kDecoding, HtmlName::Lookup("decoding"));
   EXPECT_EQ(HtmlName::kDialog, HtmlName::Lookup("dialog"));

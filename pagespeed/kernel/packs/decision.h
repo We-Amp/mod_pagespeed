@@ -38,6 +38,9 @@ enum class Reason {
   kHeaderConflict,
   // The response headers were already sent.
   kHeadersFlushed,
+  // A pack loaded earlier on the host already holds the rule's target on
+  // this page (first wins), so the rule acts on nothing.
+  kClaimed,
 };
 
 std::string_view ActionName(Action action);
@@ -70,6 +73,9 @@ struct PackDecision {
   // The decision is about the `Link: rel=canonical` response header, not the
   // document. Written to the log line as `"header":true`.
   bool header = false;
+  // The id of the pack that holds the target, for reason `claimed` only.
+  // Written to the log line as `"claimed_by"` when not empty.
+  std::string claimed_by;
 
   bool operator==(const PackDecision&) const = default;
 };
@@ -86,7 +92,7 @@ std::string HashValue(std::string_view value);
 // One JSON object, no trailing newline, keys in a fixed order:
 // host, path, rule, kind, mode, action, reason, defect, before, after and,
 // only when something was removed, removed and, only for a response header
-// decision, header. The path
+// decision, header and, only for a claimed decision, claimed_by. The path
 // is cut to 300 bytes. Contains no timestamp or pack identity: the sink that
 // writes the line adds them.
 std::string DecisionToJsonLine(std::string_view host, std::string_view path,

@@ -1,0 +1,58 @@
+{
+  "pack": {
+    "id": "fixture-second",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "Second of two packs on one virtual host (system test)"
+  },
+  "sites": [
+    {
+      "host": "rulepacks-multi.example.com",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "multi-b-title",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mod_pagespeed_test/rule_packs/**"
+        ]
+      },
+      "value": {
+        "template": "Second title for {path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "multi-b-description",
+      "kind": "description",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mod_pagespeed_test/rule_packs/**"
+        ]
+      },
+      "value": {
+        "template": "Second description for {path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "multi-b-canonical",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/mod_pagespeed_test/rule_packs/**"
+        ]
+      },
+      "value": {
+        "template": "https://second.example.com{path}"
+      },
+      "on_present": "replace"
+    }
+  ]
+}

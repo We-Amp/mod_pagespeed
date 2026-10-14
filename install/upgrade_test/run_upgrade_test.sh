@@ -861,7 +861,7 @@ fi
 if [[ -z "$REPO_URL" ]]; then
   step "upgrading in place from the release assets (both packages in one transaction)"
   if [[ "$FAMILY" == deb ]]; then
-    in_ctr "apt-get install -y /pkgs/pagespeed-optimizer_*.deb /pkgs/mod-pagespeed_*.deb" >"$WORK/logs/upgrade.log" 2>&1 \
+    in_ctr "apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold /pkgs/pagespeed-optimizer_*.deb /pkgs/mod-pagespeed_*.deb" >"$WORK/logs/upgrade.log" 2>&1 \
       || { tail -40 "$WORK/logs/upgrade.log"; die "apt-get install of the pair failed"; }
   else
     in_ctr "dnf install -y /pkgs/pagespeed-optimizer-*.rpm /pkgs/mod-pagespeed-*.rpm" >"$WORK/logs/upgrade.log" 2>&1 \
@@ -876,8 +876,11 @@ else
     "if [ -n \"\$PACKAGES_USER\" ]; then curl -fsSL -u \"\$PACKAGES_USER:\$PACKAGES_PASS\" '${REPO_URL%/staging}/install.sh' | sh; else curl -fsSL '${REPO_URL%/staging}/install.sh' | sh; fi" \
     >"$WORK/logs/install-sh-upgrade.log" 2>&1 \
     || { tail -20 "$WORK/logs/install-sh-upgrade.log"; die "install.sh (upgrade source) failed"; }
+  # The script edited pagespeed.conf above; when the shipped conffile also
+  # changed, dpkg prompts and dies on EOF. Keep the local file, as
+  # unattended upgrades do (the check below asserts it is kept).
   if [[ "$FAMILY" == deb ]]; then
-    in_ctr "apt-get update -qq && apt-get install -y mod-pagespeed" >"$WORK/logs/upgrade.log" 2>&1 \
+    in_ctr "apt-get update -qq && apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold mod-pagespeed" >"$WORK/logs/upgrade.log" 2>&1 \
       || { tail -40 "$WORK/logs/upgrade.log"; die "apt-get install mod-pagespeed (repository upgrade) failed"; }
   else
     in_ctr "dnf upgrade -y mod-pagespeed" >"$WORK/logs/upgrade.log" 2>&1 \

@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-14
+
+### Added
+
+- Rule packs: a server can run several packs. Repeat `RulePackFile` to load
+  more than one pack; Apache, nginx and IIS take the same repeated line.
+  Envoy takes one `RulePackFile` per virtual host. A scope takes at most
+  eight files, and a ninth is a configuration error. Two lines that name the
+  same path count once. A virtual host that sets `RulePackFile` uses its own
+  list and ignores the server-wide one; one that sets none inherits the
+  server-wide list.
+- Rule packs: packs run in configuration order, and the first pack wins.
+  When a pack's rule applies to a page, that pack claims the kind of element
+  (and, for a canonical rule with `link_header: match`, the `Link` header).
+  A later pack's rule of the same kind changes nothing and is logged with
+  action `none`, reason `claimed` and a `claimed_by` field naming the first
+  pack. This holds in report mode too: a first pack in report mode keeps a
+  later pack in enforce mode off that kind. When two packs carry rules of
+  one kind in different modes, the server logs one `rule pack overlap`
+  warning per process that names the owning pack. Each pack reads the page
+  as the origin sent it and does not see what an earlier pack inserted.
+- Rule packs: every pack on a server needs its own id. A file whose pack id
+  is already used by an earlier file is refused and logged once per process
+  and file version; the earlier pack keeps working.
+- Rule packs: a pack id can be any 1 to 64 lowercase letters, digits or `-`,
+  not only `edge-seo`.
+- Rule packs: each pack writes its own decision log under
+  `<LogDir>/packs/<pack-id>/`, and a `claimed` line goes to the log of the
+  pack that was kept off the page.
+- Rule packs: two new statistics, `rule_pack_decisions_claimed` (a rule kept
+  off a page by an earlier pack) and `rule_pack_refused_duplicate_id` (a
+  file refused for a duplicate pack id).
+- Rule packs: packs signed with the We-Amp publisher key (key id `we-amp`)
+  verify without a `RulePackTrustKey` line. `RulePackTrustKey` lines add
+  your own keys beside the built-in one, and a key you list with the id
+  `we-amp` replaces it. `RulePackRequireSigned` is unchanged.
+- Rule packs: the admin page (`/pagespeed_admin/rule_packs`) lists every
+  `RulePackFile` of the host in load order, with each pack's id, version,
+  publisher, SHA-256, load state, last error, warnings and licence fields,
+  and the overlap warnings. `?pack=<id>` picks the pack whose decision log
+  is shown. The page also shows `RulePackRequireSigned`.
+- Rule packs: `/pagespeed_admin/rule_packs?json=1` returns the same status
+  as one JSON document for scripts and monitoring: the configuration, every
+  pack, the overlap warnings, the `rule_pack_*` statistics and the selected
+  decision-log lines. It carries a `schema` number (`1`) that changes only
+  when a key is removed or changes meaning.
+- Admin console: a Rule packs view shows the configuration, every pack in
+  load order with its state, the overlap warnings, the counters and the
+  newest decisions, with filters by pack, action, reason and rule. It
+  replaces the console's link to the server-rendered page, which stays
+  available.
+
+### Changed
+
+- Rule packs: every `RulePackFile` line of a scope is now loaded, in order.
+  Earlier releases used only the last one. In 1.18.0 every pack had the id
+  `edge-seo`, so on a host whose lines name two different files the first
+  file now runs and the second, the one earlier releases used, is refused as
+  a duplicate id. Remove any stray extra `RulePackFile` line before you
+  upgrade. A configuration with one `RulePackFile` line needs no change: the
+  pack, its id, the decision log path and line format, the counters and the
+  admin page's `?raw=1` output are as they were.
+- Rule packs on Apache: a `HEAD` response carries the origin's `Link`
+  header, not the one the pack writes for `GET`, because the pack edits the
+  header while it reads the HTML body. A crawler that probes with `HEAD` can
+  see a different canonical than a browser does. Check canonicals with
+  `GET`.
+
+### Fixed
+
+- With `hint_preload_subresources` enabled, an author-written `<link
+  rel=modulepreload>` hint is now removed when it names a module script that
+  has been rewritten (its URL changed), so browsers no longer fetch the
+  original module in addition to the rewritten one. Hints for imported
+  modules, whose URLs are never rewritten, are kept.
+
 ## [2.3.0] - 2026-10-12
 
 ### Security

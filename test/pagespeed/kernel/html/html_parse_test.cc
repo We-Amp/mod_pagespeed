@@ -110,9 +110,9 @@ TEST_F(HtmlParseTest, RetainBogusEndTag) {
       "</script>");
 }
 
-// Cross-ported from pagespeed-optimizer (We-Amp/pagespeed-optimizer) html_parse_test.cc;
-// these exercise the HTML-comment escape states inside <script> that
-// HtmlLexer tracks with HtmlCommentEscapeState (We-Amp/pagespeed-optimizer#1139).
+// Cross-ported from pagespeed-optimizer (We-Amp/pagespeed-optimizer)
+// html_parse_test.cc; these exercise the HTML-comment escape states inside
+// <script> that HtmlLexer tracks with HtmlCommentEscapeState.
 TEST_F(HtmlParseTest, ScriptWithCommentEscaping) {
   // Script with <!-- ... //--> pattern and nested < > characters.
   ValidateNoChanges("script_with_comment_escaping",
@@ -141,9 +141,9 @@ TEST_F(HtmlParseTest, ScriptWithNestedHtmlComment) {
                     "//--></script>");
 }
 
-// Cross-ported from pagespeed-optimizer's EofInScript: EOF while inside a script
-// tag emits the remaining content and implicitly closes the element without
-// inserting a </script> into the output.
+// Cross-ported from pagespeed-optimizer's EofInScript: EOF while inside a
+// script tag emits the remaining content and implicitly closes the element
+// without inserting a </script> into the output.
 TEST_F(HtmlParseTest, EofInScript) {
   ValidateNoChanges("eof_in_script", "<script>var x = 1;");
 }
@@ -1189,9 +1189,9 @@ TEST_F(HtmlAnnotationTest, ScriptQuirkBasic) {
   EXPECT_EQ("+script '<!--<script>-->' -script(e) 'a</script>b'", annotation());
 }
 
-// Cross-ported from pagespeed-optimizer (We-Amp/pagespeed-optimizer) html_parse_test.cc,
-// where the lexer tracks this with the HtmlCommentEscapeState enum that this
-// change adopts.  See We-Amp/pagespeed-optimizer#1139.
+// Cross-ported from pagespeed-optimizer (We-Amp/pagespeed-optimizer)
+// html_parse_test.cc, where the lexer tracks this with the
+// HtmlCommentEscapeState enum that this change adopts.
 TEST_F(HtmlAnnotationTest, ScriptDoubleEscapedCommentState) {
   // WHATWG script double-escape: <script> inside <script><!-- ... enters a
   // second escape level.  The first </script> only pops back to the comment

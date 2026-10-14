@@ -22,6 +22,7 @@ import type {
   DaemonAlternatesResponse,
   DaemonLogsResponse,
   TimeRangeParams,
+  RulePacksResponse,
 } from "./types";
 
 import { NetworkError, connection } from "./connection";
@@ -243,6 +244,15 @@ export class AdminApiClient {
       query.set("granularity", String(params.granularity_ms));
     const qs = query.toString();
     return this.get<ConsoleResponse>(`/console${qs ? `?${qs}` : ""}`);
+  }
+
+  // ── Rule packs ─────────────────────────────────────────────
+
+  /** The Rule packs status as JSON; `pack` selects whose decision log the tail is read from. */
+  async getRulePacks(pack?: string): Promise<RulePacksResponse> {
+    const query = new URLSearchParams({ json: "1", limit: "1000" });
+    if (pack) query.set("pack", pack);
+    return this.get<RulePacksResponse>(`/rule_packs?${query.toString()}`);
   }
 
   // ── Messages ───────────────────────────────────────────────

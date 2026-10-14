@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -66,6 +67,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/packs/decision.h"
 #include "pagespeed/kernel/packs/pack.h"
+#include "pagespeed/kernel/packs/pack_host.h"
 #include "pagespeed/kernel/packs/pack_loader.h"
 #include "pagespeed/kernel/packs/url_norm.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -94,13 +96,23 @@ class FixtureProvider : public RulePackProvider {
     pack_.pack = std::move(pack);
     pack_.sha256 = "fixture";
   }
+  // The pack of the file at `path`; any other path gets the pack of
+  // set_pack().
+  void SetFor(const std::string& path,
+              std::shared_ptr<const pagespeed::packs::Pack> pack) {
+    LoadedRulePack& loaded = others_[path];
+    loaded.pack = std::move(pack);
+    loaded.sha256 = "fixture";
+  }
+  void ClearFiles() { others_.clear(); }
   LoadedRulePack Get(const std::string& path,
                      const pagespeed::packs::PackTrust& trust,
                      MessageHandler* handler, LoadEvent* event,
                      SignatureEvent* signature_event) override {
     *event = LoadEvent::kNone;
     *signature_event = SignatureEvent::kNone;
-    return pack_;
+    auto other = others_.find(path);
+    return other == others_.end() ? pack_ : other->second;
   }
   LogResult LogDecision(const RewriteOptions& options,
                         const LoadedRulePack& pack,
@@ -108,15 +120,36 @@ class FixtureProvider : public RulePackProvider {
                         const PackDecision& decision, int64_t now_ms,
                         MessageHandler* handler) override {
     decisions_.push_back(decision);
+    ids_.push_back(pack.pack->info.id);
     return LogResult::kWritten;
   }
   std::vector<PackDecision> TakeDecisions() {
+    ids_.clear();
     return std::exchange(decisions_, {});
+  }
+  // The decisions grouped by pack, in the order of `ids`, and for each the
+  // index of its pack in `ids`.
+  std::vector<PackDecision> TakeGrouped(const std::vector<std::string>& ids,
+                                        std::vector<size_t>* pack_of) {
+    std::vector<PackDecision> out;
+    pack_of->clear();
+    for (size_t i = 0; i < ids.size(); ++i) {
+      for (size_t j = 0; j < decisions_.size(); ++j) {
+        if (ids_[j] != ids[i]) continue;
+        out.push_back(decisions_[j]);
+        pack_of->push_back(i);
+      }
+    }
+    decisions_.clear();
+    ids_.clear();
+    return out;
   }
 
  private:
   LoadedRulePack pack_;
+  std::map<std::string, LoadedRulePack> others_;
   std::vector<PackDecision> decisions_;
+  std::vector<std::string> ids_;
 };
 
 // The chain variants.
@@ -283,6 +316,10 @@ class RulePackChainTest : public RewriteTestBase {
     std::vector<size_t> flush_after;
     // The response headers the origin sent; the driver has none when unset.
     std::optional<std::vector<HeaderLine>> origin_headers;
+    // Several pack files on the vhost, in order (RulePackFile lines), and the
+    // ids of the packs the host runs, in order. Empty: the one file.
+    std::vector<std::string> pack_paths;
+    std::vector<std::string> pack_ids;
   };
 
   // Runs `html` (served at `url`) through a fresh driver of the chain.
@@ -296,7 +333,14 @@ class RulePackChainTest : public RewriteTestBase {
     if (chain.debug) o->EnableFilter(RewriteOptions::kDebug);
     if (chain.with_pack) {
       o->EnableFilter(RewriteOptions::kRulePacks);
-      o->set_rule_pack_file(kPackPath);
+      if (chain.pack_paths.empty()) {
+        o->set_rule_pack_file(kPackPath);
+      } else {
+        for (const std::string& path : chain.pack_paths) {
+          GoogleString msg;
+          EXPECT_TRUE(o->AddRulePackFile(path, &msg)) << msg;
+        }
+      }
       o->set_rule_pack_mode(chain.mode == pagespeed::packs::Mode::kReport
                                 ? RewriteOptions::kRulePackModeReport
                                 : RewriteOptions::kRulePackModeEnforce);
@@ -339,7 +383,12 @@ class RulePackChainTest : public RewriteTestBase {
     }
     d->Clear();
     delete d;
-    result.decisions = provider_.TakeDecisions();
+    if (chain.pack_paths.empty()) {
+      result.decisions = provider_.TakeDecisions();
+    } else {
+      result.decisions =
+          provider_.TakeGrouped(chain.pack_ids, &result.decision_pack);
+    }
     if (chain.debug) result.html = WithoutDebugFilterComments(result.html);
     return result;
   }
@@ -385,8 +434,8 @@ TEST_P(RulePackFixtureTest, HoldsTheProperties) {
   auto loaded = pagespeed::packs::LoadPackFile(
       absl::StrCat(kFixturesDir, "/", kernel->pack_file), "");
   ASSERT_TRUE(loaded.ok()) << loaded.status();
-  auto full_pack = std::make_shared<const pagespeed::packs::Pack>(
-      *std::move(loaded));
+  auto full_pack =
+      std::make_shared<const pagespeed::packs::Pack>(*std::move(loaded));
   provider_.set_pack(full_pack);
 
   // The override list is the kernel runner's.
@@ -694,6 +743,61 @@ TEST_F(RulePackSystemPagesTest, AHostTheFileDoesNotListIsLeftAlone) {
   EXPECT_TRUE(r.decisions.empty());
 }
 
+// The packs of the multi-pack system test vhosts (install/.../rule_packs/multi)
+// through the same chain.
+class RulePackSystemMultiPagesTest : public RulePackChainTest {
+ protected:
+  RunResult RunMulti(const std::string& host,
+                     const std::vector<std::string>& files,
+                     const std::vector<std::string>& ids) {
+    Chain chain;
+    chain.variant = &Variants()[0];
+    for (size_t i = 0; i < files.size(); ++i) {
+      auto loaded = pagespeed::packs::LoadPackFile(
+          absl::StrCat(kSystemTestDir, "/multi/", files[i]), "");
+      EXPECT_TRUE(loaded.ok()) << loaded.status();
+      const std::string path =
+          absl::StrCat("/etc/pagespeed/packs/system-multi-", i, ".json");
+      provider_.SetFor(path, std::make_shared<const pagespeed::packs::Pack>(
+                                 *std::move(loaded)));
+      chain.pack_paths.push_back(path);
+    }
+    chain.pack_ids = ids;
+    auto html = pagespeed::packs::ReadFile(std::string(kSystemTestDir) +
+                                           "/missing.html");
+    EXPECT_TRUE(html.ok()) << html.status();
+    return Run(chain,
+               absl::StrCat("http://", host, kSystemTestPath, "missing.html"),
+               html.ok() ? *html : "");
+  }
+};
+
+TEST_F(RulePackSystemMultiPagesTest, TheFirstPackOwnsTheKindBothCarry) {
+  const RunResult r =
+      RunMulti("rulepacks-multi.example.com", {"a.json", "b.json"},
+               {"edge-seo", "fixture-second"});
+  const Facts facts = CollectFacts(r.html);
+  const std::string path = absl::StrCat(kSystemTestPath, "missing.html");
+  EXPECT_EQ(
+      facts.canonicals,
+      std::vector<std::string>{"https://rulepacks-multi.example.com" + path});
+  EXPECT_EQ(facts.titles, std::vector<std::string>{"Second title for " + path});
+  EXPECT_EQ(facts.descriptions,
+            std::vector<std::string>{"Second description for " + path});
+  ASSERT_EQ(r.decisions.size(), 4u);
+  EXPECT_EQ(r.decisions[3].reason, pagespeed::packs::Reason::kClaimed);
+  EXPECT_EQ(r.decisions[3].claimed_by, "edge-seo");
+}
+
+TEST_F(RulePackSystemMultiPagesTest, ASecondFileWithTheSamePackIdIsRefused) {
+  const RunResult r = RunMulti("rulepacks-multi-dup.example.com",
+                               {"a.json", "dup.json"}, {"edge-seo"});
+  const Facts facts = CollectFacts(r.html);
+  EXPECT_EQ(facts.canonicals.size(), 1u);
+  EXPECT_TRUE(facts.titles.empty());
+  EXPECT_EQ(r.decisions.size(), 1u);
+}
+
 // The Link header cases of the system test, on the pages and headers its
 // flush origin serves (test/system/pagespeed_test_framework/flush_origin.py).
 TEST_F(RulePackSystemPagesTest, TheLinkHeaderRuleReplacesOnlyTheConflict) {
@@ -753,6 +857,271 @@ TEST_F(RulePackSystemPagesTest, TheLinkHeaderIsSkippedAfterAFlush) {
   ASSERT_EQ(r.decisions.size(), 2u);
   EXPECT_EQ(r.decisions[1].reason, pagespeed::packs::Reason::kHeadersFlushed);
   EXPECT_TRUE(r.decisions[1].header);
+}
+
+// ---------------------------------------------------------------------------
+// Several packs on one vhost: the cases of testdata/multi-pack through the
+// chain, in the three variants.
+// ---------------------------------------------------------------------------
+
+constexpr char kMultiFixturesDir[] =
+    "test/pagespeed/kernel/packs/testdata/multi-pack";
+
+class RulePackMultiFixtureTest
+    : public RulePackChainTest,
+      public testing::WithParamInterface<FixtureCase> {
+ protected:
+  // Loads the pack files of `run` into the provider (the files as the vhost
+  // lists them, `transform` applied to the packs the host runs) and returns
+  // the paths and the ids of the packs the host runs.
+  void SetPacks(
+      const CaseRun& run, Chain* chain,
+      const std::function<std::shared_ptr<const pagespeed::packs::Pack>(
+          size_t, std::shared_ptr<const pagespeed::packs::Pack>)>& transform) {
+    provider_.ClearFiles();
+    chain->pack_paths.clear();
+    chain->pack_ids.clear();
+    size_t running = 0;
+    for (size_t i = 0; i < run.pack_files.size(); ++i) {
+      auto loaded = pagespeed::packs::LoadPackFile(
+          absl::StrCat(kMultiFixturesDir, "/", run.pack_files[i]), "");
+      ASSERT_TRUE(loaded.ok()) << loaded.status();
+      auto pack =
+          std::make_shared<const pagespeed::packs::Pack>(*std::move(loaded));
+      const std::string path =
+          absl::StrCat("/etc/pagespeed/packs/multi-", i, ".json");
+      if (!run.refused[i]) {
+        chain->pack_ids.push_back(pack->info.id);
+        pack = transform(running++, std::move(pack));
+      }
+      provider_.SetFor(path, std::move(pack));
+      chain->pack_paths.push_back(path);
+    }
+  }
+};
+
+TEST_P(RulePackMultiFixtureTest, HoldsTheProperties) {
+  const FixtureCase& c = GetParam();
+  auto kernel = pagespeed::packs::RunCase(kMultiFixturesDir, c);
+  ASSERT_TRUE(kernel.ok()) << kernel.status();
+  auto expected = pagespeed::packs::ReadExpected(c);
+  ASSERT_TRUE(expected.ok()) << expected.status();
+  const CaseRun& run = *kernel;
+  const std::string forced_report =
+      DecisionsToJsonl(run.host, run.path, run.enforce.decisions, true);
+  const Facts expected_facts = CollectFacts(expected->html);
+  const std::vector<HeaderLine> origin_link = LinkLines(run.origin_headers);
+  auto keep = [](size_t, std::shared_ptr<const pagespeed::packs::Pack> p) {
+    return p;
+  };
+  std::string alone_decisions;
+  std::vector<HeaderLine> alone_link;
+
+  for (const Variant& variant : Variants()) {
+    SCOPED_TRACE(variant.name);
+    const bool alone = !variant.core_filters;
+    Chain base;
+    base.variant = &variant;
+    base.mode = run.directive_mode;
+    base.flush_after = run.flush_cuts;
+    if (run.has_origin_headers) base.origin_headers = run.origin_headers;
+    SetPacks(run, &base, keep);
+    Chain pack_free = base;
+    pack_free.with_pack = false;
+    Chain report = base;
+    report.mode = pagespeed::packs::Mode::kReport;
+
+    RunResult whole = Run(base, run.url, run.input_html);
+    RunResult roundtrip = Run(pack_free, run.url, run.input_html);
+    RunResult reported = Run(report, run.url, run.input_html);
+    const std::string decisions =
+        DecisionsToJsonl(run.host, run.path, whole.decisions, false);
+
+    // The reference runs of the chunked property: every way of dropping the
+    // head and/or the end-of-document plan of each pack (claims kept).
+    CaseRun refs;
+    refs.drop_states = run.drop_states;
+    std::vector<std::vector<unsigned>> states = run.drop_states;
+    for (const std::vector<unsigned>& state : states) {
+      Chain ref_chain = base;
+      SetPacks(run, &ref_chain,
+               [&](size_t i, std::shared_ptr<const pagespeed::packs::Pack> p) {
+                 return pagespeed::packs::ClaimOnlyPack(*p, state[i]);
+               });
+      refs.drop_runs.push_back(Run(ref_chain, run.url, run.input_html));
+    }
+    SetPacks(run, &base, keep);
+
+    // One pack runs (a single file, or the second is refused): the
+    // single-pack references.
+    RunResult head_only;
+    RunResult document_only;
+    if (run.drop_states.empty()) {
+      auto loaded = pagespeed::packs::LoadPackFile(
+          absl::StrCat(kMultiFixturesDir, "/", run.pack_files[0]), "");
+      ASSERT_TRUE(loaded.ok()) << loaded.status();
+      auto full =
+          std::make_shared<const pagespeed::packs::Pack>(*std::move(loaded));
+      const std::string first = base.pack_paths[0];
+      provider_.SetFor(first, pagespeed::packs::HeadOnlyPack(*full));
+      head_only = Run(base, run.url, run.input_html);
+      provider_.SetFor(first, pagespeed::packs::DocumentEndOnlyPack(*full));
+      document_only = Run(base, run.url, run.input_html);
+      provider_.SetFor(first, full);
+    }
+
+    if (alone) {
+      EXPECT_EQ(whole.html, expected->html);
+      EXPECT_EQ(decisions, expected->decisions);
+      alone_decisions = decisions;
+      alone_link = LinkLines(whole.headers);
+      if (run.has_origin_headers) {
+        EXPECT_EQ(pagespeed::packs::HeadersToText(whole.headers),
+                  expected->headers);
+      }
+      // idempotence
+      Chain again_chain = base;
+      if (run.has_origin_headers) again_chain.origin_headers = whole.headers;
+      RunResult again = Run(again_chain, run.url, whole.html);
+      EXPECT_EQ(again.html, whole.html);
+      EXPECT_EQ(again.headers, whole.headers);
+      for (const PackDecision& d : again.decisions) {
+        if (d.mode != pagespeed::packs::Mode::kEnforce) continue;
+        EXPECT_EQ(d.action, pagespeed::packs::Action::kNone) << d.rule_id;
+      }
+      // determinism, and device independence
+      RunResult second = Run(base, run.url, run.input_html);
+      EXPECT_EQ(second.html, whole.html);
+      EXPECT_EQ(second.decisions, whole.decisions);
+      for (const char* agent : {kAndroidAgent, kIpadAgent}) {
+        Chain device = base;
+        device.user_agent = agent;
+        RunResult other = Run(device, run.url, run.input_html);
+        EXPECT_EQ(other.html, whole.html) << agent;
+        EXPECT_EQ(other.decisions, whole.decisions) << agent;
+      }
+    } else {
+      EXPECT_EQ(decisions, alone_decisions);
+      const Facts got = CollectFacts(whole.html);
+      EXPECT_EQ(got.canonicals, expected_facts.canonicals);
+      EXPECT_EQ(got.titles, expected_facts.titles);
+      EXPECT_EQ(got.descriptions, expected_facts.descriptions);
+      EXPECT_EQ(got.json_ld, expected_facts.json_ld);
+      EXPECT_EQ(LinkLines(whole.headers), alone_link);
+    }
+
+    // report-only
+    EXPECT_EQ(DecisionsToJsonl(run.host, run.path, reported.decisions, false),
+              forced_report);
+    EXPECT_EQ(LinkLines(reported.headers), origin_link);
+    EXPECT_EQ(reported.html, roundtrip.html);
+
+    // chunked
+    for (const pagespeed::packs::Chunking& chunking :
+         pagespeed::packs::ChunkingsFor(run.input_html)) {
+      SCOPED_TRACE(chunking.name);
+      const std::vector<size_t> cuts =
+          MergeCuts(chunking.flush_after, run.flush_cuts);
+      Chain chunked = base;
+      chunked.flush_after = cuts;
+      Chain chunked_free = pack_free;
+      chunked_free.flush_after = cuts;
+      Chain chunked_report = report;
+      chunked_report.flush_after = cuts;
+      RunResult cr = Run(chunked, run.url, run.input_html);
+      RunResult cr_free = Run(chunked_free, run.url, run.input_html);
+      RunResult cr_report = Run(chunked_report, run.url, run.input_html);
+      std::function<bool(const std::string&, const std::string&)> same;
+      if (!alone) {
+        same = [](const std::string& a, const std::string& b) {
+          return CollectFacts(a) == CollectFacts(b);
+        };
+      }
+      std::string why;
+      if (run.drop_states.empty()) {
+        EXPECT_TRUE(pagespeed::packs::ChunkedOutcomeAllowed(
+            whole, cr, cr_free.html, &why, same, &head_only.html,
+            &document_only.html))
+            << why;
+      } else {
+        EXPECT_TRUE(pagespeed::packs::ChunkedOutcomeAllowedForPacks(
+            whole, refs, cr, cr_free.html, &why, same))
+            << why;
+      }
+      EXPECT_TRUE(alone ? pagespeed::packs::ChunkedHeadersAllowed(
+                              whole, cr, run.origin_headers)
+                        : pagespeed::packs::ChunkedHeadersAllowed(
+                              LinkOnly(whole), LinkOnly(cr), origin_link))
+          << pagespeed::packs::DescribeDecisions(cr.decisions);
+      EXPECT_EQ(cr_report.html, cr_free.html);
+      // The claimed decisions are the same in every chunking.
+      auto claimed = [](const RunResult& r) {
+        std::vector<std::string> out;
+        for (const PackDecision& d : r.decisions) {
+          if (d.reason == pagespeed::packs::Reason::kClaimed) {
+            out.push_back(absl::StrCat(d.rule_id, "<-", d.claimed_by));
+          }
+        }
+        return out;
+      };
+      EXPECT_EQ(claimed(cr), claimed(whole));
+      EXPECT_EQ(claimed(cr_report), claimed(whole));
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MultiPack, RulePackMultiFixtureTest,
+    testing::ValuesIn(pagespeed::packs::ListFixtureCases(kMultiFixturesDir)),
+    [](const testing::TestParamInfo<FixtureCase>& info) {
+      std::string n = info.param.name;
+      for (char& ch : n) {
+        if (ch == '-') ch = '_';
+      }
+      return n;
+    });
+
+// The counters of the server: a claim moves rule_pack_decisions_claimed, a
+// refused duplicate id moves rule_pack_refused_duplicate_id (once).
+class RulePackMultiCounterTest : public RulePackMultiFixtureTest {
+ protected:
+  int64_t Stat(pagespeed::packs::Counter counter) {
+    Variable* v =
+        statistics()->GetVariable(pagespeed::packs::CounterName(counter));
+    return v == nullptr ? -1 : v->Get();
+  }
+  RunResult RunNamed(const std::string& name) {
+    FixtureCase c{name, absl::StrCat(kMultiFixturesDir, "/", name)};
+    auto kernel = pagespeed::packs::RunCase(kMultiFixturesDir, c);
+    EXPECT_TRUE(kernel.ok()) << kernel.status();
+    Chain chain;
+    chain.variant = &Variants()[0];
+    SetPacks(*kernel, &chain,
+             [](size_t, std::shared_ptr<const pagespeed::packs::Pack> p) {
+               return p;
+             });
+    if (kernel->has_origin_headers)
+      chain.origin_headers = kernel->origin_headers;
+    return Run(chain, kernel->url, kernel->input_html);
+  }
+};
+
+TEST_F(RulePackMultiCounterTest, AClaimIsCounted) {
+  using pagespeed::packs::Counter;
+  RunNamed("disjoint-kinds");
+  EXPECT_EQ(0, Stat(Counter::kDecisionsClaimed));
+  RunNamed("same-kind-keep-first");
+  EXPECT_EQ(1, Stat(Counter::kDecisionsClaimed));
+}
+
+TEST_F(RulePackMultiCounterTest, ADuplicateIdIsRefusedAndTheFirstPackActs) {
+  using pagespeed::packs::Counter;
+  const RunResult r = RunNamed("duplicate-id");
+  EXPECT_EQ(1, Stat(Counter::kRefusedDuplicateId));
+  ASSERT_EQ(1u, r.decisions.size());
+  EXPECT_EQ("a-canonical-disjoint", r.decisions[0].rule_id);
+  EXPECT_EQ(1u, CollectFacts(r.html).canonicals.size());
+  EXPECT_TRUE(CollectFacts(r.html).titles.empty());
 }
 
 INSTANTIATE_TEST_SUITE_P(

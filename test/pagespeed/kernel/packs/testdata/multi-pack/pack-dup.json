@@ -1,0 +1,30 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "Second file with the id of the first"
+  },
+  "sites": [
+    {
+      "host": "fixture.test",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "dup-title",
+      "kind": "title",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/disjoint/**"
+        ]
+      },
+      "value": {
+        "template": "Title from the duplicate"
+      },
+      "on_present": "keep"
+    }
+  ]
+}

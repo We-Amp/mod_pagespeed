@@ -1405,5 +1405,117 @@ TEST_F(RulePackFilterTest, LinkHeaderDecisionsFollowTheirRuleInOrder) {
   EXPECT_EQ(r.decisions[2].rule_id, "t");
 }
 
+// ---------------------------------------------------------------------------
+// Claims: several packs on one document.
+// ---------------------------------------------------------------------------
+
+TEST(ClaimSetTest, FirstPackWinsAndNeverLosesToItself) {
+  ClaimSet claims;
+  EXPECT_EQ(nullptr, claims.Claim("kind:canonical", "edge-seo"));
+  EXPECT_EQ(nullptr, claims.Claim("kind:canonical", "edge-seo"));
+  const std::string* holder = claims.Claim("kind:canonical", "fixture-second");
+  ASSERT_NE(nullptr, holder);
+  EXPECT_EQ("edge-seo", *holder);
+  EXPECT_EQ(nullptr, claims.Claim("kind:title", "fixture-second"));
+  EXPECT_EQ(2u, claims.size());
+  claims.Clear();
+  EXPECT_EQ(nullptr, claims.Claim("kind:canonical", "fixture-second"));
+}
+
+// The same pack under another id, for a second pack on the document.
+std::shared_ptr<const Pack> WithId(std::shared_ptr<const Pack> pack,
+                                   std::string_view id) {
+  Pack copy = *pack;
+  copy.info.id = std::string(id);
+  return std::make_shared<const Pack>(std::move(copy));
+}
+
+// Two filters on one parser, as a host runs two packs: they share the claim
+// set, the first pack's kinds are its own, the second acts on the rest.
+TEST(RulePackClaimTest, TheSecondPackActsOnlyOnKindsTheFirstLeftFree) {
+  net_instaweb::HtmlKeywords::Init();
+  ClaimSet claims;
+  TestPackHost host_a, host_b;
+  host_a.set_claims(&claims);
+  host_b.set_claims(&claims);
+  net_instaweb::NullMessageHandler handler;
+  net_instaweb::HtmlParse parser(&handler);
+  RulePackFilter a(&parser, MakePack(kCanonicalKeep), Mode::kEnforce, &host_a);
+  RulePackFilter b(
+      &parser,
+      WithId(MakePack(absl::StrCat(kCanonicalReplace, ",", kTitleKeep)),
+             "fixture-second"),
+      Mode::kEnforce, &host_b);
+  parser.AddFilter(&a);
+  parser.AddFilter(&b);
+  std::string out;
+  net_instaweb::StringWriter writer(&out);
+  net_instaweb::HtmlWriterFilter wf(&parser);
+  wf.set_writer(&writer);
+  parser.AddFilter(&wf);
+  claims.Clear();
+  ASSERT_TRUE(parser.StartParse("https://t.test/p"));
+  parser.ParseText("<html><head></head><body></body></html>");
+  parser.FinishParse();
+  EXPECT_EQ(
+      "<html><head><link rel=\"canonical\" href=\"https://t.test/p\">"
+      "<title>T /p</title></head><body></body></html>",
+      out);
+  ASSERT_EQ(1u, host_a.decisions().size());
+  EXPECT_EQ(Action::kInsert, host_a.decisions()[0].action);
+  ASSERT_EQ(2u, host_b.decisions().size());
+  EXPECT_EQ("t", host_b.decisions()[0].rule_id);
+  EXPECT_EQ(Action::kInsert, host_b.decisions()[0].action);
+  EXPECT_EQ("c", host_b.decisions()[1].rule_id);
+  EXPECT_EQ(Action::kNone, host_b.decisions()[1].action);
+  EXPECT_EQ(Reason::kClaimed, host_b.decisions()[1].reason);
+  EXPECT_EQ("edge-seo", host_b.decisions()[1].claimed_by);
+  EXPECT_EQ(1, host_b.count(Counter::kDecisionsClaimed));
+  EXPECT_EQ(0, host_a.count(Counter::kDecisionsClaimed));
+}
+
+// A second pack whose every selected rule is claimed evaluates nothing: it
+// only logs its claimed decisions.
+TEST(RulePackClaimTest, AFullyClaimedPackOnlyLogsItsClaims) {
+  net_instaweb::HtmlKeywords::Init();
+  ClaimSet claims;
+  TestPackHost host_a, host_b;
+  host_a.set_claims(&claims);
+  host_b.set_claims(&claims);
+  net_instaweb::NullMessageHandler handler;
+  net_instaweb::HtmlParse parser(&handler);
+  RulePackFilter a(&parser, MakePack(kCanonicalKeep, "report"), Mode::kEnforce,
+                   &host_a);
+  RulePackFilter b(&parser,
+                   WithId(MakePack(kCanonicalReplace), "fixture-second"),
+                   Mode::kEnforce, &host_b);
+  parser.AddFilter(&a);
+  parser.AddFilter(&b);
+  std::string out;
+  net_instaweb::StringWriter writer(&out);
+  net_instaweb::HtmlWriterFilter wf(&parser);
+  wf.set_writer(&writer);
+  parser.AddFilter(&wf);
+  const std::string html =
+      "<html><head><link rel=\"canonical\" href=\"https://x.test/\"></head>"
+      "<body></body></html>";
+  for (int i = 0; i < 2; ++i) {
+    claims.Clear();
+    out.clear();
+    ASSERT_TRUE(parser.StartParse("https://t.test/p"));
+    parser.ParseText(html);
+    parser.FinishParse();
+    EXPECT_EQ(html, out);
+  }
+  ASSERT_EQ(2u, host_b.decisions().size());
+  for (const PackDecision& d : host_b.decisions()) {
+    EXPECT_EQ(Reason::kClaimed, d.reason);
+    EXPECT_EQ(Mode::kEnforce, d.mode);
+  }
+  EXPECT_EQ(2, host_b.count(Counter::kDecisionsClaimed));
+  EXPECT_EQ(0, host_b.count(Counter::kPagesEvaluated));
+  EXPECT_EQ(2, host_a.count(Counter::kPagesEvaluated));
+}
+
 }  // namespace
 }  // namespace pagespeed::packs

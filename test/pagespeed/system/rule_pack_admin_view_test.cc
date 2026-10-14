@@ -170,9 +170,8 @@ TEST(RenderTest, ShowsThePackTheCountersAndTheRowsNewestFirst) {
   EXPECT_NE(std::string::npos, html.find("edge-seo"));
   EXPECT_NE(std::string::npos, html.find("0.1.0"));
   EXPECT_NE(std::string::npos, html.find("Example"));
-  EXPECT_NE(std::string::npos,
-            html.find("title=\"" + std::string(64, 'a') + "\">" +
-                      std::string(16, 'a')));
+  EXPECT_NE(std::string::npos, html.find("title=\"" + std::string(64, 'a') +
+                                         "\">" + std::string(16, 'a')));
   EXPECT_NE(std::string::npos, html.find("rule_pack_pages_evaluated"));
   EXPECT_NE(std::string::npos, html.find("a warning"));
   EXPECT_NE(std::string::npos, html.find("2026-10-11 12:00:00 UTC"));
@@ -188,8 +187,9 @@ TEST(RenderTest, LinksTheCatalogueAndTheDocs) {
   EXPECT_NE(std::string::npos,
             html.find("<a href=\"https://modpagespeed.com/packs/\">"
                       "Available packs: modpagespeed.com/packs</a>"));
-  EXPECT_NE(std::string::npos,
-            html.find("<a href=\"https://modpagespeed.com/docs/rule-packs/\">"));
+  EXPECT_NE(
+      std::string::npos,
+      html.find("<a href=\"https://modpagespeed.com/docs/rule-packs/\">"));
   EXPECT_EQ(std::string::npos, html.find("?engine="));
   // Plain text output is unchanged.
   EXPECT_EQ(std::string::npos, RenderRaw(page).find("modpagespeed.com"));
@@ -235,12 +235,15 @@ TEST(RenderTest, TheLimitCountsMatchesNotLines) {
   ASSERT_EQ(1u, rows.size());
   EXPECT_EQ(kNoon + 2000, rows[0].ts_ms);  // the newest match
   // A rule that only the oldest line has is still found.
-  page.tail.lines.push_back(Line(kNoon + 3000, "/c", "title-keep", "none", "x"));
-  page.tail.lines.push_back(Line(kNoon + 4000, "/d", "title-keep", "none", "x"));
+  page.tail.lines.push_back(
+      Line(kNoon + 3000, "/c", "title-keep", "none", "x"));
+  page.tail.lines.push_back(
+      Line(kNoon + 4000, "/d", "title-keep", "none", "x"));
   page.filter.rule = "canonical-keep";
   page.limit = 5;
   EXPECT_EQ(2u, SelectRows(page).size());
-  EXPECT_NE(std::string::npos, RenderHtml(page).find("2 matching, newest first"));
+  EXPECT_NE(std::string::npos,
+            RenderHtml(page).find("2 matching, newest first"));
 }
 
 TEST(RenderTest, AVhostShowsOnlyItsHostCaseInsensitively) {
@@ -299,6 +302,148 @@ TEST(RenderTest, SaysWhenThereIsNothingToShow) {
   page.no_pack_file = false;
   EXPECT_NE(std::string::npos,
             RenderHtml(page).find("not yet loaded in this process"));
+}
+
+// Two packs, the second licensed and verified, with an overlap.
+Page TwoPackPage() {
+  Page page = LoadedPage();
+  page.require_signed = true;
+  page.now_ms = kNoon + 5000;
+  page.tail_pack = "edge-seo";
+  PackEntry first;
+  first.file = "/etc/packs/edge.json";
+  first.state = "loaded";
+  first.last_event_ms = kNoon;
+  first.pack = page.pack;
+  PackEntry second;
+  second.file = "/etc/packs/second.json";
+  second.state = "failed-keeping-earlier";
+  second.last_event_ms = kNoon + 1000;
+  second.last_error = "unexpected key";
+  second.pack.present = true;
+  second.pack.id = "fixture-second";
+  second.pack.version = "1.2.0";
+  second.pack.publisher = "Example";
+  second.pack.sha256 = std::string(64, 'b');
+  second.pack.key_id = "example-key";
+  second.pack.license.present = true;
+  second.pack.license.label = "Second pack";
+  second.pack.license.expires = "2027-10-31";
+  second.pack.license.terms = "https://example.com/terms";
+  PackEntry third;
+  third.file = "/etc/packs/missing.json";
+  third.state = "none";
+  page.packs = {first, second, third};
+  page.overlap_warnings = {"rule pack overlap: title owned by edge-seo"};
+  return page;
+}
+
+constexpr char kTwoPackJson[] =
+    R"({"configuration":{"filter_enabled":true,"rule_pack_files":)"
+    R"(["/etc/packs/edge.json","/etc/packs/second.json",)"
+    R"("/etc/packs/missing.json"],"rule_pack_mode":"report",)"
+    R"("rule_pack_require_signed":true},"counters":)"
+    R"({"rule_pack_pages_evaluated":3},"decisions":{"date":"2026-10-11",)"
+    R"("error":null,"limit":100,"pack":"edge-seo","rows":[)"
+    R"({"action":"insert","after":"","at":"2026-10-11T12:00:02Z",)"
+    R"("before":"","claimed_by":null,"defect":"","header":false,"host":"t.test",)"
+    R"("kind":"canonical","mode":"report","pack_id":"edge-seo","pack_version":"0.1.0",)"
+    R"("path":"/<script>alert(1)</script>","reason":"missing","removed":"",)"
+    R"("rule":"canonical-keep","sha256_prefix":"0123456789abcdef",)"
+    R"("ts_ms":1791720002000},)"
+    R"({"action":"none","after":"","at":"2026-10-11T12:00:01Z",)"
+    R"("before":"","claimed_by":null,"defect":"","header":false,"host":"t.test",)"
+    R"("kind":"canonical","mode":"report","pack_id":"edge-seo","pack_version":"0.1.0",)"
+    R"("path":"/b","reason":"present","removed":"","rule":"title-keep",)"
+    R"("sha256_prefix":"0123456789abcdef","ts_ms":1791720001000},)"
+    R"({"action":"insert","after":"","at":"2026-10-11T12:00:00Z",)"
+    R"("before":"","claimed_by":null,"defect":"","header":false,"host":"t.test",)"
+    R"("kind":"canonical","mode":"report","pack_id":"edge-seo","pack_version":"0.1.0",)"
+    R"("path":"/a","reason":"missing","removed":"","rule":"canonical-keep",)"
+    R"("sha256_prefix":"0123456789abcdef","ts_ms":1791720000000}],)"
+    R"("status":"ok"},"generated_at":"2026-10-11T12:00:05Z",)"
+    R"("host":"t.test","overlap_warnings":)"
+    R"(["rule pack overlap: title owned by edge-seo"],"packs":[)"
+    R"({"file":"/etc/packs/edge.json","id":"edge-seo","key_id":null,)"
+    R"("last_error":null,"last_event_at":"2026-10-11T12:00:00Z",)"
+    R"("license":null,"position":0,"publisher":"Example",)"
+    R"("sha256":")"
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    R"(","state":"loaded","version":"0.1.0","warnings":["a warning"]},)"
+    R"({"file":"/etc/packs/second.json","id":"fixture-second",)"
+    R"("key_id":"example-key","last_error":"unexpected key",)"
+    R"("last_event_at":"2026-10-11T12:00:01Z","license":{"expires":)"
+    R"("2027-10-31","label":"Second pack","terms":)"
+    R"("https://example.com/terms"},"position":1,"publisher":"Example",)"
+    R"("sha256":")"
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    R"(","state":"failed-keeping-earlier","version":"1.2.0",)"
+    R"("warnings":[]},{"file":"/etc/packs/missing.json","id":null,)"
+    R"("key_id":null,"last_error":null,"last_event_at":null,"license":null,)"
+    R"("position":2,"publisher":null,"sha256":null,"state":"none",)"
+    R"("version":null,"warnings":[]}],"schema":1,"scope":"vhost"}
+)";
+
+// The JSON is a contract: the exact text is pinned.
+TEST(JsonTest, TheShapeIsPinned) {
+  EXPECT_EQ(std::string(kTwoPackJson), RenderJson(TwoPackPage()));
+}
+
+TEST(JsonTest, NoCountersNoLogAreStatusesNotErrors) {
+  Page page = TwoPackPage();
+  page.have_counters = false;
+  page.log_off = true;
+  const std::string json = RenderJson(page);
+  EXPECT_NE(std::string::npos, json.find("\"counters\":null"));
+  EXPECT_NE(std::string::npos, json.find("\"status\":\"log_dir_not_set\""));
+  EXPECT_NE(std::string::npos, json.find("\"rows\":[]"));
+}
+
+TEST(JsonTest, AFilterNarrowsTheRows) {
+  Page page = TwoPackPage();
+  page.tail.lines.push_back(
+      "{\"ts\":1791720003000,\"host\":\"t.test\",\"path\":\"/c\","
+      "\"rule\":\"x\",\"action\":\"none\",\"reason\":\"claimed\","
+      "\"claimed_by\":\"edge-seo\"}");
+  const std::string claimed = RenderJson(page);
+  EXPECT_NE(std::string::npos, claimed.find("\"claimed_by\":\"edge-seo\""));
+  page.filter.rule = "title-keep";
+  const std::string json = RenderJson(page);
+  EXPECT_NE(std::string::npos, json.find("\"path\":\"/b\""));
+  EXPECT_EQ(std::string::npos, json.find("\"path\":\"/a\""));
+}
+
+TEST(RenderTest, SeveralPacksAreListedInOrderWithStateAndLicenseText) {
+  const std::string html = RenderHtml(TwoPackPage());
+  const size_t first = html.find(">edge-seo<");
+  const size_t second = html.find(">fixture-second<");
+  ASSERT_NE(std::string::npos, first);
+  ASSERT_NE(std::string::npos, second);
+  EXPECT_LT(first, second);
+  EXPECT_NE(std::string::npos, html.find("failed-keeping-earlier"));
+  EXPECT_NE(std::string::npos, html.find("unexpected key"));
+  EXPECT_NE(std::string::npos, html.find("Second pack, expires 2027-10-31, "
+                                         "https://example.com/terms"));
+  EXPECT_NE(std::string::npos, html.find(">example-key<"));
+  EXPECT_NE(std::string::npos, html.find("rule pack overlap: title owned"));
+  EXPECT_NE(std::string::npos, html.find("/etc/packs/missing.json"));
+  EXPECT_NE(std::string::npos, html.find("RulePackRequireSigned"));
+  EXPECT_NE(std::string::npos, html.find("href=\"?pack=fixture-second\""));
+  EXPECT_NE(std::string::npos, html.find("Decisions of pack edge-seo"));
+}
+
+TEST(RenderTest, AnExplicitPackIsKeptByTheRawLinkAndTheForm) {
+  Page page = TwoPackPage();
+  page.tail_pack = "fixture-second";
+  page.tail_pack_requested = true;
+  const std::string html = RenderHtml(page);
+  EXPECT_NE(std::string::npos, html.find("&amp;pack=fixture-second"));
+  EXPECT_NE(std::string::npos,
+            html.find("name=\"pack\" value=\"fixture-second"));
+  // Without ?pack= the single-pack page has no trace of it.
+  const std::string plain = RenderHtml(LoadedPage());
+  EXPECT_EQ(std::string::npos, plain.find("pack="));
+  EXPECT_EQ(std::string::npos, plain.find("Packs (load order)"));
 }
 
 }  // namespace

@@ -465,16 +465,16 @@ uint32_t ServeMaskWithIdentityEncoding(uint32_t mask);
 // mismatch and yet not refuse one: a variant matching on viewport, density,
 // Save-Data and encoding still scored 200, so for a client that advertised
 // WebP and a URL with only an AVIF variant, `ps_cache_read_best` returned the
-// AVIF one (We-Amp/pagespeed-optimizer#1331) and serving it emitted bytes in a
-// format the client never said it could decode.  The peer's own fix
-// (its #1334) hard-disqualifies a mismatched RASTER format in the scorer, so
-// at the pinned daemon a family of WebP and AVIF variants no longer hands
-// this module an AVIF one for a client that advertised neither -- with no
-// compatible member it now selects nothing, and the arm falls through to the
-// by-id read below.  kSvg is the case the fix does NOT cover, deliberately:
-// the peer awards a stored SVG variant its universal bonus whatever the
-// client's format is, so an SVG variant still arrives here and is still
-// refused by this predicate.  That regime is what the retry below exists for.
+// AVIF one and serving it emitted bytes in a format the client never said it
+// could decode. The peer's own fix (a later release) hard-disqualifies a
+// mismatched RASTER format in the scorer, so at the pinned daemon a family of
+// WebP and AVIF variants no longer hands this module an AVIF one for a client
+// that advertised neither -- with no compatible member it now selects nothing,
+// and the arm falls through to the by-id read below. kSvg is the case the fix
+// does NOT cover, deliberately: the peer awards a stored SVG variant its
+// universal bonus whatever the client's format is, so an SVG variant still
+// arrives here and is still refused by this predicate. That regime is what the
+// retry below exists for.
 //
 // THE CHECK STAYS, and not out of caution.  Three reasons, none of which
 // depend on the defect: the peer's scoring is not published contract and can
@@ -782,8 +782,8 @@ GoogleString ServeVaryFieldValue(const DaemonServeDecision& decision,
 // headers, and its eligibility rules -- `gzip_min_length` (default 20, not
 // the per-leg composition's mirrored 68), the configured `gzip_types`,
 // `gzip_vary`, an operator override of any of them -- cannot be consulted or
-// influenced from here.  Every case the mirror cannot see narrows the key on one leg against
-// the other, and narrowing is the dangerous direction (see above).
+// influenced from here. Every case the mirror cannot see narrows the key on one
+// leg against the other, and narrowing is the dangerous direction (see above).
 //
 // So this composition states the encoding token on both legs whenever the
 // served media type is compressible, with NO size floor: the 200 and the

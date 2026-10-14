@@ -11,7 +11,7 @@ const labels = (group: NavGroup, isGlobal: boolean) =>
 describe("the sidebar", () => {
   it("lists the primary pages by group, plus Support and About", () => {
     expect(labels("overview", true)).toEqual(["Overview", "Savings", "URLs"]);
-    expect(labels("module", true)).toEqual(["Statistics", "Histograms", "Caches", "Configuration"]);
+    expect(labels("module", true)).toEqual(["Statistics", "Histograms", "Caches", "Configuration", "Rule packs"]);
     expect(labels("optimizer", true)).toEqual(["Status", "Logs"]);
     expect(labels("optimizer", false)).toEqual(["Status", "Logs"]);
     expect(labels("help", true)).toEqual(["Support", "About"]);
@@ -27,8 +27,10 @@ describe("the sidebar", () => {
 });
 
 describe("server-rendered page links", () => {
-  it("Rule packs follows the Module group's pages", () => {
-    expect(SERVER_PAGE_LINKS).toEqual([{ label: "Rule packs", group: "module", leaf: "rule_packs" }]);
+  it("Rule packs is a native console page after Configuration, no longer a link out", () => {
+    expect(SERVER_PAGE_LINKS).toEqual([]);
+    const module = routes.filter((r) => r.group === "module" && r.hidden !== true).map((r) => r.label);
+    expect(module).toEqual(["Statistics", "Histograms", "Caches", "Configuration", "Rule packs"]);
   });
 
   it("no link shadows a route's label, so each sidebar name stays unique", () => {

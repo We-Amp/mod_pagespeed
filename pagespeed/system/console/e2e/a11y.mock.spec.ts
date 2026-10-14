@@ -8,6 +8,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
+import * as R from "./support/rule-packs-fixtures";
 import { NETWORK_ERROR, mockAdmin, openConsole } from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
@@ -321,6 +322,19 @@ for (const scheme of ["light", "dark"] as const) {
       const timeline = page.getByTestId("logs-timeline");
       await expect(page.getByText("stream entry 79", { exact: true })).toBeVisible();
       expect(await timeline.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      await expectNoViolations(page);
+    });
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test.describe(`Accessibility, Rule packs (${scheme})`, () => {
+    test.use({ colorScheme: scheme });
+    test("#/rule-packs populated", async ({ page }) => {
+      await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), rule_packs: R.TWO_BY_PACK });
+      await openConsole(page, "pagespeed_admin", "#/rule-packs");
+      await ready(page);
+      await expect(page.getByTestId("rp-decisions")).toBeVisible();
       await expectNoViolations(page);
     });
   });

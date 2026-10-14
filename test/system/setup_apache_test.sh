@@ -1754,6 +1754,33 @@ configure_rule_pack_vhosts() {
   ModPagespeedRulePackTrustKey test-publisher kmWxckbPeJHh+oHxLYsRIzee4Dtzao80H2kyiYR7NdU=
   ModPagespeedRulePackRequireSigned on
 </VirtualHost>
+
+# Lane fixture "rule_pack_multi": two pack files on one virtual host (the
+# first pack owns a kind both have), and a host whose second file has the id of
+# the first (refused; the first pack still acts).
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-multi.example.com
+  Header always set X-Test-Vhost "rulepacks-multi.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/multi/a.json
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/multi/b.json
+  ModPagespeedRulePackMode enforce
+</VirtualHost>
+
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName rulepacks-multi-dup.example.com
+  Header always set X-Test-Vhost "rulepacks-multi-dup.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rule_packs
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/multi/a.json
+  ModPagespeedRulePackFile /var/www/html/mod_pagespeed_test/rule_packs/multi/dup.json
+  ModPagespeedRulePackMode enforce
+</VirtualHost>
 EOF
     sudo sed -i "s/@@APACHE_SECONDARY_PORT@@/$APACHE_SECONDARY_PORT/g" "$conf"
     apply_daemon_directives "$conf" routing
@@ -1765,6 +1792,7 @@ EOF
     fi
     provide_fixture rule_pack_signing
     provide_fixture rule_pack_no_link_header
+    provide_fixture rule_pack_multi
 }
 
 # Lane fixture "external_origin": local stand-ins for the internet origins

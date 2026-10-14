@@ -203,6 +203,20 @@ pagespeed_cc_test(
     ],
 )
 
+pagespeed_cc_test(
+    name = "multi_pack_fixture_test",
+    srcs = ["multi_pack_fixture_test.cc"],
+    data = [":testdata"],
+    shard_count = 1,
+    deps = [
+        ":fixture_runner",
+        "//pagespeed/kernel/packs:decision",
+        "//pagespeed/kernel/packs:pack",
+        "//pagespeed/kernel/packs:pack_loader",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 # Writes the module-specific expected files of the named cases:
 #   bazel run //test/pagespeed/kernel/packs:fixture_update -- <case>...
 cc_binary(

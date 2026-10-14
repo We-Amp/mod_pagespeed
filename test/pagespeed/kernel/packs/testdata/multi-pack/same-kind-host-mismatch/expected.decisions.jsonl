@@ -1,0 +1,1 @@
+{"host":"b-only.fixture.test","path":"/mismatch/page","rule":"b-canonical-mismatch","kind":"canonical","mode":"enforce","action":"insert","reason":"absent","defect":"canonical-missing","before":"","after":"https://b-only.fixture.test/b/mismatch/page"}

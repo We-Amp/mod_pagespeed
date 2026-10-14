@@ -1,32 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# 22.04
-FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401
+# 24.04
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 AS nginx-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build dependencies for nginx and test dependencies.
-# apt-get upgrade patches the base-image packages baked into ubuntu:22.04 (which
-# `apt install` alone leaves untouched) — clears the fixable OS CVEs the
-# dependency scan flags. Remaining medium+ are jammy `fix: none` (no upstream patch).
+# Build stage: the compiler toolchain lives here only, so it (and its OS
+# package findings) never reaches the smoke image.
+# Build nginx 1.30.5 from source (must match the version the module was built
+# against — nginx ABI-pins modules to the exact version, so this MUST track the
+# dev nginx in docker/Dockerfile; CVE-2026-90439: 1.30.4 -> 1.30.5).
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     libpcre3-dev \
     zlib1g-dev \
     libssl-dev \
-    python3 \
-    python3-pip \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-
-# Install pytest
-RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
-
-# Build nginx 1.30.5 from source (must match the version the module was built
-# against — nginx ABI-pins modules to the exact version, so this MUST track the
-# dev nginx in docker/Dockerfile; CVE-2026-90439: 1.30.4 -> 1.30.5).
 RUN curl -fsSL "https://nginx.org/download/nginx-1.30.5.tar.gz" -o /tmp/nginx.tar.gz \
     && echo "6c20565aa2325cb82216ae804f4a4ff1875179014759a381c42ddc8e11c4906d  /tmp/nginx.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nginx.tar.gz -C /usr/local/src \
@@ -40,6 +32,35 @@ RUN curl -fsSL "https://nginx.org/download/nginx-1.30.5.tar.gz" -o /tmp/nginx.ta
         --with-compat \
     && make -j$(nproc) \
     && make install
+
+# 24.04
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Smoke image: runtime libraries and test dependencies only.
+# apt-get upgrade patches the base-image packages baked into ubuntu:24.04 (which
+# `apt install` alone leaves untouched) — clears the fixable OS CVEs the
+# dependency scan flags. This is a test rig, not a shipped artifact; it sits on
+# noble (the module ships noble packages) rather than the older jammy base.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    curl \
+    libpcre3 \
+    zlib1g \
+    libssl3t64 \
+    python3 \
+    python3-pip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pytest (noble's system Python is externally managed, PEP 668; this is
+# a throwaway test image, so install into the system site-packages), then drop
+# the pip package itself: nothing needs it at test time.
+RUN pip3 install --no-cache-dir --break-system-packages pytest==9.0.3 pytest-timeout==2.3.1 \
+    && apt-get purge -y python3-pip && apt-get autoremove -y --purge \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=nginx-build /usr/local/nginx /usr/local/nginx
 
 # Extract the module from the tarball
 COPY packages/ngx_pagespeed*.tar.gz /tmp/

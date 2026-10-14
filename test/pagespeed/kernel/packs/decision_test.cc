@@ -19,6 +19,23 @@ TEST(DecisionTest, ReasonNamesAreStable) {
   EXPECT_EQ(ReasonName(Reason::kLateConflict), "late_conflict");
   EXPECT_EQ(ReasonName(Reason::kHeaderConflict), "header_conflict");
   EXPECT_EQ(ReasonName(Reason::kHeadersFlushed), "headers_flushed");
+  EXPECT_EQ(ReasonName(Reason::kClaimed), "claimed");
+}
+
+TEST(DecisionTest, ClaimedByIsOnlyWrittenWhenSet) {
+  PackDecision d;
+  d.rule_id = "c";
+  d.kind = FindKind("canonical");
+  d.mode = Mode::kEnforce;
+  d.reason = Reason::kClaimed;
+  EXPECT_EQ(DecisionToJsonLine("a.test", "/", d).find("claimed_by"),
+            std::string::npos);
+  d.claimed_by = "edge-seo";
+  EXPECT_EQ(DecisionToJsonLine("a.test", "/", d),
+            "{\"host\":\"a.test\",\"path\":\"/\",\"rule\":\"c\","
+            "\"kind\":\"canonical\",\"mode\":\"enforce\","
+            "\"action\":\"none\",\"reason\":\"claimed\",\"defect\":\"\","
+            "\"before\":\"\",\"after\":\"\",\"claimed_by\":\"edge-seo\"}");
 }
 
 TEST(DecisionTest, LineHasFixedKeyOrderAndNoTimestamp) {

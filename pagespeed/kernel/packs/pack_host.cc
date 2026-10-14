@@ -57,8 +57,22 @@ std::string_view CounterName(Counter counter) {
       return "rule_pack_refused_unknown_key";
     case Counter::kRefusedBadSignature:
       return "rule_pack_refused_bad_signature";
+    case Counter::kDecisionsClaimed:
+      return "rule_pack_decisions_claimed";
+    case Counter::kRefusedDuplicateId:
+      return "rule_pack_refused_duplicate_id";
   }
   return "rule_pack_unknown";
+}
+
+const std::string* ClaimSet::Claim(std::string_view target,
+                                   std::string_view pack_id) {
+  for (const auto& [claimed, holder] : claims_) {
+    if (claimed != target) continue;
+    return holder == pack_id ? nullptr : &holder;
+  }
+  claims_.emplace_back(std::string(target), std::string(pack_id));
+  return nullptr;
 }
 
 }  // namespace pagespeed::packs

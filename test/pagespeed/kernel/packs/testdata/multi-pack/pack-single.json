@@ -1,0 +1,44 @@
+{
+  "pack": {
+    "id": "edge-seo",
+    "version": "0.1.0",
+    "publisher": "local",
+    "description": "One pack with two rules of one kind"
+  },
+  "sites": [
+    {
+      "host": "fixture.test",
+      "mode": "enforce"
+    }
+  ],
+  "rules": [
+    {
+      "id": "single-canonical-first",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/single/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/first{path}"
+      },
+      "on_present": "keep"
+    },
+    {
+      "id": "single-canonical-second",
+      "kind": "canonical",
+      "enforce": true,
+      "match": {
+        "paths": [
+          "/single/**"
+        ]
+      },
+      "value": {
+        "template": "https://fixture.test/second{path}"
+      },
+      "on_present": "keep"
+    }
+  ]
+}

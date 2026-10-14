@@ -76,19 +76,32 @@ absl::StatusOr<RunResult> RunPackOnHtml(std::shared_ptr<const Pack> pack,
                                         std::string_view url,
                                         std::string_view html,
                                         const RunOptions& options) {
+  return RunPacksOnHtml({std::move(pack)}, url, html, options);
+}
+
+absl::StatusOr<RunResult> RunPacksOnHtml(
+    std::vector<std::shared_ptr<const Pack>> packs, std::string_view url,
+    std::string_view html, const RunOptions& options) {
   net_instaweb::HtmlKeywords::Init();
   net_instaweb::NullMessageHandler handler;
   net_instaweb::HtmlParse parser(&handler);
   TestPackHost host(options.debug_comments);
+  ClaimSet claims;
+  host.set_claims(&claims);
   if (options.origin_headers.has_value()) {
     host.SetResponseHeaders(*options.origin_headers);
   }
 
-  std::unique_ptr<RulePackFilter> filter;
+  std::vector<std::unique_ptr<RulePackFilter>> filters;
   if (options.with_filter) {
-    filter = std::make_unique<RulePackFilter>(&parser, std::move(pack),
-                                              options.global_mode, &host);
-    parser.AddFilter(filter.get());
+    std::set<std::string> ids;
+    for (std::shared_ptr<const Pack>& pack : packs) {
+      // (A server refuses a file whose pack id is already loaded.)
+      if (!ids.insert(pack->info.id).second) continue;
+      filters.push_back(std::make_unique<RulePackFilter>(
+          &parser, std::move(pack), options.global_mode, &host));
+      parser.AddFilter(filters.back().get());
+    }
   }
 
   RunResult result;
@@ -111,15 +124,32 @@ absl::StatusOr<RunResult> RunPackOnHtml(std::shared_ptr<const Pack> pack,
   }
   parser.ParseText(html.substr(at));
   parser.FinishParse();
-  if (filter != nullptr) {
-    result.decisions = filter->decisions();
-    result.modified = filter->modified();
-    result.skip = filter->skip_reason();
-    result.headers_modified = filter->headers_modified();
-    // What the host was told is what the filter recorded.
-    if (host.decisions() != result.decisions) {
+  for (size_t i = 0; i < filters.size(); ++i) {
+    const RulePackFilter& filter = *filters[i];
+    for (const PackDecision& d : filter.decisions()) {
+      result.decisions.push_back(d);
+      result.decision_pack.push_back(i);
+    }
+    result.modified = result.modified || filter.modified();
+    if (result.skip == SkipReason::kNone) result.skip = filter.skip_reason();
+    result.headers_modified =
+        result.headers_modified || filter.headers_modified();
+  }
+  if (!filters.empty()) {
+    // What the host was told is what the filters recorded (the packs report
+    // in turn, so the host's order may interleave them).
+    std::vector<PackDecision> told = host.decisions();
+    for (const PackDecision& d : result.decisions) {
+      auto it = std::find(told.begin(), told.end(), d);
+      if (it == told.end()) {
+        return absl::InternalError("host decisions differ from the filter's");
+      }
+      told.erase(it);
+    }
+    if (!told.empty()) {
       return absl::InternalError("host decisions differ from the filter's");
     }
+    result.claimed_count = host.count(Counter::kDecisionsClaimed);
   }
   if (options.origin_headers.has_value()) {
     result.headers = host.headers().lines();
@@ -245,6 +275,20 @@ std::shared_ptr<const Pack> DocumentEndOnlyPack(const Pack& pack) {
   return out;
 }
 
+std::shared_ptr<const Pack> ClaimOnlyPack(const Pack& pack, unsigned dropped) {
+  auto out = std::make_shared<Pack>(pack);
+  for (Rule& r : out->rules) {
+    if (r.kind == nullptr) continue;
+    const DecisionPoint point = r.kind->decision_point();
+    if ((point == DecisionPoint::kHeadEnd && (dropped & kHeadDropped) != 0) ||
+        (point == DecisionPoint::kDocumentEnd &&
+         (dropped & kDocumentDropped) != 0)) {
+      r.enforce = false;
+    }
+  }
+  return out;
+}
+
 const std::map<std::string, std::string>& ModuleOverrides() {
   static const auto* overrides = new std::map<std::string, std::string>{
       {"canonical-in-body-keep",
@@ -308,10 +352,12 @@ std::string CutBlocksBefore(std::string* page, size_t at, size_t max,
   static constexpr std::string_view kComment = "<!-- pagespeed-pack ";
   std::string cut;
   *count = 0;
-  while (*count < max && at >= 9 && page->compare(at - 9, 9, "</script>") == 0) {
+  while (*count < max && at >= 9 &&
+         page->compare(at - 9, 9, "</script>") == 0) {
     const size_t start = page->rfind(kBlockStart, at);
     // (Exactly one block: its own end tag is the one in front of `at`.)
-    if (start == std::string::npos || page->find("</script>", start) != at - 9) {
+    if (start == std::string::npos ||
+        page->find("</script>", start) != at - 9) {
       break;
     }
     size_t from = start;
@@ -468,6 +514,43 @@ bool ChunkedOutcomeAllowed(
   return false;
 }
 
+bool ChunkedOutcomeAllowedForPacks(
+    const RunResult& whole, const CaseRun& run, const RunResult& chunked,
+    std::string_view chunked_roundtrip_html, std::string* why,
+    const std::function<bool(const std::string&, const std::string&)>&
+        same_html) {
+  for (size_t s = 0; s < run.drop_states.size(); ++s) {
+    const std::vector<unsigned>& state = run.drop_states[s];
+    RunResult reference = run.drop_runs[s];
+    reference.decisions = whole.decisions;
+    for (size_t i = 0; i < reference.decisions.size(); ++i) {
+      PackDecision& d = reference.decisions[i];
+      if (d.kind == nullptr || d.mode != Mode::kEnforce ||
+          d.action == Action::kNone || d.header) {
+        continue;
+      }
+      const unsigned dropped = state[whole.decision_pack[i]];
+      const DecisionPoint point = d.kind->decision_point();
+      if ((point == DecisionPoint::kHeadEnd && (dropped & kHeadDropped) != 0) ||
+          (point == DecisionPoint::kDocumentEnd &&
+           (dropped & kDocumentDropped) != 0)) {
+        d = AsNotRewritable(d);
+      }
+    }
+    if (ChunkedOutcomeAllowed(reference, chunked, chunked_roundtrip_html,
+                              nullptr, same_html)) {
+      return true;
+    }
+  }
+  if (why != nullptr) {
+    *why = absl::StrCat(
+        "html:\n", chunked.html,
+        "\ndecisions: ", DescribeDecisions(chunked.decisions),
+        "\nwhole-document decisions: ", DescribeDecisions(whole.decisions));
+  }
+  return false;
+}
+
 namespace {
 
 // Offset just past the '>' of the first <head> start tag, or nullopt.
@@ -540,6 +623,21 @@ absl::StatusOr<CaseRun> RunCase(const std::string& fixtures_dir,
   run.debug = debug;
   run.directive_mode = global;
   const std::string pack_file = req.get("pack", "pack.json").asString();
+  std::vector<std::string> pack_files = {pack_file};
+  if (req.isMember("packs")) {
+    if (req.isMember("pack") || !req["packs"].isArray() ||
+        req["packs"].empty()) {
+      return absl::InvalidArgumentError(
+          c.name + ": packs is a non-empty array and excludes pack");
+    }
+    pack_files.clear();
+    for (const Json::Value& f : req["packs"]) {
+      if (!f.isString()) {
+        return absl::InvalidArgumentError(c.name + ": packs lists file names");
+      }
+      pack_files.push_back(f.asString());
+    }
+  }
   std::vector<size_t> flush_every;
   if (req.isMember("flush_every")) {
     const size_t every = req["flush_every"].asUInt64();
@@ -569,10 +667,21 @@ absl::StatusOr<CaseRun> RunCase(const std::string& fixtures_dir,
     run.origin_headers = *origin_headers;
   }
 
-  run.pack_file = pack_file;
-  auto loaded = LoadPackFile(fixtures_dir + "/" + pack_file, "");
-  if (!loaded.ok()) return loaded.status();
-  auto pack = std::make_shared<const Pack>(*std::move(loaded));
+  run.pack_file = pack_files.front();
+  run.pack_files = pack_files;
+  // The packs a server would run: a file whose pack id an earlier one has is
+  // refused.
+  std::vector<std::shared_ptr<const Pack>> packs;
+  std::set<std::string> ids;
+  for (const std::string& file : pack_files) {
+    auto loaded = LoadPackFile(fixtures_dir + "/" + file, "");
+    if (!loaded.ok()) return loaded.status();
+    auto loaded_pack = std::make_shared<const Pack>(*std::move(loaded));
+    const bool fresh = ids.insert(loaded_pack->info.id).second;
+    run.refused.push_back(!fresh);
+    if (fresh) packs.push_back(std::move(loaded_pack));
+  }
+  auto pack = packs.front();
 
   RunOptions opts;
   opts.global_mode = global;
@@ -592,7 +701,7 @@ absl::StatusOr<CaseRun> RunCase(const std::string& fixtures_dir,
 
   auto run_one = [&](const std::string& html, const RunOptions& o,
                      RunResult* out) -> absl::Status {
-    auto r = RunPackOnHtml(pack, run.url, html, o);
+    auto r = RunPacksOnHtml(packs, run.url, html, o);
     if (!r.ok()) return r.status();
     *out = *std::move(r);
     return absl::OkStatus();
@@ -610,19 +719,38 @@ absl::StatusOr<CaseRun> RunCase(const std::string& fixtures_dir,
   if (!(s = run_one(run.enforce.html, again_opts, &run.idempotent)).ok()) {
     return s;
   }
-  {
-    // The reference for a chunking that drops the head.
-    auto document_only = DocumentEndOnlyPack(*pack);
-    auto r = RunPackOnHtml(document_only, run.url, run.input_html, opts);
-    if (!r.ok()) return r.status();
-    run.document_only = *std::move(r);
-  }
-  {
-    // The reference for a chunking that drops the end of the document.
-    auto head_only = HeadOnlyPack(*pack);
-    auto r = RunPackOnHtml(head_only, run.url, run.input_html, opts);
-    if (!r.ok()) return r.status();
-    run.head_only = *std::move(r);
+  if (packs.size() == 1) {
+    {
+      // The reference for a chunking that drops the head.
+      auto document_only = DocumentEndOnlyPack(*pack);
+      auto r = RunPackOnHtml(document_only, run.url, run.input_html, opts);
+      if (!r.ok()) return r.status();
+      run.document_only = *std::move(r);
+    }
+    {
+      // The reference for a chunking that drops the end of the document.
+      auto head_only = HeadOnlyPack(*pack);
+      auto r = RunPackOnHtml(head_only, run.url, run.input_html, opts);
+      if (!r.ok()) return r.status();
+      run.head_only = *std::move(r);
+    }
+  } else {
+    // Every way of dropping the head plan and/or the end-of-document plan of
+    // each pack (the packs keep their claims).
+    const unsigned states = 1u << (2 * packs.size());
+    for (unsigned code = 0; code < states; ++code) {
+      std::vector<unsigned> state(packs.size());
+      std::vector<std::shared_ptr<const Pack>> variant;
+      variant.reserve(packs.size());
+      for (size_t i = 0; i < packs.size(); ++i) {
+        state[i] = (code >> (2 * i)) & 3u;
+        variant.push_back(ClaimOnlyPack(*packs[i], state[i]));
+      }
+      auto r = RunPacksOnHtml(variant, run.url, run.input_html, opts);
+      if (!r.ok()) return r.status();
+      run.drop_states.push_back(std::move(state));
+      run.drop_runs.push_back(*std::move(r));
+    }
   }
 
   for (Chunking& chunking : ChunkingsFor(run.input_html)) {
