@@ -193,6 +193,15 @@ def required(pkg_version, prerelease):
     return req
 
 
+def optional(prerelease):
+    """(description, artifact, regex) of files that may be present."""
+    opt = [("optimizer windows zip", "asset-optimizer", r"^pagespeed-optimizer-.*-win-x64\.zip$")]
+    if not prerelease:
+        opt.append(("ea4 rpm el10", "asset-ea4-el10",
+                    r"^ea-apache24-mod_pagespeed-.*\.el10\..*\.rpm$"))
+    return opt
+
+
 def build(args):
     stage = os.path.abspath(args.stage)
     out = os.path.abspath(args.out)
@@ -240,6 +249,14 @@ def build(args):
 
     if args.profile == "part-a":
         missing = []
+        if prerelease:
+            for a, _p, n in items:
+                if a.startswith("asset-ea4-"):
+                    missing.append("cPanel package on a pre-release: %s/%s" % (a, n))
+        rules = required(args.pkg_version, prerelease) + optional(prerelease)
+        for a, _p, n in items:
+            if not any(a == art and re.search(rx, n) for _d, art, rx in rules):
+                missing.append("unexpected file claimed by no rule: %s/%s" % (a, n))
         for desc, artifact, rx in required(args.pkg_version, prerelease):
             hits = [f for f in items if f[0] == artifact and re.search(rx, f[2])]
             if len(hits) == 0:
@@ -457,6 +474,23 @@ def self_test():
         # an ambiguous match (two apache debs) is refused
         mk(st8, "asset-linux-x64", "mod-pagespeed_%s-2_amd64.deb" % v)
         expect_exit("ambiguous", lambda: build(ns(st8, os.path.join(tmp, "o11"), profile="part-a", pre="true")))
+        os.remove(os.path.join(st8, "asset-linux-x64", "mod-pagespeed_%s-2_amd64.deb" % v))
+        # optional files are accepted
+        mk(st8, "asset-optimizer", "pagespeed-optimizer-%s-win-x64.zip" % v)
+        build(ns(st8, os.path.join(tmp, "o12"), profile="part-a", pre="true"))
+        # an extra deb no rule claims
+        mk(st8, "asset-linux-x64", "extra_1.0_amd64.deb")
+        expect_exit("extra deb", lambda: build(ns(st8, os.path.join(tmp, "o13"), profile="part-a", pre="true")))
+        os.remove(os.path.join(st8, "asset-linux-x64", "extra_1.0_amd64.deb"))
+        # a stray rpm in the cPanel el9 artifact (release)
+        mk(st8, "asset-ea4-el9", "ea-apache24-mod_pagespeed-%s-1.el9.cpanel.x86_64.rpm" % v)
+        mk(st8, "asset-ea4-el8", "ea-apache24-mod_pagespeed-%s-1.el8.cpanel.x86_64.rpm" % v)
+        build(ns(st8, os.path.join(tmp, "o14"), profile="part-a"))
+        mk(st8, "asset-ea4-el9", "stray-1.0-1.x86_64.rpm")
+        expect_exit("stray rpm in ea4-el9", lambda: build(ns(st8, os.path.join(tmp, "o15"), profile="part-a")))
+        os.remove(os.path.join(st8, "asset-ea4-el9", "stray-1.0-1.x86_64.rpm"))
+        # cPanel rpms on a pre-release
+        expect_exit("cpanel rpms on a pre-release", lambda: build(ns(st8, os.path.join(tmp, "o16"), profile="part-a", pre="true")))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if fail == 0:

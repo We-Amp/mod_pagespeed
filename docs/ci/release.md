@@ -85,9 +85,10 @@ always runs out: it is never cancelled by a newer run.
 
 ## Jobs
 
-All jobs have `permissions: contents: read` (the system-test gate and the
-optimizer fetch additionally read Actions data and use the job's own
-read-only token); none holds a secret. "Pair" means the job exists as a build
+All jobs have `permissions: contents: read` and none holds a secret. The
+system-test gate reads the workflow runs of this public repository, and the
+optimizer fetch calls a public API, both with the job's own read-only token and
+no further permission. "Pair" means the job exists as a build
 runner job and as a `-hosted` twin; exactly one of the two runs, and a small
 hosted `-ready` job joins them for the jobs that depend on the pair.
 
@@ -135,7 +136,22 @@ All of it is public and read only, and needs no credential:
   every file must match `SHA256SUMS`. The API call carries the job's own
   read-only token, to avoid the rate limit of shared runner addresses; the
   downloads carry none;
-- the dependency sources named in the Bazel files.
+- the dependency sources named in the Bazel files;
+- container images from Docker Hub, by tag and not by digest (the base images of
+  the dev image, of the distro builds and of the smokes: Ubuntu, Debian,
+  AlmaLinux, Rocky Linux, Alpine, redis and memcached);
+- packages from the distro mirrors inside those containers (apt and dnf), pip
+  packages (pytest and pytest-timeout, pinned), npm packages (the console
+  build, bazelisk) and, on Windows, Chocolatey packages (NASM, LLVM; pinned
+  versions);
+- the cPanel mirror list, over plain http with `gpgcheck=0`, only to read the
+  module interface version the cPanel Apache provides. It feeds a check that
+  warns when the repository is unreachable and fails only on a mismatch; no
+  package is installed from it.
+
+The images and mirrors are not pinned by digest, so a release build depends on
+their state on the day; part of the verification is the checks inside the
+packages and the smokes.
 
 ### The system-test gate
 
@@ -157,12 +173,18 @@ without them otherwise. A hosted twin has no remote cache and a small machine
 that are the longest on a build runner (the Apache modules and the distro
 legs, which are cold builds) are not measured there yet. Their timeouts are
 set to the hosted maximum for that reason. Measure with `FLEET_ENABLED` unset
-before relying on a hosted release.
-The queued-run sweep skips runs of the `Release` workflow (a real run may wait
-for an approval), so a release run whose runner class is not served waits until
-it is cancelled: set `FLEET_ENABLED` to anything but `true` and run it again. The nginx distro legs of a small runner
+before relying on a hosted release. The nginx distro legs of a small runner
 run one after the other (`tools/ci/release_nginx.sh` derives the concurrency
 from the cores and memory it finds).
+
+The queued-run sweep skips runs of the `Release` workflow (a real run may wait
+for an approval), so a release run whose runner class is not served waits until
+it is cancelled: set `FLEET_ENABLED` to anything but `true` and run it again.
+
+Containers that run as root leave root-owned files in the workspace and the
+temporary directory; the jobs that run them end with a step that re-owns those
+files to the runner user, and a job that cannot clear its workspace fails
+instead of continuing on stale files.
 
 ## Artifacts
 

@@ -43,11 +43,8 @@ concurrency:
 
 jobs:
   module:
-    # The called lane reads the CI runs of the release commit (the system-test
-    # gate); a called workflow cannot exceed what its caller grants.
     permissions:
       contents: read
-      actions: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
     with:
       tag: ${{ inputs.tag || '' }}

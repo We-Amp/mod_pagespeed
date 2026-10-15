@@ -369,8 +369,8 @@ suite() {
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq
       apt-get install -y --no-install-recommends nginx curl ca-certificates python3 python3-pip >/dev/null
-      pip3 install --break-system-packages --no-cache-dir pytest pytest-timeout >/dev/null 2>&1 \
-        || pip3 install --no-cache-dir pytest pytest-timeout >/dev/null
+      pip3 install --break-system-packages --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1 >/dev/null 2>&1 \
+        || pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1 >/dev/null
       cp /pkgs/'"$(basename "$deb")"' /tmp/pkg.deb
       apt-get install -y /tmp/pkg.deb
       nginx -t
@@ -384,7 +384,7 @@ suite() {
   docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro almalinux:9 bash -c '
     set -e
     dnf install -y --allowerasing --setopt=install_weak_deps=False nginx curl ca-certificates python3 python3-pip tar gzip findutils >/dev/null
-    pip3 install --no-cache-dir pytest pytest-timeout >/dev/null
+    pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1 >/dev/null
     cp /pkgs/'"$(basename "$rpm")"' /tmp/pkg.rpm
     dnf install -y /tmp/pkg.rpm
     nginx -t

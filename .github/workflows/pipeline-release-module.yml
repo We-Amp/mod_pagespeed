@@ -357,7 +357,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.version.outputs.ref }}
+          ref: ${{ needs.version.outputs.sha }}
           submodules: false
           persist-credentials: false
 
@@ -453,7 +453,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.version.outputs.ref }}
+          ref: ${{ needs.version.outputs.sha }}
           submodules: false
           persist-credentials: false
 
@@ -504,6 +504,10 @@ jobs:
             curl -fsSL --retry 5 --retry-all-errors -O "$url"
           done < ../optimizer-assets.txt
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
+          # The downloaded set must be exactly the set SHA256SUMS lists.
+          diff <(awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS | LC_ALL=C sort) \
+               <(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort) \
+            || { echo "::error::the downloaded files differ from the files SHA256SUMS lists"; exit 1; }
           sha256sum -c SHA256SUMS
           ls -la
 
@@ -555,9 +559,8 @@ jobs:
     needs: [ref-guard, version]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
+    # Reads the workflow runs of this public repository with the default
+    # read-only token; no extra permission is requested.
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
@@ -615,8 +618,11 @@ jobs:
       - &clear-workspace
         name: Clear the workspace
         run: |
-          [ -d "${GITHUB_WORKSPACE}" ] && chmod -R u+w "${GITHUB_WORKSPACE}" 2>/dev/null || true
-          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+          if [ -d "${GITHUB_WORKSPACE}" ]; then
+            chmod -R u+w "${GITHUB_WORKSPACE}" || echo "::warning::could not make every file of the workspace writable"
+          fi
+          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + \
+            || { echo "::error::could not clear the workspace (files left by an earlier run?)"; exit 1; }
 
       - &tree-download
         name: Download the release tree
@@ -881,6 +887,23 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # Containers that run as root leave root-owned files in the mounts.
+      - &reown
+        name: Re-own the files containers left behind
+        if: always()
+        run: |
+          mounts=(-v "${GITHUB_WORKSPACE}:/w" -v "${RUNNER_TEMP}:/t")
+          dirs="/w /t"
+          i=0
+          for d in "${GITHUB_WORKSPACE}"-leg-*; do
+            [ -d "$d" ] || continue
+            i=$((i + 1))
+            mounts+=(-v "${d}:/l${i}")
+            dirs="${dirs} /l${i}"
+          done
+          docker run --rm "${mounts[@]}" alpine:3.20 sh -c "chown -R $(id -u):$(id -g) ${dirs}" \
+            || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
+
   nginx-distro-build-hosted:
     name: Nginx Distro Packages (x64, hosted)
     needs: [version, vendor-ready]
@@ -962,6 +985,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      - *reown
+
   nginx-distro-build-el10-hosted:
     name: Nginx Distro Packages (el10, hosted)
     needs: [version, vendor-ready]
@@ -1013,6 +1038,8 @@ jobs:
           path: packages-${{ env.EL }}/mod-pagespeed-*.x86_64.rpm
           retention-days: 14
           if-no-files-found: error
+
+      - *reown
 
   apache-el8-build-hosted:
     name: Apache EL8 Build (glibc 2.28, hosted)
@@ -1193,10 +1220,17 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
       EXPECTED_VERSION_STRING: ${{ needs.version.outputs.version }}
     steps: &smoke-deb-steps
+      - &unlock-vendor
+        name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
       - &checkout-tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.version.outputs.ref }}
+          ref: ${{ needs.version.outputs.sha }}
           submodules: false
           persist-credentials: false
 
@@ -1390,6 +1424,8 @@ jobs:
     timeout-minutes: 60
     env: *smoke-env
     steps: &smoke-rpm-steps
+      - *unlock-vendor
+
       - *checkout-tag
 
       - name: Download the packages
@@ -1579,6 +1615,8 @@ jobs:
     if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 60
     steps: &smoke-nginx-steps
+      - *unlock-vendor
+
       - *checkout-tag
 
       - name: Download the module tarball
@@ -1659,6 +1697,8 @@ jobs:
     env: &loadcheck-x64-env
       ARCH: x64
     steps: &loadcheck-steps
+      - *unlock-vendor
+
       - *checkout-tag
 
       - name: Download the nginx packages
@@ -1701,6 +1741,8 @@ jobs:
     env: &packaged-env
       ARCH: x64
     steps: &packaged-steps
+      - *unlock-vendor
+
       - *checkout-tag
 
       - name: Download the nginx packages
@@ -1743,6 +1785,8 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       EA4_OS: ${{ matrix.os }}
     steps: &ea4-steps
+      - *unlock-vendor
+
       - *checkout-tag
 
       - name: Stamp the module version
@@ -1776,6 +1820,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      - *reown
+
   ea4-build-hosted:
     name: EA4 Build (${{ matrix.os }}, hosted)
     needs: [version, linux-ready, el8-ready]
@@ -1800,6 +1846,8 @@ jobs:
     env: &ea4-el10-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps: &ea4-el10-steps
+      - *unlock-vendor
+
       - *checkout-tag
 
       - name: Stamp the module version
@@ -1828,6 +1876,8 @@ jobs:
           path: ${{ runner.temp }}/ea4-out/*.rpm
           retention-days: 14
           if-no-files-found: error
+
+      - *reown
 
   ea4-el10-build-hosted:
     name: EA4 Build (el10, hosted)
