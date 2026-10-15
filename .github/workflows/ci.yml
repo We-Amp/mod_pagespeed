@@ -1,32 +1,63 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
+#
+# The thin CI caller. It holds the triggers and the concurrency group; the
+# pull request tier lives in the reusable workflow pipeline-pr.yml, pinned to
+# master. See docs/ci/pipelines.md. Next to the call, three small hosted jobs
+# run inline: the whole-tree Apache RAT license audit (tools/ci/rat.sh, backed
+# by .rat-excludes), the public-tree hygiene gate with the workflow-shape
+# gate (tools/ci/check-public-hygiene.sh, tools/ci/check-workflow-shape.sh)
+# and the self-tests of the CI tooling. They are hosted-only on purpose.
+#
+# Required checks after the switch are named `pr / <job name>` (for example
+# `pr / Blocking Dep Scan (npm)`), the inline jobs under their own names, and
+# `CI gate`.
 
 name: CI
-
-# Minimal public CI for the module repository: the whole-tree Apache RAT
-# license audit (tools/ci/rat.sh, backed by .rat-excludes) and the
-# public-tree hygiene gate (tools/ci/check-public-hygiene.sh — keeps
-# private-infrastructure and private-process vocabulary out of the public
-# tree). GitHub-hosted runners ONLY — a public repo must never address the
-# private build machines, so the heavy lanes (the Bazel build and unit-test
-# matrix, sanitizers, Apache/nginx/IIS system tests, Windows/macOS builds,
-# lint, CVE scanning, packaging and release lanes) stay on the private
-# side and are deliberately not part of this workflow.
 
 on:
   push:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the full tier (not available yet)
+        type: boolean
+        default: false
 
+# Cancel superseded pull request runs only; a push to master always finishes.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  pr:
+    # The called pipeline requests pull-requests: read for the release-note
+    # gate; a called workflow cannot exceed what its caller grants.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@master
+
+  # The full tier arrives with pipeline-full.yml. It stays commented out until
+  # that file exists on master, because a call to a missing reusable workflow
+  # fails the whole run at startup. When enabling it, also add `full` to the
+  # `needs` of the gate below. The ci:full label is read when the pull request
+  # run starts (open, push, reopen); after adding it, push or re-run to get
+  # the full tier.
+  #
+  # full:
+  #   if: >-
+  #     (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+  #     (github.event_name == 'workflow_dispatch' && inputs.full) ||
+  #     (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full'))
+  #   uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@master
+
   rat:
     name: License audit (Apache RAT)
     runs-on: ubuntu-latest
@@ -86,3 +117,25 @@ jobs:
           tools/ci/test_extract_vendor_tarball.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
+
+  # Aggregate gate: the one check branch protection needs besides the
+  # per-job ones. A called workflow cannot read needs.*.result of its
+  # siblings, so this job runs inline, on a hosted label only.
+  gate:
+    name: CI gate
+    needs: [rat, public-hygiene, ci-tooling-tests, pr]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every needed job succeeded or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: ${RESULTS}"
+          for r in ${RESULTS}; do
+            case "${r}" in
+              success|skipped) ;;
+              *) echo "::error::a job finished with '${r}'"; exit 1 ;;
+            esac
+          done
