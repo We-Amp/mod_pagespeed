@@ -26,3 +26,7 @@ jobs:
       - name: Check needed results
         run: |
           case "${{ needs.pr.result }}" in success|skipped) exit 0 ;; *) exit 1 ;; esac
+  release:
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
+    secrets:
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}

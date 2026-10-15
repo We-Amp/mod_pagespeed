@@ -116,6 +116,7 @@ jobs:
         run: |
           tools/ci/release_version.sh --self-test
           python3 -I tools/ci/release_manifest.py --self-test
+          python3 -I tools/ci/release_signature_check.py --self-test
           tools/ci/release_nginx.sh --self-test
           tools/ci/release_ea4_build.sh --self-test
 

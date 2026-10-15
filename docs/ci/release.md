@@ -11,17 +11,18 @@ contract of the files it produces. How the lane fits the other pipelines is in
 `docs/ci/pipelines.md`; the runner environment is in
 `docs/ci/runner-environment.md`.
 
-The lane is built in two parts.
+The lane has two halves in one workflow.
 
-- **Part A (this page's subject)**: build every package, run the package
-  smokes, the security gates, the unit tests and the system-test gate, and end
-  in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`.
-  Part A signs nothing, creates no release, publishes nothing and uses no
-  secret.
-- **Part B (not present yet)**: in jobs of the protected `release`
-  environment on hosted runners, the signing of `SHA256SUMS`, the Windows
-  binaries and the Windows installer, and the creation of the release. The
-  places where it plugs in are marked `PART B` in the workflow.
+- **Build and validate** (every run, a dry run included): build every package
+  and the Windows installer, run the package smokes, the security gates, the
+  unit tests, the system-test gate and the two release gates on the Hyper-V
+  class (installer upgrade, cPanel), and end in one run artifact with the asset
+  set, `SHA256SUMS` and `manifest.json`. A dry run signs nothing, creates
+  nothing and uses no secret.
+- **Sign and release** (a real run only, `dry_run` false): in jobs of the
+  protected `release` environment on hosted runners, sign the Windows
+  binaries and the installer, sign `SHA256SUMS`, and create the GitHub
+  release. These are the only jobs that hold a secret or a write token.
 
 ## Tags and versions
 
@@ -70,10 +71,11 @@ gh run list --workflow release.yml --limit 1
 gh run download <run id> -n release-assets -D release-assets
 ```
 
-In part A the two differ only in the `dry_run` output of the `version` job,
-which part B reads: with `dry_run` true nothing is ever created. A dry run
-builds and validates everything, so it is the way to find out whether a tag
-will go through. The `system-test gate` reports its verdict and lets a dry run
+The two differ only in the `dry_run` output of the `version` job: with
+`dry_run` true nothing is ever signed or created, and the installer is built
+from the unsigned binaries. A dry run builds and validates everything and runs
+the gates (a gate that needs the Hyper-V class is skipped while the fleet is
+off), so it is the way to find out whether a tag will go through. The `system-test gate` reports its verdict and lets a dry run
 continue; on a real run a red verdict stops the release.
 
 Runs of one tag are serialized by the caller (`release.yml`), and a release
@@ -87,13 +89,93 @@ always runs out: it is never cancelled by a newer run.
   `We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/master`
   (`docs/ci/pipelines.md`, "Runner group policy entries"). There is no entry
   for `ci-dev`: a release only runs from `master`.
-- Part B only: the `release` environment (required reviewer, tag policy for
-  `module-v*`) and its secrets. Part A refers to none of them.
+- The runner group policy also lists the two gate workflows, which run on the
+  Hyper-V class (`docs/ci/pipelines.md`, "Runner group policy entries"):
+  `gate-iis-msi-upgrade.yml` and `gate-cpanel-smoke.yml`, each at
+  `@refs/heads/master`.
+- A real run only: the `release` environment and its secrets (see "A real
+  run").
+
+## A real run
+
+A real run is a push of a `module-v*` tag, or a dispatch with `dry_run` false.
+It does everything a dry run does, and then, in this order:
+
+1. `windows-sign` signs the Windows binaries, `msi-build` builds the installer
+   from them, `msi-sign` signs the installer. The two gates test the signed
+   installer.
+2. `validate` checks the set, and that the Windows files carry a signature.
+3. `sign-checksums` signs `SHA256SUMS`.
+4. `create-release` creates a draft release for the tag with every asset and
+   `SHA256SUMS.asc`, downloads the draft's assets and checks them against
+   `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
+   release flagged as a pre-release and not as the latest one. The release
+   is never promoted any further: nothing is published to a package
+   repository and no other repository is notified.
+
+Before the first real run, someone with admin rights enters the following.
+
+### The `release` environment
+
+- Required reviewer: every job of the environment waits for an approval.
+- Deployment branches and tags: only `module-v*` tags (and `master` for a
+  dispatch).
+- Only the jobs `windows-sign`, `msi-sign`, `sign-checksums` and
+  `create-release` name the environment; the shape gate
+  (`tools/ci/check-workflow-shape.sh`, rule g) refuses an environment or a
+  secret on any job that is not on a hosted runner.
+
+### Secrets
+
+Entered as secrets of the `release` environment, by name. The caller
+(`release.yml`) passes each by name to the lane, never all of them at once;
+the jobs of the environment read the environment's value.
+
+| Name | Used by | Content |
+|---|---|---|
+| `AZURE_TENANT_ID` | `windows-sign`, `msi-sign` | tenant of the Trusted Signing identity |
+| `AZURE_CLIENT_ID` | `windows-sign`, `msi-sign` | client of that identity |
+| `AZURE_CLIENT_SECRET` | `windows-sign`, `msi-sign` | client secret of that identity |
+| `AZURE_TRUSTED_SIGNING_ENDPOINT` | `windows-sign`, `msi-sign` | Trusted Signing endpoint URL |
+| `AZURE_TRUSTED_SIGNING_ACCOUNT` | `windows-sign`, `msi-sign` | Trusted Signing account name |
+| `AZURE_TRUSTED_SIGNING_PROFILE` | `windows-sign`, `msi-sign` | certificate profile name |
+| `PACKAGE_SIGNING_KEY` | `sign-checksums` | the armored private key of the package signing key, base64 encoded, a single secret key |
+| `PACKAGE_SIGNING_PASSPHRASE` | `sign-checksums` | its passphrase |
+
+The package signing key is the one whose public half the consumer pins. The
+release itself needs no secret: `create-release` uses the run's own token with
+`contents: write`, which the caller grants and no other job of the lane has.
+
+### First rehearsal checklist
+
+- [ ] With the secrets entered, run one real rehearsal on a release candidate
+  tag and confirm that the jobs of the `release` environment see the
+  environment's values of the secrets: a called workflow is documented to read
+  the environment's value over the value the caller passed, but that
+  precedence is to be confirmed here, not assumed.
+
+### Rerunning a real run
+
+A run that failed or was cancelled before `create-release` published leaves at
+most a draft release; re-run the failed jobs, or dispatch the tag again.
+`create-release` deletes a draft of the same tag and makes it again, keeping
+the tag. A published release is never reused or replaced: it makes the job
+fail, and a new build of the same sources gets a new tag. Re-running failed jobs of the same run reuses that run's artifacts while they are kept; a new run rebuilds.
+
+### What the corp side does after
+
+The consumer pulls; the lane notifies nobody. On a published, non-draft,
+non-pre-release release of a `module-v*` tag it downloads the assets, runs
+`sha256sum -c SHA256SUMS`, verifies `SHA256SUMS.asc` against its pinned key,
+compares the set with `manifest.json`, renames each file from `asset` to `name`
+and builds and signs the apt and yum repositories itself. Release candidates are
+never taken up.
 
 ## Jobs
 
-All jobs have `permissions: contents: read` and none holds a secret. The
-system-test gate reads the workflow runs of this public repository, and the
+All jobs have `permissions: contents: read`, except `create-release`
+(`contents: write`), and only the jobs marked `release` below hold a secret.
+The system-test gate reads the workflow runs of this public repository, and the
 optimizer fetch calls a public API, both with the job's own read-only token and
 no further permission. "Pair" means the job exists as a build
 runner job and as a `-hosted` twin; exactly one of the two runs, and a small
@@ -115,6 +197,12 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `apache-el8-build` | fleet-heavy, pair | the stock Apache rpm built on el8 (glibc 2.28); input of the cPanel package only |
 | `apache-el10-build` | fleet-heavy, pair | the stock Apache rpm built natively on el10 |
 | `windows-release-build` | fleet-windows, pair | the IIS module built optimized with debug symbols, plus the pinned optimizer worker, all unsigned; hands over `unsigned-windows` |
+| `windows-ready`, `ea4-ready` | hosted | join the Windows legs and the cPanel legs |
+| `windows-sign` | hosted Windows, environment `release`, real run only | signs the IIS module and the optimizer worker and library from `unsigned-windows` with Trusted Signing, has Windows verify each signature, hands over `signed-windows` |
+| `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
+| `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows` |
+| `gate-iis-msi-upgrade` | fleet-iis (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
+| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-iis (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
 | `unit-tests` | fleet-heavy, pair | unit tests of the optimized build with redis and memcached containers |
 | `package-smoke-deb`, `package-smoke-rpm` | fleet-heavy, pair | install, upgrade over a synthetic old version, version header, removal, in a Debian and a Rocky container |
 | `package-smoke-nginx` | fleet-heavy, pair | the from-source nginx smoke with the module tarball |
@@ -123,13 +211,24 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `package-smoke-nginx-packaged` | fleet-heavy, pair | installs each x64 package into its stock nginx and runs the nginx test suite |
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
-| `validate` | hosted | builds and checks the asset set, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
+| `validate` | hosted | builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
+| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`) |
+| `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
-Left out of part A on purpose: the Windows installer and its tests (they need
-signed binaries and a virtual machine host), the cPanel smoke (a virtual
-machine host), the signing of every kind, and the release itself. The
-publication of apt and yum repositories does not exist in this repository: the
-consumer pulls the release assets (see below).
+A gate workflow can succeed without testing anything: it skips when its guest
+is not provisioned, and the cPanel gate skips on a pre-release (no package). So
+each gate workflow exposes an output `ran`, true only when the smoke actually
+executed. In a real run `validate` requires every gate to have succeeded and
+the installer gate and both cPanel gates (a release, not a pre-release) to have
+reported `ran` true. The gates run only while `FLEET_ENABLED` is `true`, so a
+real release needs the fleet enabled at that moment and the guests provisioned.
+A dry run accepts a skipped gate. A missing `ran` output counts as false, so
+until the gate workflows define it a real run fails at `validate`.
+
+Not done here on purpose: the publication of apt and yum repositories (the
+consumer pulls the release assets, see below), the signing of debs and rpms
+(the consumer signs the repositories it builds), and any notification of
+another repository.
 
 ### Fetched from outside the repository
 
@@ -222,20 +321,26 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `testdata-oldpkgs-x64` | synthetic old-version packages for the upgrade smoke | no |
 | `debug-linux-x64`, `debug-linux-arm64` | unstripped module and debug symbols | no |
 | `unsigned-windows` | the unsigned IIS module, its symbols and the optimizer worker | no |
+| `signed-windows` | the same, signed (real run) | no |
+| `msi-unsigned` | the installer before signing (real run) | no |
+| `msi-old` | the synthetic older installer of the upgrade gate | no |
+| `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`: signed in a real run, unsigned in a dry run | yes |
+| `release-signature` | `SHA256SUMS.asc` (real run) | the signature is added to the release by `create-release` |
 
 `validate` builds the asset set from the `asset-*` artifacts only. A directory
 it does not know, an empty file, a signature file or a name outside
 `[A-Za-z0-9._+-]` stops it, and so does a missing or ambiguous file of the
-required set (every package kind, suite and architecture above, the optimizer
-pair, the source tarball, the SBOM and the VEX file; the cPanel packages of el9
+required set (every package kind, suite and architecture above, the Windows installer
+named for the version, the optimizer pair, the source tarball, the SBOM and the
+VEX file; the cPanel packages of el9
 and el8 on a release, none on a pre-release).
 
 ## The asset contract
 
 This is what a consumer of the release (the process that publishes the
-packages to the apt and yum repositories) relies on. Part A produces these
-files in `release-assets`; part B signs them and attaches them to the release
-with the same names.
+packages to the apt and yum repositories) relies on. `validate` produces these
+files in `release-assets`; in a real run `sign-checksums` adds the signature
+and `create-release` attaches all of it to the release with the same names.
 
 ### Asset names
 
@@ -252,8 +357,10 @@ el9 one, so its asset name carries the prefix `el10-`.
 
 Standard `sha256sum` output (`<hash>  <name>`), one row per file of the
 release except itself, in C-locale order, with the uploaded names. It lists
-`manifest.json`. Part B adds a detached signature, `SHA256SUMS.asc`, so the
-signature covers every file through the sums.
+`manifest.json`. A real run adds a detached, armored signature of the file,
+`SHA256SUMS.asc`, made with the package signing key, so the signature covers
+every file through the sums. `SHA256SUMS.asc` is the one release asset that
+`SHA256SUMS` does not list.
 
 ### manifest.json
 
@@ -294,7 +401,7 @@ signature covers every file through the sums.
 | `optimizer_tag` | the optimizer release the packages are paired with |
 | `asset` | the uploaded name; what `SHA256SUMS` lists |
 | `name` | the original name, with any `~` kept; the name to give the file when it is put in a repository tree |
-| `kind` | `deb`, `rpm`, `tarball`, `so`, `zip` or `json` |
+| `kind` | `deb`, `rpm`, `tarball`, `so`, `zip`, `msi` or `json` |
 | `component` | `module`, `optimizer`, `source` or `sbom` |
 | `channel` | the routing hint for repository publication: `apt`, `rpm-el9`, `rpm-el10`, `rpm-ea4`, or `none` (a direct download only) |
 | `channel_also` | further channels the same file belongs to: the optimizer rpms are also in `rpm-el10` |
@@ -306,13 +413,13 @@ signature covers every file through the sums.
 optimizer rpms) are `rpm-el9`. The stock Apache rpm of el10 (dist-tagless) and
 the nginx rpm of el10 are `rpm-el10` and belong in a tree of their own; the
 optimizer rpms are `rpm-el9` with `rpm-el10` in `channel_also`. The cPanel
-rpms of all families are `rpm-ea4`. The `.so` files, tarballs, the Windows zip
-and the SBOM and VEX files are `none`.
+rpms of all families are `rpm-ea4`. The `.so` files, tarballs, the Windows zip,
+the Windows installer and the SBOM and VEX files are `none`.
 
 A consumer should: check the tag grammar and `prerelease`; check that the
 release is not a draft and that its commit is on `master`; download every
 asset; run `sha256sum -c SHA256SUMS`; verify the `SHA256SUMS.asc` signature
-against a pinned key (part B); compare the set of package assets with the
+against a pinned key; compare the set of package assets with the
 manifest and refuse extra or missing files; rename each file from `asset` to
 `name` as it builds its trees; and check the pair (every module package needs
 the optimizer packages of `optimizer_tag` beside it).
@@ -339,6 +446,8 @@ the optimizer packages of `optimizer_tag` beside it).
 | `tools/ci/release_manifest.py` | asset set, `SHA256SUMS`, `manifest.json`, verification (`--self-test`) |
 | `tools/ci/release_nginx.sh` | the nginx distro legs and their gates (`--self-test`) |
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm (`--self-test`) |
+| `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
+| `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification, used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |
 
 The self-tests run in the `CI tooling self-tests` job of `ci.yml`.
