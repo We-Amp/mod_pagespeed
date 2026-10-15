@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Nightly caller: schedule and manual dispatch. All jobs live in
+# pipeline-nightly.yml, pinned to master. See docs/ci/pipelines.md.
+
+name: Nightly
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: libFuzzer time budget in seconds, per harness (1 to 1800)
+        required: false
+        default: "600"
+      duration:
+        description: Sanitizer stress duration in seconds (Apache, nginx and IIS rigs, 1 to 1800)
+        required: false
+        default: "600"
+      concurrency:
+        description: Concurrent request workers of the stress rigs
+        required: false
+        default: "16"
+      protocols:
+        description: Space separated curl protocol flags for the nginx protocol matrix (empty means h1 and h2)
+        required: false
+        default: ""
+      arms:
+        description: IIS Application Verifier arms, comma separated arm:iterations
+        required: false
+        default: "cuzz-nopageheap:5,cuzz-pageheap:3"
+      severity:
+        description: Severity floor of the NVD scan (low, medium, high, critical)
+        required: false
+        default: "medium"
+
+# One nightly at a time; a running nightly is never cancelled.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    # Nothing in the nightly tier writes to GitHub: read access is both the
+    # ceiling the called workflow may narrow and everything it uses.
+    permissions:
+      contents: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-nightly.yml@master
+    with:
+      fuzz_seconds: ${{ inputs.fuzz_seconds || '600' }}
+      duration: ${{ inputs.duration || '600' }}
+      concurrency: ${{ inputs.concurrency || '16' }}
+      protocols: ${{ inputs.protocols || '' }}
+      arms: ${{ inputs.arms || 'cuzz-nopageheap:5,cuzz-pageheap:3' }}
+      severity: ${{ inputs.severity || 'medium' }}
