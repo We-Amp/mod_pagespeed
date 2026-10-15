@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# Release caller: triggers and concurrency only. The module release lane is a
-# reusable workflow pinned to master (docs/ci/release.md):
+# Release caller: triggers, concurrency and the secrets by name. The module
+# release lane is a reusable workflow pinned to master (docs/ci/release.md):
 #   * module-v* tags -> pipeline-release-module.yml (the module packages)
 #
 # Triggers:
@@ -10,8 +10,9 @@
 #   * workflow_dispatch { tag, dry_run: true  }    -> the default
 #   * workflow_dispatch { tag, dry_run: false }
 # The tag must exist and its commit must be on master; the lane's ref guard
-# refuses anything else. Part A of the lane builds and validates and signs,
-# creates and publishes nothing, whatever dry_run says.
+# refuses anything else. A dry run builds and validates; it signs, creates and
+# publishes nothing. A real run signs and creates the release, in jobs of the
+# protected `release` environment on hosted runners.
 #
 # Try it:  gh workflow run release.yml -f tag=module-v1.19.0 -f dry_run=true
 
@@ -43,9 +44,22 @@ concurrency:
 
 jobs:
   module:
+    # The called workflow keeps every job read-only except the release job of
+    # the `release` environment, which raises its own permission to this.
     permissions:
-      contents: read
+      contents: write
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
     with:
       tag: ${{ inputs.tag || '' }}
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    # Passed one by one, never `secrets: inherit`. The jobs of the `release`
+    # environment read the environment's value of each; no other job reads one.
+    secrets:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+      AZURE_TRUSTED_SIGNING_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+      PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+      PACKAGE_SIGNING_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}

@@ -38,6 +38,15 @@
 #       at job level on a job that runs on a hosted label; a fleet-routed job
 #       is read-only. The permissions parser is indentation-bound (jobs at two
 #       spaces, job keys at four), like the rest of this gate;
+#   (g) in every workflow: a job-level `environment:` and any
+#       `secrets.<NAME>` reference (the job's own token, secrets.GITHUB_TOKEN,
+#       excepted) are allowed only on a job that runs on a hosted label; a
+#       fleet-routed job never names an environment or reads a secret;
+#       Applied to every workflow. A job that calls another workflow may pass
+#       secrets only to a callee listed in SECRET_CALLEES (the module release
+#       lane; the fleet-iis gates get none). `secrets: inherit`, `secrets[` and
+#       `toJSON(secrets`, and a secret in an expression outside the jobs (a
+#       workflow-level env: block), are refused;
 #   (e) topology token scan of .github/ and tools/ci/: no LAN (RFC1918) IP
 #       literals, no ".home" names, no ":9090", no "self-hosted", and none
 #       of the retired runner-label words as standalone tokens (the bare
@@ -169,6 +178,68 @@ write_perm_records() {
   ' "$1"
 }
 
+# Jobs that name an environment or read a secret, one per line:
+# "<job> <tab> <line> <tab> environment|secret". Line-oriented like the other
+# parsers: a job is a 2-space key under jobs:, its `environment:` a 4-space key.
+# secrets.GITHUB_TOKEN (the job's own token) is not a secret in this sense.
+secret_env_records() {
+  awk -v tab="${TAB}" '
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { injobs=0 }
+    injobs && /^  [^[:space:]]/ { job=$1; sub(/:$/, "", job); next }
+    injobs && /^    environment:/ { printf "%s%s%d%senvironment\n", job, tab, NR, tab }
+    injobs {
+      line=$0
+      while (match(line, /secrets\.[A-Za-z_][A-Za-z0-9_]*/)) {
+        name=substr(line, RSTART + 8, RLENGTH - 8)
+        if (name != "GITHUB_TOKEN") { printf "%s%s%d%ssecret\n", job, tab, NR, tab }
+        line=substr(line, RSTART + RLENGTH)
+      }
+    }
+  ' "$1"
+}
+
+# Callees of a call job that may be passed secrets. Each is a reusable workflow
+# of this repository whose every job that reads a secret runs on a hosted label
+# (rule g checks that file too). The two fleet-iis gates get none.
+SECRET_CALLEES="pipeline-release-module.yml"
+is_secret_callee() { # a `uses:` value
+  local f c
+  f="${1##*/}"; f="${f%%@*}"
+  case "${1}" in We-Amp/mod_pagespeed/.github/workflows/*) ;; *) return 1 ;; esac
+  for c in ${SECRET_CALLEES}; do [ "${f}" = "${c}" ] && return 0; done
+  return 1
+}
+
+# `secrets: inherit` (any spacing) on a job: "<job> <tab> <line>".
+secret_inherit_records() {
+  awk -v tab="${TAB}" '
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { injobs=0 }
+    injobs && /^  [^[:space:]]/ { job=$1; sub(/:$/, "", job); next }
+    /^[[:space:]]*secrets:[[:space:]]*[\047"]?inherit/ { printf "%s%s%d\n", job, tab, NR }
+  ' "$1"
+}
+
+# Lines that index (`secrets[`) or serialise (`toJSON(secrets`) the secrets context.
+secret_index_lines() {
+  grep -nE 'secrets[[:space:]]*\[|(toJSON|toJson|tojson)[[:space:]]*\([[:space:]]*secrets' "$1" 2>/dev/null \
+    | grep -vE '^[0-9]+:[[:space:]]*#' | cut -d: -f1 || true
+}
+
+# Lines outside the jobs: block that put a secret in an expression (an env:
+# block at workflow level, a concurrency group, and so on).
+toplevel_secret_lines() {
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { injobs=0 }
+    !injobs && /\$\{\{[^}]*secrets/ { print NR }
+  ' "$1"
+}
+
 # True when the file has a top-level (zero-indent) `permissions:` key.
 has_toplevel_permissions() {
   grep -qE '^permissions:' "$1"
@@ -297,6 +368,44 @@ EOF
 $(write_perm_records "${wf}")
 EOF
   fi
+
+  # (g) secrets and environments, every workflow. An environment and a secret
+  # belong to hosted jobs only; a call of another workflow may pass secrets
+  # only to a callee on SECRET_CALLEES; no secrets: inherit; no secrets
+  # indexing or serialising; no secret in a workflow-level expression.
+  while IFS=$'\t' read -r sjob sline skind; do
+    [ -n "${sjob}" ] || continue
+    sruns="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${sjob}" '$1=="KEY" && $2==j && $3=="runs-on" {print $5}')"
+    if [ -z "${sruns}" ]; then
+      # A job without runs-on is a call of another workflow.
+      suses="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${sjob}" '$1=="KEY" && $2==j && $3=="uses" {print $5}')"
+      if ! is_secret_callee "${suses}"; then
+        err "${wf}:${sline}: call job '${sjob}' passes a ${skind} to '${suses}', which is not on the secret-callee list (rule g)"
+      fi
+    elif ! is_hosted_label "${sruns}"; then
+      err "${wf}:${sline}: job '${sjob}' names an ${skind} but does not run on a hosted label (rule g)"
+    fi
+  done <<EOF
+$(secret_env_records "${wf}")
+EOF
+  while IFS=$'\t' read -r sjob sline; do
+    [ -n "${sjob}" ] || continue
+    err "${wf}:${sline}: 'secrets: inherit' on '${sjob}': pass secrets one by one (rule g)"
+  done <<EOF
+$(secret_inherit_records "${wf}")
+EOF
+  while IFS=$'\t' read -r sline; do
+    [ -n "${sline}" ] || continue
+    err "${wf}:${sline}: secrets indexed or serialised; name each secret as secrets.NAME (rule g)"
+  done <<EOF
+$(secret_index_lines "${wf}")
+EOF
+  while IFS=$'\t' read -r sline; do
+    [ -n "${sline}" ] || continue
+    err "${wf}:${sline}: a secret in a workflow-level expression (outside jobs); read secrets in a hosted job (rule g)"
+  done <<EOF
+$(toplevel_secret_lines "${wf}")
+EOF
 
   if printf '%s\n' "${triggers}" | grep -qvx 'workflow_call'; then
     # Caller workflow. (b) unless allowlisted.
