@@ -5,14 +5,14 @@
 
 # Ref guard for the release lanes (see docs/ci/release.md). Defense in depth
 # next to the `release` environment's tag policy: a release pipeline may only
-# run on refs/heads/main or on a release tag whose commit is reachable from
-# main, and a manually dispatched release may only name a tag that already
-# exists and is reachable from main.
+# run on refs/heads/master or on a release tag whose commit is reachable from
+# master, and a manually dispatched release may only name a tag that already
+# exists and is reachable from master.
 #
 # Usage (CI):   GITHUB_REF=... GITHUB_EVENT_NAME=... [INPUT_TAG=...] \
 #                 [ALLOWED_TAG_GLOB='v*'] [ALLOWED_EVENTS='push workflow_dispatch'] \
 #                 bash tools/ci/ref_guard.sh check
-#               ALLOWED_TAG_GLOB empty = main only (no tag may run the job).
+#               ALLOWED_TAG_GLOB empty = master only (no tag may run the job).
 #               ALLOWED_EVENTS unset or empty = any event.
 # Library:      source this file, call ref_guard_ref_allowed / _dispatch_tag_ok.
 
@@ -20,7 +20,7 @@
 ref_guard_ref_allowed() {
   local ref="${1:-}" glob="${2-v*}"
   case "$ref" in
-    refs/heads/main) return 0 ;;
+    refs/heads/master) return 0 ;;
     refs/tags/*)
       local name="${ref#refs/tags/}"
       # shellcheck disable=SC2254
@@ -33,7 +33,7 @@ ref_guard_ref_allowed() {
       return 1
       ;;
   esac
-  echo "ref-guard: '$ref' may not run release jobs (only refs/heads/main${glob:+ and refs/tags/$glob})" >&2
+  echo "ref-guard: '$ref' may not run release jobs (only refs/heads/master${glob:+ and refs/tags/$glob})" >&2
   return 1
 }
 
@@ -64,7 +64,7 @@ ref_guard_dispatch_tag_ok() {
     return 1
   fi
   if ! git merge-base --is-ancestor "$sha" "$main_ref"; then
-    echo "ref-guard: dispatch tag '$tag' (${sha}) is not reachable from main" >&2
+    echo "ref-guard: dispatch tag '$tag' (${sha}) is not reachable from master" >&2
     return 1
   fi
   return 0
@@ -78,7 +78,7 @@ ref_guard_sha_on_main() {
     return 1
   fi
   if [ -z "$sha" ] || ! git merge-base --is-ancestor "$sha" "$main_ref" 2>/dev/null; then
-    echo "ref-guard: commit '${sha}' being run is not reachable from main" >&2
+    echo "ref-guard: commit '${sha}' being run is not reachable from master" >&2
     return 1
   fi
 }
@@ -103,7 +103,7 @@ ref_guard_check() {
   case "${GITHUB_REF:-}" in
     refs/tags/*)
       # A tag name proves nothing: anyone with contents:write can push v9.9.9
-      # onto an arbitrary commit. The commit being run must be on main.
+      # onto an arbitrary commit. The commit being run must be on master.
       ref_guard_sha_on_main "${GITHUB_SHA:-}" "$main_ref" || return 1
       if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && [ "${INPUT_TAG-}" != "${GITHUB_REF#refs/tags/}" ]; then
         echo "ref-guard: dispatch on tag '${GITHUB_REF#refs/tags/}' with input tag '${INPUT_TAG-}' (must be equal)" >&2
