@@ -44,8 +44,8 @@ constexpr std::string_view kFuzzEngineVersion = "2.0.0";
 // Returns whether the pack loaded.
 bool LoadOne(const char* data, size_t size) {
   using pagespeed::packs::LoadPack;
-  auto pack = LoadPack(std::string_view(data, size),
-                       kFuzzEngineVersion, "fuzz.json");
+  auto pack =
+      LoadPack(std::string_view(data, size), kFuzzEngineVersion, "fuzz.json");
   if (!pack.ok()) return false;
   if (pack->rules.size() > pagespeed::packs::kMaxRules || pack->sites.empty()) {
     std::fprintf(stderr, "loader accepted a pack that breaks its limits\n");
