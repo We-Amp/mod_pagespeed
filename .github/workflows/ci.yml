@@ -90,6 +90,8 @@ jobs:
         run: tools/ci/check-workflow-shape.sh
       - name: Workflow-shape gate fixtures
         run: tools/ci/test_check_workflow_shape.sh
+      - name: Hygiene gate credential-rule fixtures
+        run: tools/ci/test_check_public_hygiene.sh
 
   ci-tooling-tests:
     name: CI tooling self-tests
