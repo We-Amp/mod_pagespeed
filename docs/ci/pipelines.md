@@ -19,8 +19,8 @@ jobs exist today.
 
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
-| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
-| Full | `pipeline-full.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | not yet present; the call in `ci.yml` is commented out until the file exists |
+| PR | `pipeline-pr.yml`, called by `ci.yml` once the caller switch lands | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
+| Full | `pipeline-full.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | not yet present; the `full` call in `ci.yml` stays commented out until that pipeline exists until the file exists |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 
 The license audit (Apache RAT), the public-tree hygiene gate, the workflow-shape

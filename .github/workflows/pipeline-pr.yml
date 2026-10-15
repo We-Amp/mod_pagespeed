@@ -20,6 +20,8 @@
 # The parity guard of the former pipeline is dropped on purpose: the corpus
 # it compared against is not part of this repository.
 
+# Deferred to the nightly tier: the scheduled grype database pin-age
+# enforcement and the image scan mode of the dependency scan.
 name: pipeline-pr
 
 on:
@@ -394,7 +396,7 @@ jobs:
       - name: Upload SBOMs and grype reports
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dep-scan-${{ github.sha }}
           path: sbom/scan/
