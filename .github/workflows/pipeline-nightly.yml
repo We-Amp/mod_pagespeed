@@ -256,11 +256,14 @@ jobs:
     steps:
       - name: Validate the stress parameters
         run: |
-          case "${DURATION}${CONCURRENCY}" in
-            ''|*[!0-9]*) echo "::error::duration and concurrency must be whole numbers"; exit 1 ;;
-          esac
-          if [ "${DURATION}" -lt 1 ] || [ "${DURATION}" -gt 1800 ]; then
-            echo "::error::duration must be between 1 and 1800 seconds (got ${DURATION})"
+          # Length-capped digit patterns first, so a huge value never reaches
+          # an arithmetic test.
+          if ! [[ "${DURATION}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${DURATION}))" -lt 1 ] || [ "$((10#${DURATION}))" -gt 1800 ]; then
+            echo "::error::duration must be a whole number of seconds between 1 and 1800"
+            exit 1
+          fi
+          if ! [[ "${CONCURRENCY}" =~ ^[0-9]{1,3}$ ]] || [ "$((10#${CONCURRENCY}))" -lt 1 ] || [ "$((10#${CONCURRENCY}))" -gt 256 ]; then
+            echo "::error::concurrency must be a whole number between 1 and 256"
             exit 1
           fi
 
@@ -409,6 +412,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -495,16 +503,39 @@ jobs:
       # worker that cannot be built or started fails the run.
       - name: Run the Apache system tests with the daemon lane required
         run: |
-          docker exec -i -e BZL_FLAGS "${CTR}" bash -s -e PAGESPEED_DAEMON_LANE=require <<'EOS'
+          docker exec -i -e BZL_FLAGS -e PAGESPEED_DAEMON_LANE=require "${CTR}" bash -s <<'EOS'
           set -euo pipefail
           BAZEL_CONFIG="${BZL_FLAGS} --action_env=CC=clang --action_env=CXX=clang++" \
             ./test/system/run_system_tests.sh
           EOS
 
+      - name: Collect the logs on failure
+        if: failure() && env.CTR != ''
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/apache-daemon-logs"
+          docker logs --tail 400 "${CTR}" > "${RUNNER_TEMP}/apache-daemon-logs/container.log" 2>&1 || true
+          docker cp "${CTR}:/var/log/apache2/error.log" "${RUNNER_TEMP}/apache-daemon-logs/error.log" || true
+
+      - name: Upload the logs on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-apache-daemon-logs
+          path: ${{ runner.temp }}/apache-daemon-logs/
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Remove the build container
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -520,11 +551,14 @@ jobs:
     steps:
       - name: Validate the stress parameters
         run: |
-          case "${DURATION}${CONCURRENCY}" in
-            ''|*[!0-9]*) echo "::error::duration and concurrency must be whole numbers"; exit 1 ;;
-          esac
-          if [ "${DURATION}" -lt 1 ] || [ "${DURATION}" -gt 1800 ]; then
-            echo "::error::duration must be between 1 and 1800 seconds (got ${DURATION})"
+          # Length-capped digit patterns first, so a huge value never reaches
+          # an arithmetic test.
+          if ! [[ "${DURATION}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${DURATION}))" -lt 1 ] || [ "$((10#${DURATION}))" -gt 1800 ]; then
+            echo "::error::duration must be a whole number of seconds between 1 and 1800"
+            exit 1
+          fi
+          if ! [[ "${CONCURRENCY}" =~ ^[0-9]{1,3}$ ]] || [ "$((10#${CONCURRENCY}))" -lt 1 ] || [ "$((10#${CONCURRENCY}))" -gt 256 ]; then
+            echo "::error::concurrency must be a whole number between 1 and 256"
             exit 1
           fi
 
@@ -663,6 +697,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -677,9 +716,11 @@ jobs:
     steps:
       - name: Validate the protocol list
         run: |
-          # Only curl protocol flags: a flag, then more flags separated by spaces.
-          if [ -n "${PROTOCOLS_INPUT}" ] && ! printf '%s' "${PROTOCOLS_INPUT}" | grep -Eq '^--[a-z0-9.-]+( --[a-z0-9.-]+)*$'; then
-            echo "::error::protocols must be space separated curl protocol flags such as --http1.1 --http2"
+          # An allow-list of curl protocol flags, single spaces between them.
+          # bash matches the whole value, so a newline cannot smuggle a line.
+          flag='(--http1\.0|--http1\.1|--http2|--http2-prior-knowledge|--http3|--http3-only)'
+          if [ -n "${PROTOCOLS_INPUT}" ] && ! [[ "${PROTOCOLS_INPUT}" =~ ^${flag}(\ ${flag})*$ ]]; then
+            echo "::error::protocols must be space separated flags from: --http1.0 --http1.1 --http2 --http2-prior-knowledge --http3 --http3-only"
             exit 1
           fi
 
@@ -803,6 +844,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -938,6 +984,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -962,11 +1013,8 @@ jobs:
       # else runs.
       - name: Validate the fuzz budget
         run: |
-          case "${FUZZ_SECONDS}" in
-            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
-          esac
-          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
-            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+          if ! [[ "${FUZZ_SECONDS}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${FUZZ_SECONDS}))" -lt 1 ] || [ "$((10#${FUZZ_SECONDS}))" -gt 1800 ]; then
+            echo "::error::fuzz budget must be a whole number of seconds between 1 and 1800"
             exit 1
           fi
 
@@ -1171,6 +1219,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -1188,11 +1241,8 @@ jobs:
       # else runs.
       - name: Validate the fuzz budget
         run: |
-          case "${FUZZ_SECONDS}" in
-            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
-          esac
-          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
-            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+          if ! [[ "${FUZZ_SECONDS}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${FUZZ_SECONDS}))" -lt 1 ] || [ "$((10#${FUZZ_SECONDS}))" -gt 1800 ]; then
+            echo "::error::fuzz budget must be a whole number of seconds between 1 and 1800"
             exit 1
           fi
 
@@ -1394,6 +1444,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -1411,11 +1466,8 @@ jobs:
       # else runs.
       - name: Validate the fuzz budget
         run: |
-          case "${FUZZ_SECONDS}" in
-            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
-          esac
-          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
-            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+          if ! [[ "${FUZZ_SECONDS}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${FUZZ_SECONDS}))" -lt 1 ] || [ "$((10#${FUZZ_SECONDS}))" -gt 1800 ]; then
+            echo "::error::fuzz budget must be a whole number of seconds between 1 and 1800"
             exit 1
           fi
 
@@ -1654,6 +1706,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -1671,11 +1728,8 @@ jobs:
       # else runs.
       - name: Validate the fuzz budget
         run: |
-          case "${FUZZ_SECONDS}" in
-            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
-          esac
-          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
-            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+          if ! [[ "${FUZZ_SECONDS}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${FUZZ_SECONDS}))" -lt 1 ] || [ "$((10#${FUZZ_SECONDS}))" -gt 1800 ]; then
+            echo "::error::fuzz budget must be a whole number of seconds between 1 and 1800"
             exit 1
           fi
 
@@ -1925,6 +1979,11 @@ jobs:
         if: always()
         run: |
           if [ -n "${CTR:-}" ]; then
+            # Sudo inside the container can leave root-owned files (rig
+            # cores, logs, caches) in the bind-mounted workspace and temp
+            # directory; hand them back to the host user before removal so
+            # the runner's cleanup can delete them.
+            docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
           fi
 
@@ -1949,11 +2008,14 @@ jobs:
       - name: Validate the stress parameters
         shell: bash
         run: |
-          case "${DURATION}${CONCURRENCY}" in
-            ''|*[!0-9]*) echo "::error::duration and concurrency must be whole numbers"; exit 1 ;;
-          esac
-          if [ "${DURATION}" -lt 1 ] || [ "${DURATION}" -gt 1800 ]; then
-            echo "::error::duration must be between 1 and 1800 seconds (got ${DURATION})"
+          # Length-capped digit patterns first, so a huge value never reaches
+          # an arithmetic test.
+          if ! [[ "${DURATION}" =~ ^[0-9]{1,4}$ ]] || [ "$((10#${DURATION}))" -lt 1 ] || [ "$((10#${DURATION}))" -gt 1800 ]; then
+            echo "::error::duration must be a whole number of seconds between 1 and 1800"
+            exit 1
+          fi
+          if ! [[ "${CONCURRENCY}" =~ ^[0-9]{1,3}$ ]] || [ "$((10#${CONCURRENCY}))" -lt 1 ] || [ "$((10#${CONCURRENCY}))" -gt 256 ]; then
+            echo "::error::concurrency must be a whole number between 1 and 256"
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2152,7 +2214,8 @@ jobs:
       - name: Validate the arms
         shell: bash
         run: |
-          if ! printf '%s' "${ARMS}" | grep -Eq '^(cuzz-nopageheap|cuzz-pageheap|pageheap-nocuzz):[0-9]{1,2}(,(cuzz-nopageheap|cuzz-pageheap|pageheap-nocuzz):[0-9]{1,2})*$'; then
+          arm='(cuzz-nopageheap|cuzz-pageheap|pageheap-nocuzz):[0-9]{1,2}'
+          if ! [[ "${ARMS}" =~ ^${arm}(,${arm})*$ ]]; then
             echo "::error::arms must be a comma separated list of <arm>:<iterations> (cuzz-nopageheap, cuzz-pageheap, pageheap-nocuzz)"
             exit 1
           fi

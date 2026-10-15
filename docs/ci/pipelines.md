@@ -165,6 +165,8 @@ vulnerability snapshot as a pull request, needs a write token and belongs to
 a separate hosted bot job with its own token in a protected environment; it
 is not part of this tier.
 
+Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a public repository, so treat them as public evidence for three days: anyone who can view the run can download them. A crash that is also a security problem should be reported privately and its evidence not left to the schedule; delete the artifact from the run if needed.
+
 | Job | Class | What it does |
 |---|---|---|
 | `nightly-vendor` | fleet-heavy | vendors the dependencies once (`tools/vendor-deps.sh`) and hands the tree to every other job through a vendor tarball or `actions/cache`, as described under "Artifacts" |
