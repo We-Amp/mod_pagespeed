@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Also run the full tier (not available yet)
+        description: Also run the full tier
         type: boolean
         default: false
 
@@ -44,19 +44,14 @@ jobs:
       pull-requests: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@master
 
-  # The full tier arrives with pipeline-full.yml. It stays commented out until
-  # that file exists on master, because a call to a missing reusable workflow
-  # fails the whole run at startup. When enabling it, also add `full` to the
-  # `needs` of the gate below. The ci:full label is read when the pull request
-  # run starts (open, push, reopen); after adding it, push or re-run to get
-  # the full tier.
-  #
-  # full:
-  #   if: >-
-  #     (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
-  #     (github.event_name == 'workflow_dispatch' && inputs.full) ||
-  #     (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full'))
-  #   uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@master
+  # The ci:full label is read when the pull request run starts (open, push,
+  # reopen); after adding it, push or re-run to get the full tier.
+  full:
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && inputs.full) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full'))
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@master
 
   rat:
     name: License audit (Apache RAT)
@@ -123,7 +118,7 @@ jobs:
   # siblings, so this job runs inline, on a hosted label only.
   gate:
     name: CI gate
-    needs: [rat, public-hygiene, ci-tooling-tests, pr]
+    needs: [rat, public-hygiene, ci-tooling-tests, pr, full]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
