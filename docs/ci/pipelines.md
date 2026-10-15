@@ -164,6 +164,12 @@ runner. Setting it to `true` turns the build-runner legs on; clearing it is
 the kill switch that takes every such job off the build runners at once, with
 no workflow change.
 
+`FLEET_IIS_ENABLED` is a second repository variable for the jobs of the
+`fleet-iis` class, which have no hosted twin. Each of them also requires it to
+be `true`, so they are skipped (not queued) until a runner of the class is
+registered; the `CI gate` accepts the skipped result, and a real module
+release fails closed at `validate` while the gates are skipped.
+
 Two more guards exist for jobs that cannot fall back to a hosted runner, and
 the gate accepts exactly these three. **Only** is for a job that mounts the
 container socket, runs privileged containers or needs a real Linux or Windows
