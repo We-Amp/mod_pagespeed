@@ -2738,7 +2738,7 @@ jobs:
             [ "$v" = "$PKG_VERSION" ] || { echo "::error::$r version '$v' != '${PKG_VERSION}'"; exit 1; }
             case "$r" in
               mod-pagespeed-*|el10-mod-pagespeed-*)
-                rpm -qp --requires "$r" | grep -Eq "^pagespeed-optimizer = ${PAIR_VERSION}(-[0-9A-Za-z.]+)?$" \
+                rpm -qp --requires "$r" | grep -Eq "^pagespeed-optimizer = $(printf '%s' "${PAIR_VERSION}" | sed 's/\./\\./g')(-[0-9A-Za-z.]+)?$" \
                   || { echo "::error::$r does not require pagespeed-optimizer = ${PAIR_VERSION}"; rpm -qp --requires "$r"; exit 1; } ;;
             esac
             echo "$r: version $v"

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The EL10 Apache package now requires the matching `pagespeed-optimizer`
+  package and ships the daemon configuration and SELinux policy; it was built
+  without them.
 - A build from source now reports the module version (1.19.0) instead of 2.4.0.
 
 ## [2.4.0] - 2026-10-14
