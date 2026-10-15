@@ -19,7 +19,7 @@ jobs exist today.
 
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
-| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. The IIS system tests follow in a later step |
+| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. |
 | Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners. See "The full tier" |
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane, part A: build, package, smoke and validate, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`. No signing, no release, no secret. See `docs/ci/release.md` |
@@ -56,7 +56,10 @@ tier.
 
 Application Verifier and the other IIS lanes that run longer belong to the
 later tiers. `iis-sys-tests` clears stale verifier settings before the run and
-again afterwards, and ships an evidence artifact when it fails.
+again afterwards, arms Windows Error Reporting full dumps for the worker, and
+on a failure ships an evidence artifact that includes this run's staged
+crash dumps. It blanks the guest password for the whole job, because it runs
+pull request code with administrator rights.
 
 ### Release gates on the `fleet-iis` class
 
@@ -447,7 +450,9 @@ first calls them from a release workflow:
 
 ```text
 We-Amp/mod_pagespeed/.github/workflows/gate-iis-msi-upgrade.yml@refs/heads/master
+We-Amp/mod_pagespeed/.github/workflows/gate-iis-msi-upgrade.yml@refs/heads/ci-dev
 We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@refs/heads/master
+We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@refs/heads/ci-dev
 ```
 
 Callers (`ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml`, `release.yml`) never get an entry.

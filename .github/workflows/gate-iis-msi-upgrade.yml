@@ -55,7 +55,7 @@ jobs:
       - name: Check the guest
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($name in @('CI_IIS_VM_NAME', 'CI_IIS_VM_SNAPSHOT', 'CI_IIS_VM_ADMIN_PASSWORD')) {
+          foreach ($name in @('CI_IIS_VM_NAME', 'CI_IIS_VM_ADMIN_PASSWORD')) {
             if (-not [Environment]::GetEnvironmentVariable($name)) {
               Write-Host "::error::$name is not set in the runner environment; see docs/ci/runner-environment.md"
               exit 1

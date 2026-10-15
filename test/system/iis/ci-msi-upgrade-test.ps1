@@ -42,10 +42,6 @@
 #                            the runner environment provides
 #   -Snapshot                Checkpoint to restore. Defaults to
 #                            $env:CI_IIS_VM_SNAPSHOT, else 02-iis-ready
-#
-# The guest Administrator password is read from the environment variable
-# CI_IIS_VM_ADMIN_PASSWORD of the runner (docs/ci/runner-environment.md). It is
-# never a parameter, never written in this file and never printed.
 #   -ReleaseTag              Expected release tag (e.g. v1.1.0-beta.7); defaults
 #                            to $env:RELEASE_TAG. Used for admin-SPA assertion.
 #   -ExpectedVersionString   MAJOR.MINOR.BUILD[-PRERELEASE] expected in the
@@ -54,6 +50,10 @@
 #                            MOD_PAGESPEED_FULL_VERSION_STRING in
 #                            net/instaweb/public/version.h.in. Derived from
 #                            net/instaweb/public/VERSION if not supplied.
+#
+# The guest Administrator password is read from the environment variable
+# CI_IIS_VM_ADMIN_PASSWORD of the runner (docs/ci/runner-environment.md). It is
+# never a parameter, never written in this file and never printed.
 
 param(
     [Parameter(Mandatory=$true)]
