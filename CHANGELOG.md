@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A build from source now reports the module version (1.19.0) instead of 2.4.0.
+
 ## [2.4.0] - 2026-10-14
 
 ### Added

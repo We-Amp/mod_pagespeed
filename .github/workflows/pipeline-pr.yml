@@ -257,11 +257,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash pagespeed/system/console/check-no-drift.sh
 
-      # Security gates: notices drift, OpenVEX format, and a grype
-      # scan of the committed SPDX SBOM, failing on medium and above. A
-      # not_affected finding gets a documented sbom/*.vex.json entry.
-      # SBOM drift: the committed SPDX must match what bazel/repositories.bzl
-      # and the bundled console dependencies produce today.
+      # Security gates: SBOM drift (the committed SPDX must match what
+      # bazel/repositories.bzl and the bundled console dependencies produce
+      # today), notices drift, OpenVEX format, and a grype scan of the
+      # committed SPDX SBOM, failing on medium and above. A not_affected
+      # finding gets a documented sbom/*.vex.json entry.
       - name: SBOM drift - generate-sbom.py --verify
         if: ${{ !cancelled() }}
         run: python3 tools/generate-sbom.py --verify
