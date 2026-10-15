@@ -234,7 +234,7 @@ legs) are not part of it.
 | `nginx-sys-tests` | `fleet-light` | general | the same for the nginx module |
 | `windows-build` | `fleet-windows` | general | release build of the IIS module; its bundle feeds `win-appverif` |
 | `win-asan` | `fleet-windows` | general | Windows ASan build and unit tests; skips with a notice when LLVM 19 with its sanitizer runtime is not found |
-| `win-appverif` | `fleet-windows` | only | Application Verifier, full page heap and concurrency fuzzing on the IIS worker process. Needs the IIS role, administrator rights and the Windows SDK debugging tools, so it has no hosted side and a fork or Dependabot pull request skips it |
+| `win-appverif` | `fleet-iis` | only | Application Verifier, full page heap and concurrency fuzzing on the IIS worker process. Needs the IIS role, administrator rights and the Windows SDK debugging tools, so it has no hosted side and a fork or Dependabot pull request skips it |
 | `linux-arm64-build`, `linux-arm64-unit-tests`, `linux-arm64-apache-sys-tests`, `linux-arm64-nginx-sys-tests` | hosted (`ubuntu-24.04-arm`) | none | the arm64 build vendors for itself into `actions/cache` and uploads its module bundle; the other three reuse the vendored tree, the Bazel disk cache and the bundle |
 
 Notes on the full tier:

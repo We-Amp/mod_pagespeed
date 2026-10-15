@@ -13,7 +13,8 @@
 # Jobs by class:
 #   fleet-heavy    vendor, linux-build, linux-asan, linux-tsan
 #   fleet-light    apache-sys-tests, nginx-sys-tests
-#   fleet-iis  windows-build, win-asan, win-appverif (fleet only)
+#   fleet-windows  windows-build, win-asan
+#   fleet-iis  win-appverif (fleet only)
 #   hosted arm64   linux-arm64-build, linux-arm64-unit-tests,
 #                  linux-arm64-apache-sys-tests, linux-arm64-nginx-sys-tests
 #
