@@ -141,7 +141,10 @@ runner jobs has a hosted twin with the same steps (`<job>-hosted`, carrying
 `if:` of a build runner job is the guard alone, so such a job cannot name the
 result of the job it depends on; a small hosted `<name>-ready` job joins the
 pair (it succeeds when one of the two legs did) and the dependent jobs `need`
-the join. Steps shared by the two jobs, and by an arm64 job, are written once
+the join. GitHub skips a job when any ancestor job was skipped, so those
+dependents state their status check themselves: a build runner job's `if:` is
+`${{ !cancelled() && needs.<job>.result == 'success' && (<fleet guard>) }}`
+(the workflow-shape gate accepts that form), a hosted one omits the guard. Steps shared by the two jobs, and by an arm64 job, are written once
 with a YAML anchor.
 
 ## Artifacts
