@@ -60,3 +60,29 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Scan the tracked tree for non-public vocabulary
         run: tools/ci/check-public-hygiene.sh
+      - name: Workflow-shape gate
+        run: tools/ci/check-workflow-shape.sh
+      - name: Workflow-shape gate fixtures
+        run: tools/ci/test_check_workflow_shape.sh
+
+  ci-tooling-tests:
+    name: CI tooling self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Hermetic: docker, ssh, rsync and gh are shims inside each test.
+      - name: Release ref guard
+        run: tools/ci/test_ref_guard.sh
+      - name: Queued-run sweep
+        run: tools/ci/test_sweep_queued_runs.sh
+      - name: Artifact staging and bundle validation
+        run: |
+          tools/ci/test_stage_artifacts.sh
+          tools/ci/validate-local-bundle_test.sh
+      - name: Vendor tarball publish and extract
+        run: |
+          tools/ci/test_publish_vendor_tarball.sh
+          tools/ci/test_extract_vendor_tarball.sh
+      - name: Dev image naming and build lock
+        run: tools/ci/test_ensure_dev_image.sh

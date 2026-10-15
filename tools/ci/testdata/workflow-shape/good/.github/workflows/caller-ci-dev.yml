@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: CI pipeline development
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pr:
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline.yml@ci-dev

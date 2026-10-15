@@ -39,7 +39,7 @@
     INSTEAD of a ReportArchive entry, so leaving the key armed would blind the
     archive-based probe of every other job on the box.
 
-    COEXISTENCE. The original arming assumed "dedicated CI runners; nothing
+    COEXISTENCE. The original arming assumed "CI runners; nothing
     else configures
     w3wp LocalDumps on them". Once both the AppVerif lane and the ASan rig arm
     this key, that assumption is false, so both must tolerate the other:

@@ -3,7 +3,7 @@
 # Ported from pagespeed-optimizer tools/ci/ (shared CI artifact hub) — keep the copies in sync.
 # Invalidate a local CI artifacts staging dir if its metadata.json reports a
 # different commit SHA than the one expected by the caller. Protects against
-# concurrent-PR contamination on dedicated shared runners: when two PRs run
+# concurrent-PR contamination on shared runners: when two PRs run
 # back-to-back, the later Build overwrites the earlier Build's
 # .ci-artifacts/, and a Pkg Smoke rerun of the earlier PR would otherwise
 # read the other PR's binary.

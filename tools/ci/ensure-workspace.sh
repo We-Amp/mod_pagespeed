@@ -56,11 +56,11 @@ LOCAL_TARBALL="${2:-}"
 
 STAMPED="$(tr -d '[:space:]' < "${WORKSPACE_DIR}/GIT_COMMIT" 2>/dev/null || true)"
 if [ "$STAMPED" = "$GITHUB_SHA" ]; then
-  echo "ensure-workspace: workspace current on $(hostname) (${GITHUB_SHA}) -- reusing warm tree"
+  echo "ensure-workspace: workspace current (${GITHUB_SHA}) -- reusing warm tree"
   exit 0
 fi
 
-echo "ensure-workspace: workspace missing/stale on $(hostname) (have '${STAMPED}', want '${GITHUB_SHA}') -- self-healing from the CI hub"
+echo "ensure-workspace: workspace missing/stale (have '${STAMPED}', want '${GITHUB_SHA}') -- self-healing from the CI hub"
 
 # Ensure the workspace dir exists owned by THIS runner uid before we touch it.
 # On a box where the `vendor` job has never run, ${WORKSPACE_DIR} may not exist
