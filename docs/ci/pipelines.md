@@ -4,7 +4,7 @@
 # CI pipelines
 
 This repository's CI is split into thin **caller** workflows and
-**reusable** workflows. Jobs that need a lot of CPU run on a pool of build
+**reusable** workflows. Jobs that need a lot of CPU run on a fleet of build
 runners that are reachable only through this repository's reusable workflows
 at `refs/heads/master` (and `refs/heads/ci-dev`). A pull request therefore
 cannot put its own workflow code on one of those runners: whatever it
