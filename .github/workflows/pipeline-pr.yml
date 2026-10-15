@@ -260,11 +260,11 @@ jobs:
       # Security gates: notices drift, OpenVEX format, and a grype
       # scan of the committed SPDX SBOM, failing on medium and above. A
       # not_affected finding gets a documented sbom/*.vex.json entry.
-      # Not run here: generate-sbom.py --verify. It stamps the product
-      # version from net/instaweb/public/VERSION, and this tree carries the
-      # product-line version (2.4.0) where the committed SBOM carries the
-      # module version (1.19.0), so the check cannot pass until the two are
-      # reconciled. The self-test below still covers the generator's logic.
+      # SBOM drift: the committed SPDX must match what bazel/repositories.bzl
+      # and the bundled console dependencies produce today.
+      - name: SBOM drift - generate-sbom.py --verify
+        if: ${{ !cancelled() }}
+        run: python3 tools/generate-sbom.py --verify
 
       - name: SBOM scoping - generate-sbom.py --self-test
         if: ${{ !cancelled() }}
