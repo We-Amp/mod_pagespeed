@@ -139,6 +139,13 @@ build() {
       [ "$n" -lt 5 ] && sleep 3
     done
     if [ -e "$wsdir" ]; then
+      # A previous run packaged as root inside the container, so the runner
+      # user cannot delete what it left. Clear it through a throwaway root
+      # container of the leg's own image.
+      docker run --rm -v "$wsdir:/w" "${image}" sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null; true' >/dev/null 2>&1 || true
+      rmdir "$wsdir" 2>/dev/null || true
+    fi
+    if [ -e "$wsdir" ]; then
       echo "::error::leg '${distro}': could not clear its workspace"
       return 90
     fi
