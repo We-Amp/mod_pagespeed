@@ -2145,10 +2145,9 @@ jobs:
           $startup = @("--output_user_root=$outRoot")
           # Forward slashes for every Bazel path (a Windows Bazel requirement).
           $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
-          $comspec = $env:ComSpec -replace '\\', '/'
           $common = @('--config=windows', '--config=clang-cl', '-c', 'opt',
                       '--copt=/Z7', '--linkopt=/DEBUG', '--nostamp',
-                      "--workspace_status_command=$comspec /c echo.",
+                      "--workspace_status_command=echo.",
                       "--disk_cache=$diskCache")
           if ($env:WIN_CACHE_MAX_SIZE) { $common += "--experimental_disk_cache_gc_max_size=$($env:WIN_CACHE_MAX_SIZE)" }
           if (Test-Path -LiteralPath 'vendor') { $common = @('--config=vendored') + $common }
