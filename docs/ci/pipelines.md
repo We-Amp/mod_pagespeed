@@ -4,7 +4,7 @@
 # CI pipelines
 
 This repository's CI is split into thin **caller** workflows and
-**reusable** workflows. Jobs that need a lot of CPU run on a pool of build
+**reusable** workflows. Jobs that need a lot of CPU run on a fleet of build
 runners that are reachable only through this repository's reusable workflows
 at `refs/heads/master` (and `refs/heads/ci-dev`). A pull request therefore
 cannot put its own workflow code on one of those runners: whatever it
@@ -19,7 +19,7 @@ jobs exist today.
 
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
-| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
+| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. The IIS system tests follow in a later step |
 | Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners. See "The full tier" |
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane, part A: build, package, smoke and validate, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`. No signing, no release, no secret. See `docs/ci/release.md` |
@@ -35,10 +35,39 @@ The `ci:full` label is read when a pull request run starts (open, push,
 reopen). After adding the label, push or re-run the workflow to get the full
 tier.
 
+### Jobs of the PR tier
+
+| Job | Class | Needs | What it does |
+|---|---|---|---|
+| `changes` | hosted | | path filters (see below) |
+| `guards`, `blocking-dep-scan`, `dep-scan`, `browser-js-tests`, `console-tests` | hosted | | the hosted checks |
+| `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
+| `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |
+| `vendor` | `fleet-heavy` | | vendors the dependencies; publishes the tarball (hub channel) or caches `vendor/` (cache channel) |
+| `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
+| `linux-unit-tests` | `fleet-heavy` | `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
+| `lint` | `fleet-heavy` | `vendor` | clang-tidy (scoped to the pull request) and clang-format |
+| `js-minify-corpus` | `fleet-heavy` | `vendor` | JS minifier oracles and goldens freshness gate |
+| `html-parse-corpus` | `fleet-heavy` | `vendor` | HTML parse goldens freshness gate |
+| `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
+| `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
+| `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
+
+The `CI gate` in `ci.yml` consumes only the result of the whole `pr` call, so a
+job added here is covered without touching the gate.
+
+On the Linux legs the Bazel disk cache lives in a per-runner directory under
+the runner's home, mounted at `/cache` (empty on a hosted runner). Containers
+run as the runner's own user with `HOME` and `USER` set, so nothing root-owned
+lands in the checkout; no job logs in to a registry. Every Linux job that
+checks out a tree starts with a step that makes `vendor/` writable again,
+because a previous run's vendored toolchain files are read-only and would stop
+the checkout's cleanup on a persistent runner.
+
 ### Path-filtered hosted guards
 
 The `changes` job diffs a pull request against its base and publishes one
-boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`). The jobs that only
+boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`). The jobs that only
 matter when their inputs change run when their filter is true, and are skipped
 otherwise; outside a pull request every filter is true. The aggregate gate
 treats a skipped job as fine. A build runner job that depends on a filter
@@ -322,7 +351,7 @@ Not listed individually: `pr / Dependency Scan (report-only)` (it never fails
 the build) and the path-filtered jobs (`pr / Repo signing key embedded`,
 `pr / Serf stays removed`, `pr / Completeness gate (every C++ dep annotated)`,
 `pr / CVE scan vs committed snapshot (per-PR, offline)`,
-`pr / Upgrade rehearsal plan (version + distro matrix)`), which are skipped on
+`pr / Upgrade rehearsal plan (version + distro matrix)`, `pr / Fuzz smoke (deterministic replay plus 60s libFuzzer)`), which are skipped on
 a pull request that does not touch their paths. `CI gate` treats `skipped` as
 fine and fails on any other non-success result, so it covers all of them.
 Switch the required checks in the repository ruleset in the same change that
