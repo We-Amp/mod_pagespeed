@@ -1,0 +1,1838 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-full.yml: the full tier, as a reusable workflow. It runs on a push
+# to master, on a workflow_dispatch with `full: true`, and on a pull request
+# labelled `ci:full` (the caller decides; see docs/ci/pipelines.md).
+#
+# The tier is self-contained: it vendors and builds for itself instead of
+# waiting for the PR tier, so the two run side by side. The artifacts it
+# uploads carry a `full-` prefix because the PR tier uploads under the same
+# workflow run and artifact names must be unique within a run.
+#
+# Jobs by class:
+#   fleet-heavy    vendor, linux-build, linux-asan, linux-tsan
+#   fleet-light    apache-sys-tests, nginx-sys-tests
+#   fleet-windows  windows-build, win-asan, win-appverif (fleet only)
+#   hosted arm64   linux-arm64-build, linux-arm64-unit-tests,
+#                  linux-arm64-apache-sys-tests, linux-arm64-nginx-sys-tests
+#
+# Every routed job except win-appverif carries the general guard and also works
+# on a hosted runner in a degraded mode: no hub, no remote cache, no host
+# paths. win-appverif needs a Windows host with the IIS role, administrator
+# rights and Application Verifier, so it carries the fleet-only guard (a fork
+# or Dependabot pull request skips it).
+#
+# The hosted arm64 jobs are here and not in the PR tier because a cold hosted
+# arm64 build has no warm cache. They keep a Bazel disk cache in actions/cache.
+# Promote them to the PR tier only after a timing run.
+#
+# Routing expression and guards are copied verbatim from docs/ci/pipelines.md;
+# tools/ci/check-workflow-shape.sh enforces both.
+
+name: pipeline-full
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Shared inputs: the vendored tree and the Linux x64 build bundle.
+  # ---------------------------------------------------------------------
+  vendor:
+    name: Vendor Dependencies
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 45
+    outputs:
+      short_sha: ${{ steps.stamp.outputs.short_sha }}
+      channel: ${{ steps.renv.outputs.channel }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # Vendoring leaves read-only directories under vendor/; checkout's
+        # cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Detect runner environment
+        id: renv
+        run: |
+          # The vendored tree reaches consumer jobs through a runner-local
+          # vendor dir or the hub when the runner environment provides it,
+          # and through actions/cache otherwise (docs/ci/runner-environment.md).
+          channel=cache
+          if [ -n "${CI_VENDOR_DIR:-}" ] || { [ -n "${CI_HUB_SSH:-}" ] && [ -n "${CI_HUB_VENDOR_DIR:-}" ]; }; then
+            channel=hub
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "vendor distribution channel: ${channel}"
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v npm >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          command -v bazel >/dev/null 2>&1 || {
+            echo "::error::bazel is not on PATH and could not be installed via npm; see docs/ci/runner-environment.md"
+            exit 1
+          }
+          bazel --version
+
+      # Cache channel (hosted, or a fleet runner without hub configuration):
+      # vendor/ rides actions/cache between jobs, keyed on the dependency
+      # manifest so a dependency bump re-vendors exactly once.
+      - name: Restore vendored dependencies (cache channel)
+        if: steps.renv.outputs.channel == 'cache'
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+
+      # tools/vendor-deps.sh clones the source-only dependencies over ssh;
+      # the repositories are public, so rewrite that to anonymous https for
+      # this step only (no ssh key is needed or used, and no global git
+      # configuration is changed on a persistent runner).
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          bash tools/vendor-deps.sh vendor
+          if [ -d vendor/cyclone ]; then
+            echo "Cyclone: $(du -sh vendor/cyclone | cut -f1)"
+          fi
+          echo "Repo cache: $(du -sh vendor/repo-cache | cut -f1)"
+
+      # Hub channel only: stamp and tar the tree (source, vendor/, GIT_COMMIT)
+      # for the consumer jobs. On the cache channel consumers get the same
+      # tree from their own checkout plus the cached vendor/.
+      - name: Stamp GIT_COMMIT
+        if: steps.renv.outputs.channel == 'hub'
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Create the source tarball
+        if: steps.renv.outputs.channel == 'hub'
+        id: tarball
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          LOCAL_DIR="${CI_VENDOR_DIR:-${RUNNER_TEMP}}"
+          mkdir -p "${LOCAL_DIR}"
+          TARBALL="${LOCAL_DIR}/mod_pagespeed-${SHORT_SHA}.tar.zst"
+          # Short-circuit re-runs: a readable tarball for this SHA was written
+          # atomically (tmp + rename) by a prior run. Re-stamp it so the
+          # age-based prunes count from now.
+          if [ -r "$TARBALL" ]; then
+            echo "Tarball for ${SHORT_SHA} present and readable; skipping re-tar"
+            touch "$TARBALL"
+          else
+            # The temp name carries the run id: two runner instances can
+            # share the vendor dir, and a same-SHA run must not write into,
+            # or rm, the temp file this one is tarring.
+            TMP_TARBALL="${TARBALL}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+            rm -f "${TMP_TARBALL}"
+            tar --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
+              --exclude='.git' \
+              --exclude='bazel-*' \
+              .
+          fi
+          # Publish create-if-absent and write the digest sidecar
+          # (tools/ci/publish-vendor-tarball.sh): a same-SHA tarball another
+          # writer published first is adopted, never replaced.
+          bash tools/ci/publish-vendor-tarball.sh "$TARBALL" ${TMP_TARBALL:+"$TMP_TARBALL"}
+          # Prune other SHAs' tarballs from the shared local dir, but only
+          # past a grace window: a recent tarball may still be extracting in a
+          # concurrent run. The sidecar is matched explicitly so a pruned
+          # tarball never leaves its digest behind; *.tmp sweeps cancelled
+          # runs.
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            find "${CI_VENDOR_DIR}" \
+              \( -name 'mod_pagespeed-*.tar.zst' -o -name 'mod_pagespeed-*.tar.zst.sha256' \
+                 -o -name 'mod_pagespeed-*.tar.zst.*.tmp' \) \
+              ! -name "mod_pagespeed-${SHORT_SHA}.tar.zst" \
+              ! -name "mod_pagespeed-${SHORT_SHA}.tar.zst.sha256" \
+              -mmin +120 -delete 2>/dev/null || true
+          fi
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          # Name and size only: the directory is a runner-local path.
+          echo "Tarball: $(basename "$TARBALL") ($(du -h "$TARBALL" | cut -f1))"
+
+      - name: Publish the tarball to the hub
+        if: steps.renv.outputs.channel == 'hub'
+        run: |
+          # The ssh remote commands interpolate this runner's environment
+          # client-side on purpose: the values are defined by the runner
+          # environment contract (docs/ci/runner-environment.md), never
+          # logged, and the remote side needs them as literals.
+          if [ -z "${CI_HUB_SSH:-}" ] || [ -z "${CI_HUB_VENDOR_DIR:-}" ]; then
+            echo "::notice::CI_HUB_SSH/CI_HUB_VENDOR_DIR not set: the vendor tarball stays on this runner. Consumers on other runners fail with a recovery hint; configure the runner environment or use the cache channel (docs/ci/runner-environment.md)."
+            exit 0
+          fi
+          TARBALL="${{ steps.tarball.outputs.tarball }}"
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -o BatchMode=yes"
+          F="$(basename "$TARBALL")"
+          TMP_DEST="${CI_HUB_VENDOR_DIR}/${F}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+          T="$(basename "$TMP_DEST")"
+          # Publish create-if-absent ON the hub: a published tarball is never
+          # replaced, so a concurrent writer cannot swap bytes under a
+          # consumer or leave one writer's digest next to another's tarball.
+          PUBLISH="set -e; cd '${CI_HUB_VENDOR_DIR}'
+            if ! ln '${T}' '${F}' 2>/dev/null; then test -s '${F}'; fi
+            rm -f '${T}'
+            D=\$( (sha256sum '${F}' 2>/dev/null || shasum -a 256 '${F}') | cut -d' ' -f1)
+            printf '%s  %s\\n' \"\$D\" '${F}' > '${F}.sha256.${GITHUB_RUN_ID}.tmp'
+            mv -f '${F}.sha256.${GITHUB_RUN_ID}.tmp' '${F}.sha256'"
+          # SSH_OPTS is an intentional multi-token option list; the remote
+          # commands expand client-side on purpose (see above).
+          # shellcheck disable=SC2029,SC2086
+          for attempt in 1 2 3; do
+            if ssh ${SSH_OPTS} "${CI_HUB_SSH}" "mkdir -p '${CI_HUB_VENDOR_DIR}'" \
+               && rsync -a -e "ssh ${SSH_OPTS}" "$TARBALL" "${CI_HUB_SSH}:${TMP_DEST}" \
+               && ssh ${SSH_OPTS} "${CI_HUB_SSH}" "$PUBLISH"; then
+              echo "Published ${F} to the CI hub (attempt ${attempt})"
+              # Prune hub tarballs older than the retention window: the hub
+              # copy is the only one a rerun-failed-jobs consumer can reach
+              # once the local copy is gone.
+              ssh ${SSH_OPTS} "${CI_HUB_SSH}" \
+                "find '${CI_HUB_VENDOR_DIR}' -maxdepth 1 \( -name 'mod_pagespeed-*.tar.zst' -o -name 'mod_pagespeed-*.tar.zst.sha256' -o -name 'mod_pagespeed-*.tar.zst.*.tmp' \) -mmin +${CI_HUB_VENDOR_RETENTION_MIN:-1440} -delete" \
+                2>/dev/null || true
+              exit 0
+            fi
+            echo "::warning::hub publish failed (attempt ${attempt}/3)"
+            [ "$attempt" -lt 3 ] && sleep 5
+          done
+          echo "::error::hub publish failed after 3 attempts"
+          exit 1
+
+      - name: Stamp outputs
+        id: stamp
+        run: echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+  linux-build:
+    name: Linux Build
+    needs: vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          fail-on-cache-miss: true
+
+      # Hub channel: extract the vendor job's tarball over this checkout (same
+      # SHA; the tarball also carries vendor/ and the GIT_COMMIT stamp
+      # verified below). Integrity-checked with a hub fallback
+      # (tools/ci/extract-vendor-tarball.sh).
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+          STAMPED=$(tr -d '[:space:]' < GIT_COMMIT)
+          [ "${STAMPED}" = "${GITHUB_SHA}" ] || { echo "::error::stale vendored workspace: expected ${GITHUB_SHA}, got ${STAMPED}"; exit 1; }
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host flock around the build
+          # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds the
+          # image cold every time: the degraded mode.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # The container runs as the host user. That user may have no entry in
+      # the image's passwd file, so the job supplies one (the name `dev` is
+      # the one the image's sudo rules know).
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Build all targets
+        run: |
+          # Remote cache only when the runner environment names a cache host:
+          # --config=ci pulls build:remote-cache (pagespeed.bazelrc) and would
+          # fail to resolve its alias otherwise. Degraded mode: the same
+          # configuration with the cache switched off (slower, never failing).
+          EXTRA_DOCKER=()
+          BAZEL_CONFIG="--config=ci"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+          else
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            --memory=55g --memory-swap=55g \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # BAZEL_CONFIG is an intentional flag list -> word-splitting.
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                build ${BAZEL_CONFIG} \
+                --action_env=CC=clang --action_env=CXX=clang++ \
+                -- //:libmod_pagespeed.so \
+                //pagespeed/nginx:ngx_pagespeed_module.so \
+                //test/pagespeed/kernel/... //test/net/... \
+                //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+              # The modules carry their own crypto and are loaded into server
+              # processes that have another one. Fail before the artifacts are
+              # handed on if either module would bind to the host instead:
+              # crypto library in NEEDED, an undefined symbol the host would
+              # have to resolve, or exported internals. The self-test runs
+              # here as well because this container has a compiler: it builds
+              # real fixture objects.
+              bash tools/ci/assert_module_symbols.sh --self-test --require-fixtures
+              bash tools/ci/assert_module_symbols.sh --profile apache \
+                bazel-bin/libmod_pagespeed.so
+              bash tools/ci/assert_module_symbols.sh --profile nginx \
+                bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+              # Collect the modules for the system-test jobs.
+              mkdir -p /workspace/.build-artifacts/bazel-bin/pagespeed/nginx
+              cp -L bazel-bin/libmod_pagespeed.so \
+                    /workspace/.build-artifacts/bazel-bin/libmod_pagespeed.so
+              cp -L bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so \
+                    /workspace/.build-artifacts/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+            '
+
+      # The bundle passes between jobs as a GitHub artifact (retention 3
+      # days). Nothing here goes to a host-specific path.
+      - name: Upload the build bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-build-artifacts-linux-x64
+          path: .build-artifacts
+          retention-days: 3
+          include-hidden-files: true
+
+  # ---------------------------------------------------------------------
+  # Sanitizers. Gated on linux-build (not on a unit-test job) so the
+  # sanitizer configurations never race the build for a heavy slot.
+  # ---------------------------------------------------------------------
+  linux-asan:
+    name: Linux ASan + UBSan
+    needs: [vendor, linux-build]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+          STAMPED=$(tr -d '[:space:]' < GIT_COMMIT)
+          [ "${STAMPED}" = "${GITHUB_SHA}" ] || { echo "::error::stale vendored workspace: expected ${GITHUB_SHA}, got ${STAMPED}"; exit 1; }
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      # Redis and memcached for the cache tests, on a network named for this
+      # run so concurrent runs on one host never share a name. Only the
+      # containers started here are ever removed, by name.
+      - name: Start the test services
+        run: |
+          NET="ci-net-asan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          R="ci-redis-asan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          M="ci-memcached-asan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "CI_NET=${NET}"
+            echo "CI_REDIS=${R}"
+            echo "CI_MEMCACHED=${M}"
+          } >> "$GITHUB_ENV"
+          docker network create "$NET"
+          for img in redis:7-alpine memcached:1.6-alpine; do
+            for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
+          done
+          start() { local name=$1 image=$2; shift 2
+            for a in 1 2 3; do
+              docker rm -f "$name" 2>/dev/null || true
+              docker run -d --init --name "$name" --network "$NET" "$@" "$image" && return 0
+              echo "::warning::docker run $name failed ($a/3)"; sleep $((a*3))
+            done
+            echo "::error::could not start $name after 3 attempts"; return 1; }
+          start "$R" redis:7-alpine
+          start "$M" memcached:1.6-alpine
+          for a in $(seq 1 30); do docker exec "$R" redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::redis never became ready"; docker logs "$R" 2>&1 | tail; exit 1; }; done
+          echo "test services started"
+
+      - name: Run ASan + UBSan + LeakSan
+        run: |
+          EXTRA_DOCKER=()
+          BAZEL_CONFIG="--config=ci"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+          else
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            --memory=50g --memory-swap=50g \
+            --shm-size=512m \
+            --network="${CI_NET}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out-asan \
+                test ${BAZEL_CONFIG} --config=clang-asan \
+                --action_env=CC=clang --action_env=CXX=clang++ \
+                --keep_going \
+                --test_env=REDIS_HOST="${REDIS_HOST}" \
+                --test_env=REDIS_PORT=6379 \
+                --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
+                --test_env=MEMCACHED_PORT=11211 \
+                --test_env="ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1" \
+                --test_env="LSAN_OPTIONS=suppressions=/workspace/tools/lsan_suppressions.txt" \
+                --test_env="UBSAN_OPTIONS=halt_on_error=true:print_stacktrace=1:suppressions=/workspace/tools/ubsan_suppressions.txt" \
+                -- //test/pagespeed/kernel/... //test/net/... \
+                //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+            '
+
+      - name: Stop the test services
+        if: always()
+        run: |
+          [ -n "${CI_REDIS:-}" ] && docker rm -f "${CI_REDIS}" "${CI_MEMCACHED}" 2>/dev/null || true
+          [ -n "${CI_NET:-}" ] && docker network rm "${CI_NET}" 2>/dev/null || true
+
+  linux-tsan:
+    name: Linux TSan
+    needs: [vendor, linux-build]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+          STAMPED=$(tr -d '[:space:]' < GIT_COMMIT)
+          [ "${STAMPED}" = "${GITHUB_SHA}" ] || { echo "::error::stale vendored workspace: expected ${GITHUB_SHA}, got ${STAMPED}"; exit 1; }
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Start the test services
+        run: |
+          NET="ci-net-tsan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          R="ci-redis-tsan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          M="ci-memcached-tsan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "CI_NET=${NET}"
+            echo "CI_REDIS=${R}"
+            echo "CI_MEMCACHED=${M}"
+          } >> "$GITHUB_ENV"
+          docker network create "$NET"
+          for img in redis:7-alpine memcached:1.6-alpine; do
+            for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
+          done
+          start() { local name=$1 image=$2; shift 2
+            for a in 1 2 3; do
+              docker rm -f "$name" 2>/dev/null || true
+              docker run -d --init --name "$name" --network "$NET" "$@" "$image" && return 0
+              echo "::warning::docker run $name failed ($a/3)"; sleep $((a*3))
+            done
+            echo "::error::could not start $name after 3 attempts"; return 1; }
+          start "$R" redis:7-alpine
+          start "$M" memcached:1.6-alpine
+          for a in $(seq 1 30); do docker exec "$R" redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::redis never became ready"; docker logs "$R" 2>&1 | tail; exit 1; }; done
+          echo "test services started"
+
+      - name: Run TSan
+        run: |
+          EXTRA_DOCKER=()
+          BAZEL_CONFIG="--config=ci"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+          else
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          # seccomp=unconfined is required: TSan uses personality() to disable
+          # ASLR for its shadow memory layout. cap-drop=ALL limits the rest.
+          docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            --memory=50g --memory-swap=50g \
+            --shm-size=512m \
+            --network="${CI_NET}" \
+            --security-opt seccomp=unconfined \
+            --cap-drop=ALL \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out-tsan \
+                test ${BAZEL_CONFIG} --config=clang-tsan \
+                --action_env=CC=clang --action_env=CXX=clang++ \
+                --keep_going \
+                --test_env=REDIS_HOST="${REDIS_HOST}" \
+                --test_env=REDIS_PORT=6379 \
+                --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
+                --test_env=MEMCACHED_PORT=11211 \
+                --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/workspace/tools/tsan_suppressions.txt" \
+                -- //test/pagespeed/kernel/... //test/net/... \
+                //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+            '
+
+      - name: Stop the test services
+        if: always()
+        run: |
+          [ -n "${CI_REDIS:-}" ] && docker rm -f "${CI_REDIS}" "${CI_MEMCACHED}" 2>/dev/null || true
+          [ -n "${CI_NET:-}" ] && docker network rm "${CI_NET}" 2>/dev/null || true
+
+  # ---------------------------------------------------------------------
+  # Apache and nginx system tests. They run the built modules from the
+  # Linux Build bundle inside the dev image, with only the capability to bind
+  # low ports: no privileged container, no container socket. A hosted runner
+  # works too (degraded mode: it builds the dev image cold).
+  # ---------------------------------------------------------------------
+  apache-sys-tests:
+    name: Apache System Tests
+    needs: linux-build
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-light' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      # Names this job's diagnostics tarball (job, run and attempt), so only
+      # this job's own tarball is ever collected and uploaded.
+      SYSTEST_DIAG_TAG: apache-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: full-build-artifacts-linux-x64
+          path: ${{ github.workspace }}
+
+      - name: Check the modules are present
+        run: ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Run Apache system tests
+        id: systest
+        run: |
+          NAME="ci-systest-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          docker run --rm --init \
+            --name "${NAME}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            --cap-add NET_BIND_SERVICE \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -e HOME=/workspace -e USER=dev \
+            -e SYSTEST_DIAG_TAG \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              # Do not let a failing test run end this script before the
+              # diagnostics: capture the exit status, run the collector (crash
+              # lines into the job log; on failure one tarball of an allow-list
+              # of logs, see tools/ci/collect-systest-diagnostics.sh), then exit
+              # with the saved status. The collector always exits 0.
+              rc=0
+              ./test/system/run_system_tests.sh --skip-build || rc=$?
+              bash tools/ci/collect-systest-diagnostics.sh apache "$rc" /workspace/_systest-logs || true
+              exit "$rc"
+            '
+
+      # Only when the test step itself failed: take this job's own tarball
+      # into the job's scratch directory and upload it from there. Neither
+      # step can change the job's result; a refused upload (artifact storage
+      # full) must not add a failure of its own.
+      - name: Collect system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/systest-diag"
+          cp "${GITHUB_WORKSPACE}/_systest-logs/systest-diagnostics-${SYSTEST_DIAG_TAG}.tar.gz" \
+            "${RUNNER_TEMP}/systest-diag/" \
+            || echo "No diagnostics tarball for ${SYSTEST_DIAG_TAG}"
+
+      - name: Upload system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-apache-systest-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/systest-diag/
+          if-no-files-found: warn
+          retention-days: 3
+          # Already gzip-compressed.
+          compression-level: 0
+
+  nginx-sys-tests:
+    name: Nginx System Tests
+    needs: linux-build
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-light' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      SYSTEST_DIAG_TAG: nginx-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: full-build-artifacts-linux-x64
+          path: ${{ github.workspace }}
+
+      - name: Check the modules are present
+        run: ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Run Nginx system tests
+        id: systest
+        run: |
+          NAME="ci-systest-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          docker run --rm --init \
+            --name "${NAME}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            --cap-add NET_BIND_SERVICE \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -e HOME=/workspace -e USER=dev \
+            -e SYSTEST_DIAG_TAG \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              rc=0
+              ./test/system/run_nginx_tests.sh --skip-build || rc=$?
+              bash tools/ci/collect-systest-diagnostics.sh nginx "$rc" /workspace/_systest-logs || true
+              exit "$rc"
+            '
+
+      - name: Collect system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/systest-diag"
+          cp "${GITHUB_WORKSPACE}/_systest-logs/systest-diagnostics-${SYSTEST_DIAG_TAG}.tar.gz" \
+            "${RUNNER_TEMP}/systest-diag/" \
+            || echo "No diagnostics tarball for ${SYSTEST_DIAG_TAG}"
+
+      - name: Upload system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-nginx-systest-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/systest-diag/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
+
+  # ---------------------------------------------------------------------
+  # Windows. Tool locations come from PATH, or from the runner environment
+  # when the runner provides it (docs/ci/runner-environment.md). Nothing here
+  # names a drive, a user profile or an installation directory of a runner.
+  # ---------------------------------------------------------------------
+
+  # Release build of the IIS module. It feeds win-appverif and is the full
+  # tier's own Windows build (the PR tier builds it separately).
+  windows-build:
+    name: Windows Build
+    needs: vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Resolve the runner environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Set-JobEnv([string]$Name, [string]$Value) {
+            "$Name=$Value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          # CI_WIN_TOOLS_DIR is a semicolon-separated list of directories.
+          $toolDirs = @()
+          if ($env:CI_WIN_TOOLS_DIR) {
+            $toolDirs = @($env:CI_WIN_TOOLS_DIR -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+          }
+          # Python 3.12 goes ahead of Git for Windows' python stub.
+          if ($env:CI_WIN_PYTHON_DIR -and (Test-Path -LiteralPath $env:CI_WIN_PYTHON_DIR)) {
+            $toolDirs += $env:CI_WIN_PYTHON_DIR
+            $scripts = Join-Path $env:CI_WIN_PYTHON_DIR 'Scripts'
+            if (Test-Path -LiteralPath $scripts) { $toolDirs += $scripts }
+          }
+          if ($toolDirs.Count -gt 0) {
+            $toolDirs | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = (($toolDirs -join ';') + ';' + $env:PATH)
+            Write-Host "using the runner's tool directories"
+          }
+          $bazel = @('bazelisk', 'bazel') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $bazel) {
+            Write-Host "::error::neither bazelisk nor bazel is on PATH; see docs/ci/runner-environment.md (CI_WIN_TOOLS_DIR)"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_CMD' $bazel
+          # Bazel's shell: BAZEL_SH when the runner sets it, else MSYS2 bash,
+          # else Git for Windows' bash.
+          $bashCandidates = @()
+          if ($env:BAZEL_SH) { $bashCandidates += $env:BAZEL_SH }
+          foreach ($d in $toolDirs) { $bashCandidates += (Join-Path $d 'bash.exe') }
+          $bashCandidates += (Join-Path $env:SystemDrive 'msys64\usr\bin\bash.exe')
+          $bashCandidates += (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+          $bash = $bashCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $bash) {
+            Write-Host "::error::no bash.exe found for Bazel (MSYS2 or Git for Windows); see docs/ci/runner-environment.md"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_SH' $bash
+          # A short output root keeps paths under the Windows length limit.
+          Set-JobEnv 'WIN_BAZEL_OUTPUT_ROOT' ($(if ($env:CI_WIN_BAZEL_OUTPUT_ROOT) { $env:CI_WIN_BAZEL_OUTPUT_ROOT } else { Join-Path $env:SystemDrive 'b' }) -replace '\\', '/')
+          # The Bazel disk cache persists only where the runner names a
+          # directory for it; otherwise it lives in the job's temporary
+          # directory and is lost with it.
+          Set-JobEnv 'WIN_CACHE_DIR' ($(if ($env:CI_WIN_CACHE_DIR) { $env:CI_WIN_CACHE_DIR } else { Join-Path $env:RUNNER_TEMP 'bazel-disk' }))
+          Write-Host "build tool: $bazel"
+
+      # The image codec needs NASM 2.16.x: 3.x dropped an option the codec's
+      # configure step looks for. A hosted runner installs the pinned version;
+      # a fleet runner must provide it (CI_WIN_TOOLS_DIR).
+      - name: Check the assembler
+        run: |
+          $ErrorActionPreference = 'Continue'
+          function Test-Nasm {
+            $n = Get-Command nasm -ErrorAction SilentlyContinue
+            if (-not $n) { return $false }
+            return [bool](& $n.Source -hf 2>&1 | Select-String -SimpleMatch -Quiet '-Ox')
+          }
+          if (-not (Test-Nasm) -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+            choco install nasm --version 2.16.03 --allow-downgrade -y --no-progress
+            $nasmDir = Join-Path $env:ProgramFiles 'NASM'
+            $nasmDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = "$nasmDir;$env:PATH"
+          }
+          if (-not (Test-Nasm)) {
+            Write-Host "::error::no usable NASM 2.16.x on PATH; see docs/ci/runner-environment.md (CI_WIN_TOOLS_DIR)"
+            exit 1
+          }
+
+      # A vendor tarball on the runner makes the dependency fetch local.
+      - name: Use a local vendor tarball when the runner has one
+        env:
+          VENDOR_SHORT_SHA: ${{ needs.vendor.outputs.short_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tarball = $null
+          if ($env:CI_WIN_VENDOR_DIR) {
+            $candidate = Join-Path $env:CI_WIN_VENDOR_DIR "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
+            if (Test-Path -LiteralPath $candidate) { $tarball = $candidate }
+          }
+          if (-not $tarball -or -not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+            Write-Host "::notice::no runner-local vendor tarball: Bazel fetches its dependencies (docs/ci/runner-environment.md)"
+            exit 0
+          }
+          Write-Host "extracting the runner-local vendor tarball"
+          $tmpTar = Join-Path $env:RUNNER_TEMP 'vendor.tar'
+          & zstd -d -f -T0 $tarball -o $tmpTar
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          # The Windows tar: the MSYS2 GNU tar reads a drive letter as a remote host.
+          & "$($env:SystemRoot)\System32\tar.exe" xf $tmpTar -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item -LiteralPath $tmpTar -ErrorAction SilentlyContinue
+
+      - name: Set up MSVC environment
+        run: |
+          $ErrorActionPreference = 'Continue'
+          # Build Tools installs are products too: without -products * vswhere
+          # reports nothing on a host that has only them, hence the fallback.
+          $vsDir = $null
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            $vsDir = & $vswhere -latest -products * -property installationPath 2>$null
+          }
+          if (-not $vsDir -or -not (Test-Path -LiteralPath "$vsDir\VC\Auxiliary\Build\vcvars64.bat")) {
+            $vsDir = @(
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\Community')
+            ) | Where-Object { Test-Path -LiteralPath "$_\VC\Auxiliary\Build\vcvars64.bat" } | Select-Object -First 1
+          }
+          if (-not $vsDir) { Write-Host "::error::no Visual Studio installation found"; exit 1 }
+          $vcvars = "$vsDir\VC\Auxiliary\Build\vcvars64.bat"
+          # Call the command interpreter by its full path: a bare `cmd` can
+          # resolve to another program when a POSIX tools directory precedes
+          # the system directory on PATH.
+          & "$env:ComSpec" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+            if ($_ -match '^(INCLUDE|LIB|PATH)=(.*)$') {
+              "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            }
+          }
+
+      - name: Build the IIS module
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location $env:GITHUB_WORKSPACE
+          $bazel = $env:BAZEL_CMD
+          $root = "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)"
+          # Forward slashes for every Bazel path (a Windows Bazel requirement).
+          $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
+          $common = @('--config=windows', '--config=clang-cl', '--jobs=HOST_CPUS*.75', '--nostamp',
+                      '--workspace_status_command=cmd /c echo.', "--disk_cache=$diskCache")
+          if ($env:CI_WIN_CACHE_MAX_SIZE) { $common += "--experimental_disk_cache_gc_max_size=$($env:CI_WIN_CACHE_MAX_SIZE)" }
+          if (Test-Path -LiteralPath 'vendor') { $common += '--config=vendored' }
+          if ($env:BAZEL_REMOTE_CACHE_URL) {
+            $common += "--remote_cache=$($env:BAZEL_REMOTE_CACHE_URL)"
+            Write-Host "using the remote cache"
+          } else {
+            Write-Host "::notice::BAZEL_REMOTE_CACHE_URL not set: building without the remote cache (docs/ci/runner-environment.md)"
+          }
+          # Shut down a stale server so it picks up the enriched PATH.
+          & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
+          & $bazel $root build @common -- //pagespeed/iis:pagespeed_iis.dll
+          exit $LASTEXITCODE
+
+      - name: Stage the build bundle
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location $env:GITHUB_WORKSPACE
+          $staging = Join-Path $env:GITHUB_WORKSPACE '.ci-artifacts'
+          if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          # The convenience link when it exists, otherwise ask Bazel (a runner
+          # without link privileges has no symlink).
+          $bazelBin = Join-Path $env:GITHUB_WORKSPACE 'bazel-bin'
+          if (-not (Test-Path -LiteralPath $bazelBin)) {
+            $bazelBin = (& $env:BAZEL_CMD "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)" info bazel-bin 2>$null).Trim()
+            Write-Host "bazel-bin resolved via 'bazel info'"
+          }
+          Copy-Item -LiteralPath "$bazelBin\pagespeed\iis\pagespeed_iis.dll" -Destination "$staging\"
+          Get-ChildItem $bazelBin -Recurse -Filter '*.pdb' | Where-Object {
+            $_.Name -match 'pagespeed_iis'
+          } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination "$staging\" }
+          $ts = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $meta = @{commit=$env:GITHUB_SHA; branch=$env:GITHUB_REF_NAME; run="$($env:GITHUB_SERVER_URL)/$($env:GITHUB_REPOSITORY)/actions/runs/$($env:GITHUB_RUN_ID)"; platform='win-x64'; config='windows+clang-cl'; timestamp=$ts} | ConvertTo-Json -Compress
+          Set-Content -LiteralPath "$staging\metadata.json" -Value $meta -Encoding ASCII
+          Get-ChildItem $staging -File | Where-Object { $_.Name -ne 'checksums.sha256' } | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content -LiteralPath "$staging\checksums.sha256" -Encoding ASCII
+          Write-Host 'CI artifacts (win-x64):'
+          Get-ChildItem $staging | Format-Table Name, Length
+
+      - name: Upload the build bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-ci-artifacts-win-x64
+          path: .ci-artifacts
+          retention-days: 3
+          include-hidden-files: true
+
+  # Unit tests of the IIS module under the Windows AddressSanitizer. The
+  # runtime library comes with LLVM 19, found at the standard install location
+  # or CI_WIN_LLVM_DIR; a runner that has neither skips the job with a notice.
+  win-asan:
+    name: Windows ASan
+    needs: vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Resolve the runner environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Set-JobEnv([string]$Name, [string]$Value) {
+            "$Name=$Value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          $toolDirs = @()
+          if ($env:CI_WIN_TOOLS_DIR) {
+            $toolDirs = @($env:CI_WIN_TOOLS_DIR -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+          }
+          if ($env:CI_WIN_PYTHON_DIR -and (Test-Path -LiteralPath $env:CI_WIN_PYTHON_DIR)) {
+            $toolDirs += $env:CI_WIN_PYTHON_DIR
+            $scripts = Join-Path $env:CI_WIN_PYTHON_DIR 'Scripts'
+            if (Test-Path -LiteralPath $scripts) { $toolDirs += $scripts }
+          }
+          # LLVM: clang-cl on PATH, and the AddressSanitizer runtime located
+          # at the standard install location or in CI_WIN_LLVM_DIR.
+          $runtimeName = 'clang_rt.asan_dynamic-x86_64.lib'
+          $llvmRoots = @()
+          if ($env:CI_WIN_LLVM_DIR) { $llvmRoots += $env:CI_WIN_LLVM_DIR }
+          $llvmRoots += (Join-Path $env:ProgramFiles 'LLVM')
+          $llvm = $llvmRoots | Where-Object { Test-Path -LiteralPath (Join-Path $_ "lib\clang\19\lib\windows\$runtimeName") } | Select-Object -First 1
+          if ($llvm) {
+            if (Test-Path -LiteralPath (Join-Path $llvm 'bin')) { $toolDirs += (Join-Path $llvm 'bin') }
+            Set-JobEnv 'ASAN_LLVM_DIR' $llvm
+            Set-JobEnv 'ASAN_RUNTIME' 'present'
+            Write-Host "the AddressSanitizer runtime was found"
+          } else {
+            Set-JobEnv 'ASAN_RUNTIME' 'missing'
+            Write-Host "::notice::LLVM 19 with the AddressSanitizer runtime was not found (standard install location or CI_WIN_LLVM_DIR): skipping this job"
+          }
+          if ($toolDirs.Count -gt 0) {
+            $toolDirs | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = (($toolDirs -join ';') + ';' + $env:PATH)
+            Write-Host "using the runner's tool directories"
+          }
+          $bazel = @('bazelisk', 'bazel') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $bazel) {
+            Write-Host "::error::neither bazelisk nor bazel is on PATH; see docs/ci/runner-environment.md (CI_WIN_TOOLS_DIR)"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_CMD' $bazel
+          $bashCandidates = @()
+          if ($env:BAZEL_SH) { $bashCandidates += $env:BAZEL_SH }
+          foreach ($d in $toolDirs) { $bashCandidates += (Join-Path $d 'bash.exe') }
+          $bashCandidates += (Join-Path $env:SystemDrive 'msys64\usr\bin\bash.exe')
+          $bashCandidates += (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+          $bash = $bashCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $bash) {
+            Write-Host "::error::no bash.exe found for Bazel (MSYS2 or Git for Windows); see docs/ci/runner-environment.md"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_SH' $bash
+          Set-JobEnv 'WIN_BAZEL_OUTPUT_ROOT' ($(if ($env:CI_WIN_BAZEL_OUTPUT_ROOT) { $env:CI_WIN_BAZEL_OUTPUT_ROOT } else { Join-Path $env:SystemDrive 'b' }) -replace '\\', '/')
+          Set-JobEnv 'WIN_CACHE_DIR' ($(if ($env:CI_WIN_CACHE_DIR) { $env:CI_WIN_CACHE_DIR } else { Join-Path $env:RUNNER_TEMP 'bazel-disk' }))
+          Write-Host "build tool: $bazel"
+
+      - name: Check the assembler
+        if: env.ASAN_RUNTIME == 'present'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          function Test-Nasm {
+            $n = Get-Command nasm -ErrorAction SilentlyContinue
+            if (-not $n) { return $false }
+            return [bool](& $n.Source -hf 2>&1 | Select-String -SimpleMatch -Quiet '-Ox')
+          }
+          if (-not (Test-Nasm) -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+            choco install nasm --version 2.16.03 --allow-downgrade -y --no-progress
+            $nasmDir = Join-Path $env:ProgramFiles 'NASM'
+            $nasmDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = "$nasmDir;$env:PATH"
+          }
+          if (-not (Test-Nasm)) {
+            Write-Host "::error::no usable NASM 2.16.x on PATH; see docs/ci/runner-environment.md (CI_WIN_TOOLS_DIR)"
+            exit 1
+          }
+
+      - name: Use a local vendor tarball when the runner has one
+        if: env.ASAN_RUNTIME == 'present'
+        env:
+          VENDOR_SHORT_SHA: ${{ needs.vendor.outputs.short_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tarball = $null
+          if ($env:CI_WIN_VENDOR_DIR) {
+            $candidate = Join-Path $env:CI_WIN_VENDOR_DIR "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
+            if (Test-Path -LiteralPath $candidate) { $tarball = $candidate }
+          }
+          if (-not $tarball -or -not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+            Write-Host "::notice::no runner-local vendor tarball: Bazel fetches its dependencies (docs/ci/runner-environment.md)"
+            exit 0
+          }
+          Write-Host "extracting the runner-local vendor tarball"
+          $tmpTar = Join-Path $env:RUNNER_TEMP 'vendor.tar'
+          & zstd -d -f -T0 $tarball -o $tmpTar
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          & "$($env:SystemRoot)\System32\tar.exe" xf $tmpTar -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item -LiteralPath $tmpTar -ErrorAction SilentlyContinue
+
+      - name: Set up MSVC environment
+        if: env.ASAN_RUNTIME == 'present'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $vsDir = $null
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            $vsDir = & $vswhere -latest -products * -property installationPath 2>$null
+          }
+          if (-not $vsDir -or -not (Test-Path -LiteralPath "$vsDir\VC\Auxiliary\Build\vcvars64.bat")) {
+            $vsDir = @(
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\Community')
+            ) | Where-Object { Test-Path -LiteralPath "$_\VC\Auxiliary\Build\vcvars64.bat" } | Select-Object -First 1
+          }
+          if (-not $vsDir) { Write-Host "::error::no Visual Studio installation found"; exit 1 }
+          $vcvars = "$vsDir\VC\Auxiliary\Build\vcvars64.bat"
+          & "$env:ComSpec" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+            if ($_ -match '^(INCLUDE|LIB|PATH)=(.*)$') {
+              "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            }
+          }
+
+      # The exec-config protobuf compile intermittently fails with "permission
+      # denied" opening a freshly materialized _virtual_includes header under
+      # high concurrency on Windows, a file-sharing race. Bazel is incremental,
+      # so each retry re-runs only the actions that did not finish, and the
+      # race converges to green without throttling the build.
+      - name: Build the IIS module with ASan
+        if: env.ASAN_RUNTIME == 'present'
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location $env:GITHUB_WORKSPACE
+          $bazel = $env:BAZEL_CMD
+          $root = "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)"
+          $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
+          $common = @('--config=windows', '--config=clang-cl', '--config=win-asan', '--jobs=HOST_CPUS*.75', '--nostamp',
+                      '--workspace_status_command=cmd /c echo.', "--disk_cache=$diskCache")
+          if ($env:CI_WIN_CACHE_MAX_SIZE) { $common += "--experimental_disk_cache_gc_max_size=$($env:CI_WIN_CACHE_MAX_SIZE)" }
+          if (Test-Path -LiteralPath 'vendor') { $common += '--config=vendored' }
+          # The ASan runtime path in the build configuration is the standard
+          # install location; point the linker and the tests at a runner's own
+          # LLVM when that is where the runtime was found.
+          $stdLlvm = Join-Path $env:ProgramFiles 'LLVM'
+          if ($env:ASAN_LLVM_DIR -and ($env:ASAN_LLVM_DIR -ne $stdLlvm)) {
+            $rt = (Join-Path $env:ASAN_LLVM_DIR 'lib\clang\19\lib\windows')
+            $common += "--linkopt=/LIBPATH:$($rt -replace '\\', '/')"
+            $common += "--test_env=PATH=$rt;$(Join-Path $env:ASAN_LLVM_DIR 'bin');$($env:SystemRoot)\System32"
+          }
+          if ($env:BAZEL_REMOTE_CACHE_URL) {
+            $common += "--remote_cache=$($env:BAZEL_REMOTE_CACHE_URL)"
+            Write-Host "using the remote cache"
+          } else {
+            Write-Host "::notice::BAZEL_REMOTE_CACHE_URL not set: building without the remote cache (docs/ci/runner-environment.md)"
+          }
+          $built = $false
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            if ($attempt -gt 1) {
+              Write-Host "build attempt $attempt (the prior one hit the transient virtual-include permission error)"
+              & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
+              Start-Sleep -Seconds 5
+            }
+            & $bazel $root build @common -- //pagespeed/iis:pagespeed_iis.dll
+            if ($LASTEXITCODE -eq 0) { $built = $true; break }
+          }
+          if (-not $built) { Write-Host "::error::the ASan build failed after 5 attempts"; exit 1 }
+          # The test step reuses these flags.
+          ($common -join "`n") | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'asan-flags.txt') -Encoding ASCII
+
+      - name: Run the unit tests under ASan
+        if: env.ASAN_RUNTIME == 'present'
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location $env:GITHUB_WORKSPACE
+          $common = @(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'asan-flags.txt'))
+          & $env:BAZEL_CMD "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)" test @common `
+            --test_output=errors --keep_going --test_env=PATH `
+            -- //test/pagespeed/iis/...
+          exit $LASTEXITCODE
+
+  # Application Verifier with full page heap and concurrency fuzzing on the
+  # IIS worker process, running the IIS system tests against the module built
+  # by windows-build. This job needs a host with the IIS role, administrator
+  # rights and the Windows SDK debugging tools, and cannot run on a hosted
+  # runner, so a fork or Dependabot pull request skips it.
+  win-appverif:
+    name: Windows AppVerif
+    needs: windows-build
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Resolve the runner environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Set-JobEnv([string]$Name, [string]$Value) {
+            "$Name=$Value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          $toolDirs = @()
+          if ($env:CI_WIN_TOOLS_DIR) {
+            $toolDirs = @($env:CI_WIN_TOOLS_DIR -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+          }
+          if ($env:CI_WIN_PYTHON_DIR -and (Test-Path -LiteralPath $env:CI_WIN_PYTHON_DIR)) {
+            $toolDirs += $env:CI_WIN_PYTHON_DIR
+            $scripts = Join-Path $env:CI_WIN_PYTHON_DIR 'Scripts'
+            if (Test-Path -LiteralPath $scripts) { $toolDirs += $scripts }
+          }
+          if ($toolDirs.Count -gt 0) {
+            $toolDirs | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            Write-Host "using the runner's tool directories"
+          }
+          # Crash dumps and evidence go to the runner's dump directory when it
+          # names one, else to the job's temporary directory.
+          $dumpRoot = if ($env:CI_WIN_DUMP_DIR) { $env:CI_WIN_DUMP_DIR } else { Join-Path $env:RUNNER_TEMP 'dumps' }
+          New-Item -ItemType Directory -Path $dumpRoot -Force | Out-Null
+          # Drop evidence left by a previous run so the artifact cannot ship
+          # stale, mislabeled diagnostics.
+          Remove-Item (Join-Path $dumpRoot '*-on-failure.txt') -ErrorAction SilentlyContinue
+          Set-JobEnv 'APPVERIF_DUMP_ROOT' $dumpRoot
+          Set-JobEnv 'PAGESPEED_DUMP_DIR' (Join-Path $dumpRoot 'localdumps')
+          Set-JobEnv 'PAGESPEED_EVIDENCE_DIR' $dumpRoot
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: full-ci-artifacts-win-x64
+          path: ${{ github.workspace }}\bazel-bin\pagespeed\iis
+
+      # A missing or partial module must fail here, not as a startup failure
+      # of the worker process later.
+      - name: Verify the module
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'bazel-bin\pagespeed\iis'
+          $dll = Join-Path $dir 'pagespeed_iis.dll'
+          if (-not (Test-Path -LiteralPath $dll) -or (Get-Item -LiteralPath $dll).Length -eq 0) {
+            Write-Host "::error::pagespeed_iis.dll is missing or empty in the build bundle"
+            exit 1
+          }
+          $want = Get-Content -LiteralPath (Join-Path $dir 'checksums.sha256') |
+            Where-Object { $_ -match 'pagespeed_iis\.dll$' } |
+            ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1
+          $got = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLower()
+          if (-not $want -or $got -ne $want.ToLower()) {
+            Write-Host "::error::pagespeed_iis.dll does not match the bundle checksum"
+            exit 1
+          }
+          Write-Host "pagespeed_iis.dll verified against the bundle checksum"
+
+      - name: Purge the pagespeed cache and recycle DefaultAppPool
+        run: |
+          # Clear a stale file cache from a previous IIS job so cache-extended
+          # resources do not show Last-Modified mismatches.
+          if (Test-Path -LiteralPath 'C:\pagespeed_cache') {
+            Remove-Item -LiteralPath 'C:\pagespeed_cache' -Recurse -Force
+            Write-Host "Purged the pagespeed cache directory"
+          }
+          Import-Module WebAdministration -ErrorAction SilentlyContinue
+          if (Get-Command Restart-WebAppPool -ErrorAction SilentlyContinue) {
+            Restart-WebAppPool -Name "DefaultAppPool" -ErrorAction SilentlyContinue
+            Write-Host "Recycled DefaultAppPool"
+          }
+
+      - name: Enable Application Verifier and page heap
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $gflags = Get-Command gflags -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+          if (-not $gflags) {
+            $gflags = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Debuggers\x64\gflags.exe'
+          }
+          if (-not (Test-Path -LiteralPath $gflags) -or -not (Get-Command appverif -ErrorAction SilentlyContinue)) {
+            Write-Host "::error::appverif and gflags (Windows SDK debugging tools) are required on PATH; see docs/ci/runner-environment.md"
+            exit 1
+          }
+          # Defensive cleanup from any previous failed run.
+          appverif -disable * -for w3wp.exe 2>$null
+          & $gflags /p /disable w3wp.exe 2>$null
+          # Leak is deliberately NOT enabled. It stops on any heap allocation
+          # still owned by a DLL at FreeLibrary, and this module keeps
+          # immortal singletons on purpose (the held logger must outlive
+          # static destruction so draining threads can still log). The
+          # provider would fail-fast the worker on every recycle of its
+          # host, by design and with no defect behind it, which masks the
+          # stops that matter.
+          appverif -enable Heaps Handles Locks Memory SRWLock TLS Exceptions Threadpool -for w3wp.exe
+          # Concurrency fuzzing, most aggressive level.
+          appverif -enable Cuzz -for w3wp.exe -with Cuzz.FuzzingLevel=4
+          # Full page heap scoped to this module only (less memory overhead).
+          & $gflags /p /enable w3wp.exe /full /dlls pagespeed_iis.dll
+          Write-Host "Application Verifier, page heap and Cuzz enabled for w3wp.exe"
+          # Arm WER LocalDumps for w3wp.exe: it is consulted per crash, so every
+          # recycled worker is covered (an attach-based tool covers only the
+          # first). The directory comes from the runner environment.
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Set-WerLocalDumps.ps1" -Enable -DumpDir $env:PAGESPEED_DUMP_DIR | Out-Null
+          # Anchor the fail-fast check at the moment verification was armed,
+          # not at job start.
+          "APPVERIF_T0=$((Get-Date).ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install test dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --quiet -r "$env:GITHUB_WORKSPACE\test\system\requirements.txt"
+
+      - name: Run the IIS system tests under Application Verifier
+        timeout-minutes: 45
+        env:
+          # Application Verifier with page heap runs the module's async work
+          # 5-50x slower. This scales the poll budget of the test client and
+          # the per-test timeout, so a slow test is not killed before its
+          # retries complete.
+          PAGESPEED_TEST_TIMEOUT_MULTIPLIER: "4"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location $env:GITHUB_WORKSPACE
+          .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose
+
+      - name: Export the Application Verifier log
+        if: always()
+        run: |
+          $log = Join-Path $env:APPVERIF_DUMP_ROOT 'appverif-w3wp.xml'
+          # appverif exits non-zero when w3wp.exe never ran under verification;
+          # native stderr becomes an error record under the Stop preference, so
+          # the export is wrapped.
+          try {
+            appverif -export log -for w3wp.exe -with "to=$log" 2>&1 | Out-Null
+          } catch {
+            Write-Host "appverif -export produced no log (expected on a clean run): $($_.Exception.Message)"
+          }
+          $global:LASTEXITCODE = 0
+          if (Test-Path -LiteralPath $log) {
+            Write-Host "=== Application Verifier log ==="
+            $xml = [xml](Get-Content -LiteralPath $log)
+            $stops = $xml.SelectNodes("//avrf:stop", (New-Object System.Xml.XmlNamespaceManager($xml.NameTable)))
+            if (-not $stops -or $stops.Count -eq 0) { $stops = $xml.SelectNodes("//stop") }
+            if ($stops -and $stops.Count -gt 0) {
+              Write-Host "$($stops.Count) Application Verifier stop(s) found:"
+              foreach ($stop in $stops) {
+                Write-Host "  Layer: $($stop.layer) Code: $($stop.code) Severity: $($stop.severity)"
+                Write-Host "  Message: $($stop.message)"
+              }
+            } else {
+              Write-Host "No stops recorded (the log exists but is empty or clean)"
+              Get-Content -LiteralPath $log | Select-Object -First 20
+            }
+          } else {
+            Write-Host "No Application Verifier log generated (w3wp.exe did not run under verification, or the export produced nothing)"
+          }
+
+      # The event log is what knows whether the worker survived: a verifier
+      # stop fail-fasts the worker, and the harness, talking to a freshly
+      # spawned worker, reports green. Runs before the dump collection (which
+      # reads this report's verdict) and before the upload, so the report
+      # ships as evidence.
+      - name: Assert no worker fail-fast
+        if: always() && env.APPVERIF_T0 != ''
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $since = [DateTimeOffset]::Parse($env:APPVERIF_T0).LocalDateTime
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Assert-NoWorkerFailFast.ps1" `
+            -Since $since -ReportPath (Join-Path $env:APPVERIF_DUMP_ROOT 'failfast-report.txt')
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::w3wp.exe fail-fasted under Application Verifier; see the evidence artifact."
+            exit 1
+          }
+
+      # Cross-checks the dumps against the fail-fast verdict, so a dead worker
+      # is never reported as a clean run. Waits for WER to finish writing,
+      # decodes with !avrf and stages the dumps compressed.
+      - name: Collect crash dumps
+        id: dumps
+        if: always()
+        run: |
+          $since = if ($env:APPVERIF_T0) { [DateTimeOffset]::Parse($env:APPVERIF_T0).LocalDateTime } else { [DateTime]::MinValue }
+          $stage = Join-Path $env:APPVERIF_DUMP_ROOT 'staged'
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Collect-CrashDumps.ps1" `
+            -DumpDir $env:PAGESPEED_DUMP_DIR -StageDir $stage -Since $since `
+            -FailFastReport (Join-Path $env:APPVERIF_DUMP_ROOT 'failfast-report.txt') `
+            -SymbolDir "$env:GITHUB_WORKSPACE\bazel-bin\pagespeed\iis"
+          $staged = (Get-ChildItem -LiteralPath $stage -File -ErrorAction SilentlyContinue | Measure-Object).Count
+          "staged=$staged" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # Evidence is gathered into the job's temporary directory and uploaded
+      # from there. A clean run's evidence is a few hundred bytes of text, so
+      # it is uploaded only when the job failed or a dump was staged. Dumps are
+      # the scarce evidence, so retention is longer. A refused upload must not
+      # turn a passing job red.
+      - name: Gather the evidence
+        if: always() && (failure() || steps.dumps.outputs.staged != '0')
+        continue-on-error: true
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'appverif-evidence'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          $root = $env:APPVERIF_DUMP_ROOT
+          Copy-Item -Path (Join-Path $root 'staged\*') -Destination $out -Recurse -ErrorAction SilentlyContinue
+          Copy-Item -Path (Join-Path $root '*.xml') -Destination $out -ErrorAction SilentlyContinue
+          Copy-Item -Path (Join-Path $root '*.txt') -Destination $out -ErrorAction SilentlyContinue
+
+      - name: Upload the evidence
+        if: always() && (failure() || steps.dumps.outputs.staged != '0')
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-appverif-evidence
+          path: ${{ runner.temp }}/appverif-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Disable Application Verifier and page heap
+        if: always()
+        run: |
+          # Must run even on failure: the settings are machine-global and would
+          # otherwise affect every later job on this host.
+          $gflags = Get-Command gflags -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+          if (-not $gflags) {
+            $gflags = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Debuggers\x64\gflags.exe'
+          }
+          try { appverif -disable * -for w3wp.exe 2>&1 | Out-Null } catch { Write-Host "appverif -disable: $($_.Exception.Message)" }
+          try { & $gflags /p /disable w3wp.exe 2>&1 | Out-Null } catch { Write-Host "gflags disable: $($_.Exception.Message)" }
+          $global:LASTEXITCODE = 0
+          # Remove the LocalDumps override and reclaim this run's dumps. Leaving
+          # them would let CI fill a runner disk, and leaving the key armed
+          # would full-dump every later crash of the worker on the host.
+          $since = if ($env:APPVERIF_T0) { [DateTimeOffset]::Parse($env:APPVERIF_T0).LocalDateTime } else { [DateTime]::MinValue }
+          try {
+            & powershell -NoProfile -ExecutionPolicy Bypass `
+              -File "$env:GITHUB_WORKSPACE\tools\ci\Set-WerLocalDumps.ps1" -Disable -Purge -Since $since -DumpDir $env:PAGESPEED_DUMP_DIR
+          } catch { Write-Host "LocalDumps cleanup: $($_.Exception.Message)" }
+          Remove-Item -LiteralPath (Join-Path $env:APPVERIF_DUMP_ROOT 'staged') -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "Application Verifier and page heap disabled, LocalDumps removed"
+
+  # ---------------------------------------------------------------------
+  # Linux arm64 on hosted arm64 runners (there is no arm64 class). The
+  # build job vendors for itself into actions/cache; the other arm64 jobs
+  # restore that. All of them keep a Bazel disk cache in actions/cache.
+  # ---------------------------------------------------------------------
+  linux-arm64-build:
+    name: Linux arm64 Build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Restore vendored dependencies
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+
+      - name: Ensure bazel
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash tools/vendor-deps.sh vendor
+
+      - name: Restore the Bazel disk cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/mod-pagespeed-bazel-disk-arm64
+          key: mod-pagespeed-bazel-disk-arm64-build-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mod-pagespeed-bazel-disk-arm64-
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh arm64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Build all targets
+        run: |
+          mkdir -p "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64"
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # No remote cache on a hosted runner: switch off the one the CI
+              # configuration names.
+              bazel --output_user_root=/tmp/bazel-out \
+                build --config=ci-linux-arm64 --remote_cache= \
+                --jobs=HOST_CPUS*.75 \
+                --disk_cache=/cache --experimental_disk_cache_gc_max_size=3G \
+                --action_env=CC=clang --action_env=CXX=clang++ \
+                -- //:libmod_pagespeed.so \
+                //pagespeed/nginx:ngx_pagespeed_module.so \
+                //test/pagespeed/kernel/... //test/net/... \
+                //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+              bash tools/ci/assert_module_symbols.sh --self-test --require-fixtures
+              bash tools/ci/assert_module_symbols.sh --profile apache \
+                bazel-bin/libmod_pagespeed.so
+              bash tools/ci/assert_module_symbols.sh --profile nginx \
+                bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+              mkdir -p /workspace/.build-artifacts/bazel-bin/pagespeed/nginx
+              cp -L bazel-bin/libmod_pagespeed.so \
+                    /workspace/.build-artifacts/bazel-bin/libmod_pagespeed.so
+              cp -L bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so \
+                    /workspace/.build-artifacts/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+            '
+
+      - name: Upload the build bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-build-artifacts-linux-arm64
+          path: .build-artifacts
+          retention-days: 3
+          include-hidden-files: true
+
+  linux-arm64-unit-tests:
+    name: Linux arm64 Unit Tests
+    needs: linux-arm64-build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Restore vendored dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Restore the Bazel disk cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/mod-pagespeed-bazel-disk-arm64
+          key: mod-pagespeed-bazel-disk-arm64-test-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mod-pagespeed-bazel-disk-arm64-
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh arm64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Start the test services
+        run: |
+          NET="ci-net-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          R="ci-redis-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          M="ci-memcached-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "CI_NET=${NET}"
+            echo "CI_REDIS=${R}"
+            echo "CI_MEMCACHED=${M}"
+          } >> "$GITHUB_ENV"
+          docker network create "$NET"
+          for img in redis:7-alpine memcached:1.6-alpine; do
+            for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
+          done
+          start() { local name=$1 image=$2; shift 2
+            for a in 1 2 3; do
+              docker rm -f "$name" 2>/dev/null || true
+              docker run -d --init --name "$name" --network "$NET" "$@" "$image" && return 0
+              echo "::warning::docker run $name failed ($a/3)"; sleep $((a*3))
+            done
+            echo "::error::could not start $name after 3 attempts"; return 1; }
+          start "$R" redis:7-alpine
+          start "$M" memcached:1.6-alpine
+          for a in $(seq 1 30); do docker exec "$R" redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::redis never became ready"; docker logs "$R" 2>&1 | tail; exit 1; }; done
+          echo "test services started"
+
+      - name: Run the unit tests
+        run: |
+          mkdir -p "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64"
+          docker run --rm --init \
+            --network="${CI_NET}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              bazel --output_user_root=/tmp/bazel-out \
+                test --config=ci-linux-arm64 --remote_cache= \
+                --jobs=HOST_CPUS*.75 \
+                --disk_cache=/cache --experimental_disk_cache_gc_max_size=3G \
+                --action_env=CC=clang --action_env=CXX=clang++ \
+                --keep_going \
+                --test_env=REDIS_HOST="${REDIS_HOST}" \
+                --test_env=REDIS_PORT=6379 \
+                --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
+                --test_env=MEMCACHED_PORT=11211 \
+                -- //test/pagespeed/kernel/... //test/net/... \
+                //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+            '
+
+      - name: Stop the test services
+        if: always()
+        run: |
+          [ -n "${CI_REDIS:-}" ] && docker rm -f "${CI_REDIS}" "${CI_MEMCACHED}" 2>/dev/null || true
+          [ -n "${CI_NET:-}" ] && docker network rm "${CI_NET}" 2>/dev/null || true
+
+  linux-arm64-apache-sys-tests:
+    name: Linux arm64 Apache System Tests
+    needs: linux-arm64-build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      SYSTEST_DIAG_TAG: arm64-apache-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: full-build-artifacts-linux-arm64
+          path: ${{ github.workspace }}
+
+      - name: Check the modules are present
+        run: ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh arm64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Run Apache system tests
+        id: systest
+        run: |
+          NAME="ci-systest-arm64-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          docker run --rm --init \
+            --name "${NAME}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            --cap-add NET_BIND_SERVICE \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -e HOME=/workspace -e USER=dev \
+            -e SYSTEST_DIAG_TAG \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              rc=0
+              ./test/system/run_system_tests.sh --skip-build || rc=$?
+              bash tools/ci/collect-systest-diagnostics.sh apache "$rc" /workspace/_systest-logs || true
+              exit "$rc"
+            '
+
+      - name: Collect system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/systest-diag"
+          cp "${GITHUB_WORKSPACE}/_systest-logs/systest-diagnostics-${SYSTEST_DIAG_TAG}.tar.gz" \
+            "${RUNNER_TEMP}/systest-diag/" \
+            || echo "No diagnostics tarball for ${SYSTEST_DIAG_TAG}"
+
+      - name: Upload system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-arm64-apache-systest-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/systest-diag/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
+
+  linux-arm64-nginx-sys-tests:
+    name: Linux arm64 Nginx System Tests
+    needs: linux-arm64-build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      SYSTEST_DIAG_TAG: arm64-nginx-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: full-build-artifacts-linux-arm64
+          path: ${{ github.workspace }}
+
+      - name: Check the modules are present
+        run: ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh arm64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Run Nginx system tests
+        id: systest
+        run: |
+          NAME="ci-systest-arm64-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          docker run --rm --init \
+            --name "${NAME}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            --cap-add NET_BIND_SERVICE \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -e HOME=/workspace -e USER=dev \
+            -e SYSTEST_DIAG_TAG \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              rc=0
+              ./test/system/run_nginx_tests.sh --skip-build || rc=$?
+              bash tools/ci/collect-systest-diagnostics.sh nginx "$rc" /workspace/_systest-logs || true
+              exit "$rc"
+            '
+
+      - name: Collect system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/systest-diag"
+          cp "${GITHUB_WORKSPACE}/_systest-logs/systest-diagnostics-${SYSTEST_DIAG_TAG}.tar.gz" \
+            "${RUNNER_TEMP}/systest-diag/" \
+            || echo "No diagnostics tarball for ${SYSTEST_DIAG_TAG}"
+
+      - name: Upload system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: full-arm64-nginx-systest-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/systest-diag/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
