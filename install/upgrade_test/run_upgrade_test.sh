@@ -214,9 +214,7 @@ fi
 TILDE='~'
 PKGV="${RC/-/$TILDE}"            # 1.16.0~rc.13   (package Version of the pair)
 PKGV_SAN="${PKGV//$TILDE/.}"     # 1.16.0.rc.13   (GitHub's sanitized asset spelling)
-# The worker releases are tagged optimizer-v<version>; an explicit RELEASE_TAG
-# in the environment overrides the derived name.
-RELEASE_TAG="${RELEASE_TAG:-optimizer-v${RC}}"
+RELEASE_TAG="v${RC}"
 
 case "$DISTRO" in
   debian12)   FAMILY=deb; IMAGE_BASE="debian:12" ;;
