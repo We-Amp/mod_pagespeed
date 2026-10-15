@@ -5,7 +5,8 @@ tree root passed to `tools/ci/check-workflow-shape.sh`:
 
 - `good/` must pass (exit 0). It exercises a thin caller with an aggregate
   gate job, a `ci-dev` caller, a reusable workflow with every
-  routing-expression variant, the three fleet guards, a hosted report job with a write permission, and the allowlist path (`legacy.yml` is listed
+  routing-expression variant, the four fleet guards (the fleet-iis one
+  included), a hosted report job with a write permission, and the allowlist path (`legacy.yml` is listed
   in `good/tools/ci/workflow-shape-allowlist.txt`).
 - `bad-no-top-perms/` (a reusable workflow without a top-level `permissions:`
   block), `bad-write-quoted/` and `bad-write-single-quoted/` (a quoted `write`
@@ -18,6 +19,9 @@ tree root passed to `tools/ci/check-workflow-shape.sh`:
   `bad-secret-tojson/` and `bad-secret-uses-job/` cover the other holes of rule g;
   `good/` has a hosted job with both and a call that passes a secret to the
   allowed callee.
+- `bad-guard-iis-only-term/` and `bad-guard-iis-no-fork/` break the fleet-iis
+  guard; `bad-guard-iis-class/` routes to fleet-iis with the plain fleet-only
+  guard.
 - `bad-*/` must each fail (exit 1) and name the rule in the message.
 
 The bad trees violate the gate on purpose; the token scan excludes this
