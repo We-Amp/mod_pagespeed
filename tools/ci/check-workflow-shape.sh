@@ -86,6 +86,10 @@ FLEET_GUARD="\${{ ${FLEET_GUARD_BODY} }}"
 # kernel): the same switch, but a fork or Dependabot pull request skips them
 # instead of falling back to a hosted runner.
 FLEET_ONLY_GUARD="\${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}"
+# Jobs of the fleet-iis class (no hosted twin): the fleet-only guard plus the
+# FLEET_IIS_ENABLED switch, so they are skipped while no runner of the class
+# is registered.
+FLEET_IIS_GUARD="\${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}"
 # Dispatch-only fleet jobs (manual lanes): a workflow_dispatch is never a
 # fork pull request.
 FLEET_DISPATCH_GUARD="\${{ github.event_name == 'workflow_dispatch' && vars.FLEET_ENABLED == 'true' }}"
@@ -340,6 +344,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
         if_val="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="if" {print $5}')"
         if ! is_fleet_guard "${if_val}" \
            && [ "${if_val}" != "${FLEET_ONLY_GUARD}" ] \
+           && [ "${if_val}" != "${FLEET_IIS_GUARD}" ] \
            && [ "${if_val}" != "${FLEET_DISPATCH_GUARD}" ]; then
           err "${wf}:${lineno}: fleet job '${job}' does not carry a fleet guard verbatim as its if: (rule d)"
         fi

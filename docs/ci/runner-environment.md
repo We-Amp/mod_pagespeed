@@ -58,8 +58,10 @@ comes with the Windows SDK and is expected on `PATH` by the AppVerifier lanes.
 
 Jobs of this class have no hosted twin. They run only for events of this
 repository: a fork or Dependabot pull request skips them (the jobs show as
-skipped, not failed), and so does every run while `FLEET_ENABLED` is not
-`true`. A job of this class builds and runs the pull request's own code on a
+skipped, not failed), and so does every run while `FLEET_ENABLED` or
+`FLEET_IIS_ENABLED` is not `true`. `FLEET_IIS_ENABLED` is a second repository
+variable: set it to `true` once a runner of this class is registered, so the
+jobs are skipped rather than queued while the class does not exist. A job of this class builds and runs the pull request's own code on a
 host with administrator rights, so the host is dedicated to the class, carries
 no other registration and holds no credential beyond the ones named here. The
 class means a Windows host with these facts, which are not variables:
