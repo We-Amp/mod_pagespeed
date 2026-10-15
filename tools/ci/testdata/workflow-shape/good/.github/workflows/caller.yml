@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      full:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  # An indented comment between jobs is not a job.
+  pr:
+    # Nor is one inside a job.
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline.yml@master
+  gate:
+    name: CI gate
+    needs: [pr]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check needed results
+        run: |
+          case "${{ needs.pr.result }}" in success|skipped) exit 0 ;; *) exit 1 ;; esac

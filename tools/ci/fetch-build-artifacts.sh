@@ -60,7 +60,7 @@ BACKOFF="${FETCH_BACKOFF:-3}"
 SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10}"
 REMOTE="${CI_HUB_ARTIFACTS_ROOT}/${SHA}/linux-x64/build-artifacts.tar.zst"
 
-echo "[fetch-build-artifacts] host=${CI_HUB_ADDR} sha=${SHA}"
+echo "[fetch-build-artifacts] sha=${SHA}"
 
 verify() {
   # A truncated transfer must NEVER reach tar. zstd -t walks the whole frame.
@@ -85,6 +85,6 @@ while [ "$attempt" -le "$RETRIES" ]; do
 done
 
 rm -f "$OUT"
-echo "::error::build-artifacts unavailable or corrupt after ${RETRIES} attempts: ${CI_HUB_USER}@${CI_HUB_ADDR}:${REMOTE}"
+echo "::error::build-artifacts unavailable or corrupt after ${RETRIES} attempts (sha ${SHA})"
 echo "::error::the artifact may have been cleaned up -- rerun the FULL workflow, not just the failed jobs"
 exit 1

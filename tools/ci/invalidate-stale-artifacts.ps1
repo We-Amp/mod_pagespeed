@@ -2,7 +2,7 @@
 # Ported from pagespeed-optimizer tools/ci/ (shared CI artifact hub) -- keep the copies in sync.
 # Windows counterpart to invalidate-stale-artifacts.sh. Wipes a local CI
 # artifacts staging dir whose metadata.json reports a different commit SHA
-# than expected, protecting against concurrent-PR contamination on dedicated
+# than expected, protecting against concurrent-PR contamination on
 # shared runners.
 param(
   [Parameter(Mandatory=$true)][string]$Staging,

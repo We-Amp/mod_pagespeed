@@ -4,9 +4,8 @@
 #
 # Test for tools/ci/extract-vendor-tarball.sh.
 #
-# Reproduces the cross-runner artifact-fetch failure modes locally, with no
-# network and no real
-# the CI hub, by shimming `ssh` and `rsync` so the "hub shared dir" is just a
+# Reproduces the silent-success failure modes locally, with no network and no real
+# CI hub, by shimming `ssh` and `rsync` so the "hub shared dir" is just a
 # local directory. Each case asserts the hardened behaviour:
 #
 #   1. happy/local        local tarball present + valid -> extracts, no fetch.
@@ -14,7 +13,9 @@
 #                         tar; self-heals from the (valid) hub copy.
 #   3. empty-source       local missing AND hub source empty/missing ->
 #                         fails LOUD (exit 1) with "rerun the full workflow"
-#                         guidance; no partial extraction.
+#                         guidance carrying the `[vendor-tarball-unavailable]`
+#                         marker the CI gate job greps for;
+#                         no partial extraction.
 #   4. fallback/aux       no local candidate (aux runner) + valid hub copy
 #                         -> fetches, verifies, extracts.
 #   5. sha-mismatch       local .zst is a *valid* zstd frame but its sidecar
@@ -148,8 +149,12 @@ echo "[2] truncated/local: partial local .zst must NOT reach tar; self-heals"
 # ===========================================================================
 DEST="$TEST_TMP/dest2"
 LOCAL="$TEST_TMP/local2.tar.zst"
-# Truncate the good tarball to a partial frame.
-head -c 200 "$GOOD" > "$LOCAL"
+# Truncate the good tarball to a partial frame. The cut MUST be a fraction of
+# the real size, not a fixed byte count: this workspace compresses to well under
+# 200 bytes with GNU tar, so a `head -c 200` "truncation" copied the file whole
+# and the case silently passed a VALID tarball to the script (green on BSD tar,
+# where the archive is larger, and a false FAIL on Linux).
+head -c "$(( $(wc -c < "$GOOD") / 2 ))" "$GOOD" > "$LOCAL"
 # Put a VALID copy on the hub so self-heal can succeed.
 cp "$GOOD" "$SHARED/$NAME"
 if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out2.log" 2>&1; then
@@ -181,8 +186,17 @@ if [ "$rc" -ne 0 ]; then
   else
     bad "failed but without actionable rerun guidance"; cat "$TEST_TMP/out3.log"
   fi
+  # The gate's contract: the marker rides on an ::error:: line, which
+  # the runner renders as "##[error][vendor-tarball-unavailable] ..." in the
+  # job log. The gate matches that rendered form, so the marker must be the
+  # very first thing after the workflow command, with nothing in between.
+  if grep -qF '::error::[vendor-tarball-unavailable] ' "$TEST_TMP/out3.log"; then
+    ok "fail-loud message carries the [vendor-tarball-unavailable] gate marker"
+  else
+    bad "fail-loud message lost the [vendor-tarball-unavailable] gate marker"; cat "$TEST_TMP/out3.log"
+  fi
 else
-  bad "MISSING artifact did NOT fail (the silent-success bug this guard exists to kill)"; cat "$TEST_TMP/out3.log"
+  bad "MISSING artifact did NOT fail (the silent-success bug)"; cat "$TEST_TMP/out3.log"
 fi
 
 # ===========================================================================
@@ -229,9 +243,13 @@ LOCAL="$TEST_TMP/local6.tar.zst"
 # A valid zstd frame whose payload is NOT a tar archive: passes `zstd -t`
 # (no sidecar, so zstd -t is the floor) but `tar --zstd -xf` fails on it.
 # This is the same contract as the observed race (verify OK, extraction dies
-# seconds later) injected deterministically -- the harness
-# cannot delete the file between the script's verify and extract steps.
-printf 'valid zstd frame, but definitely not a tar archive\n' | zstd -q > "$LOCAL"
+# seconds later, as the script's header comment recounts) injected
+# deterministically -- the harness cannot delete the file between the
+# script's verify and extract steps.
+# The payload must be at least one full 512-byte tar block: GNU tar treats a
+# shorter archive as a clean EOF and exits 0, which made this case pass
+# vacuously. 64 KiB of incompressible bytes errors on both GNU and BSD tar.
+head -c 65536 /dev/urandom | zstd -q > "$LOCAL"
 # Valid copy on the hub so extract-phase self-heal can succeed.
 cp "$GOOD" "$SHARED/$NAME"; rm -f "$SHARED/$NAME.sha256"
 if run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out6.log" 2>&1; then
