@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# gate-iis-msi-upgrade.yml: a release gate, as a reusable workflow. It
+# restores a clean checkpoint of a Hyper-V guest that runs IIS, installs the
+# MSI built by the release lane (a clean install, or an upgrade over an older
+# MSI when one is given), smoke-tests it and uninstalls it again. The release
+# lane calls it after the hosted job that builds the MSI.
+#
+# Runs on the fleet-iis class only, never on a hosted runner, and is skipped
+# while FLEET_ENABLED is not 'true'. The job holds no secret and no write
+# token: the guest administrator password comes from the runner's own
+# environment (CI_IIS_VM_ADMIN_PASSWORD), together with the guest and
+# checkpoint names. See docs/ci/runner-environment.md. A missing guest, name
+# or password fails the job; the gate is never green by skipping.
+name: gate-iis-msi-upgrade
+
+on:
+  workflow_call:
+    inputs:
+      msi_artifact:
+        description: Name of the artifact (from an earlier job of the calling run) that holds the MSI under test
+        required: true
+        type: string
+      old_msi_artifact:
+        description: Name of the artifact that holds an older MSI; when set, the test upgrades over it
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        description: Release tag the MSI is expected to identify itself as
+        required: false
+        type: string
+        default: ""
+
+    outputs:
+      ran:
+        description: '"true" only when the test step actually executed; "false" on every skip path'
+        value: ${{ jobs.iis-msi-upgrade-test.outputs.ran }}
+
+permissions:
+  contents: read
+
+jobs:
+  iis-msi-upgrade-test:
+    name: IIS MSI upgrade test
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 30
+    outputs:
+      ran: ${{ steps.ran.outputs.ran }}
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      # Fail before any work, and without printing a value, when the runner
+      # does not provide what the test needs.
+      - name: Check the guest
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('CI_IIS_VM_NAME', 'CI_IIS_VM_ADMIN_PASSWORD')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) {
+              Write-Host "::error::$name is not set in the runner environment; see docs/ci/runner-environment.md"
+              exit 1
+            }
+          }
+          $vm = Get-VM -Name $env:CI_IIS_VM_NAME -ErrorAction SilentlyContinue
+          if (-not $vm) {
+            Write-Host "::error::the Hyper-V guest named by CI_IIS_VM_NAME does not exist on this runner; the gate cannot pass without it"
+            exit 1
+          }
+          Write-Host "the IIS guest is present"
+
+      - name: Download the MSI
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.msi_artifact }}
+          path: ${{ runner.temp }}/msi-new
+
+      - name: Download the older MSI
+        if: ${{ inputs.old_msi_artifact != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.old_msi_artifact }}
+          path: ${{ runner.temp }}/msi-old
+
+      # The directories are new for this job, so the one MSI in each is the
+      # one downloaded (a picker over a shared directory once chose a stale
+      # file of an earlier release).
+      - name: Run the MSI upgrade test
+        id: test
+        timeout-minutes: 20
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'msi-new') -Filter '*.msi' -Recurse)
+          if ($msi.Count -ne 1) { Write-Host "::error::expected exactly one MSI in the artifact, found $($msi.Count)"; exit 1 }
+          $old = ''
+          $oldDir = Join-Path $env:RUNNER_TEMP 'msi-old'
+          if (Test-Path -LiteralPath $oldDir) {
+            $oldMsi = @(Get-ChildItem -LiteralPath $oldDir -Filter '*.msi' -Recurse)
+            if ($oldMsi.Count -ne 1) { Write-Host "::error::expected exactly one older MSI in the artifact, found $($oldMsi.Count)"; exit 1 }
+            $old = $oldMsi[0].FullName
+          }
+          .\test\system\iis\ci-msi-upgrade-test.ps1 -MsiPath $msi[0].FullName -OldMsiPath $old -ReleaseTag $env:RELEASE_TAG
+          exit $LASTEXITCODE
+
+      # "true" only when the step above ran (it passed or failed); a skipped
+      # step, whatever the reason, gives "false".
+      - name: Record whether the test ran
+        id: ran
+        if: ${{ always() }}
+        env:
+          OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          $ran = if ($env:OUTCOME -eq 'success' -or $env:OUTCOME -eq 'failure') { 'true' } else { 'false' }
+          "ran=$ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append

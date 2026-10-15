@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# gate-cpanel-smoke.yml: a release gate, as a reusable workflow. For one
+# target operating system it restores a clean checkpoint of a Hyper-V guest
+# that runs cPanel, installs the package built by the release lane and smoke
+# tests it over ssh. The release lane calls it once per operating system (a
+# matrix in the caller).
+#
+# Runs on the fleet-iis class only, never on a hosted runner, and is skipped
+# while FLEET_ENABLED is not 'true'. The job holds no secret and no write
+# token; ssh keys stay on the host. The guest is named by CI_EA4_VM_<OS> in
+# the runner environment (docs/ci/runner-environment.md). A target whose guest
+# or checkpoint is not provisioned yet skips with a warning annotation, and so
+# does a prerelease tag, which has no package.
+name: gate-cpanel-smoke
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        description: Target operating system, lower case (for example el9)
+        required: true
+        type: string
+      rpm_artifact:
+        description: Name of the artifact (from an earlier job of the calling run) that holds the package for this operating system
+        required: true
+        type: string
+      release_tag:
+        description: Release tag the package is expected to identify itself as
+        required: false
+        type: string
+        default: ""
+
+    outputs:
+      ran:
+        description: '"true" only when the test step actually executed; "false" on every skip path'
+        value: ${{ jobs.cpanel-smoke.outputs.ran }}
+
+permissions:
+  contents: read
+
+jobs:
+  cpanel-smoke:
+    name: cPanel smoke (${{ inputs.os }})
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 30
+    outputs:
+      ran: ${{ steps.ran.outputs.ran }}
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      # A prerelease tag (it carries a hyphen) has no package: skip.
+      - name: Check the guest
+        id: guest
+        env:
+          OS: ${{ inputs.os }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:OS -notmatch '^[a-z0-9]+$') { Write-Host "::error::unexpected operating system name"; exit 1 }
+          if ($env:RELEASE_TAG -like '*-*') {
+            Write-Host "::notice::prerelease tag: no cPanel package is built, so the smoke is skipped"
+            "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+          $vmName = [Environment]::GetEnvironmentVariable("CI_EA4_VM_$($env:OS.ToUpper())")
+          if (-not $vmName) { $vmName = "CP-$($env:OS.ToUpper())-base" }
+          $snap = "01-cpanel-clean-$($env:OS)"
+          if (-not (Get-VM -Name $vmName -ErrorAction SilentlyContinue)) {
+            Write-Host "::warning::no cPanel guest is provisioned for $($env:OS) on this runner (CI_EA4_VM_$($env:OS.ToUpper())); the smoke is skipped"
+            "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+          if (-not (Get-VMSnapshot -VMName $vmName -Name $snap -ErrorAction SilentlyContinue)) {
+            Write-Host "::warning::the clean checkpoint for $($env:OS) is missing; the smoke is skipped"
+            "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+          "skip=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ steps.guest.outputs.skip != 'true' }}
+        with:
+          submodules: false
+
+      - name: Download the package
+        if: ${{ steps.guest.outputs.skip != 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.rpm_artifact }}
+          path: ${{ runner.temp }}/rpm
+
+      - name: Run the smoke
+        id: test
+        if: ${{ steps.guest.outputs.skip != 'true' }}
+        timeout-minutes: 20
+        env:
+          OS: ${{ inputs.os }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rpm = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'rpm') -Filter '*.rpm' -Recurse)
+          if ($rpm.Count -ne 1) { Write-Host "::error::expected exactly one package in the artifact, found $($rpm.Count)"; exit 1 }
+          .\test\system\cpanel\ci-ea4-smoke.ps1 -RpmPath $rpm[0].FullName -Os $env:OS -ReleaseTag $env:RELEASE_TAG
+          exit $LASTEXITCODE
+
+      # "true" only when the step above ran (it passed or failed); a skipped
+      # step, whatever the reason, gives "false".
+      - name: Record whether the test ran
+        id: ran
+        if: ${{ always() }}
+        env:
+          OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          $ran = if ($env:OUTCOME -eq 'success' -or $env:OUTCOME -eq 'failure') { 'true' } else { 'false' }
+          "ran=$ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
