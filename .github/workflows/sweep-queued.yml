@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Hourly sweep of workflow runs that no runner will ever pick up. A job that
+# asks for a runner label nothing serves queues for days; the sweep cancels
+# such runs so their checks do not sit pending. The logic lives in
+# tools/ci/sweep-queued-runs.sh, called through pipeline-sweep.yml pinned to
+# master. See docs/ci/pipelines.md.
+
+name: Sweep queued runs
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only log what would be cancelled
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: sweep-queued
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    # The ceiling for the called workflow: cancelling a run needs actions: write.
+    permissions:
+      contents: read
+      actions: write
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-sweep.yml@master
+    with:
+      dry_run: ${{ inputs.dry_run || false }}

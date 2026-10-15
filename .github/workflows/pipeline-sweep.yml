@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-sweep.yml -- cancels workflow runs that have waited for a runner
+# longer than 30 minutes (the repository variable SWEEP_MAX_AGE_MINUTES
+# overrides the default) with no runner assigned to any of their jobs. The age
+# counts from the start of the latest attempt, so a re-run is not stale. Called
+# by sweep-queued.yml (hourly). Hosted: it must keep working exactly when the
+# fleet does not. The job holds actions: write and nothing else.
+
+name: pipeline-sweep
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: Only log what would be cancelled
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: Cancel runs that wait for a runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The logic is tested against a fake gh before it runs for real.
+      - name: Self-test the sweep
+        run: bash tools/ci/test_sweep_queued_runs.sh
+
+      - name: Sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          # Optional repository variable; empty means the 30 minute default.
+          SWEEP_MAX_AGE_MINUTES: ${{ vars.SWEEP_MAX_AGE_MINUTES }}
+        run: |
+          args=()
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          bash tools/ci/sweep-queued-runs.sh "${args[@]}"
