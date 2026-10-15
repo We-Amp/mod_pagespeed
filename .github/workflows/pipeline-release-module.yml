@@ -1,0 +1,2336 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-release-module.yml: the module release lane, part A, as a reusable
+# workflow. The caller (release.yml) holds the triggers and the concurrency
+# group; this file holds the jobs. See docs/ci/release.md and
+# docs/ci/pipelines.md.
+#
+# For a tag `module-v<version>` (for example module-v1.19.0, or
+# module-v1.19.0-rc.1 for a release candidate) this lane builds every module
+# package, runs the package smokes, the security gates, the unit tests and the
+# system-test gate, and ends in one run artifact, `release-assets`: the
+# validated asset set with SHA256SUMS and manifest.json (docs/ci/release.md
+# describes the contract). It signs nothing, creates no release, publishes
+# nothing and uses no secret. Part B adds, in jobs of the protected `release`
+# environment on hosted runners, the signing of SHA256SUMS and the Windows
+# binaries, the Windows installer, and the draft release; the places where it
+# plugs in are marked PART B below.
+#
+# Runs:
+#   * push of a tag matching module-v*            -> dry_run is false
+#   * workflow_dispatch { tag, dry_run: true }    -> the default
+#   * workflow_dispatch { tag, dry_run: false }
+# In this part the two differ only in the `dry_run` output of the `version`
+# job, which part B reads. Both build and validate everything. The tag must
+# exist and its commit must be on master (the ref guard, which also refuses a
+# run on any other ref), for a dry run as well.
+#
+# Runners. Every build job exists twice: on a runner class (fleet-heavy,
+# fleet-windows) while the repository variable FLEET_ENABLED is 'true', and as
+# a `-hosted` twin with the same steps on a GitHub-hosted runner otherwise, so
+# the kill switch never blocks a release. A small hosted `-ready` job joins
+# each pair for the jobs that depend on it. Native arm64 builds run on hosted
+# arm64 runners. A hosted twin has no remote cache and a small machine: it is
+# slow (docs/ci/release.md). No job here holds a secret or a write token.
+#
+# Artifacts. Names with the prefix `asset-` hold release files (the `validate`
+# job builds the asset set from exactly those); `tree` is the prepared source
+# tree every build starts from; `testdata-*`, `debug-*`, `stock-el8` and
+# `unsigned-windows` are inputs of later jobs and are not release files.
+#
+# Fetched from outside this repository (all public, read only, no credential):
+# the canonical product facts file of the optimizer repository at vendoring
+# time; the pinned optimizer release (its packages, by the `optimizer-fetch`
+# job, verified against the pin file install/debian/optimizer-pin.json); and
+# dependency sources named in the Bazel files.
+
+name: pipeline-release-module
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Module tag to build (module-v<version>); empty on a tag push.
+        type: string
+        default: ''
+      dry_run:
+        description: Dispatch only. Part B creates nothing when true. Ignored on a tag push.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Control: the ref guard and the version, both hosted. The guard code is
+  # checked out from master, never from the tree being released.
+  # ---------------------------------------------------------------------
+  ref-guard:
+    name: Ref guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.guard.outputs.ref }}
+      sha: ${{ steps.guard.outputs.sha }}
+    steps:
+      - name: Checkout master (guard code)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          fetch-tags: true
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Enforce the ref guard
+        id: guard
+        uses: ./.github/actions/ref-guard
+        with:
+          tag-glob: 'module-v*'
+          dispatch-tag: ${{ inputs.tag }}
+          events: 'push workflow_dispatch'
+
+  version:
+    name: Derive versions from the tag
+    needs: ref-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.derive.outputs.ref }}
+      sha: ${{ steps.derive.outputs.sha }}
+      short_sha: ${{ steps.derive.outputs.short_sha }}
+      tag: ${{ steps.derive.outputs.tag }}
+      version: ${{ steps.derive.outputs.version }}
+      base: ${{ steps.derive.outputs.base }}
+      pkg_version: ${{ steps.derive.outputs.pkg_version }}
+      release_tag: ${{ steps.derive.outputs.release_tag }}
+      optimizer_tag: ${{ steps.derive.outputs.optimizer_tag }}
+      prerelease: ${{ steps.derive.outputs.prerelease }}
+      is_prerelease: ${{ steps.derive.outputs.is_prerelease }}
+      dry_run: ${{ steps.derive.outputs.dry_run }}
+    steps:
+      - name: Checkout master (version tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          persist-credentials: false
+
+      - name: Derive
+        id: derive
+        env:
+          REF: ${{ needs.ref-guard.outputs.ref }}
+          SHA: ${{ needs.ref-guard.outputs.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # The guard also accepts the master branch; this lane releases a tag.
+          case "$REF" in
+            refs/tags/module-v*) ;;
+            *) echo "::error::the module lane releases a module-v* tag, not '$REF'"; exit 1 ;;
+          esac
+          TAG="${REF#refs/tags/}"
+          # A tag push is a real run; a dispatch is real only when dry_run is
+          # explicitly false.
+          DRY_RUN=true
+          if [ "$EVENT_NAME" = push ] || [ "$DRY_RUN_INPUT" = false ]; then
+            DRY_RUN=false
+          fi
+          {
+            bash tools/ci/release_version.sh parse "$TAG"
+            echo "ref=$REF"
+            echo "sha=$SHA"
+            echo "short_sha=${SHA:0:7}"
+            echo "dry_run=$DRY_RUN"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # Vendor: one prepared source tree for every build, as the `tree` artifact:
+  # the source at the tag with the module version stamped into VERSION, the
+  # admin console rebuilt with that version, vendor/, and the GIT_COMMIT
+  # stamp. The source tarball of the release is made from the same files.
+  # ---------------------------------------------------------------------
+  vendor:
+    name: Vendor Dependencies
+    needs: [ref-guard, version]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    env:
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_REF: ${{ needs.version.outputs.ref }}
+    steps: &vendor-steps
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          submodules: false
+          persist-credentials: false
+
+      - name: Verify the checkout is the release commit
+        run: |
+          [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ] || { echo "::error::checked-out HEAD $(git rev-parse HEAD) != release commit $RELEASE_SHA"; exit 1; }
+
+      # The tree carries the product line version; the packages carry the
+      # module version of the tag. Every later job builds from this stamped
+      # copy.
+      - name: Stamp the module version
+        run: |
+          bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
+          cat net/instaweb/public/VERSION
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: pagespeed/system/console/.nvmrc
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v npm >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          command -v bazel >/dev/null 2>&1 || {
+            echo "::error::bazel is not on PATH and could not be installed via npm; see docs/ci/runner-environment.md"
+            exit 1
+          }
+          bazel --version
+
+      # The dependency sources are public and fetched over https. The vendor
+      # script names one of them with an ssh-style address, so the rewrite
+      # below (scoped to this step through the environment) sends it over
+      # https and no credential of any kind is needed.
+      - name: Vendor all dependencies
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          bash tools/vendor-deps.sh vendor
+          if [ -d vendor/cyclone ]; then
+            echo "Cyclone: $(du -sh vendor/cyclone | cut -f1)"
+          fi
+          echo "Repo cache: $(du -sh vendor/repo-cache | cut -f1)"
+
+      # The console build checks its synced product facts against the
+      # canonical file of the optimizer repository and fails closed in CI
+      # when that file cannot be read. The clone lives under RUNNER_TEMP so
+      # the tree tarball does not pick it up.
+      - name: Materialize canonical product facts
+        run: |
+          set -euo pipefail
+          FACTS_DIR="${RUNNER_TEMP}/product-facts"
+          rm -rf "$FACTS_DIR"
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/We-Amp/pagespeed-optimizer.git "$FACTS_DIR"
+          git -C "$FACTS_DIR" sparse-checkout set --no-cone /shared/product-facts.mjs
+          test -f "$FACTS_DIR/shared/product-facts.mjs"
+          echo "MODPAGESPEED2_DIR=${FACTS_DIR}" >> "$GITHUB_ENV"
+
+      # The admin console shows the release version, so it is rebuilt with
+      # it rather than carrying the stamp of whoever last committed the file.
+      - name: Rebuild the admin console with the release version
+        env:
+          VITE_APP_VERSION: ${{ needs.version.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          bash pagespeed/system/console/build.sh
+          html=pagespeed/system/console/admin_console.html
+          if grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*-dirty' "$html" >/dev/null 2>&1; then
+            echo "::error::admin_console.html still contains a -dirty stamp after the rebuild"
+            exit 1
+          fi
+          grep -qF "$VITE_APP_VERSION" "$html" || { echo "::error::admin_console.html does not contain $VITE_APP_VERSION"; exit 1; }
+          echo "console stamped with ${VITE_APP_VERSION}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$RELEASE_SHA" > GIT_COMMIT
+
+      # The source tarball of the release: the committed files, the stamped
+      # version and console, vendor/ and the commit stamp. A tarball build has
+      # no .git, so its LASTCHANGE is the short commit.
+      - name: Create the source tarball
+        run: |
+          set -euo pipefail
+          PREFIX="mod_pagespeed-${RELEASE_VERSION}"
+          STAGE="${RUNNER_TEMP}/source-stage"
+          OUT="${RUNNER_TEMP}/source-out"
+          rm -rf "$STAGE" "$OUT"
+          mkdir -p "$STAGE" "$OUT"
+          git archive --format=tar --prefix="${PREFIX}/" HEAD | tar x -C "$STAGE"
+          cp net/instaweb/public/VERSION "$STAGE/${PREFIX}/net/instaweb/public/VERSION"
+          sed -i.bak "s/^LASTCHANGE=.*/LASTCHANGE=${RELEASE_SHA:0:7}/" "$STAGE/${PREFIX}/net/instaweb/public/VERSION"
+          rm -f "$STAGE/${PREFIX}/net/instaweb/public/VERSION.bak"
+          cp pagespeed/system/console/admin_console.html pagespeed/system/console/admin_console.html.srchash \
+            "$STAGE/${PREFIX}/pagespeed/system/console/"
+          echo -n "$RELEASE_SHA" > "$STAGE/${PREFIX}/GIT_COMMIT"
+          cp -a vendor "$STAGE/${PREFIX}/vendor"
+          # POSIX format: some paths in the repository cache are long.
+          tar czf "${OUT}/${PREFIX}.tar.gz" --format=posix -C "$STAGE" "${PREFIX}"
+          rm -rf "$STAGE"
+          ls -lh "$OUT"
+
+      - name: Create the tree tarball
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/tree-out"
+          rm -rf "$OUT"; mkdir -p "$OUT"
+          tar --zstd --dereference --mode='u+w' -cf "${OUT}/module-tree.tar.zst" \
+            --exclude='.git' \
+            --exclude='bazel-*' \
+            --exclude='system/console/node_modules' \
+            --exclude='system/console/dist' \
+            .
+          zstd -t "${OUT}/module-tree.tar.zst"
+          echo "Tree: $(du -h "${OUT}/module-tree.tar.zst" | cut -f1)"
+
+      # Already compressed: no second pass.
+      - name: Upload the tree
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tree
+          path: ${{ runner.temp }}/tree-out/module-tree.tar.zst
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Upload the source tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-source
+          path: ${{ runner.temp }}/source-out/*.tar.gz
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+  vendor-hosted:
+    name: Vendor Dependencies (hosted)
+    needs: [ref-guard, version]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_REF: ${{ needs.version.outputs.ref }}
+    steps: *vendor-steps
+
+  vendor-ready:
+    name: Vendor ready
+    needs: [vendor, vendor-hosted]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: One of the two legs succeeded
+        env:
+          FLEET: ${{ needs.vendor.result }}
+          HOSTED: ${{ needs.vendor-hosted.result }}
+        run: |
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
+          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the vendor job did not succeed"; exit 1; }
+
+  # ---------------------------------------------------------------------
+  # Release security gates, hosted: SBOM freshness at the module version,
+  # notices, VEX statements and a grype scan with the VEX applied. The
+  # versioned SBOM and VEX files become release files.
+  # ---------------------------------------------------------------------
+  security-gates:
+    name: Security Gates (SBOM + Grype + VEX)
+    needs: [ref-guard, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          submodules: false
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The SBOM carries the module version, which comes from the tag.
+      - name: Stamp the module version
+        run: bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
+
+      - name: SBOM is up to date - generate-sbom.py --verify
+        run: python3 tools/generate-sbom.py --verify
+
+      - name: SBOM scoping - generate-sbom.py --self-test
+        run: python3 tools/generate-sbom.py --self-test
+
+      # THIRD-PARTY-NOTICES ships in every package, so it must agree with the
+      # SBOM in both directions.
+      - name: Notices drift - check-third-party-notices.py
+        run: python3 tools/sbom/check-third-party-notices.py
+
+      - name: VEX file format sanity
+        id: vex
+        run: |
+          set -euo pipefail
+          python3 tools/ci/validate-vex.py --self-test
+          python3 tools/ci/validate-vex.py sbom/
+          shopt -s nullglob
+          vex_files=(sbom/*.vex.json)
+          if [ ${#vex_files[@]} -eq 0 ]; then
+            echo "::error::no sbom/*.vex.json: the release carries one"
+            exit 1
+          fi
+          echo "vex_path=${vex_files[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Install grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+
+      - name: Vulnerability scan with VEX suppression (grype on the SPDX SBOM, fail on medium and above)
+        env:
+          GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
+          VEX_PATH: ${{ steps.vex.outputs.vex_path }}
+        run: |
+          # grype's own --vex does not support an sbom: source, so scan
+          # without it and apply the OpenVEX statements with apply-vex.py.
+          "${GRYPE_CMD}" -o json --file grype-results.json \
+            sbom:sbom/pagespeed-1.1.spdx.json
+          python3 tools/ci/apply-vex.py --grype grype-results.json \
+            --vex "${VEX_PATH}" --fail-on medium
+
+      # Versioned names: the release carries one SBOM and one VEX file per
+      # version.
+      - name: Collect the SBOM and VEX files
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/sbom-out"
+          rm -rf "$OUT"; mkdir -p "$OUT"
+          for kind in spdx vex; do
+            src=""
+            for c in sbom/*."${kind}".json; do [ -f "$c" ] && { src="$c"; break; }; done
+            [ -n "$src" ] || { echo "::error::sbom/*.${kind}.json missing"; exit 1; }
+            stem="$(basename "$src" ".${kind}.json")"
+            cp "$src" "${OUT}/${stem}-${RELEASE_VERSION}.${kind}.json"
+          done
+          ls -l "$OUT"
+
+      - name: Upload the SBOM and VEX files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sbom
+          path: ${{ runner.temp }}/sbom-out/*
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # The optimizer packages the module is released with (the serving pair).
+  # Fetched from the public optimizer release named by the pin file, verified
+  # against the pin (the hash of the release's SHA256SUMS, then every file
+  # against the sums). Anonymous: the release is public. The job's own
+  # read-only token is sent to the API endpoint only, to avoid the anonymous
+  # rate limit of shared runner addresses.
+  # ---------------------------------------------------------------------
+  optimizer-fetch:
+    name: Fetch and verify the optimizer packages
+    needs: [ref-guard, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
+      GH_READ_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          submodules: false
+          persist-credentials: false
+
+      - name: Download and verify against the pin
+        run: |
+          set -euo pipefail
+          PIN=install/debian/optimizer-pin.json
+          [ -f "$PIN" ] || { echo "::error::missing $PIN"; exit 1; }
+          PIN_TAG=$(python3 -c "import json;print(json.load(open('$PIN'))['tag'])")
+          PIN_SUMS=$(python3 -c "import json;print(json.load(open('$PIN'))['sha256sums_sha256'])")
+          case "$PIN_TAG" in
+            PLACEHOLDER*) echo "::error::optimizer-pin.json is a placeholder: cut the optimizer release first and record the pin"; exit 1 ;;
+          esac
+          # The pinned optimizer tag must be the pair of this module version.
+          if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
+            echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
+          fi
+          # The pair must link the same cache library commit: a pair that
+          # does not has an Apache that cannot start. The tag comparison
+          # above cannot see it; the pin records the optimizer commit, and
+          # this compares what that commit builds with what this tree builds.
+          OPTIMIZER_COMMIT=$(python3 -c "import json;print(json.load(open('$PIN')).get('optimizer_commit',''))")
+          case "$OPTIMIZER_COMMIT" in
+            PLACEHOLDER*|"") echo "::error::optimizer-pin.json has no optimizer_commit"; exit 1 ;;
+          esac
+          curl -fsSL --retry 5 --retry-all-errors \
+            "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/$OPTIMIZER_COMMIT/MODULE.bazel" \
+            -o optimizer-MODULE.bazel
+          python3 tools/ci/check_optimizer_pin_pair.py "$PIN" optimizer-MODULE.bazel bazel/repositories.bzl
+
+          rm -rf optimizer-dist && mkdir optimizer-dist
+          curl -fsSL --retry 5 --retry-all-errors \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_READ_TOKEN}" \
+            "https://api.github.com/repos/We-Amp/pagespeed-optimizer/releases/tags/$PIN_TAG" \
+            -o optimizer-release.json
+          python3 - <<'PY'
+          import json, sys
+          doc = json.load(open("optimizer-release.json"))
+          urls = [a["browser_download_url"] for a in doc.get("assets", [])]
+          if not urls:
+              sys.exit("::error::the pinned optimizer release has no assets")
+          with open("optimizer-assets.txt", "w") as fh:
+              fh.write("\n".join(urls) + "\n")
+          PY
+          cd optimizer-dist
+          while IFS= read -r url; do
+            curl -fsSL --retry 5 --retry-all-errors -O "$url"
+          done < ../optimizer-assets.txt
+          echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
+          # The downloaded set must be exactly the set SHA256SUMS lists.
+          diff <(awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS | LC_ALL=C sort) \
+               <(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort) \
+            || { echo "::error::the downloaded files differ from the files SHA256SUMS lists"; exit 1; }
+          sha256sum -c SHA256SUMS
+          ls -la
+
+      # The modules load the optimizer client library into the web-server
+      # process. It is built elsewhere and only fetched here, so check the
+      # fetched packages: no crypto library in NEEDED and no undefined symbol
+      # the server would have to resolve. Every deb and rpm must carry it.
+      - name: Client library binds no crypto to the host process
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm cpio binutils >/dev/null
+          shopt -s nullglob
+          pkgs=(optimizer-dist/*.deb optimizer-dist/*.rpm)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "::error::no optimizer deb or rpm packages to check"
+            exit 1
+          fi
+          for p in "${pkgs[@]}"; do
+            bash tools/ci/assert_module_symbols.sh --profile client-lib "$p"
+          done
+
+      # The optimizer's own SHA256SUMS was verified above; the release
+      # derives its own manifest over every file it ships.
+      - name: Keep the verified packages
+        run: |
+          set -euo pipefail
+          rm -f optimizer-dist/SHA256SUMS
+          ls optimizer-dist
+
+      - name: Upload the optimizer packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-optimizer
+          path: optimizer-dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # The release is gated on the system-test lanes of the CI run of the same
+  # commit: the package smokes below run the suite against a stock install,
+  # whose configuration lacks the lane fixtures, so their pytest step is
+  # informational. A completed run of the main workflow for the release
+  # commit must have passed both lanes. On a dry run the verdict is reported
+  # and the run continues.
+  # ---------------------------------------------------------------------
+  systest-gate:
+    name: System-test gate (CI run of the release commit)
+    needs: [ref-guard, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Reads the workflow runs of this public repository with the default
+    # read-only token; no extra permission is requested.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+    steps:
+      - name: Require green Apache and Nginx system tests for this commit
+        run: |
+          set -uo pipefail
+          verdict() {
+            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&status=completed&per_page=50" --jq '.workflow_runs[].id')" || return 2
+            [ -n "$RUN_IDS" ] || { echo "no completed ci.yml run for ${RELEASE_SHA}"; return 1; }
+            for RUN in $RUN_IDS; do
+              JOBS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN}/jobs?per_page=100" --jq '.jobs[] | "\(.name)=\(.conclusion)"')" || return 2
+              echo "ci.yml run ${RUN}:"
+              echo "$JOBS" | grep -E '(^| / )(Apache|Nginx) System Tests=' || echo "  (no system-test jobs)"
+              if echo "$JOBS" | grep -Eq '(^|/ )Apache System Tests=success$' \
+                 && echo "$JOBS" | grep -Eq '(^|/ )Nginx System Tests=success$'; then
+                echo "System-test lanes passed in ci.yml run ${RUN}"
+                return 0
+              fi
+            done
+            echo "no ci.yml run of ${RELEASE_SHA} passed both Apache and Nginx System Tests"
+            return 1
+          }
+          rc=0
+          verdict || rc=$?
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          if [ "$DRY_RUN" = true ]; then
+            echo "::warning::dry run: the system-test gate would refuse a real run of this tag (see above)"
+            exit 0
+          fi
+          echo "::error::the system-test gate refuses this release (see above)"
+          exit 1
+
+  # ---------------------------------------------------------------------
+  # Linux packages. One step list for three jobs: x64 on the build runners,
+  # its hosted twin, and arm64 on a hosted arm64 runner (a native build).
+  # The Apache module, its deb and rpm, the nginx module tarball built in the
+  # dev image, the unstripped debug files, and the synthetic old-version
+  # packages the upgrade smoke installs first. The job env selects the
+  # architecture.
+  # ---------------------------------------------------------------------
+  linux-release-build:
+    name: Linux Release Build (x64)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    env: &linux-x64-env
+      ARCH: x64
+      SO_ARCH: x86_64
+      BAZEL_CI_CONFIG: ci
+      HARDEN_ISA: hardening-cet
+    steps: &linux-build-steps
+      - &clear-workspace
+        name: Clear the workspace
+        run: |
+          if [ -d "${GITHUB_WORKSPACE}" ]; then
+            chmod -R u+w "${GITHUB_WORKSPACE}" || echo "::warning::could not make every file of the workspace writable"
+          fi
+          find "${GITHUB_WORKSPACE}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + \
+            || { echo "::error::could not clear the workspace (files left by an earlier run?)"; exit 1; }
+
+      - &tree-download
+        name: Download the release tree
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tree
+          path: ${{ runner.temp }}/tree
+
+      - &tree-extract
+        name: Extract the release tree
+        env:
+          RELEASE_SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          set -euo pipefail
+          T="${RUNNER_TEMP}/tree/module-tree.tar.zst"
+          zstd -t "$T"
+          tar --zstd -xf "$T" -C "${GITHUB_WORKSPACE}"
+          rm -f "$T"
+          STAMPED="$(tr -d '[:space:]' < "${GITHUB_WORKSPACE}/GIT_COMMIT" 2>/dev/null || true)"
+          [ "$STAMPED" = "$RELEASE_SHA" ] || { echo "::error::stale or missing GIT_COMMIT stamp in the extracted tree (have '${STAMPED}', want '${RELEASE_SHA}')"; exit 1; }
+          cat net/instaweb/public/VERSION
+
+      - &dev-image
+        name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). On a hosted runner this builds the
+          # image cold every time.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest "$ARCH" docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # The remote cache is used only when the runner environment names it
+      # (docs/ci/runner-environment.md). Without it the trailing empty
+      # --remote_cache= overrides the cache the ci configs chain, and nothing
+      # is uploaded.
+      - &cache-settings
+        name: Remote cache and per-runner cache directory
+        run: |
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            echo "DOCKER_CACHE_HOST_ARG=--add-host=bazel-remote-cache:${BAZEL_CACHE_HOST}" >> "$GITHUB_ENV"
+            echo "BAZEL_CACHE_FLAGS=" >> "$GITHUB_ENV"
+            echo "using the remote Bazel cache from the runner environment"
+          else
+            echo "DOCKER_CACHE_HOST_ARG=" >> "$GITHUB_ENV"
+            echo "BAZEL_CACHE_FLAGS=--remote_cache= --remote_upload_local_results=false" >> "$GITHUB_ENV"
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          # A per-runner directory for the disk cache, mounted at /cache. The
+          # name is suffixed per runner instance and never logged.
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
+          mkdir -p "${CACHE_ROOT}"
+          echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
+
+      # Debug info is kept (--strip=never) and stripped afterwards, the
+      # binary is hardened, and it must neither bind its crypto to the host
+      # process nor export internals. The deb and rpm depend on the optimizer
+      # package at the pair version, which is the module version.
+      - name: Build the Apache module and its packages
+        run: |
+          set -euo pipefail
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
+          # shellcheck disable=SC2086
+          docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
+            --memory=55g --memory-swap=55g \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e ARCH -e BAZEL_CI_CONFIG -e HARDEN_ISA -e BAZEL_CACHE_FLAGS \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${BAZEL_CACHE_DIR}:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # BAZEL_CACHE_FLAGS is an intentional flag list: word splitting.
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                build --config="${BAZEL_CI_CONFIG}" --config=hardening --config="${HARDEN_ISA}" \
+                ${BAZEL_CACHE_FLAGS} --disk_cache=/cache -c opt --strip=never \
+                -- //:libmod_pagespeed.so
+
+              bash tools/assert-binary-hardening.sh bazel-bin/libmod_pagespeed.so
+              bash tools/ci/assert_module_symbols.sh --profile apache bazel-bin/libmod_pagespeed.so
+
+              # Debug symbols before stripping.
+              mkdir -p /workspace/debug
+              objcopy --only-keep-debug bazel-bin/libmod_pagespeed.so \
+                /workspace/debug/libmod_pagespeed.so.debug
+              cp bazel-bin/libmod_pagespeed.so /workspace/debug/libmod_pagespeed.so.unstripped
+
+              # Bazel outputs are read-only: copy, then strip the copy.
+              install -m 755 bazel-bin/libmod_pagespeed.so /workspace/libmod_pagespeed.so
+              strip --strip-debug /workspace/libmod_pagespeed.so
+
+              mkdir -p /workspace/packages
+              OPT_PKG_VERSION="$(. net/instaweb/public/VERSION; v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE}" ] && v="${v}~${PRERELEASE}"; echo "$v")"
+              install/debian/build.sh -a "${ARCH}" -b . -o /workspace/packages/ -d "$OPT_PKG_VERSION"
+              install/rpm/build.sh -a "${ARCH}" -b . -o /workspace/packages/ -d "$OPT_PKG_VERSION"
+
+              # Synthetic old-version packages, installed first by the
+              # upgrade smoke.
+              mkdir -p /workspace/packages-old
+              cp net/instaweb/public/VERSION net/instaweb/public/VERSION.real
+              sed -i "s/^MAJOR=.*/MAJOR=1/;s/^MINOR=.*/MINOR=0/;s/^BUILD=.*/BUILD=99/;s/^PRERELEASE=.*/PRERELEASE=/" \
+                net/instaweb/public/VERSION
+              install/debian/build.sh -a "${ARCH}" -b . -o /workspace/packages-old/
+              install/rpm/build.sh -a "${ARCH}" -b . -o /workspace/packages-old/
+              mv net/instaweb/public/VERSION.real net/instaweb/public/VERSION
+            '
+
+      # The tarball of the module built in the dev image, for the
+      # from-source nginx smoke. The distro packages are built in their own
+      # jobs, inside containers of each distro.
+      - name: Build the nginx module tarball
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
+            --memory=55g --memory-swap=55g \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CI_CONFIG -e HARDEN_ISA -e BAZEL_CACHE_FLAGS \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${BAZEL_CACHE_DIR}:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                build --config="${BAZEL_CI_CONFIG}" --config=hardening --config="${HARDEN_ISA}" \
+                ${BAZEL_CACHE_FLAGS} --disk_cache=/cache -c opt \
+                -- //pagespeed/nginx:ngx_pagespeed_module.so
+              bash tools/assert-binary-hardening.sh bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+              bash tools/ci/assert_module_symbols.sh --profile nginx \
+                bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+              ./install/nginx/build_nginx_package.sh -o .
+            '
+
+      - name: Collect the files
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/out"
+          rm -rf "$OUT"; mkdir -p "$OUT/asset" "$OUT/oldpkgs" "$OUT/debug"
+          cp packages/* "$OUT/asset/"
+          cp libmod_pagespeed.so "$OUT/asset/libmod_pagespeed-linux-${SO_ARCH}.so"
+          cp ngx_pagespeed-*-linux-"${SO_ARCH}".tar.gz "$OUT/asset/"
+          cp packages-old/* "$OUT/oldpkgs/"
+          cp debug/* "$OUT/debug/"
+          ls -lh "$OUT"/*
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-${{ env.ARCH }}
+          path: ${{ runner.temp }}/out/asset
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload the old-version packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: testdata-oldpkgs-${{ env.ARCH }}
+          path: ${{ runner.temp }}/out/oldpkgs
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Upload the debug files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: debug-linux-${{ env.ARCH }}
+          path: ${{ runner.temp }}/out/debug
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-release-build-hosted:
+    name: Linux Release Build (x64, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env: *linux-x64-env
+    steps: *linux-build-steps
+
+  linux-ready:
+    name: Linux build ready
+    needs: [linux-release-build, linux-release-build-hosted]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: One of the two legs succeeded
+        env:
+          FLEET: ${{ needs.linux-release-build.result }}
+          HOSTED: ${{ needs.linux-release-build-hosted.result }}
+        run: |
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
+          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Linux x64 build did not succeed"; exit 1; }
+
+  linux-arm64-release-build:
+    name: Linux Release Build (arm64)
+    needs: [version, vendor-ready]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 350
+    env:
+      ARCH: arm64
+      SO_ARCH: aarch64
+      BAZEL_CI_CONFIG: ci-linux-arm64
+      HARDEN_ISA: hardening-bti
+    steps: *linux-build-steps
+
+  # ---------------------------------------------------------------------
+  # Nginx distro packages. The module is built inside a container of each
+  # target distro against that distro's stock nginx version, wrapped into a
+  # deb or rpm, and checked for leaked symbols and, for an rpm, for its name
+  # routing. The legs run concurrently within the job (tools/ci/release_nginx.sh).
+  # One step list for the x64 job, its hosted twin and the arm64 job.
+  # ---------------------------------------------------------------------
+  nginx-distro-build:
+    name: Nginx Distro Packages (x64)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    env: &nginx-x64-env
+      ARCH: x64
+    steps: &nginx-steps
+      - *clear-workspace
+      - *tree-download
+      - *tree-extract
+
+      - name: Build all distro packages
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
+          mkdir -p "${CACHE_ROOT}"
+          CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
+            --arch "$ARCH" --set main \
+            --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/nginx-out"
+
+      - name: Symbol-leak gate
+        run: |
+          bash tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Rpm routing gate
+        run: |
+          mkdir -p "${RUNNER_TEMP}/nginx-rpms"
+          cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
+          bash tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-${{ env.ARCH }}
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
+
+      # Containers that run as root leave root-owned files in the mounts.
+      - &reown
+        name: Re-own the files containers left behind
+        if: always()
+        run: |
+          mounts=(-v "${GITHUB_WORKSPACE}:/w" -v "${RUNNER_TEMP}:/t")
+          dirs="/w /t"
+          i=0
+          for d in "${GITHUB_WORKSPACE}"-leg-*; do
+            [ -d "$d" ] || continue
+            i=$((i + 1))
+            mounts+=(-v "${d}:/l${i}")
+            dirs="${dirs} /l${i}"
+          done
+          docker run --rm "${mounts[@]}" alpine:3.20 sh -c "chown -R $(id -u):$(id -g) ${dirs}" \
+            || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
+
+  nginx-distro-build-hosted:
+    name: Nginx Distro Packages (x64, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env: *nginx-x64-env
+    steps: *nginx-steps
+
+  nginx-ready:
+    name: Nginx packages ready
+    needs: [nginx-distro-build, nginx-distro-build-hosted]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: One of the two legs succeeded
+        env:
+          FLEET: ${{ needs.nginx-distro-build.result }}
+          HOSTED: ${{ needs.nginx-distro-build-hosted.result }}
+        run: |
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
+          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the nginx x64 packages did not build"; exit 1; }
+
+  nginx-distro-build-arm64:
+    name: Nginx Distro Packages (arm64)
+    needs: [version, vendor-ready]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 350
+    env:
+      ARCH: arm64
+    steps: *nginx-steps
+
+  # The el10 module builds with a much newer toolchain than the other legs and
+  # is a leg of its own so that its long build cannot hold up the others.
+  nginx-distro-build-el10:
+    name: Nginx Distro Packages (el10)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    env: &nginx-el10-env
+      ARCH: x64
+      CORES_PER_LEG: "12"
+    steps: &nginx-el10-steps
+      - *clear-workspace
+      - *tree-download
+      - *tree-extract
+
+      - name: Build the el10 module and package
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx-el10"
+          mkdir -p "${CACHE_ROOT}"
+          CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
+            --arch "$ARCH" --set el10 \
+            --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/nginx-out"
+
+      - name: Symbol-leak gate
+        run: |
+          bash tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Rpm routing gate
+        run: |
+          bash tools/ci/release_nginx.sh routing --arch "$ARCH" --set el10 \
+            --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Load into the stock packaged nginx
+        run: |
+          bash tools/ci/release_nginx.sh load-check --arch "$ARCH" --set el10 \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Upload the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-el10
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
+
+      - *reown
+
+  nginx-distro-build-el10-hosted:
+    name: Nginx Distro Packages (el10, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env: *nginx-el10-env
+    steps: *nginx-el10-steps
+
+  # ---------------------------------------------------------------------
+  # Stock Apache rpms built natively on el8 and el10 (their own glibc and
+  # toolchain). The el8 rpm only feeds the cPanel package; the el10 rpm is a
+  # release file of its own. The rpm of el10 carries no dist tag, so its
+  # release file name gets a prefix (docs/ci/release.md).
+  # ---------------------------------------------------------------------
+  apache-el8-build:
+    name: Apache EL8 Build (glibc 2.28)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 240
+    env: &apache-el8-env
+      EL: el8
+      ARTIFACT: stock-el8
+    steps: &apache-el-steps
+      - *clear-workspace
+      - *tree-download
+      - *tree-extract
+
+      - name: Build the module and the stock rpm in almalinux
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.cache/mps-release-${EL}"
+          mkdir -p "${CACHE_ROOT}"
+          docker run --rm --init \
+            --memory=80g --memory-swap=80g \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${CACHE_ROOT}:/cache" \
+            -w /workspace \
+            "almalinux:${EL#el}" \
+            bash -c "bash install/rpm/build_apache_${EL}_in_container.sh -o /workspace/packages-${EL}"
+          echo "stock rpms:"
+          ls -lh "packages-${EL}"/*.rpm
+
+      - name: Upload the rpm
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: packages-${{ env.EL }}/mod-pagespeed-*.x86_64.rpm
+          retention-days: 14
+          if-no-files-found: error
+
+      - *reown
+
+  apache-el8-build-hosted:
+    name: Apache EL8 Build (glibc 2.28, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env: *apache-el8-env
+    steps: *apache-el-steps
+
+  el8-ready:
+    name: EL8 build ready
+    needs: [apache-el8-build, apache-el8-build-hosted]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: One of the two legs succeeded
+        env:
+          FLEET: ${{ needs.apache-el8-build.result }}
+          HOSTED: ${{ needs.apache-el8-build-hosted.result }}
+        run: |
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
+          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el8 build did not succeed"; exit 1; }
+
+  apache-el10-build:
+    name: Apache EL10 Build (glibc 2.39, native)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 240
+    env: &apache-el10-env
+      EL: el10
+      ARTIFACT: asset-apache-el10
+    steps: *apache-el-steps
+
+  apache-el10-build-hosted:
+    name: Apache EL10 Build (glibc 2.39, native, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env: *apache-el10-env
+    steps: *apache-el-steps
+
+  el10-ready:
+    name: EL10 build ready
+    needs: [apache-el10-build, apache-el10-build-hosted]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: One of the two legs succeeded
+        env:
+          FLEET: ${{ needs.apache-el10-build.result }}
+          HOSTED: ${{ needs.apache-el10-build-hosted.result }}
+        run: |
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
+          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el10 build did not succeed"; exit 1; }
+
+  # ---------------------------------------------------------------------
+  # Unit tests of the optimized build, with the cache servers they talk to
+  # started as containers on a job-local network.
+  # ---------------------------------------------------------------------
+  unit-tests:
+    name: Unit Tests (Release)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    env: &unit-env
+      ARCH: x64
+      BAZEL_CI_CONFIG: ci
+    steps: &unit-steps
+      - *clear-workspace
+      - *tree-download
+      - *tree-extract
+      - *dev-image
+      - *cache-settings
+
+      - name: Create the Docker network and start the services
+        run: |
+          export DOCKER_CONFIG="${RUNNER_TEMP}/docker-clean"; mkdir -p "$DOCKER_CONFIG"; printf '{}' > "$DOCKER_CONFIG/config.json"
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::Docker daemon unreachable after 60s"; exit 1; }
+          NET="ci-net-release-${GITHUB_RUN_ID}"; R="ci-redis-release-${GITHUB_RUN_ID}"; M="ci-memcached-release-${GITHUB_RUN_ID}"
+          {
+            echo "UNIT_NET=${NET}"
+            echo "UNIT_REDIS=${R}"
+            echo "UNIT_MEMCACHED=${M}"
+          } >> "$GITHUB_ENV"
+          docker network create "$NET" 2>/dev/null || true
+          docker rm -f "$R" "$M" 2>/dev/null || true
+          for img in redis:7-alpine memcached:1.6-alpine; do
+            for a in 1 2 3; do docker pull "$img" && break; echo "::warning::pull $img failed ($a/3)"; sleep $((a*5)); done
+          done
+          start() { local name=$1 image=$2; shift 2
+            for a in 1 2 3; do
+              docker rm -f "$name" 2>/dev/null || true
+              docker run -d --init --restart=on-failure:2 --name "$name" --network "$NET" "$@" "$image" && return 0
+              echo "::warning::docker run $name failed ($a/3)"; sleep $((a*3))
+            done
+            echo "::error::could not start $name after 3 attempts"; return 1; }
+          start "$R" redis:7-alpine || exit 1
+          start "$M" memcached:1.6-alpine || exit 1
+          for a in $(seq 1 30); do docker exec "$R" redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::redis never became ready"; docker logs "$R" 2>&1 | tail; exit 1; }; done
+          for a in $(seq 1 15); do echo version | docker exec -i "$M" sh -c 'cat | nc -w1 127.0.0.1 11211' 2>/dev/null | grep -q VERSION && break; sleep 1; [ "$a" = 15 ] && echo "::warning::memcached readiness probe unconfirmed after 15s (container is running; continuing)"; done
+
+      - name: Run the unit tests
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
+          # shellcheck disable=SC2086
+          docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
+            --memory=55g --memory-swap=55g \
+            --network="${UNIT_NET}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_CI_CONFIG -e BAZEL_CACHE_FLAGS \
+            -e REDIS_HOST_NAME="${UNIT_REDIS}" -e MEMCACHED_HOST_NAME="${UNIT_MEMCACHED}" \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${BAZEL_CACHE_DIR}:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              for a in 1 2 3; do
+                if bazel --output_user_root=/tmp/bazel-out --version; then break; fi
+                echo "::warning::bazel launcher download failed (attempt ${a}/3)"
+                sleep $((a * 5))
+              done
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out \
+                test --config="${BAZEL_CI_CONFIG}" ${BAZEL_CACHE_FLAGS} --disk_cache=/cache -c opt \
+                --deleted_packages=test/pagespeed/envoy \
+                --keep_going \
+                --test_tag_filters=-external \
+                --test_env=REDIS_HOST="${REDIS_HOST_NAME}" \
+                --test_env=REDIS_PORT=6379 \
+                --test_env=MEMCACHED_HOST="${MEMCACHED_HOST_NAME}" \
+                --test_env=MEMCACHED_PORT=11211 \
+                -- //test/pagespeed/kernel/... //test/net/... \
+                //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+            '
+
+      - name: Stop the test services
+        if: always()
+        run: |
+          docker rm -f "${UNIT_REDIS:-}" "${UNIT_MEMCACHED:-}" 2>/dev/null || true
+          docker network rm "${UNIT_NET:-}" 2>/dev/null || true
+
+  unit-tests-hosted:
+    name: Unit Tests (Release, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env: *unit-env
+    steps: *unit-steps
+
+  # ---------------------------------------------------------------------
+  # Package smokes. Each installs the built packages into a container of the
+  # target family, exercises install, upgrade over the synthetic old version,
+  # the module's presence and version, and removal. The pytest step inside
+  # the Apache smokes is informational (the system-test gate is the gate); it
+  # fails the job only when the suite did not run at all.
+  # ---------------------------------------------------------------------
+  package-smoke-deb:
+    name: Smoke Test (Debian)
+    needs: [version, linux-ready, optimizer-fetch]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    env: &smoke-env
+      RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+      EXPECTED_VERSION_STRING: ${{ needs.version.outputs.version }}
+    steps: &smoke-deb-steps
+      - &unlock-vendor
+        name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
+      - &checkout-tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          submodules: false
+          persist-credentials: false
+
+      - name: Download the packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-linux-x64
+          path: ${{ runner.temp }}/packages
+
+      - name: Download the old-version packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: testdata-oldpkgs-x64
+          path: ${{ runner.temp }}/packages-old
+
+      - name: Download the optimizer packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-optimizer
+          path: ${{ runner.temp }}/optimizer
+
+      # A minimal Ubuntu and Apache container WITHOUT the package installed,
+      # so the test exercises the whole install, upgrade and uninstall life
+      # cycle.
+      - name: Build the base test container
+        run: |
+          docker build -t mps-smoke-deb-base - <<'DOCKERFILE'
+          FROM ubuntu:22.04
+          ENV DEBIAN_FRONTEND=noninteractive
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+              apache2 ca-certificates curl python3 python3-pip \
+              && rm -rf /var/lib/apt/lists/*
+          RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
+          DOCKERFILE
+
+      - name: Run upgrade, test and uninstall
+        run: |
+          docker run --rm --init \
+            -e RELEASE_TAG -e EXPECTED_VERSION_STRING \
+            -v "${RUNNER_TEMP}/packages-old:/packages-old:ro" \
+            -v "${RUNNER_TEMP}/packages:/packages:ro" \
+            -v "${RUNNER_TEMP}/optimizer:/optimizer:ro" \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            mps-smoke-deb-base bash -c '
+              set -ex
+
+              force_restart_apache() {
+                apache2ctl graceful-stop 2>/dev/null || apache2ctl stop 2>/dev/null || true
+                sleep 3
+                if [ -f /var/run/apache2/apache2.pid ]; then
+                  kill -9 $(cat /var/run/apache2/apache2.pid) 2>/dev/null || true
+                fi
+                sleep 2  # allow TIME_WAIT on port 80 to clear
+                rm -f /var/run/apache2/apache2.pid
+                apache2ctl start
+              }
+
+              wait_for_apache() {
+                for i in $(seq 1 20); do
+                  if curl -s --max-time 2 -o /dev/null http://localhost/; then return 0; fi
+                  sleep 1
+                done
+                echo "=== Apache failed to respond. Error log: ==="
+                tail -50 /var/log/apache2/error.log 2>/dev/null || true
+                return 1
+              }
+
+              echo "<html><body><p>Smoke test</p></body></html>" > /var/www/html/index.html
+
+              {
+                echo "<IfModule pagespeed_module>"
+                echo "  LogLevel pagespeed:trace1 filter:trace4"
+                echo "</IfModule>"
+              } >> /etc/apache2/apache2.conf
+
+              apt-get update -qq
+              apt-get install -y /packages-old/mod-pagespeed_*_amd64.deb
+              apache2ctl configtest
+              apache2ctl start
+              wait_for_apache
+              curl -sI http://localhost/ | head -20
+              curl -sI http://localhost/ | grep -qi "X-Mod-Pagespeed\|X-Page-Speed" \
+                || echo "WARNING: header not present on old version (expected for synthetic pkg)"
+
+              echo "# user customization marker" >> /etc/apache2/mods-available/pagespeed.conf
+
+              apt-get install -y /optimizer/pagespeed-optimizer_*_amd64.deb \
+                /packages/mod-pagespeed_*_amd64.deb
+              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
+              chown -R www-data:www-data /var/cache/mod_pagespeed /var/log/pagespeed
+              apache2ctl configtest
+              force_restart_apache
+              wait_for_apache
+              apache2ctl -M 2>/dev/null | grep -q "pagespeed_module" \
+                || { echo "FAIL: pagespeed_module not loaded"; apache2ctl -M 2>/dev/null; false; }
+              echo "Module loaded OK"
+              HDR_VALUE=""
+              for attempt in 1 2 3 4 5; do
+                HDR_LINE="$(curl -sI http://localhost/ | tee /dev/stderr | grep -i "^X-Mod-Pagespeed\|^X-Page-Speed" || true)"
+                if [ -n "$HDR_LINE" ]; then
+                  HDR_VALUE="$HDR_LINE"
+                  echo "Header found on attempt $attempt: $HDR_VALUE"
+                  break
+                fi
+                if [ "$attempt" -eq 5 ]; then
+                  echo "FAIL: X-Mod-Pagespeed header missing after 5 attempts"
+                  echo "=== Apache error log (last 30 lines): ==="
+                  tail -30 /var/log/apache2/error.log 2>/dev/null || true
+                  echo "=== PageSpeed log: ==="
+                  cat /var/log/pagespeed/*.log 2>/dev/null || true
+                  false
+                fi
+                echo "Attempt $attempt: header not yet present, retrying in 3s..."
+                sleep 3
+              done
+
+              if [ -z "$EXPECTED_VERSION_STRING" ]; then
+                echo "FAIL: EXPECTED_VERSION_STRING env not passed into container"; false
+              fi
+              echo "$HDR_VALUE" | grep -F "$EXPECTED_VERSION_STRING" >/dev/null \
+                || { echo "FAIL: header $HDR_VALUE does not contain $EXPECTED_VERSION_STRING"; false; }
+              echo "Header version assertion passed: $HDR_VALUE contains $EXPECTED_VERSION_STRING"
+
+              ADMIN_BODY="$(curl -s --max-time 5 http://localhost/pagespeed_admin/ 2>/dev/null || true)"
+              if [ -z "$ADMIN_BODY" ]; then
+                echo "WARN: /pagespeed_admin/ returned empty - skipping admin tag assertion"
+              elif echo "$ADMIN_BODY" | grep -qF "$RELEASE_TAG"; then
+                echo "Admin page contains release tag $RELEASE_TAG"
+              else
+                echo "WARN: /pagespeed_admin/ body did not contain $RELEASE_TAG"
+              fi
+
+              grep -q "user customization marker" /etc/apache2/mods-available/pagespeed.conf
+
+              for dir in mod_pagespeed_example mod_pagespeed_test do_not_modify; do
+                [ -d "/src/install/$dir" ] && cp -r "/src/install/$dir" /var/www/html/
+              done
+              chown -R www-data:www-data /var/www/html
+              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
+              chown www-data:www-data /var/cache/mod_pagespeed /var/log/pagespeed
+
+              cd /src/test/system
+              export PAGESPEED_HOST=localhost
+              export PAGESPEED_PORT=80
+              export PAGESPEED_SERVER_TYPE=apache
+              export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed
+              export PAGESPEED_STATS_ENABLED=1
+              export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
+              export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
+              export PYTHONDONTWRITEBYTECODE=1
+              python3 -c "import pytest"
+              PYTEST_RC=0
+              python3 -m pytest -p no:cacheprovider automatic/ -v --tb=short \
+                > /tmp/pytest-smoke.out 2>&1 || PYTEST_RC=$?
+              cat /tmp/pytest-smoke.out
+              echo "pytest exit status: ${PYTEST_RC}"
+              if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
+                echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
+                exit "${PYTEST_RC}"
+              fi
+              if ! grep -Eq "[0-9]+ passed" /tmp/pytest-smoke.out; then
+                echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
+                exit 1
+              fi
+              if [ "${PYTEST_RC}" -eq 1 ]; then
+                echo "::warning title=Package smoke pytest (informational)::some pytest tests failed against the stock package config; the release gate is systest-gate"
+              fi
+
+              apt-get remove -y mod-pagespeed
+              apache2ctl configtest
+              force_restart_apache
+              wait_for_apache
+              ! curl -sI http://localhost/ | grep -qi "X-Mod-Pagespeed\|X-Page-Speed"
+              echo "=== Debian smoke test PASSED ==="
+            '
+
+  package-smoke-deb-hosted:
+    name: Smoke Test (Debian, hosted)
+    needs: [version, linux-ready, optimizer-fetch]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env: *smoke-env
+    steps: *smoke-deb-steps
+
+  package-smoke-rpm:
+    name: Smoke Test (RPM)
+    needs: [version, linux-ready, optimizer-fetch]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    env: *smoke-env
+    steps: &smoke-rpm-steps
+      - *unlock-vendor
+
+      - *checkout-tag
+
+      - name: Download the packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-linux-x64
+          path: ${{ runner.temp }}/packages
+
+      - name: Download the old-version packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: testdata-oldpkgs-x64
+          path: ${{ runner.temp }}/packages-old
+
+      - name: Download the optimizer packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-optimizer
+          path: ${{ runner.temp }}/optimizer
+
+      - name: Build the base test container
+        run: |
+          docker build -t mps-smoke-rpm-base - <<'DOCKERFILE'
+          FROM rockylinux:9
+          RUN dnf install -y --allowerasing \
+              httpd curl python3 python3-pip \
+              && dnf clean all
+          RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
+          DOCKERFILE
+
+      - name: Run upgrade, test and uninstall
+        run: |
+          docker run --rm --init \
+            -e RELEASE_TAG -e EXPECTED_VERSION_STRING \
+            -v "${RUNNER_TEMP}/packages-old:/packages-old:ro" \
+            -v "${RUNNER_TEMP}/packages:/packages:ro" \
+            -v "${RUNNER_TEMP}/optimizer:/optimizer:ro" \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            mps-smoke-rpm-base bash -c '
+              set -ex
+
+              force_restart_httpd() {
+                httpd -k graceful-stop 2>/dev/null || httpd -k stop 2>/dev/null || true
+                sleep 3
+                if [ -f /var/run/httpd/httpd.pid ]; then
+                  kill -9 $(cat /var/run/httpd/httpd.pid) 2>/dev/null || true
+                fi
+                sleep 2  # allow TIME_WAIT on port 80 to clear
+                rm -f /var/run/httpd/httpd.pid
+                httpd -k start 2>/dev/null || httpd
+              }
+
+              wait_for_apache() {
+                for i in $(seq 1 20); do
+                  if curl -s --max-time 2 -o /dev/null http://localhost/; then return 0; fi
+                  sleep 1
+                done
+                echo "=== Apache failed to respond. Error log: ==="
+                tail -50 /var/log/httpd/error_log 2>/dev/null || true
+                return 1
+              }
+
+              echo "<html><body><p>Smoke test</p></body></html>" > /var/www/html/index.html
+              chown apache:apache /var/www/html/index.html
+
+              {
+                echo "<IfModule pagespeed_module>"
+                echo "  LogLevel pagespeed:trace1 filter:trace4"
+                echo "</IfModule>"
+              } >> /etc/httpd/conf/httpd.conf
+
+              dnf install -y /packages-old/mod-pagespeed-*.x86_64.rpm
+              httpd -t
+              httpd -k start 2>/dev/null || httpd
+              wait_for_apache
+              curl -sI http://localhost/ | head -20
+              curl -sI http://localhost/ | grep -qi "X-Mod-Pagespeed\|X-Page-Speed" \
+                || echo "WARNING: header not present on old version (expected for synthetic pkg)"
+
+              echo "# user customization marker" >> /etc/httpd/conf.d/pagespeed.conf
+
+              dnf install -y /optimizer/pagespeed-optimizer-*.x86_64.rpm \
+                /packages/mod-pagespeed-*.x86_64.rpm
+              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
+              chown -R apache:apache /var/cache/mod_pagespeed /var/log/pagespeed
+              httpd -t
+              force_restart_httpd
+              wait_for_apache
+              httpd -M 2>/dev/null | grep -q "pagespeed_module" \
+                || { echo "FAIL: pagespeed_module not loaded"; httpd -M 2>/dev/null; false; }
+              echo "Module loaded OK"
+              HDR_VALUE=""
+              for attempt in 1 2 3 4 5; do
+                HDR_LINE="$(curl -sI http://localhost/ | tee /dev/stderr | grep -i "^X-Mod-Pagespeed\|^X-Page-Speed" || true)"
+                if [ -n "$HDR_LINE" ]; then
+                  HDR_VALUE="$HDR_LINE"
+                  echo "Header found on attempt $attempt: $HDR_VALUE"
+                  break
+                fi
+                if [ "$attempt" -eq 5 ]; then
+                  echo "FAIL: X-Mod-Pagespeed header missing after 5 attempts"
+                  echo "=== Apache error log (last 30 lines): ==="
+                  tail -30 /var/log/httpd/error_log 2>/dev/null || true
+                  echo "=== PageSpeed log: ==="
+                  cat /var/log/pagespeed/*.log 2>/dev/null || true
+                  false
+                fi
+                echo "Attempt $attempt: header not yet present, retrying in 3s..."
+                sleep 3
+              done
+
+              if [ -z "$EXPECTED_VERSION_STRING" ]; then
+                echo "FAIL: EXPECTED_VERSION_STRING env not passed into container"; false
+              fi
+              echo "$HDR_VALUE" | grep -F "$EXPECTED_VERSION_STRING" >/dev/null \
+                || { echo "FAIL: header $HDR_VALUE does not contain $EXPECTED_VERSION_STRING"; false; }
+              echo "Header version assertion passed: $HDR_VALUE contains $EXPECTED_VERSION_STRING"
+
+              ADMIN_BODY="$(curl -s --max-time 5 http://localhost/pagespeed_admin/ 2>/dev/null || true)"
+              if [ -z "$ADMIN_BODY" ]; then
+                echo "WARN: /pagespeed_admin/ returned empty - skipping admin tag assertion"
+              elif echo "$ADMIN_BODY" | grep -qF "$RELEASE_TAG"; then
+                echo "Admin page contains release tag $RELEASE_TAG"
+              else
+                echo "WARN: /pagespeed_admin/ body did not contain $RELEASE_TAG"
+              fi
+
+              grep -q "user customization marker" /etc/httpd/conf.d/pagespeed.conf
+
+              for dir in mod_pagespeed_example mod_pagespeed_test do_not_modify; do
+                [ -d "/src/install/$dir" ] && cp -r "/src/install/$dir" /var/www/html/
+              done
+              chown -R apache:apache /var/www/html
+              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
+              chown apache:apache /var/cache/mod_pagespeed /var/log/pagespeed
+
+              cd /src/test/system
+              export PAGESPEED_HOST=localhost
+              export PAGESPEED_PORT=80
+              export PAGESPEED_SERVER_TYPE=apache
+              export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed
+              export PAGESPEED_STATS_ENABLED=1
+              export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
+              export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
+              export PYTHONDONTWRITEBYTECODE=1
+              python3 -c "import pytest"
+              PYTEST_RC=0
+              python3 -m pytest -p no:cacheprovider automatic/ -v --tb=short \
+                > /tmp/pytest-smoke.out 2>&1 || PYTEST_RC=$?
+              cat /tmp/pytest-smoke.out
+              echo "pytest exit status: ${PYTEST_RC}"
+              if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
+                echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
+                exit "${PYTEST_RC}"
+              fi
+              if ! grep -Eq "[0-9]+ passed" /tmp/pytest-smoke.out; then
+                echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
+                exit 1
+              fi
+              if [ "${PYTEST_RC}" -eq 1 ]; then
+                echo "::warning title=Package smoke pytest (informational)::some pytest tests failed against the stock package config; the release gate is systest-gate"
+              fi
+
+              dnf remove -y mod-pagespeed
+              httpd -t
+              force_restart_httpd
+              wait_for_apache
+              ! curl -sI http://localhost/ | grep -qi "X-Mod-Pagespeed\|X-Page-Speed"
+              echo "=== RPM smoke test PASSED ==="
+            '
+
+  package-smoke-rpm-hosted:
+    name: Smoke Test (RPM, hosted)
+    needs: [version, linux-ready, optimizer-fetch]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env: *smoke-env
+    steps: *smoke-rpm-steps
+
+  # The from-source nginx smoke: the module tarball built in the dev image is
+  # unpacked into a container that builds nginx from source to match it.
+  package-smoke-nginx:
+    name: Smoke Test (Nginx)
+    needs: [version, linux-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    steps: &smoke-nginx-steps
+      - *unlock-vendor
+
+      - *checkout-tag
+
+      - name: Download the module tarball
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-linux-x64
+          path: ${{ runner.temp }}/packages
+
+      - name: Build the test container
+        run: |
+          # The Dockerfile globs packages/ngx_pagespeed*.tar.gz: exactly one.
+          rm -rf test/package-test/packages
+          mkdir -p test/package-test/packages
+          cp -f "${RUNNER_TEMP}"/packages/ngx_pagespeed-*-linux-x86_64.tar.gz test/package-test/packages/
+          docker build -t mps-smoke-nginx -f test/package-test/Dockerfile.ubuntu-nginx test/package-test/
+
+      # The entrypoint sets up content, configures nginx, starts it and runs
+      # the pytest suite.
+      - name: Run install and test
+        run: |
+          docker run --rm --init \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            mps-smoke-nginx
+
+      # Clean module load and unload, not a rewriting check: the install step
+      # above runs the suite.
+      - name: Run the uninstall verification
+        run: |
+          docker run --rm --init --entrypoint bash \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            mps-smoke-nginx -c '
+              set -ex
+              mkdir -p /tmp/nginx_test/logs
+              cat > /tmp/nginx_test/nginx.conf <<CONF
+              load_module /usr/local/nginx/modules/ngx_pagespeed_module.so;
+              events { worker_connections 64; }
+              http {
+                server {
+                  listen 8080;
+                  location / { return 200 "ok"; }
+                }
+              }
+          CONF
+              /usr/local/nginx/sbin/nginx -p /tmp/nginx_test -c /tmp/nginx_test/nginx.conf
+              sleep 1
+              curl -sI http://localhost:8080/ | grep -qi "X-Page-Speed" || true
+              /usr/local/nginx/sbin/nginx -p /tmp/nginx_test -c /tmp/nginx_test/nginx.conf -s stop
+              sleep 1
+              rm -f /usr/local/nginx/modules/ngx_pagespeed_module.so
+              sed -i "/load_module/d" /tmp/nginx_test/nginx.conf
+              /usr/local/nginx/sbin/nginx -p /tmp/nginx_test -c /tmp/nginx_test/nginx.conf -t
+              /usr/local/nginx/sbin/nginx -p /tmp/nginx_test -c /tmp/nginx_test/nginx.conf
+              sleep 1
+              ! curl -sI http://localhost:8080/ | grep -qi "X-Page-Speed"
+              /usr/local/nginx/sbin/nginx -p /tmp/nginx_test -c /tmp/nginx_test/nginx.conf -s stop
+              echo "=== Nginx uninstall verification PASSED ==="
+            '
+
+  package-smoke-nginx-hosted:
+    name: Smoke Test (Nginx, hosted)
+    needs: [version, linux-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps: *smoke-nginx-steps
+
+  # Load the freshly built module into the STOCK packaged nginx of each
+  # distro (installed with apt or dnf, not built from source). A module is
+  # pinned to the exact nginx version it was built against, so this is the
+  # check that the distro matrix is right: a mismatch is refused at install or
+  # by `nginx -t`.
+  package-load-check-nginx:
+    name: Packaged-Nginx Load Check (x64)
+    needs: [version, nginx-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env: &loadcheck-x64-env
+      ARCH: x64
+    steps: &loadcheck-steps
+      - *unlock-vendor
+
+      - *checkout-tag
+
+      - name: Download the nginx packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-nginx-${{ env.ARCH }}
+          path: ${{ runner.temp }}/nginx-packages
+
+      - name: Load into the stock packaged nginx of each suite
+        run: |
+          bash tools/ci/release_nginx.sh load-check --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-packages"
+
+  package-load-check-nginx-hosted:
+    name: Packaged-Nginx Load Check (x64, hosted)
+    needs: [version, nginx-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env: *loadcheck-x64-env
+    steps: *loadcheck-steps
+
+  package-load-check-nginx-arm64:
+    name: Packaged-Nginx Load Check (arm64)
+    needs: [version, nginx-distro-build-arm64]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      ARCH: arm64
+    steps: *loadcheck-steps
+
+  # Install each package into its stock nginx and run the nginx test suite
+  # against it.
+  package-smoke-nginx-packaged:
+    name: Smoke Test (Nginx, packaged)
+    needs: [version, nginx-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    env: &packaged-env
+      ARCH: x64
+    steps: &packaged-steps
+      - *unlock-vendor
+
+      - *checkout-tag
+
+      - name: Download the nginx packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-nginx-${{ env.ARCH }}
+          path: ${{ runner.temp }}/nginx-packages
+
+      - name: Package install and the nginx test suite, per suite
+        run: |
+          bash tools/ci/release_nginx.sh suite --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-packages"
+
+  package-smoke-nginx-packaged-hosted:
+    name: Smoke Test (Nginx, packaged, hosted)
+    needs: [version, nginx-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env: *packaged-env
+    steps: *packaged-steps
+
+  # ---------------------------------------------------------------------
+  # cPanel (EasyApache 4) packages: a repackaging of the stock Apache rpm of
+  # the matching floor (the el9 rpm of the x64 build, the el8 rpm of the el8
+  # build). Unsigned; signing is part B. A pre-release tag builds none (the
+  # spec carries the release version).
+  # ---------------------------------------------------------------------
+  ea4-build:
+    name: EA4 Build (${{ matrix.os }})
+    needs: [version, linux-ready, el8-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [el9, el8]
+    env: &ea4-env
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      EA4_OS: ${{ matrix.os }}
+    steps: &ea4-steps
+      - *unlock-vendor
+
+      - *checkout-tag
+
+      - name: Stamp the module version
+        run: bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
+
+      - name: Download the stock rpm
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ matrix.os == 'el8' && 'stock-el8' || 'asset-linux-x64' }}
+          path: ${{ runner.temp }}/upstream
+
+      - name: Build the cPanel package
+        id: build
+        run: |
+          set -euo pipefail
+          # Only the stock rpm belongs in the upstream directory.
+          mkdir -p "${RUNNER_TEMP}/stock"
+          cp "${RUNNER_TEMP}"/upstream/mod-pagespeed-*.x86_64.rpm "${RUNNER_TEMP}/stock/"
+          bash tools/ci/release_ea4_build.sh --os "$EA4_OS" \
+            --upstream "${RUNNER_TEMP}/stock" \
+            --version-file net/instaweb/public/VERSION \
+            --out "${RUNNER_TEMP}/ea4-out" \
+            --work "${RUNNER_TEMP}/ea4-work"
+
+      - name: Upload the unsigned cPanel package
+        if: steps.build.outputs.built == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-${{ matrix.os }}
+          path: ${{ runner.temp }}/ea4-out/*.rpm
+          retention-days: 14
+          if-no-files-found: error
+
+      - *reown
+
+  ea4-build-hosted:
+    name: EA4 Build (${{ matrix.os }}, hosted)
+    needs: [version, linux-ready, el8-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [el9, el8]
+    env: *ea4-env
+    steps: *ea4-steps
+
+  # el10 is additive: a stock rpm whose name does not match the spec skips
+  # the package instead of failing the release.
+  ea4-el10-build:
+    name: EA4 Build (el10)
+    needs: [version, linux-ready, el10-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 60
+    env: &ea4-el10-env
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+    steps: &ea4-el10-steps
+      - *unlock-vendor
+
+      - *checkout-tag
+
+      - name: Stamp the module version
+        run: bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
+
+      - name: Download the stock rpm
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-apache-el10
+          path: ${{ runner.temp }}/stock
+
+      - name: Build the cPanel package
+        id: build
+        run: |
+          bash tools/ci/release_ea4_build.sh --os el10 \
+            --upstream "${RUNNER_TEMP}/stock" \
+            --version-file net/instaweb/public/VERSION \
+            --out "${RUNNER_TEMP}/ea4-out" \
+            --work "${RUNNER_TEMP}/ea4-work"
+
+      - name: Upload the unsigned cPanel package
+        if: steps.build.outputs.built == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el10
+          path: ${{ runner.temp }}/ea4-out/*.rpm
+          retention-days: 14
+          if-no-files-found: error
+
+      - *reown
+
+  ea4-el10-build-hosted:
+    name: EA4 Build (el10, hosted)
+    needs: [version, linux-ready, el10-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env: *ea4-el10-env
+    steps: *ea4-el10-steps
+
+  # ---------------------------------------------------------------------
+  # Windows: the IIS module and the pinned optimizer worker, unsigned. The
+  # installer is built from signed binaries, so signing and the installer are
+  # part B; this job hands over the unsigned payload as `unsigned-windows`
+  # (not a release file). One step list for the build runner and its hosted
+  # twin; a hosted image gets the pinned toolchain installed, a build runner
+  # provides it through its runner environment (docs/ci/runner-environment.md).
+  # ---------------------------------------------------------------------
+  windows-release-build:
+    name: Windows Release Build
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: powershell
+    steps: &windows-steps
+      - name: Clear the workspace
+        run: |
+          Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Download the release tree
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tree
+          path: ${{ runner.temp }}/tree
+
+      - name: Provision the toolchain (hosted runner)
+        if: runner.environment == 'github-hosted'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # NASM is pinned to 2.16.03: the AV1 codec dependency rejects 3.x.
+          choco install nasm --version=2.16.03 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::nasm install failed"; exit 1 }
+          (Join-Path $env:ProgramFiles 'NASM') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # clang-cl comes from LLVM 19.
+          $major = 0
+          $cc = Get-Command clang-cl -ErrorAction SilentlyContinue
+          if ($cc) { $v = (& clang-cl --version 2>&1 | Select-Object -First 1); if ($v -match 'version (\d+)') { $major = [int]$Matches[1] } }
+          if ($major -ne 19) {
+            choco install llvm --version=19.1.7 --allow-downgrade -y --no-progress
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::llvm install failed"; exit 1 }
+          }
+          (Join-Path $env:ProgramFiles 'LLVM\bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Set up Python
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # Tool locations come from PATH, or from the runner's environment when
+      # it provides one. Nothing here names a drive, a user profile or an
+      # installation directory, and no tool location is printed.
+      - name: Resolve the runner environment
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Set-JobEnv([string]$Name, [string]$Value) {
+            "$Name=$Value" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          function Add-ToolDir([string]$Dir) {
+            if ($Dir -and (Test-Path -LiteralPath $Dir)) {
+              $Dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              $env:PATH = ($Dir + ';' + $env:PATH)
+              return $true
+            }
+            return $false
+          }
+          # CI_WIN_TOOLS_DIR is a semicolon-separated list of directories.
+          $toolDirs = @()
+          if ($env:CI_WIN_TOOLS_DIR) {
+            $toolDirs = @($env:CI_WIN_TOOLS_DIR -split ';' | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+          }
+          [array]::Reverse($toolDirs)
+          foreach ($d in $toolDirs) { [void](Add-ToolDir $d) }
+          [array]::Reverse($toolDirs)
+          if ($toolDirs.Count -gt 0) { Write-Host "using the runner's tool directories" }
+          if ($env:CI_WIN_LLVM_DIR) { [void](Add-ToolDir (Join-Path $env:CI_WIN_LLVM_DIR 'bin')) }
+          if ($env:CI_WIN_PYTHON_DIR) { [void](Add-ToolDir $env:CI_WIN_PYTHON_DIR) }
+          $bazel = @('bazelisk', 'bazel') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $bazel) {
+            Write-Host "::error::neither bazelisk nor bazel is on PATH; see docs/ci/runner-environment.md (CI_WIN_TOOLS_DIR)"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_CMD' $bazel
+          $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
+          if (-not $clangCl) {
+            Write-Host "::error::clang-cl (LLVM 19) is not on PATH; see docs/ci/runner-environment.md (CI_WIN_LLVM_DIR)"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_LLVM' (Split-Path -Parent (Split-Path -Parent $clangCl.Source))
+          # The AV1 encoder needs NASM 2.16.03 (nasm 3.x dropped the "-Ox"
+          # line from `nasm -hf` that the codec build greps for).
+          $nasm = Get-Command nasm -ErrorAction SilentlyContinue
+          if (-not $nasm) {
+            Write-Host "::error::nasm 2.16.03 is not on PATH; see docs/ci/runner-environment.md (CI_WIN_TOOLS_DIR)"
+            exit 1
+          }
+          if (-not (& nasm -hf 2>&1 | Select-String -SimpleMatch -Quiet '-Ox')) {
+            Write-Host "::error::the nasm on PATH is not usable by the AV1 codec build (3.x is not supported). Provide 2.16.03."
+            exit 1
+          }
+          # Bazel's shell: the runner's, else MSYS2 bash, else Git bash.
+          $bashCandidates = @()
+          if ($env:BAZEL_SH) { $bashCandidates += $env:BAZEL_SH }
+          foreach ($d in $toolDirs) { $bashCandidates += (Join-Path $d 'bash.exe') }
+          $bashCandidates += (Join-Path $env:SystemDrive 'msys64\usr\bin\bash.exe')
+          $bashCandidates += (Join-Path $env:ProgramFiles 'Git\bin\bash.exe')
+          $bash = $bashCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $bash) {
+            Write-Host "::error::no bash.exe found for Bazel (MSYS2 or Git for Windows); see docs/ci/runner-environment.md"
+            exit 1
+          }
+          Set-JobEnv 'BAZEL_SH' $bash
+          # A short output root keeps paths under the Windows length limit.
+          Set-JobEnv 'WIN_BAZEL_OUTPUT_ROOT' ($(if ($env:CI_WIN_BAZEL_OUTPUT_ROOT) { $env:CI_WIN_BAZEL_OUTPUT_ROOT } else { Join-Path $env:SystemDrive 'b' }) -replace '\\', '/')
+          Set-JobEnv 'WIN_CACHE_DIR' $(if ($env:CI_WIN_CACHE_DIR) { $env:CI_WIN_CACHE_DIR } else { Join-Path $env:RUNNER_TEMP 'bazel-disk' })
+          if ($env:CI_WIN_CACHE_MAX_SIZE) { Set-JobEnv 'WIN_CACHE_MAX_SIZE' $env:CI_WIN_CACHE_MAX_SIZE }
+          Write-Host "build tool: $bazel"
+
+      # Decompress with all cores, then extract with the Windows tar (the
+      # MSYS2 GNU tar reads a drive letter as a remote host).
+      - name: Extract the release tree
+        env:
+          RELEASE_SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tarball = Join-Path $env:RUNNER_TEMP 'tree\module-tree.tar.zst'
+          & zstd -d -f -T0 $tarball -o "$tarball.tar"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          & "$($env:SystemRoot)\System32\tar.exe" xf "$tarball.tar" -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item -LiteralPath $tarball, "$tarball.tar" -ErrorAction SilentlyContinue
+          $stamped = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'GIT_COMMIT') -Raw).Trim()
+          if ($stamped -ne $env:RELEASE_SHA) {
+            Write-Host "::error::stale or missing GIT_COMMIT stamp in the extracted tree"
+            exit 1
+          }
+
+      - name: Set up the MSVC environment
+        run: |
+          $ErrorActionPreference = 'Continue'
+          # Source vcvars64 and export INCLUDE/LIB/PATH for the later steps.
+          # Build Tools installs are products too: without -products * vswhere
+          # reports nothing on a host that has only them.
+          $vsDir = $null
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            $vsDir = & $vswhere -products * -latest -property installationPath 2>$null
+          }
+          if (-not $vsDir -or -not (Test-Path -LiteralPath "$vsDir\VC\Auxiliary\Build\vcvars64.bat")) {
+            $vsDir = @(
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\BuildTools'),
+              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\Community')
+            ) | Where-Object { Test-Path -LiteralPath "$_\VC\Auxiliary\Build\vcvars64.bat" } | Select-Object -First 1
+          }
+          if (-not $vsDir) { Write-Host "::error::no Visual Studio installation found"; exit 1 }
+          $vcvars = "$vsDir\VC\Auxiliary\Build\vcvars64.bat"
+          # Full path through ComSpec: an MSYS2 cmd on PATH would shadow
+          # System32\cmd.exe.
+          & "$env:ComSpec" /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
+            if ($_ -match '^(INCLUDE|LIB|PATH)=(.*)$') {
+              "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            }
+          }
+          # MSYS2 coreutils and Ninja go on PATH for the genrule cmake builds.
+          $extra = Join-Path $env:SystemDrive 'msys64\usr\bin'
+          $ninja = Get-Command ninja -ErrorAction SilentlyContinue
+          if ($ninja) { $extra = "$extra;" + (Split-Path $ninja.Source) }
+          "PATH=$extra;$($env:PATH)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build the IIS module (optimized, with debug symbols)
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location $env:GITHUB_WORKSPACE
+          $bazel = $env:BAZEL_CMD
+          $outRoot = $env:WIN_BAZEL_OUTPUT_ROOT
+          $startup = @("--output_user_root=$outRoot")
+          # Forward slashes for every Bazel path (a Windows Bazel requirement).
+          $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
+          $comspec = $env:ComSpec -replace '\\', '/'
+          $common = @('--config=windows', '--config=clang-cl', '-c', 'opt',
+                      '--copt=/Z7', '--linkopt=/DEBUG', '--nostamp',
+                      "--workspace_status_command=$comspec /c echo.",
+                      "--disk_cache=$diskCache")
+          if ($env:WIN_CACHE_MAX_SIZE) { $common += "--experimental_disk_cache_gc_max_size=$($env:WIN_CACHE_MAX_SIZE)" }
+          if (Test-Path -LiteralPath 'vendor') { $common = @('--config=vendored') + $common }
+          if ($env:BAZEL_REMOTE_CACHE_URL) {
+            $common += "--remote_cache=$($env:BAZEL_REMOTE_CACHE_URL)"
+            Write-Host "using the remote cache"
+          } else {
+            Write-Host "::notice::BAZEL_REMOTE_CACHE_URL not set: building without the remote cache (docs/ci/runner-environment.md)"
+          }
+          # Shut down a stale server so it picks up the vcvars-enriched PATH.
+          & { $ErrorActionPreference = 'Continue'; & $bazel @startup shutdown 2>$null } *>$null
+          & $bazel @startup build @common -- //pagespeed/iis:pagespeed_iis.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # bazel-bin is a convenience link that a runner without link
+          # privileges does not have, so ask Bazel.
+          $bazelBin = (& $bazel @startup info @common bazel-bin 2>$null).Trim()
+          $staging = Join-Path $env:GITHUB_WORKSPACE '.unsigned-windows'
+          if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path (Join-Path $staging 'iis') | Out-Null
+          Copy-Item "$bazelBin\pagespeed\iis\pagespeed_iis.dll" (Join-Path $staging 'iis')
+          $pdb = Get-ChildItem $bazelBin -Recurse -Filter '*.pdb' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'pagespeed_iis' } | Select-Object -First 1
+          if ($pdb) { Copy-Item $pdb.FullName (Join-Path $staging 'iis\pagespeed_iis.pdb') }
+          else { Write-Host "::warning::no debug symbols file found for the IIS module" }
+          Get-ChildItem (Join-Path $staging 'iis') | Format-Table Name, Length
+
+      # The optimizer worker the installer carries: the Windows zip of the
+      # pinned optimizer release, verified against the pin. Exit 3 means the
+      # pinned release has no Windows zip; the installer is then the module
+      # alone.
+      - name: Fetch the pinned optimizer worker
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          $dir = Join-Path $env:GITHUB_WORKSPACE '.unsigned-windows\optimizer'
+          & .\install\iis\fetch-optimizer-windows.ps1 -OutDir $dir
+          $rc = $LASTEXITCODE
+          if ($rc -eq 0) {
+            Write-Host "optimizer worker fetched and verified"
+          } elseif ($rc -eq 3) {
+            Write-Host "::warning::the pinned optimizer release has no Windows zip; the installer carries the module only"
+            $global:LASTEXITCODE = 0
+          } else {
+            exit $rc
+          }
+
+      - name: Upload the unsigned payload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-windows
+          path: .unsigned-windows
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: error
+
+  windows-release-build-hosted:
+    name: Windows Release Build (hosted)
+    needs: [version, vendor-ready]
+    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: powershell
+    steps: *windows-steps
+
+  # ---------------------------------------------------------------------
+  # Validate: assemble the asset set from the run artifacts, check it fails
+  # closed on any deviation, write SHA256SUMS and manifest.json, and upload
+  # them with the files as the one run artifact `release-assets`
+  # (docs/ci/release.md). Hosted, no secret. The tooling comes from master,
+  # not from the tree being released.
+  # ---------------------------------------------------------------------
+  validate:
+    name: Validate the asset set, SHA256SUMS and manifest
+    needs:
+      - version
+      - vendor-ready
+      - security-gates
+      - optimizer-fetch
+      - systest-gate
+      - linux-ready
+      - linux-arm64-release-build
+      - nginx-ready
+      - nginx-distro-build-arm64
+      - nginx-distro-build-el10
+      - nginx-distro-build-el10-hosted
+      - el8-ready
+      - el10-ready
+      - windows-release-build
+      - windows-release-build-hosted
+      - unit-tests
+      - unit-tests-hosted
+      - package-smoke-deb
+      - package-smoke-deb-hosted
+      - package-smoke-rpm
+      - package-smoke-rpm-hosted
+      - package-smoke-nginx
+      - package-smoke-nginx-hosted
+      - package-load-check-nginx
+      - package-load-check-nginx-hosted
+      - package-load-check-nginx-arm64
+      - package-smoke-nginx-packaged
+      - package-smoke-nginx-packaged-hosted
+      - ea4-build
+      - ea4-build-hosted
+      - ea4-el10-build
+      - ea4-el10-build-hosted
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEEDS: ${{ toJSON(needs) }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
+      IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+      OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+    steps:
+      # Every upstream job succeeded, except that of each build runner pair
+      # exactly the leg that ran may have, and the other was skipped.
+      - name: Every upstream job succeeded
+        run: |
+          set -euo pipefail
+          # name of the job, then the name of its hosted twin ("-" for none)
+          PAIRS="
+          nginx-distro-build-el10 nginx-distro-build-el10-hosted
+          windows-release-build windows-release-build-hosted
+          unit-tests unit-tests-hosted
+          package-smoke-deb package-smoke-deb-hosted
+          package-smoke-rpm package-smoke-rpm-hosted
+          package-smoke-nginx package-smoke-nginx-hosted
+          package-load-check-nginx package-load-check-nginx-hosted
+          package-smoke-nginx-packaged package-smoke-nginx-packaged-hosted
+          ea4-build ea4-build-hosted
+          ea4-el10-build ea4-el10-build-hosted
+          "
+          bad=0
+          in_pair=" "
+          while read -r a b; do
+            [ -n "${a:-}" ] || continue
+            in_pair="${in_pair}${a} ${b} "
+            ra="$(printf '%s' "$NEEDS" | jq -r --arg j "$a" '.[$j].result')"
+            rb="$(printf '%s' "$NEEDS" | jq -r --arg j "$b" '.[$j].result')"
+            echo "${a}: ${ra}, ${b}: ${rb}"
+            if [ "$ra" != success ] && [ "$rb" != success ]; then bad=1; fi
+          done <<<"$PAIRS"
+          for j in $(printf '%s' "$NEEDS" | jq -r 'keys[]'); do
+            case "$in_pair" in *" $j "*) continue ;; esac
+            r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
+            echo "${j}: ${r}"
+            [ "$r" = success ] || bad=1
+          done
+          [ "$bad" = 0 ] || { echo "::error::an upstream job did not succeed"; exit 1; }
+
+      - name: Checkout master (tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          persist-credentials: false
+
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/stage
+          pattern: asset-*
+
+      - name: Assemble the asset set
+        run: |
+          set -euo pipefail
+          ls "${RUNNER_TEMP}/stage"
+          python3 -I tools/ci/release_manifest.py build \
+            --stage "${RUNNER_TEMP}/stage" \
+            --out "${RUNNER_TEMP}/release-assets" \
+            --tag "$TAG" --version "$VERSION" --pkg-version "$PKG_VERSION" \
+            --prerelease "$IS_PRERELEASE" \
+            --source-sha "$RELEASE_SHA" --run-id "$GITHUB_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY" --optimizer-tag "$OPTIMIZER_TAG" \
+            --profile part-a
+
+      # What the names promise, the packages must contain: the version of
+      # every package, and the serving pair (the module packages require the
+      # optimizer at exactly the pair version, and the optimizer packages
+      # have it).
+      - name: Package contents match the tag
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm >/dev/null
+          cd "${RUNNER_TEMP}/release-assets"
+          shopt -s nullglob
+          for deb in mod-pagespeed_*.deb nginx-module-pagespeed_*.deb; do
+            v="$(dpkg-deb -f "$deb" Version)"
+            case "$v" in "${PKG_VERSION}"-*) ;; *) echo "::error::$deb Version '$v' does not start with '${PKG_VERSION}-'"; exit 1 ;; esac
+            dep="$(dpkg-deb -f "$deb" Depends)"
+            case "$deb" in
+              mod-pagespeed_*)
+                case "$dep" in *"pagespeed-optimizer (= ${PKG_VERSION})"*) ;; *) echo "::error::$deb does not depend on pagespeed-optimizer (= ${PKG_VERSION}): $dep"; exit 1 ;; esac ;;
+            esac
+            echo "$deb: Version $v"
+          done
+          for deb in pagespeed-optimizer_*.deb; do
+            v="$(dpkg-deb -f "$deb" Version)"
+            [ "$v" = "$PKG_VERSION" ] || { echo "::error::$deb Version '$v' != '${PKG_VERSION}'"; exit 1; }
+            echo "$deb: Version $v"
+          done
+          for r in mod-pagespeed-*.rpm el10-mod-pagespeed-*.rpm nginx-module-pagespeed-*.rpm; do
+            v="$(rpm -qp --qf '%{VERSION}' "$r")"
+            [ "$v" = "$PKG_VERSION" ] || { echo "::error::$r version '$v' != '${PKG_VERSION}'"; exit 1; }
+            case "$r" in
+              mod-pagespeed-*|el10-mod-pagespeed-*)
+                rpm -qp --requires "$r" | grep -Eq "^pagespeed-optimizer = ${PKG_VERSION}(-[0-9A-Za-z.]+)?$" \
+                  || { echo "::error::$r does not require pagespeed-optimizer = ${PKG_VERSION}"; rpm -qp --requires "$r"; exit 1; } ;;
+            esac
+            echo "$r: version $v"
+          done
+          for r in pagespeed-optimizer-*.rpm; do
+            v="$(rpm -qp --qf '%{VERSION}' "$r")"
+            [ "$v" = "$PKG_VERSION" ] || { echo "::error::$r version '$v' != '${PKG_VERSION}'"; exit 1; }
+          done
+          echo "package contents: ok"
+
+      - name: Verify SHA256SUMS across the job boundary
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/release-assets"
+          sha256sum -c SHA256SUMS
+          python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_manifest.py" verify .
+          {
+            echo "### Release assets of ${TAG}"
+            echo ""
+            echo "Version ${VERSION}, source commit ${RELEASE_SHA}, pre-release: ${IS_PRERELEASE}."
+            echo ""
+            echo '```'
+            ls -l
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # PART B, in jobs of the protected `release` environment on hosted
+      # runners, after this job and only when needs.version.outputs.dry_run
+      # is 'false':
+      #   * sign SHA256SUMS (a detached signature, SHA256SUMS.asc) with the
+      #     package key; manifest.json is covered because SHA256SUMS lists it;
+      #   * sign the Windows binaries from `unsigned-windows`, build the
+      #     installer from the signed module, sign it, and add it (and its
+      #     signature) to the asset set before SHA256SUMS is written;
+      #   * sign the cPanel packages when required;
+      #   * create the draft GitHub release from `release-assets`, flag a
+      #     pre-release, and publish the build provenance attestations.
+      # Nothing of that exists in this part and no job here may hold a
+      # secret or a write token.
+      - name: Upload the validated asset set
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets/*
+          retention-days: 30
+          if-no-files-found: error

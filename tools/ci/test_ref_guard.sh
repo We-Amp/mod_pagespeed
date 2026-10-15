@@ -26,6 +26,11 @@ expect no "tag not v*"              ref_guard_ref_allowed refs/tags/pkg-v1.0.0
 expect no "empty ref"               ref_guard_ref_allowed ""
 expect ok "pkg tag, glob"     ref_guard_ref_allowed refs/tags/pkg-v1.0.0 'pkg-v*'
 expect no "v tag, pkg glob"   ref_guard_ref_allowed refs/tags/v1.0.0 'pkg-v*'
+expect ok "module tag, module glob"   ref_guard_ref_allowed refs/tags/module-v1.19.0 'module-v*'
+expect ok "module rc tag, module glob" ref_guard_ref_allowed refs/tags/module-v1.19.0-rc.1 'module-v*'
+expect no "optimizer tag, module glob" ref_guard_ref_allowed refs/tags/optimizer-v1.19.0 'module-v*'
+expect no "product tag, module glob"  ref_guard_ref_allowed refs/tags/v2.4.0 'module-v*'
+expect no "module tag, v glob"        ref_guard_ref_allowed refs/tags/module-v1.19.0 'v*'
 expect ok "master, empty glob"        ref_guard_ref_allowed refs/heads/master ''
 expect no "tag, empty glob"         ref_guard_ref_allowed refs/tags/v1.0.0 ''
 
@@ -33,7 +38,7 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 (
   cd "$tmp" && git init -q -b master . &&
   git config user.email t@example.invalid && git config user.name t &&
-  git commit -q --allow-empty -m a && git tag v1.0.0 &&
+  git commit -q --allow-empty -m a && git tag v1.0.0 && git tag module-v1.0.0 &&
   git commit -q --allow-empty -m b && git tag v1.1.0 &&
   git checkout -q -b side && git commit -q --allow-empty -m c && git tag v9.9.9 && git tag -a -m ann v9.9.8 && git tag -a -m ann v1.0.0-ann master~1 &&
   git checkout -q master && git update-ref refs/remotes/origin/master master
@@ -49,6 +54,9 @@ expect no "dispatch tag empty"          ref_guard_dispatch_tag_ok ""
 expect no "dispatch tag with option"    ref_guard_dispatch_tag_ok "--all"
 expect no "dispatch tag not v*"         ref_guard_dispatch_tag_ok side
 expect no "dispatch tag, no-tag job"    ref_guard_dispatch_tag_ok v1.0.0 ''
+expect ok "dispatch module tag, module glob" ref_guard_dispatch_tag_ok module-v1.0.0 'module-v*'
+expect no "dispatch v tag, module glob"      ref_guard_dispatch_tag_ok v1.0.0 'module-v*'
+expect no "dispatch module tag, v glob"      ref_guard_dispatch_tag_ok module-v1.0.0 'v*'
 
 # check REF EVENT [INPUT_TAG] [SHA]; GITHUB_SHA defaults to master's head.
 check() {
@@ -94,6 +102,8 @@ act() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatc
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$ALLOWED_TAG_GLOB" ]; then export INPUT_TAG="$DISPATCH_TAG"; fi
           ref_guard_check ); }
 expect ok "action env: dispatch good tag"    act 'v*' v1.0.0
+expect ok "action env: dispatch module tag"  act 'module-v*' module-v1.0.0
+expect no "action env: module tag, v glob"   act 'v*' module-v1.0.0
 expect no "action env: dispatch empty tag"   act 'v*' ""
 expect ok "action env: master-only, no tag"    act '' ""
 

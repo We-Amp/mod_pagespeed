@@ -22,6 +22,7 @@ jobs exist today.
 | PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
 | Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners. See "The full tier" |
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
+| Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane, part A: build, package, smoke and validate, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`. No signing, no release, no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 
 The license audit (Apache RAT), the public-tree hygiene gate, the workflow-shape
@@ -47,8 +48,8 @@ narrows its guard as described under "The guard and the kill switch".
 
 | Kind | Triggers | Holds | Example |
 |---|---|---|---|
-| Caller | `pull_request`, `push`, `schedule`, `workflow_dispatch` | triggers, `concurrency`, `permissions`, jobs that only `uses:` a reusable workflow `@master` or `@ci-dev`, and at most an aggregate gate job on a hosted label | `ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml` |
-| Reusable | `workflow_call` only | every job, with its `runs-on` | `pipeline-pr.yml`, `pipeline-nightly.yml`, `pipeline-sweep.yml` |
+| Caller | `pull_request`, `push`, `schedule`, `workflow_dispatch` | triggers, `concurrency`, `permissions`, jobs that only `uses:` a reusable workflow `@master` or `@ci-dev`, and at most an aggregate gate job on a hosted label | `ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml`, `release.yml` |
+| Reusable | `workflow_call` only | every job, with its `runs-on` | `pipeline-pr.yml`, `pipeline-nightly.yml`, `pipeline-sweep.yml`, `pipeline-release-module.yml` |
 
 Rules that follow from the shape:
 
@@ -132,6 +133,17 @@ remote cache, no host paths. Anything host-specific is read from the runner
 environment (`docs/ci/runner-environment.md`) and used only when set. When
 none of it is set the job runs slower, and never fails for that reason.
 
+### Hosted twins and joins
+
+A release lane must not stop when the kill switch is off, so each of its build
+runner jobs has a hosted twin with the same steps (`<job>-hosted`, carrying
+`if: ${{ vars.FLEET_ENABLED != 'true' }}`). Exactly one of the pair runs. The
+`if:` of a build runner job is the guard alone, so such a job cannot name the
+result of the job it depends on; a small hosted `<name>-ready` job joins the
+pair (it succeeds when one of the two legs did) and the dependent jobs `need`
+the join. Steps shared by the two jobs, and by an arm64 job, are written once
+with a YAML anchor.
+
 ## Artifacts
 
 Jobs pass files through `actions/upload-artifact` and
@@ -145,7 +157,10 @@ and hands the parent to `tools/ci/stage-artifacts.sh`, which validates it
 published with `tools/ci/publish-vendor-tarball.sh` and fetched with
 `tools/ci/extract-vendor-tarball.sh`, which verifies it and fails loudly with
 the `[vendor-tarball-unavailable]` marker when it is gone. Retention is three
-days for bundles and evidence.
+days for bundles and evidence. The release lane names its artifacts for what
+they are instead of by tier: `asset-*` hold release files, and the others
+(`tree`, `stock-el8`, `testdata-*`, `debug-*`, `unsigned-windows`) are inputs of
+later jobs (`docs/ci/release.md`).
 
 ## The nightly tier
 
@@ -262,8 +277,9 @@ Release pipelines start with the `ref-guard` action
 any ref but `master` and release tags whose commit is on `master`, and any
 event outside the allowed list; a manually dispatched release may only name a
 tag that already exists and is reachable from `master`. The allowed tag glob
-is a parameter. The action runs after a checkout of `master` with full
-history and tags, so the guard code is never the tree being released.
+is a parameter (`module-v*` for the module lane). The action runs after a
+checkout of `master` with full history and tags, so the guard code is never the
+tree being released.
 `tools/ci/test_ref_guard.sh` is its self-test.
 
 ## The queued-run sweep
@@ -367,6 +383,9 @@ We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/ci-dev
 We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-nightly.yml@refs/heads/master
+We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/master
 ```
 
-Callers (`ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml`) never get an entry.
+The release lane has no `ci-dev` entry: it only runs from `master`.
+
+Callers (`ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml`, `release.yml`) never get an entry.

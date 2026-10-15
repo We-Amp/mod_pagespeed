@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Release caller: triggers and concurrency only. The module release lane is a
+# reusable workflow pinned to master (docs/ci/release.md):
+#   * module-v* tags -> pipeline-release-module.yml (the module packages)
+#
+# Triggers:
+#   * push of a tag                                -> dry_run is false
+#   * workflow_dispatch { tag, dry_run: true  }    -> the default
+#   * workflow_dispatch { tag, dry_run: false }
+# The tag must exist and its commit must be on master; the lane's ref guard
+# refuses anything else. Part A of the lane builds and validates and signs,
+# creates and publishes nothing, whatever dry_run says.
+#
+# Try it:  gh workflow run release.yml -f tag=module-v1.19.0 -f dry_run=true
+
+name: Release
+
+on:
+  push:
+    tags: ['module-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (module-v1.19.0, or module-v1.19.0-rc.1 for a release candidate)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and validate only. Default: true.'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Serialize runs per released ref (the dispatched tag, or the pushed tag):
+# two runs of one tag never race. A release always runs out.
+concurrency:
+  group: release-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  module:
+    permissions:
+      contents: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
+    with:
+      tag: ${{ inputs.tag || '' }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
