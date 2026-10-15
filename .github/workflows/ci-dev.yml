@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Exercise a pipeline change on the fleet before it reaches master: push the
+# change to the ci-dev branch, then dispatch this workflow. It calls the PR
+# tier at @ci-dev instead of @master. See docs/ci/pipelines.md.
+
+name: CI (ci-dev)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  pr:
+    # The called pipeline requests pull-requests: read for the release-note
+    # gate; a called workflow cannot exceed what its caller grants.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@ci-dev

@@ -15,6 +15,33 @@ The pipeline is being moved over in steps. This document describes the
 shape and the tooling; the sections on tiers and required checks say which
 jobs exist today.
 
+## Tiers
+
+| Tier | Workflow | Runs on | Holds |
+|---|---|---|---|
+| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
+| Full | `pipeline-full.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | not yet present; the call in `ci.yml` is commented out until the file exists |
+| Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
+
+The license audit (Apache RAT), the public-tree hygiene gate, the workflow-shape
+gate and the CI tooling self-tests run inline in `ci.yml`, on hosted runners.
+
+The parity guard of the former pipeline is not carried over: the corpus it
+compared against is not part of this repository.
+
+The `ci:full` label is read when a pull request run starts (open, push,
+reopen). After adding the label, push or re-run the workflow to get the full
+tier, once it exists.
+
+### Path-filtered hosted guards
+
+The `changes` job diffs a pull request against its base and publishes one
+boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`). The jobs that only
+matter when their inputs change run when their filter is true, and are skipped
+otherwise; outside a pull request every filter is true. The aggregate gate
+treats a skipped job as fine. A build runner job that depends on a filter
+narrows its guard as described under "The guard and the kill switch".
+
 ## The shape
 
 | Kind | Triggers | Holds | Example |
@@ -162,6 +189,25 @@ The threshold is a repository variable: set `SWEEP_MAX_AGE_MINUTES` (a whole
 number of minutes) to override the 30 minute default. The logic is tested
 against a fake `gh` by `tools/ci/test_sweep_queued_runs.sh`, which the sweep
 job runs first.
+
+## Required checks
+
+A check from a called workflow is named `<caller job> / <job name>`, so after
+the caller switch the required checks are: `pr / Guards (security gates,
+console drift, placement, pytest exit, bazelrc, git_repository, PR policy)`,
+`pr / Blocking Dep Scan (npm)`, `pr / Browser client-JS tests`,
+`pr / Console SPA tests`, the inline `License audit (Apache RAT)`,
+`Public-tree hygiene gate` and `CI tooling self-tests`, and `CI gate`.
+
+Not listed individually: `pr / Dependency Scan (report-only)` (it never fails
+the build) and the path-filtered jobs (`pr / Repo signing key embedded`,
+`pr / Serf stays removed`, `pr / Completeness gate (every C++ dep annotated)`,
+`pr / CVE scan vs committed snapshot (per-PR, offline)`,
+`pr / Upgrade rehearsal plan (version + distro matrix)`), which are skipped on
+a pull request that does not touch their paths. `CI gate` treats `skipped` as
+fine and fails on any other non-success result, so it covers all of them.
+Switch the required checks in the repository ruleset in the same change that
+merges the caller.
 
 ## Trying a pipeline change on the build runners: `ci-dev`
 
