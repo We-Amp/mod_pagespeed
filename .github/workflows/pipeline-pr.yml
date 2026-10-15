@@ -1873,6 +1873,11 @@ jobs:
           }
           Set-JobEnv 'BAZEL_CMD' $bazel
           # clang-cl: Bazel finds the LLVM installation through BAZEL_LLVM.
+          if ($env:CI_WIN_LLVM_DIR -and (Test-Path -LiteralPath (Join-Path $env:CI_WIN_LLVM_DIR 'bin\clang-cl.exe'))) {
+            $env:PATH = (Join-Path $env:CI_WIN_LLVM_DIR 'bin') + ';' + $env:PATH
+          } elseif ($env:CI_WIN_LLVM_DIR -and (Test-Path -LiteralPath (Join-Path $env:CI_WIN_LLVM_DIR 'clang-cl.exe'))) {
+            $env:PATH = $env:CI_WIN_LLVM_DIR + ';' + $env:PATH
+          }
           $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
           if (-not $clangCl) {
             Write-Host "::error::clang-cl (LLVM 19) is not on PATH; see docs/ci/runner-environment.md (CI_WIN_LLVM_DIR)"
@@ -2157,6 +2162,11 @@ jobs:
           }
           Set-JobEnv 'BAZEL_CMD' $bazel
           # clang-cl: Bazel finds the LLVM installation through BAZEL_LLVM.
+          if ($env:CI_WIN_LLVM_DIR -and (Test-Path -LiteralPath (Join-Path $env:CI_WIN_LLVM_DIR 'bin\clang-cl.exe'))) {
+            $env:PATH = (Join-Path $env:CI_WIN_LLVM_DIR 'bin') + ';' + $env:PATH
+          } elseif ($env:CI_WIN_LLVM_DIR -and (Test-Path -LiteralPath (Join-Path $env:CI_WIN_LLVM_DIR 'clang-cl.exe'))) {
+            $env:PATH = $env:CI_WIN_LLVM_DIR + ';' + $env:PATH
+          }
           $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
           if (-not $clangCl) {
             Write-Host "::error::clang-cl (LLVM 19) is not on PATH; see docs/ci/runner-environment.md (CI_WIN_LLVM_DIR)"
