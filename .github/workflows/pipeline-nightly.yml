@@ -2390,7 +2390,7 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Hosted, read-only jobs. They hold no secret and no write token. The
-  # tracking issue and the snapshot pull request the private predecessors
+  # tracking issue and the snapshot pull request the earlier scheduled scans
   # produced are not part of this workflow; the refreshed snapshot and the
   # reports are uploaded instead.
   # ---------------------------------------------------------------------
