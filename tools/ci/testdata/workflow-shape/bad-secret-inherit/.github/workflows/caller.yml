@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  call:
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
+    secrets: inherit

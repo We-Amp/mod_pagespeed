@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  gate:
+    uses: We-Amp/mod_pagespeed/.github/workflows/gate-iis-msi-upgrade.yml@master
+    secrets:
+      KEY: ${{ secrets.SIGNING_KEY }}

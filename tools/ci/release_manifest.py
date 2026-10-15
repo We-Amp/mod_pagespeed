@@ -6,7 +6,7 @@
   release_manifest.py build  --stage DIR --out DIR --tag TAG --version V
                              --pkg-version P --source-sha SHA --run-id ID
                              [--repository R] [--optimizer-tag T]
-                             [--prerelease true|false] [--profile part-a|none]
+                             [--prerelease true|false] [--profile part-a|part-b|none]
   release_manifest.py verify DIR
   release_manifest.py --self-test
 
@@ -29,7 +29,7 @@ manifest.json (schema 1):
    component, channel, channel_also, distro, arch}]}
   asset         the uploaded name (what SHA256SUMS lists)
   name          the original name (what the packaging produced, '~' kept)
-  kind          deb | rpm | tarball | so | zip | json
+  kind          deb | rpm | tarball | so | zip | msi | json
   component     module | optimizer | source | sbom
   channel       routing hint for the consumer: apt | rpm-el9 | rpm-el10 |
                 rpm-ea4 | none (a direct download only)
@@ -39,8 +39,10 @@ manifest.json (schema 1):
                 jammy), el8 | el9 | el10, or "any"
   arch          x64 | arm64 | any
 
-`--profile part-a` (the default) also checks that the set is complete; `none`
-skips that check (self-test, local use).
+`--profile part-b` (the default) also checks that the set is complete,
+including the Windows installer; `part-a` is the same without the installer
+(the set of a lane that builds none); `none` skips the check (self-test, local
+use).
 """
 
 import argparse
@@ -66,6 +68,7 @@ ARTIFACTS = {
     "asset-ea4-el10": ("module", "rpm-ea4", "el10", ()),
     "asset-optimizer": ("optimizer", None, "any", ()),
     "asset-sbom": ("sbom", "none", "any", ()),
+    "asset-windows": ("module", "none", "any", ()),
 }
 
 # The stock Apache RPM of el10 has no dist tag in its name, so it has the same
@@ -93,6 +96,8 @@ def kind_of(name):
         return "tarball"
     if name.endswith(".zip"):
         return "zip"
+    if name.endswith(".msi"):
+        return "msi"
     if name.endswith(".so"):
         return "so"
     if name.endswith(".json"):
@@ -152,7 +157,7 @@ def sanitize(name):
     return new
 
 
-def required(pkg_version, prerelease):
+def required(pkg_version, prerelease, msi=False):
     """(description, artifact, regex over the original name) for a complete set."""
     v = re.escape(pkg_version)
     req = []
@@ -190,6 +195,11 @@ def required(pkg_version, prerelease):
     req.append(("source tarball", "asset-source", r"^mod_pagespeed-.*\.tar\.gz$"))
     req.append(("sbom", "asset-sbom", r"\.spdx\.json$"))
     req.append(("vex", "asset-sbom", r"\.vex\.json$"))
+    if msi:
+        # The installer is named after the display version of the stamped
+        # tree: the package version with a '-' where dpkg has a '~'.
+        req.append(("windows installer", "asset-windows",
+                    r"^pagespeed-iis-%s-win-x64\.msi$" % re.escape(pkg_version.replace("~", "-"))))
     return req
 
 
@@ -247,17 +257,18 @@ def build(args):
         })
     files.sort(key=lambda f: f["asset"].encode())
 
-    if args.profile == "part-a":
+    if args.profile in ("part-a", "part-b"):
+        msi = args.profile == "part-b"
         missing = []
         if prerelease:
             for a, _p, n in items:
                 if a.startswith("asset-ea4-"):
                     missing.append("cPanel package on a pre-release: %s/%s" % (a, n))
-        rules = required(args.pkg_version, prerelease) + optional(prerelease)
+        rules = required(args.pkg_version, prerelease, msi) + optional(prerelease)
         for a, _p, n in items:
             if not any(a == art and re.search(rx, n) for _d, art, rx in rules):
                 missing.append("unexpected file claimed by no rule: %s/%s" % (a, n))
-        for desc, artifact, rx in required(args.pkg_version, prerelease):
+        for desc, artifact, rx in required(args.pkg_version, prerelease, msi):
             hits = [f for f in items if f[0] == artifact and re.search(rx, f[2])]
             if len(hits) == 0:
                 missing.append("%s (%s, /%s/)" % (desc, artifact, rx))
@@ -478,6 +489,30 @@ def self_test():
         # optional files are accepted
         mk(st8, "asset-optimizer", "pagespeed-optimizer-%s-win-x64.zip" % v)
         build(ns(st8, os.path.join(tmp, "o12"), profile="part-a", pre="true"))
+        # the part-b profile also needs the installer, named for the version
+        expect_exit("missing installer", lambda: build(ns(st8, os.path.join(tmp, "o12b"), profile="part-b", pre="true")))
+        mk(st8, "asset-windows", "pagespeed-iis-1.19.0-win-x64.msi", b"msi")
+        out12c = os.path.join(tmp, "o12c")
+        build(ns(st8, out12c, profile="part-b", pre="true"))
+        with open(os.path.join(out12c, "manifest.json")) as fh:
+            msi_entry = [f for f in json.load(fh)["files"] if f["kind"] == "msi"]
+        if len(msi_entry) != 1 or msi_entry[0]["channel"] != "none" or msi_entry[0]["arch"] != "x64" \
+                or msi_entry[0]["component"] != "module":
+            print("FAIL: installer entry: %r" % msi_entry)
+            fail = 1
+        # the part-a profile does not know an installer
+        expect_exit("installer under part-a", lambda: build(ns(st8, os.path.join(tmp, "o12d"), profile="part-a", pre="true")))
+        # a wrongly named installer is refused
+        os.rename(os.path.join(st8, "asset-windows", "pagespeed-iis-1.19.0-win-x64.msi"),
+                  os.path.join(st8, "asset-windows", "pagespeed-iis-1.18.0-win-x64.msi"))
+        expect_exit("installer of another version", lambda: build(ns(st8, os.path.join(tmp, "o12e"), profile="part-b", pre="true")))
+        # a pre-release version is spelled with a hyphen in the installer name
+        rc = [r for r in required("1.19.0~rc.1", True, True) if r[0] == "windows installer"]
+        if len(rc) != 1 or not re.search(rc[0][2], "pagespeed-iis-1.19.0-rc.1-win-x64.msi") \
+                or re.search(rc[0][2], "pagespeed-iis-1.19.0-win-x64.msi"):
+            print("FAIL: installer rule of a pre-release: %r" % rc)
+            fail = 1
+        shutil.rmtree(os.path.join(st8, "asset-windows"))
         # an extra deb no rule claims
         mk(st8, "asset-linux-x64", "extra_1.0_amd64.deb")
         expect_exit("extra deb", lambda: build(ns(st8, os.path.join(tmp, "o13"), profile="part-a", pre="true")))
@@ -514,7 +549,7 @@ def main(argv):
     b.add_argument("--repository", default="")
     b.add_argument("--optimizer-tag", default="")
     b.add_argument("--prerelease", choices=("true", "false"), default="false")
-    b.add_argument("--profile", choices=("part-a", "none"), default="part-a")
+    b.add_argument("--profile", choices=("part-a", "part-b", "none"), default="part-b")
     v = sub.add_parser("verify")
     v.add_argument("dir")
     args = p.parse_args(argv[1:])
