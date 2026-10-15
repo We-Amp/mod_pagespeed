@@ -225,7 +225,7 @@ if [ "${SKIP_RPM:-0}" != "1" ]; then
   # this tree in rpm form, or the pinned one when a dry run recorded it in
   # optimizer-pair-version (the same choice as the main Linux build).
   # shellcheck disable=SC1091,SC2153
-  OPT_PKG_VERSION="$(. net/instaweb/public/VERSION; v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE}" ] && v="${v}~${PRERELEASE}"; echo "$v")"
+  OPT_PKG_VERSION="$(. net/instaweb/public/VERSION; v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE:-}" ] && v="${v}~${PRERELEASE}"; echo "$v")"
   if [ -f optimizer-pair-version ]; then OPT_PKG_VERSION="$(cat optimizer-pair-version)"; fi
   echo "==> install/rpm/build.sh -a x64 -o ${OUTDIR} (pagespeed-optimizer = ${OPT_PKG_VERSION})"
   install/rpm/build.sh -a x64 -b . -o "${OUTDIR}/" -d "${OPT_PKG_VERSION}"

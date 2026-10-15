@@ -45,8 +45,8 @@ stage_install_rpm() {
   # (via DAEMON_DROPIN_FILES, set in do_package). Shipped ONLY by a build that
   # carries the optimizer dependency (-d): a module pointed at a daemon that is
   # not installed runs with in-place optimization OFF -- it does not fall back
-  # to its classic in-place path -- so the dependency-free builds (EA4, el8,
-  # el10, the synthetic upgrade fixture) must not carry the file.
+  # to its classic in-place path -- so the dependency-free builds (EA4, the
+  # synthetic upgrade fixture) must not carry the file.
   # httpd reads conf.d/*.conf in sort order and the LoadModule line lives in
   # pagespeed.conf, so the name must sort AFTER it ('_' > '.'); a name sorting
   # before it is read before the module exists and its <IfModule> block is
