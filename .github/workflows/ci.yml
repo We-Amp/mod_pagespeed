@@ -117,6 +117,12 @@ jobs:
           tools/ci/test_extract_vendor_tarball.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
+      - name: Release lane tooling
+        run: |
+          tools/ci/release_version.sh --self-test
+          python3 -I tools/ci/release_manifest.py --self-test
+          tools/ci/release_nginx.sh --self-test
+          tools/ci/release_ea4_build.sh --self-test
 
   # Aggregate gate: the one check branch protection needs besides the
   # per-job ones. A called workflow cannot read needs.*.result of its
