@@ -56,21 +56,43 @@ comes with the Windows SDK and is expected on `PATH` by the AppVerifier lanes.
 
 ## IIS and virtual machine runners (class `fleet-iis`)
 
-Jobs of this class have no hosted twin. The class means a Windows host with
-these facts, which are not variables:
+Jobs of this class have no hosted twin. They run only for events of this
+repository: a fork or Dependabot pull request skips them (the jobs show as
+skipped, not failed), and so does every run while `FLEET_ENABLED` is not
+`true`. A job of this class builds and runs the pull request's own code on a
+host with administrator rights, so the host is dedicated to the class, carries
+no other registration and holds no credential beyond the ones named here. The
+class means a Windows host with these facts, which are not variables:
 
 - the IIS role is installed and the job manages it (sites, application pools,
-  `w3wp`, `appcmd`);
-- the runner service account is a local administrator;
-- one runner instance per host: the tests own ports 80 and 443 and the default
-  web site, and never run concurrently with another IIS job.
+  `w3wp`, `appcmd`); the runner service account is a local administrator;
+- one runner instance per host: the tests own the test ports and the default
+  web site, and never run concurrently with another IIS job;
+- the Windows toolchain of the `fleet-windows` class is present as far as the
+  job needs it: Visual Studio 2022 (found with `vswhere`; a host without it
+  only warns on the IIS system tests, which run a module that is already
+  built), Python 3.12 with pip, and `PATH` entries from `CI_WIN_TOOLS_DIR`;
+- Application Verifier (`appverif`, from the Windows SDK) and `gflags` are
+  available; the jobs call them only to clear stale settings and tolerate
+  their absence;
+- for the installer gate: the Hyper-V role and PowerShell Direct to the
+  guests (the installer itself is built on a hosted runner, so WiX is not
+  needed here);
+- for the cPanel gate: guests per target operating system, reachable by ssh
+  from the host with keys that stay on the host.
 
 | Variable | What it provides | Without it |
 |---|---|---|
-| `CI_IIS_VM_NAME` | name of the Hyper-V guest that holds a clean IIS installation, for the installer upgrade test | the test fails loudly (never a false green) |
-| `CI_IIS_VM_SNAPSHOT` | name of the clean checkpoint the test restores before each scenario | as above |
-| `CI_IIS_VM_CREDENTIAL_FILE` | path of a host-side file holding the guest administrator credential; read by the script and never echoed | as above |
-| `CI_EA4_VM_<OS>` | name of the cPanel guest for one target OS (for example `CI_EA4_VM_EL9`), with a per-OS clean checkpoint by the same naming convention; ssh keys stay on the host | the cPanel smoke for that OS skips with an annotation |
+| `CI_WIN_TOOLS_DIR`, `CI_WIN_PYTHON_DIR` | as in the Windows section above | as above |
+| `CI_WIN_DUMP_DIR` | directory for crash dumps of the IIS worker (Windows Error Reporting local dumps); the scripts read it as `PAGESPEED_DUMP_DIR` | a directory under the job's temporary directory |
+| `CI_IIS_VM_NAME` | name of the Hyper-V guest that holds a clean IIS installation, for the installer upgrade gate | the gate fails loudly (never a false green) |
+| `CI_IIS_VM_SNAPSHOT` | name of the clean checkpoint the gate restores | the script's default checkpoint name is used |
+| `CI_IIS_VM_ADMIN_PASSWORD` | the guest Administrator password, read by `test/system/iis/ci-msi-upgrade-test.ps1` from the runner's environment, never a parameter, never written in the repository and never printed. Set it in the runner's `.env` file, which only the runner account can read | the gate fails with a message that names the variable |
+| `CI_EA4_VM_<OS>` | name of the cPanel guest for one target operating system (for example `CI_EA4_VM_EL9`); the clean checkpoint follows a fixed naming convention per operating system | a conventional guest name is tried; when no guest exists the smoke for that operating system skips with a warning annotation |
+
+The IIS system tests (a pull request job) need none of the guest variables.
+The two guest gates are release-lane building blocks (see
+`docs/ci/pipelines.md`).
 
 ## Linux additions
 

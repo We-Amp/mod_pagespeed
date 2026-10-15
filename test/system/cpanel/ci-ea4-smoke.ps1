@@ -54,7 +54,7 @@
 
 param(
     [Parameter(Mandatory=$true)][string]$RpmPath,
-    # EL8 revived — see release.yml ea4-build matrix comment.
+    # EL8 revived - see release.yml ea4-build matrix comment.
     [Parameter(Mandatory=$true)][ValidateSet('el9','el8')][string]$Os,
     [string]$ReleaseTag = $env:RELEASE_TAG,
     [string]$ExpectedVersionString = "",
@@ -80,7 +80,10 @@ if ([string]::IsNullOrEmpty($ExpectedVersionString) -and -not [string]::IsNullOr
     Write-Host "Derived ExpectedVersionString from ReleaseTag: $ExpectedVersionString"
 }
 
-$VMName = "CP-$($Os.ToUpper())-base"
+# The runner names the guest in CI_EA4_VM_<OS> (docs/ci/runner-environment.md);
+# without it the conventional name is used.
+$VMName = [Environment]::GetEnvironmentVariable("CI_EA4_VM_$($Os.ToUpper())")
+if ([string]::IsNullOrEmpty($VMName)) { $VMName = "CP-$($Os.ToUpper())-base" }
 $Snapshot = "01-cpanel-clean-$Os"
 
 Write-Host "=== ea4-cpanel-smoke ($Os) ==="

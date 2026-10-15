@@ -38,8 +38,14 @@
 #                            When supplied, runs flow-b (warm upgrade) instead
 #                            of flow-a (clean install). Empty = flow-a.
 #   -VMName                  Hyper-V VM name of the Windows Server 2016 IIS
-#                            base image (required; CI passes it explicitly)
-#   -Snapshot                Checkpoint to restore (default: 02-iis-ready)
+#                            base image. Defaults to $env:CI_IIS_VM_NAME, which
+#                            the runner environment provides
+#   -Snapshot                Checkpoint to restore. Defaults to
+#                            $env:CI_IIS_VM_SNAPSHOT, else 02-iis-ready
+#
+# The guest Administrator password is read from the environment variable
+# CI_IIS_VM_ADMIN_PASSWORD of the runner (docs/ci/runner-environment.md). It is
+# never a parameter, never written in this file and never printed.
 #   -ReleaseTag              Expected release tag (e.g. v1.1.0-beta.7); defaults
 #                            to $env:RELEASE_TAG. Used for admin-SPA assertion.
 #   -ExpectedVersionString   MAJOR.MINOR.BUILD[-PRERELEASE] expected in the
@@ -58,9 +64,9 @@ param(
     # upgrade scenario that locked up beta.9. Empty -> flow-a (clean install).
     [string]$OldMsiPath = "",
 
-    [string]$VMName = "",
+    [string]$VMName = $env:CI_IIS_VM_NAME,
 
-    [string]$Snapshot = "02-iis-ready",
+    [string]$Snapshot = $(if ($env:CI_IIS_VM_SNAPSHOT) { $env:CI_IIS_VM_SNAPSHOT } else { "02-iis-ready" }),
 
     # Release tag we expect the MSI to identify itself as (e.g. v1.1.0-beta.7).
     # Defaults to RELEASE_TAG env so CI workflows can plumb it through without
@@ -77,7 +83,12 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrEmpty($VMName)) {
-    Write-Error "Pass -VMName <your Windows Server 2016 IIS base VM> (the checkpointed Hyper-V base image this script restores and drives)."
+    Write-Error "No VM name: pass -VMName or set CI_IIS_VM_NAME in the runner environment (the checkpointed Hyper-V base image this script restores and drives)."
+    exit 1
+}
+if ([string]::IsNullOrEmpty($env:CI_IIS_VM_ADMIN_PASSWORD)) {
+    Write-Error "CI_IIS_VM_ADMIN_PASSWORD is not set in the runner environment: it holds the guest Administrator password (see docs/ci/runner-environment.md)."
+    exit 1
 }
 
 # --- Derive ExpectedVersionString from ReleaseTag if not supplied ---
@@ -136,7 +147,7 @@ $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null) | Out
 $expectOptimizer = $serviceNames -contains 'WeAmpPageSpeedOptimizer'
 Write-Host "Package carries the optimizer service: $expectOptimizer"
 $oldMsiName = if ($OldMsiPath) { Split-Path $OldMsiPath -Leaf } else { "" }
-$adminPass = ConvertTo-SecureString 'Hv!PassThr0w' -AsPlainText -Force
+$adminPass = ConvertTo-SecureString $env:CI_IIS_VM_ADMIN_PASSWORD -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential("Administrator", $adminPass)
 
 # --- Step 1: Restore VM to clean IIS-ready state ---
@@ -223,10 +234,10 @@ if ($OldMsiPath) {
 #     cache-path-missing negative; the old per-site-subdir/ACL + create-failed
 #     assertions tested the obsolete pre-Cyclone file-cache). logdir keeps its
 #     positive LogDir auto-create contract; its log-dir-create-failed negative is
-#     RETIRED (a denied LogDir is non-fatal on v1.15.0 — VM-verified).
+#     RETIRED (a denied LogDir is non-fatal on v1.15.0 - VM-verified).
 #   - test_iis_config_fallback.ps1: still NON-GATING. It tests the
 #     ProgramData canonical->legacy FACTORY fallback, but request-time options
-#     come from FindConfigFile(<wwwroot>) — entangled with the config-resolution
+#     come from FindConfigFile(<wwwroot>) - entangled with the config-resolution
 #     duality between the ProgramData base and the per-site override; re-gate
 #     once it is settled which config governs what.
 $portFixtures = @(
@@ -509,7 +520,7 @@ $portFixtureScript = {
     # a terminating NativeCommandError (Windows PowerShell 5.1 behaviour under
     # 'Stop') before the per-fixture handling runs. For GATING fixtures we capture
     # the exit code and then `throw` (which, with the host's EAP=Stop, runs
-    # Restore-CleanState and fails the job — verified); non-gating fixtures warn.
+    # Restore-CleanState and fails the job - verified); non-gating fixtures warn.
     $ErrorActionPreference = 'Continue'
     $failed = @()
     foreach ($f in $fixtures) {

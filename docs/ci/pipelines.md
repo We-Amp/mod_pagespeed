@@ -52,6 +52,28 @@ tier.
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
+| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests and while `FLEET_ENABLED` is not `true`; carries the "only" guard below |
+
+Application Verifier and the other IIS lanes that run longer belong to the
+later tiers. `iis-sys-tests` clears stale verifier settings before the run and
+again afterwards, and ships an evidence artifact when it fails.
+
+### Release gates on the `fleet-iis` class
+
+Two reusable workflows hold the jobs that need a Hyper-V guest. They are not
+part of the pull request tier: the release lane calls them after the hosted
+job that builds the installer and the cPanel packages, and a gate failure
+stops the release.
+
+| Workflow | Job | Inputs | What it does |
+|---|---|---|---|
+| `gate-iis-msi-upgrade.yml` | `iis-msi-upgrade-test` | `msi_artifact`, `old_msi_artifact` (optional), `release_tag` | restores a clean IIS guest checkpoint, installs the MSI (a clean install, or an upgrade over the older MSI), smoke-tests and uninstalls it. A missing guest, name or password fails the gate |
+| `gate-cpanel-smoke.yml` | `cpanel-smoke` | `os`, `rpm_artifact`, `release_tag` | restores a clean cPanel guest checkpoint for one operating system, installs the package and smoke-tests it over ssh. Skips with a warning when that operating system has no guest yet, and on prerelease tags |
+
+Both use the "only" guard and read their guest names and the guest password
+from the runner environment (`docs/ci/runner-environment.md`); neither holds a
+secret or a write token. The MSI is built on a hosted runner and handed over
+as an artifact, so the fleet host never holds a signing key.
 
 The `CI gate` in `ci.yml` consumes only the result of the whole `pr` call, so a
 job added here is covered without touching the gate.
@@ -419,5 +441,13 @@ We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/ma
 ```
 
 The release lane has no `ci-dev` entry: it only runs from `master`.
+
+The two gates above need an entry each, in the same form, in the change that
+first calls them from a release workflow:
+
+```text
+We-Amp/mod_pagespeed/.github/workflows/gate-iis-msi-upgrade.yml@refs/heads/master
+We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@refs/heads/master
+```
 
 Callers (`ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml`, `release.yml`) never get an entry.
