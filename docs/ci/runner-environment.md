@@ -23,6 +23,7 @@ page lists names and meanings only.
 | `CI_HUB_SSH` | Linux, Windows | ssh target (`user@host`) of the shared artifact hub. Together with `CI_HUB_VENDOR_DIR` the vendor job publishes its tarball there and consumers on other runners fetch it | the vendored tree passes between jobs through `actions/cache` |
 | `CI_HUB_USER`, `CI_HUB_ADDR`, `CI_HUB_HOST`, `CI_HUB_IP` | Linux, Windows | the older split form of the ssh target: user, then an address, or a name and a fallback address probed by `tools/ci/resolve-cache-host.sh`. `CI_HUB_SSH` wins when both are set | as above |
 | `CI_HUB_VENDOR_DIR` | Linux, Windows | directory on the hub for vendor tarballs (needs an ssh target) | as above |
+| `CI_HUB_VENDOR_RETENTION_MIN` | Linux | minutes the vendor job keeps vendor tarballs on the hub before pruning them | 1440 |
 | `CI_HUB_ARTIFACTS_ROOT` | Linux | directory on the hub for build bundles, read by `tools/ci/stage-artifacts.sh` when a local bundle is missing (needs an ssh target) | bundles pass through `actions/upload-artifact` and `actions/download-artifact` only |
 | `CI_VENDOR_DIR` | Linux | runner-local directory for vendor tarballs; consumers on the same host extract from it without a network fetch | no local fast path |
 | `CI_WIN_VENDOR_DIR` | Windows | the same, for Windows runners: a directory that may hold the vendor tarball the Linux jobs of the same machine published; the Windows jobs read it and `tools/ci/prune-win-vendor.ps1` never prunes it | no local fast path (a hub fetch goes to a per-profile download directory) |
