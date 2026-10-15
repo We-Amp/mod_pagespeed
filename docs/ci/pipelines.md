@@ -4,7 +4,7 @@
 # CI pipelines
 
 This repository's CI is split into thin **caller** workflows and
-**reusable** workflows. Jobs that need a lot of CPU run on a fleet of build
+**reusable** workflows. Jobs that need a lot of CPU run on a pool of build
 runners that are reachable only through this repository's reusable workflows
 at `refs/heads/master` (and `refs/heads/ci-dev`). A pull request therefore
 cannot put its own workflow code on one of those runners: whatever it
@@ -19,8 +19,9 @@ jobs exist today.
 
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
-| PR | `pipeline-pr.yml`, called by `ci.yml` once the caller switch lands | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
-| Full | `pipeline-full.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | not yet present; the `full` call in `ci.yml` stays commented out until that pipeline exists until the file exists |
+| PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
+| Full | `pipeline-full.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | not yet present; the call in `ci.yml` is commented out until the file exists |
+| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 
 The license audit (Apache RAT), the public-tree hygiene gate, the workflow-shape
@@ -46,8 +47,8 @@ narrows its guard as described under "The guard and the kill switch".
 
 | Kind | Triggers | Holds | Example |
 |---|---|---|---|
-| Caller | `pull_request`, `push`, `schedule`, `workflow_dispatch` | triggers, `concurrency`, `permissions`, jobs that only `uses:` a reusable workflow `@master` or `@ci-dev`, and at most an aggregate gate job on a hosted label | `ci.yml`, `ci-dev.yml`, `sweep-queued.yml` |
-| Reusable | `workflow_call` only | every job, with its `runs-on` | `pipeline-pr.yml`, `pipeline-sweep.yml` |
+| Caller | `pull_request`, `push`, `schedule`, `workflow_dispatch` | triggers, `concurrency`, `permissions`, jobs that only `uses:` a reusable workflow `@master` or `@ci-dev`, and at most an aggregate gate job on a hosted label | `ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml` |
+| Reusable | `workflow_call` only | every job, with its `runs-on` | `pipeline-pr.yml`, `pipeline-nightly.yml`, `pipeline-sweep.yml` |
 
 Rules that follow from the shape:
 
@@ -145,6 +146,60 @@ published with `tools/ci/publish-vendor-tarball.sh` and fetched with
 `tools/ci/extract-vendor-tarball.sh`, which verifies it and fails loudly with
 the `[vendor-tarball-unavailable]` marker when it is gone. Retention is three
 days for bundles and evidence.
+
+## The nightly tier
+
+`nightly.yml` holds the schedule (03:30 UTC) and `workflow_dispatch`, takes
+the run-wide `nightly` concurrency group (one nightly at a time, never
+cancelled) and calls `pipeline-nightly.yml@master`. Its inputs reach the
+jobs as strings and every one is validated before use: `fuzz_seconds` and
+`duration` (1 to 1800 seconds), `concurrency`, `protocols`, `arms` and
+`severity`.
+
+Nothing in this tier writes to GitHub and nothing reads a secret. Both the
+caller and the called workflow hold `contents: read` only, which is why the
+tier has no report jobs: a lane that finds something goes red, writes the
+job summary and uploads its evidence (kept three days, seven for the IIS
+matrix). Opening a tracking issue for a finding, or proposing the refreshed
+vulnerability snapshot as a pull request, needs a write token and belongs to
+a separate hosted bot job with its own token in a protected environment; it
+is not part of this tier.
+
+| Job | Class | What it does |
+|---|---|---|
+| `nightly-vendor` | fleet-heavy | vendors the dependencies once (`tools/vendor-deps.sh`) and hands the tree to every other job through a vendor tarball or `actions/cache`, as described under "Artifacts" |
+| `apache-asan-stress` | fleet-heavy, fleet only | ASan module under graceful reload and restart load in the Apache rig; the sweep step is the gate |
+| `apache-daemon-lane` | fleet-heavy | the Apache system tests with the daemon lane required |
+| `nginx-asan-stress` | fleet-heavy, fleet only | the same for the nginx module |
+| `nginx-protocol-matrix` | fleet-heavy, fleet only | the proxy-cache race smoke over HTTP/1.1 and HTTP/2 (`protocols` input to change the list) |
+| `full-tree-lint` | fleet-heavy | clang-tidy over the whole tree, the backstop for what the pull request lint's include graph cannot see |
+| `fuzz-css`, `fuzz-html`, `fuzz-packs`, `fuzz-js` | fleet-heavy | an ASan replay floor plus a bounded libFuzzer campaign per surface; corpora persist across nights in `actions/cache`; the JS lane classifies its artifacts and fails only on needs-triage ones |
+| `iis-asan-systest` | fleet-iis | ASan build of the IIS module under recycle-under-load stress |
+| `iis-appverif-matrix` | fleet-iis | the zero-copy merge gate, then the Application Verifier provider matrix (`arms` input) |
+| `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
+| `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
+
+**Where the pin staleness check lives.** The blocking dependency gate of the
+pull request tier scans against the pinned grype database in
+`tools/sbom/grype-db-pin.json`. `dep-scan-nightly` runs
+`tools/sbom/provision-grype-db.sh --enforce-age`, which fails the job once the
+pin is older than its `max_age_days`. It is deliberately a scheduled check: a
+forgotten pin reddens the nightly and never someone's pull request. Bumping
+the pin is a reviewed change to the pin file.
+
+**The image scan mode.** `dep-scan-nightly` runs `tools/sbom/dep-scan.sh
+--images`, which scans the package-test images from the local container
+cache. A hosted runner has none, so on its own those rows read "not built":
+the scan is honest about it, and "no image findings" there means "no
+images", not "no vulnerabilities". Findings never fail that step; the pin
+age does.
+
+The Linux jobs run in the dev image as the host user. Each starts one named
+container (`nightly-<job>-<run id>-<attempt>`), runs its steps in it with
+`docker exec` so a test rig's processes survive from step to step, and
+removes it by that name in its last step. The container never mounts the
+container socket and is never privileged. The IIS jobs run on one Windows
+host at a time because the fleet-iis class has one runner instance per host.
 
 ## Report jobs
 
@@ -265,6 +320,7 @@ first such job:
 ```text
 We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/ci-dev
+We-Amp/mod_pagespeed/.github/workflows/pipeline-nightly.yml@refs/heads/master
 ```
 
-Callers (`ci.yml`, `ci-dev.yml`, `sweep-queued.yml`) never get an entry.
+Callers (`ci.yml`, `ci-dev.yml`, `nightly.yml`, `sweep-queued.yml`) never get an entry.

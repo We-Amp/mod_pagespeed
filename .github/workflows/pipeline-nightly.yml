@@ -1,0 +1,2528 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-nightly.yml -- the nightly tier, as a reusable workflow, called by
+# nightly.yml (schedule 03:30 UTC + workflow_dispatch). See
+# docs/ci/pipelines.md. The caller serializes nightlies (one group, never
+# cancelled); this file carries no concurrency block.
+#
+# Jobs by class:
+#   fleet-heavy   nightly-vendor (the vendored tree for every Linux job),
+#                 apache-asan-stress, apache-daemon-lane, nginx-asan-stress,
+#                 nginx-protocol-matrix, full-tree-lint, fuzz-css, fuzz-html,
+#                 fuzz-packs, fuzz-js
+#   fleet-iis     iis-asan-systest, iis-appverif-matrix (a Windows host with
+#                 IIS; no hosted twin, so they are skipped without the fleet)
+#   hosted        nvd-scan, dep-scan-nightly (the home of the grype database
+#                 pin staleness check and of the image scan mode)
+#
+# Nothing in this file writes to GitHub and nothing reads a secret: every job
+# holds contents: read only. Findings are reported by a red job, the job
+# summary and the uploaded evidence. Filing a tracking issue or proposing a
+# refreshed snapshot is left to a separate hosted bot job with its own token
+# in a protected environment; it is not part of this workflow.
+#
+# Routing expression and guards are copied verbatim from docs/ci/pipelines.md;
+# tools/ci/check-workflow-shape.sh enforces both. Artifacts carry a
+# `nightly-` prefix.
+
+name: pipeline-nightly
+
+on:
+  workflow_call:
+    inputs:
+      fuzz_seconds:
+        description: libFuzzer time budget in seconds, per harness (1 to 1800)
+        required: false
+        type: string
+        default: "600"
+      duration:
+        description: Sanitizer stress duration in seconds (Apache, nginx and IIS rigs)
+        required: false
+        type: string
+        default: "600"
+      concurrency:
+        description: Concurrent request workers of the stress rigs
+        required: false
+        type: string
+        default: "16"
+      protocols:
+        description: Space separated curl protocol flags for the nginx protocol matrix (empty means h1 and h2)
+        required: false
+        type: string
+        default: ""
+      arms:
+        description: IIS Application Verifier arms, comma separated arm:iterations
+        required: false
+        type: string
+        default: "cuzz-nopageheap:5,cuzz-pageheap:3"
+      severity:
+        description: Severity floor of the NVD scan (low, medium, high, critical)
+        required: false
+        type: string
+        default: "medium"
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # The vendored tree. Every Linux and Windows job below builds from it
+  # (build:vendored in pagespeed.bazelrc): the git-only dependencies are
+  # cloned once, here, with whatever git identity the runner host holds, and
+  # the rest of the nightly runs offline. The tree reaches the consumer jobs
+  # through a runner-local or hub tarball when the runner environment offers
+  # one, and through actions/cache otherwise.
+  # ---------------------------------------------------------------------
+  nightly-vendor:
+    name: Vendor Dependencies (nightly)
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 45
+    outputs:
+      short_sha: ${{ steps.stamp.outputs.short_sha }}
+      channel: ${{ steps.renv.outputs.channel }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Detect runner environment
+        id: renv
+        run: |
+          # The vendored tree reaches consumer jobs through a runner-local
+          # vendor dir or the hub when the runner environment provides it,
+          # and through actions/cache otherwise (docs/ci/runner-environment.md).
+          channel=cache
+          if [ -n "${CI_VENDOR_DIR:-}" ] || { [ -n "${CI_HUB_SSH:-}" ] && [ -n "${CI_HUB_VENDOR_DIR:-}" ]; }; then
+            channel=hub
+          fi
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "vendor distribution channel: ${channel}"
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v npm >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          command -v bazel >/dev/null 2>&1 || {
+            echo "::error::bazel is not on PATH and could not be installed via npm; see docs/ci/runner-environment.md"
+            exit 1
+          }
+          bazel --version
+
+      # Cache channel (hosted, or a build runner without hub configuration):
+      # vendor/ rides actions/cache between jobs, keyed on the dependency
+      # manifest so a dependency bump re-vendors exactly once.
+      - name: Restore vendored dependencies (cache channel)
+        if: steps.renv.outputs.channel == 'cache'
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+
+      # tools/vendor-deps.sh clones the git-only dependencies and fills the
+      # Bazel repository cache; it needs python3, git and a git identity that
+      # can read those repositories (the runner host's own).
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: bash tools/vendor-deps.sh vendor
+
+      # Hub channel only: stamp + tar the tree (source, vendor/, GIT_COMMIT)
+      # for the consumer jobs. On the cache channel consumers get the same
+      # tree from their own checkout plus the cached vendor/.
+      - name: Stamp GIT_COMMIT
+        if: steps.renv.outputs.channel == 'hub'
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Create the source tarball
+        if: steps.renv.outputs.channel == 'hub'
+        id: tarball
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          LOCAL_DIR="${CI_VENDOR_DIR:-${RUNNER_TEMP}}"
+          mkdir -p "${LOCAL_DIR}"
+          TARBALL="${LOCAL_DIR}/mod_pagespeed-${SHORT_SHA}.tar.zst"
+          # Short-circuit re-runs: a readable tarball for this SHA was
+          # written atomically (tmp + rename) by a prior run. Re-stamp it so
+          # the age-based prunes count from now.
+          if [ -r "$TARBALL" ]; then
+            echo "Tarball for ${SHORT_SHA} present and readable; skipping re-tar"
+            touch "$TARBALL"
+          else
+            # The temp name carries the run id: two runner instances can
+            # share the vendor dir, and a same-SHA run must not write into,
+            # or rm, the temp file this one is tarring.
+            TMP_TARBALL="${TARBALL}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+            rm -f "${TMP_TARBALL}"
+            tar --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
+              --exclude='.git' \
+              --exclude='bazel-*' \
+              .
+          fi
+          # Publish create-if-absent and write the digest sidecar
+          # (tools/ci/publish-vendor-tarball.sh): a same-SHA tarball another
+          # writer published first is adopted, never replaced.
+          bash tools/ci/publish-vendor-tarball.sh "$TARBALL" ${TMP_TARBALL:+"$TMP_TARBALL"}
+          # Prune other SHAs' tarballs from the shared local dir, but only
+          # past a grace window: a recent tarball may still be extracting in
+          # a concurrent run. The sidecar is matched explicitly so a pruned
+          # tarball never leaves its digest behind; *.tmp sweeps cancelled
+          # runs.
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            find "${CI_VENDOR_DIR}" \
+              \( -name 'mod_pagespeed-*.tar.zst' -o -name 'mod_pagespeed-*.tar.zst.sha256' \
+                 -o -name 'mod_pagespeed-*.tar.zst.*.tmp' \) \
+              ! -name "mod_pagespeed-${SHORT_SHA}.tar.zst" \
+              ! -name "mod_pagespeed-${SHORT_SHA}.tar.zst.sha256" \
+              -mmin +120 -delete 2>/dev/null || true
+          fi
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          # Name and size only: the directory is a runner-local path.
+          echo "Tarball: $(basename "$TARBALL") ($(du -h "$TARBALL" | cut -f1))"
+
+      - name: Publish the tarball to the hub
+        if: steps.renv.outputs.channel == 'hub'
+        run: |
+          # The ssh remote commands interpolate this runner's environment
+          # client-side on purpose: the values are defined by the runner
+          # environment contract (docs/ci/runner-environment.md), never
+          # logged, and the remote side needs them as literals.
+          if [ -z "${CI_HUB_SSH:-}" ] || [ -z "${CI_HUB_VENDOR_DIR:-}" ]; then
+            echo "::notice::CI_HUB_SSH/CI_HUB_VENDOR_DIR not set: the vendor tarball stays on this runner. Consumers on other runners fail with a recovery hint; configure the runner environment or use the cache channel (docs/ci/runner-environment.md)."
+            exit 0
+          fi
+          TARBALL="${{ steps.tarball.outputs.tarball }}"
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -o LogLevel=ERROR -o BatchMode=yes"
+          F="$(basename "$TARBALL")"
+          TMP_DEST="${CI_HUB_VENDOR_DIR}/${F}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+          T="$(basename "$TMP_DEST")"
+          # Publish create-if-absent ON the hub: a published tarball is never
+          # replaced, so a concurrent writer cannot swap bytes under a
+          # consumer or leave one writer's digest next to another's tarball.
+          PUBLISH="set -e; cd '${CI_HUB_VENDOR_DIR}'
+            if ! ln '${T}' '${F}' 2>/dev/null; then test -s '${F}'; fi
+            rm -f '${T}'
+            D=\$( (sha256sum '${F}' 2>/dev/null || shasum -a 256 '${F}') | cut -d' ' -f1)
+            printf '%s  %s\\n' \"\$D\" '${F}' > '${F}.sha256.${GITHUB_RUN_ID}.tmp'
+            mv -f '${F}.sha256.${GITHUB_RUN_ID}.tmp' '${F}.sha256'"
+          # SSH_OPTS is an intentional multi-token option list; the remote
+          # commands expand client-side on purpose (see above).
+          # shellcheck disable=SC2029,SC2086
+          for attempt in 1 2 3; do
+            if ssh ${SSH_OPTS} "${CI_HUB_SSH}" "mkdir -p '${CI_HUB_VENDOR_DIR}'" \
+               && rsync -a -e "ssh ${SSH_OPTS}" "$TARBALL" "${CI_HUB_SSH}:${TMP_DEST}" \
+               && ssh ${SSH_OPTS} "${CI_HUB_SSH}" "$PUBLISH"; then
+              echo "Published ${F} to the CI hub (attempt ${attempt})"
+              # Prune hub tarballs older than the retention window: the hub
+              # copy is the only one a rerun-failed-jobs consumer can reach
+              # once the local copy is gone.
+              ssh ${SSH_OPTS} "${CI_HUB_SSH}" \
+                "find '${CI_HUB_VENDOR_DIR}' -maxdepth 1 \( -name 'mod_pagespeed-*.tar.zst' -o -name 'mod_pagespeed-*.tar.zst.sha256' -o -name 'mod_pagespeed-*.tar.zst.*.tmp' \) -mmin +${CI_HUB_VENDOR_RETENTION_MIN:-1440} -delete" \
+                2>/dev/null || true
+              exit 0
+            fi
+            echo "::warning::hub publish failed (attempt ${attempt}/3)"
+            [ "$attempt" -lt 3 ] && sleep 5
+          done
+          echo "::error::hub publish failed after 3 attempts"
+          exit 1
+
+      - name: Stamp outputs
+        id: stamp
+        run: echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # Sanitizer stress rigs. Each builds the ASan module in the dev image and
+  # drives the module through graceful reload / restart under load inside
+  # the same container (the image carries Apache, the configured nginx
+  # source tree, clang with the sanitizer runtimes and passwordless sudo).
+  # The sweep step is the gate; evidence is kept briefly on failure.
+  # ---------------------------------------------------------------------
+  apache-asan-stress:
+    name: Apache ASan graceful-restart stress
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      DURATION: ${{ inputs.duration || '600' }}
+      CONCURRENCY: ${{ inputs.concurrency || '16' }}
+    steps:
+      - name: Validate the stress parameters
+        run: |
+          case "${DURATION}${CONCURRENCY}" in
+            ''|*[!0-9]*) echo "::error::duration and concurrency must be whole numbers"; exit 1 ;;
+          esac
+          if [ "${DURATION}" -lt 1 ] || [ "${DURATION}" -gt 1800 ]; then
+            echo "::error::duration must be between 1 and 1800 seconds (got ${DURATION})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-apache-asan-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      - name: Build the ASan module
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} --config=clang-asan //:libmod_pagespeed.so
+          test -f bazel-bin/libmod_pagespeed.so
+          EOS
+
+      - name: Set up the ASan Apache rig
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -uo pipefail
+          export REPO_DIR=/workspace RIG_DIR="${RUNNER_TEMP}/apache-asan-rig" PORT=18085
+          export DOCROOT=/var/www/html ERRLOG=/var/log/apache2/error.log
+          export MODULE_SO=/workspace/bazel-bin/libmod_pagespeed.so
+          export ASAN_RUNTIME="$(clang -print-file-name=libclang_rt.asan-x86_64.so)"
+          bash tools/stress/apache/setup_apache_asan_rig.sh
+          EOS
+
+      - name: Run the graceful-restart-under-load stress
+        run: |
+          set +e
+          docker exec -i -e DURATION -e CONCURRENCY "${CTR}" bash -s <<'EOS'
+          set -uo pipefail
+          export REPO_DIR=/workspace RIG_DIR="${RUNNER_TEMP}/apache-asan-rig" PORT=18085
+          export DOCROOT=/var/www/html ERRLOG=/var/log/apache2/error.log
+          bash tools/stress/apache/run_apache_asan_rig.sh
+          EOS
+          echo "HARNESS_RC=$?" >> "$GITHUB_ENV"
+
+      # The sweep adjudicates: it reads the Apache error log and the cores
+      # for sanitizer reports and crash tokens.
+      - name: Sweep for ASan and crash evidence (gate)
+        run: |
+          docker exec -i -e HARNESS_RC "${CTR}" bash -s <<'EOS'
+          set -uo pipefail
+          export REPO_DIR=/workspace RIG_DIR="${RUNNER_TEMP}/apache-asan-rig" PORT=18085
+          export DOCROOT=/var/www/html ERRLOG=/var/log/apache2/error.log
+          bash tools/stress/apache/sweep_apache_asan_rig.sh "${HARNESS_RC}"
+          EOS
+
+      - name: Collect the evidence
+        if: failure() && env.CTR != ''
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/apache-asan-evidence"
+          docker cp "${CTR}:/var/log/apache2/error.log" "${RUNNER_TEMP}/apache-asan-evidence/error.log" || true
+          cp -r "${RUNNER_TEMP}/apache-asan-rig/cores" "${RUNNER_TEMP}/apache-asan-evidence/" 2>/dev/null || true
+
+      # Debugging aid for a failed night only: the sweep above is the gate.
+      # A refused upload (artifact storage full) must not add a failure of
+      # its own.
+      - name: Upload the evidence
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-apache-asan-evidence
+          path: ${{ runner.temp }}/apache-asan-evidence/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Tear down the rig (restore the module configuration)
+        if: always() && env.CTR != ''
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS' || true
+          export REPO_DIR=/workspace RIG_DIR="${RUNNER_TEMP}/apache-asan-rig" ERRLOG=/var/log/apache2/error.log
+          bash tools/stress/apache/cleanup_apache_asan_rig.sh
+          EOS
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  apache-daemon-lane:
+    name: Apache system tests (daemon lane)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-apache-daemon-lane-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=(--cap-add NET_BIND_SERVICE --sysctl net.ipv4.ip_unprivileged_port_start=0)
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      # The pull request Apache system tests leave the daemon lane out, so
+      # the daemon-serving cases skip there. Here the lane is required: a
+      # worker that cannot be built or started fails the run.
+      - name: Run the Apache system tests with the daemon lane required
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s -e PAGESPEED_DAEMON_LANE=require <<'EOS'
+          set -euo pipefail
+          BAZEL_CONFIG="${BZL_FLAGS} --action_env=CC=clang --action_env=CXX=clang++" \
+            ./test/system/run_system_tests.sh
+          EOS
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  nginx-asan-stress:
+    name: nginx ASan reload stress
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      DURATION: ${{ inputs.duration || '600' }}
+      CONCURRENCY: ${{ inputs.concurrency || '16' }}
+    steps:
+      - name: Validate the stress parameters
+        run: |
+          case "${DURATION}${CONCURRENCY}" in
+            ''|*[!0-9]*) echo "::error::duration and concurrency must be whole numbers"; exit 1 ;;
+          esac
+          if [ "${DURATION}" -lt 1 ] || [ "${DURATION}" -gt 1800 ]; then
+            echo "::error::duration must be between 1 and 1800 seconds (got ${DURATION})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-nginx-asan-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      # The nginx binary is stock (--with-compat, no sanitizer); all ASan
+      # coverage is in the module and the preloaded runtime. The image
+      # carries a configured, built nginx tree.
+      - name: Build the ASan module
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} --config=clang-asan //pagespeed/nginx:ngx_pagespeed_module.so
+          test -f bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+          EOS
+
+      - name: Set up the ASan nginx rig
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          export RIG_DIR="${RUNNER_TEMP}/nginx-asan-rig" PORT=18081 REPO_DIR=/workspace
+          export NGINX_BINARY=/usr/local/src/nginx/objs/nginx
+          export MODULE_SO=/workspace/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+          export ASAN_RUNTIME="$(clang -print-file-name=libclang_rt.asan-x86_64.so)"
+          bash tools/stress/nginx/setup_nginx_asan_rig.sh
+          EOS
+
+      - name: Run the reload-under-load stress
+        run: |
+          set +e
+          docker exec -i -e DURATION -e CONCURRENCY "${CTR}" bash -s <<'EOS'
+          set -uo pipefail
+          export RIG_DIR="${RUNNER_TEMP}/nginx-asan-rig" PORT=18081 REPO_DIR=/workspace
+          bash tools/stress/nginx/run_nginx_asan_rig.sh
+          EOS
+          echo "HARNESS_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Sweep for ASan and crash evidence (gate)
+        run: |
+          docker exec -i -e HARNESS_RC "${CTR}" bash -s <<'EOS'
+          set -uo pipefail
+          export RIG_DIR="${RUNNER_TEMP}/nginx-asan-rig"
+          bash tools/stress/nginx/sweep_nginx_asan_rig.sh "${HARNESS_RC}"
+          EOS
+
+      # Debugging aid for a failed night only: the sweep above is the gate.
+      - name: Upload the evidence
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-nginx-asan-evidence
+          path: |
+            ${{ runner.temp }}/nginx-asan-rig/logs/*
+            ${{ runner.temp }}/nginx-asan-rig/cores/*
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Stop the rig
+        if: always() && env.CTR != ''
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS' || true
+          "${RUNNER_TEMP}/nginx-asan-rig/run-nginx.sh" -s quit 2>/dev/null || true
+          EOS
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  nginx-protocol-matrix:
+    name: IPRO proxy race smoke (h1/h2)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 45
+    env:
+      PROTOCOLS_INPUT: ${{ inputs.protocols }}
+    steps:
+      - name: Validate the protocol list
+        run: |
+          # Only curl protocol flags: a flag, then more flags separated by spaces.
+          if [ -n "${PROTOCOLS_INPUT}" ] && ! printf '%s' "${PROTOCOLS_INPUT}" | grep -Eq '^--[a-z0-9.-]+( --[a-z0-9.-]+)*$'; then
+            echo "::error::protocols must be space separated curl protocol flags such as --http1.1 --http2"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-nginx-protocol-matrix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      # The smoke exercises the event-pipe race class across HTTP protocol
+      # versions: h1 and h2 are different nginx code paths with different
+      # finalize and abort semantics. The protocols run sequentially inside
+      # one job because the smoke manages a single nginx instance. HTTP/3 needs
+      # an nginx built with the QUIC module and an HTTP/3 curl, which the
+      # dev image does not carry; pass them through the protocols input only
+      # on a runner image that has both.
+      - name: Build the module
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} //pagespeed/nginx:ngx_pagespeed_module.so
+          test -f bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+          EOS
+
+      - name: Run the protocol race smoke
+        run: |
+          docker exec -i -e PROTOCOLS_INPUT "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          export WORKSPACE=/workspace
+          export MODULE=/workspace/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+          export NGINX_BINARY=/usr/local/src/nginx/objs/nginx
+          export NGINX_CONFIG_DIR="${RUNNER_TEMP}/nginx-protocol-harness"
+          export PROTOCOLS="${PROTOCOLS_INPUT:---http1.1 --http2}"
+          echo "protocols: ${PROTOCOLS}"
+          bash test/system/nginx/protocol_proxy_ipro_race_smoke.sh
+          EOS
+
+      - name: Collect the error logs
+        if: failure() && env.CTR != ''
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/protocol-race-logs"
+          docker cp "${CTR}:/tmp/protocol-race-smoke/logs/." "${RUNNER_TEMP}/protocol-race-logs/" || true
+
+      - name: Upload the error logs on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-protocol-race-error-log
+          path: ${{ runner.temp }}/protocol-race-logs/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  # ---------------------------------------------------------------------
+  # Full-tree clang-tidy. The pull request lint covers the translation
+  # units a change reaches; this sweep is the backstop for what an include
+  # graph cannot see (a dependency assembled by macro, a generated header).
+  # A red nightly means the default branch has a clang-tidy error that no
+  # pull request gate will surface again, so it fails.
+  # ---------------------------------------------------------------------
+  full-tree-lint:
+    name: clang-tidy (full tree)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --derived pagespeed1.1-lint Dockerfile.lint x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-full-tree-lint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      # The compilation database holds absolute paths into the Bazel
+      # execroot, which exists only in the container that generated it, so
+      # generation and linting share this one exec.
+      - name: clang-tidy (compilation database and full-tree lint)
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going"
+          rm -f compile_commands.json
+          # Do not let the generator die unannotated: a bare failure leaves
+          # nothing in the step log.
+          set +e
+          python3 tools/gen_compilation_database.py -- //pagespeed/... //net/...
+          gen_rc=$?
+          set -e
+          if [ "$gen_rc" -ne 0 ]; then
+            echo "::error::compile_commands.json generation failed (bazel exited ${gen_rc}); see the compilation database output above"
+            exit 1
+          fi
+          # Without the vendored dependency override every nginx translation
+          # unit silently drops out of the partial database. A full-tree sweep
+          # that skips pagespeed/nginx must fail, not pass.
+          grep -q "pagespeed/nginx/ngx_pagespeed\.cc" compile_commands.json || {
+            echo "::error::compile_commands.json has no pagespeed/nginx entries; nginx dropped out of the compilation database"
+            exit 1
+          }
+          run-clang-tidy-20 \
+            -clang-tidy-binary=clang-tidy-20 \
+            -p /workspace \
+            -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+            pagespeed/ net/
+          EOS
+
+      # A silently absent clang-tidy-20 would make run-clang-tidy a no-op
+      # that exits 0: a green nightly that linted nothing.
+      - name: Assert clang-tidy actually ran
+        if: always() && env.CTR != ''
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          command -v run-clang-tidy-20 >/dev/null && command -v clang-tidy-20 >/dev/null \
+            || { echo "::error::clang-tidy-20 or run-clang-tidy-20 is missing from the image; the lint above was a no-op"; exit 1; }
+          EOS
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  # ---------------------------------------------------------------------
+  # Fuzz lanes. Each builds an ASan replay binary (the deterministic
+  # regression floor) and a libFuzzer binary (coverage-guided discovery with
+  # a bounded budget), seeds a corpus that is persisted across nights with
+  # actions/cache, and fails the job on a floor regression or a crash. Crash
+  # reproducers and the corpus are uploaded on failure.
+  # ---------------------------------------------------------------------
+  fuzz-css:
+    name: CSS parser fuzz (corpus floor + libFuzzer)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
+    steps:
+      # libFuzzer reads a non-numeric budget as "no limit" and a budget past
+      # the job timeout loses the corpus save, so bound it before anything
+      # else runs.
+      - name: Validate the fuzz budget
+        run: |
+          case "${FUZZ_SECONDS}" in
+            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
+          esac
+          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
+            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-fuzz-css-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      - name: Build the ASan replay binary and the corpus test
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          # Release with DCHECKs compiled out, ASan as the oracle.
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt \
+            //third_party/css_parser:parser_fuzz \
+            //third_party/css_parser:parser_fuzz_corpus_test
+          mkdir -p "${RUNNER_TEMP}/css-fuzz-bin"
+          cp bazel-bin/third_party/css_parser/parser_fuzz "${RUNNER_TEMP}/css-fuzz-bin/parser_fuzz_replay"
+          EOS
+
+      - name: Build the libFuzzer binary
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          # The define compiles the harness main() out and exposes
+          # LLVMFuzzerTestOneInput; a separate invocation from the replay
+          # build because the define rewrites the same output path.
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt \
+            --copt=-DCSS_PARSER_LIBFUZZER \
+            --copt=-fsanitize=fuzzer-no-link \
+            --linkopt=-fsanitize=fuzzer \
+            //third_party/css_parser:parser_fuzz
+          cp -f bazel-bin/third_party/css_parser/parser_fuzz "${RUNNER_TEMP}/css-fuzz-bin/parser_fuzz_lf"
+          EOS
+
+      - name: Restore the persisted corpus (css-fuzz-corpus)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-corpus
+          key: css-fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: css-fuzz-corpus-v1-
+
+      - name: Seed the corpus from the harness's embedded corpus
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/css-fuzz-corpus"
+          "${RUNNER_TEMP}/css-fuzz-bin/parser_fuzz_replay" --dump_corpus="${RUNNER_TEMP}/css-fuzz-seed"
+          # -n: never overwrite what the persisted cache already grew.
+          cp -n "${RUNNER_TEMP}/css-fuzz-seed"/seed-* "${RUNNER_TEMP}/css-fuzz-corpus"/
+          EOS
+
+      # The run steps capture their exit status instead of failing fast so a
+      # red corpus test cannot mask the fuzz result (and the reverse); the
+      # gate step turns either failure red after both have run.
+      - name: Run the deterministic corpus test (ASan regression floor)
+        run: |
+          set +e
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          bazel test ${BZL_FLAGS} --config=clang-asan -c opt --test_output=errors \
+            //third_party/css_parser:parser_fuzz_corpus_test
+          EOS
+          echo "CORPUS_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Run libFuzzer (bounded budget)
+        run: |
+          set +e
+          docker exec -i -e FUZZ_SECONDS "${CTR}" bash -s <<'EOS'
+          mkdir -p "${RUNNER_TEMP}/css-fuzz-crashes"
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "${RUNNER_TEMP}/css-fuzz-bin/parser_fuzz_lf" "${RUNNER_TEMP}/css-fuzz-corpus" \
+            -max_total_time="${FUZZ_SECONDS}" \
+            -max_len=4096 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix="${RUNNER_TEMP}/css-fuzz-crashes/" \
+            -print_final_stats=1
+          EOS
+          echo "FUZZ_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Gate and write the findings
+        run: |
+          set -uo pipefail
+          echo "LANE_RAN=1" >> "$GITHUB_ENV"
+          F="${RUNNER_TEMP}/css-fuzz-crashes/findings.md"
+          mkdir -p "${RUNNER_TEMP}/css-fuzz-crashes"; : > "$F"
+          if [ "${CORPUS_RC:-1}" != "0" ]; then
+            {
+              echo "### parser_fuzz_corpus_test failed (rc=${CORPUS_RC})"
+              echo
+              echo "The deterministic embedded-corpus ASan regression floor is red; see the run log for the sanitizer report."
+            } >> "$F"
+          fi
+          if [ "${FUZZ_RC:-1}" != "0" ]; then
+            {
+              echo "### libFuzzer found a crashing input (rc=${FUZZ_RC})"
+              echo
+              echo "Reproducers and the corpus: the nightly-css-fuzz-evidence artifact of the run."
+              echo "Replay locally with:"
+              echo
+              echo '    bazel run --config=clang-asan -c opt //third_party/css_parser:parser_fuzz -- <crash-file>'
+            } >> "$F"
+          fi
+          if [ -s "$F" ]; then
+            cat "$F" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # Debugging aid for a failed run, kept briefly. A refused upload
+      # (artifact storage full) must not add a failure of its own.
+      - name: Upload the evidence (crash reproducers and corpus)
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-css-fuzz-evidence
+          path: |
+            ${{ runner.temp }}/css-fuzz-crashes/
+            ${{ runner.temp }}/css-fuzz-corpus/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Save even on findings: libFuzzer writes a crash unit into the corpus
+      # directory before it stops, and keeping it makes the finding a
+      # persistent regression input once the bug is fixed. Guarded on the
+      # lane having run so a build-stage failure cannot error the save on a
+      # missing path.
+      - name: Persist the corpus (css-fuzz-corpus)
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/css-fuzz-corpus
+          key: css-fuzz-corpus-v1-${{ github.run_id }}
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  fuzz-html:
+    name: HTML parse fuzz (libFuzzer)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
+    steps:
+      # libFuzzer reads a non-numeric budget as "no limit" and a budget past
+      # the job timeout loses the corpus save, so bound it before anything
+      # else runs.
+      - name: Validate the fuzz budget
+        run: |
+          case "${FUZZ_SECONDS}" in
+            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
+          esac
+          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
+            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-fuzz-html-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      - name: Build the ASan replay binary
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt //pagespeed/kernel/html:html_fuzz
+          mkdir -p "${RUNNER_TEMP}/html-fuzz-bin"
+          cp bazel-bin/pagespeed/kernel/html/html_fuzz "${RUNNER_TEMP}/html-fuzz-bin/html_fuzz_replay"
+          EOS
+
+      - name: Build the libFuzzer binary
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          # Same split-invocation pattern as the CSS lane.
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt \
+            --copt=-DHTML_PARSE_LIBFUZZER \
+            --copt=-fsanitize=fuzzer-no-link \
+            --linkopt=-fsanitize=fuzzer \
+            //pagespeed/kernel/html:html_fuzz
+          cp -f bazel-bin/pagespeed/kernel/html/html_fuzz "${RUNNER_TEMP}/html-fuzz-bin/html_fuzz_lf"
+          EOS
+
+      - name: Restore the persisted corpus (html-fuzz-corpus)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/html-fuzz-corpus
+          key: html-fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: html-fuzz-corpus-v1-
+
+      - name: Seed the corpus from the checked-in seeds
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/html-fuzz-corpus"
+          # Plain files. -n: never overwrite what the persisted cache grew.
+          cp -n tools/html-parse-corpus/seeds/* "${RUNNER_TEMP}/html-fuzz-corpus"/
+          EOS
+
+      # Deterministic floor: replay the checked-in seeds through the
+      # standalone binary. A fixed-size input set on purpose: the persisted
+      # corpus grows unboundedly across nights. Known leak findings in the
+      # kernel make leak reports noise here; memory-safety reports remain
+      # the oracle.
+      - name: Run the seed replay (ASan regression floor)
+        run: |
+          set +e
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1:detect_leaks=0"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "${RUNNER_TEMP}/html-fuzz-bin/html_fuzz_replay" tools/html-parse-corpus/seeds/*
+          EOS
+          echo "REPLAY_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Run libFuzzer (bounded budget)
+        run: |
+          set +e
+          docker exec -i -e FUZZ_SECONDS "${CTR}" bash -s <<'EOS'
+          mkdir -p "${RUNNER_TEMP}/html-fuzz-crashes"
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1:detect_leaks=0"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "${RUNNER_TEMP}/html-fuzz-bin/html_fuzz_lf" "${RUNNER_TEMP}/html-fuzz-corpus" \
+            -max_total_time="${FUZZ_SECONDS}" \
+            -max_len=4096 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix="${RUNNER_TEMP}/html-fuzz-crashes/" \
+            -print_final_stats=1
+          EOS
+          echo "FUZZ_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Gate and write the findings
+        run: |
+          set -uo pipefail
+          echo "LANE_RAN=1" >> "$GITHUB_ENV"
+          F="${RUNNER_TEMP}/html-fuzz-crashes/findings.md"
+          mkdir -p "${RUNNER_TEMP}/html-fuzz-crashes"; : > "$F"
+          if [ "${REPLAY_RC:-1}" != "0" ]; then
+            {
+              echo "### Seed replay failed (rc=${REPLAY_RC})"
+              echo
+              echo "The deterministic checked-in-seed ASan regression floor is red; see the run log for the sanitizer report."
+            } >> "$F"
+          fi
+          if [ "${FUZZ_RC:-1}" != "0" ]; then
+            {
+              echo "### libFuzzer found a crashing input (rc=${FUZZ_RC})"
+              echo
+              echo "Reproducers and the corpus: the nightly-html-fuzz-evidence artifact of the run."
+              echo "Replay locally with:"
+              echo
+              echo '    bazel run --config=clang-asan -c opt //pagespeed/kernel/html:html_fuzz -- <crash-file>'
+            } >> "$F"
+          fi
+          if [ -s "$F" ]; then
+            cat "$F" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # Debugging aid for a failed run, kept briefly. A refused upload
+      # (artifact storage full) must not add a failure of its own.
+      - name: Upload the evidence (crash reproducers and corpus)
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-html-fuzz-evidence
+          path: |
+            ${{ runner.temp }}/html-fuzz-crashes/
+            ${{ runner.temp }}/html-fuzz-corpus/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Save even on findings: libFuzzer writes a crash unit into the corpus
+      # directory before it stops, and keeping it makes the finding a
+      # persistent regression input once the bug is fixed. Guarded on the
+      # lane having run so a build-stage failure cannot error the save on a
+      # missing path.
+      - name: Persist the corpus (html-fuzz-corpus)
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/html-fuzz-corpus
+          key: html-fuzz-corpus-v1-${{ github.run_id }}
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  fuzz-packs:
+    name: Pack loader + filter fuzz (libFuzzer)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 150
+    env:
+      FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
+    steps:
+      # libFuzzer reads a non-numeric budget as "no limit" and a budget past
+      # the job timeout loses the corpus save, so bound it before anything
+      # else runs.
+      - name: Validate the fuzz budget
+        run: |
+          case "${FUZZ_SECONDS}" in
+            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
+          esac
+          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
+            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-fuzz-packs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      - name: Build the ASan replay binaries
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt \
+            //pagespeed/kernel/packs:pack_loader_fuzz \
+            //pagespeed/kernel/packs:rule_pack_filter_fuzz
+          mkdir -p "${RUNNER_TEMP}/pack-fuzz-bin"
+          cp bazel-bin/pagespeed/kernel/packs/pack_loader_fuzz "${RUNNER_TEMP}/pack-fuzz-bin/pack_loader_fuzz_replay"
+          cp bazel-bin/pagespeed/kernel/packs/rule_pack_filter_fuzz "${RUNNER_TEMP}/pack-fuzz-bin/rule_pack_filter_fuzz_replay"
+          EOS
+
+      - name: Build the libFuzzer binaries
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          # Each harness reads only its own define, so one invocation builds
+          # both; the defines rewrite the same output paths as the replay build.
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt \
+            --copt=-DPACK_LOADER_LIBFUZZER \
+            --copt=-DRULE_PACK_FILTER_LIBFUZZER \
+            --copt=-fsanitize=fuzzer-no-link \
+            --linkopt=-fsanitize=fuzzer \
+            //pagespeed/kernel/packs:pack_loader_fuzz \
+            //pagespeed/kernel/packs:rule_pack_filter_fuzz
+          cp -f bazel-bin/pagespeed/kernel/packs/pack_loader_fuzz "${RUNNER_TEMP}/pack-fuzz-bin/pack_loader_fuzz_lf"
+          cp -f bazel-bin/pagespeed/kernel/packs/rule_pack_filter_fuzz "${RUNNER_TEMP}/pack-fuzz-bin/rule_pack_filter_fuzz_lf"
+          EOS
+
+      - name: Restore the persisted corpus (pack-fuzz-corpus)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pack-fuzz-corpus
+          key: pack-fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: pack-fuzz-corpus-v1-
+
+      - name: Restore the persisted corpus (pack-filter-fuzz-corpus)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pack-filter-fuzz-corpus
+          key: pack-filter-fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: pack-filter-fuzz-corpus-v1-
+
+      - name: Seed the corpora from the checked-in seeds
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/pack-fuzz-corpus" "${RUNNER_TEMP}/pack-filter-fuzz-corpus"
+          # Plain files. -n: never overwrite what the persisted cache grew.
+          cp -n tools/pack-loader-corpus/seeds/* "${RUNNER_TEMP}/pack-fuzz-corpus"/
+          cp -n test/pagespeed/kernel/packs/testdata/edge-seo/pack.example.json "${RUNNER_TEMP}/pack-fuzz-corpus"/
+          cp -n tools/rule-pack-filter-corpus/seeds/* "${RUNNER_TEMP}/pack-filter-fuzz-corpus"/
+          EOS
+
+      - name: Run the seed replay (ASan regression floor)
+        run: |
+          set +e
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1:detect_leaks=0"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "${RUNNER_TEMP}/pack-fuzz-bin/pack_loader_fuzz_replay" tools/pack-loader-corpus/seeds/* \
+            test/pagespeed/kernel/packs/testdata/edge-seo/pack.example.json
+          LOADER_RC=$?
+          "${RUNNER_TEMP}/pack-fuzz-bin/rule_pack_filter_fuzz_replay" tools/rule-pack-filter-corpus/seeds/*
+          FILTER_RC=$?
+          exit $(( LOADER_RC != 0 ? LOADER_RC : FILTER_RC ))
+          EOS
+          echo "REPLAY_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Run libFuzzer (bounded budget, loader then filter)
+        run: |
+          set +e
+          docker exec -i -e FUZZ_SECONDS "${CTR}" bash -s <<'EOS'
+          mkdir -p "${RUNNER_TEMP}/pack-fuzz-crashes" "${RUNNER_TEMP}/pack-filter-fuzz-crashes"
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1:detect_leaks=0"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "${RUNNER_TEMP}/pack-fuzz-bin/pack_loader_fuzz_lf" "${RUNNER_TEMP}/pack-fuzz-corpus" \
+            -max_total_time="${FUZZ_SECONDS}" \
+            -max_len=16384 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix="${RUNNER_TEMP}/pack-fuzz-crashes/" \
+            -print_final_stats=1
+          LOADER_RC=$?
+          "${RUNNER_TEMP}/pack-fuzz-bin/rule_pack_filter_fuzz_lf" "${RUNNER_TEMP}/pack-filter-fuzz-corpus" \
+            -max_total_time="${FUZZ_SECONDS}" \
+            -max_len=8192 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix="${RUNNER_TEMP}/pack-filter-fuzz-crashes/" \
+            -print_final_stats=1
+          FILTER_RC=$?
+          exit $(( LOADER_RC != 0 ? LOADER_RC : FILTER_RC ))
+          EOS
+          echo "FUZZ_RC=$?" >> "$GITHUB_ENV"
+
+      - name: Gate and write the findings
+        run: |
+          set -uo pipefail
+          echo "LANE_RAN=1" >> "$GITHUB_ENV"
+          F="${RUNNER_TEMP}/pack-fuzz-crashes/findings.md"
+          mkdir -p "${RUNNER_TEMP}/pack-fuzz-crashes"; : > "$F"
+          if [ "${REPLAY_RC:-1}" != "0" ]; then
+            {
+              echo "### Seed replay failed (rc=${REPLAY_RC})"
+              echo
+              echo "The deterministic checked-in-seed ASan regression floor is red; see the run log for the sanitizer report."
+            } >> "$F"
+          fi
+          if [ "${FUZZ_RC:-1}" != "0" ]; then
+            {
+              echo "### libFuzzer found a crashing input (rc=${FUZZ_RC})"
+              echo
+              echo "Reproducers and the corpora: the nightly-packs-fuzz-evidence artifact of the run."
+              echo "Replay locally with:"
+              echo
+              echo '    bazel run --config=clang-asan -c opt //pagespeed/kernel/packs:pack_loader_fuzz -- <crash-file>'
+              echo '    bazel run --config=clang-asan -c opt //pagespeed/kernel/packs:rule_pack_filter_fuzz -- <crash-file>'
+              echo
+              echo '(Loader crashes are under pack-fuzz-crashes/, filter crashes under pack-filter-fuzz-crashes/.)'
+            } >> "$F"
+          fi
+          if [ -s "$F" ]; then
+            cat "$F" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # Debugging aid for a failed run, kept briefly. A refused upload
+      # (artifact storage full) must not add a failure of its own.
+      - name: Upload the evidence (crash reproducers and corpus)
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-packs-fuzz-evidence
+          path: |
+            ${{ runner.temp }}/pack-fuzz-crashes/
+            ${{ runner.temp }}/pack-fuzz-corpus/
+            ${{ runner.temp }}/pack-filter-fuzz-crashes/
+            ${{ runner.temp }}/pack-filter-fuzz-corpus/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Save even on findings: libFuzzer writes a crash unit into the corpus
+      # directory before it stops, and keeping it makes the finding a
+      # persistent regression input once the bug is fixed. Guarded on the
+      # lane having run so a build-stage failure cannot error the save on a
+      # missing path.
+      - name: Persist the corpus (pack-fuzz-corpus)
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pack-fuzz-corpus
+          key: pack-fuzz-corpus-v1-${{ github.run_id }}
+
+      - name: Persist the corpus (pack-filter-fuzz-corpus)
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pack-filter-fuzz-corpus
+          key: pack-filter-fuzz-corpus-v1-${{ github.run_id }}
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  fuzz-js:
+    name: JS minify fuzz (libFuzzer + classified findings)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 90
+    env:
+      FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
+    steps:
+      # libFuzzer reads a non-numeric budget as "no limit" and a budget past
+      # the job timeout loses the corpus save, so bound it before anything
+      # else runs.
+      - name: Validate the fuzz budget
+        run: |
+          case "${FUZZ_SECONDS}" in
+            ''|*[!0-9]*) echo "::error::fuzz budget must be a whole number of seconds (1..1800)"; exit 1 ;;
+          esac
+          if [ "${FUZZ_SECONDS}" -lt 1 ] || [ "${FUZZ_SECONDS}" -gt 1800 ]; then
+            echo "::error::fuzz budget must be between 1 and 1800 (got ${FUZZ_SECONDS})"
+            exit 1
+          fi
+
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # One named container per job, started as the host user and removed in
+      # the last step. Later steps run commands in it with docker exec, so
+      # processes a test rig starts stay up between steps. The passwd entry
+      # lets the image's passwordless sudo apply to the host uid.
+      - name: Start the build container
+        run: |
+          set -euo pipefail
+          CTR="nightly-fuzz-js-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          else
+            echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          { echo "dev:x:$(id -u):$(id -g)::/tmp/ci-home:/bin/bash"
+            docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/tmp/ci-home -e USER=dev \
+            -e "RUNNER_TEMP=${RUNNER_TEMP}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" sleep infinity >/dev/null
+          docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
+          echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
+
+      # The classifier's parseability axis shells out to node. Its absence
+      # fails open (every token-channel trip becomes needs-triage), which is
+      # safe but turns the night into noise, so assert it up front.
+      - name: Assert node is available (classifier validity axis)
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          command -v node >/dev/null 2>&1 || {
+            echo "::error::node is not on PATH in the build image; the JS fuzz classifier needs it for the parseability axis"
+            exit 1
+          }
+          node --version
+          EOS
+
+      - name: Build the ASan replay binary
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt //pagespeed/kernel/js:js_minify_fuzz
+          mkdir -p "${RUNNER_TEMP}/js-fuzz-bin"
+          cp bazel-bin/pagespeed/kernel/js/js_minify_fuzz "${RUNNER_TEMP}/js-fuzz-bin/js_fuzz_replay"
+          EOS
+
+      - name: Build the libFuzzer binary
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          bazel build ${BZL_FLAGS} --config=clang-asan -c opt \
+            --copt=-DJS_MINIFY_LIBFUZZER \
+            --copt=-fsanitize=fuzzer-no-link \
+            --linkopt=-fsanitize=fuzzer \
+            //pagespeed/kernel/js:js_minify_fuzz
+          cp -f bazel-bin/pagespeed/kernel/js/js_minify_fuzz "${RUNNER_TEMP}/js-fuzz-bin/js_fuzz_lf"
+          EOS
+
+      - name: Restore the persisted corpus (js-fuzz-corpus)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/js-fuzz-corpus
+          key: js-fuzz-corpus-v1-${{ github.run_id }}
+          restore-keys: js-fuzz-corpus-v1-
+
+      # A bounded, deterministic seed set: the harness's embedded seeds, the
+      # hand-minimal reproducers, seeded synthetic files (the generator is
+      # deterministic per --seed) and the third-party originals. The replay
+      # floor below runs the same fixed set, never the cache-grown corpus.
+      - name: Seed the corpus (embedded, reproducers, synthetic, third-party)
+        run: |
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          CORPUS="${RUNNER_TEMP}/js-fuzz-corpus"; SYNTH="${RUNNER_TEMP}/js-fuzz-synthetic"
+          mkdir -p "$CORPUS" "$SYNTH"
+          "${RUNNER_TEMP}/js-fuzz-bin/js_fuzz_replay" --dump_corpus="${RUNNER_TEMP}/js-fuzz-seed"
+          python3 tools/js-minify-corpus/generate_synthetic.py \
+            --seed 20260721 --dest "$SYNTH" --shapes 128 --execs 128
+          # -n: never overwrite what the persisted cache already grew.
+          cp -n "${RUNNER_TEMP}/js-fuzz-seed"/seed-* "$CORPUS"/
+          cp -n tools/js-minify-corpus/findings/repros/*.js \
+                tools/js-minify-corpus/findings/repros/*.mjs \
+                "$SYNTH"/*.js "$SYNTH"/*.mjs \
+                test/pagespeed/kernel/js/testdata/third_party/*.original \
+                test/pagespeed/kernel/js/testdata/third_party/es2020.js \
+                "$CORPUS"/
+          EOS
+
+      # Deterministic floor: the valid-seed battery (a hard abort built into
+      # the harness) plus a trip-counted replay of the fixed corpus sources.
+      - name: Run the seed and corpus replay (regression floor)
+        run: |
+          set +e
+          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1:detect_leaks=0"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          SYNTH="${RUNNER_TEMP}/js-fuzz-synthetic"
+          "${RUNNER_TEMP}/js-fuzz-bin/js_fuzz_replay" \
+            "${RUNNER_TEMP}/js-fuzz-seed"/seed-* \
+            tools/js-minify-corpus/findings/repros/*.js \
+            tools/js-minify-corpus/findings/repros/*.mjs \
+            "$SYNTH"/*.js "$SYNTH"/*.mjs \
+            test/pagespeed/kernel/js/testdata/third_party/*.original \
+            test/pagespeed/kernel/js/testdata/third_party/es2020.js \
+            2>&1 | tail -3
+          exit "${PIPESTATUS[0]}"
+          EOS
+          echo "REPLAY_RC=$?" >> "$GITHUB_ENV"
+
+      # Fork mode so the known-class crashes (operator-gluing over-catches
+      # trip within seconds on garbage input) cannot truncate the campaign;
+      # crash units land in the crash directory for the classifier.
+      - name: Run libFuzzer (bounded budget, fork mode)
+        run: |
+          set +e
+          docker exec -i -e FUZZ_SECONDS "${CTR}" bash -s <<'EOS'
+          mkdir -p "${RUNNER_TEMP}/js-fuzz-crashes"
+          export ASAN_OPTIONS="handle_abort=1:allow_addr2line=true:detect_odr_violation=1:detect_leaks=0"
+          export UBSAN_OPTIONS="halt_on_error=true:print_stacktrace=1"
+          "${RUNNER_TEMP}/js-fuzz-bin/js_fuzz_lf" "${RUNNER_TEMP}/js-fuzz-corpus" \
+            -fork=2 -ignore_crashes=1 \
+            -max_total_time="${FUZZ_SECONDS}" \
+            -max_len=4096 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix="${RUNNER_TEMP}/js-fuzz-crashes/" \
+            -print_final_stats=1
+          EOS
+          echo "FUZZ_RC=$?" >> "$GITHUB_ENV"
+
+      # Bucket the artifacts; only needs-triage items (plus a red floor or a
+      # campaign that never ran) reach the findings file and turn the job red.
+      - name: Classify the artifacts and gate
+        run: |
+          set -uo pipefail
+          echo "LANE_RAN=1" >> "$GITHUB_ENV"
+          set +e
+          docker exec -i -e REPLAY_RC -e FUZZ_RC "${CTR}" bash -s <<'EOS'
+          set -uo pipefail
+          F="${RUNNER_TEMP}/js-fuzz-crashes/findings.md"; mkdir -p "${RUNNER_TEMP}/js-fuzz-crashes"; : > "$F"
+          if [ "${REPLAY_RC:-1}" != "0" ]; then
+            {
+              echo "### deterministic replay floor is RED (rc=${REPLAY_RC})"
+              echo
+              echo "The valid-seed battery or the fixed corpus sources trip an oracle or a sanitizer on the default branch: a genuine regression, not a fuzz find. See the run log."
+              echo
+            } >> "$F"
+          fi
+          # Fork mode exits non-zero when it FOUND crashes (artifacts in the
+          # crash directory): a normal night. Non-zero with ZERO artifacts
+          # means the campaign never ran, which must be reported.
+          n_artifacts="$(find "${RUNNER_TEMP}/js-fuzz-crashes" -type f ! -name findings.md | wc -l | tr -d ' ')"
+          if [ "${FUZZ_RC:-1}" != "0" ] && [ "$n_artifacts" = "0" ]; then
+            {
+              echo "### libFuzzer campaign failed (rc=${FUZZ_RC}, zero artifacts)"
+              echo
+              echo "The fuzzer exited non-zero without producing a single unit: a startup or campaign failure, not a fuzz find. See the run log."
+              echo
+            } >> "$F"
+          fi
+          bash tools/ci/classify-js-fuzz-artifacts.sh \
+            "${RUNNER_TEMP}/js-fuzz-bin/js_fuzz_replay" "${RUNNER_TEMP}/js-fuzz-crashes" "$F"
+          [ -s "$F" ] || exit 0
+          cat "$F"
+          exit 1
+          EOS
+          rc=$?
+          [ -s "${RUNNER_TEMP}/js-fuzz-crashes/findings.md" ] && cat "${RUNNER_TEMP}/js-fuzz-crashes/findings.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      # Debugging aid for a failed run, kept briefly. A refused upload
+      # (artifact storage full) must not add a failure of its own.
+      - name: Upload the evidence (crash reproducers and corpus)
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-js-fuzz-evidence
+          path: |
+            ${{ runner.temp }}/js-fuzz-crashes/
+            ${{ runner.temp }}/js-fuzz-corpus/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Save even on findings: libFuzzer writes a crash unit into the corpus
+      # directory before it stops, and keeping it makes the finding a
+      # persistent regression input once the bug is fixed. Guarded on the
+      # lane having run so a build-stage failure cannot error the save on a
+      # missing path.
+      - name: Persist the corpus (js-fuzz-corpus)
+        if: always() && env.LANE_RAN == '1'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/js-fuzz-corpus
+          key: js-fuzz-corpus-v1-${{ github.run_id }}
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          if [ -n "${CTR:-}" ]; then
+            docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  # ---------------------------------------------------------------------
+  # IIS lanes (class fleet-iis: a Windows host with the IIS role, a local
+  # administrator service account and one runner instance, so these lanes
+  # never overlap each other or any other IIS job). No hosted twin exists, so
+  # a fork pull request or a missing fleet skips them. Toolchain, caches and
+  # the dump directory come from the optional runner environment
+  # (docs/ci/runner-environment.md).
+  # ---------------------------------------------------------------------
+  iis-asan-systest:
+    name: IIS ASan recycle stress
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    env:
+      DURATION: ${{ inputs.duration || '600' }}
+      CONCURRENCY: ${{ inputs.concurrency || '16' }}
+    steps:
+      - name: Validate the stress parameters
+        shell: bash
+        run: |
+          case "${DURATION}${CONCURRENCY}" in
+            ''|*[!0-9]*) echo "::error::duration and concurrency must be whole numbers"; exit 1 ;;
+          esac
+          if [ "${DURATION}" -lt 1 ] || [ "${DURATION}" -gt 1800 ]; then
+            echo "::error::duration must be between 1 and 1800 seconds (got ${DURATION})"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      # A vendor tarball on the runner makes the dependency fetch local; the
+      # extraction script falls back to the hub only when the runner environment
+      # configures one (docs/ci/runner-environment.md).
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        shell: bash
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_WIN_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_WIN_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        shell: bash
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+
+      - name: Set up the toolchain from the runner environment
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Directories the runner environment offers go to the front of PATH
+          # for the following steps: bazelisk, bash, the pinned NASM, Python.
+          $dirs = @()
+          if ($env:CI_WIN_TOOLS_DIR) { $dirs += ($env:CI_WIN_TOOLS_DIR -split ';') }
+          if ($env:CI_WIN_PYTHON_DIR) { $dirs += $env:CI_WIN_PYTHON_DIR; $dirs += (Join-Path $env:CI_WIN_PYTHON_DIR 'Scripts') }
+          if ($env:CI_WIN_LLVM_DIR) {
+            # The AddressSanitizer runtime sits under lib\clang\<version>\lib\windows.
+            $rt = Get-ChildItem -Path (Join-Path $env:CI_WIN_LLVM_DIR 'lib\clang') -Directory -ErrorAction SilentlyContinue |
+              ForEach-Object { Join-Path $_.FullName 'lib\windows' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($rt) { $dirs += $rt } else { Write-Host "::notice::no AddressSanitizer runtime directory under the LLVM install" }
+          }
+          [array]::Reverse($dirs)
+          foreach ($d in $dirs) {
+            if ($d -and (Test-Path $d)) { $d | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+          }
+
+      # The AV1 encoder needs NASM 2.16.03: libaom rejects 3.x, which dropped
+      # the -Ox line from the help text that libaom checks for. The check runs
+      # before the build loop so a missing assembler is not retried five times.
+      - name: Check the pinned assembler
+        shell: powershell
+        run: |
+          $nasm = Get-Command nasm -ErrorAction SilentlyContinue
+          if (-not $nasm) { throw "nasm is not on PATH. Provide NASM 2.16.03 through CI_WIN_TOOLS_DIR (docs/ci/runner-environment.md)." }
+          if (-not (& $nasm.Source -hf 2>&1 | Select-String -SimpleMatch -Quiet '-Ox')) {
+            throw "the nasm on PATH is not usable by libaom (no -Ox in -hf output; 3.x dropped it). Provide 2.16.03."
+          }
+          Write-Host "nasm ok: $(& $nasm.Source -v)"
+
+      - name: Ensure bazel
+        shell: bash
+        run: |
+          if command -v bazelisk >/dev/null 2>&1; then
+            echo "BAZEL_BIN=bazelisk" >> "$GITHUB_ENV"
+          elif command -v bazel >/dev/null 2>&1; then
+            echo "BAZEL_BIN=bazel" >> "$GITHUB_ENV"
+          else
+            npm install -g @bazel/bazelisk@1.28.1
+            echo "BAZEL_BIN=bazelisk" >> "$GITHUB_ENV"
+          fi
+
+
+      - name: Build the IIS module with ASan
+        shell: bash
+        timeout-minutes: 60
+        run: |
+          set -uo pipefail
+          FLAGS=(--config=vendored --config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
+                 "--workspace_status_command=cmd /c echo.")
+          if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
+            echo "using the remote cache"
+            FLAGS+=("--remote_cache=${BAZEL_REMOTE_CACHE_URL}")
+          else
+            echo "::notice::BAZEL_REMOTE_CACHE_URL not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          if [ -n "${CI_WIN_CACHE_DIR:-}" ]; then
+            CACHE_DIR="${CI_WIN_CACHE_DIR//\\//}"
+            FLAGS+=("--disk_cache=${CACHE_DIR}-asan")
+            if [ -n "${CI_WIN_CACHE_MAX_SIZE:-}" ]; then
+              FLAGS+=("--experimental_disk_cache_gc_max_size=${CI_WIN_CACHE_MAX_SIZE}")
+            fi
+          fi
+          # A short output root keeps Windows path lengths in bounds.
+          OUT_ROOT="${CI_WIN_BAZEL_OUTPUT_ROOT:-${SYSTEMDRIVE:-C:}/b}"
+          OUT_ROOT="${OUT_ROOT//\\//}"
+          # A transient permission-denied on a freshly materialized generated
+          # header is a known Bazel-on-Windows race; retry the build.
+          built=0
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "build attempt ${attempt} (the previous one hit a transient permission error)"
+              "$BAZEL_BIN" --output_user_root="$OUT_ROOT" shutdown || true
+              sleep 5
+            fi
+            if "$BAZEL_BIN" --output_user_root="$OUT_ROOT" build "${FLAGS[@]}" //pagespeed/iis:pagespeed_iis.dll; then
+              built=1; break
+            fi
+          done
+          if [ "$built" != 1 ]; then echo "::error::build failed after 5 attempts"; exit 1; fi
+          BAZEL_BIN_DIR="$("$BAZEL_BIN" --output_user_root="$OUT_ROOT" info bazel-bin 2>/dev/null | tr -d '\r')"
+          test -f "$BAZEL_BIN_DIR/pagespeed/iis/pagespeed_iis.dll" || { echo "::error::module missing after the build"; exit 1; }
+          echo "BAZEL_BIN_DIR=$(cygpath -w "$BAZEL_BIN_DIR" 2>/dev/null || echo "$BAZEL_BIN_DIR")" >> "$GITHUB_ENV"
+          echo "built the module: $(wc -c < "$BAZEL_BIN_DIR/pagespeed/iis/pagespeed_iis.dll") bytes"
+
+
+      - name: Set up the ASan IIS rig
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $rig = Join-Path $env:RUNNER_TEMP 'iis-asan-rig'
+          "RIG_DIR=$rig" >> $env:GITHUB_ENV
+          & "$env:GITHUB_WORKSPACE\tools\stress\iis\setup_iis_asan_rig.ps1" `
+            -RigDir $rig `
+            -DllSourceDir "$env:BAZEL_BIN_DIR\pagespeed\iis" `
+            -RepoDir $env:GITHUB_WORKSPACE
+
+      # Crash-dump capture is WER LocalDumps for w3wp.exe, installed by the
+      # setup script and removed by the cleanup script.
+      - name: Run the recycle-under-load stress
+        id: stress
+        shell: powershell
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & "$env:GITHUB_WORKSPACE\tools\stress\iis\run_iis_asan_rig.ps1" `
+            -RigDir $env:RIG_DIR -Duration ([int]$env:DURATION) -Concurrency ([int]$env:CONCURRENCY) `
+            -RepoDir $env:GITHUB_WORKSPACE
+          # The harness status alone does not fail the step; the sweep is the gate.
+          Write-Host "run step rc=$LASTEXITCODE (the sweep adjudicates)"
+
+      # Runs even when the stress step failed (the harness exits non-zero when
+      # it sees a crash): the sweep collects the evidence and gates either way.
+      - name: Sweep for ASan and crash evidence (gate)
+        if: ${{ !cancelled() && steps.stress.outcome != 'skipped' }}
+        shell: powershell
+        run: |
+          & "$env:GITHUB_WORKSPACE\tools\stress\iis\sweep_iis_asan_rig.ps1" -RigDir $env:RIG_DIR
+          if ($LASTEXITCODE -ne 0) { Write-Error "ASan or crash evidence found; see the logs above and the uploaded artifact"; exit 1 }
+
+      - name: Stage the evidence for upload
+        if: always()
+        shell: powershell
+        run: |
+          # upload-artifact computes one common root across all input paths,
+          # so stage everything into one folder first.
+          $stage = Join-Path $env:RUNNER_TEMP 'iis-asan-evidence'
+          Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          if ($env:RIG_DIR) { Copy-Item "$env:RIG_DIR\logs\*" $stage -Recurse -Force -ErrorAction SilentlyContinue }
+          Get-ChildItem C:\pagespeed_asan* -File -ErrorAction SilentlyContinue | Copy-Item -Destination $stage -Force
+          Write-Host "staged $((Get-ChildItem $stage -ErrorAction SilentlyContinue | Measure-Object).Count) file(s)"
+
+      # Full worker dumps run to gigabytes and stay on the host for on-box
+      # analysis; only logs go up. Debugging aid for a failed night only.
+      - name: Upload the evidence
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-iis-asan-evidence
+          path: ${{ runner.temp }}\iis-asan-evidence\*
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Tear down the rig (restore the module configuration)
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:RIG_DIR) { & "$env:GITHUB_WORKSPACE\tools\stress\iis\cleanup_iis_asan_rig.ps1" -RigDir $env:RIG_DIR }
+
+  iis-appverif-matrix:
+    name: IIS AppVerif provider matrix
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 240
+    env:
+      ARMS: ${{ inputs.arms }}
+    steps:
+      # The arms string goes to a script as an argument; keep it to the
+      # documented shape.
+      - name: Validate the arms
+        shell: bash
+        run: |
+          if ! printf '%s' "${ARMS}" | grep -Eq '^(cuzz-nopageheap|cuzz-pageheap|pageheap-nocuzz):[0-9]{1,2}(,(cuzz-nopageheap|cuzz-pageheap|pageheap-nocuzz):[0-9]{1,2})*$'; then
+            echo "::error::arms must be a comma separated list of <arm>:<iterations> (cuzz-nopageheap, cuzz-pageheap, pageheap-nocuzz)"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      # A vendor tarball on the runner makes the dependency fetch local; the
+      # extraction script falls back to the hub only when the runner environment
+      # configures one (docs/ci/runner-environment.md).
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        shell: bash
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_WIN_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_WIN_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        shell: bash
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+
+      - name: Set up the toolchain from the runner environment
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Directories the runner environment offers go to the front of PATH
+          # for the following steps: bazelisk, bash, the pinned NASM, Python.
+          $dirs = @()
+          if ($env:CI_WIN_TOOLS_DIR) { $dirs += ($env:CI_WIN_TOOLS_DIR -split ';') }
+          if ($env:CI_WIN_PYTHON_DIR) { $dirs += $env:CI_WIN_PYTHON_DIR; $dirs += (Join-Path $env:CI_WIN_PYTHON_DIR 'Scripts') }
+          if ($env:CI_WIN_LLVM_DIR) {
+            # The AddressSanitizer runtime sits under lib\clang\<version>\lib\windows.
+            $rt = Get-ChildItem -Path (Join-Path $env:CI_WIN_LLVM_DIR 'lib\clang') -Directory -ErrorAction SilentlyContinue |
+              ForEach-Object { Join-Path $_.FullName 'lib\windows' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($rt) { $dirs += $rt } else { Write-Host "::notice::no AddressSanitizer runtime directory under the LLVM install" }
+          }
+          [array]::Reverse($dirs)
+          foreach ($d in $dirs) {
+            if ($d -and (Test-Path $d)) { $d | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8 }
+          }
+
+      # The AV1 encoder needs NASM 2.16.03: libaom rejects 3.x, which dropped
+      # the -Ox line from the help text that libaom checks for. The check runs
+      # before the build loop so a missing assembler is not retried five times.
+      - name: Check the pinned assembler
+        shell: powershell
+        run: |
+          $nasm = Get-Command nasm -ErrorAction SilentlyContinue
+          if (-not $nasm) { throw "nasm is not on PATH. Provide NASM 2.16.03 through CI_WIN_TOOLS_DIR (docs/ci/runner-environment.md)." }
+          if (-not (& $nasm.Source -hf 2>&1 | Select-String -SimpleMatch -Quiet '-Ox')) {
+            throw "the nasm on PATH is not usable by libaom (no -Ox in -hf output; 3.x dropped it). Provide 2.16.03."
+          }
+          Write-Host "nasm ok: $(& $nasm.Source -v)"
+
+      - name: Ensure bazel
+        shell: bash
+        run: |
+          if command -v bazelisk >/dev/null 2>&1; then
+            echo "BAZEL_BIN=bazelisk" >> "$GITHUB_ENV"
+          elif command -v bazel >/dev/null 2>&1; then
+            echo "BAZEL_BIN=bazel" >> "$GITHUB_ENV"
+          else
+            npm install -g @bazel/bazelisk@1.28.1
+            echo "BAZEL_BIN=bazelisk" >> "$GITHUB_ENV"
+          fi
+
+
+      - name: Build the IIS module
+        shell: bash
+        timeout-minutes: 60
+        run: |
+          set -uo pipefail
+          FLAGS=(--config=vendored --config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
+                 "--workspace_status_command=cmd /c echo.")
+          if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
+            echo "using the remote cache"
+            FLAGS+=("--remote_cache=${BAZEL_REMOTE_CACHE_URL}")
+          else
+            echo "::notice::BAZEL_REMOTE_CACHE_URL not set: building without the remote cache (docs/ci/runner-environment.md)"
+          fi
+          if [ -n "${CI_WIN_CACHE_DIR:-}" ]; then
+            CACHE_DIR="${CI_WIN_CACHE_DIR//\\//}"
+            FLAGS+=("--disk_cache=${CACHE_DIR}-appverif")
+            if [ -n "${CI_WIN_CACHE_MAX_SIZE:-}" ]; then
+              FLAGS+=("--experimental_disk_cache_gc_max_size=${CI_WIN_CACHE_MAX_SIZE}")
+            fi
+          fi
+          # A short output root keeps Windows path lengths in bounds.
+          OUT_ROOT="${CI_WIN_BAZEL_OUTPUT_ROOT:-${SYSTEMDRIVE:-C:}/b}"
+          OUT_ROOT="${OUT_ROOT//\\//}"
+          # A transient permission-denied on a freshly materialized generated
+          # header is a known Bazel-on-Windows race; retry the build.
+          built=0
+          for attempt in 1 2 3 4 5; do
+            if [ "$attempt" -gt 1 ]; then
+              echo "build attempt ${attempt} (the previous one hit a transient permission error)"
+              "$BAZEL_BIN" --output_user_root="$OUT_ROOT" shutdown || true
+              sleep 5
+            fi
+            if "$BAZEL_BIN" --output_user_root="$OUT_ROOT" build "${FLAGS[@]}" //pagespeed/iis:pagespeed_iis.dll; then
+              built=1; break
+            fi
+          done
+          if [ "$built" != 1 ]; then echo "::error::build failed after 5 attempts"; exit 1; fi
+          BAZEL_BIN_DIR="$("$BAZEL_BIN" --output_user_root="$OUT_ROOT" info bazel-bin 2>/dev/null | tr -d '\r')"
+          test -f "$BAZEL_BIN_DIR/pagespeed/iis/pagespeed_iis.dll" || { echo "::error::module missing after the build"; exit 1; }
+          echo "BAZEL_BIN_DIR=$(cygpath -w "$BAZEL_BIN_DIR" 2>/dev/null || echo "$BAZEL_BIN_DIR")" >> "$GITHUB_ENV"
+          echo "built the module: $(wc -c < "$BAZEL_BIN_DIR/pagespeed/iis/pagespeed_iis.dll") bytes"
+
+
+      - name: Install the test dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --quiet -r "$env:GITHUB_WORKSPACE\test\system\requirements.txt"
+
+      # Armed before the zero-copy gate: that gate runs under full page heap
+      # too, so a stop there must self-capture as well.
+      - name: Arm crash-dump capture
+        shell: powershell
+        run: |
+          $extra = @('-Enable', '-GitHubEnv')
+          if ($env:CI_WIN_DUMP_DIR) { $extra += @('-DumpDir', $env:CI_WIN_DUMP_DIR) }
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Set-WerLocalDumps.ps1" @extra | Out-Null
+          "APPVERIF_T0=$((Get-Date).ToString('o'))" >> $env:GITHUB_ENV
+
+      # The on-IIS validation the aliased serve path demands: a slow client
+      # while flood writes wrap the cache volume, asserting byte-identity or
+      # reset. Full page heap on the module turns an aliased use-after-
+      # overwrite into a first-chance verifier stop. The verifier settings
+      # are machine-global, so this runs strictly before the matrix step.
+      - name: Run the zero-copy merge gate (slow client and region-rewrite canary)
+        id: zerocopy_gate
+        shell: powershell
+        timeout-minutes: 30
+        env:
+          PAGESPEED_ZEROCOPY_GATE_TRIALS: "3"
+          PAGESPEED_ZEROCOPY_GATE_CEILING: "1"
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Invoke-ZeroCopyGate.ps1" `
+            -RepoDir $env:GITHUB_WORKSPACE -EvidenceDir "$env:RUNNER_TEMP\zerocopy-gate"
+          if ($LASTEXITCODE -ne 0) { Write-Error "the zero-copy gate regressed; see the uploaded evidence"; exit 1 }
+
+      # Arms run strictly serially: the verifier and heap settings for the
+      # worker process are machine-global and one IIS instance serves them all.
+      - name: Run the AppVerifier provider matrix
+        id: matrix
+        shell: powershell
+        timeout-minutes: 150
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $arms = $env:ARMS
+          if (-not $arms) { $arms = "cuzz-nopageheap:5,cuzz-pageheap:3" }
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Invoke-AppVerifMatrix.ps1" `
+            -RepoDir $env:GITHUB_WORKSPACE -Arms $arms -EvidenceDir "$env:RUNNER_TEMP\appverif-matrix"
+          if ($LASTEXITCODE -ne 0) { Write-Error "the AppVerifier matrix regressed; see the summary above and the uploaded evidence"; exit 1 }
+
+      - name: Collect crash dumps
+        id: dumps
+        if: always()
+        shell: powershell
+        run: |
+          $since = if ($env:APPVERIF_T0) { [DateTimeOffset]::Parse($env:APPVERIF_T0).LocalDateTime } else { [DateTime]::MinValue }
+          $dumpDir = if ($env:PAGESPEED_DUMP_DIR) { $env:PAGESPEED_DUMP_DIR } else { "C:\dumps\localdumps" }
+          # The matrix writes one <arm>-<n>.txt fail-fast report per iteration;
+          # pass the directory so a failure in any iteration is cross-checked.
+          & powershell -NoProfile -ExecutionPolicy Bypass `
+            -File "$env:GITHUB_WORKSPACE\tools\ci\Collect-CrashDumps.ps1" `
+            -DumpDir $dumpDir -StageDir "$env:RUNNER_TEMP\appverif-matrix\staged" -Since $since `
+            -FailFastReport "$env:RUNNER_TEMP\appverif-matrix" `
+            -SymbolDir "$env:BAZEL_BIN_DIR\pagespeed\iis"
+          $staged = (Get-ChildItem "$env:RUNNER_TEMP\appverif-matrix\staged" -File -ErrorAction SilentlyContinue | Measure-Object).Count
+          "staged=$staged" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Uploaded when the night failed or a dump was staged; the matrix and
+      # zero-copy steps are the gates. A refused upload must not add a failure
+      # of its own.
+      - name: Upload the evidence
+        if: failure() || steps.dumps.outputs.staged != '0'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-iis-appverif-matrix-evidence
+          path: ${{ runner.temp }}\appverif-matrix\*
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the zero-copy gate evidence
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-iis-zerocopy-gate-evidence
+          path: ${{ runner.temp }}\zerocopy-gate\*
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Belt and braces: the matrix script disables the verifier in its own
+      # cleanup, but leaving the settings armed would slow, and eventually
+      # fail, every later job on this host. Must run even on failure.
+      - name: Disable Application Verifier and page heap
+        if: always()
+        shell: powershell
+        run: |
+          try { appverif -disable * -for w3wp.exe 2>&1 | Out-Null } catch { Write-Host "appverif -disable: $($_.Exception.Message)" }
+          $gflags = Get-Command gflags -ErrorAction SilentlyContinue
+          $gp = $null
+          if ($gflags) { $gp = $gflags.Source }
+          elseif (Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\gflags.exe") { $gp = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\gflags.exe" }
+          if ($gp) {
+            try { & $gp /p /disable w3wp.exe 2>&1 | Out-Null } catch { Write-Host "gflags disable: $($_.Exception.Message)" }
+          }
+          $global:LASTEXITCODE = 0
+          $since = if ($env:APPVERIF_T0) { [DateTimeOffset]::Parse($env:APPVERIF_T0).LocalDateTime } else { [DateTime]::MinValue }
+          try {
+            & powershell -NoProfile -ExecutionPolicy Bypass `
+              -File "$env:GITHUB_WORKSPACE\tools\ci\Set-WerLocalDumps.ps1" -Disable -Purge -Since $since
+          } catch { Write-Host "LocalDumps cleanup: $($_.Exception.Message)" }
+          Write-Host "Application Verifier and page heap disabled, LocalDumps removed"
+
+
+  # ---------------------------------------------------------------------
+  # Hosted, read-only jobs. They hold no secret and no write token. The
+  # tracking issue and the snapshot pull request the private predecessors
+  # produced are not part of this workflow; the refreshed snapshot and the
+  # reports are uploaded instead.
+  # ---------------------------------------------------------------------
+  nvd-scan:
+    name: NVD CVE scan (report only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SEVERITY: ${{ inputs.severity }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate the severity floor
+        run: |
+          case "${SEVERITY:-medium}" in
+            low|medium|high|critical) ;;
+            *) echo "::error::severity must be one of low, medium, high, critical"; exit 1 ;;
+          esac
+
+      # Hits the live NVD feed (plus each dependency's upstream feed) and
+      # rebuilds the snapshot into the runner temp directory, so the checkout
+      # stays clean. No API key is configured, so the request rate is the
+      # anonymous one: a slow run, and a rate-limited one soft-skips.
+      - name: Run the vendored-dependency CVE matcher against NVD (rebuild the snapshot)
+        id: refresh
+        run: |
+          set -uo pipefail
+          mkdir -p "${RUNNER_TEMP}/nvd"
+          python3 tools/dependency/cve_scan.py \
+            --severity "${SEVERITY:-medium}" \
+            --refresh \
+            --build-snapshot "${RUNNER_TEMP}/nvd/nvd-snapshot.json" \
+            --json "${RUNNER_TEMP}/nvd/report.json" \
+            | tee "${RUNNER_TEMP}/nvd/scan.txt"
+          rc="${PIPESTATUS[0]}"
+          if [ "$rc" -eq 0 ]; then
+            echo "refresh_ok=true" >> "$GITHUB_OUTPUT"
+            echo "Refresh succeeded: snapshot rebuilt."
+          elif [ "$rc" -eq 3 ]; then
+            # The matcher uses exit 3 for "NVD was unreachable or the refresh
+            # could not complete": an upstream outage or rate limit, not a
+            # finding and not a logic error. This job only reports, and the
+            # per-pull-request gate reads the committed snapshot, so skip.
+            echo "refresh_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::NVD unreachable or rate limited: snapshot refresh skipped, the committed snapshot is retained"
+          else
+            echo "refresh_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::the CVE matcher exited ${rc} (not the NVD-unreachable skip)"
+            exit "$rc"
+          fi
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo '## Vendored C/C++ CVE scan (report only)'
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/nvd/scan.txt" 2>/dev/null || echo "(the scan produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The refreshed snapshot rides along so a reviewer, or a later bot job
+      # with its own token, can propose it. A refused upload must not turn
+      # the scan red.
+      - name: Upload the report and the refreshed snapshot
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-cpp-cve-report
+          path: ${{ runner.temp }}/nvd/
+          if-no-files-found: warn
+          retention-days: 3
+
+  # The live-database dependency scan of the nightly tier, and the home of
+  # two checks the pull request tier leaves out: the staleness ratchet for
+  # the pinned grype database, and the image scan mode. Scan findings never
+  # fail the job; the pin staleness check does, on purpose.
+  dep-scan-nightly:
+    name: Dependency scan (nightly, pin age and images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SYFT_VERSION: v1.44.0
+      GRYPE_VERSION: v0.112.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Ensure pinned syft + grype
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          have() { command -v "$1" >/dev/null 2>&1 && "$1" version 2>/dev/null | awk '/^Version:/{print "v"$2}'; }
+          [ "$(have syft)" = "$SYFT_VERSION" ] || \
+            bash tools/sbom/install-pinned-tool.sh syft "$SYFT_VERSION" "$RUNNER_TEMP/bin"
+          [ "$(have grype)" = "$GRYPE_VERSION" ] || \
+            bash tools/sbom/install-pinned-tool.sh grype "$GRYPE_VERSION" "$RUNNER_TEMP/bin"
+          syft version | awk '/^Version:/{print "syft "$2}'
+          grype version | awk '/^Version:/{print "grype "$2}'
+
+      # The staleness ratchet. The blocking dependency gate of the pull
+      # request tier scans against a pinned grype database
+      # (tools/sbom/grype-db-pin.json). Once that pin is older than its
+      # max_age_days, this scheduled job goes red, so a pin nobody bumps
+      # reddens the schedule and never a pull request. This job is the
+      # home of the check.
+      - name: Enforce the grype database pin age
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+        run: bash tools/sbom/provision-grype-db.sh --enforce-age
+
+      # The live database, every surface, and the image scan mode. The image
+      # surface scans the package-test images from the local container cache;
+      # a hosted runner has none, so those rows read "not built" (an honest
+      # row, never a clean one). The report never fails on findings.
+      - name: Run the dependency scan (report only, with images)
+        run: |
+          set -uo pipefail
+          bash tools/sbom/dep-scan.sh --images
+          # Surface the severity table on the run's Summary tab.
+          if [ -f sbom/scan/SUMMARY.md ]; then cat sbom/scan/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      # A refused upload (artifact storage full) must not turn the scan red.
+      - name: Upload SBOMs and grype reports
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-dep-scan-reports
+          path: sbom/scan/
+          if-no-files-found: warn
+          retention-days: 3
