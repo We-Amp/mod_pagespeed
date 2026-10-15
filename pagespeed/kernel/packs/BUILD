@@ -378,7 +378,6 @@ cc_binary(
     srcs = ["pack_loader_fuzz.cc"],
     tags = ["manual"],
     deps = [
-        ":engine_version",
         ":pack_loader",
     ],
 )

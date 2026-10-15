@@ -142,7 +142,6 @@ cc_test(
     data = ["//tools/pack-loader-corpus:seeds"],
     linkstatic = True,
     deps = [
-        "//pagespeed/kernel/packs:engine_version",
         "//pagespeed/kernel/packs:pack_loader",
     ],
 )
