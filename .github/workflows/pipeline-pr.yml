@@ -2040,7 +2040,7 @@ jobs:
           $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
           $comspec = $env:ComSpec -replace '\\', '/'
           $common = @('--config=windows', '--config=clang-cl', '--jobs=HOST_CPUS*.75', '--nostamp',
-                      "--workspace_status_command=$comspec /c echo.",
+                      "--workspace_status_command=echo.",
                       "--disk_cache=$diskCache")
           if ($env:WIN_CACHE_MAX_SIZE) { $common += "--experimental_disk_cache_gc_max_size=$($env:WIN_CACHE_MAX_SIZE)" }
           if (Test-Path -LiteralPath 'vendor') { $common = @('--config=vendored') + $common }
@@ -2329,7 +2329,7 @@ jobs:
           $diskCache = $env:WIN_CACHE_DIR -replace '\\', '/'
           $comspec = $env:ComSpec -replace '\\', '/'
           $common = @('--config=windows', '--config=clang-cl', '--jobs=HOST_CPUS*.75', '--nostamp',
-                      "--workspace_status_command=$comspec /c echo.",
+                      "--workspace_status_command=echo.",
                       "--disk_cache=$diskCache")
           if ($env:WIN_CACHE_MAX_SIZE) { $common += "--experimental_disk_cache_gc_max_size=$($env:WIN_CACHE_MAX_SIZE)" }
           if (Test-Path -LiteralPath 'vendor') { $common = @('--config=vendored') + $common }
