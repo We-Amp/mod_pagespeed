@@ -417,6 +417,37 @@ pull request (the callers pin `@master`). To exercise it before merge:
 The `ci-dev` branch is shared and disposable; whoever pushes it last owns the
 next dispatch.
 
+## The public-tree hygiene gate
+
+`tools/ci/check-public-hygiene.sh` runs in the `Public-tree hygiene gate` job
+in two passes over the tracked tree. The first pass applies
+`.github/hygiene-rules.txt` (private vocabulary and identifiers). The second
+pass applies `.github/hygiene-credential-rules.txt` and refuses credential
+literals:
+
+- **securestring-literal**: PowerShell `ConvertTo-SecureString` with a quoted
+  string literal and `-AsPlainText` (any argument order, or via the pipeline).
+  A variable or `$env:` argument passes.
+- **pscredential-literal**: `PSCredential(` constructed with a quoted literal
+  second argument.
+- **secret-assignment**: `password`, `passwd`, `secret`, `token`, `api_key` or
+  `apikey` (whole word, any case) assigned a quoted string of 8 or more
+  characters, in shell, PowerShell, YAML, Python and JSON files. Obvious
+  placeholders pass (`changeme`, `example`, `placeholder`, `xxx`, `dummy`,
+  `test`, `<...>`, `${...}`, `$env:...`, `%...%`, `secret` itself); the list
+  is the `placeholder` entries in the rules file and can grow there.
+- **private-key-header**: `-----BEGIN ... PRIVATE KEY-----` headers.
+- **token-shape**: GitHub (`gh[pousr]_`), AWS (`AKIA`), Slack (`xox[baprs]-`)
+  and Google (`AIza`) token shapes.
+
+The report names `path:line` and the rule class, never the matched text.
+
+Allowlisting, for fixtures that intentionally hold fake secrets only: add an
+`allow-path` entry (a git pathspec glob, with a comment saying why) to the
+credential rules file, or put the marker `hygiene-allow-credential` on the
+line itself, for example in a trailing comment. The self-test for this pass is
+`tools/ci/test_check_public_hygiene.sh`; it builds its fixtures at run time.
+
 ## The workflow-shape gate
 
 `tools/ci/check-workflow-shape.sh` runs in the `Public-tree hygiene gate` job

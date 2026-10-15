@@ -23,7 +23,15 @@
 #   * .git -- git grep visits tracked files only, so it is never scanned.
 #   * the rules file itself -- it necessarily contains every blocked
 #     pattern.
-# There are NO content exclusions: any hit anywhere else in the tree fails.
+# There are NO content exclusions in this first pass: any hit anywhere else
+# in the tree fails.
+#
+# Second pass: credential literals (PowerShell secure-string and PSCredential
+# literals, password-like assignments, private key headers, well-known token
+# shapes). Its rules, placeholder list and path allowlist live in
+# .github/hygiene-credential-rules.txt (header documents the format); a line
+# carrying the marker "hygiene-allow-credential" is exempt. It reports
+# path:line and the rule class only, never the matched text.
 #
 # Usage: tools/ci/check-public-hygiene.sh
 set -euo pipefail
@@ -76,3 +84,96 @@ if [[ $status -ne 0 ]]; then
 fi
 
 echo "Public-tree hygiene gate passed: no rule matched the tracked tree."
+
+# ---------------------------------------------------------------------------
+# Second pass: credential literals.
+# ---------------------------------------------------------------------------
+CRED_RULES=".github/hygiene-credential-rules.txt"
+CRED_MARKER="hygiene-allow-credential"
+[[ -f "$CRED_RULES" ]] || { echo "::error::${CRED_RULES} not found" >&2; exit 1; }
+
+cred_excludes=(":(exclude)${RULES}" ":(exclude)${CRED_RULES}")
+placeholders=()
+cred_rules=()
+lineno=0
+while IFS=$'\t' read -r kind a b c d || [[ -n "$kind" ]]; do
+  lineno=$((lineno + 1))
+  case "$kind" in
+    ''|\#*) continue ;;
+    placeholder) placeholders+=("$a") ;;
+    allow-path) cred_excludes+=(":(exclude,glob)${a}") ;;
+    rule)
+      if [[ "$a" != *E* || -z "$b" || -z "$c" ]]; then
+        echo "::error::${CRED_RULES}:${lineno}: malformed rule" >&2
+        exit 1
+      fi
+      cred_rules+=("${a}"$'\t'"${b}"$'\t'"${c}"$'\t'"${d:-}")
+      ;;
+    *)
+      echo "::error::${CRED_RULES}:${lineno}: unknown line kind '${kind}'" >&2
+      exit 1
+      ;;
+  esac
+done < "$CRED_RULES"
+
+is_placeholder() { # <value>
+  local p
+  for p in "${placeholders[@]}"; do
+    if printf '%s\n' "$1" | grep -Eiq -e "$p"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+cred_status=0
+for entry in "${cred_rules[@]}"; do
+  IFS=$'\t' read -r flags name pattern options <<<"$entry"
+  grep_args=(-n -I -o -E)
+  [[ "$flags" == *i* ]] && grep_args+=(-i)
+  pathspecs=(.)
+  filter=0
+  for opt in $options; do
+    case "$opt" in
+      value-filter) filter=1 ;;
+      paths=*)
+        IFS=',' read -r -a pathspecs <<<"${opt#paths=}"
+        ;;
+    esac
+  done
+  set +e
+  out="$(git grep "${grep_args[@]}" -e "$pattern" -- "${pathspecs[@]}" "${cred_excludes[@]}")"
+  rc=$?
+  set -e
+  if [[ $rc -gt 1 ]]; then
+    echo "::error::${CRED_RULES}: rule '${name}': git grep failed (status ${rc})" >&2
+    exit 1
+  fi
+  [[ $rc -eq 0 ]] || continue
+  while IFS= read -r hit; do
+    [[ -n "$hit" ]] || continue
+    rest="${hit#*:}"
+    path="${hit%%:*}"
+    n="${rest%%:*}"
+    match="${rest#*:}"
+    if sed -n "${n}p" "$path" | grep -qF -e "$CRED_MARKER"; then
+      continue
+    fi
+    if [[ $filter -eq 1 ]]; then
+      value="$(printf '%s' "$match" | sed -E "s/^[^:=]*[:=][[:space:]]*[\"']//; s/[\"']\$//")"
+      if is_placeholder "$value"; then
+        continue
+      fi
+    fi
+    echo "::error file=${path},line=${n}::credential literal (${name}); move it to the environment or a secret store" >&2
+    echo "${path}:${n}: ${name}" >&2
+    cred_status=1
+  done <<<"$out"
+done
+
+if [[ $cred_status -ne 0 ]]; then
+  echo "::error::public-tree hygiene gate FAILED -- credential literals found; see ${CRED_RULES} for the rules and the allowlist" >&2
+  exit 1
+fi
+
+echo "Public-tree credential-literal pass passed: no rule matched the tracked tree."
