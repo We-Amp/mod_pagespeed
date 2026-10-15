@@ -20,7 +20,7 @@ jobs exist today.
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
 | PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | today only hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal. Build runner legs follow in a later step |
-| Full | `pipeline-full.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | not yet present; the call in `ci.yml` is commented out until the file exists |
+| Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners. See "The full tier" |
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 
@@ -32,7 +32,7 @@ compared against is not part of this repository.
 
 The `ci:full` label is read when a pull request run starts (open, push,
 reopen). After adding the label, push or re-run the workflow to get the full
-tier, once it exists.
+tier.
 
 ### Path-filtered hosted guards
 
@@ -217,6 +217,44 @@ the split (rule f): every reusable workflow declares a top-level
 not) is allowed only on a job with a hosted `runs-on`. Report jobs check out
 `master` for the tools they run, because they hold a write token.
 
+## The full tier
+
+`pipeline-full.yml` is self-contained: it vendors and builds for itself
+instead of waiting for the PR tier, so the two run side by side. Its
+artifacts carry the `full-` prefix. The IIS system tests (the PR tier's IIS
+legs) are not part of it.
+
+| Job | Class | Guard | Notes |
+|---|---|---|---|
+| `vendor` | `fleet-heavy` | general | vendors the dependency tree; publishes it through the hub when the runner environment provides one, else `actions/cache` |
+| `linux-build` | `fleet-heavy` | general | builds both server modules and the test targets, runs the module symbol checks, uploads the module bundle |
+| `linux-asan` | `fleet-heavy` | general | ASan, UBSan and LeakSan over the unit tests, with redis and memcached on a per-run network |
+| `linux-tsan` | `fleet-heavy` | general | TSan over the same tests (`seccomp=unconfined` for TSan's address-space layout, all capabilities dropped) |
+| `apache-sys-tests` | `fleet-light` | general | runs the built module in the dev image with only the low-port capability; failure diagnostics are uploaded |
+| `nginx-sys-tests` | `fleet-light` | general | the same for the nginx module |
+| `windows-build` | `fleet-windows` | general | release build of the IIS module; its bundle feeds `win-appverif` |
+| `win-asan` | `fleet-windows` | general | Windows ASan build and unit tests; skips with a notice when LLVM 19 with its sanitizer runtime is not found |
+| `win-appverif` | `fleet-iis` | only | Application Verifier, full page heap and concurrency fuzzing on the IIS worker process. Needs the IIS role, administrator rights and the Windows SDK debugging tools, so it has no hosted side and a fork or Dependabot pull request skips it |
+| `linux-arm64-build`, `linux-arm64-unit-tests`, `linux-arm64-apache-sys-tests`, `linux-arm64-nginx-sys-tests` | hosted (`ubuntu-24.04-arm`) | none | the arm64 build vendors for itself into `actions/cache` and uploads its module bundle; the other three reuse the vendored tree, the Bazel disk cache and the bundle |
+
+Notes on the full tier:
+
+- Sanitizer jobs wait for `linux-build` (not only for `vendor`), so they never
+  compete with the build for a heavy slot.
+- Containers run as the host user. The job supplies a passwd file that names
+  that user `dev`, the name the dev image's sudo rules know. No job mounts the
+  container socket or runs a privileged container.
+- With none of the runner-environment variables set (a fork or Dependabot pull
+  request, or a runner without a cache), every general-guard job runs on a
+  hosted runner without the remote cache and without host paths.
+- The hosted arm64 jobs are in this tier and not in the PR tier because a cold
+  hosted arm64 build has no warm cache. Promote them after a timing run.
+- A failed system-test run uploads one diagnostics tarball as an artifact;
+  that collection and upload are best effort and cannot change the job result.
+- Stale Windows runner state matters to `win-appverif`: Application Verifier
+  and page heap settings for the worker process are machine-global, so the job
+  clears them before arming and again at the end, even on failure.
+
 ## The release ref guard
 
 Release pipelines start with the `ref-guard` action
@@ -255,6 +293,11 @@ console drift, placement, pytest exit, bazelrc, git_repository, PR policy)`,
 `pr / Blocking Dep Scan (npm)`, `pr / Browser client-JS tests`,
 `pr / Console SPA tests`, the inline `License audit (Apache RAT)`,
 `Public-tree hygiene gate` and `CI tooling self-tests`, and `CI gate`.
+
+The full tier's jobs are named `full / <job name>` (for example
+`full / Linux Build`). They run only on a push to `master`, a dispatch with
+`full: true` or a labelled pull request, so none of them is a required check;
+`CI gate` covers them whenever they run.
 
 Not listed individually: `pr / Dependency Scan (report-only)` (it never fails
 the build) and the path-filtered jobs (`pr / Repo signing key embedded`,
@@ -322,6 +365,7 @@ first such job:
 ```text
 We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/ci-dev
+We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-nightly.yml@refs/heads/master
 ```
 
