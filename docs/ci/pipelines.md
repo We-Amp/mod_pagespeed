@@ -73,6 +73,13 @@ stops the release.
 | `gate-iis-msi-upgrade.yml` | `iis-msi-upgrade-test` | `msi_artifact`, `old_msi_artifact` (optional), `release_tag` | restores a clean IIS guest checkpoint, installs the MSI (a clean install, or an upgrade over the older MSI), smoke-tests and uninstalls it. A missing guest, name or password fails the gate |
 | `gate-cpanel-smoke.yml` | `cpanel-smoke` | `os`, `rpm_artifact`, `release_tag` | restores a clean cPanel guest checkpoint for one operating system, installs the package and smoke-tests it over ssh. Skips with a warning when that operating system has no guest yet, and on prerelease tags |
 
+Both declare one output, `ran`: the string `true` only when the test step
+actually executed (it passed or failed), and `false` on every other path (a
+missing guest or checkpoint, a prerelease tag, an early exit, a cancelled or
+failed earlier step). The release lane requires `ran == 'true'` from each gate
+in a real run and treats a missing output as `false`, so a skip can never
+count as a pass.
+
 Both use the "only" guard and read their guest names and the guest password
 from the runner environment (`docs/ci/runner-environment.md`); neither holds a
 secret or a write token. The MSI is built on a hosted runner and handed over

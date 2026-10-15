@@ -33,6 +33,11 @@ on:
         type: string
         default: ""
 
+    outputs:
+      ran:
+        description: '"true" only when the test step actually executed; "false" on every skip path'
+        value: ${{ jobs.iis-msi-upgrade-test.outputs.ran }}
+
 permissions:
   contents: read
 
@@ -42,6 +47,8 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
     if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 30
+    outputs:
+      ran: ${{ steps.ran.outputs.ran }}
     defaults:
       run:
         shell: powershell
@@ -85,6 +92,7 @@ jobs:
       # one downloaded (a picker over a shared directory once chose a stale
       # file of an earlier release).
       - name: Run the MSI upgrade test
+        id: test
         timeout-minutes: 20
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
@@ -101,3 +109,14 @@ jobs:
           }
           .\test\system\iis\ci-msi-upgrade-test.ps1 -MsiPath $msi[0].FullName -OldMsiPath $old -ReleaseTag $env:RELEASE_TAG
           exit $LASTEXITCODE
+
+      # "true" only when the step above ran (it passed or failed); a skipped
+      # step, whatever the reason, gives "false".
+      - name: Record whether the test ran
+        id: ran
+        if: ${{ always() }}
+        env:
+          OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          $ran = if ($env:OUTCOME -eq 'success' -or $env:OUTCOME -eq 'failure') { 'true' } else { 'false' }
+          "ran=$ran" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
