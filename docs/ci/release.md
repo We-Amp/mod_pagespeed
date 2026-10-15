@@ -39,13 +39,13 @@ a new tag. The tags of the product line (`v2.4.0`) and of the optimizer
 (`optimizer-v1.19.0`) never match `module-v*`, so a tag selects exactly one
 lane.
 
-The module version comes from the tag alone. The tree carries the product line
-version in `net/instaweb/public/VERSION`; the `vendor` job stamps
+The module version comes from the tag alone. The tree carries the module
+version in `net/instaweb/public/VERSION`; the `vendor` job stamps the tag's
 `MAJOR`, `MINOR`, `BUILD`, `PRERELEASE` and `LASTCHANGE=1` (the package
 revision) into the copy every build starts from, with
 `tools/ci/release_version.sh`. The packages therefore carry `1.19.0` (or
-`1.19.0~rc.1`, the dpkg and rpm spelling of a pre-release) while the tree says
-`2.4.0`. The pinned optimizer release (`install/debian/optimizer-pin.json`)
+`1.19.0~rc.1`, the dpkg and rpm spelling of a pre-release), taken from the tag
+rather than from the tree. The pinned optimizer release (`install/debian/optimizer-pin.json`)
 must be `optimizer-v` plus the same version, and its cache library must be the
 one this tree links: the `optimizer-fetch` job refuses a pin that is not.
 
