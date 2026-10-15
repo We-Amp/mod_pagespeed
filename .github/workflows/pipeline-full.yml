@@ -787,8 +787,9 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Windows. Tool locations come from PATH, or from the runner environment
-  # when the runner provides it (docs/ci/runner-environment.md). Nothing here
-  # names a drive, a user profile or an installation directory of a runner.
+  # when the runner provides it (docs/ci/runner-environment.md). No user
+  # profile or installation directory of a runner is named here; the one
+  # fixed path is the product's own cache directory.
   # ---------------------------------------------------------------------
 
   # Release build of the IIS module. It feeds win-appverif and is the full
