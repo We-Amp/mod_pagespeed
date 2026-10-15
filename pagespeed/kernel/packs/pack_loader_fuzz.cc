@@ -34,7 +34,7 @@
 
 namespace {
 
-// The engine version every input is loaded against. The corpus is recorded
+// The engine version every input is loaded against. The corpus is replayed
 // against this fixed engine, so the real product version (EngineVersion())
 // must not leak in: an engine_min above it has to be refused no matter which
 // release this tree is at. It sits above the example pack's engine_min
