@@ -209,8 +209,8 @@ jobs:
         run: |
           [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ] || { echo "::error::checked-out HEAD $(git rev-parse HEAD) != release commit $RELEASE_SHA"; exit 1; }
 
-      # The tree carries the product line version; the packages carry the
-      # module version of the tag. Every later job builds from this stamped
+      # The tree carries the module version; the packages carry the version
+      # of the tag, stamped here. Every later job builds from this stamped
       # copy.
       - name: Stamp the module version
         run: |
@@ -417,9 +417,8 @@ jobs:
 
       # The release SBOM is generated for the stamped tree, not compared with
       # the committed copy: the committed file carries the version of the
-      # tree's VERSION, which is not the tag's. The drift check
-      # (generate-sbom.py --verify) belongs to the pull request tier, once the
-      # tree's VERSION and the committed SBOM agree. The scans below, the
+      # tree's VERSION, which is not necessarily the tag's. The drift check
+      # (generate-sbom.py --verify) runs in the pull request tier. The scans below, the
       # notices check and the release file all use the generated SBOM.
       - name: Generate the SBOM for the stamped tree
         run: python3 tools/generate-sbom.py
