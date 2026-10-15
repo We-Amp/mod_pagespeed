@@ -1,0 +1,567 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-pr.yml: the PR tier, as a reusable workflow. Callers (ci.yml,
+# ci-dev.yml) hold the triggers and the concurrency block; this file holds
+# the jobs. See docs/ci/pipelines.md.
+#
+# This step holds the hosted checks only. Every job here runs on a
+# GitHub-hosted runner and holds no secret and no write token.
+#
+# Coming in the next step, as jobs on the build runners (they will carry the
+# runner routing expression and the guard of docs/ci/pipelines.md,
+# enforced by tools/ci/check-workflow-shape.sh):
+#   vendor, linux-build, linux-unit-tests, lint, js-minify-corpus,
+#   html-parse-corpus, the CSS and JS fuzz smokes, windows-build,
+#   windows-unit-tests and the rehearse leg of the upgrade rehearsal; later
+#   the IIS system tests. The full, nightly and release tiers follow in
+#   their own reusable workflows.
+#
+# The parity guard of the former pipeline is dropped on purpose: the corpus
+# it compared against is not part of this repository.
+
+name: pipeline-pr
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # Path filters for the guards that only matter when their inputs change: a
+  # hosted job diffs the pull request's files and publishes one boolean per
+  # filter. Outside a pull request every filter is true, so a push to the
+  # default branch and a manual run always run them.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      signing_key: ${{ steps.diff.outputs.signing_key }}
+      serf: ${{ steps.diff.outputs.serf }}
+      cve: ${{ steps.diff.outputs.cve }}
+      upgrade: ${{ steps.diff.outputs.upgrade }}
+    steps:
+      # fetch-depth: 0 so the diff can reach the pull request's base commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the base commit
+        id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          signing_key=true
+          serf=true
+          cve=true
+          upgrade=true
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            signing_key=false
+            serf=false
+            cve=false
+            upgrade=false
+            changed="${RUNNER_TEMP}/changed-files.txt"
+            git diff --name-only "${BASE}...HEAD" > "${changed}"
+            wf='\.github/workflows/pipeline-pr\.yml'
+            if grep -qE "^(install/common/apt\.include|install/common/rpm\.include|tools/assert-repo-signing-key\.sh|${wf})\$" "${changed}"; then
+              signing_key=true
+            fi
+            if grep -qE "(\.lds\$)|^(WORKSPACE|MODULE\.bazel|tools/assert-serf-removed\.sh|third_party/|${wf})" "${changed}"; then
+              serf=true
+            fi
+            if grep -qE "^(bazel/repositories\.bzl|tools/dependency/|test/tools/dependency/|tools/generate-sbom\.py|${wf})" "${changed}"; then
+              cve=true
+            fi
+            if grep -qE "^(install/upgrade_test/|${wf})" "${changed}"; then
+              upgrade=true
+            fi
+          fi
+          {
+            echo "signing_key=${signing_key}"
+            echo "serf=${serf}"
+            echo "cve=${cve}"
+            echo "upgrade=${upgrade}"
+          } >> "$GITHUB_OUTPUT"
+          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade}"
+
+  # One checkout serves every group. Each step runs even when an earlier one
+  # failed (`!cancelled()`), so one red run lists every broken guard.
+  guards:
+    name: Guards (security gates, console drift, placement, pytest exit, bazelrc, git_repository, PR policy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # pull-requests: read is for the PR policy group. The calling job must
+    # grant it too: a called workflow cannot raise the caller's token.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+      # generate-sbom.py needs Python 3.11 or newer.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # Every *_test.cc must live under test/: the build and test globs cover
+      # //test/... only, so a test next to its source is linted but never
+      # compiled or run.
+      - name: Every *_test.cc lives under test/
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/check_tests_in_test_tree.sh
+
+      # No test file may call pytest.main() bare in its __main__ block (a
+      # py_test running such a main reports PASS on a red suite), and every
+      # test_*.py must have a __main__ block at all.
+      - name: No test main swallows the pytest exit status
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/check_pytest_exit_status.sh
+
+      # A C++-only (or C-only) compiler flag must never be passed through the
+      # language-agnostic --copt. The self-test runs the guard's bypass matrix
+      # first: a guard that silently stops detecting a spelling is worse than
+      # none.
+      - name: Bazelrc language-flag guard - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/assert-bazelrc-lang-flags.py --self-test
+      - name: Single-language flags use --cxxopt / --conlyopt, not --copt
+        if: ${{ !cancelled() }}
+        run: python3 tools/assert-bazelrc-lang-flags.py
+
+      # Every git_repository dependency must carry a vendored override: a
+      # git_repository is cloned at build time, and the release containers
+      # ship without git, so an un-vendored one builds everywhere except the
+      # release.
+      - name: git_repository vendor guard - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/assert-git-repository-vendored.py --self-test
+      - name: Every git_repository carries a vendored override
+        if: ${{ !cancelled() }}
+        run: python3 tools/assert-git-repository-vendored.py
+
+      # Self-tests of the policy and release helpers, so a gate whose own
+      # logic has rotted cannot report success on every pull request.
+      - name: Policy guards - self-tests
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/check_release_note.sh --self-test
+
+      - name: Release helpers - self-tests (SHA256SUMS, release body)
+        if: ${{ !cancelled() }}
+        run: |
+          bash tools/ci/release_sha256sums.sh --self-test
+          bash tools/ci/release_highlights.sh --self-test
+
+      - name: Optimizer pin pair guard - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/ci/check_optimizer_pin_pair.py --self-test
+
+      - name: Legacy-docs guard - self-test
+        if: ${{ !cancelled() }}
+        run: sh tools/ci/check_legacy_docs.sh --self-test
+
+      - name: Module symbol check - self-test
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/assert_module_symbols.sh --self-test
+
+      # Signs a rule pack with a throwaway key, verifies it, tampers one byte
+      # and expects refusal. Needs OpenSSL 3.
+      - name: Rule pack signing tool - self-test
+        if: ${{ !cancelled() }}
+        run: bash tools/rule-packs/sign-pack.sh --self-test
+
+      # The pull request's changed files, commits and live description come
+      # from the API rather than git, so the gates work on a depth-1
+      # checkout. The description is read live, not from the event payload:
+      # the payload is frozen at event time, so after a failed run the remedy
+      # "edit the description and re-run this job" would otherwise re-read the
+      # same stale text. Fails closed: any API error fails the step instead of
+      # falling back to "nothing changed".
+      - name: Collect pull request inputs
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          api="repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
+          gh api --paginate "${api}/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/pr-files.txt"
+          gh api --paginate "${api}/commits" \
+            --jq '.[].commit.message' > "${RUNNER_TEMP}/pr-haystack.txt"
+          gh api "${api}" --jq '.body // ""' >> "${RUNNER_TEMP}/pr-haystack.txt"
+          echo "collected $(wc -l < "${RUNNER_TEMP}/pr-files.txt" | tr -d ' ') changed file name(s)"
+
+      # A user-facing change must touch RELEASE_NOTES.md or CHANGELOG.md, or
+      # say in one line why it is invisible (`Release-Note: none - <why>` in a
+      # commit message or the description). No pipe in this run: a pipe would
+      # swallow the gate's exit code.
+      - name: User-facing change carries a release note
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          bash tools/ci/check_release_note.sh \
+            --files-from "${RUNNER_TEMP}/pr-files.txt" \
+            --haystack-from "${RUNNER_TEMP}/pr-haystack.txt"
+
+      # html/ is the legacy documentation archive, published unchanged.
+      - name: Legacy documentation archive is untouched
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          sh tools/ci/check_legacy_docs.sh \
+            --files-from "${RUNNER_TEMP}/pr-files.txt" \
+            --haystack-from "${RUNNER_TEMP}/pr-haystack.txt"
+
+      # The console's synced product-facts copy is byte-compared against the
+      # canonical file in the optimizer repository. Materialize that file
+      # explicitly (anonymous HTTPS, the repository is public) and point the
+      # drift check at it, so the check never falls back to its
+      # unreachable-canonical path, which is a hard error in CI.
+      - name: Materialize canonical product facts
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/product-facts"
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/We-Amp/pagespeed-optimizer.git "${RUNNER_TEMP}/product-facts"
+          git -C "${RUNNER_TEMP}/product-facts" sparse-checkout set --no-cone /shared/product-facts.mjs
+          test -f "${RUNNER_TEMP}/product-facts/shared/product-facts.mjs"
+          echo "MODPAGESPEED2_DIR=${RUNNER_TEMP}/product-facts" >> "$GITHUB_ENV"
+
+      # Pure-bash source-hash check (no node, no build): fails when the
+      # committed admin_console.html is stale relative to its source.
+      - name: Admin console bundle is in sync with its source
+        if: ${{ !cancelled() }}
+        run: bash pagespeed/system/console/check-no-drift.sh
+
+      # Security gates: notices drift, OpenVEX format, and a grype
+      # scan of the committed SPDX SBOM, failing on medium and above. A
+      # not_affected finding gets a documented sbom/*.vex.json entry.
+      # Not run here: generate-sbom.py --verify. It stamps the product
+      # version from net/instaweb/public/VERSION, and this tree carries the
+      # product-line version (2.4.0) where the committed SBOM carries the
+      # module version (1.19.0), so the check cannot pass until the two are
+      # reconciled. The self-test below still covers the generator's logic.
+
+      - name: SBOM scoping - generate-sbom.py --self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/generate-sbom.py --self-test
+
+      # THIRD-PARTY-NOTICES ships in every package, so it must agree with the
+      # SBOM in both directions.
+      - name: Notices drift - check-third-party-notices.py
+        if: ${{ !cancelled() }}
+        run: python3 tools/sbom/check-third-party-notices.py
+
+      - name: VEX file format sanity
+        if: ${{ !cancelled() }}
+        id: vex
+        run: |
+          set -euo pipefail
+          python3 tools/ci/validate-vex.py --self-test
+          python3 tools/ci/validate-vex.py sbom/
+          shopt -s nullglob
+          vex_files=(sbom/*.vex.json)
+          if [ ${#vex_files[@]} -eq 0 ]; then
+            echo "vex_path=" >> "$GITHUB_OUTPUT"
+          else
+            echo "vex_path=${vex_files[0]}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # SHA-pinned; bumping it is a deliberate, reviewed change.
+      - name: Install grype
+        if: ${{ !cancelled() }}
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+
+      - name: Vulnerability scan with VEX suppression (grype on the SPDX SBOM, fail on medium and above)
+        if: ${{ !cancelled() }}
+        env:
+          GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
+          VEX_PATH: ${{ steps.vex.outputs.vex_path }}
+        run: |
+          # grype's own --vex does not support an sbom: source, so scan
+          # without it and apply the OpenVEX not_affected statements with
+          # tools/ci/apply-vex.py.
+          "${GRYPE_CMD}" -o json --file grype-results.json \
+            sbom:sbom/pagespeed-1.1.spdx.json
+          vex_args=()
+          if [ -n "${VEX_PATH}" ]; then
+            vex_args=(--vex "${VEX_PATH}")
+          fi
+          python3 tools/ci/apply-vex.py --grype grype-results.json \
+            "${vex_args[@]}" --fail-on medium
+
+  # Ground-truth scan of every committed npm lockfile. tools/sbom/dep-scan.sh
+  # runs in --fail-on medium mode over only that surface. The grype database
+  # is pinned (tools/sbom/grype-db-pin.json) and imported with auto-update
+  # off, so a newly published advisory cannot break an in-flight pull
+  # request; bumping the pin is a reviewed change. The report-only scan
+  # below uses the live database to surface fresh advisories promptly.
+  blocking-dep-scan:
+    name: Blocking Dep Scan (npm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SYFT_VERSION: v1.44.0
+      GRYPE_VERSION: v0.112.0
+      # Isolated, job-local database cache so the pinned import cannot be
+      # clobbered by a live-database auto-update.
+      GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.grype-db-pinned
+      GRYPE_DB_AUTO_UPDATE: "false"
+      GRYPE_DB_VALIDATE_AGE: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A malformed VEX statement is silently ignored by grype, which would
+      # let a broken not_affected claim look like an active suppression.
+      - name: Validate VEX statements
+        run: |
+          python3 tools/ci/validate-vex.py --self-test
+          python3 tools/ci/validate-vex.py sbom/
+
+      - name: Test pinned-tool installer aborts on checksum mismatch
+        run: bash tools/ci/test_install_pinned_tool.sh
+
+      # dep-scan.sh hard-fails a blocking run on an unpinned syft or grype,
+      # so this step is load-bearing.
+      - name: Ensure pinned syft + grype
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          have() { command -v "$1" >/dev/null 2>&1 && "$1" version 2>/dev/null | awk '/^Version:/{print "v"$2}'; }
+          [ "$(have syft)" = "$SYFT_VERSION" ] || \
+            bash tools/sbom/install-pinned-tool.sh syft "$SYFT_VERSION" "$RUNNER_TEMP/bin"
+          [ "$(have grype)" = "$GRYPE_VERSION" ] || \
+            bash tools/sbom/install-pinned-tool.sh grype "$GRYPE_VERSION" "$RUNNER_TEMP/bin"
+          syft version | awk '/^Version:/{print "syft "$2}'
+          grype version | awk '/^Version:/{print "grype "$2}'
+
+      - name: Provision pinned grype DB
+        run: bash tools/sbom/provision-grype-db.sh
+
+      - name: Blocking scan (npm, fail on medium and above)
+        run: |
+          set -uo pipefail
+          # Capture the gate's exit but always publish the table to the
+          # Summary tab; a non-zero rc then fails the job.
+          rc=0
+          bash tools/sbom/dep-scan.sh --fail-on medium --surfaces npm || rc=$?
+          if [ -f sbom/scan/SUMMARY.md ]; then cat sbom/scan/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$rc"
+
+  # Report-only live-database sweep of the same lockfiles: surfaces newly
+  # disclosed advisories fast and never reddens the build (the blocking,
+  # pinned-database gate is blocking-dep-scan above). This leg only reports;
+  # filing the tracking issue belongs to the scheduled tier's hosted report
+  # job, which holds the issue permission.
+  dep-scan:
+    name: Dependency Scan (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SYFT_VERSION: v1.44.0
+      GRYPE_VERSION: v0.112.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Ensure pinned syft + grype
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/bin:$PATH"
+          have() { command -v "$1" >/dev/null 2>&1 && "$1" version 2>/dev/null | awk '/^Version:/{print "v"$2}'; }
+          [ "$(have syft)" = "$SYFT_VERSION" ] || \
+            bash tools/sbom/install-pinned-tool.sh syft "$SYFT_VERSION" "$RUNNER_TEMP/bin"
+          [ "$(have grype)" = "$GRYPE_VERSION" ] || \
+            bash tools/sbom/install-pinned-tool.sh grype "$GRYPE_VERSION" "$RUNNER_TEMP/bin"
+          syft version | awk '/^Version:/{print "syft "$2}'
+          grype version | awk '/^Version:/{print "grype "$2}'
+
+      - name: Run dependency scan (report-only)
+        run: |
+          set -uo pipefail
+          bash tools/sbom/dep-scan.sh
+          # Surface the severity table on the run's Summary tab.
+          if [ -f sbom/scan/SUMMARY.md ]; then cat sbom/scan/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      # A new report is produced on every run, so each is kept briefly. A
+      # refused upload (artifact storage full) must not turn the scan red.
+      - name: Upload SBOMs and grype reports
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dep-scan-${{ github.sha }}
+          path: sbom/scan/
+          if-no-files-found: warn
+          retention-days: 3
+
+  # Browser tests of the client scripts, in headless Chromium. Sparse
+  # checkout: they need nothing else.
+  browser-js-tests:
+    name: Browser client-JS tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+          sparse-checkout: |
+            test/browser
+            net/instaweb/rewriter/generated
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Run browser client-JS tests
+        run: bash test/browser/run_browser_tests.sh
+
+  # Admin console tests: unit tests, type check, and the browser tests that
+  # load the committed console bundle with mocked admin endpoints (no server,
+  # no build).
+  console-tests:
+    name: Console SPA tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+          sparse-checkout: pagespeed/system/console
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: pagespeed/system/console/.nvmrc
+      - name: Run console tests
+        run: bash pagespeed/system/console/run-ci-tests.sh
+
+  # The installer fragments embed the repository signing key so end users can
+  # verify the signed package repositories. This fails if either fragment
+  # regresses to a placeholder or an empty key block, or embeds another key.
+  signing-key:
+    name: Repo signing key embedded
+    needs: changes
+    if: ${{ needs.changes.outputs.signing_key == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert the guard script is tracked
+        run: git ls-files --error-unmatch tools/assert-repo-signing-key.sh
+      - name: Assert apt/rpm fragments embed the signing key
+        run: bash tools/assert-repo-signing-key.sh
+
+  # The libcurl fetcher replaced serf everywhere. This pure grep check
+  # asserts serf does not creep back in as a built or linked artifact (dead
+  # exports in a version script, a vendored third_party/serf tree, or a serf
+  # Bazel repo rule). Comments that mention it for history do not trip it.
+  serf-removed:
+    name: Serf stays removed
+    needs: changes
+    if: ${{ needs.changes.outputs.serf == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert the guard script is tracked
+        run: git ls-files --error-unmatch tools/assert-serf-removed.sh
+      - name: Assert serf stays removed
+        run: bash tools/assert-serf-removed.sh
+
+  # Vendored C/C++ CVE matcher, anti-drift half: offline and fast. Fails if a
+  # dependency in bazel/repositories.bzl lacks a cpe-map.yaml entry, a
+  # cve-ignore.yaml fixed_in entry is above the pin, or an ignore entry is
+  # stale (suppresses no finding in the committed snapshot). Pure python3.
+  cpp-cve-completeness:
+    name: Completeness gate (every C++ dep annotated)
+    needs: changes
+    if: ${{ needs.changes.outputs.cve == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate cpe-map.yaml covers every repositories.bzl dep
+        run: python3 tools/dependency/validate-deps.py
+      - name: Unit tests (matcher, OSV feed rule, ignore-list checks)
+        run: python3 test/tools/dependency/cve_scan_test.py -v
+
+  # Per-pull-request CVE scan against the committed snapshot
+  # (tools/dependency/nvd-snapshot.json): offline, reproducible, blocking at
+  # medium. A new medium or higher CVE on any annotated dependency fails the
+  # pull request; to accept one, justify and suppress it in cve-ignore.yaml.
+  # The scan fails closed when the snapshot cannot evaluate a dependency, so
+  # an empty or degraded snapshot cannot disable the gate. The scheduled live
+  # refresh of the snapshot belongs to the nightly tier.
+  cpp-cve-snapshot-scan:
+    name: CVE scan vs committed snapshot (per-PR, offline)
+    needs: changes
+    if: ${{ needs.changes.outputs.cve == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Scan vendored C/C++ deps against the committed snapshot
+        env:
+          FAIL_ON: medium
+        run: |
+          set -euo pipefail
+          python3 tools/dependency/cve_scan.py \
+            --snapshot tools/dependency/nvd-snapshot.json \
+            --severity medium \
+            --json "${RUNNER_TEMP}/cve-report.json" \
+            --fail-on "${FAIL_ON}" | tee "${RUNNER_TEMP}/cve-pr-scan.txt"
+      - name: Job summary
+        if: always()
+        run: |
+          # shellcheck disable=SC2016
+          {
+            echo '## Vendored C/C++ CVE scan vs committed snapshot'
+            echo
+            echo 'Offline scan against `tools/dependency/nvd-snapshot.json`.'
+            echo 'Blocking at `medium`: a new medium or higher finding fails the'
+            echo 'pull request. Accept a finding by justifying and suppressing it'
+            echo 'in `cve-ignore.yaml`.'
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/cve-pr-scan.txt" 2>/dev/null || echo "(scan produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Plan half of the module upgrade rehearsal: resolves the version under
+  # test (the optimizer pin) and the default distro matrix. The rehearse half
+  # boots systemd containers and needs the build runners; it arrives in the
+  # next step and consumes these outputs.
+  upgrade-rehearsal-plan:
+    name: Upgrade rehearsal plan (version + distro matrix)
+    needs: changes
+    if: ${{ needs.changes.outputs.upgrade == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rc: ${{ steps.plan.outputs.rc }}
+      distros: ${{ steps.plan.outputs.distros }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+      - name: Resolve
+        id: plan
+        run: |
+          set -euo pipefail
+          # The optimizer pin names the release the tree currently ships with
+          # (optimizer-v<version>); the module release carries the same
+          # version without the prefix.
+          tag=$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")
+          case "$tag" in
+            optimizer-v[0-9]*) rc="${tag#optimizer-v}" ;;
+            *) echo "::error::optimizer-pin.json tag '$tag' is not optimizer-v<version>"; exit 1 ;;
+          esac
+          json=$(printf '%s\n' debian12 ubuntu2404 alma9 | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "distros=$json" >> "$GITHUB_OUTPUT"
+          echo "rc=$rc distros=$json"
