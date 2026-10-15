@@ -2507,9 +2507,14 @@ jobs:
   # this repository that need a Hyper-V guest (docs/ci/pipelines.md). They
   # hold no secret and no write token. They run in a dry run as well; the
   # installer under test is the one in `asset-windows` (unsigned in a dry run,
-  # signed in a real one). A real run needs both to have run and passed;
-  # `validate` enforces that, so a gate is never green by being skipped. The
-  # called workflows are pinned to master by name and not by relative path.
+  # signed in a real one). A gate workflow can succeed without having tested
+  # anything (it skips when its guest is not provisioned, and the cPanel gate
+  # skips on a pre-release, which has no package). So each gate workflow
+  # exposes an output `ran`, true only when the smoke actually executed, and in
+  # a real run `validate` requires ran == 'true' from the installer gate and,
+  # on a release (not a pre-release), from both cPanel gates. A missing output
+  # reads as false: the gates fail closed until the gate workflows define it.
+  # The called workflows are pinned to master by name and not by relative path.
   # ---------------------------------------------------------------------
   gate-iis-msi-upgrade:
     name: Gate, IIS installer
@@ -2523,21 +2528,30 @@ jobs:
       old_msi_artifact: msi-old
       release_tag: ${{ needs.version.outputs.release_tag }}
 
-  # el10 is not in the matrix: its package is optional in the asset set.
-  gate-cpanel-smoke:
-    name: Gate, cPanel (${{ matrix.os }})
+  # One job per operating system (a matrix would leave `ran` ambiguous). el10
+  # has no gate: its package is optional in the asset set.
+  gate-cpanel-smoke-el9:
+    name: Gate, cPanel (el9)
     needs: [version, ea4-ready]
     if: ${{ !cancelled() && needs.ea4-ready.result == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [el9, el8]
     permissions:
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
     with:
-      os: ${{ matrix.os }}
-      rpm_artifact: asset-ea4-${{ matrix.os }}
+      os: el9
+      rpm_artifact: asset-ea4-el9
+      release_tag: ${{ needs.version.outputs.release_tag }}
+
+  gate-cpanel-smoke-el8:
+    name: Gate, cPanel (el8)
+    needs: [version, ea4-ready]
+    if: ${{ !cancelled() && needs.ea4-ready.result == 'success' }}
+    permissions:
+      contents: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
+    with:
+      os: el8
+      rpm_artifact: asset-ea4-el8
       release_tag: ${{ needs.version.outputs.release_tag }}
 
   # ---------------------------------------------------------------------
@@ -2570,7 +2584,8 @@ jobs:
       - msi-build
       - msi-sign
       - gate-iis-msi-upgrade
-      - gate-cpanel-smoke
+      - gate-cpanel-smoke-el9
+      - gate-cpanel-smoke-el8
       - ea4-ready
       - unit-tests
       - unit-tests-hosted
@@ -2625,22 +2640,26 @@ jobs:
           bad=0
           in_pair=" "
           # The signing jobs run in a real run only: they must have
-          # succeeded there and been skipped in a dry run. The two gates need
-          # the fleet-iis class; in a real run they must have run and passed
-          # (the fleet must be enabled, a skipped gate is not a pass), in a
-          # dry run a skipped gate is allowed.
+          # succeeded there and been skipped in a dry run. The gates need the
+          # fleet-iis class and can succeed without testing anything, so in a
+          # real run each must have succeeded AND reported ran == true (the
+          # cPanel gates are exempt on a pre-release, which has no package);
+          # in a dry run a skipped gate is allowed.
           for j in windows-sign msi-sign; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             echo "${j}: ${r} (dry run: ${DRY_RUN})"
             in_pair="${in_pair}${j} "
             if [ "$DRY_RUN" = false ]; then [ "$r" = success ] || bad=1; else [ "$r" = skipped ] || bad=1; fi
           done
-          for j in gate-iis-msi-upgrade gate-cpanel-smoke; do
+          for j in gate-iis-msi-upgrade gate-cpanel-smoke-el9 gate-cpanel-smoke-el8; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
-            echo "${j}: ${r} (dry run: ${DRY_RUN}, fleet: ${FLEET_ENABLED})"
+            ran="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].outputs.ran // "false"')"
+            echo "${j}: ${r}, ran: ${ran} (dry run: ${DRY_RUN}, pre-release: ${IS_PRERELEASE})"
             in_pair="${in_pair}${j} "
             if [ "$DRY_RUN" = false ]; then
-              [ "$r" = success ] && [ "$FLEET_ENABLED" = true ] || { echo "::error::a real release needs the ${j} gate to run and pass (it runs only while FLEET_ENABLED is true)"; bad=1; }
+              [ "$r" = success ] || { echo "::error::the ${j} gate did not succeed"; bad=1; }
+              if [ "$IS_PRERELEASE" = true ] && [ "${j#gate-cpanel-smoke-}" != "$j" ]; then continue; fi
+              [ "$ran" = true ] || { echo "::error::the ${j} gate did not run its smoke (it needs the fleet and its guest); a skipped gate is not a pass"; bad=1; }
             else
               [ "$r" = success ] || [ "$r" = skipped ] || bad=1
             fi
@@ -2859,7 +2878,6 @@ jobs:
       TAG: ${{ needs.version.outputs.tag }}
       VERSION: ${{ needs.version.outputs.version }}
       IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
-      OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
     steps:
       # gh release create --verify-tag needs a git checkout of the tag.
@@ -2907,6 +2925,7 @@ jobs:
           [ "$(jq -r .prerelease dist/manifest.json)" = "$IS_PRERELEASE" ] || { echo "::error::the manifest and the version disagree on the pre-release state"; exit 1; }
           [ -s signature/SHA256SUMS.asc ] || { echo "::error::no signature"; exit 1; }
           cp signature/SHA256SUMS.asc dist/SHA256SUMS.asc
+          echo "OPTIMIZER_TAG=$(jq -r .optimizer_tag dist/manifest.json)" >> "$GITHUB_ENV"
           ls -l dist
 
       - name: Create the draft release
@@ -2914,9 +2933,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::error::a release for ${TAG} exists already (draft or published); delete it and run again"
-            exit 1
+          # A draft left by an earlier run of this tag (failed or cancelled
+          # before publishing) is deleted and made again; the tag itself is
+          # kept. A published release is never reused or replaced.
+          if state="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$state" = true ]; then
+              echo "::notice::deleting the draft of an earlier run of ${TAG}"
+              gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+            else
+              echo "::error::${TAG} is already published; a published release is never replaced (a new build of the same sources needs a new tag)"
+              exit 1
+            fi
           fi
           {
             printf '## mod_pagespeed %s\n\n' "$VERSION"

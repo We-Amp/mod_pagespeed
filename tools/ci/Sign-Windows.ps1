@@ -51,9 +51,20 @@ $dlibDir = Join-Path $env:RUNNER_TEMP 'TrustedSigning'
 New-Item -ItemType Directory -Path $dlibDir -Force | Out-Null
 $pkg = Join-Path $dlibDir 'Microsoft.Trusted.Signing.Client.zip'
 Invoke-WebRequest -Uri 'https://www.nuget.org/api/v2/package/Microsoft.Trusted.Signing.Client/1.0.53' -OutFile $pkg
+# The package runs inside the signing step, next to the secrets: it must be
+# exactly the one pinned here.
+$pinned = 'b5abe405d1464e59c2c4f4fe8b4653bf184fe3e975a75c9628d366ed384c6979'
+$actual = (Get-FileHash -LiteralPath $pkg -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $pinned) { Write-Host "::error::the signing client package does not match the pinned hash"; exit 1 }
 Expand-Archive -Path $pkg -DestinationPath $dlibDir -Force
 $dlib = Join-Path $dlibDir 'bin\x64\Azure.CodeSigning.Dlib.dll'
 if (-not (Test-Path -LiteralPath $dlib)) { Write-Host "::error::the signing client library is missing"; exit 1 }
+# Second guard: the library must carry a valid Microsoft signature.
+$dsig = Get-AuthenticodeSignature -LiteralPath $dlib
+if ($dsig.Status -ne 'Valid' -or $dsig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+    Write-Host "::error::the signing client library is not validly signed by Microsoft"
+    exit 1
+}
 
 $metadataFile = Join-Path $env:RUNNER_TEMP 'tsmetadata.json'
 @{

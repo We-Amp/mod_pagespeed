@@ -146,6 +146,22 @@ The package signing key is the one whose public half the consumer pins. The
 release itself needs no secret: `create-release` uses the run's own token with
 `contents: write`, which the caller grants and no other job of the lane has.
 
+### First rehearsal checklist
+
+- [ ] With the secrets entered, run one real rehearsal on a release candidate
+  tag and confirm that the jobs of the `release` environment see the
+  environment's values of the secrets: a called workflow is documented to read
+  the environment's value over the value the caller passed, but that
+  precedence is to be confirmed here, not assumed.
+
+### Rerunning a real run
+
+A run that failed or was cancelled before `create-release` published leaves at
+most a draft release; re-run the failed jobs, or dispatch the tag again.
+`create-release` deletes a draft of the same tag and makes it again, keeping
+the tag. A published release is never reused or replaced: it makes the job
+fail, and a new build of the same sources gets a new tag. Re-running failed jobs of the same run reuses that run's artifacts while they are kept; a new run rebuilds.
+
 ### What the corp side does after
 
 The consumer pulls; the lane notifies nobody. On a published, non-draft,
@@ -186,7 +202,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
 | `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows` |
 | `gate-iis-msi-upgrade` | fleet-iis (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
-| `gate-cpanel-smoke` | fleet-iis (the same, for el9 and el8) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
+| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-iis (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
 | `unit-tests` | fleet-heavy, pair | unit tests of the optimized build with redis and memcached containers |
 | `package-smoke-deb`, `package-smoke-rpm` | fleet-heavy, pair | install, upgrade over a synthetic old version, version header, removal, in a Debian and a Rocky container |
 | `package-smoke-nginx` | fleet-heavy, pair | the from-source nginx smoke with the module tarball |
@@ -199,10 +215,15 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`) |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
-The gates are never green by being skipped: they run only while `FLEET_ENABLED`
-is `true` (they need the Hyper-V host), and `validate` fails a real run in which
-either did not run and pass. A dry run accepts a skipped gate. A real release
-therefore needs the fleet enabled at that moment.
+A gate workflow can succeed without testing anything: it skips when its guest
+is not provisioned, and the cPanel gate skips on a pre-release (no package). So
+each gate workflow exposes an output `ran`, true only when the smoke actually
+executed. In a real run `validate` requires every gate to have succeeded and
+the installer gate and both cPanel gates (a release, not a pre-release) to have
+reported `ran` true. The gates run only while `FLEET_ENABLED` is `true`, so a
+real release needs the fleet enabled at that moment and the guests provisioned.
+A dry run accepts a skipped gate. A missing `ran` output counts as false, so
+until the gate workflows define it a real run fails at `validate`.
 
 Not done here on purpose: the publication of apt and yum repositories (the
 consumer pulls the release assets, see below), the signing of debs and rpms
