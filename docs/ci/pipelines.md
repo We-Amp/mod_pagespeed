@@ -170,8 +170,8 @@ be `true`, so they are skipped (not queued) until a runner of the class is
 registered; the `CI gate` accepts the skipped result, and a real module
 release fails closed at `validate` while the gates are skipped.
 
-Two more guards exist for jobs that cannot fall back to a hosted runner, and
-the gate accepts exactly these three. **Only** is for a job that mounts the
+Three more guards exist for jobs that cannot fall back to a hosted runner, and
+the gate accepts exactly these four. **Only** is for a job that mounts the
 container socket, runs privileged containers or needs a real Linux or Windows
 host: a fork or Dependabot pull request skips it.
 
@@ -186,9 +186,17 @@ request.
 if: ${{ github.event_name == 'workflow_dispatch' && vars.FLEET_ENABLED == 'true' }}
 ```
 
+**fleet-iis** is for a job routed to the `fleet-iis` class, which has no
+hosted twin: the fleet-only guard plus the `FLEET_IIS_ENABLED` term. The gate
+requires it, and no other guard, on every job routed to that class.
+
+```yaml
+if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+```
+
 A job that needs more conditions (for example a path filter) appends them
 together with a matching gate rule; the gate rejects any routed job whose
-`if:` is not exactly one of the three guards, or the first one narrowed by
+`if:` is not exactly one of the four guards, or the first one narrowed by
 `&& needs.changes.outputs.<name> == 'true'`. A job that runs on a hosted label
 only (hosted arm64, report jobs, the checks that need nothing special)
 carries no guard.
@@ -425,7 +433,7 @@ and fails the build when the shape breaks:
 - **(d)** in a reusable workflow every `runs-on` is a hosted label
   (`ubuntu-latest`, `ubuntu-24.04`, `ubuntu-24.04-arm`, `windows-2022`,
   `macos-15`, `macos-latest`) or exactly the routing expression with a
-  runner class, and a job routed by the expression carries one of the three
+  runner class, and a job routed by the expression carries one of the four
   guards verbatim (the first one optionally narrowed by a `changes` path
   filter);
 - **(f)** a reusable workflow has a top-level `permissions:` block with no

@@ -27,9 +27,10 @@
 #       macos-15, macos-latest) or exactly the fork/Dependabot routing
 #       expression with a fleet class (fleet-heavy, fleet-light,
 #       fleet-windows, fleet-iis); a job routed by that expression must
-#       carry one of the three fleet guards of docs/ci/pipelines.md (the
+#       carry one of the four fleet guards of docs/ci/pipelines.md (the
 #       FLEET_ENABLED kill switch in its general, fleet-only or
-#       dispatch-only form) verbatim as its if:, the general form optionally
+#       dispatch-only form, or the fleet-iis form that adds
+#       FLEET_IIS_ENABLED; a job routed to fleet-iis must carry the last) verbatim as its if:, the general form optionally
 #       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
 #       prefixed by `!cancelled() && needs.<job>.result == 'success' && `;
 #   (f) in a workflow_call workflow: a top-level `permissions:` block is
@@ -296,6 +297,12 @@ is_fleet_guard() {
   return 1
 }
 
+# A routing expression whose fleet class is fleet-iis.
+is_fleet_iis_route() {
+  case "$1" in *"|| 'fleet-iis' }}") return 0 ;; esac
+  return 1
+}
+
 # --- workflow scan ------------------------------------------------------------
 shopt -s nullglob
 WORKFLOWS=( "${WF_DIR}"/*.yml "${WF_DIR}"/*.yaml "${WF_DIR}"/*.yml.example )
@@ -342,9 +349,12 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
         # A fleet job carries the fleet guard verbatim as its if: (the
         # FLEET_ENABLED kill switch, docs/ci/pipelines.md).
         if_val="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="if" {print $5}')"
-        if ! is_fleet_guard "${if_val}" \
+        if is_fleet_iis_route "${val}"; then
+          if [ "${if_val}" != "${FLEET_IIS_GUARD}" ]; then
+            err "${wf}:${lineno}: fleet-iis job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
+          fi
+        elif ! is_fleet_guard "${if_val}" \
            && [ "${if_val}" != "${FLEET_ONLY_GUARD}" ] \
-           && [ "${if_val}" != "${FLEET_IIS_GUARD}" ] \
            && [ "${if_val}" != "${FLEET_DISPATCH_GUARD}" ]; then
           err "${wf}:${lineno}: fleet job '${job}' does not carry a fleet guard verbatim as its if: (rule d)"
         fi
