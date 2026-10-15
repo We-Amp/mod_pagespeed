@@ -123,6 +123,9 @@ jobs:
   # Aggregate gate: the one check branch protection needs besides the
   # per-job ones. A called workflow cannot read needs.*.result of its
   # siblings, so this job runs inline, on a hosted label only.
+  # A job skipped by its FLEET_ENABLED or FLEET_IIS_ENABLED term (the
+  # fleet-iis class jobs) is accepted as skipped; failure and cancelled still
+  # fail the gate.
   gate:
     name: CI gate
     needs: [rat, public-hygiene, ci-tooling-tests, pr, full]

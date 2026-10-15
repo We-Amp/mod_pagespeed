@@ -2513,12 +2513,16 @@ jobs:
   # a real run `validate` requires ran == 'true' from the installer gate and,
   # on a release (not a pre-release), from both cPanel gates. A missing output
   # reads as false: the gates fail closed until the gate workflows define it.
+  # While the repository variable FLEET_IIS_ENABLED is not 'true' (no runner
+  # of the class is registered) the gate jobs are skipped, not queued. A real
+  # run then fails closed at `validate`, which requires ran == 'true' from
+  # them; a dry run tolerates the skipped gates.
   # The called workflows are pinned to master by name and not by relative path.
   # ---------------------------------------------------------------------
   gate-iis-msi-upgrade:
     name: Gate, IIS installer
     needs: [version, msi-build, msi-sign]
-    if: ${{ !cancelled() && needs.msi-build.result == 'success' && (needs.version.outputs.dry_run == 'true' || needs.msi-sign.result == 'success') }}
+    if: ${{ !cancelled() && vars.FLEET_IIS_ENABLED == 'true' && needs.msi-build.result == 'success' && (needs.version.outputs.dry_run == 'true' || needs.msi-sign.result == 'success') }}
     permissions:
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-iis-msi-upgrade.yml@master
@@ -2532,7 +2536,7 @@ jobs:
   gate-cpanel-smoke-el9:
     name: Gate, cPanel (el9)
     needs: [version, ea4-ready]
-    if: ${{ !cancelled() && needs.ea4-ready.result == 'success' }}
+    if: ${{ !cancelled() && vars.FLEET_IIS_ENABLED == 'true' && needs.ea4-ready.result == 'success' }}
     permissions:
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
@@ -2544,7 +2548,7 @@ jobs:
   gate-cpanel-smoke-el8:
     name: Gate, cPanel (el8)
     needs: [version, ea4-ready]
-    if: ${{ !cancelled() && needs.ea4-ready.result == 'success' }}
+    if: ${{ !cancelled() && vars.FLEET_IIS_ENABLED == 'true' && needs.ea4-ready.result == 'success' }}
     permissions:
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
