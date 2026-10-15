@@ -38,6 +38,10 @@
 #       at job level on a job that runs on a hosted label; a fleet-routed job
 #       is read-only. The permissions parser is indentation-bound (jobs at two
 #       spaces, job keys at four), like the rest of this gate;
+#   (g) in a workflow_call workflow: a job-level `environment:` and any
+#       `secrets.<NAME>` reference (the job's own token, secrets.GITHUB_TOKEN,
+#       excepted) are allowed only on a job that runs on a hosted label; a
+#       fleet-routed job never names an environment or reads a secret;
 #   (e) topology token scan of .github/ and tools/ci/: no LAN (RFC1918) IP
 #       literals, no ".home" names, no ":9090", no "self-hosted", and none
 #       of the retired runner-label words as standalone tokens (the bare
@@ -169,6 +173,28 @@ write_perm_records() {
   ' "$1"
 }
 
+# Jobs that name an environment or read a secret, one per line:
+# "<job> <tab> <line> <tab> environment|secret". Line-oriented like the other
+# parsers: a job is a 2-space key under jobs:, its `environment:` a 4-space key.
+# secrets.GITHUB_TOKEN (the job's own token) is not a secret in this sense.
+secret_env_records() {
+  awk -v tab="${TAB}" '
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { injobs=0 }
+    injobs && /^  [^[:space:]]/ { job=$1; sub(/:$/, "", job); next }
+    injobs && /^    environment:/ { printf "%s%s%d%senvironment\n", job, tab, NR, tab }
+    injobs {
+      line=$0
+      while (match(line, /secrets\.[A-Za-z_][A-Za-z0-9_]*/)) {
+        name=substr(line, RSTART + 8, RLENGTH - 8)
+        if (name != "GITHUB_TOKEN") { printf "%s%s%d%ssecret\n", job, tab, NR, tab }
+        line=substr(line, RSTART + RLENGTH)
+      }
+    }
+  ' "$1"
+}
+
 # True when the file has a top-level (zero-indent) `permissions:` key.
 has_toplevel_permissions() {
   grep -qE '^permissions:' "$1"
@@ -295,6 +321,18 @@ EOF
       fi
     done <<EOF
 $(write_perm_records "${wf}")
+EOF
+    # (g) an environment and a secret belong to hosted jobs only.
+    while IFS=$'\t' read -r sjob sline skind; do
+      [ -n "${sjob}" ] || continue
+      sruns="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${sjob}" '$1=="KEY" && $2==j && $3=="runs-on" {print $5}')"
+      # A job without runs-on is a call of another workflow: nothing runs in it.
+      [ -n "${sruns}" ] || continue
+      if ! is_hosted_label "${sruns}"; then
+        err "${wf}:${sline}: job '${sjob}' names an ${skind} but does not run on a hosted label (rule g)"
+      fi
+    done <<EOF
+$(secret_env_records "${wf}")
 EOF
   fi
 
