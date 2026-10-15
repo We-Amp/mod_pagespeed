@@ -48,6 +48,13 @@ revision) into the copy every build starts from, with
 must be `optimizer-v` plus the same version, and its cache library must be the
 one this tree links: the `optimizer-fetch` job refuses a pin that is not.
 
+In a dry run the optimizer release paired with the version cannot exist yet.
+The `optimizer-fetch` job then accepts the pinned optimizer tag as it is, emits
+a warning naming both versions, and the package build and `validate` use the
+pinned version: the Apache packages must depend on, and the optimizer packages
+must have, the pinned version instead of the tag's. A real run keeps the hard
+failure: the pin must be `optimizer-v` plus the tag's version.
+
 The tag must exist, and its commit must be reachable from `master`. The ref
 guard (`.github/actions/ref-guard`) refuses any other ref and any event but a
 tag push or a manual dispatch, for a dry run as well.
@@ -97,7 +104,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `ref-guard` | hosted | enforces the ref guard (tag glob `module-v*`) |
 | `version` | hosted | derives version, package version, pin tag and `dry_run` from the tag |
 | `vendor` | fleet-heavy, pair | vendors dependencies, stamps the module version, rebuilds the admin console with it, makes the `tree` artifact and the source tarball |
-| `security-gates` | hosted | SBOM at the module version, notices, VEX, grype with VEX applied; makes the versioned SBOM and VEX files |
+| `security-gates` | hosted | generates the SBOM for the stamped tree, then notices, VEX, grype with VEX applied on that SBOM; makes the versioned SBOM and VEX files |
 | `optimizer-fetch` | hosted | fetches the pinned optimizer release and verifies it (see below) |
 | `systest-gate` | hosted | requires a green Apache and Nginx system test of the CI run of the release commit |
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
@@ -152,6 +159,15 @@ All of it is public and read only, and needs no credential:
 The images and mirrors are not pinned by digest, so a release build depends on
 their state on the day; part of the verification is the checks inside the
 packages and the smokes.
+
+### The SBOM
+
+The lane generates the SBOM for the stamped tree (`tools/generate-sbom.py`)
+and runs the notices check and the grype and VEX gates against that file; the
+generated file is the release's SBOM. It does not run `generate-sbom.py
+--verify`: the committed SBOM carries the version of the tree's `VERSION`, not
+the tag's, so the drift check would fail on every tag. That check belongs to
+the pull request tier, once the tree's `VERSION` and the committed SBOM agree.
 
 ### The system-test gate
 

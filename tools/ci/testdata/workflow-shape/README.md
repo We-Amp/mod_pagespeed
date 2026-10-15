@@ -11,6 +11,7 @@ tree root passed to `tools/ci/check-workflow-shape.sh`:
   block), `bad-write-quoted/` and `bad-write-single-quoted/` (a quoted `write`
   on a fleet job) and `bad-write-flow/` (the one-line flow form) cover the
   gaps of rule f.
+- `good/` also has a job whose guard is prefixed by `!cancelled()` and `needs.<job>.result == 'success'` terms (a job that depends on a build runner pair); `bad-guard-status-drift/` and `bad-guard-status-missing/` break that form.
 - `bad-*/` must each fail (exit 1) and name the rule in the message.
 
 The bad trees violate the gate on purpose; the token scan excludes this

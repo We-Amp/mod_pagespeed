@@ -163,6 +163,7 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
     steps: &vendor-steps
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -188,6 +189,23 @@ jobs:
         run: |
           bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
           cat net/instaweb/public/VERSION
+
+      # A dry run may name a version whose paired optimizer release does not
+      # exist yet; the pin then names an older one and the packages depend on
+      # that. The file tells the package build which version to depend on. A
+      # real run has none and depends on the tag's version.
+      - name: Record the optimizer pair version of a dry run
+        run: |
+          set -euo pipefail
+          rm -f optimizer-pair-version
+          if [ "$DRY_RUN" = true ]; then
+            pin_tag="$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")"
+            case "$pin_tag" in optimizer-v[0-9]*) ;; *) echo "::error::unusable optimizer pin tag '$pin_tag'"; exit 1 ;; esac
+            pair="${pin_tag#optimizer-v}"
+            tilde='~'
+            printf '%s' "${pair/-/$tilde}" > optimizer-pair-version
+            echo "dry run: the packages depend on the pinned optimizer ${pair}"
+          fi
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -324,6 +342,7 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
     steps: *vendor-steps
 
   vendor-ready:
@@ -369,10 +388,16 @@ jobs:
       - name: Stamp the module version
         run: bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
 
-      - name: SBOM is up to date - generate-sbom.py --verify
-        run: python3 tools/generate-sbom.py --verify
+      # The release SBOM is generated for the stamped tree, not compared with
+      # the committed copy: the committed file carries the version of the
+      # tree's VERSION, which is not the tag's. The drift check
+      # (generate-sbom.py --verify) belongs to the pull request tier, once the
+      # tree's VERSION and the committed SBOM agree. The scans below, the
+      # notices check and the release file all use the generated SBOM.
+      - name: Generate the SBOM for the stamped tree
+        run: python3 tools/generate-sbom.py
 
-      - name: SBOM scoping - generate-sbom.py --self-test
+      - name: SBOM generator self-test
         run: python3 tools/generate-sbom.py --self-test
 
       # THIRD-PARTY-NOTICES ships in every package, so it must agree with the
@@ -447,8 +472,12 @@ jobs:
     needs: [ref-guard, version]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      pair_tag: ${{ steps.fetch.outputs.pair_tag }}
+      pair_pkg_version: ${{ steps.fetch.outputs.pair_pkg_version }}
     env:
       OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
       GH_READ_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -458,6 +487,7 @@ jobs:
           persist-credentials: false
 
       - name: Download and verify against the pin
+        id: fetch
         run: |
           set -euo pipefail
           PIN=install/debian/optimizer-pin.json
@@ -468,9 +498,21 @@ jobs:
             PLACEHOLDER*) echo "::error::optimizer-pin.json is a placeholder: cut the optimizer release first and record the pin"; exit 1 ;;
           esac
           # The pinned optimizer tag must be the pair of this module version.
+          # In a dry run the paired release cannot exist yet, so the pin is
+          # taken as it is and the packages are checked against it.
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
-            echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
+            if [ "$DRY_RUN" = true ]; then
+              echo "::warning::dry run: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
+            else
+              echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
+            fi
           fi
+          PAIR_VERSION="${PIN_TAG#optimizer-v}"
+          tilde='~'
+          {
+            echo "pair_tag=$PIN_TAG"
+            echo "pair_pkg_version=${PAIR_VERSION/-/$tilde}"
+          } >> "$GITHUB_OUTPUT"
           # The pair must link the same cache library commit: a pair that
           # does not has an Apache that cannot start. The tag comparison
           # above cannot see it; the pin records the optimizer commit, and
@@ -607,7 +649,7 @@ jobs:
     name: Linux Release Build (x64)
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &linux-x64-env
       ARCH: x64
@@ -722,6 +764,8 @@ jobs:
 
               mkdir -p /workspace/packages
               OPT_PKG_VERSION="$(. net/instaweb/public/VERSION; v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE}" ] && v="${v}~${PRERELEASE}"; echo "$v")"
+              # A dry run depends on the pinned optimizer (see the vendor job).
+              if [ -f optimizer-pair-version ]; then OPT_PKG_VERSION="$(cat optimizer-pair-version)"; fi
               install/debian/build.sh -a "${ARCH}" -b . -o /workspace/packages/ -d "$OPT_PKG_VERSION"
               install/rpm/build.sh -a "${ARCH}" -b . -o /workspace/packages/ -d "$OPT_PKG_VERSION"
 
@@ -806,7 +850,7 @@ jobs:
   linux-release-build-hosted:
     name: Linux Release Build (x64, hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *linux-x64-env
@@ -830,6 +874,7 @@ jobs:
   linux-arm64-release-build:
     name: Linux Release Build (arm64)
     needs: [version, vendor-ready]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success'}}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
@@ -850,7 +895,7 @@ jobs:
     name: Nginx Distro Packages (x64)
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &nginx-x64-env
       ARCH: x64
@@ -907,7 +952,7 @@ jobs:
   nginx-distro-build-hosted:
     name: Nginx Distro Packages (x64, hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *nginx-x64-env
@@ -931,6 +976,7 @@ jobs:
   nginx-distro-build-arm64:
     name: Nginx Distro Packages (arm64)
     needs: [version, vendor-ready]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success'}}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
@@ -943,7 +989,7 @@ jobs:
     name: Nginx Distro Packages (el10)
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &nginx-el10-env
       ARCH: x64
@@ -990,7 +1036,7 @@ jobs:
   nginx-distro-build-el10-hosted:
     name: Nginx Distro Packages (el10, hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *nginx-el10-env
@@ -1006,7 +1052,7 @@ jobs:
     name: Apache EL8 Build (glibc 2.28)
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 240
     env: &apache-el8-env
       EL: el8
@@ -1044,7 +1090,7 @@ jobs:
   apache-el8-build-hosted:
     name: Apache EL8 Build (glibc 2.28, hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *apache-el8-env
@@ -1069,7 +1115,7 @@ jobs:
     name: Apache EL10 Build (glibc 2.39, native)
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 240
     env: &apache-el10-env
       EL: el10
@@ -1079,7 +1125,7 @@ jobs:
   apache-el10-build-hosted:
     name: Apache EL10 Build (glibc 2.39, native, hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *apache-el10-env
@@ -1108,7 +1154,7 @@ jobs:
     name: Unit Tests (Release)
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 120
     env: &unit-env
       ARCH: x64
@@ -1197,7 +1243,7 @@ jobs:
   unit-tests-hosted:
     name: Unit Tests (Release, hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env: *unit-env
@@ -1214,7 +1260,7 @@ jobs:
     name: Smoke Test (Debian)
     needs: [version, linux-ready, optimizer-fetch]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: &smoke-env
       RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
@@ -1410,7 +1456,7 @@ jobs:
   package-smoke-deb-hosted:
     name: Smoke Test (Debian, hosted)
     needs: [version, linux-ready, optimizer-fetch]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env: *smoke-env
@@ -1420,7 +1466,7 @@ jobs:
     name: Smoke Test (RPM)
     needs: [version, linux-ready, optimizer-fetch]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: *smoke-env
     steps: &smoke-rpm-steps
@@ -1600,7 +1646,7 @@ jobs:
   package-smoke-rpm-hosted:
     name: Smoke Test (RPM, hosted)
     needs: [version, linux-ready, optimizer-fetch]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env: *smoke-env
@@ -1612,7 +1658,7 @@ jobs:
     name: Smoke Test (Nginx)
     needs: [version, linux-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     steps: &smoke-nginx-steps
       - *unlock-vendor
@@ -1678,7 +1724,7 @@ jobs:
   package-smoke-nginx-hosted:
     name: Smoke Test (Nginx, hosted)
     needs: [version, linux-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps: *smoke-nginx-steps
@@ -1692,7 +1738,7 @@ jobs:
     name: Packaged-Nginx Load Check (x64)
     needs: [version, nginx-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 90
     env: &loadcheck-x64-env
       ARCH: x64
@@ -1715,7 +1761,7 @@ jobs:
   package-load-check-nginx-hosted:
     name: Packaged-Nginx Load Check (x64, hosted)
     needs: [version, nginx-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env: *loadcheck-x64-env
@@ -1724,6 +1770,7 @@ jobs:
   package-load-check-nginx-arm64:
     name: Packaged-Nginx Load Check (arm64)
     needs: [version, nginx-distro-build-arm64]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success'}}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     env:
@@ -1736,7 +1783,7 @@ jobs:
     name: Smoke Test (Nginx, packaged)
     needs: [version, nginx-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &packaged-env
       ARCH: x64
@@ -1759,7 +1806,7 @@ jobs:
   package-smoke-nginx-packaged-hosted:
     name: Smoke Test (Nginx, packaged, hosted)
     needs: [version, nginx-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env: *packaged-env
@@ -1775,7 +1822,7 @@ jobs:
     name: EA4 Build (${{ matrix.os }})
     needs: [version, linux-ready, el8-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -1825,7 +1872,7 @@ jobs:
   ea4-build-hosted:
     name: EA4 Build (${{ matrix.os }}, hosted)
     needs: [version, linux-ready, el8-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -1841,7 +1888,7 @@ jobs:
     name: EA4 Build (el10)
     needs: [version, linux-ready, el10-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: &ea4-el10-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
@@ -1882,7 +1929,7 @@ jobs:
   ea4-el10-build-hosted:
     name: EA4 Build (el10, hosted)
     needs: [version, linux-ready, el10-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env: *ea4-el10-env
@@ -1900,7 +1947,7 @@ jobs:
     name: Windows Release Build
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     defaults:
       run:
@@ -2133,7 +2180,7 @@ jobs:
   windows-release-build-hosted:
     name: Windows Release Build (hosted)
     needs: [version, vendor-ready]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 350
     defaults:
@@ -2192,7 +2239,8 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
       IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
-      OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
+      OPTIMIZER_TAG: ${{ needs.optimizer-fetch.outputs.pair_tag }}
+      PAIR_VERSION: ${{ needs.optimizer-fetch.outputs.pair_pkg_version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
     steps:
       # Every upstream job succeeded, except that of each build runner pair
@@ -2273,13 +2321,13 @@ jobs:
             dep="$(dpkg-deb -f "$deb" Depends)"
             case "$deb" in
               mod-pagespeed_*)
-                case "$dep" in *"pagespeed-optimizer (= ${PKG_VERSION})"*) ;; *) echo "::error::$deb does not depend on pagespeed-optimizer (= ${PKG_VERSION}): $dep"; exit 1 ;; esac ;;
+                case "$dep" in *"pagespeed-optimizer (= ${PAIR_VERSION})"*) ;; *) echo "::error::$deb does not depend on pagespeed-optimizer (= ${PAIR_VERSION}): $dep"; exit 1 ;; esac ;;
             esac
             echo "$deb: Version $v"
           done
           for deb in pagespeed-optimizer_*.deb; do
             v="$(dpkg-deb -f "$deb" Version)"
-            [ "$v" = "$PKG_VERSION" ] || { echo "::error::$deb Version '$v' != '${PKG_VERSION}'"; exit 1; }
+            [ "$v" = "$PAIR_VERSION" ] || { echo "::error::$deb Version '$v' != '${PAIR_VERSION}'"; exit 1; }
             echo "$deb: Version $v"
           done
           for r in mod-pagespeed-*.rpm el10-mod-pagespeed-*.rpm nginx-module-pagespeed-*.rpm; do
@@ -2287,14 +2335,14 @@ jobs:
             [ "$v" = "$PKG_VERSION" ] || { echo "::error::$r version '$v' != '${PKG_VERSION}'"; exit 1; }
             case "$r" in
               mod-pagespeed-*|el10-mod-pagespeed-*)
-                rpm -qp --requires "$r" | grep -Eq "^pagespeed-optimizer = ${PKG_VERSION}(-[0-9A-Za-z.]+)?$" \
-                  || { echo "::error::$r does not require pagespeed-optimizer = ${PKG_VERSION}"; rpm -qp --requires "$r"; exit 1; } ;;
+                rpm -qp --requires "$r" | grep -Eq "^pagespeed-optimizer = ${PAIR_VERSION}(-[0-9A-Za-z.]+)?$" \
+                  || { echo "::error::$r does not require pagespeed-optimizer = ${PAIR_VERSION}"; rpm -qp --requires "$r"; exit 1; } ;;
             esac
             echo "$r: version $v"
           done
           for r in pagespeed-optimizer-*.rpm; do
             v="$(rpm -qp --qf '%{VERSION}' "$r")"
-            [ "$v" = "$PKG_VERSION" ] || { echo "::error::$r version '$v' != '${PKG_VERSION}'"; exit 1; }
+            [ "$v" = "$PAIR_VERSION" ] || { echo "::error::$r version '$v' != '${PAIR_VERSION}'"; exit 1; }
           done
           echo "package contents: ok"
 

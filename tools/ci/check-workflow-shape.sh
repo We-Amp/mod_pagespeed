@@ -30,7 +30,8 @@
 #       carry one of the three fleet guards of docs/ci/pipelines.md (the
 #       FLEET_ENABLED kill switch in its general, fleet-only or
 #       dispatch-only form) verbatim as its if:, the general form optionally
-#       narrowed by `&& needs.changes.outputs.<name> == 'true'`;
+#       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
+#       prefixed by `!cancelled() && needs.<job>.result == 'success' && `;
 #   (f) in a workflow_call workflow: a top-level `permissions:` block is
 #       required and must grant no write access; write access to GitHub (a
 #       `: write` permission, plain or quoted, or write-all) is allowed only
@@ -202,6 +203,19 @@ is_fleet_guard() {
     "${prefix}"*" == 'true' }}")
       name="$(printf '%s' "${v#"${prefix}"}" | sed "s/ == 'true' }}\$//")"
       printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+      ;;
+  esac
+  # A job that depends on a pair of build runner and hosted twin jobs: GitHub
+  # skips a job whose ancestors include a skipped job unless its if: has a
+  # status check, so the guard may be prefixed by `!cancelled()` and
+  # `needs.<job>.result == 'success'` terms (at least one) that restore the
+  # implicit success check:
+  #   ${{ !cancelled() && needs.a.result == 'success' && (<guard>) }}
+  local pre="\${{ !cancelled() && " post="(${FLEET_GUARD_BODY}) }}" mid
+  case "${v}" in
+    "${pre}"*"${post}")
+      mid="${v#"${pre}"}"; mid="${mid%"${post}"}"
+      printf '%s' "${mid}" | grep -qE "^(needs\.[a-z0-9-]+\.result == 'success' && )+\$" && return 0
       ;;
   esac
   return 1
