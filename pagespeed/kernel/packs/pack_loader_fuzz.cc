@@ -29,17 +29,23 @@
 #include <string>
 #include <string_view>
 
-#include "pagespeed/kernel/packs/engine_version.h"
 #include "pagespeed/kernel/packs/pack.h"
 #include "pagespeed/kernel/packs/pack_loader.h"
 
 namespace {
 
+// The engine version every input is loaded against. The corpus is recorded
+// against this fixed engine, so the real product version (EngineVersion())
+// must not leak in: an engine_min above it has to be refused no matter which
+// release this tree is at. It sits above the example pack's engine_min
+// (1.19.0) and below every refused seed's (2.3.0 and up).
+constexpr std::string_view kFuzzEngineVersion = "2.0.0";
+
 // Returns whether the pack loaded.
 bool LoadOne(const char* data, size_t size) {
   using pagespeed::packs::LoadPack;
   auto pack = LoadPack(std::string_view(data, size),
-                       pagespeed::packs::EngineVersion(), "fuzz.json");
+                       kFuzzEngineVersion, "fuzz.json");
   if (!pack.ok()) return false;
   if (pack->rules.size() > pagespeed::packs::kMaxRules || pack->sites.empty()) {
     std::fprintf(stderr, "loader accepted a pack that breaks its limits\n");
