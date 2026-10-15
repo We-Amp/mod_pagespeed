@@ -14,8 +14,9 @@
 # The classes mirror the private source repo's export-time forbidden-strings
 # gate, adapted to public-safe patterns: a rule may name a CLASS of unwanted
 # content (host names, label schemes, id shapes), never an actual private
-# value -- the credential-literal rules stay private-side only, because
-# publishing the literal would leak the very value it guards. The
+# value. Credential literals are checked by a second pass with its own
+# rules file, .github/hygiene-credential-rules.txt, whose patterns match
+# shapes only. The
 # dangling-ci-config class from the private gate is deliberately absent:
 # this tree DOES carry .github/workflows, so references to it are
 # legitimate.

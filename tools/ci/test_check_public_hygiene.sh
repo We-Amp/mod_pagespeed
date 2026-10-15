@@ -26,11 +26,16 @@ run_case() {
   repo="${WORK}/case${CASE}"
   mkdir -p "${repo}/tools/ci" "${repo}/.github"
   cp "${ROOT}/tools/ci/check-public-hygiene.sh" "${repo}/tools/ci/"
-  cp "${ROOT}/.github/hygiene-rules.txt" "${ROOT}/.github/hygiene-credential-rules.txt" "${repo}/.github/"
+  cp "${ROOT}/.github/hygiene-rules.txt" "${repo}/.github/"
+  { grep -v '^allow-path' "${ROOT}/.github/hygiene-credential-rules.txt"; printf '%b' "${EXTRA_RULES:-}"; } \
+    > "${repo}/.github/hygiene-credential-rules.txt"
   printf '%s\n' "$content" > "${repo}/${name}"
   git -C "$repo" init -q
   git -C "$repo" add -A
   out="$(bash "${repo}/tools/ci/check-public-hygiene.sh" 2>&1)" || rc=$?
+  if [[ "$expect" == fail && -n "${EXPECT_MSG:-}" ]] && ! grep -qF -e "$EXPECT_MSG" <<<"$out"; then
+    rc=0
+  fi
   if [[ "$expect" == fail && $rc -ne 0 ]] || [[ "$expect" == pass && $rc -eq 0 ]]; then
     echo "PASS: ${desc}"
   else
@@ -69,14 +74,34 @@ run_case pass "c: empty value" t.sh "password=${D}${D}"
 run_case pass "c: changeme" t.yml "password: ${D}changeme-please${D}"
 run_case pass "c: example" t.yml "password: ${D}example-password${D}"
 run_case pass "c: angle placeholder" t.yml "token: ${D}<your-token-here>${D}"
+run_case fail "c: ADMIN_PASSWORD" t.sh "ADMIN_PASSWORD=${D}${PW}${D}"
+run_case fail "c: env-qualified PowerShell name" t.ps1 "\$env:ADMIN_PASSWORD = ${Q}${PW}${Q}"
+run_case fail "c: camel-case PowerShell name" t.ps1 "\$AdminPassword = ${Q}${PW}${Q}"
+run_case fail "c: GITHUB_TOKEN in YAML" t.yml "GITHUB_TOKEN: ${D}${PW}${D}"
+run_case fail "c: db_password" t.sh "db_password=${D}${PW}${D}"
+run_case fail "c: canary value" t.sh "password=${D}Qw7rTz9pLm2x${D}"
+run_case fail "c: placeholder word only as a substring" t.sh "password=${D}Qw7rTestz9pLm2x${D}"
+run_case fail "c: single-quoted dollar literal" t.ps1 "\$password = ${Q}\$Abcdefgh12${Q}"
+run_case fail "c: x run inside a longer value" t.sh "password=${D}xxxQw7rTz9${D}"
+run_case pass "c: GitHub Actions expression" t.yml "token: ${D}\${{ secrets.GITHUB_TOKEN }}${D}"
+run_case pass "c: shell default expansion" t.sh "password=${D}\${DB_PASSWORD:-fallback}${D}"
+run_case pass "c: xxx run" t.sh "password=${D}xxxxxxxxxx${D}"
 run_case pass "c: shell expansion" t.sh "token=${D}\${CI_TOKEN_VALUE}${D}"
 run_case pass "c: PowerShell env" t.ps1 "\$token = ${D}\$env:CI_TOKEN_VALUE${D}"
 run_case pass "c: percent form" t.sh "password=${D}%PASSWORD_VALUE%${D}"
 run_case pass "c: dummy" t.py "password = ${Q}dummy-value-1${Q}"
 run_case pass "c: test" t.py "password = ${Q}test-value-123${Q}"
-run_case pass "c: not a whole word" t.sh "my_password_file=${D}${PW}${D}"
+run_case pass "c: name only contains the word" t.sh "my_password_file=${D}${PW}${D}"
 run_case pass "c: unlisted file type" t.txt "password=${D}${PW}${D}"
 run_case pass "c: per-line marker" t.sh "password=${D}${PW}${D} # hygiene-allow-credential"
+
+# (b) additional PSCredential forms
+run_case fail "b: New-Object -ArgumentList" t.ps1 "New-Object PSCredential -ArgumentList ${Q}admin${Q}, ${Q}${PW}${Q}"
+run_case fail "b: -ArgumentList first" t.ps1 "New-Object -ArgumentList ${Q}admin${Q}, ${Q}${PW}${Q} -TypeName PSCredential"
+run_case pass "b: -ArgumentList with variable" t.ps1 'New-Object PSCredential -ArgumentList $user, $secure'
+run_case fail "b: -Password single-quoted" t.ps1 "Set-Thing -Password ${Q}${PW}${Q}"
+run_case fail "b: -Password double-quoted" t.ps1 "Set-Thing -Password ${D}${PW}${D}"
+run_case pass "b: -Password variable" t.ps1 'Set-Thing -Password $secure'
 
 # (d) private key headers
 run_case fail "d: RSA" t.txt "-----BEGIN RSA ""PRIVATE KEY-----"
@@ -88,8 +113,22 @@ run_case fail "e: GitHub" t.txt "gh""p_$(printf 'A%.0s' $(seq 36))"
 run_case fail "e: AWS" t.txt "AK""IA$(printf 'A%.0s' $(seq 16))"
 run_case fail "e: Slack" t.txt "xo""xb-12345"
 run_case fail "e: Google" t.txt "AI""za$(printf 'A%.0s' $(seq 35))"
+run_case fail "e: GitHub fine-grained" t.txt "github""_pat_$(printf 'A%.0s' $(seq 25))"
 run_case pass "e: too short GitHub" t.txt "gh""p_abc"
 run_case pass "e: too short AWS" t.txt "AK""IAABC"
+
+# gate configuration refusals
+EXTRA_RULES='allow-path\t.\n'      EXPECT_MSG='allow-path' run_case fail "allow-path dot refused" t.sh 'x=1'
+EXTRA_RULES='allow-path\t*\n'      EXPECT_MSG='allow-path' run_case fail "allow-path star refused" t.sh 'x=1'
+EXTRA_RULES='allow-path\t**/*\n'   EXPECT_MSG='allow-path' run_case fail "allow-path globstar refused" t.sh 'x=1'
+EXTRA_RULES='allow-path\t\n'       EXPECT_MSG='allow-path' run_case fail "allow-path empty refused" t.sh 'x=1'
+EXTRA_RULES='allow-path\t..\n'     EXPECT_MSG='allow-path' run_case fail "allow-path dotdot refused" t.sh 'x=1'
+EXTRA_RULES='allow-path\tmissing.sh\n' EXPECT_MSG='allow-path' run_case fail "allow-path untracked refused" t.sh 'x=1'
+EXTRA_RULES='allow-path\tt.sh\n'   EXPECT_MSG='allow-path' run_case pass "allow-path exact tracked file" t.sh "password=${D}${PW}${D}"
+EXTRA_RULES='placeholder\t\n'      EXPECT_MSG='empty placeholder' run_case fail "empty placeholder refused" t.sh 'x=1'
+EXTRA_RULES='placeholder\t.\n'     EXPECT_MSG='canary' run_case fail "placeholder dot trips canary" t.sh 'x=1'
+EXTRA_RULES='placeholder\t.*\n'    EXPECT_MSG='canary' run_case fail "placeholder dot-star trips canary" t.sh 'x=1'
+EXTRA_RULES='placeholder-dq\t.\n'  EXPECT_MSG='canary' run_case fail "placeholder-dq dot trips canary" t.sh 'x=1'
 
 # allowlist
 run_case pass "clean tree" t.txt "nothing to see"
@@ -98,7 +137,7 @@ repo="${WORK}/case${CASE}"
 mkdir -p "${repo}/tools/ci" "${repo}/.github" "${repo}/fixtures"
 cp "${ROOT}/tools/ci/check-public-hygiene.sh" "${repo}/tools/ci/"
 cp "${ROOT}/.github/hygiene-rules.txt" "${repo}/.github/"
-{ cat "${ROOT}/.github/hygiene-credential-rules.txt"
+{ grep -v '^allow-path' "${ROOT}/.github/hygiene-credential-rules.txt"
   printf 'allow-path\tfixtures/fake.sh\n'; } > "${repo}/.github/hygiene-credential-rules.txt"
 printf 'password="%s"\n' "$PW" > "${repo}/fixtures/fake.sh"
 git -C "$repo" init -q
@@ -114,7 +153,8 @@ CASE=$((CASE + 1))
 repo="${WORK}/case${CASE}"
 mkdir -p "${repo}/tools/ci" "${repo}/.github"
 cp "${ROOT}/tools/ci/check-public-hygiene.sh" "${repo}/tools/ci/"
-cp "${ROOT}/.github/hygiene-rules.txt" "${ROOT}/.github/hygiene-credential-rules.txt" "${repo}/.github/"
+cp "${ROOT}/.github/hygiene-rules.txt" "${repo}/.github/"
+grep -v '^allow-path' "${ROOT}/.github/hygiene-credential-rules.txt" > "${repo}/.github/hygiene-credential-rules.txt"
 printf 'password="%s"\n' "$PW" > "${repo}/t.sh"
 git -C "$repo" init -q
 git -C "$repo" add -A

@@ -45,7 +45,7 @@ _RIGHT_TOKEN = (
     "?PageSpeedStickyQueryParameters=sticky_secret"
     "&PageSpeedFilters=+remove_comments"
 )
-_EXPIRE_TOKEN = "?PageSpeedStickyQueryParameters=off"
+_EXPIRE_TOKEN = "?PageSpeedStickyQueryParameters=off"  # hygiene-allow-credential: query string, not a secret
 _EPOCH = "Expires=Thu, 01 Jan 1970"
 # Every option cookie ends with this (response_headers.cc,
 # SetQueryParamsAsCookies / ClearOptionCookies).

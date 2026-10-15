@@ -728,7 +728,7 @@ pagespeed FileCacheSizeKb 65536
 "@
             # canary.js: a large, unique-token-bearing resource the gate test
             # floods (distinct ?v= inputs) to churn the small Cyclone volume.
-            $canaryToken = "ZZQX_CYCLONE_ZEROCOPY_CANARY_MARKER_ZZQX"
+            $canaryToken = "ZZQX_CYCLONE_ZEROCOPY_CANARY_MARKER_ZZQX"  # hygiene-allow-credential: test marker, not a secret
             $sb = New-Object System.Text.StringBuilder
             [void]$sb.Append("/* zero-copy M1 gate canary flood resource */`n")
             [void]$sb.Append("var _canary_marker = `"$canaryToken`";`n")

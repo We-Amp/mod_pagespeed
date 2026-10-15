@@ -428,24 +428,37 @@ literals:
 - **securestring-literal**: PowerShell `ConvertTo-SecureString` with a quoted
   string literal and `-AsPlainText` (any argument order, or via the pipeline).
   A variable or `$env:` argument passes.
-- **pscredential-literal**: `PSCredential(` constructed with a quoted literal
-  second argument.
-- **secret-assignment**: `password`, `passwd`, `secret`, `token`, `api_key` or
-  `apikey` (whole word, any case) assigned a quoted string of 8 or more
-  characters, in shell, PowerShell, YAML, Python and JSON files. Obvious
-  placeholders pass (`changeme`, `example`, `placeholder`, `xxx`, `dummy`,
-  `test`, `<...>`, `${...}`, `$env:...`, `%...%`, `secret` itself); the list
-  is the `placeholder` entries in the rules file and can grow there.
+- **pscredential-literal**: `PSCredential(` or `New-Object ... PSCredential
+  -ArgumentList` with a quoted literal password argument, and the `-Password`
+  cmdlet parameter with a quoted literal (PowerShell files).
+- **secret-assignment**: a name ending in `password`, `passwd`, `secret`,
+  `token`, `api_key` or `apikey` (any case; `ADMIN_PASSWORD`, `$AdminPassword`
+  and `GITHUB_TOKEN` count, `password_file` does not) assigned a quoted string
+  of 8 or more characters, in shell, PowerShell, YAML, Python and JSON files.
+  Obvious placeholders pass; they are anchored `placeholder` entries in the
+  rules file (`changeme`, `example`, `placeholder`, `dummy`, `test`,
+  `replace` optionally followed by a separator and more text, runs of `x`,
+  `<...>`, `%...%`, `your-...`, `secret` itself, `${{ ... }}`) plus variable
+  references in double quotes (`${NAME}`, `$env:NAME`, `$NAME`). The gate
+  refuses empty entries and fails if the set matches a canary value.
 - **private-key-header**: `-----BEGIN ... PRIVATE KEY-----` headers.
-- **token-shape**: GitHub (`gh[pousr]_`), AWS (`AKIA`), Slack (`xox[baprs]-`)
-  and Google (`AIza`) token shapes.
+- **token-shape**: GitHub (`gh[pousr]_` and `github_pat_`), AWS (`AKIA`),
+  Slack (`xox[baprs]-`) and Google (`AIza`) token shapes.
 
 The report names `path:line` and the rule class, never the matched text.
 
 Allowlisting, for fixtures that intentionally hold fake secrets only: add an
-`allow-path` entry (a git pathspec glob, with a comment saying why) to the
-credential rules file, or put the marker `hygiene-allow-credential` on the
-line itself, for example in a trailing comment. The self-test for this pass is
+`allow-path` entry (with a comment saying why) to the
+credential rules file (the exact path of one tracked file: no glob
+characters, no directory; the gate refuses anything else and lists the active
+entries in its output), or put the marker `hygiene-allow-credential` on the
+line itself, for example in a trailing comment.
+
+Known gaps: unquoted YAML values, `.env` files and Dockerfile `ENV` lines are
+not scanned, and a secret's NAME in a Kubernetes or Helm value (for example
+`secret: "some-secret-name"`) can be a false positive; the line marker is the
+escape hatch. File names containing a colon break the `path:line` report. The
+self-test for this pass is
 `tools/ci/test_check_public_hygiene.sh`; it builds its fixtures at run time.
 
 ## The workflow-shape gate

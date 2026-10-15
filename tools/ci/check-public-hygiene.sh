@@ -12,8 +12,9 @@
 # private source repo's export-time filters, so the classes are re-checked
 # here, against public-safe patterns only: a rule may name a CLASS of
 # unwanted content, it may never carry an actual private value (hostnames
-# and topology coinages are fair game; credential literals stay gated
-# private-side only).
+# and topology coinages are fair game). Credential literals are covered
+# by a second pass with its own rules file (see below), whose patterns match
+# shapes only.
 #
 # The rules live in .github/hygiene-rules.txt (one "<flags><TAB><ERE>" per
 # line; its header documents each class). Every rule is run over the
@@ -31,7 +32,8 @@
 # shapes). Its rules, placeholder list and path allowlist live in
 # .github/hygiene-credential-rules.txt (header documents the format); a line
 # carrying the marker "hygiene-allow-credential" is exempt. It reports
-# path:line and the rule class only, never the matched text.
+# path:line and the rule class only, never the matched text. Limitation: the
+# path:line report format assumes tracked file names without a colon.
 #
 # Usage: tools/ci/check-public-hygiene.sh
 set -euo pipefail
@@ -94,14 +96,34 @@ CRED_MARKER="hygiene-allow-credential"
 
 cred_excludes=(":(exclude)${RULES}" ":(exclude)${CRED_RULES}")
 placeholders=()
+placeholders_dq=()
+allowed_paths=()
 cred_rules=()
 lineno=0
 while IFS=$'\t' read -r kind a b c d || [[ -n "$kind" ]]; do
   lineno=$((lineno + 1))
   case "$kind" in
     ''|\#*) continue ;;
-    placeholder) placeholders+=("$a") ;;
-    allow-path) cred_excludes+=(":(exclude,glob)${a}") ;;
+    placeholder|placeholder-dq)
+      if [[ -z "$a" ]]; then
+        echo "::error::${CRED_RULES}:${lineno}: empty ${kind} entry refused" >&2
+        exit 1
+      fi
+      if [[ "$kind" == placeholder ]]; then placeholders+=("$a"); else placeholders_dq+=("$a"); fi
+      ;;
+    allow-path)
+      if [[ -z "$a" || "$a" == . || "$a" == .. || "$a" == *[\*\?\[]* \
+            || "$a" == :* || "$a" == /* || "$a" == *..* ]]; then
+        echo "::error::${CRED_RULES}:${lineno}: allow-path must be the exact path of one tracked file (no glob characters, not empty, not . or ..)" >&2
+        exit 1
+      fi
+      if [[ "$(git ls-files -- ":(literal)${a}")" != "$a" ]]; then
+        echo "::error::${CRED_RULES}:${lineno}: allow-path '${a}' is not a tracked file" >&2
+        exit 1
+      fi
+      cred_excludes+=(":(exclude,literal)${a}")
+      allowed_paths+=("$a")
+      ;;
     rule)
       if [[ "$a" != *E* || -z "$b" || -z "$c" ]]; then
         echo "::error::${CRED_RULES}:${lineno}: malformed rule" >&2
@@ -116,15 +138,32 @@ while IFS=$'\t' read -r kind a b c d || [[ -n "$kind" ]]; do
   esac
 done < "$CRED_RULES"
 
-is_placeholder() { # <value>
+is_placeholder() { # <value> <quote char>
   local p
   for p in "${placeholders[@]}"; do
     if printf '%s\n' "$1" | grep -Eiq -e "$p"; then
       return 0
     fi
   done
+  if [[ "$2" == '"' ]]; then
+    for p in "${placeholders_dq[@]}"; do
+      if printf '%s\n' "$1" | grep -Eiq -e "$p"; then
+        return 0
+      fi
+    done
+  fi
   return 1
 }
+
+# Self-check: a realistic random-looking value must never read as a
+# placeholder, whichever quote it is wrapped in. Catches an over-broad entry.
+CANARY='Qw7rTz9pLm2x'
+for q in '"' "'"; do
+  if is_placeholder "$CANARY" "$q"; then
+    echo "::error::${CRED_RULES}: placeholder set matches the canary value; an entry is too broad" >&2
+    exit 1
+  fi
+done
 
 cred_status=0
 for entry in "${cred_rules[@]}"; do
@@ -133,7 +172,8 @@ for entry in "${cred_rules[@]}"; do
   [[ "$flags" == *i* ]] && grep_args+=(-i)
   pathspecs=(.)
   filter=0
-  for opt in $options; do
+  read -r -a opts <<<"$options"
+  for opt in ${opts[@]+"${opts[@]}"}; do
     case "$opt" in
       value-filter) filter=1 ;;
       paths=*)
@@ -161,7 +201,8 @@ for entry in "${cred_rules[@]}"; do
     fi
     if [[ $filter -eq 1 ]]; then
       value="$(printf '%s' "$match" | sed -E "s/^[^:=]*[:=][[:space:]]*[\"']//; s/[\"']\$//")"
-      if is_placeholder "$value"; then
+      quote="$(printf '%s' "$match" | sed -E "s/^[^:=]*[:=][[:space:]]*(.).*/\1/")"
+      if is_placeholder "$value" "$quote"; then
         continue
       fi
     fi
@@ -176,4 +217,4 @@ if [[ $cred_status -ne 0 ]]; then
   exit 1
 fi
 
-echo "Public-tree credential-literal pass passed: no rule matched the tracked tree."
+echo "Public-tree credential-literal pass passed: no rule matched the tracked tree (allowed paths: ${allowed_paths[*]:-none})."
