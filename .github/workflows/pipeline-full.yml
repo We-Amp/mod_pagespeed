@@ -642,10 +642,10 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
-      # The tests run as the runner's user, never as root: a root-run server
-      # drops its workers to an unprivileged user that cannot write the logs
-      # the tests read. A runner service that is root hands the workspace to
-      # an unprivileged id instead.
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
@@ -747,10 +747,10 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
-      # The tests run as the runner's user, never as root: a root-run server
-      # drops its workers to an unprivileged user that cannot write the logs
-      # the tests read. A runner service that is root hands the workspace to
-      # an unprivileged id instead.
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
