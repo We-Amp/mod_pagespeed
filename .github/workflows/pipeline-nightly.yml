@@ -9,7 +9,7 @@
 # Jobs by class:
 #   fleet-heavy   nightly-vendor (the vendored tree for every Linux job),
 #                 apache-asan-stress, apache-daemon-lane, nginx-asan-stress,
-#                 nginx-protocol-matrix, full-tree-lint, fuzz-css, fuzz-html,
+#                 nginx-protocol-matrix, full-tree-lint (3 shards), fuzz-css, fuzz-html,
 #                 fuzz-packs, fuzz-js
 #   fleet-iis     iis-asan-systest, iis-appverif-matrix (a Windows host with
 #                 IIS; no hosted twin, so they are skipped without the fleet)
@@ -858,13 +858,24 @@ jobs:
   # graph cannot see (a dependency assembled by macro, a generated header).
   # A red nightly means the default branch has a clang-tidy error that no
   # pull request gate will surface again, so it fails.
+  # The sweep runs as LINT_SHARDS matrix shards: each one lints the files
+  # whose index in the sorted file list satisfies index % LINT_SHARDS ==
+  # shard. To change the shard count, change LINT_SHARDS, the matrix list and
+  # the "of N" in the job name together.
   # ---------------------------------------------------------------------
   full-tree-lint:
-    name: clang-tidy (full tree)
+    name: clang-tidy (full tree, shard ${{ matrix.shard }} of 3)
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    env:
+      LINT_SHARDS: 3
+      LINT_SHARD: ${{ matrix.shard }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -907,7 +918,7 @@ jobs:
       - name: Start the build container
         run: |
           set -euo pipefail
-          CTR="nightly-full-tree-lint-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CTR="nightly-full-tree-lint-${LINT_SHARD}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
           EXTRA=()
@@ -935,6 +946,9 @@ jobs:
             "${DOCKER_IMAGE}" sleep infinity >/dev/null
           docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
           echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          # The container memory limit in GiB, the one number the lint
+          # parallelism is derived from (see the lint step).
+          echo "LINT_MEM_GIB=${RAM_GB}" >> "$GITHUB_ENV"
           echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
 
       # The compilation database holds absolute paths into the Bazel
@@ -942,7 +956,7 @@ jobs:
       # generation and linting share this one exec.
       - name: clang-tidy (compilation database and full-tree lint)
         run: |
-          docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
+          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS -e LINT_MEM_GIB "${CTR}" bash -s <<'EOS'
           set -euo pipefail
           export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going"
           rm -f compile_commands.json
@@ -963,11 +977,49 @@ jobs:
             echo "::error::compile_commands.json has no pagespeed/nginx entries; nginx dropped out of the compilation database"
             exit 1
           }
+          # The file list: every database entry whose absolute path matches
+          # the regex the old single job passed (pagespeed/|net/; the execroot
+          # path itself contains pagespeed/, so today this is every
+          # translation unit in the database). A file belongs to this shard
+          # when a stable hash of its path relative to the execroot satisfies
+          # crc32(path) % LINT_SHARDS == LINT_SHARD, so the assignment does
+          # not depend on list position even if shards build slightly
+          # different databases. The list is sorted for a deterministic
+          # argument order, and each file becomes an anchored escaped regex.
+          python3 - > "${RUNNER_TEMP}/lint-shard-files.txt" <<'PY'
+          import json, os, re, zlib
+          sel = re.compile(r"pagespeed/|net/")
+          n, s = int(os.environ["LINT_SHARDS"]), int(os.environ["LINT_SHARD"])
+          files = set()
+          for e in json.load(open("compile_commands.json")):
+              f = os.path.normpath(os.path.join(e["directory"], e["file"]))
+              rel = os.path.relpath(f, e["directory"])
+              if sel.search(f) and zlib.crc32(rel.encode()) % n == s:
+                  files.add(f)
+          if files:
+              print("\n".join(sorted(files)))
+          PY
+          echo "shard ${LINT_SHARD} of ${LINT_SHARDS}: $(wc -l < "${RUNNER_TEMP}/lint-shard-files.txt") files"
+          [ -s "${RUNNER_TEMP}/lint-shard-files.txt" ] || {
+            echo "::error::shard ${LINT_SHARD} of ${LINT_SHARDS} has no files to lint"
+            exit 1
+          }
+          mapfile -t shard_re < <(sed -e 's/[][\.^$*+?(){}|\/]/\\&/g' -e 's/^/^/' -e 's/$/$/' "${RUNNER_TEMP}/lint-shard-files.txt")
+          # One clang-tidy process on this tree can take about 2 GiB, and
+          # run-clang-tidy defaults -j to the host CPU count, which on a big
+          # host far exceeds the container memory limit (the kernel then
+          # kills the processes). Cap it: -j = min(nproc, max(4, GiB / 2)),
+          # where GiB is the container's --memory value (16 GiB gives -j 8).
+          lint_jobs=$(( LINT_MEM_GIB / 2 ))
+          [ "${lint_jobs}" -ge 4 ] || lint_jobs=4
+          [ "${lint_jobs}" -le "$(nproc)" ] || lint_jobs="$(nproc)"
+          echo "run-clang-tidy-20 -j ${lint_jobs} (memory limit ${LINT_MEM_GIB} GiB)"
           run-clang-tidy-20 \
+            -j "${lint_jobs}" \
             -clang-tidy-binary=clang-tidy-20 \
             -p /workspace \
             -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
-            pagespeed/ net/
+            "${shard_re[@]}"
           EOS
 
       # A silently absent clang-tidy-20 would make run-clang-tidy a no-op
