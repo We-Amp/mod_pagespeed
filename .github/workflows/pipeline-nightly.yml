@@ -946,6 +946,9 @@ jobs:
             "${DOCKER_IMAGE}" sleep infinity >/dev/null
           docker exec "${CTR}" bash -c 'mkdir -p "$HOME" && echo "startup --output_user_root=/tmp/bazel-out" > "$HOME/.bazelrc"'
           echo "CTR=${CTR}" >> "$GITHUB_ENV"
+          # The container memory limit in GiB, the one number the lint
+          # parallelism is derived from (see the lint step).
+          echo "LINT_MEM_GIB=${RAM_GB}" >> "$GITHUB_ENV"
           echo "BZL_FLAGS=${BZL_FLAGS}" >> "$GITHUB_ENV"
 
       # The compilation database holds absolute paths into the Bazel
@@ -953,7 +956,7 @@ jobs:
       # generation and linting share this one exec.
       - name: clang-tidy (compilation database and full-tree lint)
         run: |
-          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS "${CTR}" bash -s <<'EOS'
+          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS -e LINT_MEM_GIB "${CTR}" bash -s <<'EOS'
           set -euo pipefail
           export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going"
           rm -f compile_commands.json
@@ -1002,7 +1005,17 @@ jobs:
             exit 1
           }
           mapfile -t shard_re < <(sed -e 's/[][\.^$*+?(){}|\/]/\\&/g' -e 's/^/^/' -e 's/$/$/' "${RUNNER_TEMP}/lint-shard-files.txt")
+          # One clang-tidy process on this tree can take about 2 GiB, and
+          # run-clang-tidy defaults -j to the host CPU count, which on a big
+          # host far exceeds the container memory limit (the kernel then
+          # kills the processes). Cap it: -j = min(nproc, max(4, GiB / 2)),
+          # where GiB is the container's --memory value (16 GiB gives -j 8).
+          lint_jobs=$(( LINT_MEM_GIB / 2 ))
+          [ "${lint_jobs}" -ge 4 ] || lint_jobs=4
+          [ "${lint_jobs}" -le "$(nproc)" ] || lint_jobs="$(nproc)"
+          echo "run-clang-tidy-20 -j ${lint_jobs} (memory limit ${LINT_MEM_GIB} GiB)"
           run-clang-tidy-20 \
+            -j "${lint_jobs}" \
             -clang-tidy-binary=clang-tidy-20 \
             -p /workspace \
             -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
