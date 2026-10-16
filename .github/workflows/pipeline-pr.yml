@@ -693,20 +693,23 @@ jobs:
             # or rm, the temp file this one is tarring.
             TMP_TARBALL="${TARBALL}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
             rm -f "${TMP_TARBALL}"
-            # Stop the Bazel server the vendor step left running so nothing
-            # writes to the tree while it is archived.
-            bazel shutdown || true
-            # Status 1 means a file changed while being read (a background
-            # write); the rest of the archive is intact, and the digest
-            # sidecar is computed after the write. Any other failure is real.
+            # Status 1 is accepted only when the sole complaint is the workspace
+            # root directory changing (no file contents); a changed file is torn.
+            TAR_ERR="${RUNNER_TEMP:-/tmp}/tar-err-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.txt"
             set +e
-            tar --warning=no-file-changed --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
+            tar --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
               --exclude='.git' \
               --exclude='bazel-*' \
-              .
+              . 2>"${TAR_ERR}"
             tar_rc=$?
             set -e
-            if [ "$tar_rc" -ne 0 ] && [ "$tar_rc" -ne 1 ]; then echo "::error::tar failed with status ${tar_rc}"; exit "$tar_rc"; fi
+            if [ "$tar_rc" -eq 1 ] && ! grep -v -x -e '' -e 'tar: .: file changed as we read it' "${TAR_ERR}" | grep -q .; then
+              echo "::notice::workspace root changed during archiving; archive accepted"
+            elif [ "$tar_rc" -ne 0 ]; then
+              while IFS= read -r line; do echo "::error::${line}"; done < "${TAR_ERR}"
+              echo "::error::tar failed with status ${tar_rc}"
+              exit "$tar_rc"
+            fi
           fi
           # Publish create-if-absent and write the digest sidecar
           # (tools/ci/publish-vendor-tarball.sh): a same-SHA tarball another
