@@ -201,8 +201,8 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `windows-sign` | hosted Windows, environment `release`, real run only | signs the IIS module and the optimizer worker and library from `unsigned-windows` with Trusted Signing, has Windows verify each signature, hands over `signed-windows` |
 | `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
 | `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows` |
-| `gate-iis-msi-upgrade` | fleet-iis (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
-| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-iis (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
+| `gate-iis-msi-upgrade` | fleet-hyperv (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
+| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
 | `unit-tests` | fleet-heavy, pair | unit tests of the optimized build with redis and memcached containers |
 | `package-smoke-deb`, `package-smoke-rpm` | fleet-heavy, pair | install, upgrade over a synthetic old version, version header, removal, in a Debian and a Rocky container |
 | `package-smoke-nginx` | fleet-heavy, pair | the from-source nginx smoke with the module tarball |

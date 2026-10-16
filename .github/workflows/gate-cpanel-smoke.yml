@@ -7,8 +7,9 @@
 # tests it over ssh. The release lane calls it once per operating system (a
 # matrix in the caller).
 #
-# Runs on the fleet-iis class only, never on a hosted runner, and is skipped
-# while FLEET_ENABLED is not 'true'. The job holds no secret and no write
+# Runs on the fleet-hyperv class only (a Windows host with the Hyper-V role and
+# the test guests with their clean checkpoints), never on a hosted runner, and
+# is skipped while FLEET_ENABLED is not 'true'. The job holds no secret and no write
 # token; ssh keys stay on the host. The guest is named by CI_EA4_VM_<OS> in
 # the runner environment (docs/ci/runner-environment.md). A target whose guest
 # or checkpoint is not provisioned yet skips with a warning annotation, and so
@@ -43,7 +44,7 @@ permissions:
 jobs:
   cpanel-smoke:
     name: cPanel smoke (${{ inputs.os }})
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-hyperv' }}
     if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 30
     outputs:
