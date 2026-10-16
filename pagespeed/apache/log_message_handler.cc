@@ -119,7 +119,8 @@ void ShutDown() {
     delete mod_pagespeed_version;
     mod_pagespeed_version = nullptr;
   }
-  apache_glog_sink.release();
+  // Deliberately leak the sink so logging outlives static destruction.
+  (void)apache_glog_sink.release();
 }
 
 // What Google level of logs to display when Apache LogLevel is Debug.
