@@ -262,6 +262,7 @@ pagespeed_cc_test(
         "system_message_handler_test.cc",
     ],
     shard_count = 1,
+    size = "large",
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "//test/pagespeed/system:test_base",
