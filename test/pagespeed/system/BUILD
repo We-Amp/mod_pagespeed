@@ -228,6 +228,7 @@ pagespeed_cc_test(
     name = "system_caches_test",
     srcs = ["system_caches_test.cc"],
     shard_count = 1,
+    size = "large",
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "//test/pagespeed/system:test_base_core",
