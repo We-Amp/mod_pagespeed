@@ -160,10 +160,20 @@ jobs:
             # or rm, the temp file this one is tarring.
             TMP_TARBALL="${TARBALL}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
             rm -f "${TMP_TARBALL}"
-            tar --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
+            # Stop the Bazel server the vendor step left running so nothing
+            # writes to the tree while it is archived.
+            bazel shutdown || true
+            # Status 1 means a file changed while being read (a background
+            # write); the rest of the archive is intact, and the digest
+            # sidecar is computed after the write. Any other failure is real.
+            set +e
+            tar --warning=no-file-changed --zstd --dereference --mode='u+w' -cf "${TMP_TARBALL}" \
               --exclude='.git' \
               --exclude='bazel-*' \
               .
+            tar_rc=$?
+            set -e
+            if [ "$tar_rc" -ne 0 ] && [ "$tar_rc" -ne 1 ]; then echo "::error::tar failed with status ${tar_rc}"; exit "$tar_rc"; fi
           fi
           # Publish create-if-absent and write the digest sidecar
           # (tools/ci/publish-vendor-tarball.sh): a same-SHA tarball another
