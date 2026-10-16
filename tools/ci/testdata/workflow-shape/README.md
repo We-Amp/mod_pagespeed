@@ -21,7 +21,7 @@ tree root passed to `tools/ci/check-workflow-shape.sh`:
   allowed callee.
 - `bad-guard-iis-only-term/` and `bad-guard-iis-no-fork/` break the fleet-iis
   guard; `bad-guard-iis-class/` routes to fleet-iis with the plain fleet-only
-  guard.
+  guard; `bad-guard-hyperv-class/` does the same for fleet-hyperv.
 - `bad-*/` must each fail (exit 1) and name the rule in the message.
 
 The bad trees violate the gate on purpose; the token scan excludes this

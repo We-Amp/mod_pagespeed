@@ -10,7 +10,7 @@
 # module-v1.19.0-rc.1 for a release candidate) this lane builds every module
 # package and the Windows installer, runs the package smokes, the security
 # gates, the unit tests, the system-test gate and the two release gates on the
-# fleet-iis class (installer upgrade, cPanel), validates the asset set and
+# fleet-hyperv class (installer upgrade, cPanel), validates the asset set and
 # ends in one run artifact, `release-assets`: the validated asset set with
 # SHA256SUMS and manifest.json (docs/ci/release.md describes the contract).
 # In a real run (dry_run false) it also signs the Windows binaries and the
@@ -2501,7 +2501,7 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
-  # The release gates on the fleet-iis class: reusable workflows of
+  # The release gates on the fleet-hyperv class: reusable workflows of
   # this repository that need a Hyper-V guest (docs/ci/pipelines.md). They
   # hold no secret and no write token. They run in a dry run as well; the
   # installer under test is the one in `asset-windows` (unsigned in a dry run,
@@ -2643,7 +2643,7 @@ jobs:
           in_pair=" "
           # The signing jobs run in a real run only: they must have
           # succeeded there and been skipped in a dry run. The gates need the
-          # fleet-iis class and can succeed without testing anything, so in a
+          # fleet-hyperv class and can succeed without testing anything, so in a
           # real run each must have succeeded AND reported ran == true (the
           # cPanel gates are exempt on a pre-release, which has no package);
           # in a dry run a skipped gate is allowed.

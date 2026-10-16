@@ -2041,8 +2041,8 @@ jobs:
 
   # ---------------------------------------------------------------------
   # IIS lanes (class fleet-iis: a Windows host with the IIS role, a local
-  # administrator service account and one runner instance, so these lanes
-  # never overlap each other or any other IIS job). No hosted twin exists, so
+  # administrator service account and one runner instance per host, so the IIS
+  # jobs serialize per host and may run on different hosts at the same time). No hosted twin exists, so
   # a fork pull request or a missing fleet skips them. Toolchain, caches and
   # the dump directory come from the optional runner environment
   # (docs/ci/runner-environment.md).
