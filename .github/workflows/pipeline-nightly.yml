@@ -974,29 +974,34 @@ jobs:
             echo "::error::compile_commands.json has no pagespeed/nginx entries; nginx dropped out of the compilation database"
             exit 1
           }
-          # The file list: every translation unit of the database under
-          # pagespeed/ or net/ (what run-clang-tidy-20 selected from those two
-          # arguments before), sorted and de-duplicated. This shard takes the
-          # entries whose 1-based index satisfies index % LINT_SHARDS ==
-          # LINT_SHARD. Each file becomes an end-anchored regex argument.
-          python3 - > "${RUNNER_TEMP}/lint-all-files.txt" <<'PY'
-          import json, os, re
+          # The file list: every database entry whose absolute path matches
+          # the regex the old single job passed (pagespeed/|net/; the execroot
+          # path itself contains pagespeed/, so today this is every
+          # translation unit in the database). A file belongs to this shard
+          # when a stable hash of its path relative to the execroot satisfies
+          # crc32(path) % LINT_SHARDS == LINT_SHARD, so the assignment does
+          # not depend on list position even if shards build slightly
+          # different databases. The list is sorted for a deterministic
+          # argument order, and each file becomes an anchored escaped regex.
+          python3 - > "${RUNNER_TEMP}/lint-shard-files.txt" <<'PY'
+          import json, os, re, zlib
           sel = re.compile(r"pagespeed/|net/")
+          n, s = int(os.environ["LINT_SHARDS"]), int(os.environ["LINT_SHARD"])
           files = set()
           for e in json.load(open("compile_commands.json")):
               f = os.path.normpath(os.path.join(e["directory"], e["file"]))
-              if sel.search(f):
+              rel = os.path.relpath(f, e["directory"])
+              if sel.search(f) and zlib.crc32(rel.encode()) % n == s:
                   files.add(f)
-          print("\n".join(sorted(files)))
+          if files:
+              print("\n".join(sorted(files)))
           PY
-          LC_ALL=C sort -o "${RUNNER_TEMP}/lint-all-files.txt" "${RUNNER_TEMP}/lint-all-files.txt"
-          awk -v n="${LINT_SHARDS}" -v s="${LINT_SHARD}" 'NR % n == s' "${RUNNER_TEMP}/lint-all-files.txt" > "${RUNNER_TEMP}/lint-shard-files.txt"
-          echo "shard ${LINT_SHARD} of ${LINT_SHARDS}: $(wc -l < "${RUNNER_TEMP}/lint-shard-files.txt") of $(wc -l < "${RUNNER_TEMP}/lint-all-files.txt") files"
+          echo "shard ${LINT_SHARD} of ${LINT_SHARDS}: $(wc -l < "${RUNNER_TEMP}/lint-shard-files.txt") files"
           [ -s "${RUNNER_TEMP}/lint-shard-files.txt" ] || {
             echo "::error::shard ${LINT_SHARD} of ${LINT_SHARDS} has no files to lint"
             exit 1
           }
-          mapfile -t shard_re < <(sed -e 's/[][\.^$*+?(){}|\/]/\\&/g' -e 's/$/$/' "${RUNNER_TEMP}/lint-shard-files.txt")
+          mapfile -t shard_re < <(sed -e 's/[][\.^$*+?(){}|\/]/\\&/g' -e 's/^/^/' -e 's/$/$/' "${RUNNER_TEMP}/lint-shard-files.txt")
           run-clang-tidy-20 \
             -clang-tidy-binary=clang-tidy-20 \
             -p /workspace \
