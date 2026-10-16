@@ -268,7 +268,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `apache-daemon-lane` | fleet-heavy | the Apache system tests with the daemon lane required |
 | `nginx-asan-stress` | fleet-heavy, fleet only | the same for the nginx module |
 | `nginx-protocol-matrix` | fleet-heavy, fleet only | the proxy-cache race smoke over HTTP/1.1 and HTTP/2 (`protocols` input to change the list) |
-| `full-tree-lint` | fleet-heavy | clang-tidy over the whole tree, the backstop for what the pull request lint's include graph cannot see |
+| `full-tree-lint` | fleet-heavy, three shards | clang-tidy over the whole tree, split into three matrix shards by file index, the backstop for what the pull request lint's include graph cannot see |
 | `fuzz-css`, `fuzz-html`, `fuzz-packs`, `fuzz-js` | fleet-heavy | an ASan replay floor plus a bounded libFuzzer campaign per surface; corpora persist across nights in `actions/cache`; the JS lane classifies its artifacts and fails only on needs-triage ones |
 | `iis-asan-systest` | fleet-iis | ASan build of the IIS module under recycle-under-load stress |
 | `iis-appverif-matrix` | fleet-iis | the zero-copy merge gate, then the Application Verifier provider matrix (`arms` input) |
