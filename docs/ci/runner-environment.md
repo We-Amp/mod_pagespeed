@@ -56,16 +56,17 @@ comes with the Windows SDK and is expected on `PATH` by the AppVerifier lanes.
 
 ## IIS and virtual machine runners (classes `fleet-iis` and `fleet-hyperv`)
 
-Jobs of this class have no hosted twin. They run only for events of this
+Jobs of these classes have no hosted twin. They run only for events of this
 repository: a fork or Dependabot pull request skips them (the jobs show as
 skipped, not failed), and so does every run while `FLEET_ENABLED` or
 `FLEET_IIS_ENABLED` is not `true`. `FLEET_IIS_ENABLED` is a second repository
-variable: set it to `true` once a runner of this class is registered, so the
-jobs are skipped rather than queued while the class does not exist. A job
-of this class builds and runs the pull request's own code on a
-host with administrator rights, so the host is dedicated to the class, carries
+variable: set it to `true` once a runner of each class is registered, so the
+jobs are skipped rather than queued while a class does not exist. A job
+of either class builds and runs the pull request's own code on a
+host with administrator rights, so the host is dedicated to its class, carries
 no other registration and holds no credential beyond the ones named here. The
-class means a Windows host with these facts, which are not variables:
+`fleet-iis` class means a Windows host with these facts, which are not
+variables:
 
 - the IIS role is installed and the job manages it (sites, application pools,
   `w3wp`, `appcmd`); the runner service account is a local administrator;
@@ -77,7 +78,7 @@ class means a Windows host with these facts, which are not variables:
   built), Python 3.12 with pip, and `PATH` entries from `CI_WIN_TOOLS_DIR`;
 - Application Verifier (`appverif`, from the Windows SDK) and `gflags` are
   available; the jobs call them only to clear stale settings and tolerate
-  their absence;
+  their absence.
 
 The installer-upgrade and cPanel release gates run on a separate class,
 `fleet-hyperv`: a Windows host with the Hyper-V role and the test guests with
@@ -99,6 +100,10 @@ per host) and needs:
 | `CI_IIS_VM_SNAPSHOT` | name of the clean checkpoint the gate restores | the script's default checkpoint name is used |
 | `CI_IIS_VM_ADMIN_PASSWORD` | the guest Administrator password, read by `test/system/iis/ci-msi-upgrade-test.ps1` from the runner's environment, never a parameter, never written in the repository and never printed. Set it in the runner's `.env` file, which only the runner account can read. Only the two release gates may read it: `iis-sys-tests` runs pull request code on the same host, so its first step blanks the variable for the rest of that job | the gate fails with a message that names the variable |
 | `CI_EA4_VM_<OS>` | name of the cPanel guest for one target operating system (for example `CI_EA4_VM_EL9`); the clean checkpoint follows a fixed naming convention per operating system | a conventional guest name is tried; when no guest exists the smoke for that operating system skips with a warning annotation |
+
+The guest variables above (`CI_IIS_VM_NAME`, `CI_IIS_VM_SNAPSHOT`,
+`CI_IIS_VM_ADMIN_PASSWORD` and `CI_EA4_VM_<OS>`) belong only to a `fleet-hyperv`
+host; an IIS-only host in the `fleet-iis` class must not carry them.
 
 The IIS system tests (a pull request job) need none of the guest variables.
 The two guest gates are release-lane building blocks (see

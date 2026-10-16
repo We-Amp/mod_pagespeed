@@ -351,8 +351,9 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
         # FLEET_ENABLED kill switch, docs/ci/pipelines.md).
         if_val="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="if" {print $5}')"
         if is_fleet_iis_route "${val}"; then
+          route_class="${val%\' \}\}}"; route_class="${route_class##*\'}"
           if [ "${if_val}" != "${FLEET_IIS_GUARD}" ]; then
-            err "${wf}:${lineno}: fleet-iis job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
+            err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
           fi
         elif ! is_fleet_guard "${if_val}" \
            && [ "${if_val}" != "${FLEET_ONLY_GUARD}" ] \
