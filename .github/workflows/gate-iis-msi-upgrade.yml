@@ -7,8 +7,9 @@
 # MSI when one is given), smoke-tests it and uninstalls it again. The release
 # lane calls it after the hosted job that builds the MSI.
 #
-# Runs on the fleet-iis class only, never on a hosted runner, and is skipped
-# while FLEET_ENABLED is not 'true'. The job holds no secret and no write
+# Runs on the fleet-hyperv class only (a Windows host with the Hyper-V role and
+# the test guests with their clean checkpoints), never on a hosted runner, and
+# is skipped while FLEET_ENABLED is not 'true'. The job holds no secret and no write
 # token: the guest administrator password comes from the runner's own
 # environment (CI_IIS_VM_ADMIN_PASSWORD), together with the guest and
 # checkpoint names. See docs/ci/runner-environment.md. A missing guest, name
@@ -44,7 +45,7 @@ permissions:
 jobs:
   iis-msi-upgrade-test:
     name: IIS MSI upgrade test
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-hyperv' }}
     if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 30
     outputs:

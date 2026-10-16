@@ -54,7 +54,7 @@ concern and are not required of a build runner. ProcDump is expected on
 `PATH` by the IIS AddressSanitizer rig; Application Verifier (`appverif`)
 comes with the Windows SDK and is expected on `PATH` by the AppVerifier lanes.
 
-## IIS and virtual machine runners (class `fleet-iis`)
+## IIS and virtual machine runners (classes `fleet-iis` and `fleet-hyperv`)
 
 Jobs of this class have no hosted twin. They run only for events of this
 repository: a fork or Dependabot pull request skips them (the jobs show as
@@ -78,9 +78,16 @@ class means a Windows host with these facts, which are not variables:
 - Application Verifier (`appverif`, from the Windows SDK) and `gflags` are
   available; the jobs call them only to clear stale settings and tolerate
   their absence;
+
+The installer-upgrade and cPanel release gates run on a separate class,
+`fleet-hyperv`: a Windows host with the Hyper-V role and the test guests with
+their clean checkpoints. It follows the same rules as this class (events of
+this repository only, the same two repository variables, one runner instance
+per host) and needs:
+
 - for the installer gate: the Hyper-V role and PowerShell Direct to the
   guests (the installer itself is built on a hosted runner, so WiX is not
-  needed here);
+  needed);
 - for the cPanel gate: guests per target operating system, reachable by ssh
   from the host with keys that stay on the host.
 

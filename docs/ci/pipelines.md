@@ -61,7 +61,7 @@ on a failure ships an evidence artifact that includes this run's staged
 crash dumps. It blanks the guest password for the whole job, because it runs
 pull request code with administrator rights.
 
-### Release gates on the `fleet-iis` class
+### Release gates on the `fleet-hyperv` class
 
 Two reusable workflows hold the jobs that need a Hyper-V guest. They are not
 part of the pull request tier: the release lane calls them after the hosted
@@ -145,9 +145,14 @@ runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.
 ```
 
 The class is one of `fleet-heavy`, `fleet-light`, `fleet-windows`,
-`fleet-iis`. Windows jobs use `windows-2022` as the hosted side. A job
-that needs a full IIS installation or a Hyper-V guest has no hosted side
-and uses the "only" guard below.
+`fleet-iis`, `fleet-hyperv`. Windows jobs use `windows-2022` as the hosted
+side. A job that needs a full IIS installation or a Hyper-V guest has no
+hosted side and uses the "only" guard below.
+
+| Class | Hosts |
+|---|---|
+| `fleet-iis` | a Windows host with the IIS role, Application Verifier and the sanitizer runtime; runs the IIS system tests and the sanitizer and Application Verifier jobs, and can have more than one host |
+| `fleet-hyperv` | a Windows host with the Hyper-V role and the test guests with their clean checkpoints; runs the installer-upgrade and cPanel release gates |
 
 ### The guard and the kill switch
 
@@ -166,7 +171,7 @@ the kill switch that takes every such job off the build runners at once, with
 no workflow change.
 
 `FLEET_IIS_ENABLED` is a second repository variable for the jobs of the
-`fleet-iis` class, which have no hosted twin. Each of them also requires it to
+`fleet-iis` and `fleet-hyperv` classes, which have no hosted twin. Each of them also requires it to
 be `true`, so they are skipped (not queued) until a runner of the class is
 registered; the `CI gate` accepts the skipped result, and a real module
 release fails closed at `validate` while the gates are skipped.
@@ -187,8 +192,8 @@ request.
 if: ${{ github.event_name == 'workflow_dispatch' && vars.FLEET_ENABLED == 'true' }}
 ```
 
-**fleet-iis** is for a job routed to the `fleet-iis` class, which has no
-hosted twin: the fleet-only guard plus the `FLEET_IIS_ENABLED` term. The gate
+**fleet-iis** is for a job routed to the `fleet-iis` or `fleet-hyperv` class,
+which has no hosted twin: the fleet-only guard plus the `FLEET_IIS_ENABLED` term. The gate
 requires it, and no other guard, on every job routed to that class.
 
 ```yaml

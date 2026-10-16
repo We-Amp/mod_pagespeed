@@ -26,11 +26,11 @@
 #       (ubuntu-latest, ubuntu-24.04, ubuntu-24.04-arm, windows-2022,
 #       macos-15, macos-latest) or exactly the fork/Dependabot routing
 #       expression with a fleet class (fleet-heavy, fleet-light,
-#       fleet-windows, fleet-iis); a job routed by that expression must
+#       fleet-windows, fleet-iis, fleet-hyperv); a job routed by that expression must
 #       carry one of the four fleet guards of docs/ci/pipelines.md (the
 #       FLEET_ENABLED kill switch in its general, fleet-only or
 #       dispatch-only form, or the fleet-iis form that adds
-#       FLEET_IIS_ENABLED; a job routed to fleet-iis must carry the last) verbatim as its if:, the general form optionally
+#       FLEET_IIS_ENABLED; a job routed to fleet-iis or fleet-hyperv must carry the last) verbatim as its if:, the general form optionally
 #       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
 #       prefixed by `!cancelled() && needs.<job>.result == 'success' && `;
 #   (f) in a workflow_call workflow: a top-level `permissions:` block is
@@ -45,7 +45,7 @@
 #       fleet-routed job never names an environment or reads a secret;
 #       Applied to every workflow. A job that calls another workflow may pass
 #       secrets only to a callee listed in SECRET_CALLEES (the module release
-#       lane; the fleet-iis gates get none). `secrets: inherit`, `secrets[` and
+#       lane; the fleet-hyperv gates get none). `secrets: inherit`, `secrets[` and
 #       `toJSON(secrets`, and a secret in an expression outside the jobs (a
 #       workflow-level env: block), are refused;
 #   (e) topology token scan of .github/ and tools/ci/: no LAN (RFC1918) IP
@@ -77,7 +77,7 @@ ALLOWLIST="tools/ci/workflow-shape-allowlist.txt"
 WF_DIR=".github/workflows"
 
 HOSTED_LABELS="ubuntu-latest ubuntu-24.04 ubuntu-24.04-arm windows-2022 macos-15 macos-latest"
-FLEET_CLASSES="fleet-heavy fleet-light fleet-windows fleet-iis"
+FLEET_CLASSES="fleet-heavy fleet-light fleet-windows fleet-iis fleet-hyperv"
 TAB="$(printf '\t')"
 # The fleet guard of docs/ci/pipelines.md, required verbatim as the if: of
 # every job whose runs-on is the routing expression.
@@ -207,7 +207,7 @@ secret_env_records() {
 
 # Callees of a call job that may be passed secrets. Each is a reusable workflow
 # of this repository whose every job that reads a secret runs on a hosted label
-# (rule g checks that file too). The two fleet-iis gates get none.
+# (rule g checks that file too). The two fleet-hyperv gates get none.
 SECRET_CALLEES="pipeline-release-module.yml"
 is_secret_callee() { # a `uses:` value
   local f c
@@ -297,9 +297,10 @@ is_fleet_guard() {
   return 1
 }
 
-# A routing expression whose fleet class is fleet-iis.
+# A routing expression whose fleet class is fleet-iis or fleet-hyperv (both
+# have no hosted twin and carry the same guard).
 is_fleet_iis_route() {
-  case "$1" in *"|| 'fleet-iis' }}") return 0 ;; esac
+  case "$1" in *"|| 'fleet-iis' }}"|*"|| 'fleet-hyperv' }}") return 0 ;; esac
   return 1
 }
 
