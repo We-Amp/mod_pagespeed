@@ -2031,7 +2031,7 @@ jobs:
       # A vendor tarball on the runner makes the dependency fetch local; without
       # one, Bazel fetches its dependencies (docs/ci/runner-environment.md).
       - name: Use a local vendor tarball when the runner has one
-        shell: pwsh
+        shell: powershell
         env:
           VENDOR_SHORT_SHA: ${{ needs.nightly-vendor.outputs.short_sha }}
         run: |
@@ -2110,8 +2110,9 @@ jobs:
         timeout-minutes: 60
         run: |
           set -uo pipefail
-          FLAGS=(--config=vendored --config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
                  "--workspace_status_command=cmd /c echo.")
+          if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
             echo "using the remote cache"
             FLAGS+=("--remote_cache=${BAZEL_REMOTE_CACHE_URL}")
@@ -2245,7 +2246,7 @@ jobs:
       # A vendor tarball on the runner makes the dependency fetch local; without
       # one, Bazel fetches its dependencies (docs/ci/runner-environment.md).
       - name: Use a local vendor tarball when the runner has one
-        shell: pwsh
+        shell: powershell
         env:
           VENDOR_SHORT_SHA: ${{ needs.nightly-vendor.outputs.short_sha }}
         run: |
@@ -2324,8 +2325,9 @@ jobs:
         timeout-minutes: 60
         run: |
           set -uo pipefail
-          FLAGS=(--config=vendored --config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
                  "--workspace_status_command=cmd /c echo.")
+          if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
             echo "using the remote cache"
             FLAGS+=("--remote_cache=${BAZEL_REMOTE_CACHE_URL}")
