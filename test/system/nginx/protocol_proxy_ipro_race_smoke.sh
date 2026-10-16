@@ -62,7 +62,7 @@ if [ ! -f "$DOC_ROOT/mod_pagespeed_example/index.html" ]; then
   echo "bootstrapping docroot from install/mod_pagespeed_example..."
   rm -rf "$DOC_ROOT/mod_pagespeed_example"
   mkdir -p "$DOC_ROOT"
-  cp -r "$WORKSPACE/install/mod_pagespeed_example" "$DOC_ROOT/"
+  cp -r "$WORKSPACE/install/mod_pagespeed_example" "$DOC_ROOT/" || { echo "FATAL: no docroot source under $WORKSPACE/install"; exit 1; }
 fi
 if [ ! -f "$CERTS/server.crt" ] || \
    ! openssl x509 -checkend 3600 -noout -in "$CERTS/server.crt" 2>/dev/null; then
