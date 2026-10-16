@@ -2028,18 +2028,31 @@ jobs:
           key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
           fail-on-cache-miss: true
 
-      # A vendor tarball on the runner makes the dependency fetch local; the
-      # extraction script falls back to the hub only when the runner environment
-      # configures one (docs/ci/runner-environment.md).
-      - name: Extract the vendored workspace (hub channel)
-        if: needs.nightly-vendor.outputs.channel == 'hub'
-        shell: bash
+      # A vendor tarball on the runner makes the dependency fetch local; without
+      # one, Bazel fetches its dependencies (docs/ci/runner-environment.md).
+      - name: Use a local vendor tarball when the runner has one
+        shell: powershell
+        env:
+          VENDOR_SHORT_SHA: ${{ needs.nightly-vendor.outputs.short_sha }}
         run: |
-          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
-          if [ -n "${CI_WIN_VENDOR_DIR:-}" ]; then
-            args+=(--local "${CI_WIN_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
-          fi
-          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+          $ErrorActionPreference = 'Stop'
+          $tarball = $null
+          if ($env:CI_WIN_VENDOR_DIR) {
+            $candidate = Join-Path $env:CI_WIN_VENDOR_DIR "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
+            if (Test-Path -LiteralPath $candidate) { $tarball = $candidate }
+          }
+          if (-not $tarball -or -not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+            Write-Host "::notice::no runner-local vendor tarball: Bazel fetches its dependencies (docs/ci/runner-environment.md)"
+            exit 0
+          }
+          Write-Host "extracting the runner-local vendor tarball"
+          $tmpTar = Join-Path $env:RUNNER_TEMP 'vendor.tar'
+          & zstd -d -f -T0 $tarball -o $tmpTar
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          # The Windows tar: the MSYS2 GNU tar reads a drive letter as a remote host.
+          & "$($env:SystemRoot)\System32\tar.exe" xf $tmpTar -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item -LiteralPath $tmpTar -ErrorAction SilentlyContinue
 
       - name: Stamp GIT_COMMIT
         shell: bash
@@ -2097,8 +2110,9 @@ jobs:
         timeout-minutes: 60
         run: |
           set -uo pipefail
-          FLAGS=(--config=vendored --config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
                  "--workspace_status_command=cmd /c echo.")
+          if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
             echo "using the remote cache"
             FLAGS+=("--remote_cache=${BAZEL_REMOTE_CACHE_URL}")
@@ -2229,18 +2243,31 @@ jobs:
           key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
           fail-on-cache-miss: true
 
-      # A vendor tarball on the runner makes the dependency fetch local; the
-      # extraction script falls back to the hub only when the runner environment
-      # configures one (docs/ci/runner-environment.md).
-      - name: Extract the vendored workspace (hub channel)
-        if: needs.nightly-vendor.outputs.channel == 'hub'
-        shell: bash
+      # A vendor tarball on the runner makes the dependency fetch local; without
+      # one, Bazel fetches its dependencies (docs/ci/runner-environment.md).
+      - name: Use a local vendor tarball when the runner has one
+        shell: powershell
+        env:
+          VENDOR_SHORT_SHA: ${{ needs.nightly-vendor.outputs.short_sha }}
         run: |
-          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
-          if [ -n "${CI_WIN_VENDOR_DIR:-}" ]; then
-            args+=(--local "${CI_WIN_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
-          fi
-          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+          $ErrorActionPreference = 'Stop'
+          $tarball = $null
+          if ($env:CI_WIN_VENDOR_DIR) {
+            $candidate = Join-Path $env:CI_WIN_VENDOR_DIR "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
+            if (Test-Path -LiteralPath $candidate) { $tarball = $candidate }
+          }
+          if (-not $tarball -or -not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+            Write-Host "::notice::no runner-local vendor tarball: Bazel fetches its dependencies (docs/ci/runner-environment.md)"
+            exit 0
+          }
+          Write-Host "extracting the runner-local vendor tarball"
+          $tmpTar = Join-Path $env:RUNNER_TEMP 'vendor.tar'
+          & zstd -d -f -T0 $tarball -o $tmpTar
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+          # The Windows tar: the MSYS2 GNU tar reads a drive letter as a remote host.
+          & "$($env:SystemRoot)\System32\tar.exe" xf $tmpTar -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item -LiteralPath $tmpTar -ErrorAction SilentlyContinue
 
       - name: Stamp GIT_COMMIT
         shell: bash
@@ -2298,8 +2325,9 @@ jobs:
         timeout-minutes: 60
         run: |
           set -uo pipefail
-          FLAGS=(--config=vendored --config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
                  "--workspace_status_command=cmd /c echo.")
+          if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
             echo "using the remote cache"
             FLAGS+=("--remote_cache=${BAZEL_REMOTE_CACHE_URL}")

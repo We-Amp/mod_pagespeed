@@ -179,10 +179,14 @@ verify_tarball() {
         out="$(sha256sum "$path" 2>/dev/null)" \
           || { warn "tarball unreadable while hashing (vanished?): $path"; return 1; }
         got="$(printf '%s\n' "$out" | awk '{print $1}')"
+        # The hash tool marks a line for a file name containing backslashes with a leading backslash.
+        got="${got#\\}"
       elif command -v shasum >/dev/null 2>&1; then
         out="$(shasum -a 256 "$path" 2>/dev/null)" \
           || { warn "tarball unreadable while hashing (vanished?): $path"; return 1; }
         got="$(printf '%s\n' "$out" | awk '{print $1}')"
+        # The hash tool marks a line for a file name containing backslashes with a leading backslash.
+        got="${got#\\}"
       else
         got=""
       fi
