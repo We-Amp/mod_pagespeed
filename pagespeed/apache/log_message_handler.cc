@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include "base/logging.h"
 #include "pagespeed/apache/apache_httpd_includes.h"
@@ -119,7 +120,8 @@ void ShutDown() {
     delete mod_pagespeed_version;
     mod_pagespeed_version = nullptr;
   }
-  apache_glog_sink.release();
+  // The sink is intentionally not destroyed here (unchanged behaviour).
+  std::ignore = apache_glog_sink.release();
 }
 
 // What Google level of logs to display when Apache LogLevel is Debug.

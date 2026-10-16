@@ -20,10 +20,10 @@
 #include "pagespeed/kernel/base/posix_timer.h"
 
 #include <sys/time.h>
-#include <time.h>
 #include <unistd.h>
 
 #include <cerrno>
+#include <ctime>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
