@@ -642,9 +642,20 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
       - name: Container identity
         run: |
-          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          u="$(id -u)"; g="$(id -g)"
+          if [ "$u" = 0 ]; then
+            u=1000; g=1000
+            chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          fi
+          echo "CI_UID=${u}" >> "$GITHUB_ENV"
+          echo "CI_GID=${g}" >> "$GITHUB_ENV"
+          echo "dev:x:${u}:${g}::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
 
       - name: Run Apache system tests
@@ -654,7 +665,7 @@ jobs:
           docker rm -f "${NAME}" 2>/dev/null || true
           docker run --rm --init \
             --name "${NAME}" \
-            --user "$(id -u):$(id -g)" \
+            --user "${CI_UID}:${CI_GID}" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             --cap-add NET_BIND_SERVICE \
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \
@@ -736,9 +747,20 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
       - name: Container identity
         run: |
-          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          u="$(id -u)"; g="$(id -g)"
+          if [ "$u" = 0 ]; then
+            u=1000; g=1000
+            chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          fi
+          echo "CI_UID=${u}" >> "$GITHUB_ENV"
+          echo "CI_GID=${g}" >> "$GITHUB_ENV"
+          echo "dev:x:${u}:${g}::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
 
       - name: Run Nginx system tests
@@ -748,7 +770,7 @@ jobs:
           docker rm -f "${NAME}" 2>/dev/null || true
           docker run --rm --init \
             --name "${NAME}" \
-            --user "$(id -u):$(id -g)" \
+            --user "${CI_UID}:${CI_GID}" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             --cap-add NET_BIND_SERVICE \
             --sysctl net.ipv4.ip_unprivileged_port_start=0 \

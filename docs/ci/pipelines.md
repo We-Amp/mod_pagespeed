@@ -91,7 +91,8 @@ job added here is covered without touching the gate.
 On the Linux legs the Bazel disk cache lives in a per-runner directory under
 the runner's home, mounted at `/cache` (empty on a hosted runner). Containers
 run as the runner's own user with `HOME` and `USER` set, so nothing root-owned
-lands in the checkout; no job logs in to a registry. Every Linux job that
+lands in the checkout (the system-test jobs use uid 1000 and hand it the
+workspace when the runner itself is root); no job logs in to a registry. Every Linux job that
 checks out a tree starts with a step that makes `vendor/` writable again,
 because a previous run's vendored toolchain files are read-only and would stop
 the checkout's cleanup on a persistent runner.
