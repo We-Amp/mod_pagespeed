@@ -548,15 +548,14 @@ bool StatisticsLogfileReader::ReadNextDataBlock(int64* timestamp,
     // Separate the current timestamp from the rest of the data in the buffer.
     size_t timestamp_size = STATIC_STRLEN("timestamp: ");
     StringPiece timestamp_str = StringPiece(buffer_).substr(
-        offset + timestamp_size, newline_pos - timestamp_size);
+        offset + timestamp_size, newline_pos - offset - timestamp_size);
     StringToInt64(timestamp_str, timestamp);
     // Before ReadNextDataBlock returns, it finds the next occurrence of the
     // full string "timestamp: " so that it knows it contains the full data
     // block. It then separates the data block from the rest of the data,
     // meaning that "timestamp:  " should always be the first thing in the
     // buffer.
-    size_t next_timestamp_pos =
-        BufferFind("timestamp: ", offset + newline_pos + 1);
+    size_t next_timestamp_pos = BufferFind("timestamp: ", newline_pos + 1);
     // Check to make sure that this timestamp fits the criteria. If it doesn't,
     // the loop restarts.
     if (*timestamp >= start_time_ && *timestamp <= end_time_ &&
