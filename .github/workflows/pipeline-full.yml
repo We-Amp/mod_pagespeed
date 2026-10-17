@@ -839,6 +839,14 @@ jobs:
       run:
         shell: powershell
     steps:
+      # The fleet runners carry the same setting; byte-compared fixtures need LF.
+      - name: Check out with LF line endings (hosted runner)
+        if: runner.environment == 'github-hosted'
+        shell: powershell
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: false
@@ -1039,6 +1047,14 @@ jobs:
       run:
         shell: powershell
     steps:
+      # The fleet runners carry the same setting; byte-compared fixtures need LF.
+      - name: Check out with LF line endings (hosted runner)
+        if: runner.environment == 'github-hosted'
+        shell: powershell
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: false
