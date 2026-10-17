@@ -79,6 +79,8 @@
 #                       contacted).
 #   FETCH_RETRIES       hub fetch attempts (default: 4).
 #   FETCH_BACKOFF       initial backoff seconds, doubled each retry (default: 3).
+#   LOCAL_RETRIES       checks of the --local tarball before the hub fallback
+#                       (default: 3); LOCAL_BACKOFF seconds between them (2).
 #   SSH_OPTS            ssh options (default: StrictHostKeyChecking=accept-new
 #                       + BatchMode=yes + LogLevel=ERROR).
 #
@@ -133,6 +135,11 @@ CI_HUB_USER="${CI_HUB_USER:-}"
 CI_HUB_VENDOR_DIR="${CI_HUB_VENDOR_DIR:-}"
 FETCH_RETRIES="${FETCH_RETRIES:-4}"
 FETCH_BACKOFF="${FETCH_BACKOFF:-3}"
+# A local copy that is short, fails its digest, or has no sidecar yet may be
+# mid-publish by a sibling runner on the same host: re-check it a few times
+# before falling back to the hub.
+LOCAL_RETRIES="${LOCAL_RETRIES:-3}"
+LOCAL_BACKOFF="${LOCAL_BACKOFF:-2}"
 SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR}"
 REMOTE_PATH=""
 SSH_TARGET=""
@@ -142,13 +149,19 @@ warn() { echo "::warning::$*"; }
 err()  { echo "::error::$*" >&2; }
 
 # --- integrity --------------------------------------------------------------
-# verify_tarball <path> [<expected_sha_file>]
-#   Returns 0 only if the file is non-empty, passes `zstd -t`, and (when a
-#   .sha256 sidecar exists) matches it. Never extracts; pure verification so a
-#   partial can be rejected before it ever reaches `tar`.
+# verify_tarball <path> [<allow_no_sidecar>] [<expected_sha_file>]
+#   Returns 0 only if the file is non-empty, passes `zstd -t`, and matches its
+#   .sha256 sidecar. Never extracts; pure verification so a partial can be
+#   rejected before it ever reaches `tar`. Returns 1 for a bad file and 3 when
+#   the file is sound but has no usable sidecar and <allow_no_sidecar> is 0:
+#   the publisher writes the sidecar just after the tarball, so callers retry
+#   that case and only accept it on their last attempt (an older tarball
+#   predates the sidecar).
 verify_tarball() {
   local path="$1"
-  local sha_file="${2:-${path}.sha256}"
+  local allow_no_sidecar="${2:-1}"
+  local sha_file="${3:-${path}.sha256}"
+  local have_digest=0
 
   if [ ! -s "$path" ]; then
     warn "tarball missing or empty: $path"
@@ -169,6 +182,7 @@ verify_tarball() {
     local want got
     want="$(awk '{print $1}' "$sha_file" 2>/dev/null | head -1)"
     if [ -n "$want" ]; then
+      have_digest=1
       # Distinguish "no hash tool" (degrade to the zstd -t floor) from "the
       # hash tool FAILED" (the file vanished between zstd -t and here: a
       # Windows consumer's `zstd --rm` deleted it on 2026-10-03, and
@@ -189,12 +203,17 @@ verify_tarball() {
         got="${got#\\}"
       else
         got=""
+        have_digest=0
       fi
       if [ -n "$got" ] && [ "$got" != "$want" ]; then
         warn "tarball sha256 mismatch (want ${want:0:12}.. got ${got:0:12}..): $path"
         return 1
       fi
     fi
+  fi
+  if [ "$have_digest" -eq 0 ] && [ "$allow_no_sidecar" -eq 0 ]; then
+    warn "no usable .sha256 sidecar next to: $path"
+    return 3
   fi
   return 0
 }
@@ -234,7 +253,7 @@ resolve_hub() {
 
 fetch_from_hub() {
   local dest_path="$1"
-  local attempt backoff
+  local attempt backoff allow
   resolve_hub
   backoff="$FETCH_BACKOFF"
 
@@ -247,7 +266,10 @@ fetch_from_hub() {
       "${REMOTE_PATH}.sha256" "${dest_path}.sha256" >/dev/null 2>&1 || true
 
     if rsync -a -e "ssh ${SSH_OPTS}" "$REMOTE_PATH" "$dest_path"; then
-      if verify_tarball "$dest_path"; then
+      # An absent sidecar is retried until the last attempt: the publisher
+      # writes it just after the tarball.
+      allow=0; [ "$attempt" -lt "$FETCH_RETRIES" ] || allow=1
+      if verify_tarball "$dest_path" "$allow"; then
         # Extend in-flight TTL: re-stamp mtime so hub cleanup counts from
         # last consumption, not from vendoring. Best-effort; never fatal.
         # The sidecar is touched only when present: `touch` on an absent
@@ -319,7 +341,16 @@ if [ -n "$LOCAL_TARBALL" ] && [ -r "$LOCAL_TARBALL" ]; then
   # present (touch would CREATE an empty one).
   touch "$LOCAL_TARBALL" 2>/dev/null || true
   [ ! -f "${LOCAL_TARBALL}.sha256" ] || touch "${LOCAL_TARBALL}.sha256" 2>/dev/null || true
-  if verify_tarball "$LOCAL_TARBALL"; then
+  local_ok=0
+  for local_attempt in $(seq 1 "$LOCAL_RETRIES"); do
+    allow=0; [ "$local_attempt" -lt "$LOCAL_RETRIES" ] || allow=1
+    if verify_tarball "$LOCAL_TARBALL" "$allow"; then local_ok=1; break; fi
+    [ "$local_attempt" -lt "$LOCAL_RETRIES" ] || break
+    [ -r "$LOCAL_TARBALL" ] || break
+    warn "Local tarball not yet usable (attempt ${local_attempt}/${LOCAL_RETRIES}); it may be mid-publish. Retrying in ${LOCAL_BACKOFF}s."
+    sleep "$LOCAL_BACKOFF"
+  done
+  if [ "$local_ok" -eq 1 ]; then
     log "Local tarball present and verified: $(basename "$LOCAL_TARBALL")"
     CHOSEN="$LOCAL_TARBALL"
   else
