@@ -1968,6 +1968,83 @@ TEST_F(CacheUrlAsyncFetcherTest, BackgroundFreshenStartsAfterRequestFinished) {
   EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
 }
 
+// A stale-while-revalidate freshen holds the stale value only when its
+// conditional fetch can revalidate it (a 200 with an ETag or Last-Modified):
+// linking a mapped value copies the body, and the link is held for the whole
+// lock wait.  Observed through the cached buffer's sharing: once the request
+// has finished and the cache entry is dropped, only a linked freshen still
+// shares the buffer.
+TEST_F(CacheUrlAsyncFetcherTest, BackgroundFreshenLinksFallbackOnlyIfUsable) {
+  const GoogleString plain_url = "http://www.example.com/plain_freshen.css";
+  const GoogleString etag_url = "http://www.example.com/etag_freshen.css";
+  ResponseHeaders headers;
+  SetDefaultHeaders(kContentTypeCss, &headers);
+  headers.SetDateAndCaching(timer_.NowMs(), ttl_ms_);
+  mock_fetcher_.SetResponse(plain_url, headers, cache_body_);
+  headers.Add(HttpAttributes::kEtag, etag_);
+  mock_fetcher_.SetConditionalResponse(etag_url, -1, etag_, headers,
+                                       cache_body_);
+  ExpectCache(plain_url, cache_body_);
+  ExpectCache(etag_url, cache_body_);
+  // Expire both entries, still inside the serve-stale window.
+  timer_.AdvanceMs(ttl_ms_ + Timer::kHourMs);
+
+  DeferredGrantLockManager deferred_locks;
+  CacheUrlAsyncFetcher fetcher(&mock_hasher_, &deferred_locks,
+                               http_cache_.get(), fragment_,
+                               &mock_async_op_hooks_, &counting_fetcher_);
+  fetcher.set_serve_stale_while_revalidate_threshold_sec(Timer::kDayMs *
+                                                         Timer::kSecondMs);
+  fetcher.set_num_conditional_refreshes(
+      cache_fetcher_->num_conditional_refreshes());
+  fetcher.set_fallback_responses_served_while_revalidate(
+      cache_fetcher_->fallback_responses_served_while_revalidate());
+
+  // Serves url stale, then reports whether the pending freshen still shares
+  // the cached buffer after the request finished.
+  auto serve_stale_and_check_linked = [&](const GoogleString& url) {
+    GoogleString content;
+    bool done = false, success = false, cacheable = false;
+    ResponseHeaders response_headers;
+    MockFetch* fetch =
+        new MockFetch(RequestContextPtr(new RequestContext(
+                          http_options_, thread_system_->NewMutex(), nullptr)),
+                      &content, &done, &success, &cacheable);
+    fetch->set_response_headers(&response_headers);
+    fetcher.Fetch(url, &handler_, fetch);
+    EXPECT_TRUE(done);
+    EXPECT_TRUE(success);
+    EXPECT_EQ(cache_body_, content);
+    EXPECT_EQ(0, counting_fetcher_.fetch_count());
+
+    const GoogleString key = http_cache_->CompositeKey(url, fragment_);
+    SharedString cached;
+    {
+      CacheInterface::SynchronousCallback callback;
+      lru_cache_.Get(key, &callback);
+      EXPECT_EQ(CacheInterface::kAvailable, callback.state());
+      cached = callback.value().ToOwned();
+    }
+    lru_cache_.Delete(key);
+    return !cached.unique();
+  };
+
+  ClearStats();
+  EXPECT_FALSE(serve_stale_and_check_linked(plain_url));
+  EXPECT_EQ(1, deferred_locks.GrantAll());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
+  EXPECT_EQ(0, cache_fetcher_->num_conditional_refreshes()->Get());
+
+  ClearStats();
+  EXPECT_TRUE(serve_stale_and_check_linked(etag_url));
+  EXPECT_EQ(1, deferred_locks.GrantAll());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
+  // The linked value was revalidated by a 304 rather than re-downloaded.
+  EXPECT_EQ(1, cache_fetcher_->num_conditional_refreshes()->Get());
+}
+
 // Deferred-delivery zero-copy serving (CycloneZeroCopy).  Drives a cache-hit
 // serve through the response-sequence path: CacheFindCallback::Done defers
 // Finish onto a worker-pool sequence, and the inner HTTPCacheCallback (which
