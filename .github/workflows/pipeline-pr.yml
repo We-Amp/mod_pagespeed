@@ -681,17 +681,19 @@ jobs:
           LOCAL_DIR="${CI_VENDOR_DIR:-${RUNNER_TEMP}}"
           mkdir -p "${LOCAL_DIR}"
           TARBALL="${LOCAL_DIR}/mod_pagespeed-${SHORT_SHA}.tar.zst"
-          # Short-circuit re-runs: a readable tarball for this SHA was
-          # written atomically (tmp + rename) by a prior run. Re-stamp it so
-          # the age-based prunes count from now.
-          if [ -r "$TARBALL" ]; then
+          # Short-circuit re-runs: a complete tarball for this SHA was
+          # published atomically by a prior run. A readable file that fails
+          # `zstd -t` is not trusted and is tarred again. Re-stamp it so the
+          # age-based prunes count from now.
+          if [ -r "$TARBALL" ] && zstd -t -q "$TARBALL" >/dev/null 2>&1; then
             echo "Tarball for ${SHORT_SHA} present and readable; skipping re-tar"
             touch "$TARBALL"
           else
-            # The temp name carries the run id: two runner instances can
-            # share the vendor dir, and a same-SHA run must not write into,
-            # or rm, the temp file this one is tarring.
-            TMP_TARBALL="${TARBALL}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+            # The temp file is runner-private (the runner's own temp dir) and
+            # carries the run id and attempt: the long write never happens in
+            # the vendor dir that sibling runners prune and read, and the
+            # publish step copies it in under a unique name before linking.
+            TMP_TARBALL="${RUNNER_TEMP:-/tmp}/$(basename "$TARBALL").${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
             rm -f "${TMP_TARBALL}"
             # Status 1 is accepted only when the sole complaint is the workspace
             # root directory changing (no file contents); a changed file is torn.
@@ -714,19 +716,14 @@ jobs:
           # Publish create-if-absent and write the digest sidecar
           # (tools/ci/publish-vendor-tarball.sh): a same-SHA tarball another
           # writer published first is adopted, never replaced.
-          bash tools/ci/publish-vendor-tarball.sh "$TARBALL" ${TMP_TARBALL:+"$TMP_TARBALL"}
+          VENDOR_VERIFY_ZSTD=1 bash tools/ci/publish-vendor-tarball.sh "$TARBALL" ${TMP_TARBALL:+"$TMP_TARBALL"}
           # Prune other SHAs' tarballs from the shared local dir, but only
-          # past a grace window: a recent tarball may still be extracting in
-          # a concurrent run. The sidecar is matched explicitly so a pruned
-          # tarball never leaves its digest behind; *.tmp sweeps cancelled
-          # runs.
+          # past a grace window (a recent tarball may still be extracting in
+          # a concurrent run) and only while file times agree with this
+          # host's clock (tools/ci/prune-vendor-dir.sh). Sidecars go with
+          # their tarball; *.tmp sweeps cancelled runs.
           if [ -n "${CI_VENDOR_DIR:-}" ]; then
-            find "${CI_VENDOR_DIR}" \
-              \( -name 'mod_pagespeed-*.tar.zst' -o -name 'mod_pagespeed-*.tar.zst.sha256' \
-                 -o -name 'mod_pagespeed-*.tar.zst.*.tmp' \) \
-              ! -name "mod_pagespeed-${SHORT_SHA}.tar.zst" \
-              ! -name "mod_pagespeed-${SHORT_SHA}.tar.zst.sha256" \
-              -mmin +120 -delete 2>/dev/null || true
+            bash tools/ci/prune-vendor-dir.sh "${CI_VENDOR_DIR}" mod_pagespeed "${SHORT_SHA}" 120
           fi
           echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
           # Name and size only: the directory is a runner-local path.
@@ -747,30 +744,29 @@ jobs:
           SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR"
           F="$(basename "$TARBALL")"
           TMP_DEST="${CI_HUB_VENDOR_DIR}/${F}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
-          T="$(basename "$TMP_DEST")"
-          # Publish create-if-absent ON the hub: a published tarball is never
-          # replaced, so a concurrent writer cannot swap bytes under a
-          # consumer or leave one writer's digest next to another's tarball.
-          PUBLISH="set -e; cd '${CI_HUB_VENDOR_DIR}'
-            if ! ln '${T}' '${F}' 2>/dev/null; then test -s '${F}'; fi
-            rm -f '${T}'
-            D=\$( (sha256sum '${F}' 2>/dev/null || shasum -a 256 '${F}') | cut -d' ' -f1)
-            printf '%s  %s\\n' \"\$D\" '${F}' > '${F}.sha256.${GITHUB_RUN_ID}.tmp'
-            mv -f '${F}.sha256.${GITHUB_RUN_ID}.tmp' '${F}.sha256'"
-          # SSH_OPTS is an intentional multi-token option list; the remote
-          # commands expand client-side on purpose (see above).
+          # The digest of the local tarball (the publish step above wrote its
+          # sidecar): the hub side checks the transferred bytes against it.
+          DIGEST="$(cut -d' ' -f1 "${TARBALL}.sha256")"
+          # Publish ON the hub with the same script the local publish used,
+          # streamed over ssh: create-if-absent (a sound published tarball is
+          # never replaced), flushed before the link, digest checked, sidecar
+          # written through a temp name. The remote commands expand
+          # client-side on purpose.
+          # SSH_OPTS is an intentional multi-token option list.
           # shellcheck disable=SC2029,SC2086
           for attempt in 1 2 3; do
             if ssh ${SSH_OPTS} "${CI_HUB_SSH}" "mkdir -p '${CI_HUB_VENDOR_DIR}'" \
                && rsync -a -e "ssh ${SSH_OPTS}" "$TARBALL" "${CI_HUB_SSH}:${TMP_DEST}" \
-               && ssh ${SSH_OPTS} "${CI_HUB_SSH}" "$PUBLISH"; then
+               && ssh ${SSH_OPTS} "${CI_HUB_SSH}" \
+                    "GITHUB_RUN_ID='${GITHUB_RUN_ID}' GITHUB_RUN_ATTEMPT='${GITHUB_RUN_ATTEMPT}' VENDOR_EXPECT_SHA256='${DIGEST}' VENDOR_VERIFY_ZSTD=1 bash -s -- '${CI_HUB_VENDOR_DIR}/${F}' '${TMP_DEST}'" \
+                    < tools/ci/publish-vendor-tarball.sh; then
               echo "Published ${F} to the CI hub (attempt ${attempt})"
               # Prune hub tarballs older than the retention window: the hub
               # copy is the only one a rerun-failed-jobs consumer can reach
               # once the local copy is gone.
               ssh ${SSH_OPTS} "${CI_HUB_SSH}" \
-                "find '${CI_HUB_VENDOR_DIR}' -maxdepth 1 \( -name 'mod_pagespeed-*.tar.zst' -o -name 'mod_pagespeed-*.tar.zst.sha256' -o -name 'mod_pagespeed-*.tar.zst.*.tmp' \) -mmin +${CI_HUB_VENDOR_RETENTION_MIN:-1440} -delete" \
-                2>/dev/null || true
+                "bash -s -- '${CI_HUB_VENDOR_DIR}' mod_pagespeed - ${CI_HUB_VENDOR_RETENTION_MIN:-1440}" \
+                < tools/ci/prune-vendor-dir.sh 2>/dev/null || true
               exit 0
             fi
             echo "::warning::hub publish failed (attempt ${attempt}/3)"
@@ -1959,46 +1955,24 @@ jobs:
             exit 0
           }
           $name = "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
-          $tarball = $null
-          foreach ($dir in @($env:CI_WIN_VENDOR_DIR, $env:WIN_VENDOR_DL_DIR)) {
-            if ($dir) {
-              $candidate = Join-Path $dir $name
-              if (Test-Path -LiteralPath $candidate) { $tarball = $candidate; break }
-            }
-          }
-          if (-not $tarball -and $env:CI_HUB_SSH -and $env:CI_HUB_VENDOR_DIR) {
-            New-Item -ItemType Directory -Force -Path $env:WIN_VENDOR_DL_DIR | Out-Null
-            $final = Join-Path $env:WIN_VENDOR_DL_DIR $name
-            $tmp = "$final.$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT).tmp"
-            Write-Host "fetching $name from the CI hub"
-            scp -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR "$($env:CI_HUB_SSH):$($env:CI_HUB_VENDOR_DIR)/$name" $tmp
-            if ($LASTEXITCODE -ne 0) {
-              # A failed scp can leave a partial file that a later job would
-              # find and feed to zstd; never leave it behind.
-              Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          # Never extract straight from a directory that Linux jobs of the
+          # same machine publish into and prune: stage a private copy, check
+          # it against the sidecar digest (retrying a copy that is short or
+          # mid-publish), and decompress and extract only that copy
+          # (tools/ci/fetch-vendor-tarball.ps1).
+          $dirs = @($env:CI_WIN_VENDOR_DIR) | Where-Object { $_ }
+          & "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball.ps1" `
+            -Name $name -Dest $env:GITHUB_WORKSPACE -StageDir $env:WIN_VENDOR_DL_DIR `
+            -SearchDirs $dirs -HubSsh $env:CI_HUB_SSH -HubDir $env:CI_HUB_VENDOR_DIR
+          $rc = $LASTEXITCODE
+          if ($rc -eq 4) {
+            if ($env:CI_HUB_SSH -and $env:CI_HUB_VENDOR_DIR) {
               Write-Host "::warning::[vendor-tarball-unavailable] the vendor tarball could not be fetched from the CI hub; it may have aged out of the hub's retention window. Re-run the full workflow, not only the failed jobs, to regenerate it."
-            } else {
-              # Publish under the final name only once complete, and never over
-              # a tarball another job placed there first.
-              try { Move-Item -LiteralPath $tmp -Destination $final -ErrorAction Stop }
-              catch { if (Test-Path -LiteralPath $final) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } else { throw } }
-              $tarball = $final
             }
-          }
-          if (-not $tarball) {
             Write-Host "::notice::no vendor tarball reachable from this runner: Bazel fetches dependencies directly (docs/ci/runner-environment.md)"
             exit 0
           }
-          Write-Host "extracting $(Split-Path -Leaf $tarball)"
-          # Decompress with all cores, then extract with the Windows tar (the
-          # MSYS2 GNU tar reads a drive letter as a remote host). The tarball
-          # stays: a directory shared with the Linux jobs is pruned by the
-          # Linux vendor job.
-          & zstd -d -f -T0 $tarball -o "$tarball.tar"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
-          & "$($env:SystemRoot)\System32\tar.exe" xf "$tarball.tar" -C $env:GITHUB_WORKSPACE
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
-          Remove-Item -LiteralPath "$tarball.tar" -ErrorAction SilentlyContinue
+          if ($rc -ne 0) { exit $rc }
           $stamped = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'GIT_COMMIT') -Raw).Trim()
           if ($stamped -ne $env:GITHUB_SHA) {
             Write-Host "::error::[vendor-tarball-unavailable] stale GIT_COMMIT stamp in the extracted workspace; re-run the full workflow, not only the failed jobs"
@@ -2019,6 +1993,8 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor_test.ps1"
           if ($LASTEXITCODE -ne 0) { Write-Host "::warning::prune-win-vendor self-test failed (exit $LASTEXITCODE); not pruning"; exit 1 }
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball_test.ps1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::fetch-vendor-tarball self-test failed (exit $LASTEXITCODE)" }
           & "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor.ps1" `
             -VendorDir $env:WIN_VENDOR_DL_DIR -ShortSha $env:VENDOR_SHORT_SHA
 
@@ -2264,46 +2240,24 @@ jobs:
             exit 0
           }
           $name = "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
-          $tarball = $null
-          foreach ($dir in @($env:CI_WIN_VENDOR_DIR, $env:WIN_VENDOR_DL_DIR)) {
-            if ($dir) {
-              $candidate = Join-Path $dir $name
-              if (Test-Path -LiteralPath $candidate) { $tarball = $candidate; break }
-            }
-          }
-          if (-not $tarball -and $env:CI_HUB_SSH -and $env:CI_HUB_VENDOR_DIR) {
-            New-Item -ItemType Directory -Force -Path $env:WIN_VENDOR_DL_DIR | Out-Null
-            $final = Join-Path $env:WIN_VENDOR_DL_DIR $name
-            $tmp = "$final.$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT).tmp"
-            Write-Host "fetching $name from the CI hub"
-            scp -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR "$($env:CI_HUB_SSH):$($env:CI_HUB_VENDOR_DIR)/$name" $tmp
-            if ($LASTEXITCODE -ne 0) {
-              # A failed scp can leave a partial file that a later job would
-              # find and feed to zstd; never leave it behind.
-              Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+          # Never extract straight from a directory that Linux jobs of the
+          # same machine publish into and prune: stage a private copy, check
+          # it against the sidecar digest (retrying a copy that is short or
+          # mid-publish), and decompress and extract only that copy
+          # (tools/ci/fetch-vendor-tarball.ps1).
+          $dirs = @($env:CI_WIN_VENDOR_DIR) | Where-Object { $_ }
+          & "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball.ps1" `
+            -Name $name -Dest $env:GITHUB_WORKSPACE -StageDir $env:WIN_VENDOR_DL_DIR `
+            -SearchDirs $dirs -HubSsh $env:CI_HUB_SSH -HubDir $env:CI_HUB_VENDOR_DIR
+          $rc = $LASTEXITCODE
+          if ($rc -eq 4) {
+            if ($env:CI_HUB_SSH -and $env:CI_HUB_VENDOR_DIR) {
               Write-Host "::warning::[vendor-tarball-unavailable] the vendor tarball could not be fetched from the CI hub; it may have aged out of the hub's retention window. Re-run the full workflow, not only the failed jobs, to regenerate it."
-            } else {
-              # Publish under the final name only once complete, and never over
-              # a tarball another job placed there first.
-              try { Move-Item -LiteralPath $tmp -Destination $final -ErrorAction Stop }
-              catch { if (Test-Path -LiteralPath $final) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } else { throw } }
-              $tarball = $final
             }
-          }
-          if (-not $tarball) {
             Write-Host "::notice::no vendor tarball reachable from this runner: Bazel fetches dependencies directly (docs/ci/runner-environment.md)"
             exit 0
           }
-          Write-Host "extracting $(Split-Path -Leaf $tarball)"
-          # Decompress with all cores, then extract with the Windows tar (the
-          # MSYS2 GNU tar reads a drive letter as a remote host). The tarball
-          # stays: a directory shared with the Linux jobs is pruned by the
-          # Linux vendor job.
-          & zstd -d -f -T0 $tarball -o "$tarball.tar"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
-          & "$($env:SystemRoot)\System32\tar.exe" xf "$tarball.tar" -C $env:GITHUB_WORKSPACE
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
-          Remove-Item -LiteralPath "$tarball.tar" -ErrorAction SilentlyContinue
+          if ($rc -ne 0) { exit $rc }
           $stamped = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'GIT_COMMIT') -Raw).Trim()
           if ($stamped -ne $env:GITHUB_SHA) {
             Write-Host "::error::[vendor-tarball-unavailable] stale GIT_COMMIT stamp in the extracted workspace; re-run the full workflow, not only the failed jobs"
@@ -2324,6 +2278,8 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor_test.ps1"
           if ($LASTEXITCODE -ne 0) { Write-Host "::warning::prune-win-vendor self-test failed (exit $LASTEXITCODE); not pruning"; exit 1 }
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball_test.ps1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::fetch-vendor-tarball self-test failed (exit $LASTEXITCODE)" }
           & "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor.ps1" `
             -VendorDir $env:WIN_VENDOR_DL_DIR -ShortSha $env:VENDOR_SHORT_SHA
 
