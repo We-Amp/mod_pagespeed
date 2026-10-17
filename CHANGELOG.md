@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a start-up race in the threading layer. A thread that deletes itself
+  when finished could overlap with the code that started it, which then wrote
+  to the thread object after it had been freed. No shipped deployment starts
+  threads that way today; the fix makes the documented pattern safe.
+
 ### Changed
 
 - The EL10 Apache package now requires the matching `pagespeed-optimizer`
