@@ -54,6 +54,13 @@ class HTTPValueTest : public testing::Test {
     return value->ComputeContentsSize();
   }
 
+  // Installs 'bytes' as the value's storage directly, bypassing Link()'s
+  // validation, to emulate a corrupted entry read back from a cache.
+  void CorruptLink(HTTPValue& value, const GoogleString& bytes) {
+    value.storage_ = SharedString(bytes);
+    value.contents_size_ = value.ComputeContentsSize();
+  }
+
   // Builds the canonical encoded form (headers-first) of a response with
   // FillResponseHeaders() headers and body "body", as stored in a cache.
   GoogleString BuildEncodedValue() {
@@ -220,6 +227,47 @@ TEST_F(HTTPValueTest, LinkCorrupt) {
   ASSERT_FALSE(value.Link(storage, &headers, &message_handler_));
   storage.Append("xyz");
   ASSERT_FALSE(value.Link(storage, &headers, &message_handler_));
+}
+
+// A first-chunk size field with the high bit set is a valid unsigned 32-bit
+// value on disk but names more bytes than any entry can hold.  Extraction
+// must reject it rather than letting it wrap negative and skip the bounds
+// check.
+TEST_F(HTTPValueTest, CorruptFirstChunkSizeHeadersFirst) {
+  GoogleString bytes = BuildEncodedValue();
+  ASSERT_LT(4, bytes.size());
+  for (int i = 0; i < 4; ++i) {
+    bytes[1 + i] = static_cast<char>((0x80000000u >> (8 * i)) & 0xff);
+  }
+
+  HTTPValue value;
+  CorruptLink(value, bytes);
+
+  StringPiece body;
+  EXPECT_FALSE(value.ExtractContents(&body));
+  ResponseHeaders check_headers;
+  EXPECT_FALSE(value.ExtractHeaders(&check_headers, &message_handler_));
+}
+
+TEST_F(HTTPValueTest, CorruptFirstChunkSizeBodyFirst) {
+  HTTPValue good;
+  ResponseHeaders headers;
+  FillResponseHeaders(&headers);
+  good.Write("body", &message_handler_);
+  good.SetHeaders(&headers);
+  GoogleString bytes = good.share().Value().as_string();
+  ASSERT_LT(4, bytes.size());
+  for (int i = 0; i < 4; ++i) {
+    bytes[1 + i] = static_cast<char>((0x80000000u >> (8 * i)) & 0xff);
+  }
+
+  HTTPValue value;
+  CorruptLink(value, bytes);
+
+  StringPiece body;
+  EXPECT_FALSE(value.ExtractContents(&body));
+  ResponseHeaders check_headers;
+  EXPECT_FALSE(value.ExtractHeaders(&check_headers, &message_handler_));
 }
 
 // ============================================================================
