@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under them.
 - Parallel resource fetches for one page no longer race on the per-request
   list of origins authorized for fetching.
+- A proxied request rejected as unauthorized no longer leaks its property
+  cache lookup state when the lookup finishes after the rejection.
 
 ## [2.4.0] - 2026-10-14
 
