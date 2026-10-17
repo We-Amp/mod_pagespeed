@@ -302,6 +302,13 @@ GoogleString WindowsSharedMem::SegmentObjectName(
     const GoogleString& name) const {
   // Use Local\ prefix for session-local shared memory (works within IIS app
   // pool). Combine instance number and sanitized name for uniqueness.
+  //
+  // The name is unique within one process only: instance_number_ counts from
+  // 1 in every process, so unrelated processes in one session (overlapped
+  // recycling, web gardens) derive the same names, and CreateSegment refuses
+  // the segments of whichever comes second. Before the IIS module uses this
+  // runtime, the process id or the application pool name must become part of
+  // the name, on the create and the attach side alike.
   return StrCat("Local\\PageSpeed_", IntegerToString(instance_number_), "_",
                 SanitizeObjectName(name));
 }
@@ -314,8 +321,11 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
 
   auto it = segments_.find(prefixed_name);
   if (it != segments_.end()) {
-    // Created again by this runtime: hand out a view with fresh contents.
-    // Views handed out before stay mapped.
+    // Created again by this runtime: map another view of the SAME section
+    // and zero it. Views handed out before stay mapped but see the zeroed
+    // contents too; unlike the in-process and POSIX runtimes, they do not keep
+    // the old contents. A truly new section would need a generation number
+    // in the object name.
     SegmentInfo* info = it->second;
     if (info->size != size) {
       handler->Message(kError,
