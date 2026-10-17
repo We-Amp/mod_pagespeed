@@ -192,6 +192,29 @@ class WallClockOnlyBackwardTimer : public BackwardWallClockTimer {
   int64 NowMonotonicUs() const override { return NowUs(); }
 };
 
+// A real-time Timer that, once armed, shuts the given fetcher down from
+// inside its next clock reading. The fetcher reads the clock while it sets up
+// a new fetch, so this lands a ShutDown() between StartFetch()'s first
+// shutdown check and the point where the fetch is queued for the poll thread.
+class ShutDownOnNextReadTimer : public Timer {
+ public:
+  int64 NowUs() const override { return real_.NowUs(); }
+  int64 NowMonotonicUs() const override {
+    CurlUrlAsyncFetcher* fetcher = armed_fetcher_.exchange(nullptr);
+    if (fetcher != nullptr) {
+      fetcher->ShutDown();
+    }
+    return real_.NowMonotonicUs();
+  }
+  void SleepUs(int64 us) override { real_.SleepUs(us); }
+
+  void Arm(CurlUrlAsyncFetcher* fetcher) { armed_fetcher_ = fetcher; }
+
+ private:
+  PosixTimer real_;
+  mutable std::atomic<CurlUrlAsyncFetcher*> armed_fetcher_{nullptr};
+};
+
 }  // namespace
 
 class CurlUrlAsyncFetcherTest : public ::testing::Test {
@@ -1032,6 +1055,26 @@ TEST_F(CurlUrlAsyncFetcherTest, FinishedFetchesAreReleased) {
   EXPECT_EQ(0, ActiveFetches());
   curl_fetcher_->ShutDown();
   EXPECT_EQ(0, curl_fetcher_->NumCompletedFetchesForTesting());
+}
+
+// A fetch started while the fetcher shuts down must still be completed: the
+// shutdown lands after StartFetch()'s first check but before the fetch is
+// queued, so the poll thread has already drained its queue and exited.
+TEST_F(CurlUrlAsyncFetcherTest, FetchStartedDuringShutDownCompletes) {
+  ShutDownOnNextReadTimer timer;
+  CurlUrlAsyncFetcher fetcher("", thread_system_.get(), statistics_.get(),
+                              &timer, fetcher_timeout_ms_, &message_handler_);
+  int index = AddTestUrl(StrCat("http://", test_host_, "/get"), "");
+  CurlTestFetch* fetch = fetches_[index];
+  fetch->Reset();
+  timer.Arm(&fetcher);
+  fetcher.Fetch(urls_[index], &message_handler_, fetch);
+  EXPECT_TRUE(fetcher.shutdown());
+  // No poll thread is left to complete it, so it must be done right away.
+  ASSERT_TRUE(fetch->IsDone());
+  EXPECT_FALSE(fetch->success());
+  EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code());
+  EXPECT_EQ(0, ActiveFetches());
 }
 
 // CancelActiveFetches() must complete every outstanding fetch exactly once,
