@@ -303,6 +303,25 @@ TEST_F(IisEntityChunkTest, FileChunksBecomeMemoryChunks) {
   EXPECT_EQ(7u, chunks[3].FromMemory.BufferLength);
 }
 
+// The module reads file chunks with the request buffer limit only (a DWORD),
+// so a large static file, such as a resource being recorded for in-place
+// optimization, is converted in full.
+TEST_F(IisEntityChunkTest, LargeFileChunkIsConvertedInFull) {
+  const ULONGLONG kSize = 3 << 20;
+  WriteContent(kSize);
+  HTTP_DATA_CHUNK chunks[1] = {FileChunk(0, HTTP_BYTE_RANGE_TO_EOF)};
+  TestAllocator allocator;
+  ASSERT_TRUE(ConvertFileChunksToMemory(chunks, 1, MAXDWORD,
+                                        &TestAllocator::Allocate, &allocator));
+  ASSERT_EQ(HttpDataChunkFromMemory, chunks[0].DataChunkType);
+  ASSERT_EQ(kSize, chunks[0].FromMemory.BufferLength);
+  const char* data = static_cast<const char*>(chunks[0].FromMemory.pBuffer);
+  for (ULONGLONG i = 0; i < kSize; i += 4093) {
+    ASSERT_EQ(ContentAt(i), data[i]) << "at " << i;
+  }
+  EXPECT_EQ(ContentAt(kSize - 1), data[kSize - 1]);
+}
+
 // When any file chunk cannot be read in full, none is converted, so the
 // response can still go out exactly as it came.
 TEST_F(IisEntityChunkTest, AFailedReadLeavesEveryChunkUnchanged) {
