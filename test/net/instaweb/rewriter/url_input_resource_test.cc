@@ -22,11 +22,14 @@
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/resource.h"  // for Resource, etc
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/basictypes.h"  // for arraysize
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/string.h"       // for GoogleString
 #include "pagespeed/kernel/base/string_util.h"  // for StrCat, etc
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -126,6 +129,38 @@ class UrlInputResourceTest : public RewriteTestBase {
     EXPECT_STREQ(kHello, resource->ExtractUncompressedContents());
   }
 
+  // A gzip body that inflates past the largest response we are willing to
+  // handle must be treated as un-extractable (the compressed bytes are kept,
+  // as for any broken input) rather than inflated without bound.
+  void CheckOversizedGzippedResource(const GoogleString& url,
+                                     const GoogleString& fetch_url,
+                                     const GoogleString& base_url,
+                                     bool is_background_fetch,
+                                     bool is_authorized_domain,
+                                     bool is_auth_domain_expected,
+                                     const GoogleString& expected_cache_key,
+                                     const GoogleString& expected_referer) {
+    GoogleString huge(
+        RewriteOptions::kDefaultMaxCacheableResponseContentLength + 1, 'a');
+    GoogleString compressed;
+    StringWriter writer(&compressed);
+    ASSERT_TRUE(GzipInflater::Deflate(huge, GzipInflater::kGzip, &writer));
+    ASSERT_LT(compressed.size(), huge.size() / 100);  // Compresses well.
+
+    PrepareGzippedResourceFetch(fetch_url, compressed);
+    ResourcePtr resource(MakeUrlInputResource(url, is_authorized_domain));
+    RequestContextPtr request_context(
+        RequestContext::NewTestRequestContext(factory()->thread_system()));
+    ResourceFetchHelper(url, fetch_url, base_url, is_background_fetch,
+                        is_authorized_domain, is_auth_domain_expected, resource,
+                        expected_cache_key, expected_referer, request_context);
+    // The oversized body is treated as un-extractable: the compressed bytes
+    // are kept, as for any broken input, and never inflated.
+    EXPECT_EQ(compressed.size(),
+              resource->ExtractUncompressedContents().size())
+        << "A gzip body inflating past the handled size must not be inflated";
+  }
+
   UrlInputResource* MakeUrlInputResource(const GoogleString& url,
                                          bool is_authorized_domain) {
     return new UrlInputResource(rewrite_driver(), &kContentTypeJpeg, url,
@@ -163,6 +198,16 @@ TEST_F(UrlInputResourceTest, TestBackgroundFetchRefererSameDomain) {
 TEST_F(UrlInputResourceTest, TestExtractGzippedResource) {
   GoogleString url = "http://other.com/1.txt";
   CheckExtractedGzippedResource(
+      url, url, kTestDomain, true /* is_background_fetch */,
+      false /* is_authorized_domain */, true /* is_auth_domain_expected */,
+      "unauth://other.com/1.txt", kTestDomain);
+}
+
+// Test that a gzip body inflating past the size we are willing to handle is
+// not inflated.
+TEST_F(UrlInputResourceTest, TestOversizedGzippedResourceNotInflated) {
+  GoogleString url = "http://other.com/1.txt";
+  CheckOversizedGzippedResource(
       url, url, kTestDomain, true /* is_background_fetch */,
       false /* is_authorized_domain */, true /* is_auth_domain_expected */,
       "unauth://other.com/1.txt", kTestDomain);

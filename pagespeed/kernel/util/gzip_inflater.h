@@ -78,6 +78,13 @@ class GzipInflater {
   // if there was some kind of failure, such as a corrupt input.
   static bool Inflate(StringPiece in, InflateType format, Writer* writer);
 
+  // Inflates like Inflate(), but gives up (returning false, with *writer
+  // holding no more than max_inflated_bytes) once the input is known to
+  // inflate past max_inflated_bytes. Bounds the memory spent on untrusted
+  // input, which can expand a thousandfold.
+  static bool InflateWithLimit(StringPiece in, InflateType format,
+                               size_t max_inflated_bytes, Writer* writer);
+
   // Checks whether in starts with the gzip file signature.
   static bool HasGzipMagicBytes(StringPiece in);
 

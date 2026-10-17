@@ -283,9 +283,22 @@ bool Resource::EnsureExtractedIfNeeded() const {
       return false;
     }
 
+    // A compressed body can inflate a thousandfold, so stop at the largest
+    // response we are willing to handle and treat anything past it like
+    // any other broken input.
+    int64 inflate_limit =
+        RewriteOptions::kDefaultMaxCacheableResponseContentLength;
+    if (server_context_ != nullptr) {
+      inflate_limit = server_context_->global_options()
+                          ->max_cacheable_response_content_length();
+    }
+
     StringWriter inflate_writer(&extracted_contents_);
-    if (GzipInflater::Inflate(raw_contents(), GzipInflater::kGzip,
-                              &inflate_writer)) {
+    size_t max_inflated_bytes = (inflate_limit < 0)
+                                    ? static_cast<size_t>(-1)
+                                    : static_cast<size_t>(inflate_limit);
+    if (GzipInflater::InflateWithLimit(raw_contents(), GzipInflater::kGzip,
+                                       max_inflated_bytes, &inflate_writer)) {
       extracted_state_ = kExtractUseExtracted;
       extracted_headers_ = std::make_unique<ResponseHeaders>();
       extracted_headers_->CopyFrom(response_headers_);
@@ -294,6 +307,7 @@ bool Resource::EnsureExtractedIfNeeded() const {
       extracted_headers_->SetContentLength(extracted_contents_.length());
       extracted_headers_->ComputeCaching();
     } else {
+      extracted_contents_.clear();
       // Prevent repeated attempts on broken input.
       extracted_state_ = kExtractUseBase;
     }
