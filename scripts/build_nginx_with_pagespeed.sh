@@ -54,7 +54,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
 show_help() {
-    head -30 "$0" | tail -27 | sed 's/^#//'
+    head -37 "$0" | tail -34 | sed 's/^#//'
 }
 
 # Pinned SHA-256 digests of the nginx.org release tarballs.
@@ -356,6 +356,7 @@ main() {
     print_summary
 }
 
+# Run from a file: BASH_SOURCE is empty under `bash < script` or a pipe.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     main
 fi
