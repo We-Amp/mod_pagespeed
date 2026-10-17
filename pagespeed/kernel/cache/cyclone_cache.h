@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <shared_mutex>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
@@ -194,14 +195,23 @@ class CycloneCache : public CacheInterface {
   // CYCLONE_TIER_SMALL routing.
   void GetWithTier(const GoogleString& key, bool small_tier,
                    Callback* callback);
+  // Looks key up and sets callback's value on a hit, without calling it.
+  KeyState LookupWithTier(const GoogleString& key, bool small_tier,
+                          Callback* callback);
   void PutWithTier(const GoogleString& key, const SharedString& value,
                    bool small_tier);
   void DeleteWithTier(const GoogleString& key, bool small_tier);
 
   Config config_;
+  // cache_ is read under a shared lock of handle_mutex_ for every operation
+  // and cleared under an exclusive lock by ShutDown(), so the handle is never
+  // destroyed while a request thread is still using it.  is_shut_down_ is
+  // set before ShutDown() waits for the lock, so new operations stop
+  // queueing for it.
+  mutable std::shared_mutex handle_mutex_;
   CycloneCacheHandle* cache_;  // C handle from wrapper
   MessageHandler* handler_;
-  bool is_shut_down_;
+  std::atomic<bool> is_shut_down_;
 
   // Write failures observed by this instance.  A full or unwritable cache
   // fails EVERY write, so PutWithTier samples its kWarning off this count

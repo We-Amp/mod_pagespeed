@@ -25,6 +25,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 
 #include "pagespeed/kernel/base/mapped_shared_string.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -211,9 +213,21 @@ void CycloneCache::Get(const GoogleString& key, Callback* callback) {
 
 void CycloneCache::GetWithTier(const GoogleString& key, bool small_tier,
                                Callback* callback) {
-  if (is_shut_down_ || cache_ == nullptr) {
-    ValidateAndReportResult(key, kNotFound, callback);
-    return;
+  // The callback runs after the lock is dropped: it may call back into this
+  // cache.
+  KeyState state = LookupWithTier(key, small_tier, callback);
+  ValidateAndReportResult(key, state, callback);
+}
+
+CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
+                                                      bool small_tier,
+                                                      Callback* callback) {
+  if (is_shut_down_.load(std::memory_order_acquire)) {
+    return kNotFound;
+  }
+  std::shared_lock<std::shared_mutex> lock(handle_mutex_);
+  if (cache_ == nullptr) {
+    return kNotFound;
   }
 
   CycloneReadHandle* read_handle = nullptr;
@@ -263,13 +277,11 @@ void CycloneCache::GetWithTier(const GoogleString& key, bool small_tier,
       disk_hits_->Add(1);
     }
     bytes_read_->Add(static_cast<int64>(size));
-
-    ValidateAndReportResult(key, kAvailable, callback);
-  } else {
-    // Cache miss
-    misses_->Add(1);
-    ValidateAndReportResult(key, kNotFound, callback);
+    return kAvailable;
   }
+  // Cache miss
+  misses_->Add(1);
+  return kNotFound;
 }
 
 void CycloneCache::Put(const GoogleString& key, const SharedString& value) {
@@ -278,7 +290,12 @@ void CycloneCache::Put(const GoogleString& key, const SharedString& value) {
 
 void CycloneCache::PutWithTier(const GoogleString& key,
                                const SharedString& value, bool small_tier) {
-  if (is_shut_down_ || cache_ == nullptr) {
+  if (is_shut_down_.load(std::memory_order_acquire)) {
+    failures_->Add(1);
+    return;
+  }
+  std::shared_lock<std::shared_mutex> lock(handle_mutex_);
+  if (cache_ == nullptr) {
     failures_->Add(1);
     return;
   }
@@ -317,7 +334,11 @@ void CycloneCache::Delete(const GoogleString& key) {
 }
 
 void CycloneCache::DeleteWithTier(const GoogleString& key, bool small_tier) {
-  if (is_shut_down_ || cache_ == nullptr) {
+  if (is_shut_down_.load(std::memory_order_acquire)) {
+    return;
+  }
+  std::shared_lock<std::shared_mutex> lock(handle_mutex_);
+  if (cache_ == nullptr) {
     return;
   }
 
@@ -333,7 +354,11 @@ void CycloneCache::DeleteWithTier(const GoogleString& key, bool small_tier) {
 }
 
 bool CycloneCache::small_tier_active() const {
-  if (is_shut_down_ || cache_ == nullptr) {
+  if (is_shut_down_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  std::shared_lock<std::shared_mutex> lock(handle_mutex_);
+  if (cache_ == nullptr) {
     return false;
   }
   return cyclone_cache_small_tier_active(cache_) != 0;
@@ -344,7 +369,11 @@ CacheInterface* CycloneCache::small_tier_view() {
 }
 
 void CycloneCache::PrintStats(GoogleString* out) const {
-  if (is_shut_down_ || cache_ == nullptr) {
+  if (is_shut_down_.load(std::memory_order_acquire)) {
+    return;
+  }
+  std::shared_lock<std::shared_mutex> lock(handle_mutex_);
+  if (cache_ == nullptr) {
     return;
   }
   // Zero-initialize: the struct is append-only across the vendored C ABI,
@@ -403,22 +432,33 @@ void CycloneCache::PrintStats(GoogleString* out) const {
 }
 
 bool CycloneCache::IsHealthy() const {
-  if (is_shut_down_ || cache_ == nullptr) {
+  if (is_shut_down_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  std::shared_lock<std::shared_mutex> lock(handle_mutex_);
+  if (cache_ == nullptr) {
     return false;
   }
   return cyclone_cache_is_running(cache_) != 0;
 }
 
 void CycloneCache::ShutDown() {
-  if (is_shut_down_) {
+  if (is_shut_down_.exchange(true, std::memory_order_acq_rel)) {
     return;
   }
-  is_shut_down_ = true;
 
-  if (cache_ != nullptr) {
-    cyclone_cache_stop(cache_);
-    cyclone_cache_destroy(cache_);
+  // Waits for operations already holding the shared lock to finish; later
+  // ones see is_shut_down_ or a null cache_.
+  CycloneCacheHandle* cache = nullptr;
+  {
+    std::unique_lock<std::shared_mutex> lock(handle_mutex_);
+    cache = cache_;
     cache_ = nullptr;
+  }
+
+  if (cache != nullptr) {
+    cyclone_cache_stop(cache);
+    cyclone_cache_destroy(cache);
     handler_->Message(kInfo, "CycloneCache: Shut down cache at %s",
                       config_.cache_path.c_str());
   }

@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shutting down a batched cache (memcached or Redis behind the lookup
   batcher) while lookups were waiting for a free slot no longer aborts the
   process; each waiting lookup is reported as a miss.
+- Shutting down the Cyclone cache while request threads are still reading or
+  writing it now waits for those operations instead of destroying the cache
+  under them.
 
 ## [2.4.0] - 2026-10-14
 
