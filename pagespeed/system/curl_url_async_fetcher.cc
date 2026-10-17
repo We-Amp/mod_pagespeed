@@ -160,9 +160,9 @@ CurlUrlAsyncFetcher::CurlUrlAsyncFetcher(const char* proxy,
 }
 
 CurlUrlAsyncFetcher::~CurlUrlAsyncFetcher() {
-  if (!shutdown_) {
-    ShutDown();
-  }
+  // Always runs: besides stopping the poll thread, ShutDown() frees fetches
+  // completed after it, which must go before the curl cleanup below.
+  ShutDown();
   if (multi_handle_ != nullptr) {
     curl_multi_cleanup(multi_handle_);
   }
@@ -192,6 +192,9 @@ void CurlUrlAsyncFetcher::ShutDown() {
     poll_thread_->Join();
     poll_thread_.reset();
   }
+  // The poll thread is gone, so release what it left and any fetch that was
+  // completed inline after shutdown began.
+  ReleaseCompletedFetches();
 }
 
 void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
@@ -278,9 +281,7 @@ void CurlUrlAsyncFetcher::StartFetch(const GoogleString& url,
     }
   }
   if (!queued) {
-    message_handler->Message(
-        kWarning, "CurlUrlAsyncFetcher is shut down, cannot fetch: %s",
-        url.c_str());
+    // Done() logs the failure with the URL.
     curl_fetch->Done(CURLE_ABORTED_BY_CALLBACK);
   }
 }

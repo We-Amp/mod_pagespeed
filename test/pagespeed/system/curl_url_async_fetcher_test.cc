@@ -1075,6 +1075,11 @@ TEST_F(CurlUrlAsyncFetcherTest, FetchStartedDuringShutDownCompletes) {
   EXPECT_FALSE(fetch->success());
   EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code());
   EXPECT_EQ(0, ActiveFetches());
+  // The late fetch is still held; the ShutDown() that the destructor runs
+  // releases it before curl is cleaned up.
+  EXPECT_EQ(1, fetcher.NumCompletedFetchesForTesting());
+  fetcher.ShutDown();
+  EXPECT_EQ(0, fetcher.NumCompletedFetchesForTesting());
 }
 
 // CancelActiveFetches() must complete every outstanding fetch exactly once,
