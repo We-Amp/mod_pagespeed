@@ -101,6 +101,10 @@ class WindowsSharedMem : public AbstractSharedMem {
   void DestroySegment(const GoogleString& name,
                       MessageHandler* handler) override;
 
+  // The name of the kernel file mapping object that backs the segment called
+  // `name` in this runtime.
+  GoogleString SegmentObjectName(const GoogleString& name) const;
+
  private:
   // Internal structure tracking segment metadata.
   struct SegmentInfo;
@@ -114,9 +118,6 @@ class WindowsSharedMem : public AbstractSharedMem {
 
   // Counter for generating unique mutex IDs within this instance.
   uint32_t next_mutex_id_;
-
-  // Prefixes segment name with instance number.
-  GoogleString PrefixSegmentName(const GoogleString& name);
 
   // Gets the prefixed name for this instance (without modifying name).
   // Used by segment classes to generate mutex names.
