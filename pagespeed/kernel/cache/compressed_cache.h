@@ -35,8 +35,17 @@ class Variable;
 // Compressed cache adapter.
 class CompressedCache : public CacheInterface {
  public:
+  // Largest inflated value size a cached payload may produce before it is
+  // reported as corrupt; a payload that would inflate past it is not
+  // inflated. Constructors that do not take a limit use this default,
+  // which matches the default largest cacheable response size.
+  static const int64 kDefaultMaxInflatedValueSize = 16 << 20;
+
   // Does not takes ownership of cache or stats.
   CompressedCache(CacheInterface* cache, Statistics* stats);
+  // Same, with an explicit cap on the inflated size of cached payloads.
+  CompressedCache(CacheInterface* cache, Statistics* stats,
+                  int64 max_inflated_value_size);
   ~CompressedCache() override;
 
   static void InitStats(Statistics* stats);
@@ -65,6 +74,7 @@ class CompressedCache : public CacheInterface {
 
  private:
   CacheInterface* cache_;
+  int64 max_inflated_value_size_;
   Histogram* compressed_cache_savings_;
   Variable* corrupt_payloads_;
   Variable* original_size_;

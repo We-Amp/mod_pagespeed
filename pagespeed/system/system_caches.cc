@@ -664,9 +664,16 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
     property_store_cache = metadata_l2;
   }
   if (config->compress_metadata_cache()) {
-    metadata_cache = new CompressedCache(metadata_cache, stats);
+    // Cap the inflated size of cached payloads at the configured largest
+    // cacheable response, so an oversized entry is reported as corruption
+    // instead of being inflated in full.
+    const int64 max_inflated_value_size =
+        config->max_cacheable_response_content_length();
+    metadata_cache =
+        new CompressedCache(metadata_cache, stats, max_inflated_value_size);
     server_context->DeleteCacheOnDestruction(metadata_cache);
-    property_store_cache = new CompressedCache(property_store_cache, stats);
+    property_store_cache = new CompressedCache(property_store_cache, stats,
+                                               max_inflated_value_size);
     server_context->DeleteCacheOnDestruction(property_store_cache);
   }
   DCHECK(property_store_cache->IsBlocking());
