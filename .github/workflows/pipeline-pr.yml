@@ -1843,6 +1843,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Host "::error::llvm install failed"; exit 1 }
           }
           (Join-Path $env:ProgramFiles 'LLVM\bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # gperf for the Bazel genrules, from the MSYS2 that ships with the image.
+          & (Join-Path $env:SystemDrive 'msys64\usr\bin\pacman.exe') -Sy --noconfirm --needed gperf
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::gperf install failed"; exit 1 }
 
       - name: Set up Python
         if: runner.environment == 'github-hosted'
@@ -2132,6 +2135,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Write-Host "::error::llvm install failed"; exit 1 }
           }
           (Join-Path $env:ProgramFiles 'LLVM\bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # gperf for the Bazel genrules, from the MSYS2 that ships with the image.
+          & (Join-Path $env:SystemDrive 'msys64\usr\bin\pacman.exe') -Sy --noconfirm --needed gperf
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::gperf install failed"; exit 1 }
 
       - name: Set up Python
         if: runner.environment == 'github-hosted'

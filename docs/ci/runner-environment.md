@@ -53,6 +53,7 @@ Signing tools (`signtool`, the trusted-signing client) are a hosted-job
 concern and are not required of a build runner. ProcDump is expected on
 `PATH` by the IIS AddressSanitizer rig; Application Verifier (`appverif`)
 comes with the Windows SDK and is expected on `PATH` by the AppVerifier lanes.
+On a hosted Windows runner gperf comes from the image's MSYS2, installed with `pacman`.
 
 ## IIS and virtual machine runners (classes `fleet-iis` and `fleet-hyperv`)
 
