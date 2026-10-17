@@ -541,10 +541,11 @@ class Library : public spriter::ImageLibraryInterface {
   };
 
   Library(Delegate* delegate, const StringPiece& tmp_dir, Timer* timer,
-          MessageHandler* handler)
+          MessageHandler* handler, int64 max_image_resolution_bytes)
       : spriter::ImageLibraryInterface(delegate),
         timer_(timer),
-        handler_(handler) {
+        handler_(handler),
+        max_image_resolution_bytes_(max_image_resolution_bytes) {
     tmp_dir.CopyToString(&tmp_dir_);
   }
 
@@ -608,6 +609,19 @@ class Library : public spriter::ImageLibraryInterface {
                        dims.width(), dims.height(), resource->url().c_str());
       return false;
     }
+    // Apply the same resolution limit as the image-rewrite path.  Layout
+    // uses the header dimensions without decoding, so an oversized image
+    // would otherwise be laid out into a canvas of its declared size.
+    // Compare with division so the pixel budget cannot overflow.
+    const int64 kBytesPerPixel = 4;
+    const int64 max_pixels = max_image_resolution_bytes_ / kBytesPerPixel;
+    if (static_cast<int64>(dims.width()) > max_pixels / dims.height()) {
+      handler->Message(kInfo,
+                       "Cannot sprite: resolution %dx%d exceeds the "
+                       "configured limit, %s",
+                       dims.width(), dims.height(), resource->url().c_str());
+      return false;
+    }
     RegisterImage(resource->url(), image.release());
     return true;
   }
@@ -640,6 +654,7 @@ class Library : public spriter::ImageLibraryInterface {
   GoogleString tmp_dir_;
   Timer* timer_;
   MessageHandler* handler_;
+  int64 max_image_resolution_bytes_;
 };
 
 }  // namespace spriter_binding
@@ -772,8 +787,8 @@ class ImageCombineFilter::Context : public RewriteContext {
           const GoogleUrl& css_url, const StringPiece& css_text)
       : RewriteContext(nullptr, parent, nullptr),
         library_(nullptr, filter->driver()->server_context()->filename_prefix(),
-                 filter->driver()->timer(),
-                 filter->driver()->message_handler()),
+                 filter->driver()->timer(), filter->driver()->message_handler(),
+                 filter->driver()->options()->image_resolution_limit_bytes()),
         filter_(filter) {
     css_base_url_.Reset(css_url);
     MD5Hasher hasher;
@@ -784,8 +799,8 @@ class ImageCombineFilter::Context : public RewriteContext {
   Context(RewriteDriver* driver, ImageCombineFilter* filter)
       : RewriteContext(driver, nullptr, nullptr),
         library_(nullptr, filter->driver()->server_context()->filename_prefix(),
-                 filter->driver()->timer(),
-                 filter->driver()->message_handler()),
+                 filter->driver()->timer(), filter->driver()->message_handler(),
+                 filter->driver()->options()->image_resolution_limit_bytes()),
         filter_(filter) {}
 
   ~Context() override {}

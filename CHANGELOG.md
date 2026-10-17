@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The shared message buffer (`MessageBufferSize`) now refuses a capacity
   that is non-positive or too large for its size computation (over 1 GiB):
   the buffer is left off instead of misbehaving in shared memory.
+- Image spriting now applies the same `ImageResolutionLimitBytes` budget as
+  image rewriting, so a candidate image whose declared dimensions exceed the
+  limit is skipped instead of being laid out into a canvas of that size.
 
 ## [2.4.0] - 2026-10-14
 
