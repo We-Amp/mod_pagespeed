@@ -34,7 +34,11 @@
 # Every publish step is therefore judged by its result (the file is there
 # and complete, the sidecar holds the digest), never by the exit status of
 # the command alone. Where hard links are unsupported, a plain rename onto
-# the still-free name is the fallback.
+# the still-free name is the fallback. That fallback is not exclusive: on a
+# filesystem without hard links two publishers can both see the name as free
+# and the second rename replaces the first, so "a sound tarball is never
+# rewritten" holds only where `ln` works. Sidecars still converge on the
+# tarball that ends up there, and readers retry until tarball and digest agree.
 
 set -euo pipefail
 
@@ -102,11 +106,13 @@ if [ -n "$TMP" ]; then
     fi
   fi
   if ! zstd_ok "$STAGE"; then
+    rm -f "$STAGE"
     echo "::error::temp tarball is not a complete zstd frame: $TMP" >&2
     exit 1
   fi
   STAGE_DIGEST="$(hash_of "$STAGE")"
   if [ -n "$EXPECT" ] && [ "$STAGE_DIGEST" != "$EXPECT" ]; then
+    rm -f "$STAGE"
     echo "::error::temp tarball digest ${STAGE_DIGEST} is not the expected ${EXPECT}" >&2
     exit 1
   fi
@@ -125,12 +131,17 @@ if [ -n "$TMP" ]; then
       if mv -f "$STAGE" "$FINAL" 2>/dev/null || [ "$(size_of "$FINAL")" = "$TMP_SIZE" ]; then
         published=1; break
       fi
-    elif { rm -f "$SIDECAR"; ln "$STAGE" "$FINAL" 2>/dev/null; }; then
+    elif ln "$STAGE" "$FINAL" 2>/dev/null; then
+      # The name was free, so any sidecar is stale; drop it only now that
+      # this writer owns the name (a losing writer must not remove the
+      # winner's fresh one).
+      rm -f "$SIDECAR"
       log "published $BN"
       published=1; break
     elif [ ! -e "$FINAL" ]; then
       # No hard links here: rename onto the name, which is still free.
       if mv "$STAGE" "$FINAL" 2>/dev/null || settle test -s "$FINAL"; then
+        rm -f "$SIDECAR"
         log "published $BN by rename"
         published=1; break
       fi

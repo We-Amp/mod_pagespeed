@@ -66,8 +66,12 @@ function Copy-FromSource {
   if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { return $false }
   try {
     Copy-Item -LiteralPath $src -Destination $staged -Force -ErrorAction Stop
+    # Copy-Item keeps the source's LastWriteTime; a private copy must look new
+    # so a sibling's prune does not take it.
+    (Get-Item -LiteralPath $staged).LastWriteTime = Get-Date
     if (Test-Path -LiteralPath "$src.sha256" -PathType Leaf) {
       Copy-Item -LiteralPath "$src.sha256" -Destination $sidecarStaged -Force -ErrorAction Stop
+      (Get-Item -LiteralPath $sidecarStaged).LastWriteTime = Get-Date
     }
     return $true
   } catch {
@@ -77,6 +81,9 @@ function Copy-FromSource {
 }
 
 function Copy-FromHub {
+  # Windows PowerShell 5.1 turns a native command's stderr into a terminating
+  # error under 'Stop' once it is redirected; the exit code is what counts.
+  $ErrorActionPreference = 'Continue'
   if (-not $HubSsh -or -not $HubDir) { return $false }
   $opts = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'LogLevel=ERROR')
   & scp @opts "${HubSsh}:${HubDir}/$Name" $staged 2>$null
@@ -90,6 +97,7 @@ function Copy-FromHub {
 # sound tarball that has no digest.
 function Test-Staged {
   param([bool]$AllowNoSidecar)
+  $ErrorActionPreference = 'Continue'
   if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { return $false }
   if ((Get-Item -LiteralPath $staged).Length -le 0) {
     Write-Host '::warning::fetch-vendor-tarball: staged tarball is empty'
@@ -158,6 +166,8 @@ try {
   # GNU tar reads a drive letter as a remote host).
   & zstd -d -f -q -T0 $staged -o $tarFile
   if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
+  # zstd -d keeps the source's LastWriteTime too; stamp the intermediate.
+  (Get-Item -LiteralPath $tarFile).LastWriteTime = Get-Date
   New-Item -ItemType Directory -Force -Path $Dest | Out-Null
   & $TarExe xf $tarFile -C $Dest
   if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }

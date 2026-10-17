@@ -148,8 +148,8 @@ if [ "$HAVE_ZSTD" = 1 ]; then
   mkzst "$T/whole.zst"; head -c "$(( $(wc -c < "$T/whole.zst") / 2 ))" "$T/whole.zst" > "$P.2.tmp"
   if OUT=$(VENDOR_VERIFY_ZSTD=1 bash "$PUBLISH" "$P" "$P.2.tmp" 2>&1); then
     fail "truncated zstd temp was published"
-  elif [ ! -e "$P" ] && printf '%s' "$OUT" | grep -q 'not a complete zstd frame'; then
-    pass "truncated zstd temp rejected; nothing published"
+  elif [ ! -e "$P" ] && [ ! -e "$P.2.tmp" ] && printf '%s' "$OUT" | grep -q 'not a complete zstd frame'; then
+    pass "truncated zstd temp rejected and removed; nothing published"
   else
     fail "truncated zstd temp: ($OUT)"
   fi
@@ -161,11 +161,12 @@ D="$T/vendor-1111111.tar.zst"
 printf 'bytes\n' > "$D.1.tmp"
 if OUT=$(VENDOR_EXPECT_SHA256=$(printf x | sha256sum | cut -d' ' -f1) bash "$PUBLISH" "$D" "$D.1.tmp" 2>&1); then
   fail "temp with the wrong digest was published"
-elif [ ! -e "$D" ] && printf '%s' "$OUT" | grep -q 'not the expected'; then
-  pass "digest mismatch rejected; nothing published"
+elif [ ! -e "$D" ] && [ ! -e "$D.1.tmp" ] && printf '%s' "$OUT" | grep -q 'not the expected'; then
+  pass "digest mismatch rejected and temp removed; nothing published"
 else
   fail "digest mismatch: ($OUT)"
 fi
+printf 'bytes\n' > "$D.1.tmp"
 if VENDOR_EXPECT_SHA256="$(digest "$D.1.tmp")" bash "$PUBLISH" "$D" "$D.1.tmp" 2>/dev/null \
    && [ "$(cat "$D")" = bytes ] && sidecar_matches "$D"; then
   pass "expected digest publishes"

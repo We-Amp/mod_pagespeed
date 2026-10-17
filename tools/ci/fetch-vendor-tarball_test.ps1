@@ -13,8 +13,11 @@
 #   5. a truncated tarball that a producer completes during the retries is
 #      picked up (exit 0).
 #   6. a sound tarball with no sidecar is accepted on the last pass only.
-#   7. two readers of the same shared tarball use private files and both
-#      extract (no shared decompression intermediate).
+#   7. two readers of the same shared tarball, running concurrently, use
+#      private files and both extract (no shared decompression intermediate).
+#   8. the staged copy and the decompressed intermediate of a fetch from an
+#      old shared tarball look new, so a prune of the staging directory run
+#      between the steps (here, from inside the tar step) removes neither.
 #
 # Run:   powershell -NoProfile -File tools\ci\fetch-vendor-tarball_test.ps1
 #   or:  pwsh -NoProfile -File tools/ci/fetch-vendor-tarball_test.ps1
@@ -123,10 +126,39 @@ if ($rc -eq 0 -and (Test-Path -LiteralPath (Join-Path $dest 'GIT_COMMIT'))) { Pa
 # 7
 $sh = New-Shared 'shared7' 'good'; $stage = Join-Path $root 'stage7'
 $d1 = Join-Path $root 'dest7a'; $d2 = Join-Path $root 'dest7b'
-$rc1 = Invoke-Fetch $sh $d1 $stage 2 0 'jobA'
+# Reader A runs as a background job while reader B runs here.
+$jobA = Start-Job -ArgumentList $script, $name, $d1, $stage, $sh, $tar -ScriptBlock {
+  param($s, $n, $d, $st, $shared, $t)
+  & $s -Name $n -Dest $d -StageDir $st -SearchDirs @($shared) -Retries 2 -BackoffSeconds 0 -Tag 'jobA' -TarExe $t 6>&1 | Out-Null
+  return $LASTEXITCODE
+}
 $rc2 = Invoke-Fetch $sh $d2 $stage 2 0 'jobB'
+$rc1 = @(Receive-Job -Job $jobA -Wait)[-1]
+Remove-Job $jobA -Force
 if ($rc1 -eq 0 -and $rc2 -eq 0 -and (Test-Path -LiteralPath (Join-Path $d1 'GIT_COMMIT')) -and (Test-Path -LiteralPath (Join-Path $d2 'GIT_COMMIT'))) { Pass '7: two readers each extract from private files' } else { Fail "7: exits $rc1 $rc2" }
 if (-not (Test-Path -LiteralPath (Join-Path $sh "$name.tar"))) { Pass '7: no decompression intermediate in the shared dir' } else { Fail '7: intermediate left in the shared dir' }
+
+# 8: the shared tarball is hours old; a prune that runs while the fetch is
+# between decompression and extraction (from a stand-in for tar) must keep
+# both private files.
+$sh = New-Shared 'shared8' 'good'; $dest = Join-Path $root 'dest8'; $stage = Join-Path $root 'stage8'
+foreach ($f8 in @((Join-Path $sh $name), (Join-Path $sh "$name.sha256"))) { (Get-Item -LiteralPath $f8).LastWriteTime = (Get-Date).AddHours(-5) }
+$marker = Join-Path $root 'marker8'
+$wrap = Join-Path $root 'tar-wrap8.ps1'
+$wrapText = @'
+& '@PRUNE@' -VendorDir '@STAGE@' -ShortSha fffffff -SharedDir 'Z:\no\such\shared' 6>&1 | Out-Null
+$kept = @(Get-ChildItem -LiteralPath '@STAGE@' -File | Where-Object { $_.Name -like '*.stage' -or $_.Name -like '*.tar' }).Count
+Set-Content -LiteralPath '@MARKER@' -Value $kept
+& '@TAR@' @args
+exit $LASTEXITCODE
+'@
+$wrapText = $wrapText.Replace('@PRUNE@', (Join-Path $here 'prune-win-vendor.ps1')).Replace('@STAGE@', $stage).Replace('@MARKER@', $marker).Replace('@TAR@', $tar)
+Set-Content -LiteralPath $wrap -Value $wrapText -Encoding ascii
+& $script -Name $name -Dest $dest -StageDir $stage -SearchDirs @($sh) -Retries 2 -BackoffSeconds 0 -Tag 'prune8' -TarExe $wrap 6>&1 | Out-Null
+$rc = $LASTEXITCODE
+$kept8 = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -TotalCount 1).Trim() } else { 'none' }
+if ($kept8 -eq '2') { Pass '8: a prune keeps the staged copy and the intermediate of a live fetch' } else { Fail "8: files surviving the prune: $kept8" }
+if ($rc -eq 0 -and (Test-Path -LiteralPath (Join-Path $dest 'GIT_COMMIT'))) { Pass '8: fetch from an old tarball extracts' } else { Fail "8: exit $rc" }
 } finally {
   Remove-Item -Recurse -Force -LiteralPath $root -ErrorAction SilentlyContinue
 }

@@ -14,8 +14,10 @@
 # other side's clock. A clock that disagrees with this host's by more than a
 # couple of minutes makes every fresh file look old, and the prune would then
 # delete a sibling runner's tarball while it is being written or read. The
-# prune therefore stamps a probe file in <dir>, compares its mtime with this
-# host's clock, and does nothing (exit 0, with a warning) when they disagree.
+# prune therefore stamps a probe file in <dir> and measures ages against the
+# probe's own timestamp (through a reference file set that many minutes
+# earlier), never against this host's clock. When the two disagree it says
+# so and prunes anyway, so a permanent skew cannot fill the shared drive.
 #
 # bash 3.2 compatible (macOS runners); ASCII only.
 
@@ -40,19 +42,28 @@ rm -f "$PROBE"
 case "$STAMP" in ''|*[!0-9]*) echo "::warning::prune-vendor-dir: cannot read file times; not pruning"; exit 0 ;; esac
 SKEW=$((NOW - STAMP)); [ "$SKEW" -ge 0 ] || SKEW=$((-SKEW))
 if [ "$SKEW" -gt "$MAX_SKEW_SECS" ]; then
-  echo "::warning::prune-vendor-dir: file times differ from this host's clock by ${SKEW}s; file ages cannot be trusted, not pruning"
-  exit 0
+  echo "::warning::prune-vendor-dir: file times differ from this host's clock by ${SKEW}s; measuring ages against the directory's own clock"
+fi
+
+# Reference file: the cutoff, on the directory's clock.
+REF="$DIR/.prune-ref.$$"
+trap 'rm -f "$REF"' EXIT
+CUTOFF=$((STAMP - MAXMIN * 60))
+if ! touch -d "@${CUTOFF}" "$REF" 2>/dev/null; then
+  # BSD touch has no -d @epoch.
+  touch -t "$(date -r "$CUTOFF" +%Y%m%d%H%M.%S 2>/dev/null)" "$REF" 2>/dev/null \
+    || { echo "::warning::prune-vendor-dir: cannot stamp a reference file; not pruning"; exit 0; }
 fi
 
 if [ "$KEEP" = "-" ]; then
   find "$DIR" -maxdepth 1 -type f \
     \( -name "${PREFIX}-*.tar.zst" -o -name "${PREFIX}-*.tar.zst.sha256" -o -name "${PREFIX}-*.tar.zst.*.tmp" -o -name "${PREFIX}-*.tar.zst.sha256.*.tmp" \) \
-    -mmin "+${MAXMIN}" -delete 2>/dev/null || true
+    ! -newer "$REF" -delete 2>/dev/null || true
 else
   find "$DIR" -maxdepth 1 -type f \
     \( -name "${PREFIX}-*.tar.zst" -o -name "${PREFIX}-*.tar.zst.sha256" -o -name "${PREFIX}-*.tar.zst.*.tmp" -o -name "${PREFIX}-*.tar.zst.sha256.*.tmp" \) \
     ! -name "${PREFIX}-${KEEP}.tar.zst" \
     ! -name "${PREFIX}-${KEEP}.tar.zst.sha256" \
-    -mmin "+${MAXMIN}" -delete 2>/dev/null || true
+    ! -newer "$REF" -delete 2>/dev/null || true
 fi
 exit 0

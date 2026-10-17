@@ -1985,16 +1985,20 @@ jobs:
       # with the Linux jobs (CI_WIN_VENDOR_DIR) is left to the Linux vendor
       # job. The hermetic self-test runs first; if it fails, the prune is
       # skipped. Housekeeping: continue-on-error, so it never blocks a merge.
+      - name: Vendor fetch and prune scripts - self-test
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor_test.ps1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::prune-win-vendor self-test failed (exit $LASTEXITCODE)"; exit 1 }
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball_test.ps1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::fetch-vendor-tarball self-test failed (exit $LASTEXITCODE)"; exit 1 }
+
       - name: Prune the vendor download directory
         if: needs.vendor.outputs.channel == 'hub'
         continue-on-error: true
         env:
           VENDOR_SHORT_SHA: ${{ needs.vendor.outputs.short_sha }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor_test.ps1"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::prune-win-vendor self-test failed (exit $LASTEXITCODE); not pruning"; exit 1 }
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball_test.ps1"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::fetch-vendor-tarball self-test failed (exit $LASTEXITCODE)" }
           & "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor.ps1" `
             -VendorDir $env:WIN_VENDOR_DL_DIR -ShortSha $env:VENDOR_SHORT_SHA
 
@@ -2270,16 +2274,20 @@ jobs:
       # with the Linux jobs (CI_WIN_VENDOR_DIR) is left to the Linux vendor
       # job. The hermetic self-test runs first; if it fails, the prune is
       # skipped. Housekeeping: continue-on-error, so it never blocks a merge.
+      - name: Vendor fetch and prune scripts - self-test
+        if: needs.vendor.outputs.channel == 'hub'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor_test.ps1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::prune-win-vendor self-test failed (exit $LASTEXITCODE)"; exit 1 }
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball_test.ps1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::fetch-vendor-tarball self-test failed (exit $LASTEXITCODE)"; exit 1 }
+
       - name: Prune the vendor download directory
         if: needs.vendor.outputs.channel == 'hub'
         continue-on-error: true
         env:
           VENDOR_SHORT_SHA: ${{ needs.vendor.outputs.short_sha }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor_test.ps1"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::prune-win-vendor self-test failed (exit $LASTEXITCODE); not pruning"; exit 1 }
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\fetch-vendor-tarball_test.ps1"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::warning::fetch-vendor-tarball self-test failed (exit $LASTEXITCODE)" }
           & "$($env:GITHUB_WORKSPACE)\tools\ci\prune-win-vendor.ps1" `
             -VendorDir $env:WIN_VENDOR_DL_DIR -ShortSha $env:VENDOR_SHORT_SHA
 
