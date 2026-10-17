@@ -219,6 +219,16 @@ build:clang-tsan --copt -DEVENT__DISABLE_DEBUG_MODE
 # https://github.com/abseil/abseil-cpp/issues/760
 # https://github.com/google/sanitizers/issues/953
 build:clang-tsan --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/src/tools/tsan_suppressions.txt"
+# Symbolize TSan reports. The sanitizer runtime cannot find llvm-symbolizer
+# under the hermetic PATH bazel hands to test actions, so forward an explicit
+# path (TSAN_SYMBOLIZER_PATH, set in the environment like the ASAN/MSAN
+# equivalents). Line tables keep file:line info in the reports without the
+# full -g debug-info build cost.
+build:clang-tsan --test_env=TSAN_SYMBOLIZER_PATH
+build:clang-tsan --copt -gline-tables-only
+# Bazel's default --strip=sometimes drops debug info in fastbuild, which
+# would discard the line tables again at link time.
+build:clang-tsan --strip=never
 
 # Clang MSAN - to run this config without our build image, follow
 # https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo
