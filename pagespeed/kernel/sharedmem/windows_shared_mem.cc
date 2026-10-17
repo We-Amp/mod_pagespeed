@@ -216,13 +216,15 @@ class WindowsSharedMemSegment : public AbstractSharedMemSegment {
 
 }  // namespace
 
-// Structure to track segment metadata.
+// Structure to track segment metadata. The views of a segment belong to the
+// WindowsSharedMemSegment objects handed out for it, never to this record:
+// the file mapping stays alive for as long as any view of it is mapped, so a
+// segment object remains usable after its name is destroyed or created again.
 struct WindowsSharedMem::SegmentInfo {
   HANDLE file_mapping;
-  char* base;
   size_t size;
 
-  SegmentInfo() : file_mapping(nullptr), base(nullptr), size(0) {}
+  SegmentInfo() : file_mapping(nullptr), size(0) {}
 };
 
 size_t WindowsSharedMem::s_instance_count_ = 0;
@@ -236,9 +238,6 @@ WindowsSharedMem::~WindowsSharedMem() {
   // Clean up any remaining segments.
   for (auto& pair : segments_) {
     SegmentInfo* info = pair.second;
-    if (info->base != nullptr) {
-      UnmapViewOfFile(info->base);
-    }
     if (info->file_mapping != nullptr) {
       CloseHandle(info->file_mapping);
     }
@@ -268,7 +267,8 @@ static GoogleString SanitizeObjectName(const GoogleString& raw) {
   return out;
 }
 
-GoogleString WindowsSharedMem::PrefixSegmentName(const GoogleString& name) {
+GoogleString WindowsSharedMem::SegmentObjectName(
+    const GoogleString& name) const {
   // Use Local\ prefix for session-local shared memory (works within IIS app
   // pool). Combine instance number and sanitized name for uniqueness.
   return StrCat("Local\\PageSpeed_", IntegerToString(instance_number_), "_",
@@ -277,7 +277,34 @@ GoogleString WindowsSharedMem::PrefixSegmentName(const GoogleString& name) {
 
 AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
     const GoogleString& name, size_t size, MessageHandler* handler) {
-  GoogleString prefixed_name = PrefixSegmentName(name);
+  GoogleString prefixed_name = SegmentObjectName(name);
+  GoogleString simple_name =
+      SanitizeObjectName(StrCat(IntegerToString(instance_number_), "_", name));
+
+  auto it = segments_.find(prefixed_name);
+  if (it != segments_.end()) {
+    // Created again by this runtime: hand out a view with fresh contents.
+    // Views handed out before stay mapped.
+    SegmentInfo* info = it->second;
+    if (info->size != size) {
+      handler->Message(kError,
+                       "CreateSegment: '%s' created again with size %zu, "
+                       "was %zu",
+                       prefixed_name.c_str(), size, info->size);
+      return nullptr;
+    }
+    char* base = static_cast<char*>(
+        MapViewOfFile(info->file_mapping, FILE_MAP_ALL_ACCESS, 0, 0, size));
+    if (base == nullptr) {
+      DWORD error = GetLastError();
+      handler->Message(kError,
+                       "MapViewOfFile failed for segment '%s' with error %lu",
+                       prefixed_name.c_str(), error);
+      return nullptr;
+    }
+    memset(base, 0, size);
+    return new WindowsSharedMemSegment(base, size, simple_name);
+  }
 
   // Create a file mapping object backed by the paging file.
   HANDLE file_mapping = CreateFileMappingA(
@@ -296,14 +323,19 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
     return nullptr;
   }
 
-  bool already_exists = (GetLastError() == ERROR_ALREADY_EXISTS);
-  if (already_exists) {
-    handler->Message(kWarning,
-                     "Shared memory segment '%s' already exists, reusing",
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    // Another runtime (another process deriving the same name) created this
+    // segment and may be using it. Its contents are not ours to reset, and
+    // initializing shared structures over them would corrupt them for both.
+    CloseHandle(file_mapping);
+    handler->Message(kError,
+                     "Shared memory segment '%s' is already in use by "
+                     "another owner",
                      prefixed_name.c_str());
+    return nullptr;
   }
 
-  // Map the view of the file.
+  // A new mapping backed by the paging file starts out zeroed.
   char* base = static_cast<char*>(
       MapViewOfFile(file_mapping, FILE_MAP_ALL_ACCESS, 0, 0, size));
 
@@ -316,45 +348,19 @@ AbstractSharedMemSegment* WindowsSharedMem::CreateSegment(
     return nullptr;
   }
 
-  // Always zero-initialize the memory. For new segments this provides clean
-  // state; for existing segments this ensures predictable behavior when
-  // CreateSegment is called multiple times (matching POSIX semantics where
-  // shmget + IPC_CREAT returns zeroed memory).
-  memset(base, 0, size);
-
-  // Store segment info.
   SegmentInfo* info = new SegmentInfo();
   info->file_mapping = file_mapping;
-  info->base = base;
   info->size = size;
-
-  // Check for existing segment with same name in our local map.
-  auto it = segments_.find(prefixed_name);
-  if (it != segments_.end()) {
-    handler->Message(kWarning,
-                     "CreateSegment called twice for '%s', replacing old",
-                     prefixed_name.c_str());
-    if (it->second->base != nullptr) {
-      UnmapViewOfFile(it->second->base);
-    }
-    if (it->second->file_mapping != nullptr) {
-      CloseHandle(it->second->file_mapping);
-    }
-    delete it->second;
-  }
-
   segments_[prefixed_name] = info;
 
-  // Return segment with a simplified name for mutex naming (without Local\
-  // prefix).  Sanitize so mutex names are also valid Windows object names.
-  GoogleString simple_name =
-      SanitizeObjectName(StrCat(IntegerToString(instance_number_), "_", name));
+  // The segment's mutex names use the simplified name (no namespace prefix),
+  // sanitized so they are valid Windows object names too.
   return new WindowsSharedMemSegment(base, size, simple_name);
 }
 
 AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
     const GoogleString& name, size_t size, MessageHandler* handler) {
-  GoogleString prefixed_name = PrefixSegmentName(name);
+  GoogleString prefixed_name = SegmentObjectName(name);
 
   // Look up in our local map first (for in-process case).
   auto it = segments_.find(prefixed_name);
@@ -410,7 +416,6 @@ AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
   // Store for future reference.
   SegmentInfo* info = new SegmentInfo();
   info->file_mapping = file_mapping;
-  info->base = base;
   info->size = size;
   segments_[prefixed_name] = info;
 
@@ -421,7 +426,7 @@ AbstractSharedMemSegment* WindowsSharedMem::AttachToSegment(
 
 void WindowsSharedMem::DestroySegment(const GoogleString& name,
                                       MessageHandler* handler) {
-  GoogleString prefixed_name = PrefixSegmentName(name);
+  GoogleString prefixed_name = SegmentObjectName(name);
 
   auto it = segments_.find(prefixed_name);
   if (it == segments_.end()) {
@@ -437,11 +442,8 @@ void WindowsSharedMem::DestroySegment(const GoogleString& name,
   // them in ~WindowsNamedMutex, the mutexes will be cleaned up as the
   // AbstractMutex objects are deleted.
 
-  if (info->base != nullptr) {
-    UnmapViewOfFile(info->base);
-    info->base = nullptr;
-  }
-
+  // Views still held by segment objects keep the mapping alive; they are
+  // unmapped when those objects are deleted.
   if (info->file_mapping != nullptr) {
     CloseHandle(info->file_mapping);
     info->file_mapping = nullptr;

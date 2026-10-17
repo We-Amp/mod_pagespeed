@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/stl_util.h"
@@ -220,6 +221,90 @@ TEST(WindowsSharedMemTest, MultipleMutexes) {
   delete mutex2;
   delete seg;
   shm.DestroySegment("test_multi_mutex", &handler);
+}
+
+// Large enough that a stale view would span many pages.
+constexpr size_t kLargeSegmentSize = 4 << 20;
+
+// Creating a segment name again in the same runtime hands out a fresh zeroed
+// view; segment objects returned earlier keep a valid mapping until deleted.
+TEST(WindowsSharedMemTest, RecreateKeepsEarlierSegmentMapped) {
+  WindowsSharedMem shm;
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  MockMessageHandler handler(thread_system->NewMutex());
+
+  std::unique_ptr<AbstractSharedMemSegment> first(
+      shm.CreateSegment("test_recreate", kLargeSegmentSize, &handler));
+  ASSERT_NE(nullptr, first.get());
+  first->Base()[kLargeSegmentSize - 1] = 'A';
+
+  std::unique_ptr<AbstractSharedMemSegment> second(
+      shm.CreateSegment("test_recreate", kLargeSegmentSize, &handler));
+  ASSERT_NE(nullptr, second.get());
+  EXPECT_EQ('\0', second->Base()[kLargeSegmentSize - 1]);
+
+  // Still mapped: reading and writing through the earlier object is fine.
+  first->Base()[kLargeSegmentSize - 1] = 'B';
+  EXPECT_EQ('B', first->Base()[kLargeSegmentSize - 1]);
+
+  first.reset();
+  second.reset();
+  shm.DestroySegment("test_recreate", &handler);
+}
+
+// Deleting segment objects and destroying the name, in either order, releases
+// each view exactly once.
+TEST(WindowsSharedMemTest, DestroyAfterSegmentObjectsAreGone) {
+  WindowsSharedMem shm;
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  MockMessageHandler handler(thread_system->NewMutex());
+
+  std::unique_ptr<AbstractSharedMemSegment> seg(
+      shm.CreateSegment("test_destroy_order", 4096, &handler));
+  ASSERT_NE(nullptr, seg.get());
+  shm.DestroySegment("test_destroy_order", &handler);
+  // The segment object still owns its view after the name is destroyed.
+  seg->Base()[0] = 'A';
+  EXPECT_EQ('A', seg->Base()[0]);
+  seg.reset();
+
+  // A view mapped after the earlier ones were released must stay intact
+  // while the runtime itself is torn down below.
+  std::unique_ptr<AbstractSharedMemSegment> other(
+      shm.CreateSegment("test_destroy_order_2", 4096, &handler));
+  ASSERT_NE(nullptr, other.get());
+  other->Base()[0] = 'Z';
+  EXPECT_EQ('Z', other->Base()[0]);
+}
+
+// A segment name that is already in use by another runtime (another worker
+// process deriving the same object name) belongs to that runtime: creating
+// it must neither wipe the memory the other runtime is using nor silently
+// share it.
+TEST(WindowsSharedMemTest, CreateDoesNotTakeOverAnotherOwnersSegment) {
+  WindowsSharedMem shm;
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  MockMessageHandler handler(thread_system->NewMutex());
+
+  const size_t kSize = 4096;
+  GoogleString object_name = shm.SegmentObjectName("test_foreign");
+  HANDLE other_mapping =
+      CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                         static_cast<DWORD>(kSize), object_name.c_str());
+  ASSERT_NE(nullptr, other_mapping);
+  ASSERT_NE(static_cast<DWORD>(ERROR_ALREADY_EXISTS), GetLastError());
+  char* other_view = static_cast<char*>(
+      MapViewOfFile(other_mapping, FILE_MAP_ALL_ACCESS, 0, 0, kSize));
+  ASSERT_NE(nullptr, other_view);
+  other_view[0] = 'L';
+
+  std::unique_ptr<AbstractSharedMemSegment> seg(
+      shm.CreateSegment("test_foreign", kSize, &handler));
+  EXPECT_EQ(nullptr, seg.get());
+  EXPECT_EQ('L', other_view[0]);
+
+  UnmapViewOfFile(other_view);
+  CloseHandle(other_mapping);
 }
 
 // Instantiate the standard shared memory test suites
