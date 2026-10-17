@@ -52,6 +52,9 @@ class SharedCircularBufferTestBase : public testing::Test {
   void TestClear();
   // Test the shared memory circular buffer.
   void TestCircular();
+  // Test that an invalid capacity is refused without leaving a segment
+  // behind under our name.
+  void TestInvalidCapacity();
 
  private:
   // Helper functions.
@@ -110,8 +113,13 @@ TYPED_TEST_P(SharedCircularBufferTestTemplate, TestCircular) {
   SharedCircularBufferTestBase::TestCircular();
 }
 
+TYPED_TEST_P(SharedCircularBufferTestTemplate, TestInvalidCapacity) {
+  SharedCircularBufferTestBase::TestInvalidCapacity();
+}
+
 REGISTER_TYPED_TEST_SUITE_P(SharedCircularBufferTestTemplate, TestCreate,
-                            TestAdd, TestClear, TestCircular);
+                            TestAdd, TestClear, TestCircular,
+                            TestInvalidCapacity);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SharedCircularBufferTestTemplate);
 

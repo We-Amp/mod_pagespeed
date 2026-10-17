@@ -40,6 +40,7 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
+#include "pagespeed/kernel/base/circular_buffer.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
@@ -422,6 +423,11 @@ void SystemRewriteDriverFactory::SharedCircularBufferInit(bool is_root) {
         filename_prefix().as_string(), hostname_identifier());
     if (shared_circular_buffer_->InitSegment(is_root, message_handler())) {
       SetCircularBuffer(shared_circular_buffer_.get());
+    } else {
+      // InitSegment itself reports the cause; do not drop the failure
+      // silently, since a missing message buffer is operator-visible.
+      message_handler()->Message(
+          kError, "Failed to initialize the shared memory message buffer.");
     }
   }
 }
@@ -516,6 +522,16 @@ SystemRewriteDriverFactory::ParseAndSetOption1(StringPiece option,
           ? RewriteOptions::kOptionOk
           : RewriteOptions::kOptionValueInvalid;
   if (StringCaseEqual(option, kMessageBufferSize)) {
+    // The size is handed straight to the shared-memory circular buffer, so
+    // reject what that buffer cannot represent: a negative value or one
+    // past its capacity bound would otherwise fail silently at child init,
+    // where a false return from InitSegment is dropped.
+    if (parsed_as_int == RewriteOptions::kOptionOk &&
+        (int_value < 0 || int_value > CircularBuffer::kMaxCapacity)) {
+      *msg = StrCat("MessageBufferSize must be between 0 and ",
+                    CircularBuffer::kMaxCapacity, ".");
+      return RewriteOptions::kOptionValueInvalid;
+    }
     set_message_buffer_size(int_value);
     return parsed_as_int;
   }

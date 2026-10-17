@@ -170,4 +170,35 @@ void SharedCircularBufferTestBase::TestCircular() {
   parent->GlobalCleanup(&handler_);
 }
 
+// A capacity CircularBuffer cannot represent must be refused before any
+// size is computed or any segment created, so the failure leaves nothing
+// behind under our segment name.
+void SharedCircularBufferTestBase::TestInvalidCapacity() {
+  // Only the rejections themselves should be reported; a leaked segment on
+  // the failure path would surface later as a runtime error instead.
+  handler_.AddPatternToSkipPrinting("*Invalid buffer capacity*");
+
+  {
+    SharedCircularBuffer negative(shmem_runtime_.get(), -1, kPrefix,
+                                  kPostfix);
+    EXPECT_FALSE(negative.InitSegment(true /* parent */, &handler_));
+  }
+  {
+    SharedCircularBuffer zero(shmem_runtime_.get(), 0, kPrefix, kPostfix);
+    EXPECT_FALSE(zero.InitSegment(true /* parent */, &handler_));
+  }
+
+  // A good buffer with the same name must still initialize cleanly and
+  // work: nothing was registered under the name by the failures above.
+  std::unique_ptr<SharedCircularBuffer> good(ParentInit());
+  good->Write("hello", &null_handler_);
+  EXPECT_EQ("hello", good->ToString(&handler_));
+
+  // Exactly the two rejections, and no other serious message.
+  EXPECT_EQ(2, handler_.MessagesOfType(kError));
+  EXPECT_EQ(2, handler_.SkippedMessagesOfType(kError));
+
+  good->GlobalCleanup(&handler_);
+}
+
 }  // namespace net_instaweb
