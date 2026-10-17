@@ -846,8 +846,11 @@ bool DomainLawyer::MapDomainHelper(
   if (!IsSchemeSafeToMapTo(to_domain_name, allow_map_to_https)) {
     return false;
   }
+  // Register the domains without authorizing them yet: authorization is
+  // granted only after the mapping has been validated, so that a rejected
+  // mapping cannot leave an authorization behind.
   Domain* to_domain = AddDomainHelper(to_domain_name, false,
-                                      authorize_to_domain, false, handler);
+                                      false /* authorize */, false, handler);
   if (to_domain == nullptr) {
     return false;
   }
@@ -858,6 +861,9 @@ bool DomainLawyer::MapDomainHelper(
     handler->Message(kError, "Cannot map to a wildcarded domain: %s",
                      to_domain_name.as_string().c_str());
   } else {
+    if (authorize_to_domain) {
+      to_domain->set_authorized(true);
+    }
     GoogleUrl to_url(to_domain->name());
     StringPieceVector domains;
     SplitStringPieceToVector(comma_separated_from_domains, ",", &domains, true);
@@ -865,16 +871,22 @@ bool DomainLawyer::MapDomainHelper(
     for (int i = 0, n = domains.size(); i < n; ++i) {
       const StringPiece& domain_name = domains[i];
       Domain* from_domain =
-          AddDomainHelper(domain_name, false, true, false, handler);
+          AddDomainHelper(domain_name, false, false /* authorize */, false,
+                          handler);
       if (from_domain != nullptr) {
         GoogleUrl from_url(from_domain->name());
         if (to_url.Origin() == from_url.Origin()) {
           // Ignore requests to map to the same scheme://hostname:port/.
+          from_domain->set_authorized(true);
         } else if (!allow_wildcards && from_domain->IsWildcarded()) {
           handler->Message(kError, "Cannot map from a wildcarded domain: %s",
                            domain_name.as_string().c_str());
           ret = false;
         } else {
+          if (domain_name == "*") {
+            authorize_all_domains_ = true;
+          }
+          from_domain->set_authorized(true);
           bool ok = (from_domain->*set_domain_fn)(to_domain, handler);
           ret &= ok;
           mapped_a_domain |= ok;
