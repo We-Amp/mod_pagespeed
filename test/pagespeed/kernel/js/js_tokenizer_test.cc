@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/js/js_tokenizer.h"
 
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -655,6 +656,36 @@ TEST_F(JsTokenizerTest, SpeculativeRegexGuardIgnoresFlags) {
   ExpectToken(JsKeywords::kComment, "/*c*/", "Start RetTh Expr");
   ExpectToken(JsKeywords::kOperator, ";", "Start");
   ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexManyBlockCommentOpenersInClass) {
+  // Block-comment openers inside a character class that never close must not
+  // be rescanned to the end of input once each.
+  BeginTokenizing("return await/[/*a/*a]/;");
+  ExpectToken(JsKeywords::kReturn, "return", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start RetTh Oper");
+  ExpectToken(JsKeywords::kRegex, "/[/*a/*a]/", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexManyBlockCommentOpenersIsLinear) {
+  // About 1 MB of comment openers in one character class.  Work must be
+  // linear in the input: the quadratic implementation needed minutes here.
+  GoogleString input = "return await/[";
+  for (int i = 0; i < 350000; ++i) {
+    input += "/*a";
+  }
+  input += "]/;";
+  const auto start = std::chrono::steady_clock::now();
+  JsTokenizerPatterns patterns;
+  JsTokenizer tokenizer(&patterns, input);
+  StringPiece token;
+  while (tokenizer.NextToken(&token) != JsKeywords::kEndOfInput) {
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_LT(elapsed, std::chrono::seconds(2));
 }
 
 TEST_F(JsTokenizerTest, SpeculativeOperatorBlockGuard) {

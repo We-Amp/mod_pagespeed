@@ -2015,6 +2015,11 @@ bool SpeculativeRegexCanReassembleComment(StringPiece input) {
   // escaping.
   bool in_class = false;
   bool escaped = false;
+  // Position of the first "*/" at or after the most recent search start.  The
+  // search start only moves forward, so a cached result stays valid while it
+  // is still ahead of the start, and "not found" stays "not found".
+  size_t block_end = 0;
+  bool block_end_searched = false;
   for (size_t i = 1; i < close; ++i) {
     const char ch = input[i];
     const bool delimiter =
@@ -2034,7 +2039,12 @@ bool SpeculativeRegexCanReassembleComment(StringPiece input) {
         // either it closes inside the verbatim literal, or it never closes
         // at all -- in which case the division reading is not valid
         // JavaScript.
-        const size_t end = input.find("*/", i + 2);
+        if (!block_end_searched ||
+            (block_end != StringPiece::npos && block_end < i + 2)) {
+          block_end = input.find("*/", i + 2);
+          block_end_searched = true;
+        }
+        const size_t end = block_end;
         if (end != StringPiece::npos && end + 2 > close) {
           return true;
         }
