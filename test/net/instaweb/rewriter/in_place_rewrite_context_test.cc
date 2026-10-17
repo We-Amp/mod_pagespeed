@@ -810,6 +810,37 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeResourceTooBig) {
   EXPECT_EQ(1, oversized_stream_->Get());
 }
 
+TEST_F(InPlaceRewriteContextTest, WaitForOptimizeOversizedNoShortContentLength) {
+  // When a buffered response crosses the cache size limit mid-stream, the
+  // fetch falls back to passing the original body through.  It must not
+  // declare a Content-Length shorter than the body it actually delivers.
+  // With the cache limit below the first chunk's size, the fallback happens
+  // on the first of two split writes, so more body bytes arrive after the
+  // headers are sent.
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  mock_url_fetcher()->set_split_writes(true);
+  http_cache()->set_max_cacheable_response_content_length(1);
+
+  WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+  RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+      server_context()->thread_system()));
+  NotifyingFetch notifying_fetch(request_context, options(), cache_jpg_url_,
+                                 &sync, &response_headers_);
+  rewrite_driver()->FetchResource(cache_jpg_url_, &notifying_fetch);
+  sync.Wait();
+  rewrite_driver()->WaitForShutDown();
+  mock_scheduler()->AwaitQuiescence();
+
+  EXPECT_TRUE(notifying_fetch.done());
+  EXPECT_TRUE(notifying_fetch.success());
+  // The client receives the complete, unmodified body, and no Content-Length
+  // shorter than the body is declared.
+  EXPECT_EQ(cache_body_, notifying_fetch.content());
+  EXPECT_FALSE(notifying_fetch.content_length_known());
+  EXPECT_EQ(1, oversized_stream_->Get());
+}
+
 TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   Init();
   FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, ttl_ms_, nullptr,

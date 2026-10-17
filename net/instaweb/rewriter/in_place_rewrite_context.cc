@@ -176,12 +176,15 @@ bool RecordingFetch::HandleWrite(const StringPiece& content,
       // we don't try to cache it later? Test and fix if not.
       can_in_place_rewrite_ = false;
       if (!streaming_) {
-        // We need to start streaming now so write out what we've cached so far.
+        // We need to start streaming now so write out what we've cached so
+        // far.  Do not declare a content length: more writes may still
+        // follow, so the total length is not known here.  Any Content-Length
+        // header from the origin response is forwarded as-is and matches the
+        // body we pass through.
         streaming_ = true;
         in_place_oversized_opt_stream_->Add(1);
         StringPiece cache_contents;
         cache_value_.ExtractContents(&cache_contents);
-        set_content_length(cache_contents.size() + content.size());
         SharedAsyncFetch::HandleHeadersComplete();
         SharedAsyncFetch::HandleWrite(cache_contents, handler);
         SharedAsyncFetch::HandleWrite(content, handler);
