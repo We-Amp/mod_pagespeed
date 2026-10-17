@@ -71,10 +71,18 @@ class WinThreadImpl : public ThreadSystem::ThreadImpl {
   }
 
   virtual bool StartImpl() {
+    // Read the flag before creating the thread: a detached thread can run
+    // to completion and delete the owning Thread (and with it this impl)
+    // before StartImpl returns, so nothing may touch members afterwards.
+    const bool joinable = (flags_ & ThreadSystem::kJoinable) != 0;
     try {
-      thread_ = std::thread(&WinThreadImpl::InvokeRun, this);
-      if ((flags_ & ThreadSystem::kJoinable) == 0) {
-        thread_.detach();
+      std::thread t(&WinThreadImpl::InvokeRun, this);
+      if (!joinable) {
+        t.detach();
+      } else {
+        // A joinable thread is Join()ed before the Thread object goes
+        // away, so the member write is safe.
+        thread_ = std::move(t);
       }
       return true;
     } catch (...) {
