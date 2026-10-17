@@ -124,6 +124,9 @@ AGNOSTIC_FLAGS = {
     "-Wall", "-Wextra",
     "-Wno-deprecated-declarations",
     "-Wno-unknown-warning-option",
+    # debug-info level: valid for C and C++ alike (sanitizer configs use it
+    # to keep file:line in reports without a full -g build)
+    "-gline-tables-only",
     "-Wno-macro-redefined",
     "-Wno-builtin-macro-redefined",
     "-Wno-free-nonheap-object",
