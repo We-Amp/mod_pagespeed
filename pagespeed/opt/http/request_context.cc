@@ -164,6 +164,19 @@ AbstractLogRecord* RequestContext::GetBackgroundRewriteLog(
   return log_record;
 }
 
+void RequestContext::AddSessionAuthorizedFetchOrigin(
+    const GoogleString& origin) {
+  ScopedMutex lock(log_record_->mutex());
+  session_authorized_fetch_origins_.insert(origin);
+}
+
+bool RequestContext::IsSessionAuthorizedFetchOrigin(
+    const GoogleString& origin) const {
+  ScopedMutex lock(log_record_->mutex());
+  return session_authorized_fetch_origins_.find(origin) !=
+         session_authorized_fetch_origins_.end();
+}
+
 void RequestContext::ReleaseDependentTraceContext(RequestTrace* t) {
   if (t != nullptr) {
     delete t;
