@@ -11,9 +11,12 @@
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_
 #endif
+// clang-format off
+// Order matters: winsock2.h must come before windows.h, and http.h needs both.
 #include <winsock2.h>
 #include <windows.h>
 #include <http.h>
+// clang-format on
 
 namespace net_instaweb {
 
@@ -37,6 +40,19 @@ bool ResolveFileChunkLength(const HTTP_DATA_CHUNK& chunk, ULONGLONG max_length,
 // more than `length` bytes into `buf`.
 HRESULT ReadFileChunkInto(const HTTP_DATA_CHUNK& chunk, char* buf,
                           ULONGLONG length, ULONGLONG* bytes_read);
+
+// Allocates `size` bytes that stay valid for as long as the response (the
+// request memory pool). Returns null on failure.
+typedef void* (*EntityChunkAllocator)(void* context, DWORD size);
+
+// Reads every HttpDataChunkFromFileHandle chunk among the `count` chunks into
+// memory obtained from `allocate`, each bounded by `max_length` bytes. Only
+// when every one of them was read in full are they turned into
+// HttpDataChunkFromMemory chunks holding those bytes; otherwise returns false
+// and leaves all chunks unchanged, so the response can still be sent as is.
+bool ConvertFileChunksToMemory(HTTP_DATA_CHUNK* chunks, int count,
+                               ULONGLONG max_length,
+                               EntityChunkAllocator allocate, void* context);
 
 }  // namespace net_instaweb
 

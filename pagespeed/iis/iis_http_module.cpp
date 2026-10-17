@@ -1271,6 +1271,22 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 	}
 
 	MyCustomProvider cp2;
+
+	// Request memory for a response body chunk: lives as long as the request.
+	static void* AllocateResponseChunk(void* context, DWORD size)
+	{
+		return static_cast<IHttpContext*>(context)->AllocateRequestMemory(size);
+	}
+
+	// The most bytes of one file chunk read into request memory: the
+	// rewriter's HTML size limit when one is set.
+	static ULONGLONG MaxFileChunkBytes(ServerContext* server_context)
+	{
+		int64 limit = server_context->global_options()->max_html_parse_bytes();
+		return (limit > 0 && static_cast<ULONGLONG>(limit) < MAXDWORD)
+			? static_cast<ULONGLONG>(limit) : MAXDWORD;
+	}
+
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnSendResponse(IN IHttpContext * pHttpContext, IN ISendResponseProvider * pProvider)
 	{
@@ -1410,11 +1426,16 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				
 			}
 
-			// Chunks served from the kernel fragment cache cannot be read here.
-			// While nothing of this response has been consumed yet, let it go
-			// out unchanged.
+			// While nothing of this response has been consumed yet, a response
+			// whose body cannot be read in full goes out unchanged. Chunks served
+			// from the kernel fragment cache cannot be read here at all. File
+			// chunks are read into request memory up front and replaced by memory
+			// chunks, so a file that changes size between its length lookup and
+			// the read can never leave a hole in what the rewriter sees.
 			if (innerContext->proxy_fetch() == NULL &&
-				!AllEntityChunksReadable(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount))
+				(!AllEntityChunksReadable(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount) ||
+				 !ConvertFileChunksToMemory(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount,
+					MaxFileChunkBytes(innerContext->server_context()), &AllocateResponseChunk, pHttpContext)))
 			{
 				log(pHttpContext, "OnSendResponse --- response has chunks that cannot be read, bail");
 				if (innerContext->recorder() != NULL) {
@@ -1790,9 +1811,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						innerContext->set_leave(true);
 						return RQ_NOTIFICATION_CONTINUE;
 					}
-					// The rewriter already holds part of the response: carry on
-					// without this chunk.
-					continue;
+					// The rewriter already holds part of the response, so it can
+					// neither go out unchanged nor be completed without a hole.
+					// A truncated connection is the honest outcome: a client or
+					// cache never takes the incomplete body for the whole one.
+					pHttpContext->GetResponse()->ResetConnection();
+					break;
 				}
 
 				if (len > 0)

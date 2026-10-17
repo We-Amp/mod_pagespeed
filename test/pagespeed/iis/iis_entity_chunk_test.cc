@@ -9,6 +9,8 @@
 
 #include "pagespeed/iis/iis_entity_chunk.h"
 
+#include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -182,8 +184,8 @@ TEST_F(IisEntityChunkTest, RefusesRangeLargerThanTheBufferLimit) {
   ULONGLONG length = 0;
   EXPECT_FALSE(ResolveFileChunkLength(FileChunk(0, HTTP_BYTE_RANGE_TO_EOF),
                                       8999, &length));
-  EXPECT_FALSE(ResolveFileChunkLength(FileChunk(0, 1ULL << 33), 0xffffffffULL,
-                                      &length));
+  EXPECT_FALSE(
+      ResolveFileChunkLength(FileChunk(0, 1ULL << 33), 0xffffffffULL, &length));
 }
 
 TEST_F(IisEntityChunkTest, ReadsAnUnalignedRange) {
@@ -254,11 +256,92 @@ TEST_F(IisEntityChunkTest, FileGrownAfterTheLengthLookup) {
   ExpectGuardIntact(buffer, length);
 }
 
+// Request memory stand-in for ConvertFileChunksToMemory: owns what it hands
+// out, and can be told to fail.
+struct TestAllocator {
+  static void* Allocate(void* context, DWORD size) {
+    TestAllocator* self = static_cast<TestAllocator*>(context);
+    if (self->fail) {
+      return nullptr;
+    }
+    self->buffers.emplace_back(new char[size]);
+    return self->buffers.back().get();
+  }
+  bool fail = false;
+  std::vector<std::unique_ptr<char[]>> buffers;
+};
+
+HTTP_DATA_CHUNK MemoryChunk(const char* text) {
+  HTTP_DATA_CHUNK chunk;
+  ZeroMemory(&chunk, sizeof(chunk));
+  chunk.DataChunkType = HttpDataChunkFromMemory;
+  chunk.FromMemory.pBuffer = const_cast<char*>(text);
+  chunk.FromMemory.BufferLength = static_cast<ULONG>(strlen(text));
+  return chunk;
+}
+
+TEST_F(IisEntityChunkTest, FileChunksBecomeMemoryChunks) {
+  WriteContent(9000);
+  HTTP_DATA_CHUNK chunks[4] = {
+      MemoryChunk("<html>"), FileChunk(100, HTTP_BYTE_RANGE_TO_EOF),
+      FileChunk(9000, HTTP_BYTE_RANGE_TO_EOF), MemoryChunk("</html>")};
+  TestAllocator allocator;
+  ASSERT_TRUE(ConvertFileChunksToMemory(chunks, 4, ~0ULL,
+                                        &TestAllocator::Allocate, &allocator));
+  for (const HTTP_DATA_CHUNK& chunk : chunks) {
+    EXPECT_EQ(HttpDataChunkFromMemory, chunk.DataChunkType);
+  }
+  EXPECT_EQ(6u, chunks[0].FromMemory.BufferLength);
+  ASSERT_EQ(8900u, chunks[1].FromMemory.BufferLength);
+  const char* data = static_cast<const char*>(chunks[1].FromMemory.pBuffer);
+  for (ULONGLONG i = 0; i < 8900; ++i) {
+    ASSERT_EQ(ContentAt(100 + i), data[i]) << "at " << i;
+  }
+  // An empty range still points at a buffer.
+  EXPECT_EQ(0u, chunks[2].FromMemory.BufferLength);
+  EXPECT_NE(nullptr, chunks[2].FromMemory.pBuffer);
+  EXPECT_EQ(7u, chunks[3].FromMemory.BufferLength);
+}
+
+// When any file chunk cannot be read in full, none is converted, so the
+// response can still go out exactly as it came.
+TEST_F(IisEntityChunkTest, AFailedReadLeavesEveryChunkUnchanged) {
+  WriteContent(5000);
+  TestAllocator allocator;
+
+  // The file is shorter than the second chunk's range.
+  HTTP_DATA_CHUNK short_file[2] = {FileChunk(0, 100), FileChunk(0, 10000)};
+  EXPECT_FALSE(ConvertFileChunksToMemory(short_file, 2, ~0ULL,
+                                         &TestAllocator::Allocate, &allocator));
+  EXPECT_EQ(HttpDataChunkFromFileHandle, short_file[0].DataChunkType);
+  EXPECT_EQ(HttpDataChunkFromFileHandle, short_file[1].DataChunkType);
+
+  // The range starts past the end of the file.
+  HTTP_DATA_CHUNK past_end[2] = {FileChunk(0, 100),
+                                 FileChunk(6000, HTTP_BYTE_RANGE_TO_EOF)};
+  EXPECT_FALSE(ConvertFileChunksToMemory(past_end, 2, ~0ULL,
+                                         &TestAllocator::Allocate, &allocator));
+  EXPECT_EQ(HttpDataChunkFromFileHandle, past_end[0].DataChunkType);
+
+  // The range is larger than the limit.
+  HTTP_DATA_CHUNK too_large[1] = {FileChunk(0, HTTP_BYTE_RANGE_TO_EOF)};
+  EXPECT_FALSE(ConvertFileChunksToMemory(too_large, 1, 4999,
+                                         &TestAllocator::Allocate, &allocator));
+  EXPECT_EQ(HttpDataChunkFromFileHandle, too_large[0].DataChunkType);
+
+  // No memory.
+  allocator.fail = true;
+  HTTP_DATA_CHUNK no_memory[1] = {FileChunk(0, 100)};
+  EXPECT_FALSE(ConvertFileChunksToMemory(no_memory, 1, ~0ULL,
+                                         &TestAllocator::Allocate, &allocator));
+  EXPECT_EQ(HttpDataChunkFromFileHandle, no_memory[0].DataChunkType);
+}
+
 // OnSendResponse runs on every response the module looks at. Nothing it
 // meets while reading a response body (a chunk type it cannot read, a file
-// it cannot read) may stop the worker process; the response is passed on
-// instead.
-TEST(IisSendResponseSourceTest, OnSendResponseHasNoFatalAssertions) {
+// it cannot read) may hit an unconditional CHECK(false); the response is
+// passed on, or the connection reset once rewriting has started.
+TEST(IisSendResponseSourceTest, OnSendResponseHasNoCheckFalse) {
   StdioFileSystem file_system;
   NullMessageHandler handler;
   GoogleString source;
@@ -277,7 +360,8 @@ TEST(IisSendResponseSourceTest, OnSendResponseHasNoFatalAssertions) {
         << "fatal assertion at offset " << pos << " of OnSendResponse";
   }
   EXPECT_EQ(StringPiece::npos, body.find("LOG(FATAL)"));
-  EXPECT_EQ(StringPiece::npos, body.find("ReadFileChunk(currentchunk"));
+  EXPECT_NE(StringPiece::npos, body.find("ConvertFileChunksToMemory("));
+  EXPECT_NE(StringPiece::npos, body.find("ResetConnection()"));
 }
 
 }  // namespace
