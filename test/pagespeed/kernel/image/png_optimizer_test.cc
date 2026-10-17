@@ -21,6 +21,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -1248,6 +1249,85 @@ TEST_F(PngScanlineReaderRawTest, OversizedDimensionsRejected) {
   ScanlineStatus status =
       reader.InitializeWithStatus(bomb.data(), bomb.length());
   EXPECT_FALSE(status.Success());
+}
+
+// Builds a complete, valid PNG declaring the given dimensions: an opaque
+// black image whose IDAT carries real pixel data, so a decoder that accepts
+// the dimensions will happily decode the whole stream.
+GoogleString MakeValidPngDeclaringDimensions(uint32 width, uint32 height) {
+  // Each scanline is a filter byte followed by width * 3 zero bytes.
+  GoogleString raw;
+  for (uint32 row = 0; row < height; ++row) {
+    raw.push_back('\0');
+    raw.append(static_cast<size_t>(width) * 3, '\0');
+  }
+  uLongf idat_size = compressBound(raw.size());
+  GoogleString idat(idat_size, '\0');
+  if (compress2(reinterpret_cast<Bytef*>(&idat[0]), &idat_size,
+                reinterpret_cast<const Bytef*>(raw.data()), raw.size(),
+                9 /*level*/) != Z_OK) {
+    return "";
+  }
+  idat.resize(idat_size);
+
+  GoogleString png("\x89PNG\r\n\x1a\n", 8);
+  char ihdr[13];
+  ihdr[0] = static_cast<char>(width >> 24);
+  ihdr[1] = static_cast<char>(width >> 16);
+  ihdr[2] = static_cast<char>(width >> 8);
+  ihdr[3] = static_cast<char>(width);
+  ihdr[4] = static_cast<char>(height >> 24);
+  ihdr[5] = static_cast<char>(height >> 16);
+  ihdr[6] = static_cast<char>(height >> 8);
+  ihdr[7] = static_cast<char>(height);
+  ihdr[8] = 8;  // Bit depth.
+  ihdr[9] = 2;  // Color type: truecolor RGB.
+  ihdr[10] = 0;  // Compression: deflate.
+  ihdr[11] = 0;  // Filter method.
+  ihdr[12] = 0;  // No interlace.
+  AppendPngChunk(&png, "IHDR", StringPiece(ihdr, sizeof(ihdr)));
+  AppendPngChunk(&png, "IDAT", idat);
+  AppendPngChunk(&png, "IEND", StringPiece("", 0));
+  return png;
+}
+
+// The whole-image optimizer decodes via png_read_png, which buffers every
+// row from the IHDR before any data is seen. A complete image one pixel
+// wider than the per-side cap must be refused rather than decoded whole.
+TEST_F(PngOptimizerTest, OversizedWholeImageDimensionsRejected) {
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngError);
+  message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngFailure);
+  reader_ = std::make_unique<PngReader>(&message_handler_);
+  GoogleString in = MakeValidPngDeclaringDimensions(
+      pagespeed::image_compression::kScanlineMaxDimension + 1, 1);
+  ASSERT_NE(static_cast<size_t>(0), in.length());
+  GoogleString out;
+  EXPECT_FALSE(PngOptimizer::OptimizePngBestCompression(*reader_, in, &out,
+                                                        &message_handler_));
+  EXPECT_TRUE(out.empty());
+}
+
+// The best-compression pass re-reads the just-written PNG in full via
+// png_read_png, so the writer must apply the same per-side cap on that
+// re-read as the readers apply on the first decode.
+TEST_F(PngScanlineWriterTest, OversizedDimensionsRejectedByBestCompression) {
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngError);
+  message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngFailure);
+  const size_t width =
+      pagespeed::image_compression::kScanlineMaxDimension + 1;
+  PngCompressParams best(true /*best compression*/, false /*progressive*/);
+  writer_.reset(CreateScanlineWriter(pagespeed::image_compression::IMAGE_PNG,
+                                     pixel_format_, width, height_ /* = 2 */,
+                                     &best, &output_, &message_handler_));
+  ASSERT_NE(static_cast<ScanlineWriterInterface*>(nullptr), writer_.get());
+  // pixel_format_ is GRAY_8, so each row is one byte per pixel.
+  std::vector<unsigned char> row(width, 0);
+  for (int i = 0; i < height_; ++i) {
+    ASSERT_TRUE(writer_->WriteNextScanline(row.data()));
+  }
+  EXPECT_FALSE(writer_->FinalizeWrite());
 }
 
 TEST_F(PngScanlineReaderRawTest, InvalidPngs) {

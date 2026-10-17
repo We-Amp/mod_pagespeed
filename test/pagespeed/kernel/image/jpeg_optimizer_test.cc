@@ -23,6 +23,7 @@
 
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/image/scanline_utils.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/image/jpeg_optimizer_test_helper.h"
@@ -37,8 +38,11 @@ namespace {
 using net_instaweb::MockMessageHandler;
 using net_instaweb::NullMutex;
 using pagespeed::image_compression::ColorSampling;
+using pagespeed::image_compression::GRAY_8;
 using pagespeed::image_compression::JpegCompressionOptions;
 using pagespeed::image_compression::JpegLossyOptions;
+using pagespeed::image_compression::JpegScanlineWriter;
+using pagespeed::image_compression::kScanlineMaxDimension;
 using pagespeed::image_compression::kJpegTestDir;
 using pagespeed::image_compression::OptimizeJpeg;
 using pagespeed::image_compression::OptimizeJpegWithOptions;
@@ -136,6 +140,42 @@ TEST_F(JpegOptimizerTest, ValidJpegs) {
 
     ASSERT_LE(dest_data.size(), src_data.size());
   }
+}
+
+// The lossless path buffers the DCT coefficients of the whole image, an
+// allocation proportional to the declared dimensions, so a complete image
+// one pixel wider than the per-side cap must be refused before the
+// coefficients are read.
+TEST_F(JpegOptimizerTest, OversizedDimensionsRejectedByLosslessPath) {
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  message_handler_.AddPatternToSkipPrinting("*exceed*");
+
+  // Encode a valid grayscale strip wider than the decode cap; the bytes
+  // are a real JPEG, only the dimensions are unusual.
+  const size_t width = static_cast<size_t>(kScanlineMaxDimension) + 1;
+  GoogleString src_data;
+  {
+    jmp_buf env;
+    JpegScanlineWriter writer(&message_handler_);
+    if (setjmp(env)) {
+      writer.AbortWrite();
+      FAIL() << "writing the test image failed";
+    }
+    writer.SetJmpBufEnv(&env);
+    ASSERT_TRUE(writer.InitWithStatus(width, 1, GRAY_8).Success());
+    JpegCompressionOptions options;
+    options.lossy = true;
+    ASSERT_TRUE(writer.InitializeWriteWithStatus(&options, &src_data)
+                    .Success());
+    const std::vector<unsigned char> row(width, 0);
+    ASSERT_TRUE(writer.WriteNextScanlineWithStatus(row.data()).Success());
+    ASSERT_TRUE(writer.FinalizeWriteWithStatus().Success());
+  }
+  ASSERT_LT(static_cast<size_t>(0), src_data.size());
+
+  GoogleString dest_data;
+  EXPECT_FALSE(OptimizeJpeg(src_data, &dest_data, &message_handler_));
+  EXPECT_TRUE(dest_data.empty());
 }
 
 TEST_F(JpegOptimizerTest, ValidJpegsLossy) {
