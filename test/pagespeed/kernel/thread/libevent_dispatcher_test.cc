@@ -66,6 +66,22 @@ class SignalFunction : public Function {
   ThreadSystem::Condvar* condvar_;
 };
 
+// Counts runs and cancels separately so a test can check that each
+// function received exactly one of the two.
+class TallyFunction : public Function {
+ public:
+  TallyFunction(std::atomic<int>* runs, std::atomic<int>* cancels)
+      : runs_(runs), cancels_(cancels) {}
+
+ protected:
+  void Run() override { ++(*runs_); }
+  void Cancel() override { ++(*cancels_); }
+
+ private:
+  std::atomic<int>* runs_;
+  std::atomic<int>* cancels_;
+};
+
 class LibeventDispatcherTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -187,6 +203,28 @@ TEST_F(LibeventDispatcherTest, TimerCancel) {
   // Counter should be negative (cancelled).
   EXPECT_EQ(-100, counter.load());
   delete timer;
+}
+
+// Cancel() may be called from another thread while the timer is firing on
+// the event loop.  Each callback must be either run or cancelled, exactly
+// once, whichever side gets there first.
+TEST_F(LibeventDispatcherTest, CancelRacingFireInvokesCallbackOnce) {
+  ASSERT_TRUE(dispatcher_->Start());
+
+  const int kTimers = 500;
+  std::atomic<int> runs(0);
+  std::atomic<int> cancels(0);
+  for (int i = 0; i < kTimers; ++i) {
+    EventTimer* timer =
+        dispatcher_->CreateTimer(0, new TallyFunction(&runs, &cancels));
+    // Vary the gap so some cancels land before, during and after firing.
+    for (int spin = 0; spin < (i % 50) * 200; ++spin) {
+      runs.load(std::memory_order_relaxed);
+    }
+    timer->Cancel();
+    delete timer;
+  }
+  EXPECT_EQ(kTimers, runs.load() + cancels.load());
 }
 
 TEST_F(LibeventDispatcherTest, CreateTimerAtUs) {
