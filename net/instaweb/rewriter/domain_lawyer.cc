@@ -870,9 +870,8 @@ bool DomainLawyer::MapDomainHelper(
     ret = true;
     for (int i = 0, n = domains.size(); i < n; ++i) {
       const StringPiece& domain_name = domains[i];
-      Domain* from_domain =
-          AddDomainHelper(domain_name, false, false /* authorize */, false,
-                          handler);
+      Domain* from_domain = AddDomainHelper(
+          domain_name, false, false /* authorize */, false, handler);
       if (from_domain != nullptr) {
         GoogleUrl from_url(from_domain->name());
         if (to_url.Origin() == from_url.Origin()) {
