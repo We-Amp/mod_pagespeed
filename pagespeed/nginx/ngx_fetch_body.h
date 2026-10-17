@@ -50,6 +50,11 @@ NgxFetchBodyStep NgxFetchAcceptBody(bool content_length_known,
                                     int64 content_length, int64 bytes_received,
                                     size_t available);
 
+// Whether a response carries no body whatever its headers announce: a 204
+// or 304, or any response to a HEAD request. Such a response is complete as
+// soon as its headers are.
+bool NgxFetchResponseHasNoBody(int status_code, bool head_request);
+
 // Whether a response is complete when the origin closes the connection.
 // With an announced content length the body must be exactly that long;
 // without one, a response whose headers parsed is complete at close.

@@ -74,6 +74,18 @@ TEST(NgxFetchBodyTest, UnknownLengthAcceptsEverythingUntilClose) {
   EXPECT_TRUE(NgxFetchCompleteOnClose(true, false, -1, 0));
 }
 
+TEST(NgxFetchBodyTest, HeadResponseIsCompleteWithItsHeaders) {
+  // A HEAD response with Content-Length: 100 and no body bytes. The close
+  // rule alone would reject it (0 of 100 bytes), so the fetcher finishes it
+  // as soon as its headers are complete.
+  EXPECT_TRUE(NgxFetchResponseHasNoBody(200, true));
+  EXPECT_FALSE(NgxFetchCompleteOnClose(true, true, 100, 0));
+  // 204 and 304 carry no body for any method; other GET responses do.
+  EXPECT_TRUE(NgxFetchResponseHasNoBody(204, false));
+  EXPECT_TRUE(NgxFetchResponseHasNoBody(304, false));
+  EXPECT_FALSE(NgxFetchResponseHasNoBody(200, false));
+}
+
 TEST(NgxFetchBodyTest, IncompleteHeadersAtCloseAreNotComplete) {
   EXPECT_FALSE(NgxFetchCompleteOnClose(false, false, -1, 0));
 }
