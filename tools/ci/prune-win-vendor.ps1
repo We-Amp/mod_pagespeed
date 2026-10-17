@@ -13,8 +13,10 @@
 #
 # The rules match the Linux vendor job's prune:
 #   * only files named mod_pagespeed-*.tar.zst, *.tar.zst.sha256 and
-#     *.tar.zst.*.tmp, plus *.tar.zst.tar (the decompression intermediate),
-#     and only once older than -MaxAgeMinutes (default 2 hours);
+#     *.tar.zst.*.tmp, plus *.tar.zst.tar and *.tar.zst.*.tar (the
+#     decompression intermediates) and the *.tar.zst.*.stage copies (and
+#     their sidecars) that fetch-vendor-tarball.ps1 makes, and only once
+#     older than -MaxAgeMinutes (default 2 hours);
 #   * never this run's tarball or its sidecar (-ShortSha); this run's
 #     tarball is re-stamped first, so the window counts from last use;
 #   * a sidecar goes only when its tarball is gone too, so a kept tarball
@@ -28,13 +30,18 @@
 # the Linux vendor job's prune own it. Deletion errors (a file in use) are
 # warnings; the prune never fails the job for them.
 #
+# File ages are file times, which a drive mount stamps with the other side's
+# clock. When a probe file written now reads back more than -MaxSkewSeconds
+# away from this host's clock, ages cannot be trusted and nothing is pruned.
+#
 # Usage: prune-win-vendor.ps1 -VendorDir <dir> -ShortSha <sha7>
-#          [-MaxAgeMinutes 120] [-SharedDir <dir>]
+#          [-MaxAgeMinutes 120] [-SharedDir <dir>] [-MaxSkewSeconds 120]
 param(
   [string]$VendorDir,
   [Parameter(Mandatory = $true)][string]$ShortSha,
   [int]$MaxAgeMinutes = 120,
-  [string]$SharedDir = $env:CI_WIN_VENDOR_DIR
+  [string]$SharedDir = $env:CI_WIN_VENDOR_DIR,
+  [int]$MaxSkewSeconds = 120
 )
 $ErrorActionPreference = 'Stop'
 
@@ -49,6 +56,22 @@ if (-not $VendorDir -or -not (Test-Path -LiteralPath $VendorDir -PathType Contai
 $full = (Resolve-Path -LiteralPath $VendorDir).ProviderPath.TrimEnd('\')
 if ($SharedDir -and ($full -ieq $SharedDir.TrimEnd('\'))) {
   Write-Host "prune-win-vendor: $full is the shared vendor dir; the Linux vendor job's prune owns it"
+  exit 0
+}
+
+# Clock check: stamp a probe file and read its time back.
+$probe = Join-Path $full (".clock-probe." + [guid]::NewGuid().ToString('N'))
+try {
+  [System.IO.File]::WriteAllText($probe, 'x')
+  $skew = [Math]::Abs(((Get-Date) - (Get-Item -LiteralPath $probe -Force).LastWriteTime).TotalSeconds)
+} catch {
+  Write-Host "::warning::prune-win-vendor: cannot probe file times in ${full}: $($_.Exception.Message); not pruning"
+  exit 0
+} finally {
+  Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+}
+if ($skew -gt $MaxSkewSeconds) {
+  Write-Host ("::warning::prune-win-vendor: file times differ from this host's clock by {0:N0}s; file ages cannot be trusted, not pruning" -f $skew)
   exit 0
 }
 
@@ -93,6 +116,8 @@ foreach ($f in $aged) {
   $n = $f.Name
   if ($n -eq $curTarball -or $n -eq $curSidecar) { continue }
   if ($n -like "$prefix*.tar.zst" -or $n -like "$prefix*.tar.zst.*.tmp" `
+      -or $n -like "$prefix*.tar.zst.*.stage" -or $n -like "$prefix*.tar.zst.*.stage.sha256" `
+      -or $n -like "$prefix*.tar.zst.*.tar" `
       -or ($n -like "$prefix*.tar.zst.tar" -and $n -ne "$curTarball.tar")) {
     Remove-Aged $f
   }

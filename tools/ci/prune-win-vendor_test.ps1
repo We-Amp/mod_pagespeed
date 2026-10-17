@@ -11,7 +11,8 @@
 #   * unrelated files;
 #   * everything, when the dir is the shared one (-SharedDir).
 # and what it removes: an aged tarball of another SHA with its sidecar, an
-# orphaned aged sidecar, aged *.tmp and *.tar.zst.tar files. On Windows
+# orphaned aged sidecar, aged *.tmp, *.tar.zst.tar, *.tar.zst.*.tar and
+# *.tar.zst.*.stage files; and that a skewed clock disables the prune. On Windows
 # it also checks a delete failure (a file held open without delete
 # sharing): a warning, the job goes on, and that tarball keeps its sidecar.
 #
@@ -58,6 +59,8 @@ $expectKept = @(
   (New-File $root "${pre}ddddddd.tar.zst.111-1.tmp" 0.2),    # live run's scp temp
   (New-File $root "${pre}ddddddd.tar.zst.sha256.111-1.tmp" 0.2),
   (New-File $root "${pre}ddddddd.tar.zst.tar" 0.2),          # live run's zstd output
+  (New-File $root "${pre}mmmmmmm.tar.zst.444-1-5.stage" 0.2), # live job's staged copy
+  (New-File $root "${pre}mmmmmmm.tar.zst.444-1-5.tar" 0.2),   # live job's intermediate
   (New-File $root "unrelated.tar.zst" 9),                    # not ours
   (New-File $root "${pre}eeeeeee.tar.zst.keep" 9)            # not a pattern we own
 )
@@ -67,7 +70,10 @@ $expectGone = @(
   (New-File $root "${pre}ggggggg.tar.zst.sha256" 3),         # aged orphan sidecar
   (New-File $root "${pre}hhhhhhh.tar.zst.222-3.tmp" 3),      # cancelled scp
   (New-File $root "${pre}hhhhhhh.tar.zst.sha256.222-3.tmp" 3),
-  (New-File $root "${pre}iiiiiii.tar.zst.tar" 3)             # cancelled extract
+  (New-File $root "${pre}iiiiiii.tar.zst.tar" 3),            # cancelled extract
+  (New-File $root "${pre}lllllll.tar.zst.333-1-77.stage" 3), # cancelled staged copy
+  (New-File $root "${pre}lllllll.tar.zst.333-1-77.stage.sha256" 3),
+  (New-File $root "${pre}lllllll.tar.zst.333-1-77.tar" 3)    # cancelled per-job intermediate
 )
 & $script -VendorDir $root -ShortSha $cur -SharedDir 'Z:\no\such\shared' | Out-Null
 foreach ($p in $expectKept) {
@@ -89,6 +95,14 @@ if (Test-Path -LiteralPath $old) { Pass '2: shared dir untouched' } else { Fail 
 $missing = Join-Path ([System.IO.Path]::GetTempPath()) ("prune-win-vendor-missing-" + [guid]::NewGuid().ToString('N'))
 & $script -VendorDir $missing -ShortSha $cur | Out-Null
 if ($LASTEXITCODE -eq 0) { Pass '3: missing dir exits 0' } else { Fail "3: missing dir exit $LASTEXITCODE" }
+
+# 3b: a clock that disagrees with the file times disables the prune. The
+# skew limit below zero makes any probe read as skewed.
+$root = New-TempRoot
+$old = New-File $root "${pre}fffffff.tar.zst" 3
+$out = & $script -VendorDir $root -ShortSha $cur -SharedDir 'Z:\no\such\shared' -MaxSkewSeconds -1 6>&1 | Out-String
+if ((Test-Path -LiteralPath $old) -and $out -match 'not pruning') { Pass '3b: skewed clock disables the prune' } else { Fail "3b: skew guard: $out" }
+if (-not (Get-ChildItem -LiteralPath $root -Force | Where-Object { $_.Name -like '.clock-probe.*' })) { Pass '3b: probe file removed' } else { Fail '3b: probe file left behind' }
 
 # 4: a delete failure (Windows only: elsewhere an open file can be deleted).
 if ([Environment]::OSVersion.Platform -eq 'Win32NT') {

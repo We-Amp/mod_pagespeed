@@ -24,6 +24,18 @@
 #                         (the observed race: "Local tarball present and
 #                         verified", then extraction dies) -> self-heals from
 #                         the hub and extracts correctly.
+#   9. partial/retry      a short local file and an empty hub: the local copy
+#                         is re-checked LOCAL_RETRIES times (it may be
+#                         mid-publish), then rejected; fails loud, extracts
+#                         nothing.
+#  10. mismatch/retry     a valid frame whose sidecar disagrees, empty hub:
+#                         retried, then rejected; nothing extracted.
+#  11. mid-publish        a short local file that a sibling completes while
+#                         the reader is retrying: the reader extracts the
+#                         completed local copy without going to the hub.
+#  12. late-sidecar       a sound tarball whose sidecar appears while the
+#                         reader is retrying: the digest is checked, not
+#                         skipped.
 #
 # Run:
 #   tools/ci/test_extract_vendor_tarball.sh
@@ -120,6 +132,7 @@ run_extract() {
   CI_HUB_ADDR="hub.test" CI_HUB_USER="tester" \
   CI_HUB_VENDOR_DIR="/remote/vendor" \
   FETCH_RETRIES=2 FETCH_BACKOFF=1 \
+  LOCAL_RETRIES="${LOCAL_RETRIES:-3}" LOCAL_BACKOFF="${LOCAL_BACKOFF:-0}" \
     bash "$EXTRACT" "$@"
 }
 
@@ -311,6 +324,77 @@ if [ -z "$left" ]; then
   ok "no fetched tarball or sidecar left behind"
 else
   bad "fetched files left behind: $left"
+fi
+
+
+# ===========================================================================
+echo "[9] partial/retry: short local + empty hub -> retried, then rejected"
+# ===========================================================================
+DEST="$TEST_TMP/dest9"
+LOCAL="$TEST_TMP/local9.tar.zst"
+head -c "$(( $(wc -c < "$GOOD") / 2 ))" "$GOOD" > "$LOCAL"
+rm -f "$SHARED/$NAME" "$SHARED/$NAME.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out9.log" 2>&1
+rc=$?
+set -e
+retries=$(grep -c "may be mid-publish" "$TEST_TMP/out9.log" || true)
+if [ "$rc" -ne 0 ] && [ "$retries" = 2 ] && [ ! -f "$DEST/GIT_COMMIT" ]; then
+  ok "short local re-checked ${retries} times, then rejected; nothing extracted"
+else
+  bad "partial/retry: rc=$rc retries=$retries"; cat "$TEST_TMP/out9.log"
+fi
+
+# ===========================================================================
+echo "[10] mismatch/retry: wrong sidecar + empty hub -> retried, then rejected"
+# ===========================================================================
+DEST="$TEST_TMP/dest10"
+LOCAL="$TEST_TMP/local10.tar.zst"; cp "$GOOD" "$LOCAL"
+echo "0000000000000000000000000000000000000000000000000000000000000000  $NAME" > "$LOCAL.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out10.log" 2>&1
+rc=$?
+set -e
+retries=$(grep -c "may be mid-publish" "$TEST_TMP/out10.log" || true)
+if [ "$rc" -ne 0 ] && [ "$retries" = 2 ] && [ ! -f "$DEST/GIT_COMMIT" ] \
+   && grep -q "sha256 mismatch" "$TEST_TMP/out10.log"; then
+  ok "digest mismatch re-checked ${retries} times, then rejected"
+else
+  bad "mismatch/retry: rc=$rc retries=$retries"; cat "$TEST_TMP/out10.log"
+fi
+
+# ===========================================================================
+echo "[11] mid-publish: local completes during the retry -> used, hub untouched"
+# ===========================================================================
+DEST="$TEST_TMP/dest11"
+LOCAL="$TEST_TMP/local11.tar.zst"
+head -c "$(( $(wc -c < "$GOOD") / 2 ))" "$GOOD" > "$LOCAL"
+( sleep 1; cp "$GOOD" "$LOCAL.new"; mv "$LOCAL.new" "$LOCAL" ) &
+publisher=$!
+LOCAL_BACKOFF=2 run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out11.log" 2>&1 && rc=0 || rc=$?
+wait "$publisher"
+if [ "$rc" = 0 ] && [ -f "$DEST/GIT_COMMIT" ] && grep -q "Local tarball present and verified" "$TEST_TMP/out11.log" \
+   && ! grep -q "Fetching .* from the CI hub" "$TEST_TMP/out11.log"; then
+  ok "reader waited for the completed local copy"
+else
+  bad "mid-publish: rc=$rc"; cat "$TEST_TMP/out11.log"
+fi
+
+# ===========================================================================
+echo "[12] late-sidecar: sound tarball, sidecar appears during the retry"
+# ===========================================================================
+DEST="$TEST_TMP/dest12"
+LOCAL="$TEST_TMP/local12.tar.zst"; cp "$GOOD" "$LOCAL"; rm -f "$LOCAL.sha256"
+( sleep 1; printf '%s  %s\n' "$(sha256sum "$LOCAL" | cut -d' ' -f1)" "$(basename "$LOCAL")" > "$LOCAL.sha256" ) &
+publisher=$!
+LOCAL_BACKOFF=2 run_extract --sha "$SHA" --dest "$DEST" --local "$LOCAL" >"$TEST_TMP/out12.log" 2>&1 && rc=0 || rc=$?
+wait "$publisher"
+if [ "$rc" = 0 ] && [ -f "$DEST/GIT_COMMIT" ] && grep -q "no usable .sha256 sidecar" "$TEST_TMP/out12.log" \
+   && grep -q "Local tarball present and verified" "$TEST_TMP/out12.log" \
+   && ! grep -q "Fetching .* from the CI hub" "$TEST_TMP/out12.log"; then
+  ok "sidecar picked up on the retry and checked"
+else
+  bad "late-sidecar: rc=$rc"; cat "$TEST_TMP/out12.log"
 fi
 
 echo ""
