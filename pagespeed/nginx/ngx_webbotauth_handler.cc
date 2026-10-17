@@ -446,11 +446,11 @@ webbotauth::FileKeyDirectoryCache g_key_directory_files(
     kMaxKeyDirectoryFileBytes);
 
 // KeyDirectoryProvider over the operator-local JWKS file that defers loading
-// it until the FIRST actual key lookup, memoized for the rest of the request. The verifier only calls
-// GetKey after the signature material parsed, was tagged web-bot-auth, and
-// passed the profile + freshness gates -- so requests that fail closed
-// earlier (bare Signature header, untagged/other-tag material, malformed or
-// unsupported profiles) never pay the file read.
+// it until the FIRST actual key lookup, memoized for the rest of the request.
+// The verifier only calls GetKey after the signature material parsed, was
+// tagged web-bot-auth, and passed the profile + freshness gates -- so
+// requests that fail closed earlier (bare Signature header, untagged/other-tag
+// material, malformed or unsupported profiles) never touch the file.
 class LazyFileKeyDirectory : public webbotauth::KeyDirectoryProvider {
  public:
   LazyFileKeyDirectory(NgxServerContext* server_context,

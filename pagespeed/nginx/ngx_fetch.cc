@@ -1030,9 +1030,12 @@ bool NgxFetch::HandleHeader(ngx_connection_t* c) {
   if (n > size) {
     return false;
   } else if (fetch->parser_.headers_complete()) {
-    // TODO(oschaaf): We should also check if the request method was HEAD
-    // - but I don't think PSOL uses that at this point.
-    if (fetch->get_status_code() == 304 || fetch->get_status_code() == 204) {
+    // A HEAD response announces the length of a body it does not send, so
+    // it is complete with its headers, like a 204 or 304.
+    if (NgxFetchResponseHasNoBody(
+            fetch->get_status_code(),
+            fetch->async_fetch_->request_headers()->method() ==
+                RequestHeaders::kHead)) {
       fetch->done_ = true;
     } else if (fetch->async_fetch_->response_headers()->FindContentLength(
                    &fetch->content_length_)) {

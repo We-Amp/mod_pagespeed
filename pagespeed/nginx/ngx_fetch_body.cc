@@ -45,6 +45,10 @@ NgxFetchBodyStep NgxFetchAcceptBody(bool content_length_known,
   return step;
 }
 
+bool NgxFetchResponseHasNoBody(int status_code, bool head_request) {
+  return head_request || status_code == 304 || status_code == 204;
+}
+
 bool NgxFetchCompleteOnClose(bool headers_complete, bool content_length_known,
                              int64 content_length, int64 bytes_received) {
   // An announced length is a promise: a body that closes short of it (or
