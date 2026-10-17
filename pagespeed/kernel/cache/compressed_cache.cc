@@ -54,9 +54,10 @@ const char kCompressedCacheCorruptPayloads[] =
 class CompressedCallback : public CacheInterface::Callback {
  public:
   CompressedCallback(CacheInterface::Callback* callback,
-                     Variable* corrupt_payloads)
+                     Variable* corrupt_payloads, int64 max_inflated_value_size)
       : callback_(callback),
         corrupt_payloads_(corrupt_payloads),
+        max_inflated_value_size_(max_inflated_value_size),
         validate_candidate_called_(false) {}
 
   ~CompressedCallback() override {}
@@ -69,11 +70,18 @@ class CompressedCallback : public CacheInterface::Callback {
       GoogleString uncompressed;
       StringWriter writer(&uncompressed);
       StringPiece compressed = value().Value();
+      // A payload can inflate a thousandfold, so stop at the largest
+      // inflated value we are willing to produce and report anything past
+      // it like any other corruption.
+      const size_t max_inflated_bytes =
+          (max_inflated_value_size_ < 0)
+              ? static_cast<size_t>(-1)
+              : static_cast<size_t>(max_inflated_value_size_);
       if (strings::EndsWith(compressed,
                             StringPiece(kTrailer, STATIC_STRLEN(kTrailer))) &&
-          GzipInflater::Inflate(
+          GzipInflater::InflateWithLimit(
               compressed.substr(0, compressed.size() - STATIC_STRLEN(kTrailer)),
-              GzipInflater::kDeflate, &writer)) {
+              GzipInflater::kDeflate, max_inflated_bytes, &writer)) {
         SharedString uncompressed_shared;
         uncompressed_shared.SwapWithString(&uncompressed);
         callback_->set_value(uncompressed_shared);
@@ -95,13 +103,18 @@ class CompressedCallback : public CacheInterface::Callback {
 
   Callback* callback_;
   Variable* corrupt_payloads_;
+  int64 max_inflated_value_size_;
   bool validate_candidate_called_;
 };
 
 }  // namespace
 
 CompressedCache::CompressedCache(CacheInterface* cache, Statistics* stats)
-    : cache_(cache) {
+    : CompressedCache(cache, stats, kDefaultMaxInflatedValueSize) {}
+
+CompressedCache::CompressedCache(CacheInterface* cache, Statistics* stats,
+                                 int64 max_inflated_value_size)
+    : cache_(cache), max_inflated_value_size_(max_inflated_value_size) {
 #if INCLUDE_HISTOGRAMS
   compressed_cache_savings_ = stats->GetHistogram(kCompressedCacheSavings);
 #endif
@@ -126,7 +139,8 @@ void CompressedCache::InitStats(Statistics* statistics) {
 }
 
 void CompressedCache::Get(const GoogleString& key, Callback* callback) {
-  CompressedCallback* cb = new CompressedCallback(callback, corrupt_payloads_);
+  CompressedCallback* cb = new CompressedCallback(callback, corrupt_payloads_,
+                                                  max_inflated_value_size_);
   cache_->Get(key, cb);
 }
 

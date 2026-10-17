@@ -26,9 +26,11 @@
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/kernel/util/simple_stats.h"
@@ -39,6 +41,9 @@ namespace net_instaweb {
 
 namespace {
 const size_t kMaxSize = 10 * kStackBufferSize;
+
+// Physical payloads written by compressed_cache.cc end with this trailer.
+const char kPhysicalTrailer[] = "[[]]";
 }
 
 class CompressedCacheTest : public CacheTestBase {
@@ -179,6 +184,21 @@ TEST_F(CompressedCacheTest, RemoveOneByteFromMiddle) {
   GoogleString raw_value = GetRawValue("key");
   raw_value.erase(raw_value.size() / 2, 1);
   lru_cache_->PutSwappingString("key", &raw_value);
+  CheckNotFound("key");
+  EXPECT_EQ(1, compressed_cache_->CorruptPayloads());
+}
+
+// A cached payload that inflates past the largest value we are willing to
+// handle must be reported like any other corruption (a miss), not inflated
+// without bound.
+TEST_F(CompressedCacheTest, OversizedInflatedValue) {
+  GoogleString huge(CompressedCache::kDefaultMaxInflatedValueSize + 1, 'a');
+  GoogleString raw_value;
+  StringWriter writer(&raw_value);
+  ASSERT_TRUE(GzipInflater::Deflate(huge, GzipInflater::kDeflate, &writer));
+  StrAppend(&raw_value, kPhysicalTrailer);
+  lru_cache_->PutSwappingString("key", &raw_value);
+
   CheckNotFound("key");
   EXPECT_EQ(1, compressed_cache_->CorruptPayloads());
 }
