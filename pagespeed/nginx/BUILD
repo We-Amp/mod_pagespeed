@@ -135,6 +135,19 @@ cc_library(
     ],
 )
 
+# The automatic gzip setup's record of the configuration slots it wrote,
+# reset at the start of every configuration cycle -- nginx-free so the
+# bookkeeping across reloads is unit tested standalone
+# (//test/pagespeed/nginx:ngx_gzip_rollback_test). The module targets below
+# compile ngx_gzip_rollback.cc directly in their srcs for the same
+# archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_gzip_rollback",
+    srcs = ["ngx_gzip_rollback.cc"],
+    hdrs = ["ngx_gzip_rollback.h"],
+    visibility = ["//visibility:public"],
+)
+
 # The composed response of the daemon serve arm: status, media type, the
 # one Vary, and whether it carries the encoding token -- computed from the
 # decision, nginx-free, so the whole shape is unit tested standalone
@@ -246,6 +259,7 @@ cc_library(
         "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
         "ngx_request_body.cc",
+        "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
         "ngx_list_iterator.cc",
@@ -273,6 +287,7 @@ cc_library(
         "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
         "ngx_request_body.h",
+        "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
         "ngx_list_iterator.h",
@@ -363,6 +378,7 @@ cc_library(
         "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
         "ngx_request_body.cc",
+        "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
         "ngx_list_iterator.cc",
@@ -390,6 +406,7 @@ cc_library(
         "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
         "ngx_request_body.h",
+        "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
         "ngx_list_iterator.h",
@@ -488,6 +505,7 @@ cc_library(
         "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
         "ngx_request_body.cc",
+        "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
         "ngx_list_iterator.cc",
@@ -514,6 +532,7 @@ cc_library(
         "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
         "ngx_request_body.h",
+        "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
         "ngx_list_iterator.h",
