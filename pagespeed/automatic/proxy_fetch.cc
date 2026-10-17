@@ -332,6 +332,15 @@ void ProxyFetchPropertyCallbackCollector::ExecuteDone(
 }
 
 void ProxyFetchPropertyCallbackCollector::RunPostLookupsAndCleanupIfSafe() {
+  if (done_ && detached_) {
+    // Detach() already cancelled the post-lookup tasks, and a detached
+    // collector may never see RequestHeadersComplete() (the request can be
+    // rejected before any ProxyFetch exists), so clean up now.
+    DCHECK(post_lookup_task_vector_.empty());
+    UpdateStatusCodeInPropertyCache();
+    delete this;
+    return;
+  }
   if (!done_ || !request_headers_ok_) {
     return;
   }
@@ -344,10 +353,6 @@ void ProxyFetchPropertyCallbackCollector::RunPostLookupsAndCleanupIfSafe() {
   if (proxy_fetch_ != nullptr) {
     // ConnectProxyFetch() is already called.
     proxy_fetch_->PropertyCacheComplete(this);  // deletes this.
-  } else if (detached_) {
-    // Detach() is already called.
-    UpdateStatusCodeInPropertyCache();
-    delete this;
   }
 }
 

@@ -462,6 +462,45 @@ TEST_F(ProxyFetchPropertyCallbackCollectorTest, DetachBeforeDone) {
   callback->Done(true);
 }
 
+// Records its own destruction so a test can tell whether the collector was
+// freed.
+class DeletionTrackingCollector : public ProxyFetchPropertyCallbackCollector {
+ public:
+  DeletionTrackingCollector(ServerContext* server_context, StringPiece url,
+                            const RequestContextPtr& request_context,
+                            const RewriteOptions* options, bool* deleted)
+      : ProxyFetchPropertyCallbackCollector(server_context, url,
+                                            request_context, options,
+                                            UserAgentMatcher::kDesktop),
+        deleted_(deleted) {}
+  ~DeletionTrackingCollector() override { *deleted_ = true; }
+
+ private:
+  bool* deleted_;
+};
+
+TEST_F(ProxyFetchPropertyCallbackCollectorTest,
+       DetachBeforeDoneWithoutRequestHeaders) {
+  EnableCollectorPrefix();
+  // A request rejected before any ProxyFetch exists detaches the collector
+  // without RequestHeadersComplete() ever being called.  The lookup finishing
+  // afterwards must still free the collector.
+  bool deleted = false;
+  ProxyFetchPropertyCallbackCollector* collector =
+      new DeletionTrackingCollector(
+          server_context_, kTestDomain,
+          RequestContext::NewTestRequestContext(thread_system_.get()),
+          options(), &deleted);
+  ProxyFetchPropertyCallback* callback =
+      AddCallback(collector, ProxyFetchPropertyCallback::kPropertyCachePage);
+
+  collector->Detach(HttpStatus::kForbidden);
+  EXPECT_FALSE(deleted);
+
+  callback->Done(true);
+  EXPECT_TRUE(deleted);
+}
+
 TEST_F(ProxyFetchPropertyCallbackCollectorTest, DoneBeforeSetProxyFetch) {
   EnableCollectorPrefix();
   // Test that calling Done() before SetProxyFetch() works.
