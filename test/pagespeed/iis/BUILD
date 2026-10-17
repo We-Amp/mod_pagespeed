@@ -395,6 +395,20 @@ pagespeed_cc_test(
     ],
 )
 
+# Ownership of the process context reference the per-request module holds;
+# runs on every platform, and pins how the module uses it (reads the port
+# source as data).
+pagespeed_cc_test(
+    name = "iis_unclaimed_ref_test",
+    srcs = ["iis_unclaimed_ref_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//pagespeed/iis:iis_unclaimed_ref",
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # Reading response entity chunks for the HTML rewriter: unreadable chunk
 # types and file-handle chunks whose file changes size between the length
 # lookup and the read, against real temporary files. Also pins that
