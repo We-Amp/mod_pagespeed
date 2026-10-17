@@ -563,6 +563,20 @@ class Library : public spriter::ImageLibraryInterface {
   }
 
   Canvas* CreateCanvas(int width, int height) override {
+    // Bound the canvas as a whole: the per-image check in Register()
+    // admits any number of candidates that are individually under the
+    // limit, but the canvas is max(width) x sum(heights). Compare with
+    // division so the pixel budget cannot overflow; the spriter skips the
+    // sprite when no canvas comes back.
+    const int64 kBytesPerPixel = 4;
+    const int64 max_pixels = max_image_resolution_bytes_ / kBytesPerPixel;
+    if (height <= 0 || static_cast<int64>(width) > max_pixels / height) {
+      handler_->Message(kInfo,
+                        "Cannot sprite: canvas %dx%d exceeds the configured "
+                        "limit",
+                        width, height);
+      return nullptr;
+    }
     return new Canvas(width, height, this, tmp_dir_, timer_, handler_);
   }
 
