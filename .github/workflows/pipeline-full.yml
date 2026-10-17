@@ -580,6 +580,7 @@ jobs:
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e TSAN_SYMBOLIZER_PATH=/opt/llvm/bin/llvm-symbolizer \
             -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
             -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
@@ -596,7 +597,7 @@ jobs:
                 --test_env=REDIS_PORT=6379 \
                 --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
                 --test_env=MEMCACHED_PORT=11211 \
-                --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/workspace/tools/tsan_suppressions.txt" \
+                --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/workspace/tools/tsan_suppressions.txt:external_symbolizer_path=/opt/llvm/bin/llvm-symbolizer" \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
