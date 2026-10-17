@@ -590,7 +590,17 @@ note "fixture labels: $(label_of "$DOCROOT$FIXTURE_URL_DIR/$IMAGE_NAME")"
 # 2. Baseline: the previous release like a customer, on an enforcing host
 # ---------------------------------------------------------------------------
 step "configuring the public repository (install.sh)"
-curl -fsSL "$INSTALL_SH_URL" | sh >"$ARTIFACTS/install-sh.log" 2>&1 \
+# Download first, record its checksum, then run it. The published installer
+# moves with each release, so the checksum is only enforced when the caller
+# supplies INSTALL_SH_SHA256.
+INSTALL_SH_FILE="$ARTIFACTS/install.sh"
+curl -fsSL -o "$INSTALL_SH_FILE" "$INSTALL_SH_URL" || die "could not download install.sh"
+INSTALL_SH_ACTUAL_SHA256="$(sha256sum "$INSTALL_SH_FILE" | cut -d' ' -f1)"
+note "install.sh sha256: $INSTALL_SH_ACTUAL_SHA256"
+if [ -n "${INSTALL_SH_SHA256:-}" ] && [ "$INSTALL_SH_SHA256" != "$INSTALL_SH_ACTUAL_SHA256" ]; then
+  die "install.sh sha256 mismatch (expected $INSTALL_SH_SHA256)"
+fi
+sh "$INSTALL_SH_FILE" >"$ARTIFACTS/install-sh.log" 2>&1 \
   || { tail -20 "$ARTIFACTS/install-sh.log"; die "install.sh failed"; }
 grep -E '^baseurl' /etc/yum.repos.d/modpagespeed.repo 2>/dev/null | head -1 | sed 's/^/  yum baseurl: /' || true
 # Every published version, one per line (VERSION-RELEASE: 1.15.0-22; any
