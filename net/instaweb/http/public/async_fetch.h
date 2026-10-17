@@ -172,6 +172,19 @@ class AsyncFetch : public Writer {
   int64 content_length() const { return content_length_; }
   void set_content_length(int64 x) { content_length_ = x; }
 
+  // Advisory per-request total timeout in milliseconds, carried on the fetch
+  // so the fetcher can enforce it.  Zero (the default) means unspecified,
+  // matching UrlAsyncFetcher::kUnspecifiedTimeout; a fetcher without
+  // per-request timeout support applies its own default.
+  int64 fetch_timeout_ms() const { return fetch_timeout_ms_; }
+  void set_fetch_timeout_ms(int64 x) { fetch_timeout_ms_ = x; }
+
+  // Whether the fetcher may follow redirect responses for this request.
+  // Defaults to true, preserving historical fetcher behavior; a caller that
+  // must pin the response to the requested origin clears it.
+  bool follow_redirects() const { return follow_redirects_; }
+  void set_follow_redirects(bool x) { follow_redirects_ = x; }
+
   // Returns logging information in a string eg. c1:0;c2:2;hf:45;.
   // c1 is cache 1, c2 is cache 2, hf is headers fetch.
   GoogleString LoggingString();
@@ -217,6 +230,8 @@ class AsyncFetch : public Writer {
   bool owns_extra_response_headers_;
   bool headers_complete_;
   int64 content_length_;
+  int64 fetch_timeout_ms_;
+  bool follow_redirects_;
 
   AsyncFetch(const AsyncFetch&) = delete;
   AsyncFetch& operator=(const AsyncFetch&) = delete;

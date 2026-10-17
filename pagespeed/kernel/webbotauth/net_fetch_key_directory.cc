@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "net/instaweb/http/public/async_fetch.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/webbotauth/jwks.h"
 
@@ -163,19 +164,26 @@ KeyLookupResult NetFetchKeyDirectory::GetKey(StringPiece host,
 
   GoogleString body;
   StringAsyncFetch fetch(request_context_, &body);
-  // Disable redirect following at the policy level: we never follow here, and
-  // re-validate nothing off-allowlist. (If the fetcher follows redirects
-  // internally, the allowlist+https guard on the final origin is our backstop;
-  // a redirect to an off-allowlist origin yields a body we will still try to
-  // parse -- but the response can only ever provide a 32-byte key, never a
-  // capability, so the blast radius is parsing a JWKS from an unexpected host.
-  // We additionally cap size below.)
+  // Carry the fetch policy on the request: the bounded total timeout, and the
+  // no-redirect directive.  A redirect can only ever point off the allowlist,
+  // so it is never chased.  (If a fetcher follows redirects on its own despite
+  // the directive, the residual risk documented above stands; the 200-only
+  // check below still rejects any redirect response that surfaces unfollowed.)
+  fetch.set_fetch_timeout_ms(options_.fetch_timeout_ms);
+  fetch.set_follow_redirects(options_.follow_redirects);
   fetcher_->Fetch(url, handler_, &fetch);
 
   // The serf fetcher in the nginx context is driven by the event loop; in a
   // blocking call site we rely on the fetcher's synchronous-wait behavior. If
   // the fetch did not complete, fail closed.
   if (!fetch.done() || !fetch.success()) {
+    return KeyLookupResult::Error();
+  }
+
+  // Only a 200 from the allowlisted origin is a key directory.  Any other
+  // status fails closed: a redirect response is never parsed as JWKS and its
+  // Location is never chased.
+  if (fetch.response_headers()->status_code() != HttpStatus::kOK) {
     return KeyLookupResult::Error();
   }
 

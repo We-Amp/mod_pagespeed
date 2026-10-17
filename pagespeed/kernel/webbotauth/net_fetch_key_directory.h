@@ -53,10 +53,11 @@ class NetFetchKeyDirectory : public KeyDirectoryProvider {
   struct Options {
     std::set<GoogleString> host_allowlist;  // operator https origins
     std::map<GoogleString, GoogleString>
-        host_to_directory_url;  // host->JWKS url
-    int64_t fetch_timeout_ms = 2000;
+        host_to_directory_url;               // host->JWKS url
+    int64_t fetch_timeout_ms = 2000;         // carried on the fetch request
     size_t max_response_bytes = 256 * 1024;  // 256 KiB
-    bool follow_redirects = false;           // default: do not follow
+    bool follow_redirects =
+        false;  // carried on the fetch request; never chased
   };
 
   // Does NOT take ownership of fetcher or handler.
