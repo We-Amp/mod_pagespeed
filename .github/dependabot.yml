@@ -13,3 +13,7 @@ updates:
       - "/test/package-test"
     schedule:
       interval: "weekly"
+    ignore:
+      # Base images move between long-term-support releases on purpose.
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-major"]
