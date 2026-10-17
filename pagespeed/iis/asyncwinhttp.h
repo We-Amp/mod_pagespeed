@@ -89,6 +89,7 @@ class WinHTTP
 	bool retry_scheduled_;		// failed pinned attempt: restart when the session closes
 	bool retry_attempted_;		// the fallback attempt is running (or finished)
 	bool response_data_seen_;	// response data reached this attempt's handler
+	bool failed_without_handles_;	// this attempt failed before opening any handle
 	// Loopback-fetch diagnostics: per-attempt trail (connect family, failure point,
 	// real WinHTTP error codes). Appended only on the request/callback path,
 	// read by the owner after completion; surfaces in the failure warning so

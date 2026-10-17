@@ -18,7 +18,10 @@ WinHTTP::WinHTTP()
 	// in that case.
 	// TODO(oschaaf): append version and lastchang string as well
 	useragent=L"WinHttp mod_pagespeed ";
-	endEvent=CreateEventA(NULL,TRUE,FALSE,NULL);
+	// endEvent is set whenever no WinHTTP handle of this client is open, so
+	// Wait(), CleanUp() and the destructor return at once for a client that
+	// never started a request, or whose request failed before opening one.
+	endEvent=CreateEventA(NULL,TRUE,TRUE,NULL);
 	session=NULL;
 	requestHandle=NULL;
 	connectSession=NULL;
@@ -37,6 +40,7 @@ WinHTTP::WinHTTP()
 	retry_scheduled_=false;
 	retry_attempted_=false;
 	response_data_seen_=false;
+	failed_without_handles_=false;
 }
 void WinHTTP::SetUserAgent(std::string useragent)
 {
@@ -451,7 +455,18 @@ bool WinHTTP::GetUrl(std::string url, std::string host)
 	host_=host;
 	retry_scheduled_=false;
 	retry_attempted_=false;
-	return StartRequest();
+	ResetEvent(endEvent);
+	if (StartRequest())
+		return true;
+	if (failed_without_handles_)
+	{
+		// No handle was opened, so no closing callback will finish this
+		// request: finish it here, once.
+		status=WinHTTPStatus::Error;
+		SetEvent(endEvent);
+		EventHandlerCompleted();
+	}
+	return false;
 }
 
 bool WinHTTP::StartRequest()
@@ -459,6 +474,7 @@ bool WinHTTP::StartRequest()
 	status=WinHTTPStatus::Running;
 	starttime=GetTickCount();
 	response_data_seen_=false;
+	failed_without_handles_=false;
 	URL_COMPONENTS urlComp;
 	ZeroMemory(&urlComp, sizeof(urlComp));
 	urlComp.dwStructSize = sizeof(urlComp);
@@ -472,6 +488,7 @@ bool WinHTTP::StartRequest()
 	if (!WinHttpCrackUrl(wUrl.c_str(),wcslen(wUrl.c_str()),0,&urlComp))
 	{
 		diag_+="|crackurl_fail="+std::to_string((unsigned long)GetLastError());
+		failed_without_handles_=true;
 		return false;
 	}
 	std::wstring server=std::wstring(urlComp.lpszHostName,urlComp.dwHostNameLength);
@@ -605,6 +622,7 @@ bool WinHTTP::StartRequest()
 	else
 	{
 		diag_+="|open_fail="+std::to_string((unsigned long)GetLastError());
+		failed_without_handles_=true;
 		return false;
 	}
 

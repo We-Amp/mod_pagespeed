@@ -60,6 +60,7 @@
 #include "pagespeed/iis/asyncwinhttp.h"
 
 #include <string>
+#include <thread>
 
 #include "pagespeed/kernel/base/string.h"
 #include "gtest/gtest.h"
@@ -180,6 +181,65 @@ TEST(WinHttpLoopbackConnectHostTest, NonLoopbackHostsAreNotPinned) {
   // No prefix confusion with hostnames that merely start with "localhost".
   EXPECT_EQ(std::wstring(),
             WinHttpClient::LoopbackConnectHost(L"localhost.example.com", false));
+}
+
+// Teardown of the WinHTTP client waits until every handle it opened has
+// closed. A client that never opened one (never started, or a request that
+// failed before the session was created) must not wait at all, and a
+// request that cannot start must still report its completion exactly once.
+
+class CountingCompletionHandler : public ::ASyncWinHTTP::WinHTTPEvents {
+ public:
+  void OnData(const char*, int, ::ASyncWinHTTP::WinHTTPContentType) override {
+  }
+  void OnCompleted(::ASyncWinHTTP::WinHTTPStatus status) override {
+    ++completions;
+    last_status = status;
+  }
+  int completions = 0;
+  ::ASyncWinHTTP::WinHTTPStatus last_status =
+      ::ASyncWinHTTP::WinHTTPStatus::NotStarted;
+};
+
+// Runs `fn` on a separate thread and reports whether it returned within
+// `timeout_ms`. A thread that does not return is left behind (it is torn
+// down with the test process) so the test fails instead of hanging.
+template <typename Fn>
+bool ReturnsWithin(DWORD timeout_ms, Fn fn) {
+  HANDLE done = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+  std::thread worker([fn, done]() {
+    fn();
+    SetEvent(done);
+  });
+  bool returned = WaitForSingleObject(done, timeout_ms) == WAIT_OBJECT_0;
+  if (returned) {
+    worker.join();
+    CloseHandle(done);
+  } else {
+    worker.detach();
+  }
+  return returned;
+}
+
+TEST(WinHttpTeardownTest, UnstartedClientDestroysWithoutWaiting) {
+  WinHttpClient* client = new WinHttpClient();
+  EXPECT_TRUE(ReturnsWithin(10000, [client]() { delete client; }));
+}
+
+TEST(WinHttpTeardownTest, RequestThatCannotStartCompletesAndTearsDown) {
+  CountingCompletionHandler* handler = new CountingCompletionHandler();
+  WinHttpClient* client = new WinHttpClient();
+  client->SetEventHandler(handler);
+  // Not a URL WinHttpCrackUrl accepts, so no WinHTTP handle is ever opened.
+  EXPECT_FALSE(client->GetUrl("not a url", ""));
+  EXPECT_EQ(1, handler->completions);
+  EXPECT_EQ(::ASyncWinHTTP::WinHTTPStatus::Error, handler->last_status);
+
+  ASSERT_TRUE(ReturnsWithin(10000, [client]() { client->Wait(); }));
+  ASSERT_TRUE(ReturnsWithin(10000, [client]() { client->Cancel(); }));
+  ASSERT_TRUE(ReturnsWithin(10000, [client]() { delete client; }));
+  EXPECT_EQ(1, handler->completions);
+  delete handler;
 }
 
 }  // namespace
