@@ -64,6 +64,18 @@ cc_library(
     ],
 )
 
+# Reading the response entity chunks the HTML rewriter consumes: which chunk
+# types are readable, and bounded reads of file-handle chunks. Windows-only
+# (Win32 file I/O and the HTTP API chunk types).
+cc_library(
+    name = "iis_entity_chunk",
+    srcs = ["iis_entity_chunk.cc"],
+    hdrs = ["iis_entity_chunk.h"],
+    defines = ["_WINSOCKAPI_"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+)
+
 # =============================================================================
 # IIS Native Module for PageSpeed — built on the adopted IISpeed code base
 # =============================================================================
@@ -137,6 +149,7 @@ cc_library(
         ":iis_daemon_check",
         ":iis_daemon_record",
         ":iis_daemon_serve",
+        ":iis_entity_chunk",
         ":iis_global_constants",
         ":iis_ip_string",
         ":iis_proxy_fetch_completion",

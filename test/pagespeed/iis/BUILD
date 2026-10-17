@@ -395,6 +395,22 @@ pagespeed_cc_test(
     ],
 )
 
+# Reading response entity chunks for the HTML rewriter: unreadable chunk
+# types and file-handle chunks whose file changes size between the length
+# lookup and the read, against real temporary files. Also pins that
+# OnSendResponse has no fatal assertions (reads the port source as data).
+pagespeed_cc_test(
+    name = "iis_entity_chunk_test",
+    srcs = ["iis_entity_chunk_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_entity_chunk",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The daemon record arm's request facts: the authorization decision and
 # the begin-time properties in their pure form (the IHttpContext plumbing
 # sits behind the IIS runtime headers; the seam pin covers the call shape).

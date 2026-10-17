@@ -178,7 +178,6 @@ public:
 	
 	bool IsLocalRequest(IN IHttpContext* pHttpContext);
 	
-	HRESULT ReadFileChunk(HTTP_DATA_CHUNK *chunk, char *buf);
 	void log(IHttpContext* c, const char * msg, ...);
 
 	IisProcessContext* process_context(const GoogleString& site_app_id,std::string site_root, const GoogleString& app_url_base) { 
