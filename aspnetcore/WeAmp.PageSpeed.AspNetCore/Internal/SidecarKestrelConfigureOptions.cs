@@ -213,13 +213,8 @@ internal sealed class SidecarKestrelConfigureOptions : IConfigureOptions<Kestrel
             // hosts in one process and successive restarts never collide.
             var token = Guid.NewGuid().ToString("N").Substring(0, 8);
             var appDir = Path.Combine(baseDir, $"ps-{Environment.ProcessId}-{token}");
-            Directory.CreateDirectory(appDir);
-            // 0700: only this user may traverse into the dir and connect to the socket.
-            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            {
-                File.SetUnixFileMode(appDir,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
+            // 0700 from creation: only this user may traverse into the dir and connect to the socket.
+            Sidecar.ProcessSidecarManager.CreatePrivateDirectory(appDir);
 
             var sock = Path.Combine(appDir, "origin.sock");
 
