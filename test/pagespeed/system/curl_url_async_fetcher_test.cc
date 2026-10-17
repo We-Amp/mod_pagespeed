@@ -1015,6 +1015,25 @@ TEST_F(CurlUrlAsyncFetcherTest, TestShutdownWithActiveFetches) {
   delete fetch;
 }
 
+// Finished fetches must be released as they complete, not kept until the
+// fetcher is destroyed: every one holds a curl easy handle and its buffers.
+TEST_F(CurlUrlAsyncFetcherTest, FinishedFetchesAreReleased) {
+  const int kNumFetches = 20;
+  int index = AddTestUrl(StrCat("http://", test_host_, "/get"), "");
+  for (int i = 0; i < kNumFetches; ++i) {
+    prev_done_count = 0;
+    StartFetch(index);
+    ASSERT_EQ(1, WaitTillDone(index, index));
+    EXPECT_TRUE(fetches_[index]->success());
+    // The callback runs just before the fetch is handed back, so at most the
+    // fetch that just finished may still be held.
+    EXPECT_GE(1, curl_fetcher_->NumCompletedFetchesForTesting()) << i;
+  }
+  EXPECT_EQ(0, ActiveFetches());
+  curl_fetcher_->ShutDown();
+  EXPECT_EQ(0, curl_fetcher_->NumCompletedFetchesForTesting());
+}
+
 // CancelActiveFetches() must complete every outstanding fetch exactly once,
 // promptly, and leave the fetcher usable for new fetches.
 TEST_F(CurlUrlAsyncFetcherTest, CancelActiveFetchesCompletesEachFetchOnce) {
