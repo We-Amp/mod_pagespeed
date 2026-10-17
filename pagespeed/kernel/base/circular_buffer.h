@@ -32,6 +32,11 @@ class MessageHandler;
 // pre-allocated buffer.
 class CircularBuffer {
  public:
+  // Largest capacity Create() and Init() accept. A larger value would make
+  // the segment size computation overflow int, so it is refused rather
+  // than wrapped into an undersized allocation.
+  static const int kMaxCapacity = 1 << 30;  // 1 GiB of message buffer.
+
   // Instantiate buffer with malloc.
   static CircularBuffer* Create(const int capacity);
   // Instantiate buffer with pre-allocated block.
@@ -45,11 +50,18 @@ class CircularBuffer {
                               const int capacity);
   // Return the size in bytes of the memory block to allocate to hold a buffer
   // with size equal to capacity.
-  // capacity is the size of data buffer.
+  // capacity is the size of data buffer; it must satisfy
+  // IsValidCapacity(capacity), or the result is not representable.
   static int Sizeof(const int capacity) {
-    // buffer[1] is double counted, so -1 here.
-    int total = sizeof(CircularBuffer) + capacity - 1;
-    return total;
+    // buffer[1] is double counted, so -1 here. Compute in 64 bits so an
+    // out-of-range capacity cannot overflow int arithmetic.
+    int64 total = static_cast<int64>(sizeof(CircularBuffer)) + capacity - 1;
+    return static_cast<int>(total);
+  }
+
+  // Returns true if capacity is in the range Create() and Init() accept.
+  static bool IsValidCapacity(const int capacity) {
+    return capacity > 0 && capacity <= kMaxCapacity;
   }
   // Reset offset of data segment and wrapped flag.
   // The old content is not cleared but shouldn't be print out again.

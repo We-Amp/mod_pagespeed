@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A compressed metadata-cache payload that inflates past the largest
   cacheable response size is now reported as a corrupt entry (a cache miss)
   instead of being inflated in full on the reading thread.
+- The shared message buffer (`MessageBufferSize`) now refuses a capacity
+  that is non-positive or too large for its size computation (over 1 GiB):
+  the buffer is left off instead of misbehaving in shared memory.
 
 ## [2.4.0] - 2026-10-14
 

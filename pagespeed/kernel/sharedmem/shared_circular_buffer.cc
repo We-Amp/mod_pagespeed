@@ -88,7 +88,9 @@ bool SharedCircularBuffer::InitSegment(bool parent, MessageHandler* handler) {
   buffer_ = CircularBuffer::Init(
       parent, static_cast<void*>(const_cast<char*>(segment_->Base() + pos)),
       buffer_size, buffer_capacity_);
-  return true;
+  // A capacity that cannot produce a usable buffer is refused; report the
+  // failure instead of carrying a buffer we can never write to.
+  return buffer_ != nullptr;
 }
 
 void SharedCircularBuffer::Clear() {
