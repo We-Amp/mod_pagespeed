@@ -1187,6 +1187,22 @@ TEST_F(DomainLawyerTest, AddMappingFailures) {
   EXPECT_TRUE(AddShard("foo.com", "bar1.com,bar2.com"));
 }
 
+TEST_F(DomainLawyerTest, RejectedMappingLeavesDomainsUnauthorized) {
+  // A mapping rejected for wildcarding must not leave the rejected domains
+  // authorized for rewriting or fetching.
+  EXPECT_FALSE(AddShard("*.foo.com", "bar.com"));
+  EXPECT_FALSE(IsDomainAuthorized(orig_request_, "http://baz.foo.com/"));
+  EXPECT_FALSE(IsDomainAuthorized(orig_request_, "http://bar.com/"));
+
+  EXPECT_FALSE(AddShard("foo.com", "*.bar.com"));
+  EXPECT_FALSE(IsDomainAuthorized(orig_request_, "http://cdn.bar.com/"));
+
+  // A rejected wildcard mapping must not trip the authorize-all-domains
+  // switch either.
+  EXPECT_FALSE(AddShard("*", "bar.com"));
+  EXPECT_FALSE(IsDomainAuthorized(orig_request_, "http://unrelated.com/"));
+}
+
 TEST_F(DomainLawyerTest, Shard) {
   EXPECT_FALSE(domain_lawyer_.can_rewrite_domains());
   ASSERT_TRUE(AddShard("foo.com", "bar1.com,bar2.com"));
