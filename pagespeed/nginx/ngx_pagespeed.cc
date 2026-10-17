@@ -3044,7 +3044,13 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
       // before we got here.
       StringPiece request_body;
       if (r->method == NGX_HTTP_POST && r->request_body != nullptr) {
-        ps_request_body_to_string_piece(r, &request_body);
+        // An empty POST has no buffers and proceeds with an empty body. A
+        // body that could not be loaded (over the module's in-memory limit,
+        // or unreadable; already logged) is refused like an oversized one.
+        if (!ps_request_body_to_string_piece(r, &request_body) &&
+            r->request_body->bufs != nullptr) {
+          return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
+        }
         if (request_body.size() > ADMIN_MAX_POST_SIZE) {
           ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                         "admin POST body too large: %uz > %uz",
