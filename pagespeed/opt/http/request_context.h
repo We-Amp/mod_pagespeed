@@ -202,16 +202,15 @@ class RequestContext : public RefCounted<RequestContext> {
   // TODO(morlovich): It's not clearly this is the appropriate mechanism
   // for all the authorizations --- we may want to scope this to a request
   // only.
-  void AddSessionAuthorizedFetchOrigin(const GoogleString& origin) {
-    session_authorized_fetch_origins_.insert(origin);
-  }
+  //
+  // Thread-safe: parallel resource fetches for one request share this
+  // context.
+  void AddSessionAuthorizedFetchOrigin(const GoogleString& origin);
 
   // Returns true for exactly the origins that were authorized for this
   // particular session by calls to AddSessionAuthorizedFetchOrigin()
-  bool IsSessionAuthorizedFetchOrigin(const GoogleString& origin) const {
-    return session_authorized_fetch_origins_.find(origin) !=
-           session_authorized_fetch_origins_.end();
-  }
+  // Thread-safe.
+  bool IsSessionAuthorizedFetchOrigin(const GoogleString& origin) const;
 
   // Prepare the AbstractLogRecord for a subsequent call to WriteLog.  This
   // might include propagating information collected in the RequestContext,
@@ -275,6 +274,7 @@ class RequestContext : public RefCounted<RequestContext> {
   // Log for recording background rewritings.
   std::unique_ptr<AbstractLogRecord> background_rewrite_log_record_;
 
+  // Guarded by log_record_->mutex().
   StringSet session_authorized_fetch_origins_;
 
   bool using_http2_;

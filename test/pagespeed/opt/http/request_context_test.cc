@@ -20,9 +20,11 @@
 // Unit tests for RequestContext.
 
 #include <memory>
+#include <thread>
 
 #include "pagespeed/opt/http/request_context.h"
 
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -83,6 +85,32 @@ TEST_F(RequestContextTest, ViaHttp2) {
     rc->SetHttp2SupportFromViaHeader("1.1 someproxy, 2 coolproxy");
     EXPECT_FALSE(rc->using_http2());
   }
+}
+
+// Parallel resource fetches for one page share a RequestContext: some threads
+// authorize origins while others check them.
+TEST_F(RequestContextTest, SessionAuthorizedFetchOriginsFromManyThreads) {
+  RequestContextPtr rc(MakeRequestContext());
+  const int kOrigins = 200;
+  std::thread writer([&rc]() {
+    for (int i = 0; i < kOrigins; ++i) {
+      rc->AddSessionAuthorizedFetchOrigin(
+          StrCat("http://o", IntegerToString(i), ".example.com"));
+    }
+  });
+  std::thread reader([&rc]() {
+    for (int i = 0; i < kOrigins; ++i) {
+      rc->IsSessionAuthorizedFetchOrigin(
+          StrCat("http://o", IntegerToString(i), ".example.com"));
+    }
+  });
+  writer.join();
+  reader.join();
+  for (int i = 0; i < kOrigins; ++i) {
+    EXPECT_TRUE(rc->IsSessionAuthorizedFetchOrigin(
+        StrCat("http://o", IntegerToString(i), ".example.com")));
+  }
+  EXPECT_FALSE(rc->IsSessionAuthorizedFetchOrigin("http://other.example.com"));
 }
 
 }  // namespace net_instaweb
