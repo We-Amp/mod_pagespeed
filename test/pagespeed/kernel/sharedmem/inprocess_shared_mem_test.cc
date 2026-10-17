@@ -30,11 +30,15 @@
 #include <unistd.h>
 #endif
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
+#include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -108,6 +112,60 @@ class InProcessSharedMemEnv : public SharedMemTestEnv {
   std::unique_ptr<ThreadSystem> thread_system_;
   std::vector<ThreadSystem::Thread*> child_threads_;
 };
+
+// Large enough that the allocator returns the storage to the OS when it is
+// freed, so touching freed storage faults instead of reading stale bytes.
+constexpr size_t kLargeSegmentSize = 4 << 20;
+
+// A segment object stays usable for as long as the caller holds it: creating
+// the same name again or destroying the name only affects later lookups.
+TEST(InProcessSharedMemSegmentLifetimeTest, RecreateKeepsEarlierSegment) {
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  InProcessSharedMem shm(thread_system.get());
+  NullMessageHandler handler;
+
+  std::unique_ptr<AbstractSharedMemSegment> first(
+      shm.CreateSegment("seg", kLargeSegmentSize, &handler));
+  ASSERT_NE(nullptr, first.get());
+  first->Base()[kLargeSegmentSize - 1] = 'A';
+
+  std::unique_ptr<AbstractSharedMemSegment> second(
+      shm.CreateSegment("seg", kLargeSegmentSize, &handler));
+  ASSERT_NE(nullptr, second.get());
+  EXPECT_EQ('\0', second->Base()[kLargeSegmentSize - 1]);
+
+  EXPECT_EQ('A', first->Base()[kLargeSegmentSize - 1]);
+  first->Base()[kLargeSegmentSize - 1] = 'B';
+  EXPECT_EQ('\0', second->Base()[kLargeSegmentSize - 1]);
+
+  // Attaching finds the newest segment.
+  std::unique_ptr<AbstractSharedMemSegment> attached(
+      shm.AttachToSegment("seg", kLargeSegmentSize, &handler));
+  ASSERT_NE(nullptr, attached.get());
+  second->Base()[0] = 'C';
+  EXPECT_EQ('C', attached->Base()[0]);
+  shm.DestroySegment("seg", &handler);
+}
+
+TEST(InProcessSharedMemSegmentLifetimeTest, DestroyKeepsAttachedSegment) {
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  InProcessSharedMem shm(thread_system.get());
+  NullMessageHandler handler;
+
+  std::unique_ptr<AbstractSharedMemSegment> seg(
+      shm.CreateSegment("seg", kLargeSegmentSize, &handler));
+  ASSERT_NE(nullptr, seg.get());
+  ASSERT_TRUE(seg->InitializeSharedMutex(0, &handler));
+  shm.DestroySegment("seg", &handler);
+
+  seg->Base()[kLargeSegmentSize - 1] = 'A';
+  EXPECT_EQ('A', seg->Base()[kLargeSegmentSize - 1]);
+  std::unique_ptr<AbstractMutex> mutex(seg->AttachToSharedMutex(0));
+  ASSERT_NE(nullptr, mutex.get());
+  mutex->Lock();
+  mutex->Unlock();
+  EXPECT_EQ(nullptr, shm.AttachToSegment("seg", kLargeSegmentSize, &handler));
+}
 
 INSTANTIATE_TYPED_TEST_SUITE_P(InprocessShm, SharedCircularBufferTestTemplate,
                                InProcessSharedMemEnv);

@@ -22,6 +22,7 @@
 
 #include <cstddef>
 #include <map>
+#include <memory>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -59,7 +60,9 @@ class InProcessSharedMem : public AbstractSharedMem {
   class DelegateMutex;
   class DelegateSegment;
   class Segment;
-  using SegmentMap = std::map<GoogleString, Segment*>;
+  // Segments are shared with the segment and mutex objects handed out for
+  // them, so those stay usable after the name is destroyed or created again.
+  using SegmentMap = std::map<GoogleString, std::shared_ptr<Segment>>;
 
   ThreadSystem* thread_system_;
   SegmentMap segments_;
