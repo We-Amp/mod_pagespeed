@@ -885,4 +885,26 @@ TEST_F(IisConfigurationTest,
   EXPECT_GT(total_files.load(), 0);
 }
 
+// A directive line with no option name (a bare "pagespeed", or one followed
+// only by whitespace) tokenizes to nothing. That is an operator error to
+// report, not a reason to stop the worker process.
+TEST_F(IisConfigurationTest, EmptyDirectiveIsReportedNotFatal) {
+  IisRewriteOptions rwo(nullptr);
+  const char* error = rwo.ParseAndSetOptions(std::vector<std::string>(),
+                                             &handler_, global_config_);
+  EXPECT_NE(nullptr, error);
+}
+
+TEST_F(IisConfigurationTest, BareDirectiveLinesParse) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(
+      "pagespeed\n"
+      "pagespeed    \n"
+      "pagespeed EnableFilters combine_css\n",
+      "", &rwo);
+  // The lines without an option name are skipped; the next line still
+  // applies.
+  EXPECT_TRUE(rwo.Enabled(RewriteOptions::kCombineCss));
+}
+
 }  // namespace
