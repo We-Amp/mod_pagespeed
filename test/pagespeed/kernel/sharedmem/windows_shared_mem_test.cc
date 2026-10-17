@@ -232,8 +232,9 @@ TEST(WindowsSharedMemTest, MultipleMutexes) {
 // Large enough that a stale view would span many pages.
 constexpr size_t kLargeSegmentSize = 4 << 20;
 
-// Creating a segment name again in the same runtime hands out a fresh zeroed
-// view; segment objects returned earlier keep a valid mapping until deleted.
+// Creating a segment name again in the same runtime hands out a zeroed view
+// of the same section; segment objects returned earlier keep a valid mapping
+// until deleted.
 TEST(WindowsSharedMemTest, RecreateKeepsEarlierSegmentMapped) {
   WindowsSharedMem shm;
   std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
@@ -248,6 +249,8 @@ TEST(WindowsSharedMemTest, RecreateKeepsEarlierSegmentMapped) {
       shm.CreateSegment("test_recreate", kLargeSegmentSize, &handler));
   ASSERT_NE(nullptr, second.get());
   EXPECT_EQ('\0', second->Base()[kLargeSegmentSize - 1]);
+  // Both objects view the same section, so the earlier one sees the reset.
+  EXPECT_EQ('\0', first->Base()[kLargeSegmentSize - 1]);
 
   // Still mapped: reading and writing through the earlier object is fine.
   first->Base()[kLargeSegmentSize - 1] = 'B';
