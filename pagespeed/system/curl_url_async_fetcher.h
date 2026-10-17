@@ -162,8 +162,9 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
     return active_fetches_.size() + pending_fetches_.size();
   }
 
-  // Completes every fetch started so far as cancelled. Returns at once; the
-  // callbacks run on the poll thread.
+  // Completes every fetch started so far as cancelled, and may also cancel
+  // fetches started before the poll thread acts on the request. Returns at
+  // once; the callbacks run on the poll thread.
   void CancelActiveFetches();
 
   // The number of finished fetches still held by the fetcher, for tests that
@@ -190,7 +191,8 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
                   int64 timeout_ms, size_t max_response_body_bytes,
                   MessageHandler* message_handler, AsyncFetch* async_fetch);
 
-  // Frees every fetch that has finished. Poll thread only.
+  // Frees every fetch that has finished. Called by the poll thread, and by
+  // ShutDown() once that thread has been joined.
   void ReleaseCompletedFetches();
 
   // Removes every active fetch from the multi handle and completes it as
