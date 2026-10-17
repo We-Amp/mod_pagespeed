@@ -19,6 +19,10 @@
 
 #include "pagespeed/kernel/util/statistics_logger.h"
 
+#include <unistd.h>
+
+#include <chrono>
+#include <future>
 #include <map>
 #include <memory>
 #include <set>
@@ -431,6 +435,66 @@ TEST_F(StatisticsLoggerTest, DumpJsonRangeAfterAllEntriesDoesNotThrow) {
   std::stringstream ss(json_dump);
   EXPECT_TRUE(Json::parseFromStream(reader_builder, ss, &parsed, &errs))
       << json_dump;
+}
+
+// A log whose last line is "timestamp: <digits>" with no trailing newline (a
+// writer that stopped mid-dump) must not make the reader spin. The partial
+// record has no data block, so it is dropped; complete records before it are
+// still returned.
+TEST_F(StatisticsLoggerTest, ReadNextDataBlockTruncatedTimestampDropsPartial) {
+  const int64 base = MockTimer::kApr_5_2010_ms;
+  GoogleString input;
+  StrAppend(&input, "timestamp: ", Integer64ToString(base), "\n",
+            "num_flushes: 1\n");
+  StrAppend(&input, "timestamp: ", Integer64ToString(base + 100));
+  GoogleString file_name;
+  ASSERT_TRUE(
+      file_system_.WriteTempFile("/prefix/", input, &file_name, &handler_));
+  FileSystem::InputFile* log_file =
+      file_system_.OpenInputFile(file_name.c_str(), &handler_);
+  ASSERT_TRUE(log_file != nullptr);
+
+  StatisticsLogfileReader reader(log_file, base, base + Timer::kDayMs,
+                                 0 /* granularity_ms */, &handler_);
+  // Run the reads on a helper thread so a non-terminating reader fails the
+  // test instead of hanging it.
+  auto done = std::async(std::launch::async, [&reader]() {
+    int count = 0;
+    int64 timestamp = -1;
+    GoogleString output;
+    while (count < 10 && reader.ReadNextDataBlock(&timestamp, &output)) {
+      ++count;
+    }
+    return count;
+  });
+  if (done.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
+    ADD_FAILURE() << "ReadNextDataBlock did not terminate";
+    _exit(1);
+  }
+  EXPECT_EQ(1, done.get());
+
+  file_system_.Close(log_file, &handler_);
+}
+
+// A corrupted line without the ": " separator, or ending exactly at the
+// separator, is skipped without disturbing the other lines.
+TEST_F(StatisticsLoggerTest, ParseVarDataSkipsMalformedLines) {
+  std::map<StringPiece, StringPiece> parsed_var_data;
+  GoogleString var_data =
+      "num_flushes: 3\n"
+      "no_separator_here\n"
+      "ends_at_colon:\n"
+      "ends_at_colon_space: \n"
+      "cache_hits: 7\n"
+      "truncated_tail:";
+  EXPECT_NO_THROW(ParseVarDataIntoMap(var_data, &parsed_var_data));
+  ASSERT_NE(parsed_var_data.end(), parsed_var_data.find("num_flushes"));
+  EXPECT_EQ("3", parsed_var_data["num_flushes"]);
+  ASSERT_NE(parsed_var_data.end(), parsed_var_data.find("cache_hits"));
+  EXPECT_EQ("7", parsed_var_data["cache_hits"]);
+  EXPECT_EQ(parsed_var_data.end(), parsed_var_data.find("no_separator_here"));
+  EXPECT_EQ(parsed_var_data.end(), parsed_var_data.find("ends_at_colon"));
+  EXPECT_EQ(parsed_var_data.end(), parsed_var_data.find("truncated_tail"));
 }
 
 // Creates fake logfile data and tests that the data containing the variable
