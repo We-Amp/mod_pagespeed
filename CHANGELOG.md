@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Image optimization: certain GIF images could make a worker process
+  exit (denial of service).** A GIF extension block carrying no data
+  crashed the image reader on three decode paths: the per-frame
+  graphics control extension, the animation loop-count block, and the
+  GIF-to-PNG conversion path. The reader now rejects such images.
+  Affects the module and the optimizer worker in releases up to and
+  including 2.4.0 with image optimization enabled. **Update
+  recommended.**
+
 ### Changed
 
 - The EL10 Apache package now requires the matching `pagespeed-optimizer`
