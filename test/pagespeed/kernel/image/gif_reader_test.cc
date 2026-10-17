@@ -577,7 +577,7 @@ TEST_F(GifReaderTest, EmptyGraphicsControlExtensionBlock) {
   // must reject the image instead of dereferencing it.
   GoogleString in;
   AppendGifHeaderNoGct(&in);
-  const char empty_gce[] = {0x21, 0xF9, 0x00};
+  const char empty_gce[] = {0x21, '\xF9', 0x00};
   in.append(empty_gce, sizeof(empty_gce));
   in.push_back(0x3B);  // trailer
 
@@ -598,7 +598,7 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
   // Priming image: a 256-entry global color map entirely filled with
   // 0xA5, pixel index 0.
   const char priming_header[] = {'G',  'I',  'F',  '8',  '9',  'a', 0x01,
-                                 0x00, 0x01, 0x00, 0x87, 0x00, 0x00};
+                                 0x00, 0x01, 0x00, '\x87', 0x00, 0x00};
   priming.append(priming_header, sizeof(priming_header));
   priming.append(256 * 3, static_cast<char>(0xA5));
   AppendOnePixelImageDescriptor(&priming, 0);
@@ -612,7 +612,7 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
   // Victim image: a two-entry global color map and four pixels whose
   // indices (5, 60, 130, 250) are all out of range for the map.
   const char victim_header[] = {'G',  'I',  'F',  '8',  '9',  'a', 0x04,
-                                0x00, 0x01, 0x00, 0x80, 0x00, 0x00};
+                                0x00, 0x01, 0x00, '\x80', 0x00, 0x00};
   victim.append(victim_header, sizeof(victim_header));
   const char color_map[] = {static_cast<char>(0xFF),
                             0x00,
@@ -664,7 +664,7 @@ TEST(GifFrameReaderInvalidInput, EmptyGraphicsControlExtensionBlock) {
   // reject it instead of dereferencing a null extension.
   GoogleString in;
   AppendGifHeaderNoGct(&in);
-  const char empty_gce[] = {0x21, 0xF9, 0x00};
+  const char empty_gce[] = {0x21, '\xF9', 0x00};
   in.append(empty_gce, sizeof(empty_gce));
   AppendOnePixelImageDescriptor(&in, 0);
   in.push_back(0x3B);
@@ -684,7 +684,7 @@ TEST(GifFrameReaderInvalidInput, EmptyLoopCountSubblock) {
   // dereferencing it.
   GoogleString in;
   AppendGifHeaderNoGct(&in);
-  const char empty_loop_count[] = {0x21, 0xFF, 0x0B, 'N', 'E', 'T', 'S', 'C',
+  const char empty_loop_count[] = {0x21, '\xFF', 0x0B, 'N', 'E', 'T', 'S', 'C',
                                    'A',  'P',  'E',  '2', '.', '0', 0x00};
   in.append(empty_loop_count, sizeof(empty_loop_count));
   in.push_back(0x3B);
