@@ -20,6 +20,13 @@
 #   --jobs=N                 Number of parallel jobs (default: auto)
 #   --help                   Show this help message
 #
+# Environment:
+#   NGINX_SHA256             SHA-256 of the nginx tarball. Required for any
+#                            --nginx-version that is not in the pinned table
+#                            below; when set it takes precedence over the table.
+#                            The download is always verified; there is no way
+#                            to skip the check.
+#
 # This script:
 # 1. Downloads nginx source (or uses existing source)
 # 2. Builds the PageSpeed static archive with Bazel
@@ -48,6 +55,41 @@ log_step() { echo -e "${BLUE}[STEP]${NC} $1"; }
 
 show_help() {
     head -30 "$0" | tail -27 | sed 's/^#//'
+}
+
+# Pinned SHA-256 digests of the nginx.org release tarballs.
+nginx_pinned_sha256() {
+    case "$1" in
+        1.30.5) echo "6c20565aa2325cb82216ae804f4a4ff1875179014759a381c42ddc8e11c4906d" ;;
+        1.26.3) echo "69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
+        1.24.0) echo "77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d" ;;
+        1.20.1) echo "e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
+        *) return 1 ;;
+    esac
+}
+
+# verify_nginx_tarball VERSION FILE
+# Checks FILE against NGINX_SHA256 (if set) or the pinned digest for VERSION.
+# Returns non-zero, with a message on stderr, if no digest is known or the
+# digest does not match.
+verify_nginx_tarball() {
+    local version="$1" file="$2" expected actual
+    expected="${NGINX_SHA256:-}"
+    if [ -z "$expected" ]; then
+        expected="$(nginx_pinned_sha256 "$version")" || {
+            echo "[ERROR] no pinned SHA-256 for nginx $version; set NGINX_SHA256 to the expected digest" >&2
+            return 1
+        }
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual="$(sha256sum "$file" | awk '{print $1}')"
+    else
+        actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+    fi
+    if [ "$actual" != "$expected" ]; then
+        echo "[ERROR] nginx tarball SHA-256 mismatch (got $actual, expected $expected)" >&2
+        return 1
+    fi
 }
 
 # Default values
@@ -156,6 +198,11 @@ download_nginx() {
 
     log_info "Downloading from $NGINX_URL"
     curl -fsSL "$NGINX_URL" -o "$NGINX_TAR"
+
+    if ! verify_nginx_tarball "$NGINX_VERSION" "$NGINX_TAR"; then
+        rm -f "$NGINX_TAR"
+        exit 1
+    fi
 
     log_info "Extracting..."
     tar -xzf "$NGINX_TAR" -C "$BUILD_DIR"
@@ -309,4 +356,6 @@ main() {
     print_summary
 }
 
-main
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi
