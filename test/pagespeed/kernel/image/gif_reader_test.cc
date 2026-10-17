@@ -24,8 +24,8 @@
 #include "pagespeed/kernel/image/gif_reader.h"
 
 #include <cstddef>
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -507,12 +507,12 @@ TEST_F(GifScanlineReaderRawTest, FrameSmallerThanImage) {
 
 // A 1x1 GIF89a header with no global color table.
 void AppendGifHeaderNoGct(GoogleString* out) {
-  const char header[] = {'G',  'I',  'F',  '8',  '9',  'a',  //
-                         0x01, 0x00,                   // width = 1
-                         0x01, 0x00,                   // height = 1
-                         0x00,                         // no global color table
-                         0x00,                         // background index
-                         0x00};                        // aspect ratio
+  const char header[] = {'G',  'I',  'F', '8', '9', 'a',  //
+                         0x01, 0x00,                      // width = 1
+                         0x01, 0x00,                      // height = 1
+                         0x00,   // no global color table
+                         0x00,   // background index
+                         0x00};  // aspect ratio
   out->append(header, sizeof(header));
 }
 
@@ -530,10 +530,11 @@ void AppendOnePixelImageDescriptor(GoogleString* out, int pixel_value) {
   // Minimum code size 3: clear = 8, EOI = 9, first code is 4 bits.
   // Codes: clear(8), pixel_value, EOI(9), packed LSB first.
   const int bits = 8 /* clear */ | (pixel_value << 4) | (9 << 8) /* EOI */;
-  const char lzw[] = {0x03,  // minimum code size
-                      0x02, static_cast<char>(bits & 0xff),
-                      static_cast<char>((bits >> 8) & 0xff),
-                      0x00  // block terminator
+  const char lzw[] = {
+      0x03,  // minimum code size
+      0x02, static_cast<char>(bits & 0xff),
+      static_cast<char>((bits >> 8) & 0xff),
+      0x00  // block terminator
   };
   out->append(lzw, sizeof(lzw));
 }
@@ -564,8 +565,8 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
 
   // Priming image: a 256-entry global color map entirely filled with
   // 0xA5, pixel index 0.
-  const char priming_header[] = {'G',  'I',  'F',  '8', '9', 'a', 0x01, 0x00,
-                                 0x01, 0x00, 0x87, 0x00, 0x00};
+  const char priming_header[] = {'G',  'I',  'F',  '8',  '9',  'a', 0x01,
+                                 0x00, 0x01, 0x00, 0x87, 0x00, 0x00};
   priming.append(priming_header, sizeof(priming_header));
   priming.append(256 * 3, static_cast<char>(0xA5));
   AppendOnePixelImageDescriptor(&priming, 0);
@@ -578,11 +579,15 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
 
   // Victim image: a two-entry global color map and four pixels whose
   // indices (5, 60, 130, 250) are all out of range for the map.
-  const char victim_header[] = {'G',  'I',  'F',  '8', '9', 'a', 0x04, 0x00,
-                                0x01, 0x00, 0x80, 0x00, 0x00};
+  const char victim_header[] = {'G',  'I',  'F',  '8',  '9',  'a', 0x04,
+                                0x00, 0x01, 0x00, 0x80, 0x00, 0x00};
   victim.append(victim_header, sizeof(victim_header));
-  const char color_map[] = {static_cast<char>(0xFF), 0x00, 0x00,  // red
-                            0x00, static_cast<char>(0xFF), 0x00};  // green
+  const char color_map[] = {static_cast<char>(0xFF),
+                            0x00,
+                            0x00,  // red
+                            0x00,
+                            static_cast<char>(0xFF),
+                            0x00};  // green
   victim.append(color_map, sizeof(color_map));
   const char descriptor[] = {0x2C,        // image separator
                              0x00, 0x00,  // left = 0
@@ -616,7 +621,8 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
   png_bytep victim_row = png_get_rows(read_.png_ptr(), read_.info_ptr())[0];
   const png_byte kBlack[3] = {0x00, 0x00, 0x00};
   for (int pixel = 0; pixel < 4; ++pixel) {
-    EXPECT_EQ(0, memcmp(victim_row + 3 * pixel, kBlack, 3)) << "pixel " << pixel;
+    EXPECT_EQ(0, memcmp(victim_row + 3 * pixel, kBlack, 3))
+        << "pixel " << pixel;
   }
 }
 
