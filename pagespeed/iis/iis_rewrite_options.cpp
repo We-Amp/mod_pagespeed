@@ -6,6 +6,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/timer.h"
 
+#include "pagespeed/kernel/base/circular_buffer.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 
@@ -344,7 +345,8 @@ IisRewriteOptions::ParseAndSetOptions(
     } */ else if (IsDirective(directive, "MessageBufferSize")) {
       int message_buffer_size;
       bool ok = StringToInt(arg.as_string(), &message_buffer_size);
-      if (ok && message_buffer_size >= 0) {
+      if (ok && message_buffer_size >= 0 &&
+          message_buffer_size <= CircularBuffer::kMaxCapacity) {
 		  global_config.message_buffer_size = message_buffer_size;
         result = RewriteOptions::kOptionOk;
       } else {
