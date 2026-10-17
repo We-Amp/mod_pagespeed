@@ -2225,6 +2225,96 @@ jobs:
             -DllSourceDir "$env:BAZEL_BIN_DIR\pagespeed\iis" `
             -RepoDir $env:GITHUB_WORKSPACE
 
+      # The first request into an ASan-instrumented worker is slow, and a
+      # module that failed to load answers every request with an error. Wait
+      # for the page to answer 200 and, if it never does, log why, so a rig
+      # that is not ready fails here and not as a harness health abort.
+      - name: Wait for the ASan IIS rig to answer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $url = 'http://localhost:18180/stress/page1.html'
+          $deadline = (Get-Date).AddSeconds(180)
+          $lastStatus = ''
+          $lastBody = ''
+          $ready = $false
+          while ($true) {
+            $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri $url
+              $lastStatus = [string][int]$r.StatusCode
+              $lastBody = [string]$r.Content
+              Write-Host "[$stamp] probe $url -> $lastStatus"
+              if ([int]$r.StatusCode -eq 200) { $ready = $true; break }
+            } catch {
+              $resp = $_.Exception.Response
+              if ($resp) {
+                $lastStatus = [string][int]$resp.StatusCode
+                try {
+                  $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
+                  $lastBody = $sr.ReadToEnd()
+                  $sr.Close()
+                } catch { $lastBody = '' }
+                Write-Host "[$stamp] probe $url -> $lastStatus ($($_.Exception.Message))"
+              } else {
+                $lastStatus = 'no response: ' + $_.Exception.Message
+                $lastBody = ''
+                Write-Host "[$stamp] probe $url -> $lastStatus"
+              }
+            }
+            if ((Get-Date) -ge $deadline) { break }
+            Start-Sleep -Seconds 5
+          }
+          if ($ready) { Write-Host "rig answers 200"; exit 0 }
+
+          Write-Host "==== last probe status: $lastStatus ===="
+          Write-Host "==== last probe body (first 800 chars) ===="
+          if ($lastBody.Length -gt 800) { $lastBody = $lastBody.Substring(0, 800) }
+          Write-Host $lastBody
+
+          $ac = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
+          Write-Host "==== appcmd list site ===="
+          $siteLine = (& $ac list site PageSpeedAsanStressSite 2>&1 | Out-String).Trim()
+          Write-Host $siteLine
+          if ($siteLine -match 'id:(\d+)') {
+            $logDir = "C:\inetpub\logs\LogFiles\W3SVC$($Matches[1])"
+            $f = Get-ChildItem $logDir -File -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            Write-Host "==== last 40 lines of the site IIS log ($($f.FullName)) ===="
+            if ($f) { Get-Content $f.FullName -Tail 40 } else { Write-Host "(no log file in $logDir)" }
+          } else {
+            Write-Host "(could not derive the site id)"
+          }
+
+          $f = Get-ChildItem 'C:\Windows\System32\LogFiles\HTTPERR' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Write-Host "==== last 20 lines of HTTPERR ($($f.FullName)) ===="
+          if ($f) { Get-Content $f.FullName -Tail 20 } else { Write-Host "(no HTTPERR log)" }
+
+          # Same "since" derivation as sweep_iis_asan_rig.ps1: the rig-start
+          # marker minus a 30 s skew buffer.
+          $since = (Get-Date).AddHours(-2)
+          $marker = Join-Path $env:RIG_DIR 'logs\rig.setup.started'
+          if (Test-Path $marker) {
+            $s = ((Get-Content $marker -TotalCount 1) -replace '^started\s+', '').Trim()
+            try {
+              $since = ([datetime]::Parse($s, [cultureinfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::RoundtripKind)).ToLocalTime().AddSeconds(-30)
+            } catch { Write-Host "could not parse '$s' from $marker" }
+          }
+          Write-Host "==== w3wp and WAS events since $since ===="
+          foreach ($log in 'Application', 'System') {
+            Write-Host "-- $log --"
+            Get-WinEvent -FilterHashtable @{LogName=$log; StartTime=$since} -MaxEvents 500 -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProviderName -match 'WAS|W3SVC|IIS' -or $_.Message -match 'w3wp' } |
+              ForEach-Object { "{0} {1} id={2} {3}" -f $_.TimeCreated, $_.ProviderName, $_.Id, (($_.Message -split "`r?`n")[0]) }
+          }
+          Write-Host "==== appcmd list wp ===="
+          & $ac list wp 2>&1 | Out-String | Write-Host
+
+          Write-Host "::error::IIS ASan rig not ready after 180 s"
+          exit 1
+
       # Crash-dump capture is WER LocalDumps for w3wp.exe, installed by the
       # setup script and removed by the cleanup script.
       - name: Run the recycle-under-load stress
