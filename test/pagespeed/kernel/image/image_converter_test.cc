@@ -388,6 +388,24 @@ TEST_F(ImageConverterTest, ConvertPaddedGifToWebp) {
   echo '</table>') > /tmp/allimages.html
 */
 
+TEST_F(ImageConverterTest, GetSmallestOfPngJpegWebpInvalidPngWithWebpConfig) {
+  png_struct_reader_ = std::make_unique<PngReader>(&message_handler_);
+  pagespeed::image_compression::JpegCompressionOptions jpeg_options;
+  WebpConfiguration webp_config;
+  GoogleString in, out;
+  ReadTestFile(kPngSuiteTestDir, "xcrn0g04", "png", &in);
+  ASSERT_NE(static_cast<size_t>(0), in.size()) << "input file missing";
+
+  // The corrupted PNG fails the lossless WebP conversion before a
+  // writer is allocated; the custom-quality WebP attempt must be
+  // skipped rather than dereferenced, and the original bytes returned.
+  ImageConverter::ImageType type = ImageConverter::GetSmallestOfPngJpegWebp(
+      *png_struct_reader_, in, &jpeg_options, &webp_config, &out,
+      &message_handler_);
+  EXPECT_EQ(ImageConverter::IMAGE_NONE, type);
+  EXPECT_EQ(in, out);
+}
+
 // TODO(vchudnov): add webp tests to do pixel-for-pixel comparisons
 // and to test GetSmallestOfPngJpegWebp
 
