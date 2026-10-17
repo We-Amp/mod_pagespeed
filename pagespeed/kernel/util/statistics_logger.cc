@@ -447,6 +447,12 @@ void StatisticsLogger::ParseVarDataIntoMap(
   SplitStringPieceToVector(logfile_var_data, "\n", &lines, true);
   for (size_t i = 0; i < lines.size(); ++i) {
     size_t end_index_of_name = lines[i].find_first_of(":");
+    // Skip lines that are not shaped like "name: value", such as a line
+    // cut off at or before the separator.
+    if (end_index_of_name == StringPiece::npos ||
+        end_index_of_name + 2 > lines[i].size()) {
+      continue;
+    }
     StringPiece var_name = lines[i].substr(0, end_index_of_name);
     StringPiece var_value_string = lines[i].substr(end_index_of_name + 2);
     (*parsed_var_data)[var_name] = var_value_string;
@@ -534,6 +540,11 @@ bool StatisticsLogfileReader::ReadNextDataBlock(int64* timestamp,
     // If the timestamp was cut off in the middle of the buffer, we need to
     // read more into the buffer.
     size_t newline_pos = BufferFind("\n", offset);
+    // A timestamp line with no terminating newline is a partial record;
+    // there is no data block to return.
+    if (newline_pos == GoogleString::npos) {
+      return false;
+    }
     // Separate the current timestamp from the rest of the data in the buffer.
     size_t timestamp_size = STATIC_STRLEN("timestamp: ");
     StringPiece timestamp_str = StringPiece(buffer_).substr(
