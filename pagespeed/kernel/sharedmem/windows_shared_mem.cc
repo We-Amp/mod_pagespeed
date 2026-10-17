@@ -53,11 +53,18 @@ static_assert(alignof(WindowsMutexSlot) <= 8,
 // Wrapper around a Windows Named Mutex for cross-process synchronization.
 // Named Mutexes are kernel objects that work correctly across processes,
 // unlike CRITICAL_SECTION which only works within a single process.
+//
+// When the thread or process holding the mutex terminates without releasing
+// it, the next acquirer gets it with WAIT_ABANDONED. The data it protects may
+// be half updated, so that acquisition is reported to the recovery handler.
 class WindowsNamedMutex : public AbstractMutex {
  public:
-  // Takes ownership of the mutex handle.
-  explicit WindowsNamedMutex(HANDLE mutex_handle)
-      : mutex_handle_(mutex_handle) {
+  // Takes ownership of the mutex handle. Does not own `recovery_handler`,
+  // which may be null.
+  WindowsNamedMutex(
+      HANDLE mutex_handle,
+      AbstractSharedMemSegment::MutexRecoveryHandler* recovery_handler)
+      : mutex_handle_(mutex_handle), recovery_handler_(recovery_handler) {
     DCHECK(mutex_handle_ != nullptr);
   }
 
@@ -70,20 +77,39 @@ class WindowsNamedMutex : public AbstractMutex {
 
   bool TryLock() override {
     DWORD result = WaitForSingleObject(mutex_handle_, 0);
+    if (result == WAIT_ABANDONED) {
+      // Acquired, from a holder that terminated.
+      RecoverFromOwnerDeath();
+      return true;
+    }
     return result == WAIT_OBJECT_0;
   }
 
   void Lock() override {
     DWORD result = WaitForSingleObject(mutex_handle_, INFINITE);
-    // WAIT_ABANDONED means we got the mutex but the previous owner died
-    // without releasing it. We still own it now, so treat as success.
-    DCHECK(result == WAIT_OBJECT_0 || result == WAIT_ABANDONED);
+    if (result == WAIT_ABANDONED) {
+      RecoverFromOwnerDeath();
+    } else {
+      DCHECK(result == WAIT_OBJECT_0);
+    }
   }
 
   void Unlock() override { ReleaseMutex(mutex_handle_); }
 
  private:
+  // We hold the mutex, taken over from a holder that terminated while holding
+  // it. Windows needs nothing more to keep the mutex usable; the owner of the
+  // protected data deals with whatever the holder left behind.
+  void RecoverFromOwnerDeath() {
+    LOG(WARNING) << "Took over a shared memory mutex whose holder terminated "
+                    "while holding it";
+    if (recovery_handler_ != nullptr) {
+      recovery_handler_->OnOwnerDied();
+    }
+  }
+
   HANDLE mutex_handle_;
+  AbstractSharedMemSegment::MutexRecoveryHandler* recovery_handler_;
 
   WindowsNamedMutex(const WindowsNamedMutex&) = delete;
   WindowsNamedMutex& operator=(const WindowsNamedMutex&) = delete;
@@ -168,6 +194,11 @@ class WindowsSharedMemSegment : public AbstractSharedMemSegment {
   }
 
   AbstractMutex* AttachToSharedMutex(size_t offset) override {
+    return AttachToSharedMutexWithRecovery(offset, nullptr);
+  }
+
+  AbstractMutex* AttachToSharedMutexWithRecovery(
+      size_t offset, MutexRecoveryHandler* recovery_handler) override {
     // Verify the slot has been initialized
     WindowsMutexSlot* slot =
         reinterpret_cast<WindowsMutexSlot*>(base_ + offset);
@@ -193,7 +224,7 @@ class WindowsSharedMemSegment : public AbstractSharedMemSegment {
       return nullptr;
     }
 
-    return new WindowsNamedMutex(mutex_handle);
+    return new WindowsNamedMutex(mutex_handle, recovery_handler);
   }
 
  private:
