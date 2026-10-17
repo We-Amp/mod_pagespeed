@@ -33,6 +33,7 @@
 #include "pagespeed/kernel/base/abstract_mutex.h"  // for ScopedMutex
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -217,6 +218,52 @@ class MockCacheUrlAsyncFetcherAsyncOpHooks
       const MockCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
   MockCacheUrlAsyncFetcherAsyncOpHooks& operator=(
       const MockCacheUrlAsyncFetcherAsyncOpHooks&) = delete;
+};
+
+// A lock manager whose locks are only granted when the test calls
+// GrantAll(), modelling a lock whose callback fires after the requester has
+// moved on.
+class DeferredGrantLockManager : public NamedLockManager {
+ public:
+  ~DeferredGrantLockManager() override { CHECK(pending_.empty()); }
+
+  NamedLock* CreateNamedLock(const StringPiece& name) override {
+    return new DeferredLock(this, name);
+  }
+
+  // Grants every pending lock request; returns how many were granted.
+  int GrantAll() {
+    std::vector<Function*> pending;
+    pending.swap(pending_);
+    for (Function* callback : pending) {
+      callback->CallRun();
+    }
+    return static_cast<int>(pending.size());
+  }
+
+ private:
+  class DeferredLock : public NamedLock {
+   public:
+    DeferredLock(DeferredGrantLockManager* manager, StringPiece name)
+        : manager_(manager), name_(name.data(), name.size()) {}
+
+    void LockTimedWait(int64 wait_ms, Function* callback) override {
+      manager_->pending_.push_back(callback);
+    }
+    void LockTimedWaitStealOld(int64 wait_ms, int64 steal_ms,
+                               Function* callback) override {
+      manager_->pending_.push_back(callback);
+    }
+    void Unlock() override {}
+    bool Held() override { return false; }
+    GoogleString name() const override { return name_; }
+
+   private:
+    DeferredGrantLockManager* manager_;
+    GoogleString name_;
+  };
+
+  std::vector<Function*> pending_;
 };
 
 class DelayedMockUrlFetcher : public MockUrlFetcher {
@@ -1875,6 +1922,50 @@ TEST_F(CacheUrlAsyncFetcherTest, TestParallelBackgroundFreshenCalls) {
   EXPECT_EQ(1, counting_fetcher_.fetch_count());
   EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
   EXPECT_EQ(0, cache_fetcher_->fallback_responses_served()->Get());
+}
+
+// A background freshen may get its fetch lock after the user-facing request
+// has completed: the NamedLock contract lets the grant arrive later, from
+// another thread (a scheduler wakeup, or another holder's Unlock).  By then
+// every per-request object is gone, so the freshen must carry what it needs
+// to build its cache-put wrapper rather than reach back into the finished
+// request.
+TEST_F(CacheUrlAsyncFetcherTest, BackgroundFreshenStartsAfterRequestFinished) {
+  ClearStats();
+  FetchAndValidate(cache_url_, empty_request_headers_, true, HttpStatus::kOK,
+                   cache_body_, kBackendFetch, true);
+  // Advance the time so that the cached value is about to expire.
+  timer_.AdvanceMs(ttl_ms_ - 3 * Timer::kMinuteMs);
+
+  DeferredGrantLockManager deferred_locks;
+  CacheUrlAsyncFetcher fetcher(&mock_hasher_, &deferred_locks,
+                               http_cache_.get(), fragment_,
+                               &mock_async_op_hooks_, &counting_fetcher_);
+  fetcher.set_proactively_freshen_user_facing_request(true);
+
+  ClearStats();
+  GoogleString content;
+  bool done = false;
+  bool success = false;
+  bool cacheable = false;
+  ResponseHeaders response_headers;
+  MockFetch* fetch =
+      new MockFetch(RequestContextPtr(new RequestContext(
+                        http_options_, thread_system_->NewMutex(), nullptr)),
+                    &content, &done, &success, &cacheable);
+  fetch->set_response_headers(&response_headers);
+  fetcher.Fetch(cache_url_, &handler_, fetch);
+  EXPECT_TRUE(done);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(cache_body_, content);
+  EXPECT_EQ(1, http_cache_->cache_hits()->Get());
+  EXPECT_EQ(0, counting_fetcher_.fetch_count());
+
+  // The request is finished; now the freshen gets its lock, fetches and
+  // refreshes the cache.
+  EXPECT_EQ(1, deferred_locks.GrantAll());
+  EXPECT_EQ(1, counting_fetcher_.fetch_count());
+  EXPECT_EQ(1, http_cache_->cache_inserts()->Get());
 }
 
 // Deferred-delivery zero-copy serving (CycloneZeroCopy).  Drives a cache-hit
