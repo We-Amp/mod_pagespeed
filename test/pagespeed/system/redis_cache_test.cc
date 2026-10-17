@@ -528,8 +528,11 @@ namespace {
 // That is partially leveraged by the fact that we have a bunch of code around
 // I/O in RedisCache, but probability is still non-zero (0.05%). Probability
 // of 1ms gap in RedisCacheOperationTimeouTest was around 5% at the time it was
-// written. So we put here 5ms to be safe.
-const int kTimedOutOperationMinTimeUs = kTimeoutUs - 5 * Timer::kMsUs;
+// written. On a loaded shared host timer jitter is larger still (a 100ms
+// timeout was measured at 93.5ms). The floor only guards against the operation
+// returning early, so a generous allowance of 20ms costs nothing: the tests
+// still fail if the operation returns well before its timeout.
+const int kTimedOutOperationMinTimeUs = kTimeoutUs - 20 * Timer::kMsUs;
 
 // Upper gap is bigger because taking more time than time out is expected.
 // Unfortunately, it still gives 0.05%-0.1% of spurious failures and 'real'
