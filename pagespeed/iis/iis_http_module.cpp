@@ -48,6 +48,7 @@
 #include "pagespeed/iis/iis_daemon_record.h"
 #include "net/instaweb/public/global_constants.h"
 #include "pagespeed/iis/iis_daemon_serve.h"
+#include "pagespeed/iis/iis_entity_chunk.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/system/daemon_serve_arm.h"
@@ -1409,6 +1410,22 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				
 			}
 
+			// Chunks served from the kernel fragment cache cannot be read here.
+			// While nothing of this response has been consumed yet, let it go
+			// out unchanged.
+			if (innerContext->proxy_fetch() == NULL &&
+				!AllEntityChunksReadable(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount))
+			{
+				log(pHttpContext, "OnSendResponse --- response has chunks that cannot be read, bail");
+				if (innerContext->recorder() != NULL) {
+					innerContext->recorder()->Fail();
+					innerContext->recorder()->DoneAndSetHeaders(NULL, false);
+					innerContext->set_recorder(NULL);
+				}
+				innerContext->set_leave(true);
+				return RQ_NOTIFICATION_CONTINUE;
+			}
+
 			// TODO(oschaaF): if first time, and we want to rewrite html, etc
 			if (innerContext->rewrite_html() && innerContext->proxy_fetch() == NULL && !innerContext->end_request_seen())
 			{
@@ -1711,6 +1728,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			{
 				char * data = NULL;
 				size_t len=0;
+				bool unreadable = false;
 
 				HTTP_DATA_CHUNK *currentchunk=pResponseStruct->pEntityChunks+c;
 				IisModuleBaseFetch* bf = (IisModuleBaseFetch*) innerContext->base_fetch();
@@ -1728,66 +1746,52 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					len = currentchunk->FromMemory.BufferLength;
 					break;
 				case HttpDataChunkFromFileHandle: {
-					HTTP_BYTE_RANGE *pFileByteRange = &currentchunk->FromFileHandle.ByteRange;
-					LARGE_INTEGER  lFileSize;
-					ULONGLONG ulTotalLength = 0;
-					//
-					// File chunks may contain by ranges with unspecified length 
-					// (HTTP_BYTE_RANGE_TO_EOF).  In order to send parts of such a chunk, 
-					// its necessary to know when the chunk is finished, and
-					// we need to move to the next chunk.
-					//              
-					if (pFileByteRange->Length.QuadPart == HTTP_BYTE_RANGE_TO_EOF)
+					// The file can change size between the length lookup and the
+					// read, so anything but exactly the looked-up length counts as
+					// a failed read. The request buffer size is a DWORD.
+					ULONGLONG file_length = 0;
+					ULONGLONG file_read = 0;
+					bool read_ok = ResolveFileChunkLength(*currentchunk, MAXDWORD, &file_length);
+					if (read_ok && file_length > 0)
 					{
-						if (GetFileType(currentchunk->FromFileHandle.FileHandle) ==
-							FILE_TYPE_DISK)
-						{
-							if (!GetFileSizeEx(currentchunk->FromFileHandle.FileHandle,
-								&lFileSize))
-							{
-								CHECK(false) << "Could not determine file size";
-								return RQ_NOTIFICATION_CONTINUE;
-
-								//								DWORD dwError = GetLastError();
-								//								hr = HRESULT_FROM_WIN32(dwError);
-								//								goto Finished;
-							}
-
-							// put the resolved file length in the chunk, replacing 
-							// HTTP_BYTE_RANGE_TO_EOF
-							pFileByteRange->Length.QuadPart =
-								lFileSize.QuadPart - pFileByteRange->StartingOffset.QuadPart;
-						}
-						else
-						{
-							CHECK(false) << "Could not determine file type";
-							return RQ_NOTIFICATION_CONTINUE;
-							//hr = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-							//goto Finished;                        
-						}
+						data = (char*)pHttpContext->AllocateRequestMemory((DWORD)file_length);
+						read_ok = data != NULL &&
+							SUCCEEDED(ReadFileChunkInto(*currentchunk, data, file_length, &file_read)) &&
+							file_read == file_length;
 					}
-
-					ulTotalLength = pFileByteRange->Length.QuadPart;
-					data = (char*)pHttpContext->AllocateRequestMemory(ulTotalLength);
-					len = ulTotalLength;
-					log(pHttpContext, "read file chunk");
-
-					if (ReadFileChunk(currentchunk, data) != S_OK)
+					if (read_ok)
 					{
-						CHECK(false) << "Failed to read file chunk";
-						return RQ_NOTIFICATION_CONTINUE;
-
-						//DWORD dwErr = GetLastError();
-						//hr = HRESULT_FROM_WIN32(dwErr);
-						//goto Finished;
+						len = (size_t)file_length;
 					}
-					log(pHttpContext, "done reading file chunk");
-
+					else
+					{
+						unreadable = true;
+					}
 				} break;
 
 				default:
-					// TODO(oschaaf):
-					CHECK(false);
+					unreadable = true;
+					break;
+				}
+
+				if (unreadable)
+				{
+					innerContext->process_context()->handler()->Message(net_instaweb::kWarning,
+						"Could not read a response body chunk of [%s]", innerContext->url());
+					if (innerContext->proxy_fetch() == NULL)
+					{
+						// Nothing of this response has been consumed: let it go out
+						// unchanged.
+						if (innerContext->recorder() != NULL) {
+							innerContext->recorder()->Fail();
+							innerContext->recorder()->DoneAndSetHeaders(NULL, false);
+							innerContext->set_recorder(NULL);
+						}
+						innerContext->set_leave(true);
+						return RQ_NOTIFICATION_CONTINUE;
+					}
+					// The rewriter already holds part of the response: carry on
+					// without this chunk.
 					continue;
 				}
 
@@ -2001,128 +2005,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 	
 
-	HRESULT IisHttpModule::ReadFileChunk(HTTP_DATA_CHUNK *chunk, char *buf)
-	{
-		OVERLAPPED ovl;
-		DWORD dwDataStartOffset;
-		ULONGLONG bytesTotal = 0;
-		ULONGLONG bytesToRead = chunk->FromFileHandle.ByteRange.Length.QuadPart;
-		BYTE *	pIoBuffer = NULL;
-		HANDLE	hIoEvent = INVALID_HANDLE_VALUE;
-		HRESULT hr = S_OK;
-
-		pIoBuffer = (BYTE *)VirtualAlloc(NULL,
-			1,
-			MEM_COMMIT | MEM_RESERVE,
-			PAGE_READWRITE);
-		if (pIoBuffer == NULL)
-		{
-			hr = HRESULT_FROM_WIN32(GetLastError());
-			goto Done;
-		}
-
-		hIoEvent = CreateEvent(NULL,  // security attr
-			FALSE, // manual reset
-			FALSE, // initial state
-			NULL); // name
-		if (hIoEvent == NULL)
-		{
-			hr = HRESULT_FROM_WIN32(GetLastError());
-			goto Done;
-		}
-		DWORD m_dwPageSize = 4096;//Replace with call to  process_context()->page_size();
-
-		while (bytesTotal < chunk->FromFileHandle.ByteRange.Length.QuadPart)
-		{
-			DWORD bytesRead = 0;
-			int was_eof = 0;
-			ULONGLONG offset = chunk->FromFileHandle.ByteRange.StartingOffset.QuadPart + bytesTotal;
-
-			ZeroMemory(&ovl, sizeof ovl);
-			ovl.hEvent = hIoEvent;
-			ovl.Offset = (DWORD)offset;
-			dwDataStartOffset = ovl.Offset & (m_dwPageSize - 1);
-			ovl.Offset &= ~(m_dwPageSize - 1);
-			ovl.OffsetHigh = offset >> 32;
-
-			if (!ReadFile(chunk->FromFileHandle.FileHandle,
-				pIoBuffer,
-				m_dwPageSize,
-				&bytesRead,
-				&ovl))
-			{
-				DWORD dwErr = GetLastError();
-
-				switch (dwErr)
-				{
-				case ERROR_IO_PENDING:
-					//
-					// GetOverlappedResult can return without waiting for the
-					// event thus leaving it signalled and causing problems
-					// with future use of that event handle, so just wait ourselves
-					//
-					WaitForSingleObject(ovl.hEvent, INFINITE); // == WAIT_OBJECT_0);
-
-					if (!GetOverlappedResult(
-						chunk->FromFileHandle.FileHandle,
-						&ovl,
-						&bytesRead,
-						TRUE))
-					{
-						dwErr = GetLastError();
-
-						switch (dwErr)
-						{
-						case ERROR_HANDLE_EOF:
-							was_eof = 1;
-							break;
-
-						default:
-							hr = HRESULT_FROM_WIN32(dwErr);
-							goto Done;
-						}
-					}
-					break;
-
-				case ERROR_HANDLE_EOF:
-					was_eof = 1;
-					break;
-
-				default:
-					hr = HRESULT_FROM_WIN32(dwErr);
-					goto Done;
-				}
-			}
-
-			bytesRead -= dwDataStartOffset;
-
-			if (bytesRead > chunk->FromFileHandle.ByteRange.Length.QuadPart)
-			{
-				bytesRead = (DWORD)chunk->FromFileHandle.ByteRange.Length.QuadPart;
-			}
-			if (bytesToRead < (bytesTotal + bytesRead)) { bytesRead = bytesToRead - bytesTotal; }
-			memcpy(buf, pIoBuffer + dwDataStartOffset, bytesRead);
-
-			buf += bytesRead;
-			bytesTotal += bytesRead;
-
-			if (was_eof != 0)
-				chunk->FromFileHandle.ByteRange.Length.QuadPart = bytesToRead;
-		}
-
-	Done:
-		if (NULL != pIoBuffer)
-		{
-			VirtualFree(pIoBuffer, 0, MEM_RELEASE);
-		}
-
-		if (INVALID_HANDLE_VALUE != hIoEvent)
-		{
-			CloseHandle(hIoEvent);
-		}
-
-		return hr;
-	}
 	/*::ReadFileChunk(HTTP_DATA_CHUNK *chunk, char *buf)
 	{
 	OutputDebugStringA("ReadFileChunk!");
