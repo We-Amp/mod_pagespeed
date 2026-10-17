@@ -36,6 +36,15 @@ namespace image_compression {
 
 using net_instaweb::MessageHandler;
 
+// Decode-side dimension caps. Scanline readers decode bytes fetched from
+// origin servers, which are not trusted: a tiny stream can declare
+// dimensions implying a giant decode buffer. A stream whose declared
+// dimensions exceed these caps is rejected at Initialize time, before any
+// buffer proportional to width * height is allocated. These mirror the
+// AVIF reader caps in avif_optimizer.cc.
+const uint32 kScanlineMaxDimension = 16384;           // Per-side pixel cap.
+const uint64 kScanlineMaxImagePixels = 100ull << 20;  // Total pixel cap.
+
 // Return the number of channels, including color channels and alpha channel,
 // for the input pixel format.
 //   GRAY_8:    1
