@@ -423,4 +423,41 @@ bool GzipInflater::HasGzipMagicBytes(StringPiece in) {
          in[1] == static_cast<char>(0x8b);
 }
 
+namespace {
+
+// Delegates to another writer but refuses to accept bytes beyond a fixed
+// total, so an inflate whose output exceeds that total fails instead of
+// buffering all of it.
+class BoundedWriter : public Writer {
+ public:
+  BoundedWriter(Writer* sink, size_t max_bytes)
+      : sink_(sink), max_bytes_(max_bytes), bytes_written_(0) {}
+
+  bool Write(const StringPiece& str, MessageHandler* handler) override {
+    if (str.size() > max_bytes_ - bytes_written_) {
+      return false;
+    }
+    bytes_written_ += str.size();
+    return sink_->Write(str, handler);
+  }
+
+  bool Flush(MessageHandler* handler) override { return sink_->Flush(handler); }
+
+ private:
+  Writer* sink_;
+  size_t max_bytes_;
+  size_t bytes_written_;
+
+  BoundedWriter(const BoundedWriter&) = delete;
+  BoundedWriter& operator=(const BoundedWriter&) = delete;
+};
+
+}  // namespace
+
+bool GzipInflater::InflateWithLimit(StringPiece in, InflateType format,
+                                    size_t max_inflated_bytes, Writer* writer) {
+  BoundedWriter bounded(writer, max_inflated_bytes);
+  return Inflate(in, format, &bounded);
+}
+
 }  // namespace net_instaweb
