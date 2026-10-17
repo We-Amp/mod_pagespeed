@@ -1421,6 +1421,23 @@ TEST_F(GifAnimationTest, OversizedFrameRejectedByPrepareNextFrame) {
   EXPECT_FALSE(reader_->PrepareNextFrame(&status));
 }
 
+// In Chrome quirks mode the logical screen is resized to the first frame
+// after the screen caps were checked, so a first frame past the cap would
+// be published through GetImageSpec() uncapped. Initialization must refuse
+// the enlarged dimensions.
+TEST_F(GifAnimationTest, OversizedFirstFrameInChromeQuirksRejectedByInitialize) {
+  const Frame frame = {16385, 1, false, 0, 0, nullptr, 0, -1, 2, 0, 0};
+  synth_frames_.push_back(frame);
+
+  SynthesizeImage("oversized_first_frame_quirks", DefineImage());
+  ASSERT_TRUE(ReadFile(filename_, &input_image_));
+  ScanlineStatus status;
+  ASSERT_TRUE(reader_->set_quirks_mode(QUIRKS_CHROME, &status));
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  EXPECT_FALSE(reader_->Initialize(input_image_.c_str(), input_image_.length())
+                   .Success());
+}
+
 TEST_F(GifAnimationTest, ReadSingleFrameTransparency) {
   const Frame frame = {10, 10, false, 0, 1, nullptr, 0, 4, 2, 10, 10};
   synth_frames_.push_back(frame);
