@@ -853,8 +853,10 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         }
     }
 
-    private void SetState(SidecarState newState)
+    internal void SetState(SidecarState newState)
     {
+        EventHandler<SidecarStateChangedEventArgs>? handler;
+        SidecarStateChangedEventArgs args;
         lock (_lock)
         {
             if (State == newState) return;
@@ -862,9 +864,14 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
             var previousState = State;
             State = newState;
 
-            StateChanged?.Invoke(this, new SidecarStateChangedEventArgs(
-                previousState, newState, newState == SidecarState.Failed ? ErrorMessage : null));
+            // Snapshot under the lock, raise outside it: a subscriber may call back
+            // into the manager (Stop, Dispose, State) without deadlocking.
+            handler = StateChanged;
+            args = new SidecarStateChangedEventArgs(
+                previousState, newState, newState == SidecarState.Failed ? ErrorMessage : null);
         }
+
+        handler?.Invoke(this, args);
     }
 
     /// <summary>
