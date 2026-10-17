@@ -302,6 +302,25 @@ install_deps_noble() {
   install_bazelisk
 }
 
+# add_llvm_apt_repo VERSION
+# Registers the apt.llvm.org repository for clang VERSION with an explicit,
+# key-scoped source entry (no remote installer script is downloaded or run).
+# LLVM_KEYRING_DIR, LLVM_SOURCES_DIR and LLVM_CODENAME exist for tests.
+add_llvm_apt_repo() {
+  local ver="$1"
+  local keyring_dir="${LLVM_KEYRING_DIR:-/usr/share/keyrings}"
+  local sources_dir="${LLVM_SOURCES_DIR:-/etc/apt/sources.list.d}"
+  local codename="${LLVM_CODENAME:-}"
+  if [ -z "${codename}" ]; then
+    # shellcheck disable=SC1091
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+  fi
+  wget -qO "${keyring_dir}/llvm-snapshot.gpg.asc" https://apt.llvm.org/llvm-snapshot.gpg.key
+  echo "deb [signed-by=${keyring_dir}/llvm-snapshot.gpg.asc] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
+    > "${sources_dir}/llvm-${ver}.list"
+  apt-get update -qq
+}
+
 install_deps_focal() {
   # Ubuntu 20.04 (glibc 2.31) build base for the PORTABLE sidecar pair.
   # Building here gives the module a glibc-2.31 floor — focal's glibc headers do
@@ -327,9 +346,7 @@ install_deps_focal() {
   apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
   # clang/lld/llvm from apt.llvm.org (focal's stock clang predates C++20/23 support).
   local CLANG_VER=18
-  wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-  chmod +x /tmp/llvm.sh
-  /tmp/llvm.sh ${CLANG_VER} >/dev/null 2>&1
+  add_llvm_apt_repo "${CLANG_VER}"
   apt-get install -y --no-install-recommends \
     clang-${CLANG_VER} lld-${CLANG_VER} llvm-${CLANG_VER} >/dev/null
   # The clang-libstdcxx13 bazel config + nginx make invoke clang/clang++/ld.lld by
@@ -459,9 +476,7 @@ enable_deb_src() {
 install_llvm_clang() {
   local CLANG_VER="$1"
   apt-get install -y --no-install-recommends software-properties-common >/dev/null
-  wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-  chmod +x /tmp/llvm.sh
-  /tmp/llvm.sh "${CLANG_VER}" >/dev/null 2>&1
+  add_llvm_apt_repo "${CLANG_VER}"
   apt-get install -y --no-install-recommends \
     clang-${CLANG_VER} lld-${CLANG_VER} llvm-${CLANG_VER} >/dev/null
   update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-${CLANG_VER}   100
