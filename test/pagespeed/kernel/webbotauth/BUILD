@@ -124,3 +124,18 @@ pagespeed_cc_test(
         "//pagespeed/kernel/webbotauth:webbotauth_warmer",
     ],
 )
+
+# The operator-local JWKS file memo: one read per change of the file
+# (modification time or size), fail-closed on a missing or oversized file.
+# In-memory file system and mock clock; no network.
+pagespeed_cc_test(
+    name = "file_key_directory_cache_test",
+    size = "small",
+    srcs = ["file_key_directory_cache_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/webbotauth:webbotauth_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)

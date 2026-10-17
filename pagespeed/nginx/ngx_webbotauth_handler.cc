@@ -39,6 +39,7 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/webbotauth/classifier.h"
+#include "pagespeed/kernel/webbotauth/file_key_directory_cache.h"
 #include "pagespeed/kernel/webbotauth/key_directory.h"
 #include "pagespeed/kernel/webbotauth/rsl_cap_token.h"
 #include "pagespeed/kernel/webbotauth/rsl_cap_validator.h"
@@ -439,9 +440,13 @@ bool HasNonEmptyRequestHeader(ngx_http_request_t* r, const char* name,
   return false;
 }
 
-// KeyDirectoryProvider over the operator-local JWKS file that defers the file
-// read (up to kMaxKeyDirectoryFileBytes, synchronous) until the FIRST actual
-// key lookup, memoized for the rest of the request. The verifier only calls
+// The operator-local JWKS files, loaded once per change of the file (one
+// stat per lookup, the read only when the file's mtime or size moved).
+webbotauth::FileKeyDirectoryCache g_key_directory_files(
+    kMaxKeyDirectoryFileBytes);
+
+// KeyDirectoryProvider over the operator-local JWKS file that defers loading
+// it until the FIRST actual key lookup, memoized for the rest of the request. The verifier only calls
 // GetKey after the signature material parsed, was tagged web-bot-auth, and
 // passed the profile + freshness gates -- so requests that fail closed
 // earlier (bare Signature header, untagged/other-tag material, malformed or
@@ -458,15 +463,9 @@ class LazyFileKeyDirectory : public webbotauth::KeyDirectoryProvider {
       // An empty/unreadable file yields an empty directory -> kNotFound ->
       // Verdict::kUnknown, the honest result when no key is available. The
       // path comes ONLY from operator config, never the request.
-      GoogleString jwks_doc;
-      if (!kd_file_.empty()) {
-        FileSystem* fs = server_context_->file_system();
-        if (fs != nullptr) {
-          fs->ReadFile(kd_file_.c_str(), kMaxKeyDirectoryFileBytes, &jwks_doc,
-                       server_context_->message_handler());
-        }
-      }
-      directory_.reset(new webbotauth::StaticKeyDirectory(jwks_doc));
+      directory_ =
+          g_key_directory_files.Get(server_context_->file_system(), kd_file_,
+                                    server_context_->message_handler());
     }
     return directory_->GetKey(host, keyid, now_unix_sec);
   }
@@ -474,7 +473,7 @@ class LazyFileKeyDirectory : public webbotauth::KeyDirectoryProvider {
  private:
   NgxServerContext* const server_context_;
   const GoogleString& kd_file_;
-  std::unique_ptr<webbotauth::StaticKeyDirectory> directory_;
+  std::shared_ptr<webbotauth::StaticKeyDirectory> directory_;
 };
 
 // The comma-joined value of every occurrence of request header `name`
@@ -832,17 +831,11 @@ ngx_int_t ps_rsl_cap_preaccess_handler(ngx_http_request_t* r) {
   // implements the same KeyDirectoryProvider interface and drops in here once
   // an async continuation exists -- it is deferred for the SAME reason A1 defers
   // it: an async fetch cannot complete inline in an nginx phase handler.
-  GoogleString jwks_doc;
-  const GoogleString& kd_file = options->rsl_cap_key_directory_file();
-  if (!kd_file.empty()) {
-    FileSystem* fs = server_context->file_system();
-    if (fs != nullptr) {
-      fs->ReadFile(kd_file.c_str(), kMaxKeyDirectoryFileBytes, &jwks_doc,
-                   server_context->message_handler());
-    }
-  }
-
-  webbotauth::StaticKeyDirectory local_provider(jwks_doc);
+  // The file is loaded only when the validator actually asks for a key (a
+  // request with no or a malformed token never does), and then from the
+  // per-change cache rather than read again.
+  LazyFileKeyDirectory local_provider(server_context,
+                                      options->rsl_cap_key_directory_file());
 
   // A2 warm-fetch (mirrors A1): prefer cache-only remote keys then the local
   // file when a remote RSL-CAP issuer directory is configured. The validator
