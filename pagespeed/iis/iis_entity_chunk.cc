@@ -4,6 +4,7 @@
 #include "pagespeed/iis/iis_entity_chunk.h"
 
 #include <cstring>
+#include <vector>
 
 namespace net_instaweb {
 
@@ -57,7 +58,8 @@ HRESULT ReadFileChunkInto(const HTTP_DATA_CHUNK& chunk, char* buf,
                           ULONGLONG length, ULONGLONG* bytes_read) {
   *bytes_read = 0;
   HANDLE file = chunk.FromFileHandle.FileHandle;
-  const ULONGLONG start = chunk.FromFileHandle.ByteRange.StartingOffset.QuadPart;
+  const ULONGLONG start =
+      chunk.FromFileHandle.ByteRange.StartingOffset.QuadPart;
   if (length == 0) {
     return S_OK;
   }
@@ -134,6 +136,51 @@ HRESULT ReadFileChunkInto(const HTTP_DATA_CHUNK& chunk, char* buf,
   VirtualFree(page, 0, MEM_RELEASE);
   *bytes_read = done;
   return hr;
+}
+
+bool ConvertFileChunksToMemory(HTTP_DATA_CHUNK* chunks, int count,
+                               ULONGLONG max_length,
+                               EntityChunkAllocator allocate, void* context) {
+  if (max_length > MAXDWORD) {
+    max_length = MAXDWORD;
+  }
+  struct Converted {
+    int index;
+    void* buffer;
+    ULONG length;
+  };
+  std::vector<Converted> converted;
+  for (int i = 0; i < count; ++i) {
+    if (chunks[i].DataChunkType != HttpDataChunkFromFileHandle) {
+      continue;
+    }
+    ULONGLONG length = 0;
+    if (!ResolveFileChunkLength(chunks[i], max_length, &length)) {
+      return false;
+    }
+    // A memory chunk always points at a buffer, even an empty one.
+    void* buffer =
+        allocate(context, length > 0 ? static_cast<DWORD>(length) : 1);
+    if (buffer == nullptr) {
+      return false;
+    }
+    ULONGLONG read = 0;
+    if (length > 0 &&
+        (FAILED(ReadFileChunkInto(chunks[i], static_cast<char*>(buffer), length,
+                                  &read)) ||
+         read != length)) {
+      return false;
+    }
+    converted.push_back({i, buffer, static_cast<ULONG>(length)});
+  }
+  for (const Converted& c : converted) {
+    HTTP_DATA_CHUNK* chunk = &chunks[c.index];
+    ZeroMemory(chunk, sizeof(*chunk));
+    chunk->DataChunkType = HttpDataChunkFromMemory;
+    chunk->FromMemory.pBuffer = c.buffer;
+    chunk->FromMemory.BufferLength = c.length;
+  }
+  return true;
 }
 
 }  // namespace net_instaweb
