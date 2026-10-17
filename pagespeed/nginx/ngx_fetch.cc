@@ -61,6 +61,7 @@ extern "C" {
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/public/version.h"
 #include "ngx_fetch.h"
+#include "ngx_fetch_body.h"
 #include "ngx_openssl_shim.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
@@ -959,9 +960,9 @@ void NgxFetch::ConnectionReadHandler(ngx_event_t* rev) {
       // all if we at least parsed the headers.
       // If we do know the content length, having a mismatch on the bytes read
       // will be interpreted as an error.
-      ok = (fetch->content_length_known_ &&
-            fetch->content_length_ == fetch->bytes_received_) ||
-           fetch->parser_.headers_complete();
+      ok = NgxFetchCompleteOnClose(
+          fetch->parser_.headers_complete(), fetch->content_length_known_,
+          fetch->content_length_, fetch->bytes_received_);
       fetch->done_ = true;
       break;
     } else if (n > 0) {
@@ -1071,18 +1072,29 @@ bool NgxFetch::HandleBody(ngx_connection_t* c) {
   NgxFetch* fetch = static_cast<NgxFetch*>(c->data);
   char* data = reinterpret_cast<char*>(fetch->in_->pos);
   size_t size = fetch->in_->last - fetch->in_->pos;
+  NgxFetchBodyStep step =
+      NgxFetchAcceptBody(fetch->content_length_known_, fetch->content_length_,
+                         fetch->bytes_received_, size);
 
-  fetch->bytes_received_add(size);
+  fetch->bytes_received_add(step.accept);
 
   ngx_log_error(NGX_LOG_DEBUG, fetch->log_, 0,
                 "NgxFetch %p: Handle body (%d bytes)", fetch, size);
 
-  if (fetch->async_fetch_->Write(StringPiece(data, size),
+  if (fetch->async_fetch_->Write(StringPiece(data, step.accept),
                                  fetch->message_handler())) {
-    if (fetch->bytes_received_ == fetch->content_length_) {
+    if (step.complete) {
       fetch->done_ = true;
     }
     fetch->in_->pos += size;
+    if (step.overflow) {
+      // More bytes than the announced content length: the response is
+      // malformed, and the connection must not be reused.
+      fetch->message_handler()->Message(
+          kWarning, "NgxFetch %p: response body exceeds its content-length",
+          fetch);
+      return false;
+    }
   } else {
     ngx_log_error(NGX_LOG_DEBUG, fetch->log_, 0,
                   "NgxFetch %p: async fetch write failure", fetch);
