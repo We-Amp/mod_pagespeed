@@ -430,6 +430,23 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   bool purge_success_;
 };
 
+// The inflated-size cap for the compressed metadata and property caches is
+// floored at the CompressedCache default: metadata entries are not HTTP
+// responses, so a small (or zero) largest-cacheable-response setting must
+// not mark every larger entry corrupt, and -1 stays unlimited.
+TEST(SystemCachesMaxMetadataInflatedValueSize, FloorsSmallConfiguredValues) {
+  EXPECT_EQ(CompressedCache::kDefaultMaxInflatedValueSize,
+            SystemCaches::MaxMetadataInflatedValueSize(0));
+  EXPECT_EQ(CompressedCache::kDefaultMaxInflatedValueSize,
+            SystemCaches::MaxMetadataInflatedValueSize(100));
+  // A setting above the floor is honored as-is.
+  EXPECT_EQ(RewriteOptions::kDefaultMaxCacheableResponseContentLength,
+            SystemCaches::MaxMetadataInflatedValueSize(
+                RewriteOptions::kDefaultMaxCacheableResponseContentLength));
+  // Unlimited stays unlimited.
+  EXPECT_EQ(-1, SystemCaches::MaxMetadataInflatedValueSize(-1));
+}
+
 TEST_F(SystemCachesTest, BasicFileAndLruCache) {
   // CycloneCache integrates its own optional RAM tier (CycloneRamCacheKb),
   // so setting lru_cache_kb_per_process never creates a separate
