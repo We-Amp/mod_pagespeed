@@ -469,6 +469,10 @@ struct JpegScanlineWriter::Data {
   // Structures for jpeg compression.
   jpeg_compress_struct jpeg_compress_;
   jpeg_error_mgr compress_error_;
+  // Jump buffer for errors raised by libjpeg during the writer's own
+  // calls. It is owned by the writer so that it stays valid for every
+  // call, unlike a buffer living in a caller's stack frame.
+  jmp_buf jmp_buf_;
 };
 
 JpegScanlineWriter::JpegScanlineWriter(MessageHandler* handler)
@@ -480,9 +484,22 @@ void JpegScanlineWriter::SetJmpBufEnv(jmp_buf* env) {
   data_->jpeg_compress_.client_data = static_cast<void*>(env);
 }
 
+void JpegScanlineWriter::UseInternalJmpBufEnv() {
+  if (data_->jpeg_compress_.client_data == nullptr) {
+    data_->jpeg_compress_.client_data = &data_->jmp_buf_;
+  }
+}
+
 ScanlineStatus JpegScanlineWriter::InitWithStatus(const size_t width,
                                                   const size_t height,
                                                   PixelFormat pixel_format) {
+  if (setjmp(data_->jmp_buf_)) {
+    AbortWrite();
+    return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler_,
+                            SCANLINE_STATUS_INTERNAL_ERROR, SCANLINE_JPEGWRITER,
+                            "libjpeg failed to set compression defaults.");
+  }
+  UseInternalJmpBufEnv();
   data_->jpeg_compress_.image_width = width;
   data_->jpeg_compress_.image_height = height;
 
@@ -533,6 +550,13 @@ ScanlineStatus JpegScanlineWriter::InitializeWriteWithStatus(
         PS_LOG_DFATAL, message_handler_, SCANLINE_STATUS_INVOCATION_ERROR,
         SCANLINE_JPEGWRITER, "missing JpegCompressionOptions*");
   }
+  if (setjmp(data_->jmp_buf_)) {
+    AbortWrite();
+    return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler_,
+                            SCANLINE_STATUS_INTERNAL_ERROR, SCANLINE_JPEGWRITER,
+                            "libjpeg failed to start the compression.");
+  }
+  UseInternalJmpBufEnv();
   const JpegCompressionOptions* jpeg_compression_options =
       static_cast<const JpegCompressionOptions*>(params);
   SetJpegCompressParams(*jpeg_compression_options);
@@ -543,6 +567,13 @@ ScanlineStatus JpegScanlineWriter::InitializeWriteWithStatus(
 
 ScanlineStatus JpegScanlineWriter::WriteNextScanlineWithStatus(
     const void* const scanline_bytes) {
+  if (setjmp(data_->jmp_buf_)) {
+    AbortWrite();
+    return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler_,
+                            SCANLINE_STATUS_INTERNAL_ERROR, SCANLINE_JPEGWRITER,
+                            "libjpeg failed to write a scanline.");
+  }
+  UseInternalJmpBufEnv();
   JSAMPROW row_pointer[1] = {
       static_cast<JSAMPLE*>(const_cast<void*>(scanline_bytes))};
   unsigned int result =
@@ -557,6 +588,13 @@ ScanlineStatus JpegScanlineWriter::WriteNextScanlineWithStatus(
 }
 
 ScanlineStatus JpegScanlineWriter::FinalizeWriteWithStatus() {
+  if (setjmp(data_->jmp_buf_)) {
+    AbortWrite();
+    return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler_,
+                            SCANLINE_STATUS_INTERNAL_ERROR, SCANLINE_JPEGWRITER,
+                            "libjpeg failed to finish the compression.");
+  }
+  UseInternalJmpBufEnv();
   jpeg_finish_compress(&data_->jpeg_compress_);
   return ScanlineStatus(SCANLINE_STATUS_SUCCESS);
 }

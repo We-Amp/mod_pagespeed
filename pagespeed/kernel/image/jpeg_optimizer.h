@@ -106,15 +106,14 @@ bool OptimizeJpegWithOptions(const GoogleString& original,
                              const JpegCompressionOptions& options,
                              MessageHandler* handler);
 
+// Errors raised by libjpeg are reported through a failed ScanlineStatus
+// from the method that triggered them; the writer keeps the jump buffer
+// it needs for that inside itself. A caller that wants the longjmp to
+// land in its own frame may still install one with SetJmpBufEnv.
+//
 // User of this class must call this functions in the following sequence
 // func () {
 //   JpegScanlineWriter jpeg_writer;
-//   jmp_buf env;
-//   if (setjmp(env)) {
-//     jpeg_writer.AbortWrite();
-//     return;
-//   }
-//   jpeg_writer.SetJmpBufEnv(&env);
 //   if (jpeg_writer.Init(width, height, format)) {
 //     jpeg_writer.SetJpegCompressParams(quality);
 //     jpeg_writer.InitializeWrite(out);
@@ -129,7 +128,9 @@ class JpegScanlineWriter : public ScanlineWriterInterface {
   explicit JpegScanlineWriter(MessageHandler* handler);
   ~JpegScanlineWriter() override;
 
-  // Set the environment for longjmp calls.
+  // Set the environment for longjmp calls. The buffer must outlive every
+  // call on this writer. If no buffer is installed, the writer jumps to
+  // its own buffer and reports the failure as a ScanlineStatus.
   void SetJmpBufEnv(jmp_buf* env);
 
   // This function is only called when jpeg library call longjmp for
@@ -152,6 +153,10 @@ class JpegScanlineWriter : public ScanlineWriterInterface {
   // Since writer only supports lossy encoding, it is an error to pass
   // in a compression options that has lossy field set to false.
   void SetJpegCompressParams(const JpegCompressionOptions& options);
+
+  // Points libjpeg's error jump at the writer's own buffer unless a
+  // caller installed one with SetJmpBufEnv.
+  void UseInternalJmpBufEnv();
 
   // Opaque struct that is defined in the cc file and contains our
   // JPEG-compressor-specific structures.
