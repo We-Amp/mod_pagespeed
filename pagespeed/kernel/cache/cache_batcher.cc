@@ -294,8 +294,10 @@ void CacheBatcher::ShutDown() {
     ScopedMutex mutex(mutex_.get());
     shutdown_ = true;
     if (!queued_.empty()) {
-      request = ConvertMapToRequest(queued_);
-      queued_.clear();
+      // Report the queued lookups through the normal in-flight path so each
+      // callback is found, answered once, and its group is accounted for.
+      ++num_in_flight_groups_;
+      request = CreateRequestForQueuedKeys();
     }
   }
 

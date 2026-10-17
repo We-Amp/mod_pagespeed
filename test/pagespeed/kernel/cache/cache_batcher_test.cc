@@ -484,6 +484,37 @@ TEST_F(CacheBatcherTest, CoalesceInFlightGet) {
   EXPECT_EQ(2, lru_cache_->num_hits());
 }
 
+// Shutting down with lookups still waiting for a free slot must report each
+// of them as not found, once, and leave the in-flight accounting balanced so
+// the lookup that was holding the slot can still complete.
+TEST_F(CacheBatcherTest, ShutDownReportsQueuedGetsNotFound) {
+  CacheBatcher::Options options;
+  options.max_parallel_lookups = 1;
+  ChangeBatcherConfig(options, delay_cache_.get());
+
+  PopulateCache(4);
+
+  DelayKey("n0");
+  Callback* n0 = InitiateGet("n0");
+  Callback* n1 = InitiateGet("n1");
+  Callback* n1_dup = InitiateGet("n1");
+  Callback* n2 = InitiateGet("n2");
+  EXPECT_EQ(4, outstanding_fetches());
+
+  batcher_->ShutDown();
+  WaitAndCheckNotFound(n1);
+  WaitAndCheckNotFound(n1_dup);
+  WaitAndCheckNotFound(n2);
+  EXPECT_EQ(1, outstanding_fetches());
+
+  ReleaseKey("n0");
+  n0->Wait();
+  EXPECT_TRUE(n0->called());
+  PostOpCleanup();
+  EXPECT_EQ(0, outstanding_fetches());
+  EXPECT_EQ(0, num_in_flight_keys());
+}
+
 TEST_F(CacheBatcherTest, CheckWriteThroughCacheCompatibility) {
   LRUCache small_cache(kMaxSize);
   LRUCache big_cache(kMaxSize);
