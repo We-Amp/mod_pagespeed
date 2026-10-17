@@ -339,28 +339,40 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     /// by other local users (D8) — never the world-traversable shared
     /// <c>Path.GetTempPath()/pagespeed_sidecar</c> the prototype used.
     /// </summary>
-    private string ResolveConfigDirectory(SidecarOptions sidecar)
+    internal static void CreatePrivateDirectory(string dir)
+    {
+        const UnixFileMode OwnerOnly =
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(dir);
+            return;
+        }
+
+        // Created with the restrictive mode from the start (no window where the
+        // directory is group/world traversable).
+        Directory.CreateDirectory(dir, OwnerOnly);
+        try
+        {
+            // Also tightens a pre-existing (operator-pinned) directory.
+            File.SetUnixFileMode(dir, OwnerOnly);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    internal string ResolveConfigDirectory(SidecarOptions sidecar)
     {
         var dir = sidecar.ConfigDirectory
-            ?? Path.Combine(Path.GetTempPath(), $"ps-sidecar-{Environment.ProcessId}-{Guid.NewGuid():N}".Substring(0, 24));
+            ?? Path.Combine(Path.GetTempPath(), $"ps-sidecar-{Environment.ProcessId}-{Guid.NewGuid():N}");
         // Track ownership so Dispose only reaps the directory the sidecar created
         // itself (which holds the bearer-token conf). An operator-pinned
         // ConfigDirectory is left intact (their cache persists).
         _configDir = dir;
         _ownsConfigDir = sidecar.ConfigDirectory == null;
-        Directory.CreateDirectory(dir);
-        if (!OperatingSystem.IsWindows())
-        {
-            try
-            {
-                File.SetUnixFileMode(dir,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-            catch
-            {
-                // best-effort
-            }
-        }
+        CreatePrivateDirectory(dir);
         return dir;
     }
 

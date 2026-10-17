@@ -65,8 +65,9 @@ public class NginxConfigGenerator
 
         var (conf, adminToken) = GenerateConfig(options, prefix, resolvedBinaryPath);
 
-        File.WriteAllText(configPath, conf);
-        // The generated conf embeds the admin bearer token -> 0600 (D8).
+        // The generated conf embeds the admin bearer token -> created 0600 from the
+        // start (D8), never briefly readable under the default umask.
+        WriteOwnerOnlyFile(configPath, conf);
         TrySetMode(configPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
         _logger.LogInformation("Generated nginx configuration at {ConfigPath}", configPath);
@@ -618,6 +619,23 @@ public class NginxConfigGenerator
         var bytes = new byte[32];
         RandomNumberGenerator.Fill(bytes);
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    internal static void WriteOwnerOnlyFile(string path, string contents)
+    {
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+            Share = FileShare.Read,
+        };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+        using var stream = new FileStream(path, options);
+        using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
+        writer.Write(contents);
     }
 
     private static void TrySetMode(string path, UnixFileMode mode)
