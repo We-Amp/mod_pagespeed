@@ -1278,15 +1278,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		return static_cast<IHttpContext*>(context)->AllocateRequestMemory(size);
 	}
 
-	// The most bytes of one file chunk read into request memory: the
-	// rewriter's HTML size limit when one is set.
-	static ULONGLONG MaxFileChunkBytes(ServerContext* server_context)
-	{
-		int64 limit = server_context->global_options()->max_html_parse_bytes();
-		return (limit > 0 && static_cast<ULONGLONG>(limit) < MAXDWORD)
-			? static_cast<ULONGLONG>(limit) : MAXDWORD;
-	}
-
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnSendResponse(IN IHttpContext * pHttpContext, IN ISendResponseProvider * pProvider)
 	{
@@ -1435,7 +1426,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			if (innerContext->proxy_fetch() == NULL &&
 				(!AllEntityChunksReadable(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount) ||
 				 !ConvertFileChunksToMemory(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount,
-					MaxFileChunkBytes(innerContext->server_context()), &AllocateResponseChunk, pHttpContext)))
+					MAXDWORD, &AllocateResponseChunk, pHttpContext)))
 			{
 				log(pHttpContext, "OnSendResponse --- response has chunks that cannot be read, bail");
 				if (innerContext->recorder() != NULL) {
