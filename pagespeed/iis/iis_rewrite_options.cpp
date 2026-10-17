@@ -311,7 +311,12 @@ const char*
 IisRewriteOptions::ParseAndSetOptions(
      std::vector<std::string> args, MessageHandler* handler, global_settings& global_config) {
   int n_args = args.size();
-  CHECK_GE(n_args, 1);
+  if (n_args < 1) {
+    // A directive line without an option name: report it, as for an unknown
+    // option, and leave the options unchanged.
+    handler->Message(kWarning, "Missing option name in a pagespeed directive");
+    return "missing option name";
+  }
 
   StringPiece directive = args[0];
 
