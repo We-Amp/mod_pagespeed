@@ -502,6 +502,93 @@ TEST_F(GifScanlineReaderRawTest, FrameSmallerThanImage) {
   EXPECT_EQ(0, message_handler_.MessagesOfType(net_instaweb::kFatal));
 }
 
+// Helpers to build minimal GIF images byte by byte so truncated
+// extension blocks can be constructed precisely.
+
+// A 1x1 GIF89a header with no global color table.
+void AppendGifHeaderNoGct(GoogleString* out) {
+  const char header[] = {'G',  'I',  'F',  '8',  '9',  'a',  //
+                         0x01, 0x00,                   // width = 1
+                         0x01, 0x00,                   // height = 1
+                         0x00,                         // no global color table
+                         0x00,                         // background index
+                         0x00};                        // aspect ratio
+  out->append(header, sizeof(header));
+}
+
+// A 1x1 image descriptor at (0, 0) with no local color table,
+// followed by LZW data encoding a single pixel of value
+// 'pixel_value' (minimum code size 3 so values up to 7 encode).
+void AppendOnePixelImageDescriptor(GoogleString* out, int pixel_value) {
+  const char descriptor[] = {0x2C,        // image separator
+                             0x00, 0x00,  // left = 0
+                             0x00, 0x00,  // top = 0
+                             0x01, 0x00,  // width = 1
+                             0x01, 0x00,  // height = 1
+                             0x00};       // no local color table
+  out->append(descriptor, sizeof(descriptor));
+  // Minimum code size 3: clear = 8, EOI = 9, first code is 4 bits.
+  // Codes: clear(8), pixel_value, EOI(9), packed LSB first.
+  const int bits = 8 /* clear */ | (pixel_value << 4) | (9 << 8) /* EOI */;
+  const char lzw[] = {0x03,  // minimum code size
+                      0x02, static_cast<char>(bits & 0xff),
+                      static_cast<char>((bits >> 8) & 0xff),
+                      0x00  // block terminator
+  };
+  out->append(lzw, sizeof(lzw));
+}
+
+TEST_F(GifReaderTest, EmptyGraphicsControlExtensionBlock) {
+  // A graphics control extension whose single sub-block is empty
+  // (length zero) decodes to a null extension pointer; the reader
+  // must reject the image instead of dereferencing it.
+  GoogleString in;
+  AppendGifHeaderNoGct(&in);
+  const char empty_gce[] = {0x21, 0xF9, 0x00};
+  in.append(empty_gce, sizeof(empty_gce));
+  in.push_back(0x3B);  // trailer
+
+  EXPECT_FALSE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
+                                    PNG_TRANSFORM_IDENTITY));
+}
+
+TEST(GifFrameReaderInvalidInput, EmptyGraphicsControlExtensionBlock) {
+  // Same empty graphics control extension block, on the frame reader
+  // path: Initialize() scans past it, and PrepareNextFrame() must
+  // reject it instead of dereferencing a null extension.
+  GoogleString in;
+  AppendGifHeaderNoGct(&in);
+  const char empty_gce[] = {0x21, 0xF9, 0x00};
+  in.append(empty_gce, sizeof(empty_gce));
+  AppendOnePixelImageDescriptor(&in, 0);
+  in.push_back(0x3B);
+
+  MockMessageHandler message_handler(new NullMutex);
+  std::unique_ptr<MultipleFrameReader> reader(
+      new TestGifFrameReader(&message_handler));
+  ASSERT_TRUE(reader->Initialize(in.data(), in.length()).Success());
+  ScanlineStatus status;
+  EXPECT_FALSE(reader->PrepareNextFrame(&status));
+}
+
+TEST(GifFrameReaderInvalidInput, EmptyLoopCountSubblock) {
+  // A NETSCAPE2.0 application extension whose loop-count sub-block
+  // is empty (length zero) decodes to a null extension pointer; the
+  // frame reader must reject the image during Initialize() instead of
+  // dereferencing it.
+  GoogleString in;
+  AppendGifHeaderNoGct(&in);
+  const char empty_loop_count[] = {0x21, 0xFF, 0x0B, 'N', 'E', 'T', 'S', 'C',
+                                   'A',  'P',  'E',  '2', '.', '0', 0x00};
+  in.append(empty_loop_count, sizeof(empty_loop_count));
+  in.push_back(0x3B);
+
+  MockMessageHandler message_handler(new NullMutex);
+  std::unique_ptr<MultipleFrameReader> reader(
+      new TestGifFrameReader(&message_handler));
+  EXPECT_FALSE(reader->Initialize(in.data(), in.length()).Success());
+}
+
 TEST(GifReaderUtil, DisposalMethod) {
   for (int i = -1; i < 4; ++i) {
     FrameSpec::DisposalMethod actual_disposal =

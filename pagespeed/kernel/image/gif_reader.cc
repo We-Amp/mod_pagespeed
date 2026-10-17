@@ -221,6 +221,11 @@ bool ReadExtension(GifFileType* gif_file, png_structp png_ptr,
   // We only care about one extension type, the graphics extension,
   // which can contain transparency information.
   if (ext_code == GRAPHICS_EXT_FUNC_CODE) {
+    // A zero-length sub-block yields a null extension pointer.
+    if (extension == nullptr) {
+      PS_DLOG_INFO(handler, "Received graphics extension with no data.");
+      return false;
+    }
     // Make sure that the extension has the expected length.
     if (extension[0] < 4) {
       PS_DLOG_INFO(handler,
@@ -729,6 +734,11 @@ ScanlineStatus GifFrameReader::ProcessExtensionAffectingFrame() {
   }
 
   if (ext_code == GRAPHICS_EXT_FUNC_CODE) {
+    if (extension == nullptr) {
+      return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler(),
+                              SCANLINE_STATUS_PARSE_ERROR, FRAME_GIFREADER,
+                              "NULL graphics control extension block.");
+    }
     if (extension[kGifGceSizeIndex] != kGifGceExpectedSize) {
       return PS_LOGGED_STATUS(
           PS_LOG_INFO, message_handler(), SCANLINE_STATUS_PARSE_ERROR,
@@ -833,6 +843,11 @@ ScanlineStatus GifFrameReader::ProcessExtensionAffectingImage(
             PS_LOG_INFO, message_handler(), SCANLINE_STATUS_PARSE_ERROR,
             FRAME_GIFREADER,
             "DGifGetExtensionNext failed while trying to get loop count");
+      }
+      if (extension == nullptr) {
+        return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler(),
+                                SCANLINE_STATUS_PARSE_ERROR, FRAME_GIFREADER,
+                                "NULL animation loop count block.");
       }
       if (((extension[kGifAeLoopCountLengthIndex] !=
             kGifAeLoopCountExpectedLength) &&
