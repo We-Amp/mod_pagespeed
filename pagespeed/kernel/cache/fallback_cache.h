@@ -78,6 +78,20 @@ class FallbackCache : public CacheInterface {
   // value size when checking whether a store exceeds threshold_bytes.
   void set_account_for_key_size(bool x) { account_for_key_size_ = x; }
 
+  // The stored size Put() compares against threshold_bytes: the value,
+  // plus the key when the key is accounted for, plus one byte for the
+  // routing marker. Computed in 64 bits so a value past 2 GB cannot wrap
+  // the result and be misrouted into the small-object cache.
+  static int64 StoreSizeForRouting(StringPiece key, size_t value_size,
+                                   bool account_for_key_size) {
+    int64 store_size = static_cast<int64>(value_size);
+    if (account_for_key_size) {
+      store_size += static_cast<int64>(key.size());
+    }
+    store_size += 1;  // For kInSmallObjectCache marker.
+    return store_size;
+  }
+
  private:
   void DecodeValueMatchingKeyAndCallCallback(const GoogleString& key,
                                              const char* data, size_t data_len,
