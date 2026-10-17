@@ -96,7 +96,10 @@ pagespeed_cc_test(
     srcs = ["net_fetch_key_directory_test.cc"],
     shard_count = 1,
     deps = [
+        "//net/instaweb/http:http",
         "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http:http",
+        "//pagespeed/kernel/util:util",
         "//pagespeed/kernel/webbotauth:webbotauth_netfetch",
         "//pagespeed/opt/http:http",
     ],
