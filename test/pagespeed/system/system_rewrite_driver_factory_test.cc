@@ -43,6 +43,7 @@
 
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "pagespeed/kernel/base/circular_buffer.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
@@ -436,6 +437,35 @@ TEST_F(SystemThreadCountTest, AutoThreadCountConstantIsLinkable) {
   EXPECT_EQ(0, SystemRewriteDriverFactory::kAutoThreadCount);
   EXPECT_EQ(SystemRewriteDriverFactory::kAutoThreadCount,
             std::max(SystemRewriteDriverFactory::kAutoThreadCount, 0));
+}
+
+// MessageBufferSize is handed straight to the shared-memory circular buffer,
+// so a negative value or one past CircularBuffer::kMaxCapacity must be
+// rejected at parse time as a visible configuration error, not silently
+// carried into a segment that can never be initialized.
+TEST_F(SystemThreadCountTest, MessageBufferSizeOutOfRangeIsRejected) {
+  Init();
+  GoogleString msg = SetInvalidDirective("MessageBufferSize", "-1");
+  EXPECT_TRUE(msg.find("MessageBufferSize") != GoogleString::npos) << msg;
+  EXPECT_EQ(0, factory_->message_buffer_size());
+
+  msg = SetInvalidDirective("MessageBufferSize",
+                            StrCat(CircularBuffer::kMaxCapacity + 1).c_str());
+  EXPECT_TRUE(msg.find("MessageBufferSize") != GoogleString::npos) << msg;
+  EXPECT_EQ(0, factory_->message_buffer_size());
+}
+
+TEST_F(SystemThreadCountTest, MessageBufferSizeInRangeIsAccepted) {
+  Init();
+  SetDirective("MessageBufferSize", "0");  // Disables the message buffer.
+  EXPECT_EQ(0, factory_->message_buffer_size());
+
+  SetDirective("MessageBufferSize",
+               StrCat(CircularBuffer::kMaxCapacity).c_str());
+  EXPECT_EQ(CircularBuffer::kMaxCapacity, factory_->message_buffer_size());
+
+  SetDirective("MessageBufferSize", "10000");
+  EXPECT_EQ(10000, factory_->message_buffer_size());
 }
 
 }  // namespace

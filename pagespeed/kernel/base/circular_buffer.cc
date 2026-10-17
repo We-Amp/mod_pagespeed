@@ -31,6 +31,10 @@ namespace net_instaweb {
 
 class MessageHandler;
 
+// Definition for the ODR uses of the in-class constant (comparisons and
+// diagnostics in the factories pass it by reference).
+const int CircularBuffer::kMaxCapacity;
+
 CircularBuffer* CircularBuffer::Create(const int capacity) {
   if (!IsValidCapacity(capacity)) {
     return nullptr;
