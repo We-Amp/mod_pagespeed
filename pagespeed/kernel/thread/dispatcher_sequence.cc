@@ -55,21 +55,45 @@ DispatcherSequence::~DispatcherSequence() {
 }
 
 void DispatcherSequence::Add(Function* function) {
-  ScopedMutex lock(mutex_.get());
+  {
+    ScopedMutex lock(mutex_.get());
 
-  if (shutting_down_) {
-    // During shutdown, immediately cancel new tasks.
-    function->CallCancel();
-    return;
-  }
+    if (shutting_down_) {
+      // During shutdown, immediately cancel new tasks.
+      function->CallCancel();
+      return;
+    }
 
-  queue_.push_back(function);
+    queue_.push_back(function);
 
-  // If no task is currently running, schedule the next one.
-  if (!running_task_) {
+    // If a task is already running it will schedule the next one.
+    if (running_task_) {
+      return;
+    }
     running_task_ = true;
-    // Post a callback to run the next task.
-    dispatcher_->Post(MakeFunction(this, &DispatcherSequence::RunNextTask));
+  }
+  // Posted without holding mutex_: the dispatcher may cancel the step
+  // synchronously, and CancelNextTask takes mutex_.
+  PostNextTask();
+}
+
+void DispatcherSequence::PostNextTask() {
+  dispatcher_->Post(MakeFunction(this, &DispatcherSequence::RunNextTask,
+                                 &DispatcherSequence::CancelNextTask));
+}
+
+void DispatcherSequence::CancelNextTask() {
+  // The dispatcher will not run the step that would have drained queue_, so
+  // nothing queued can run: cancel it and stop counting a task as running.
+  ScopedMutex lock(mutex_.get());
+  while (!queue_.empty()) {
+    Function* f = queue_.front();
+    queue_.pop_front();
+    f->CallCancel();
+  }
+  running_task_ = false;
+  if (shutting_down_) {
+    shutdown_complete_ = true;
   }
 }
 
@@ -135,26 +159,28 @@ void DispatcherSequence::RunNextTask() {
 }
 
 void DispatcherSequence::TaskComplete() {
-  ScopedMutex lock(mutex_.get());
+  {
+    ScopedMutex lock(mutex_.get());
 
-  if (shutting_down_) {
-    // Cancel remaining tasks.
-    while (!queue_.empty()) {
-      Function* f = queue_.front();
-      queue_.pop_front();
-      f->CallCancel();
+    if (shutting_down_) {
+      // Cancel remaining tasks.
+      while (!queue_.empty()) {
+        Function* f = queue_.front();
+        queue_.pop_front();
+        f->CallCancel();
+      }
+      running_task_ = false;
+      shutdown_complete_ = true;
+      return;
     }
-    running_task_ = false;
-    shutdown_complete_ = true;
-    return;
-  }
 
-  if (!queue_.empty()) {
-    // More work to do - schedule the next task.
-    dispatcher_->Post(MakeFunction(this, &DispatcherSequence::RunNextTask));
-  } else {
-    running_task_ = false;
+    if (queue_.empty()) {
+      running_task_ = false;
+      return;
+    }
   }
+  // More work to do - schedule the next task.
+  PostNextTask();
 }
 
 }  // namespace net_instaweb

@@ -72,8 +72,14 @@ class DispatcherSequence : public Sequence {
   void WaitForShutdown();
 
  private:
+  // Posts RunNextTask to the dispatcher.  Must be called without mutex_ held.
+  void PostNextTask();
+
   // Called by the dispatcher to run the next task in the queue.
   void RunNextTask();
+
+  // Called if the dispatcher cancels RunNextTask instead of running it.
+  void CancelNextTask();
 
   // Called after a task completes to potentially schedule the next one.
   void TaskComplete();
