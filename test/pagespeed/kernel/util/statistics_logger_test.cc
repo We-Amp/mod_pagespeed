@@ -19,7 +19,7 @@
 
 #include "pagespeed/kernel/util/statistics_logger.h"
 
-#include <unistd.h>
+#include <cstdlib>
 
 #include <chrono>
 #include <future>
@@ -510,7 +510,7 @@ void StatisticsLoggerTest::CheckTruncatedTail(const GoogleString& input,
   if (done.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
     ADD_FAILURE() << "ReadNextDataBlock did not terminate";
     fflush(stdout);
-    _exit(1);
+    std::_Exit(1);
   }
   EXPECT_EQ(1, done.get());
 
