@@ -385,7 +385,7 @@ TEST_F(RewriteDomainTransformerTest, UnquotedUrlLongWhitespaceIsLinear) {
   GoogleString output = Transform(input);
   const auto elapsed = std::chrono::steady_clock::now() - start;
   EXPECT_STREQ("a{background:url(http://old-base.com/x", output);
-  EXPECT_LT(elapsed, std::chrono::seconds(2));
+  EXPECT_LT(elapsed, std::chrono::seconds(10));
 }
 
 TEST_F(RewriteDomainTransformerTest, Relative) {

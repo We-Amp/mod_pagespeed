@@ -290,6 +290,9 @@ class JsTokenizer {
   std::vector<ParseState> parse_stack_;
   std::deque<std::pair<JsKeywords::Type, StringPiece> > lookahead_queue_;
   StringPiece input_;  // The portion of input that has yet to be consumed.
+  // If non-null, no "*/" starts at or after this address.  Lets repeated
+  // regex-literal checks skip searches already known to fail.
+  const char* no_block_end_from_ = nullptr;
   JsonStep json_step_;
   bool start_of_line_;  // No non-whitespace/comment tokens on this line yet.
   // See LastTokenWasSpeculativeOperator().  Survives whitespace, comments,
@@ -341,7 +344,8 @@ class JsTokenizer {
 // must decline: failing is fail-safe, since the caller then serves the
 // original input unmodified.  `input` must start at the literal's opening
 // slash.
-bool SpeculativeRegexCanReassembleComment(StringPiece input);
+bool SpeculativeRegexCanReassembleComment(
+    StringPiece input, const char** no_block_end_from = nullptr);
 
 // Structure to store RE2 patterns that can be shared by instances of
 // JsTokenizer.  These patterns are slightly expensive to compile, so we'd

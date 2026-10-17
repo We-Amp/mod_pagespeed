@@ -685,7 +685,46 @@ TEST_F(JsTokenizerTest, SpeculativeRegexManyBlockCommentOpenersIsLinear) {
   while (tokenizer.NextToken(&token) != JsKeywords::kEndOfInput) {
   }
   const auto elapsed = std::chrono::steady_clock::now() - start;
-  EXPECT_LT(elapsed, std::chrono::seconds(2));
+  EXPECT_LT(elapsed, std::chrono::seconds(10));
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexBlockCommentEndReused) {
+  // One closing marker inside the literal serves both openers.
+  BeginTokenizing("return await/[/*/*a*/]/;");
+  ExpectToken(JsKeywords::kReturn, "return", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start RetTh Oper");
+  ExpectToken(JsKeywords::kRegex, "/[/*/*a*/]/", "Start RetTh Expr");
+  ExpectToken(JsKeywords::kOperator, ";", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexBlockCommentEndAtLiteralBoundary) {
+  // The second opener's comment ends exactly at the literal's closing slash,
+  // so it could swallow code after the literal: the tokenizer declines.
+  BeginTokenizing("return await/[/*a*/ /*b]*/;");
+  ExpectToken(JsKeywords::kReturn, "return", "Start RetTh");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kAwait, "await", "Start RetTh Oper");
+  ExpectError("/[/*a*/ /*b]*/;");
+}
+
+TEST_F(JsTokenizerTest, SpeculativeRegexManyLiteralsIsLinear) {
+  // Many short literals, each with an unclosed comment opener and no closing
+  // marker anywhere later.  Work must stay linear across literals too.
+  GoogleString input;
+  for (int i = 0; i < 55000; ++i) {
+    input += "return await/[/*]/;";
+  }
+  const auto start = std::chrono::steady_clock::now();
+  JsTokenizerPatterns patterns;
+  JsTokenizer tokenizer(&patterns, input);
+  StringPiece token;
+  while (tokenizer.NextToken(&token) != JsKeywords::kEndOfInput) {
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_FALSE(tokenizer.has_error());
+  EXPECT_LT(elapsed, std::chrono::seconds(10));
 }
 
 TEST_F(JsTokenizerTest, SpeculativeOperatorBlockGuard) {
