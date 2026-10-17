@@ -21,6 +21,8 @@
 
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 
+#include <chrono>
+
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
@@ -367,6 +369,23 @@ TEST_F(RewriteDomainTransformerTest, AbsoluteSQuote) {
 TEST_F(RewriteDomainTransformerTest, AbsoluteDQuote) {
   const char css_with_abs_path[] = "a url(\"http://other_base/image.png\") b";
   EXPECT_STREQ(css_with_abs_path, Transform(css_with_abs_path));
+}
+
+TEST_F(RewriteDomainTransformerTest, UnquotedUrlTrailingWhitespace) {
+  EXPECT_STREQ("a{background:url(http://old-base.com/x",
+               Transform("a{background:url(x   "));
+}
+
+TEST_F(RewriteDomainTransformerTest, UnquotedUrlLongWhitespaceIsLinear) {
+  // An unterminated unquoted url followed by a very long run of whitespace
+  // must be handled in linear time.
+  GoogleString input = "a{background:url(x";
+  input.append(1 << 20, ' ');
+  const auto start = std::chrono::steady_clock::now();
+  GoogleString output = Transform(input);
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_STREQ("a{background:url(http://old-base.com/x", output);
+  EXPECT_LT(elapsed, std::chrono::seconds(2));
 }
 
 TEST_F(RewriteDomainTransformerTest, Relative) {
