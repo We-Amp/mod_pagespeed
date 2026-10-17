@@ -18,7 +18,13 @@ bash "$SCRIPT_DIR/check-product-facts.sh"
 # Ensure dependencies are installed
 if [ ! -d "node_modules" ]; then
   echo "Installing dependencies..."
-  pnpm install --frozen-lockfile 2>/dev/null || npm install
+  # pnpm-lock.yaml is the only lock file; the pnpm version is pinned by the
+  # packageManager field in package.json (`corepack enable` provides it).
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "ERROR: pnpm not found; run 'corepack enable' first" >&2
+    exit 1
+  fi
+  pnpm install --frozen-lockfile
 fi
 
 # Stamp the version into the SPA. Release builds set VITE_APP_VERSION
