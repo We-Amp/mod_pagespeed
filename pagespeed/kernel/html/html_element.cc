@@ -67,8 +67,8 @@ bool EscapedValueNeedsQuotes(const StringPiece& escaped_value) {
 // An attribute whose value is replaced with one that cannot be serialized
 // unquoted must be quoted, or the serialized form would silently split the
 // value into additional attributes.
-HtmlElement::QuoteStyle QuoteStyleForEscapedValue(
-    HtmlElement::QuoteStyle style, const char* escaped_value) {
+HtmlElement::QuoteStyle QuoteStyleForEscapedValue(HtmlElement::QuoteStyle style,
+                                                  const char* escaped_value) {
   if (style == HtmlElement::NO_QUOTE && escaped_value != nullptr &&
       EscapedValueNeedsQuotes(escaped_value)) {
     return HtmlElement::DOUBLE_QUOTE;
