@@ -552,6 +552,74 @@ TEST_F(GifReaderTest, EmptyGraphicsControlExtensionBlock) {
                                     PNG_TRANSFORM_IDENTITY));
 }
 
+TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
+  // A pixel index beyond the end of the color map must expand to
+  // deterministic black rather than to whatever happens to sit in the
+  // uninitialized tail of the palette buffer. The first, valid image
+  // primes the stack region the palette occupies with a distinctive
+  // fill so an uninitialized read is observable. The same PNG structs
+  // are reused for both images: resetting them would run a deep
+  // libpng call chain that wipes the primed stack region.
+  GoogleString priming, victim;
+
+  // Priming image: a 256-entry global color map entirely filled with
+  // 0xA5, pixel index 0.
+  const char priming_header[] = {'G',  'I',  'F',  '8', '9', 'a', 0x01, 0x00,
+                                 0x01, 0x00, 0x87, 0x00, 0x00};
+  priming.append(priming_header, sizeof(priming_header));
+  priming.append(256 * 3, static_cast<char>(0xA5));
+  AppendOnePixelImageDescriptor(&priming, 0);
+  priming.push_back(0x3B);
+  ASSERT_TRUE(gif_reader_->ReadPng(priming, read_.png_ptr(), read_.info_ptr(),
+                                   PNG_TRANSFORM_EXPAND));
+  png_bytep priming_row = png_get_rows(read_.png_ptr(), read_.info_ptr())[0];
+  const png_byte kPrimed[3] = {0xA5, 0xA5, 0xA5};
+  ASSERT_EQ(0, memcmp(priming_row, kPrimed, 3));
+
+  // Victim image: a two-entry global color map and four pixels whose
+  // indices (5, 60, 130, 250) are all out of range for the map.
+  const char victim_header[] = {'G',  'I',  'F',  '8', '9', 'a', 0x04, 0x00,
+                                0x01, 0x00, 0x80, 0x00, 0x00};
+  victim.append(victim_header, sizeof(victim_header));
+  const char color_map[] = {static_cast<char>(0xFF), 0x00, 0x00,  // red
+                            0x00, static_cast<char>(0xFF), 0x00};  // green
+  victim.append(color_map, sizeof(color_map));
+  const char descriptor[] = {0x2C,        // image separator
+                             0x00, 0x00,  // left = 0
+                             0x00, 0x00,  // top = 0
+                             0x04, 0x00,  // width = 4
+                             0x01, 0x00,  // height = 1
+                             0x00};       // no local color table
+  victim.append(descriptor, sizeof(descriptor));
+  // Minimum code size 8 (clear = 256, EOI = 257, 9-bit codes): clear,
+  // 5, 60, 130, 250, EOI, packed LSB first.
+  const int codes[] = {256, 5, 60, 130, 250, 257};
+  int bit_pos = 0;
+  unsigned char lzw[16] = {0};
+  for (int code : codes) {
+    for (int b = 0; b < 9; ++b) {
+      if ((code >> b) & 1) {
+        lzw[bit_pos / 8] |= 1 << (bit_pos % 8);
+      }
+      ++bit_pos;
+    }
+  }
+  const int lzw_size = (bit_pos + 7) / 8;
+  victim.push_back(0x08);  // minimum code size
+  victim.push_back(static_cast<char>(lzw_size));
+  victim.append(reinterpret_cast<const char*>(lzw), lzw_size);
+  victim.push_back(0x00);  // block terminator
+  victim.push_back(0x3B);  // trailer
+
+  ASSERT_TRUE(gif_reader_->ReadPng(victim, read_.png_ptr(), read_.info_ptr(),
+                                   PNG_TRANSFORM_EXPAND));
+  png_bytep victim_row = png_get_rows(read_.png_ptr(), read_.info_ptr())[0];
+  const png_byte kBlack[3] = {0x00, 0x00, 0x00};
+  for (int pixel = 0; pixel < 4; ++pixel) {
+    EXPECT_EQ(0, memcmp(victim_row + 3 * pixel, kBlack, 3)) << "pixel " << pixel;
+  }
+}
+
 TEST(GifFrameReaderInvalidInput, EmptyGraphicsControlExtensionBlock) {
   // Same empty graphics control extension block, on the frame reader
   // path: Initialize() scans past it, and PrepareNextFrame() must
