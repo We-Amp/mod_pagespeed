@@ -283,6 +283,12 @@ void CurlUrlAsyncFetcher::PollLoop() {
         curl_multi_add_handle(multi_handle_, fetch->curl_handle());
       }
     }
+    if (cancel_requested_.exchange(false)) {
+      int cancelled = AbortActiveFetches();
+      if (cancel_count_ != nullptr) {
+        cancel_count_->Add(cancelled);
+      }
+    }
     // Drive transfers
     int still_running = 0;
     curl_multi_perform(multi_handle_, &still_running);
@@ -324,12 +330,24 @@ void CurlUrlAsyncFetcher::PollLoop() {
     fetch->Done(CURLE_ABORTED_BY_CALLBACK);
   }
 
-  // Cancel active fetches (only poll thread touches active_fetches_ here)
-  while (!active_fetches_.empty()) {
-    CurlFetch* fetch = active_fetches_.RemoveOldest();
+  AbortActiveFetches();
+}
+
+int CurlUrlAsyncFetcher::AbortActiveFetches() {
+  std::vector<CurlFetch*> to_abort;
+  {
+    ScopedMutex lock(mutex_.get());
+    while (!active_fetches_.empty()) {
+      to_abort.push_back(active_fetches_.RemoveOldest());
+    }
+  }
+  // Callbacks run without the lock: Done() hands the fetch back through
+  // FetchComplete(), which takes it.
+  for (CurlFetch* fetch : to_abort) {
     curl_multi_remove_handle(multi_handle_, fetch->curl_handle());
     fetch->Done(CURLE_ABORTED_BY_CALLBACK);
   }
+  return static_cast<int>(to_abort.size());
 }
 
 void CurlUrlAsyncFetcher::FetchComplete(CurlFetch* fetch) {
@@ -352,15 +370,11 @@ void CurlUrlAsyncFetcher::PrintActiveFetches(MessageHandler* handler) const {
 }
 
 void CurlUrlAsyncFetcher::CancelActiveFetches() {
-  ScopedMutex lock(mutex_.get());
-  if (cancel_count_ != nullptr) {
-    cancel_count_->Add(active_fetches_.size());
-  }
-  while (!active_fetches_.empty()) {
-    CurlFetch* fetch = active_fetches_.oldest();
-    active_fetches_.Remove(fetch);
-    completed_fetches_.Add(fetch);
-  }
+  // The multi handle belongs to the poll thread, so only that thread may take
+  // easy handles out of it. Ask it to abort everything in flight; it completes
+  // each fetch exactly once, on its next iteration.
+  cancel_requested_ = true;
+  curl_multi_wakeup(multi_handle_);
 }
 
 void CurlUrlAsyncFetcher::SetSslCertificatesDir(StringPiece dir) {

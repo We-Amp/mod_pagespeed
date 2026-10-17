@@ -162,6 +162,8 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
     return active_fetches_.size() + pending_fetches_.size();
   }
 
+  // Completes every fetch started so far as cancelled. Returns at once; the
+  // callbacks run on the poll thread.
   void CancelActiveFetches();
 
   bool shutdown() const { return shutdown_; }
@@ -184,6 +186,10 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
                   int64 timeout_ms, size_t max_response_body_bytes,
                   MessageHandler* message_handler, AsyncFetch* async_fetch);
 
+  // Removes every active fetch from the multi handle and completes it as
+  // cancelled. Returns how many there were. Poll thread only.
+  int AbortActiveFetches();
+
   CURLM* multi_handle_;
   CurlFetchPool active_fetches_;
   CurlFetchPool pending_fetches_;
@@ -191,6 +197,8 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   GoogleString proxy_;
 
   std::atomic<bool> shutdown_;
+  // Set by CancelActiveFetches(), acted on by the poll thread.
+  std::atomic<bool> cancel_requested_{false};
   bool track_original_content_length_;
   bool list_outstanding_urls_on_error_;
   ThreadSystem* thread_system_;

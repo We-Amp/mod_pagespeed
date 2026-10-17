@@ -1015,6 +1015,36 @@ TEST_F(CurlUrlAsyncFetcherTest, TestShutdownWithActiveFetches) {
   delete fetch;
 }
 
+// CancelActiveFetches() must complete every outstanding fetch exactly once,
+// promptly, and leave the fetcher usable for new fetches.
+TEST_F(CurlUrlAsyncFetcherTest, CancelActiveFetchesCompletesEachFetchOnce) {
+  int second_slow = AddTestUrl(StrCat("http://", test_host_, "/delay/30"), "{");
+  StartFetches(kCgiSlowJs, kCgiSlowJs);
+  StartFetches(second_slow, second_slow);
+  curl_fetcher_->CancelActiveFetches();
+  // The server holds both responses far longer than the fetcher timeout, so
+  // only the cancellation can finish them inside this window.
+  int64 deadline_ms = timer_->NowMs() + fetcher_timeout_ms_ / 2;
+  while (
+      (!fetches_[kCgiSlowJs]->IsDone() || !fetches_[second_slow]->IsDone()) &&
+      timer_->NowMs() < deadline_ms) {
+    usleep(1000);
+  }
+  ASSERT_TRUE(fetches_[kCgiSlowJs]->IsDone());
+  ASSERT_TRUE(fetches_[second_slow]->IsDone());
+  EXPECT_FALSE(fetches_[kCgiSlowJs]->success());
+  EXPECT_FALSE(fetches_[second_slow]->success());
+  EXPECT_EQ(2,
+            statistics_->GetVariable(CurlStats::kCurlFetchCancelCount)->Get());
+  EXPECT_EQ(0, ActiveFetches());
+  EXPECT_EQ(0,
+            statistics_->GetVariable(CurlStats::kCurlFetchTimeoutCount)->Get());
+
+  // The fetcher keeps working after a cancellation.
+  prev_done_count = 0;
+  EXPECT_TRUE(TestFetch(kModpagespeedSite, kModpagespeedSite));
+}
+
 // ---- Coexisting fetcher instances (global init/cleanup refcounting) ----
 //
 // The admin console's daemon reader lazily creates its own
