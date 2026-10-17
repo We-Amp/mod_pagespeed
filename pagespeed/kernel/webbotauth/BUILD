@@ -12,6 +12,7 @@ cc_library(
     srcs = [
         "base64.cc",
         "classifier.cc",
+        "file_key_directory_cache.cc",
         "header_parser.cc",
         "jwks.cc",
         "key_directory.cc",
@@ -25,6 +26,7 @@ cc_library(
     hdrs = [
         "base64.h",
         "classifier.h",
+        "file_key_directory_cache.h",
         "header_parser.h",
         "jwks.h",
         "key_directory.h",
