@@ -258,14 +258,41 @@ class CacheFindCallback : public HTTPCache::Callback {
         const Hasher* lock_hasher, const RequestContextPtr& request_context,
         const GoogleString& url, NamedLockManager* lock_manager,
         MessageHandler* message_handler, const CachePutSettings& settings,
-        HTTPValue* fallback_value,
         CacheUrlAsyncFetcher::AsyncOpHooks* async_op_hooks)
         : AsyncFetchWithLock(lock_hasher, request_context, url,
                              url /* cache_key*/, lock_manager, message_handler),
           settings_(settings),
           async_op_hooks_(async_op_hooks) {
-      fallback_value_.Link(fallback_value);
       async_op_hooks_->StartAsyncOp();
+    }
+
+    // Must run after request_headers() are final and before Start().  Links
+    // fallback_value only when the conditional fetch built in StartFetch
+    // would revalidate it (same test as ConditionalSharedAsyncFetch).
+    // Linking a mapped value copies its body, and the link lives for the
+    // whole lock wait, so it is skipped when the copy would go unused.
+    void LinkFallbackIfRevalidatable(HTTPValue* fallback_value) {
+      if (fallback_value == nullptr || fallback_value->Empty()) {
+        return;
+      }
+      const RequestHeaders* headers = request_headers();
+      const char* request_etag = headers->Lookup1(HttpAttributes::kIfNoneMatch);
+      if (headers->Has(HttpAttributes::kIfModifiedSince) ||
+          (request_etag != nullptr &&
+           !StringCaseStartsWith(request_etag, HTTPCache::kEtagPrefix))) {
+        return;
+      }
+      ResponseHeaders cached_headers(request_context()->options());
+      if (!fallback_value->ExtractHeaders(&cached_headers, settings_.handler) ||
+          cached_headers.status_code() != HttpStatus::kOK) {
+        return;
+      }
+      const char* etag = cached_headers.Lookup1(HttpAttributes::kEtag);
+      if ((etag != nullptr &&
+           !StringCaseStartsWith(etag, HTTPCache::kEtagPrefix)) ||
+          cached_headers.Has(HttpAttributes::kLastModified)) {
+        fallback_value_.Link(fallback_value);
+      }
     }
 
     ~BackgroundFreshenFetch() override { async_op_hooks_->FinishAsyncOp(); }
@@ -564,9 +591,9 @@ class CacheFindCallback : public HTTPCache::Callback {
   }
 
   void TriggerBackgroundFreshenFetch() {
-    AsyncFetchWithLock* fetch = new BackgroundFreshenFetch(
+    BackgroundFreshenFetch* fetch = new BackgroundFreshenFetch(
         lock_hasher_, base_fetch_->request_context(), url_, lock_manager_,
-        handler_, cache_put_settings(), fallback_http_value(), async_op_hooks_);
+        handler_, cache_put_settings(), async_op_hooks_);
     RequestHeaders* request_headers = fetch->request_headers();
     request_headers->CopyFrom(*base_fetch_->request_headers());
     DCHECK(request_headers->method() == RequestHeaders::kGet ||
@@ -575,6 +602,7 @@ class CacheFindCallback : public HTTPCache::Callback {
     // If so, actually send the GET request, since we don't want to be
     // trying to cache a HEAD response.
     request_headers->set_method(RequestHeaders::kGet);
+    fetch->LinkFallbackIfRevalidatable(fallback_http_value());
     fetch->Start(fetcher_);
   }
 
