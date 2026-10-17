@@ -14,7 +14,9 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      # Base images move between long-term-support releases on purpose.
+      # Base images move to a new major release on purpose, never by a bump.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       # Ubuntu tags are year.month, so an interim release looks like a minor bump.
       - dependency-name: "ubuntu"
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+        update-types: ["version-update:semver-minor"]
