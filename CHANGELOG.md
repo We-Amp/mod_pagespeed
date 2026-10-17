@@ -60,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beyond the decode caps (16384 per side, 100 megapixels in total), instead
   of allocating buffers proportional to the declared size. A tiny stream
   could declare huge dimensions and exhaust worker memory.
+- A fetched resource whose gzip body inflates past the largest response the
+  server is configured to handle is no longer inflated in full; it is kept
+  compressed and treated like any other unusable content.
+- A compressed metadata-cache payload that inflates past the largest
+  cacheable response size is now reported as a corrupt entry (a cache miss)
+  instead of being inflated in full on the reading thread.
 
 ## [2.4.0] - 2026-10-14
 
