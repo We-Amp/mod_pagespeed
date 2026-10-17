@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A background cache refresh (proactive freshening or serve-stale-while-
   revalidate) that waited for its fetch lock no longer reads memory freed when
   the original request finished.
+- A dispatcher-backed task sequence no longer hangs on shutdown when its
+  dispatcher is already shutting down; tasks it can no longer run are
+  cancelled.
 
 ## [2.4.0] - 2026-10-14
 

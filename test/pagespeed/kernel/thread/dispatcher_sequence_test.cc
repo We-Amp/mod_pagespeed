@@ -153,5 +153,21 @@ TEST_F(DispatcherSequenceTest, AddDuringShutdownCancels) {
   EXPECT_EQ(-100, counter.load());
 }
 
+TEST_F(DispatcherSequenceTest, AddWhileDispatcherShutsDownCancels) {
+  // If the dispatcher refuses to run the sequence's next step, the queued
+  // task can never run: it must be cancelled, and the sequence must still be
+  // able to finish shutting down.
+  std::atomic<int> counter(0);
+  DispatcherSequence sequence(dispatcher_.get(), thread_system_.get());
+
+  dispatcher_->InitiateShutdown();
+  sequence.Add(new CountFunction(&counter));
+  ASSERT_EQ(-100, counter.load());
+
+  sequence.InitiateShutdown();
+  sequence.WaitForShutdown();
+  EXPECT_EQ(-100, counter.load());
+}
+
 }  // namespace
 }  // namespace net_instaweb
