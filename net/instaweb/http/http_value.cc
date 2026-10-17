@@ -171,7 +171,10 @@ bool HTTPValue::ExtractHeaders(ResponseHeaders* headers,
   if (raw_size() >= kStorageOverhead) {
     char type_id = type_identifier();
     const char* start = raw_data() + kStorageOverhead;
-    int size = SizeOfFirstChunk();
+    // The on-disk field is an unsigned 32-bit value.  Keep it in int64 so a
+    // corrupted entry with the high bit set cannot wrap negative and slip
+    // past the bounds check.
+    int64 size = SizeOfFirstChunk();
     if (size <= raw_size() - kStorageOverhead) {
       if (type_id == kBodyFirst) {
         start += size;
@@ -196,7 +199,9 @@ bool HTTPValue::ExtractContents(StringPiece* val) const {
   if (raw_size() >= kStorageOverhead) {
     char type_id = type_identifier();
     const char* start = raw_data() + kStorageOverhead;
-    int size = SizeOfFirstChunk();
+    // As in ExtractHeaders, keep the unsigned on-disk field in int64 so a
+    // corrupted entry cannot wrap negative and defeat the bounds check.
+    int64 size = SizeOfFirstChunk();
     if (size <= raw_size() - kStorageOverhead) {
       if (type_id == kHeadersFirst) {
         start += size;
