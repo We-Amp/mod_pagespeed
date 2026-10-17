@@ -62,6 +62,7 @@
 #include "ngx_gzip_setter.h"
 #include "ngx_list_iterator.h"
 #include "ngx_message_handler.h"
+#include "ngx_request_body.h"
 #include "ngx_rewrite_driver_factory.h"
 #include "ngx_rewrite_options.h"
 #include "ngx_server_context.h"
@@ -103,7 +104,6 @@ extern ngx_module_t ngx_pagespeed;
 // Unused flag, see
 // http://lxr.evanmiller.org/http/source/http/ngx_http_request.h#L130
 #define NGX_HTTP_PAGESPEED_BUFFERED 0x08
-#define POST_BUF_READ_SIZE 65536
 #define ADMIN_MAX_POST_SIZE 8192
 
 // Needed for SystemRewriteDriverFactory to use shared memory.
@@ -4169,19 +4169,20 @@ bool ps_request_body_to_string_piece(ngx_http_request_t* r, StringPiece* out) {
   }
 
   if (r->request_body->temp_file) {
-    u_char buf[POST_BUF_READ_SIZE];
-    int count = 0;
-    ssize_t ret;
+    ngx_file_t* file = &r->request_body->temp_file->file;
     GoogleString tmp;
-
-    // Note that we depend on nginx to impose sensible limits on post data.
-    while ((ret = ngx_read_file(&r->request_body->temp_file->file, buf,
-                                POST_BUF_READ_SIZE, count)) > 0) {
-      tmp.append(reinterpret_cast<char*>(buf), ret);
-      count += ret;
-    }
-
-    if (ret < 0) {
+    NgxRequestBodyStatus status = NgxReadRequestBody(
+        [file](char* buf, size_t size, int64 offset) -> int64 {
+          return ngx_read_file(file, reinterpret_cast<u_char*>(buf), size,
+                               static_cast<off_t>(offset));
+        },
+        kNgxMaxRequestBodyBytes, &tmp);
+    if (status == kNgxRequestBodyTooLarge) {
+      ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                    "ps_request_body_to_string_piece: "
+                    "post body too large.");
+      return false;
+    } else if (status != kNgxRequestBodyOk) {
       ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                     "ps_request_body_to_string_piece: "
                     "error reading post body.");
@@ -4190,10 +4191,14 @@ bool ps_request_body_to_string_piece(ngx_http_request_t* r, StringPiece* out) {
 
     // We have read the complete post body, copy it to a buffer
     // from the request's pool.
-    u_char* data = reinterpret_cast<u_char*>(ngx_palloc(r->pool, count));
-    memcpy(data, tmp.c_str(), count);
-    *out = StringPiece(reinterpret_cast<char*>(data), count);
-
+    if (!NgxCopyRequestBody(
+            tmp, [r](size_t n) -> void* { return ngx_palloc(r->pool, n); },
+            out)) {
+      ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                    "ps_request_body_to_string_piece: "
+                    "failed to allocate memory");
+      return false;
+    }
     return true;
   } else if (r->request_body->bufs->next == nullptr) {
     // There's just one buffer, so we can simply return a StringPiece pointing

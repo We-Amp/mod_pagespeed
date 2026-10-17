@@ -40,6 +40,18 @@ pagespeed_cc_test(
     ],
 )
 
+# Loading a spooled request body: bounded in size, read errors and failed
+# allocations reported rather than written through.
+pagespeed_cc_test(
+    name = "ngx_request_body_test",
+    srcs = ["ngx_request_body_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/nginx:ngx_request_body",
+    ],
+)
+
 # The admin-style handler path lookup: exact vs subtree, unconfigured never
 # matches, and case-sensitive like the nginx `location` blocks that guard
 # these paths.
