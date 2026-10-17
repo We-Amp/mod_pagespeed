@@ -29,9 +29,11 @@
 #include <windows.h>
 
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "base/logging.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
@@ -66,6 +68,10 @@ class WindowsSharedMemEnv : public SharedMemTestEnv {
   }
 
   void ShortSleep() override { Sleep(1); }
+
+  // A named mutex whose owning thread or process terminates is handed to the
+  // next waiter as abandoned, which the runtime reports as a recovery.
+  bool RecoversAbandonedMutexes() const override { return true; }
 
   bool CreateChild(Function* callback) override {
     RunFunctionThread* thread =
@@ -305,6 +311,56 @@ TEST(WindowsSharedMemTest, CreateDoesNotTakeOverAnotherOwnersSegment) {
 
   UnmapViewOfFile(other_view);
   CloseHandle(other_mapping);
+}
+
+// The runtime reports a mutex taken over from a terminated holder, and a
+// non-blocking acquire of such a mutex succeeds instead of leaving it held.
+TEST(WindowsSharedMemTest, AbandonedMutexIsReportedAndUsable) {
+  WindowsSharedMem shm;
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  MockMessageHandler handler(thread_system->NewMutex());
+
+  std::unique_ptr<AbstractSharedMemSegment> seg(
+      shm.CreateSegment("test_abandon", shm.SharedMutexSize() + 64, &handler));
+  ASSERT_NE(nullptr, seg.get());
+  ASSERT_TRUE(seg->InitializeSharedMutex(0, &handler));
+
+  class Counting : public AbstractSharedMemSegment::MutexRecoveryHandler {
+   public:
+    void OnOwnerDied() override { ++calls; }
+    int calls = 0;
+  } recovery;
+
+  for (int use_try_lock = 0; use_try_lock < 2; ++use_try_lock) {
+    std::thread holder([&seg]() {
+      std::unique_ptr<AbstractMutex> m(seg->AttachToSharedMutex(0));
+      m->Lock();
+      // Terminates while holding the mutex.
+    });
+    holder.join();
+
+    std::unique_ptr<AbstractMutex> mutex(
+        seg->AttachToSharedMutexWithRecovery(0, &recovery));
+    ASSERT_NE(nullptr, mutex.get());
+    if (use_try_lock) {
+      EXPECT_TRUE(mutex->TryLock());
+    } else {
+      mutex->Lock();
+    }
+    EXPECT_EQ(use_try_lock + 1, recovery.calls);
+    mutex->Unlock();
+
+    // The mutex is free again for everyone.
+    std::thread other([&seg]() {
+      std::unique_ptr<AbstractMutex> m(seg->AttachToSharedMutex(0));
+      EXPECT_TRUE(m->TryLock());
+      m->Unlock();
+    });
+    other.join();
+  }
+  EXPECT_EQ(2, recovery.calls);
+  seg.reset();
+  shm.DestroySegment("test_abandon", &handler);
 }
 
 // Instantiate the standard shared memory test suites
