@@ -266,9 +266,22 @@ void CurlUrlAsyncFetcher::StartFetch(const GoogleString& url,
     active_count_->Add(1);
   }
 
+  // Check shutdown_ again under the lock: the poll thread drains
+  // pending_fetches_ under this lock only after shutdown_ is set, so a fetch
+  // queued here while shutdown_ is still false is always completed by it.
+  bool queued = false;
   {
     ScopedMutex lock(mutex_.get());
-    pending_fetches_.Add(curl_fetch);
+    if (!shutdown_) {
+      pending_fetches_.Add(curl_fetch);
+      queued = true;
+    }
+  }
+  if (!queued) {
+    message_handler->Message(
+        kWarning, "CurlUrlAsyncFetcher is shut down, cannot fetch: %s",
+        url.c_str());
+    curl_fetch->Done(CURLE_ABORTED_BY_CALLBACK);
   }
 }
 
