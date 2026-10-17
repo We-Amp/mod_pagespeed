@@ -51,6 +51,15 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Holder for a reference-counted object's reference until another owner
+# claims it (the per-request module's process context reference).
+# Header-only and free of IIS/Windows headers, like iis_proxy_fetch_completion.
+cc_library(
+    name = "iis_unclaimed_ref",
+    hdrs = ["iis_unclaimed_ref.h"],
+    visibility = ["//visibility:public"],
+)
+
 # Decision core for the zero-copy aliased serve (CycloneZeroCopyServe):
 # chunking, copy-out and abort policy.  Header-only and free of
 # IIS/Windows headers (same pattern as iis_proxy_fetch_completion) so the
@@ -153,6 +162,7 @@ cc_library(
         ":iis_global_constants",
         ":iis_ip_string",
         ":iis_proxy_fetch_completion",
+        ":iis_unclaimed_ref",
         ":iis_zerocopy_serve",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",

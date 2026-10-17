@@ -13,6 +13,7 @@
 #include "pagespeed/iis/iis_module_request_context.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/iis/iis_module_factory.h"
+#include "pagespeed/iis/iis_unclaimed_ref.h"
 
 namespace net_instaweb
 {
@@ -24,8 +25,7 @@ class IisHttpModule  : public CHttpModule
 public:
 	IisHttpModule(IisModuleFactory *module_creator) 
 	:
-		module_creator_(module_creator),
-		process_context__(NULL)
+		module_creator_(module_creator)
 	{
 	}
 
@@ -181,11 +181,11 @@ public:
 	void log(IHttpContext* c, const char * msg, ...);
 
 	IisProcessContext* process_context(const GoogleString& site_app_id,std::string site_root, const GoogleString& app_url_base) { 
-		if (!process_context__) 
+		if (!process_context__.get()) 
 		{
-			process_context__=module_creator_->GetProcessContext(site_app_id,site_root,app_url_base);
+			process_context__.Adopt(module_creator_->GetProcessContext(site_app_id,site_root,app_url_base));
 		}
-		return process_context__;
+		return process_context__.get();
 	}
    REQUEST_NOTIFICATION_STATUS
         OnAsyncCompletion(
@@ -214,7 +214,10 @@ private:
 	void WriteHandlerResponse(IN IHttpContext * pHttpContext, const StringPiece& output);
 
 	IisModuleFactory *module_creator_;
-	IisProcessContext* process_context__;
+	// The reference GetProcessContext adds for this request. A request
+	// context that is created claims it; otherwise it is released when the
+	// module goes away at the end of the request.
+	UnclaimedRef<IisProcessContext> process_context__;
 	IisHttpModule(const IisHttpModule&) = delete;
 	IisHttpModule& operator=(const IisHttpModule&) = delete;
 };

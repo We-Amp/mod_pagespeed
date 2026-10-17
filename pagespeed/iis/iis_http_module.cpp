@@ -2224,6 +2224,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// TODO:!!!!! is_resource => kHtml, etc?
 		IisModuleRequestContext* ctx = new IisModuleRequestContext(pHttpContext, is_resource, url, url_len, gurl, process_context, server_context,
 			(int)ntohs(addr_in->sin_port), ip_address);
+		// The request context now owns the process context reference and
+		// releases it when the request ends.
+		process_context__.Claim();
 		return ctx;
 
 	}
