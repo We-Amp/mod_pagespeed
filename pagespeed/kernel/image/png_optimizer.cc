@@ -922,6 +922,19 @@ ScanlineStatus PngScanlineReaderRaw::InitializeWithStatus(
                             SCANLINE_PNGREADERRAW, "png_get_IHDR() failed.");
   }
 
+  // Reject dimensions that imply a decode buffer we would never allocate,
+  // whatever the actual (possibly tiny) data size.
+  if (width > kScanlineMaxDimension || height > kScanlineMaxDimension ||
+      static_cast<uint64>(width) * height > kScanlineMaxImagePixels) {
+    png_struct_.reset();
+    return PS_LOGGED_STATUS(
+        PS_LOG_INFO, message_handler_, SCANLINE_STATUS_UNSUPPORTED_FORMAT,
+        SCANLINE_PNGREADERRAW,
+        "Image dimensions %ux%u exceed the supported "
+        "maximum.",
+        static_cast<unsigned>(width), static_cast<unsigned>(height));
+  }
+
   // Set up transformations. We will transform the input to one of these
   // formats: GRAY_8, RGB_888, and RGBA_8888.
   //

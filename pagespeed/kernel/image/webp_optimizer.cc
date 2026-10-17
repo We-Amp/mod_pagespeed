@@ -657,6 +657,20 @@ ScanlineStatus WebpScanlineReader::InitializeWithStatus(
   // TODO(huibao): Upgrade libwebp for open source and check if the
   // input is an animated WebP.
 
+  // Reject dimensions that imply a decode buffer we would never allocate,
+  // whatever the actual (possibly tiny) data size. The VP8X canvas size is
+  // 24 bits per side, so it can reach far beyond decodable images.
+  if (features.width > static_cast<int>(kScanlineMaxDimension) ||
+      features.height > static_cast<int>(kScanlineMaxDimension) ||
+      static_cast<uint64>(features.width) * features.height >
+          kScanlineMaxImagePixels) {
+    return PS_LOGGED_STATUS(
+        PS_LOG_INFO, message_handler_, SCANLINE_STATUS_UNSUPPORTED_FORMAT,
+        SCANLINE_WEBPREADER,
+        "Image dimensions %dx%d exceed the supported maximum.", features.width,
+        features.height);
+  }
+
   // Determine the pixel format and the number of channels.
   if (features.has_alpha) {
     pixel_format_ = RGBA_8888;

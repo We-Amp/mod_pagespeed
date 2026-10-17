@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list of origins authorized for fetching.
 - A proxied request rejected as unauthorized no longer leaks its property
   cache lookup state when the lookup finishes after the rejection.
+- Image decoding now rejects PNG and WebP streams that declare dimensions
+  beyond the decode caps (16384 per side, 100 megapixels in total), instead
+  of allocating buffers proportional to the declared size. A tiny stream
+  could declare huge dimensions and exhaust worker memory.
 
 ## [2.4.0] - 2026-10-14
 
