@@ -374,6 +374,23 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     return true;
   }
 
+  // Checks that every slot index referenced by the entry names a slot that
+  // exists in this rewrite.  The entry is trusted with vector indexing by
+  // every cache-hit consumer, so any out-of-range index marks it corrupt.
+  bool HasValidSlotIndexes(const OutputPartitions& partitions) const {
+    int num_slots = rewrite_context_->num_slots();
+    for (int i = 0, n = partitions.partition_size(); i < n; ++i) {
+      const CachedResult& partition = partitions.partition(i);
+      for (int j = 0, m = partition.input_size(); j < m; ++j) {
+        int index = partition.input(j).index();
+        if (index < 0 || index >= num_slots) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   // Tries to decode result of a cache lookup (which may or may not have
   // succeeded) into partitions (in result->partitions), and also checks the
   // dependency tables.
@@ -415,6 +432,18 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
       // borrow; a torn read is treated as a cache miss.
       if (cache_value.is_mapped() &&
           cache_value.RenewLeaseStrict() == LeaseRenewal::kTorn) {
+        rewrite_context_->FindServerContext()
+            ->rewrite_stats()
+            ->cached_output_misses()
+            ->Add(1);
+        *can_revalidate = false;
+        return false;
+      }
+      // The slot indexes serialized in the entry are later used verbatim to
+      // index the rewrite's slot table.  A corrupted entry naming a slot
+      // that does not exist must be rejected here, as a cache miss, before
+      // any consumer can index out of bounds.
+      if (!HasValidSlotIndexes(*partitions)) {
         rewrite_context_->FindServerContext()
             ->rewrite_stats()
             ->cached_output_misses()
