@@ -154,11 +154,8 @@ void FallbackCache::MultiGet(MultiGetRequest* request) {
 }
 
 void FallbackCache::Put(const GoogleString& key, const SharedString& value) {
-  int store_size = value.size();
-  if (account_for_key_size_) {
-    store_size += static_cast<int>(key.size());
-  }
-  store_size += 1;  // For kInSmallObjectCache marker.
+  const int64 store_size =
+      StoreSizeForRouting(key, value.size(), account_for_key_size_);
 
   if (store_size > threshold_bytes_) {
     // Write the actual value to large_object_cache_ first, then the

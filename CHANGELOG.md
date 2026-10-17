@@ -72,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Image spriting now applies the same `ImageResolutionLimitBytes` budget as
   image rewriting, so a candidate image whose declared dimensions exceed the
   limit is skipped instead of being laid out into a canvas of that size.
+- The two-tier cache that routes values by size no longer truncates the
+  stored size to 32 bits, so a value past 2 GB is routed to the large-object
+  tier as intended instead of wrapping into the small-object tier.
 
 ## [2.4.0] - 2026-10-14
 
