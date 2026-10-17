@@ -2244,6 +2244,30 @@ TEST_F(AttributeManipulationTest, ModifyAttribute) {
   CheckExpected("<a src='google' id=37 class='search!' selected />");
 }
 
+TEST_F(AttributeManipulationTest, SetValueWithSpaceUpgradesUnquotedAttribute) {
+  // id=37 is unquoted.  Rewriting it to a value containing characters
+  // outside the unquoted-attribute-value set must upgrade its quoting;
+  // otherwise the serialized form silently splits the value into extra
+  // attributes.
+  HtmlElement::Attribute* id = node_->FindAttribute(HtmlName::kId);
+  ASSERT_TRUE(id != nullptr);
+  id->SetValue("37 onmouseover=alert(1)");
+  EXPECT_EQ(HtmlElement::DOUBLE_QUOTE, id->quote_style());
+  CheckExpected(
+      "<a href=\"http://www.google.com/\" id=\"37 onmouseover=alert(1)\""
+      " class='search!' selected />");
+}
+
+TEST_F(AttributeManipulationTest, SetValueWithoutUnsafeCharsKeepsNoQuote) {
+  // A value that stays within the unquoted-safe set keeps its quoting.
+  HtmlElement::Attribute* id = node_->FindAttribute(HtmlName::kId);
+  ASSERT_TRUE(id != nullptr);
+  id->SetValue("38");
+  EXPECT_EQ(HtmlElement::NO_QUOTE, id->quote_style());
+  CheckExpected(
+      "<a href=\"http://www.google.com/\" id=38 class='search!' selected />");
+}
+
 TEST_F(AttributeManipulationTest, ModifyKeepAttribute) {
   HtmlElement::Attribute* href = node_->FindAttribute(HtmlName::kHref);
   EXPECT_TRUE(href != nullptr);

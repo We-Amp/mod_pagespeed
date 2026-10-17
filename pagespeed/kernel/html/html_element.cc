@@ -33,6 +33,51 @@
 
 namespace net_instaweb {
 
+namespace {
+
+// Returns true if an escaped attribute value cannot be serialized without
+// quotes: it is empty, or contains a byte that would terminate the value or
+// the tag in an HTML tokenizer (whitespace, '>') or a quote character.
+// '=' is intentionally not in this set: it does not terminate an unquoted
+// value, and URLs with query strings are routinely serialized unquoted.
+// Post-escaping, quotes and angle brackets can only appear as entities, so
+// in practice this guards against whitespace.
+bool EscapedValueNeedsQuotes(const StringPiece& escaped_value) {
+  if (escaped_value.empty()) {
+    return true;
+  }
+  for (char c : escaped_value) {
+    switch (c) {
+      case ' ':
+      case '\t':
+      case '\n':
+      case '\f':
+      case '\r':
+      case '"':
+      case '\'':
+      case '<':
+      case '>':
+      case '`':
+        return true;
+    }
+  }
+  return false;
+}
+
+// An attribute whose value is replaced with one that cannot be serialized
+// unquoted must be quoted, or the serialized form would silently split the
+// value into additional attributes.
+HtmlElement::QuoteStyle QuoteStyleForEscapedValue(
+    HtmlElement::QuoteStyle style, const char* escaped_value) {
+  if (style == HtmlElement::NO_QUOTE && escaped_value != nullptr &&
+      EscapedValueNeedsQuotes(escaped_value)) {
+    return HtmlElement::DOUBLE_QUOTE;
+  }
+  return style;
+}
+
+}  // namespace
+
 HtmlElement::HtmlElement(HtmlElement* parent, const HtmlName& name,
                          const HtmlEventListIterator& begin,
                          const HtmlEventListIterator& end)
@@ -275,6 +320,7 @@ void HtmlElement::Attribute::SetValue(const StringPiece& decoded_value) {
   CopyValue(decoded_value, &decoded_value_);
   decoded_value_computed_ = true;
   decoding_error_ = false;
+  quote_style_ = QuoteStyleForEscapedValue(quote_style_, escaped_value_.get());
 }
 
 void HtmlElement::Attribute::SetEscapedValue(const StringPiece& escaped_value) {
@@ -293,6 +339,7 @@ void HtmlElement::Attribute::SetEscapedValue(const StringPiece& escaped_value) {
   decoded_value_computed_ = false;
 
   CopyValue(escaped_value, &escaped_value_);
+  quote_style_ = QuoteStyleForEscapedValue(quote_style_, escaped_value_.get());
 }
 
 const char* HtmlElement::Attribute::quote_str() const {

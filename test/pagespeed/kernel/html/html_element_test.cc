@@ -118,6 +118,26 @@ TEST_F(HtmlElementTest, SetValueOnValuelessAttribute) {
   EXPECT_FALSE(attr->decoding_error());
 }
 
+TEST_F(HtmlElementTest, SetValueUpgradesQuotingWhenValueNeedsQuotes) {
+  // An unquoted attribute rewritten to a value containing a space (or any
+  // other byte outside the unquoted-safe set) must be quoted on output.
+  HtmlElement* div = NewElement(HtmlName::kDiv);
+  div->AddEscapedAttribute(html_parse_.MakeName(HtmlName::kStyle),
+                           "color:red", HtmlElement::NO_QUOTE);
+  HtmlElement::Attribute* attr = div->FindAttribute(HtmlName::kStyle);
+  ASSERT_NE(nullptr, attr);
+  EXPECT_EQ(HtmlElement::NO_QUOTE, attr->quote_style());
+
+  attr->SetValue("color: red");
+  EXPECT_EQ(HtmlElement::DOUBLE_QUOTE, attr->quote_style());
+  EXPECT_STREQ("color: red", attr->escaped_value());
+
+  // A value within the unquoted-safe set keeps the original quoting.
+  attr->set_quote_style(HtmlElement::NO_QUOTE);
+  attr->SetValue("color:red");
+  EXPECT_EQ(HtmlElement::NO_QUOTE, attr->quote_style());
+}
+
 TEST_F(HtmlElementTest, SetValueKeepsDecodedStateConsistent) {
   // After SetValue, the attribute's decoded state must reflect the value
   // just set (not a lazy recomputation), and copying the attribute must
