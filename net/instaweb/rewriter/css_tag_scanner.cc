@@ -260,7 +260,9 @@ LexResult CssExtractUntil(bool is_string,
       if (!is_string && IsHtmlSpace(c)) {
         // Whitespace is not generally permitted in url() payload, but can
         // come before closing ).
-        for (int i = 0, n = in->size(); i < n; ++i) {
+        int i = 0;
+        const int n = in->size();
+        for (; i < n; ++i) {
           char ahead = (*in)[i];
 
           // IsHtmlSpace is, in a pleasant surprise, also appropriate for CSS.
@@ -280,6 +282,11 @@ LexResult CssExtractUntil(bool is_string,
             *in = StringPiece(in->data() - 1, in->size() + 1);
             return kLexYes;
           }
+        }
+        if (i == n) {
+          // Only whitespace remains; skip it all at once rather than
+          // rescanning it for every whitespace character popped.
+          in->remove_prefix(n);
         }
       } else if (c == '\n' || c == '\r' || c == '\f') {
         // Strings tokens can't have unescaped newlines, so we are done here.
