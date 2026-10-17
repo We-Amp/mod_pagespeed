@@ -104,6 +104,22 @@ cc_library(
     ],
 )
 
+# Body accounting for the native fetcher: bytes past the announced
+# content-length are not part of the response, and a response that closes
+# short of it is not complete. A pure function over lengths, unit tested
+# standalone (//test/pagespeed/nginx:ngx_fetch_body_test). The module
+# targets below compile ngx_fetch_body.cc directly in their srcs for the
+# same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_fetch_body",
+    srcs = ["ngx_fetch_body.cc"],
+    hdrs = ["ngx_fetch_body.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # The composed response of the daemon serve arm: status, media type, the
 # one Vary, and whether it carries the encoding token -- computed from the
 # decision, nginx-free, so the whole shape is unit tested standalone
@@ -212,6 +228,7 @@ cc_library(
         "ngx_etag_match.cc",
         "ngx_event_connection.cc",
         "ngx_fetch.cc",
+        "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
@@ -237,6 +254,7 @@ cc_library(
         "ngx_etag_match.h",
         "ngx_event_connection.h",
         "ngx_fetch.h",
+        "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
@@ -325,6 +343,7 @@ cc_library(
         "ngx_etag_match.cc",
         "ngx_event_connection.cc",
         "ngx_fetch.cc",
+        "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
@@ -350,6 +369,7 @@ cc_library(
         "ngx_etag_match.h",
         "ngx_event_connection.h",
         "ngx_fetch.h",
+        "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
@@ -446,6 +466,7 @@ cc_library(
         "ngx_etag_match.cc",
         "ngx_event_connection.cc",
         "ngx_fetch.cc",
+        "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
@@ -470,6 +491,7 @@ cc_library(
         "ngx_etag_match.h",
         "ngx_event_connection.h",
         "ngx_fetch.h",
+        "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
