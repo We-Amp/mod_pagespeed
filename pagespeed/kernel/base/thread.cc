@@ -53,8 +53,9 @@ bool ThreadSystem::Thread::Start() {
   DCHECK(!started_) << "Threads cannot be restarted, create a new instance";
   // Set started_ before creating the OS thread.  Once the create succeeds,
   // the new thread can already run to completion and delete this Thread
-  // object (see the note on ~Thread), so members must not be written after
-  // StartImpl returns.
+  // object (see the note on ~Thread), so nothing on the starting side may
+  // touch this object's members after the OS thread exists, neither here
+  // nor inside StartImpl.  All ThreadImpl backends keep to that rule.
   started_ = true;
   if (!impl_->StartImpl()) {
     // No thread was created, so this write cannot race with anything.

@@ -113,7 +113,9 @@ class PthreadThreadImpl : public ThreadSystem::ThreadImpl {
     if (name.length() > 15) {
       name = name.substr(0, 15);
     }
-    pthread_setname_np(self->thread_obj_, name.c_str());
+    // Name the current thread directly: reading self->thread_obj_ here
+    // would race with the parent, which stores it in pthread_create.
+    pthread_setname_np(pthread_self(), name.c_str());
 #endif
 #endif
     self->wrapper_->Run();
