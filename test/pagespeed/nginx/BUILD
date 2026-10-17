@@ -52,6 +52,18 @@ pagespeed_cc_test(
     ],
 )
 
+# The automatic gzip setup's rollback record across configuration cycles:
+# a reload never writes into an earlier cycle's configuration, and a
+# rollback in one cycle does not disable the next.
+pagespeed_cc_test(
+    name = "ngx_gzip_rollback_test",
+    srcs = ["ngx_gzip_rollback_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/nginx:ngx_gzip_rollback",
+    ],
+)
+
 # The admin-style handler path lookup: exact vs subtree, unconfigured never
 # matches, and case-sensitive like the nginx `location` blocks that guard
 # these paths.

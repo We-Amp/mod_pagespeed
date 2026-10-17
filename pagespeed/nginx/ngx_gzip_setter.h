@@ -59,6 +59,7 @@ extern "C" {
 
 #include <vector>
 
+#include "ngx_gzip_rollback.h"
 #include "ngx_pagespeed.h"
 #include "pagespeed/kernel/base/basictypes.h"
 
@@ -82,15 +83,14 @@ enum gzs_enable_result {
 };
 
 class NgxGZipSetter {
-  std::vector<ngx_flag_t*> ngx_flags_set_;
-  std::vector<ngx_uint_t*> ngx_uint_set_;
-  std::vector<void*> ngx_httptypes_set_;
+  // The slots written in the current configuration cycle, reset by Init()
+  // at the start of every cycle.
+  NgxGZipRollbackLog rollback_log_;
   ngx_command_ctx gzip_command_;
   ngx_command_ctx gzip_http_types_command_;
   ngx_command_ctx gzip_proxied_command_;
   ngx_command_ctx gzip_vary_command_;
   ngx_command_ctx gzip_http_version_command_;
-  bool enabled_;
 
  public:
   NgxGZipSetter();
@@ -108,7 +108,7 @@ class NgxGZipSetter {
   void AddGZipHTTPTypes(ngx_conf_t* cf);
   void RollBackAndDisable(ngx_conf_t* cf);
 
-  bool enabled() { return enabled_; }
+  bool enabled() { return rollback_log_.enabled(); }
 
  private:
   NgxGZipSetter(const NgxGZipSetter&) = delete;
