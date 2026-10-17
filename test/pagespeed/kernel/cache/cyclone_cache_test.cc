@@ -21,7 +21,9 @@
 
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
+#include <atomic>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #ifndef _WIN32
@@ -33,6 +35,7 @@
 #endif
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -331,6 +334,44 @@ TEST_F(CycloneCacheTest, ShutDown) {
 
   // After shutdown, gets should return not found
   CheckNotFound("key1");
+}
+
+// Request threads may still be calling into the cache while another thread
+// shuts it down; every call must either use the live cache or see it as shut
+// down, never a destroyed one.
+TEST_F(CycloneCacheTest, ShutDownWhileOperationsInFlight) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  CheckPut("key", "value");
+  std::atomic<int> started(0);
+  std::atomic<bool> stop(false);
+  std::vector<std::thread> workers;
+  for (int t = 0; t < 4; ++t) {
+    workers.emplace_back([this, t, &started, &stop]() {
+      GoogleString key = StrCat("key", IntegerToString(t));
+      SharedString value("value");
+      started.fetch_add(1);
+      while (!stop.load()) {
+        CacheInterface::SynchronousCallback callback;
+        cache_->Get("key", &callback);
+        EXPECT_TRUE(callback.called());
+        cache_->Put(key, value);
+        cache_->Delete(key);
+        cache_->IsHealthy();
+      }
+    });
+  }
+  while (started.load() < 4) {
+    std::this_thread::yield();
+  }
+  cache_->ShutDown();
+  EXPECT_FALSE(cache_->IsHealthy());
+  stop.store(true);
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
 }
 
 // Test empty key
