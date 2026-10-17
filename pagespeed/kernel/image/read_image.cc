@@ -152,19 +152,9 @@ ScanlineWriterInterface* InstantiateScanlineWriter(ImageFormat image_type,
       std::unique_ptr<JpegScanlineWriter> jpeg_writer(
           new JpegScanlineWriter(handler));
       if (jpeg_writer != nullptr) {
-        // TODO(huibao): Set up error handling inside JpegScanlineWriter.
-        // Remove 'setjmp' from the clients and remove the 'SetJmpBufEnv'
-        // method.
-        jmp_buf env;
-        if (setjmp(env)) {
-          // This code is run only when libjpeg hit an error, and
-          // called longjmp(env). Note that this only works for as
-          // long as this stack frame is valid.
-          jpeg_writer->AbortWrite();
-          return nullptr;
-        }
-
-        jpeg_writer->SetJmpBufEnv(&env);
+        // The writer owns its libjpeg error jump buffer, so a jump
+        // triggered by any later call lands in a live frame and is
+        // reported as a failed ScanlineStatus.
         writer = jpeg_writer.release();
       }
       which = "JpegScanlineWriter";

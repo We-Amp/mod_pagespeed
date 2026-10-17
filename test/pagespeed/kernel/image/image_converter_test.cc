@@ -406,6 +406,25 @@ TEST_F(ImageConverterTest, GetSmallestOfPngJpegWebpInvalidPngWithWebpConfig) {
   EXPECT_EQ(in, out);
 }
 
+TEST_F(ImageConverterTest, CreateJpegWriterForOversizedImage) {
+  ScanlineStatus status;
+  GoogleString out;
+  pagespeed::image_compression::JpegCompressionOptions options;
+  options.lossy = true;
+  options.lossy_options.quality = 85;
+
+  // libjpeg rejects dimensions above 65500 pixels when compression
+  // starts. That error must surface as a failed status rather than a
+  // jump into a buffer owned by a returned-from stack frame.
+  std::unique_ptr<ScanlineWriterInterface> writer(CreateScanlineWriter(
+      pagespeed::image_compression::IMAGE_JPEG,
+      pagespeed::image_compression::RGB_888,
+      70000,  // width, beyond libjpeg's 65500 limit
+      1, &options, &out, &message_handler_, &status));
+  EXPECT_EQ(nullptr, writer);
+  EXPECT_FALSE(status.Success());
+}
+
 // TODO(vchudnov): add webp tests to do pixel-for-pixel comparisons
 // and to test GetSmallestOfPngJpegWebp
 
