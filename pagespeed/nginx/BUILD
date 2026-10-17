@@ -120,6 +120,21 @@ cc_library(
     ],
 )
 
+# Loading a request body nginx spooled to a temporary file into one buffer,
+# bounded in size, with the file read and the pool allocation passed in so
+# it is unit tested standalone (//test/pagespeed/nginx:ngx_request_body_test).
+# The module targets below compile ngx_request_body.cc directly in their
+# srcs for the same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_request_body",
+    srcs = ["ngx_request_body.cc"],
+    hdrs = ["ngx_request_body.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # The composed response of the daemon serve arm: status, media type, the
 # one Vary, and whether it carries the encoding token -- computed from the
 # decision, nginx-free, so the whole shape is unit tested standalone
@@ -230,6 +245,7 @@ cc_library(
         "ngx_fetch.cc",
         "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
+        "ngx_request_body.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
         "ngx_list_iterator.cc",
@@ -256,6 +272,7 @@ cc_library(
         "ngx_fetch.h",
         "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
+        "ngx_request_body.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
         "ngx_list_iterator.h",
@@ -345,6 +362,7 @@ cc_library(
         "ngx_fetch.cc",
         "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
+        "ngx_request_body.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
         "ngx_list_iterator.cc",
@@ -371,6 +389,7 @@ cc_library(
         "ngx_fetch.h",
         "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
+        "ngx_request_body.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
         "ngx_list_iterator.h",
@@ -468,6 +487,7 @@ cc_library(
         "ngx_fetch.cc",
         "ngx_fetch_body.cc",
         "ngx_openssl_shim.cc",
+        "ngx_request_body.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
         "ngx_list_iterator.cc",
@@ -493,6 +513,7 @@ cc_library(
         "ngx_fetch.h",
         "ngx_fetch_body.h",
         "ngx_openssl_shim.h",
+        "ngx_request_body.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
         "ngx_list_iterator.h",
