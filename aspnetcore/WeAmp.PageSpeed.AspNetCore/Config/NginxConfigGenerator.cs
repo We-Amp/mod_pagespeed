@@ -623,19 +623,34 @@ public class NginxConfigGenerator
 
     internal static void WriteOwnerOnlyFile(string path, string contents)
     {
+        // Write a sibling temp file (new, so the 0600 create mode always applies) and
+        // atomically replace the target: an existing file left at a wider mode is
+        // never reused for the new contents.
+        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         var options = new FileStreamOptions
         {
-            Mode = FileMode.Create,
+            Mode = FileMode.CreateNew,
             Access = FileAccess.Write,
-            Share = FileShare.Read,
+            Share = FileShare.None,
         };
         if (!OperatingSystem.IsWindows())
         {
             options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
         }
-        using var stream = new FileStream(path, options);
-        using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
-        writer.Write(contents);
+        try
+        {
+            using (var stream = new FileStream(temp, options))
+            using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
+            {
+                writer.Write(contents);
+            }
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+            throw;
+        }
     }
 
     private static void TrySetMode(string path, UnixFileMode mode)
