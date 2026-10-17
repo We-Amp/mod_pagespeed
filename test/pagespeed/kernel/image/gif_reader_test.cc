@@ -319,6 +319,38 @@ TEST_F(GifReaderTest, ExpandColormapOnZeroSizeCanvasAndCatchLibPngError) {
                                     PNG_TRANSFORM_EXPAND, true));
 }
 
+// The whole-image GIF reader allocates one row per logical-screen line
+// before it looks at any frame data, so a valid file whose screen declares
+// dimensions past the decode caps must be refused up front.
+TEST_F(GifReaderTest, OversizedScreenRejected) {
+  // Four colors: GifSquare derives the color resolution as log2(count)-1,
+  // and a two-entry map would make that zero, which giflib shifts while
+  // negative.
+  static const GifColorType color_map[] = {GifSquare::kGifWhite,
+                                           GifSquare::kGifBlack,
+                                           GifSquare::kGifRed,
+                                           GifSquare::kGifGreen};
+  const GoogleString filename =
+      StrCat(net_instaweb::GTestTempDir(), "/oversized_screen.gif");
+  {
+    GifSquare gif(true /* manual_gcb */, &message_handler_);
+    ASSERT_TRUE(gif.Open(filename));
+    ASSERT_TRUE(gif.PrepareScreen(true, 65535, 10, color_map,
+                                  arraysize(color_map), 0,
+                                  GifSquare::kNoLoopCountSpecified));
+    ASSERT_TRUE(gif.PutImage(0, 0, 10, 10, color_map, arraysize(color_map), 0,
+                             -1 /* transparent_idx */, false /* interlace */,
+                             0 /* delay_cs */, 0 /* disposal */));
+    ASSERT_TRUE(gif.Close());
+  }
+  GoogleString in;
+  ASSERT_TRUE(ReadFile(filename, &in));
+  message_handler_.AddPatternToSkipPrinting("*too big*");
+  EXPECT_FALSE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
+                                    PNG_TRANSFORM_EXPAND));
+  ASSERT_TRUE(read_.reset());
+}
+
 class GifScanlineReaderRawTest : public testing::Test {
  public:
   GifScanlineReaderRawTest()
@@ -1339,6 +1371,54 @@ TEST_F(GifAnimationTest, ReadSingleFrameOpaque) {
   synth_frames_.push_back(frame);
 
   SynthesizeAndRead("single_frame_opaque", DefineImage());
+}
+
+// A screen that declares a side past the decode cap drives buffers
+// proportional to the screen area, whatever the size of the frames, so
+// initialization must refuse it before any frame is prepared.
+TEST_F(GifAnimationTest, OversizedScreenRejectedByInitialize) {
+  const Frame frame = {10, 10, false, 0, 0, nullptr, 0, -1, 2, 0, 0};
+  synth_frames_.push_back(frame);
+
+  Image image = DefineImage();
+  image.width = 65535;
+  image.height = 10;
+  SynthesizeImage("oversized_screen", image);
+  ASSERT_TRUE(ReadFile(filename_, &input_image_));
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  EXPECT_FALSE(reader_->Initialize(input_image_.c_str(), input_image_.length())
+                   .Success());
+}
+
+// Sides within the cap can still combine past the pixel budget.
+TEST_F(GifAnimationTest, OversizedScreenPixelBudgetRejectedByInitialize) {
+  const Frame frame = {10, 10, false, 0, 0, nullptr, 0, -1, 2, 0, 0};
+  synth_frames_.push_back(frame);
+
+  Image image = DefineImage();
+  image.width = 16384;
+  image.height = 8192;  // 128 Mi pixels, over the 100 Mi pixel budget.
+  SynthesizeImage("oversized_screen_budget", image);
+  ASSERT_TRUE(ReadFile(filename_, &input_image_));
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  EXPECT_FALSE(reader_->Initialize(input_image_.c_str(), input_image_.length())
+                   .Success());
+}
+
+// A frame may declare dimensions beyond the logical screen, and the eager
+// frame buffer is proportional to width * height, so the same caps are
+// applied when the frame is prepared.
+TEST_F(GifAnimationTest, OversizedFrameRejectedByPrepareNextFrame) {
+  const Frame frame = {16385, 1, false, 0, 0, nullptr, 0, -1, 2, 0, 0};
+  synth_frames_.push_back(frame);
+
+  SynthesizeImage("oversized_frame", DefineImage());
+  ASSERT_TRUE(ReadFile(filename_, &input_image_));
+  EXPECT_TRUE(reader_->Initialize(input_image_.c_str(), input_image_.length())
+                  .Success());
+  ScanlineStatus status;
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  EXPECT_FALSE(reader_->PrepareNextFrame(&status));
 }
 
 TEST_F(GifAnimationTest, ReadSingleFrameTransparency) {

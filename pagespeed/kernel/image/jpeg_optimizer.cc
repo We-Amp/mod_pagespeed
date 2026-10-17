@@ -30,6 +30,7 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/jpeg_reader.h"
+#include "pagespeed/kernel/image/scanline_utils.h"
 
 extern "C" {
 #ifdef USE_SYSTEM_LIBJPEG
@@ -43,6 +44,8 @@ using net_instaweb::MessageHandler;
 using pagespeed::image_compression::ColorSampling;
 using pagespeed::image_compression::JpegCompressionOptions;
 using pagespeed::image_compression::JpegLossyOptions;
+using pagespeed::image_compression::kScanlineMaxDimension;
+using pagespeed::image_compression::kScanlineMaxImagePixels;
 using pagespeed::image_compression::RETAIN;
 using pagespeed::image_compression::YUV420;
 using pagespeed::image_compression::YUV422;
@@ -348,6 +351,21 @@ bool JpegOptimizer::OptimizeLossless(jpeg_decompress_struct* jpeg_decompress,
   if (options.lossy) {
     PS_LOG_DFATAL(message_handler_,
                   "Lossy options are not allowed in lossless compression.");
+    return false;
+  }
+
+  // Unlike the scanline paths, which hold one row at a time,
+  // jpeg_read_coefficients buffers the DCT coefficients of the whole image,
+  // an allocation proportional to the dimensions declared in the header.
+  // Refuse anything beyond the decode caps before that allocation happens.
+  if (jpeg_decompress->image_width > kScanlineMaxDimension ||
+      jpeg_decompress->image_height > kScanlineMaxDimension ||
+      static_cast<uint64>(jpeg_decompress->image_width) *
+              jpeg_decompress->image_height >
+          kScanlineMaxImagePixels) {
+    PS_LOG_INFO(message_handler_,
+                "Image dimensions %ux%u exceed the supported maximum.",
+                jpeg_decompress->image_width, jpeg_decompress->image_height);
     return false;
   }
 

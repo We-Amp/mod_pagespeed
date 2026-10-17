@@ -375,6 +375,11 @@ bool PngReader::ReadPng(const GoogleString& body, png_structp png_ptr,
     return false;
   }
   png_set_read_fn(png_ptr, &input, &ReadPngFromStream);
+  // png_read_png buffers every row of the image, an allocation driven by
+  // the IHDR dimensions rather than by the bytes actually present, so give
+  // libpng the same per-side cap the scanline readers enforce. A stream
+  // beyond it errors out in png_read_info, before any row is allocated.
+  png_set_user_limits(png_ptr, kScanlineMaxDimension, kScanlineMaxDimension);
   png_read_png(png_ptr, info_ptr, transforms, nullptr);
 
   if (require_opaque && ((transforms & PNG_TRANSFORM_STRIP_ALPHA) == 0)) {
@@ -1301,6 +1306,10 @@ bool PngScanlineWriter::DoBestCompression() {
   }
 
   png_set_read_fn(png_read.png_ptr(), &png_input, &ReadPngFromStream);
+  // The re-read below buffers the whole image again; apply the same
+  // per-side decode cap as every other read.
+  png_set_user_limits(png_read.png_ptr(), kScanlineMaxDimension,
+                      kScanlineMaxDimension);
   png_read_png(png_read.png_ptr(), png_read.info_ptr(), PNG_TRANSFORM_IDENTITY,
                nullptr);
   opng_reduce_image(png_read.png_ptr(), png_read.info_ptr(), OPNG_REDUCE_ALL);
