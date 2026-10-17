@@ -27,6 +27,7 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
+#include "test/net/instaweb/rewriter/oob_slot_index_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
 
@@ -139,6 +140,40 @@ TEST_F(CssImageCombineTest, SpritesImages) {
   TestSpriting("right", "-90px -115px", true);
   // This is equivalent to "top center".
   TestSpriting("top", "-45px -70px", true);
+}
+
+// A corrupted metadata entry whose partition inputs name slot indexes
+// outside the sprite context's slot table must be treated as a miss (and
+// recomputed), not indexed into the slot array on the render path.
+TEST_F(CssImageCombineTest, OobSlotIndexMetadataTreatedAsMiss) {
+  constexpr char html[] =
+      "<head><style>"
+      "#div1{background:url(%s) 0 0;width:10px;height:10px}"
+      "#div2{background:url(%s) 0 -70px;width:10px;height:10px}"
+      "</style></head>";
+  const GoogleString input = absl::StrFormat(html, kCuppaPngFile, kBikePngFile);
+
+  ParseUrl(kTestDomain, input);
+  const GoogleString sprited_output = output_buffer_;
+  // Sanity: the two images were combined into a sprite.
+  EXPECT_NE(GoogleString::npos, sprited_output.find(".pagespeed.is."));
+  ClearStats();
+
+  // Interpose a backend that rewrites every metadata hit to carry a slot
+  // index far outside the slot table.  The wrapper does not own its
+  // delegate.
+  OobSlotIndexCache* corrupting_metadata =
+      new OobSlotIndexCache(server_context()->metadata_cache());
+  server_context()->DeleteCacheOnDestruction(corrupting_metadata);
+  server_context()->set_metadata_cache(corrupting_metadata);
+
+  // The corrupted entry must degrade to a miss and be recomputed, yielding
+  // byte-identical output.
+  ParseUrl(kTestDomain, input);
+  EXPECT_EQ(sprited_output, output_buffer_);
+  EXPECT_LE(1, corrupting_metadata->num_corrupted());
+  EXPECT_EQ(0, metadata_cache_info().num_hits());
+  EXPECT_LE(1, metadata_cache_info().num_misses());
 }
 
 // Image spriting tests with debug enabled.

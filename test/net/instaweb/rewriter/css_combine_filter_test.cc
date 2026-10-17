@@ -47,6 +47,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "test/net/instaweb/http/mock_callback.h"
+#include "test/net/instaweb/rewriter/oob_slot_index_cache.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
@@ -533,6 +534,46 @@ TEST_F(CssCombineFilterTest, CombineCssUnhealthy) {
       Link(kCssB), "\n");
   ParseUrl(StrCat(kDomain, "unhealthy.html"), html_input);
   EXPECT_EQ(AddHtmlBody(html_input), output_buffer_);
+}
+
+// A corrupted metadata entry whose partition inputs name slot indexes
+// outside the combine context's slot table must be treated as a miss (and
+// recomputed), not indexed into the element and slot arrays.
+TEST_F(CssCombineFilterTest, OobSlotIndexMetadataTreatedAsMiss) {
+  SetHtmlMimetype();
+  SetupCssResources(kCssA, kCssB);
+  GoogleString html_input = StrCat(
+      "<head>\n"
+      "  ",
+      Link(kCssA),
+      "\n"
+      "  ",
+      Link(kCssB), "\n");
+  const GoogleString html_url = StrCat(kDomain, "oob_metadata.html");
+
+  ParseUrl(html_url, html_input);
+  StringVector css_urls;
+  CollectCssLinks("oob_metadata", output_buffer_, &css_urls);
+  ASSERT_EQ(1UL, css_urls.size());
+  EXPECT_NE(GoogleString::npos, css_urls[0].find(".pagespeed.cc."));
+  const GoogleString combined_output = output_buffer_;
+  ClearStats();
+
+  // Interpose a backend that rewrites every metadata hit to carry a slot
+  // index far outside the slot table.  The wrapper does not own its
+  // delegate.
+  OobSlotIndexCache* corrupting_metadata =
+      new OobSlotIndexCache(server_context()->metadata_cache());
+  server_context()->DeleteCacheOnDestruction(corrupting_metadata);
+  server_context()->set_metadata_cache(corrupting_metadata);
+
+  // The corrupted entry must degrade to a miss and be recomputed, yielding
+  // byte-identical output.
+  ParseUrl(html_url, html_input);
+  EXPECT_EQ(combined_output, output_buffer_);
+  EXPECT_LE(1, corrupting_metadata->num_corrupted());
+  EXPECT_EQ(0, metadata_cache_info().num_hits());
+  EXPECT_LE(1, metadata_cache_info().num_misses());
 }
 
 TEST_F(CssCombineFilterTest, Fetch) { TestFetch(); }
