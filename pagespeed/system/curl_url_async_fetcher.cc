@@ -313,6 +313,8 @@ void CurlUrlAsyncFetcher::PollLoop() {
       }
     }
 
+    ReleaseCompletedFetches();
+
     // Wait for activity or 10ms timeout
     int numfds;
     curl_multi_poll(multi_handle_, nullptr, 0, 10, &numfds);
@@ -331,6 +333,7 @@ void CurlUrlAsyncFetcher::PollLoop() {
   }
 
   AbortActiveFetches();
+  ReleaseCompletedFetches();
 }
 
 int CurlUrlAsyncFetcher::AbortActiveFetches() {
@@ -355,6 +358,22 @@ void CurlUrlAsyncFetcher::FetchComplete(CurlFetch* fetch) {
   completed_fetches_.Add(fetch);
 }
 
+void CurlUrlAsyncFetcher::ReleaseCompletedFetches() {
+  // A finished fetch is out of the multi handle and its callback has run, so
+  // nothing refers to it any more. Free it, with its easy handle and buffers,
+  // outside the lock.
+  std::vector<CurlFetch*> finished;
+  {
+    ScopedMutex lock(mutex_.get());
+    while (!completed_fetches_.empty()) {
+      finished.push_back(completed_fetches_.RemoveOldest());
+    }
+  }
+  for (CurlFetch* fetch : finished) {
+    delete fetch;
+  }
+}
+
 void CurlUrlAsyncFetcher::PrintActiveFetches(MessageHandler* handler) const {
   ScopedMutex lock(mutex_.get());
   if (!list_outstanding_urls_on_error_ && active_fetches_.empty()) {
@@ -367,6 +386,11 @@ void CurlUrlAsyncFetcher::PrintActiveFetches(MessageHandler* handler) const {
     handler->Message(kInfo, "  %s (started %ldms ago)", fetch->url().c_str(),
                      static_cast<long>(fetch->TimeDuration()));
   }
+}
+
+int CurlUrlAsyncFetcher::NumCompletedFetchesForTesting() const {
+  ScopedMutex lock(mutex_.get());
+  return static_cast<int>(completed_fetches_.size());
 }
 
 void CurlUrlAsyncFetcher::CancelActiveFetches() {

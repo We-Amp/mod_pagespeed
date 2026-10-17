@@ -166,6 +166,10 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   // callbacks run on the poll thread.
   void CancelActiveFetches();
 
+  // The number of finished fetches still held by the fetcher, for tests that
+  // check finished fetches (and their curl handles) are released.
+  int NumCompletedFetchesForTesting() const;
+
   bool shutdown() const { return shutdown_; }
 
   const GoogleString& proxy() const { return proxy_; }
@@ -185,6 +189,9 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   void StartFetch(const GoogleString& url, StringPiece socket_path,
                   int64 timeout_ms, size_t max_response_body_bytes,
                   MessageHandler* message_handler, AsyncFetch* async_fetch);
+
+  // Frees every fetch that has finished. Poll thread only.
+  void ReleaseCompletedFetches();
 
   // Removes every active fetch from the multi handle and completes it as
   // cancelled. Returns how many there were. Poll thread only.
