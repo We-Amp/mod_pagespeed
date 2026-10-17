@@ -270,20 +270,22 @@ void CachingHeaders::ParseCacheControlIfNecessary() {
     StringPieceVector values;
     if (Lookup(HttpAttributes::kCacheControl, &values)) {
       for (int i = 0, n = values.size(); i < n; ++i) {
+        // Cache-Control directive names are case-insensitive (RFC 7234 5.2),
+        // so "No-Store" must be honored exactly like "no-store".
         StringPiece value = values[i];
-        if (value == "public") {
+        if (StringCaseEqual(value, "public")) {
           public_ = true;
-        } else if (strings::StartsWith(value, "private")) {
+        } else if (StringCaseStartsWith(value, "private")) {
           // See http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html :
           // "private" [ "=" <"> 1#field-name <"> ] ; Section 14.9.1
           // So we must use 'starts_with' rather than test for equality.
           private_ = true;
-        } else if (strings::StartsWith(value, "no-cache")) {
+        } else if (StringCaseStartsWith(value, "no-cache")) {
           // "no-cache" [ "=" <"> 1#field-name <"> ]; Section 14.9.1
           no_cache_ = true;
-        } else if (value == "no-store") {
+        } else if (StringCaseEqual(value, "no-store")) {
           no_store_ = true;
-        } else if (strings::StartsWith(value, "max-age=")) {
+        } else if (StringCaseStartsWith(value, "max-age=")) {
           int max_age_value = 0;
           StringPiece max_age_piece = value.substr(STATIC_STRLEN("max-age="));
           if (StringToInt(max_age_piece, &max_age_value)) {
@@ -291,9 +293,9 @@ void CachingHeaders::ParseCacheControlIfNecessary() {
           } else {
             cache_control_parse_error_ = true;
           }
-        } else if (value == "must-revalidate") {
+        } else if (StringCaseEqual(value, "must-revalidate")) {
           must_revalidate_ = true;
-        } else if (value == "proxy-revalidate") {
+        } else if (StringCaseEqual(value, "proxy-revalidate")) {
           proxy_revalidate_ = true;
         }
       }
@@ -326,8 +328,13 @@ bool CachingHeaders::ComputeHasExplicitNoCacheDirective() {
   }
 
   StringPieceVector pragma, vary;
-  if (Lookup(HttpAttributes::kPragma, &pragma) && STLFind(pragma, "no-cache")) {
-    return true;
+  if (Lookup(HttpAttributes::kPragma, &pragma)) {
+    // The Pragma directive value is case-insensitive, like Cache-Control's.
+    for (int i = 0, n = pragma.size(); i < n; ++i) {
+      if (StringCaseEqual(pragma[i], "no-cache")) {
+        return true;
+      }
+    }
   }
 
   if (Lookup(HttpAttributes::kVary, &vary) && STLFind(vary, "*")) {

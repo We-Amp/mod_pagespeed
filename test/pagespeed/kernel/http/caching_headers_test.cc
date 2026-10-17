@@ -41,6 +41,9 @@ class TestCachingHeaders : public CachingHeaders {
         TrimWhitespace(&((*values)[i]));
       }
       return true;
+    } else if (key == HttpAttributes::kPragma && !pragma_.empty()) {
+      values->push_back(pragma_);
+      return true;
     } else {
       return false;
     }
@@ -62,8 +65,11 @@ class TestCachingHeaders : public CachingHeaders {
     cacheable_resource_status_code_ = x;
   }
 
+  void set_pragma(const char* pragma) { pragma_ = pragma; }
+
  private:
   GoogleString cache_control_;
+  GoogleString pragma_;
   bool likely_static_resource_type_;
   bool cacheable_resource_status_code_;
 
@@ -189,6 +195,40 @@ TEST_F(CachingHeadersTest, IsCacheable) {
   EXPECT_TRUE(headers_->ProxyRevalidate());
   EXPECT_FALSE(headers_->MustRevalidate());
   EXPECT_TRUE(headers_->IsProxyCacheable());
+}
+
+TEST_F(CachingHeadersTest, CaseInsensitiveDirectives) {
+  // Cache-Control directive names are case-insensitive per RFC 7234 5.2,
+  // so mixed-case spellings must be honored exactly like lowercase ones.
+  SetCacheControl("No-Store");
+  EXPECT_FALSE(headers_->IsCacheable());
+  EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
+
+  SetCacheControl("NO-CACHE");
+  EXPECT_FALSE(headers_->IsCacheable());
+
+  SetCacheControl("Private");
+  EXPECT_TRUE(headers_->IsCacheable());
+  EXPECT_FALSE(headers_->IsProxyCacheable());
+
+  SetCacheControl("MAX-AGE=0");
+  EXPECT_FALSE(headers_->IsCacheable());
+  EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
+
+  SetCacheControl("Max-Age=600");
+  EXPECT_TRUE(headers_->IsCacheable());
+  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+
+  SetCacheControl("MUST-REVALIDATE");
+  EXPECT_TRUE(headers_->MustRevalidate());
+
+  SetCacheControl("PROXY-REVALIDATE");
+  EXPECT_TRUE(headers_->ProxyRevalidate());
+
+  // Pragma: no-cache is case-insensitive too.
+  SetCacheControl("");
+  headers_->set_pragma("No-Cache");
+  EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
 }
 
 }  // namespace net_instaweb
