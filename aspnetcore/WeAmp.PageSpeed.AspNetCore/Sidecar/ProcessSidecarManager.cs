@@ -56,6 +56,11 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     public string? ErrorMessage { get; private set; }
     public int RestartCount { get; private set; }
 
+    /// <summary>
+    /// Raised on the thread that changed the state, outside the manager's lock.
+    /// Handlers may run concurrently and must not assume delivery order; the event
+    /// args carry both the previous and the new state.
+    /// </summary>
     public event EventHandler<SidecarStateChangedEventArgs>? StateChanged;
 
     public ProcessSidecarManager(
@@ -331,13 +336,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     }
 
     /// <summary>
-    /// Resolves the private directory that holds the generated nginx.conf, the
-    /// embedded-token config, and (by default) the cache/log tree. When the
-    /// operator pins <see cref="SidecarOptions.ConfigDirectory"/> it is used
-    /// as-is; otherwise a per-app, per-pid directory is created under the system
-    /// temp root. Either way it is chmod 0700 so the bearer token is not readable
-    /// by other local users (D8) — never the world-traversable shared
-    /// <c>Path.GetTempPath()/pagespeed_sidecar</c> the prototype used.
+    /// Creates <paramref name="dir"/> owner-only (0700) from the first moment on Unix.
     /// </summary>
     internal static void CreatePrivateDirectory(string dir)
     {
@@ -363,6 +362,15 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         }
     }
 
+    /// <summary>
+    /// Resolves the private directory that holds the generated nginx.conf, the
+    /// embedded-token config, and (by default) the cache/log tree. When the
+    /// operator pins <see cref="SidecarOptions.ConfigDirectory"/> it is used
+    /// as-is; otherwise a per-app, per-pid directory is created under the system
+    /// temp root. Either way it is chmod 0700 so the bearer token is not readable
+    /// by other local users (D8) — never the world-traversable shared
+    /// <c>Path.GetTempPath()/pagespeed_sidecar</c> the prototype used.
+    /// </summary>
     internal string ResolveConfigDirectory(SidecarOptions sidecar)
     {
         var dir = sidecar.ConfigDirectory

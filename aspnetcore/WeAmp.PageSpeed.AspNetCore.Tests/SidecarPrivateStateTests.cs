@@ -77,6 +77,29 @@ public class SidecarPrivateStateTests
         finally { TryDeleteDir(dir); }
     }
 
+    [Fact]
+    public void WriteOwnerOnlyFile_ReplacingWiderModeFile_ResultIsOwnerOnly()
+    {
+        if (OperatingSystem.IsWindows()) return; // POSIX modes do not exist on Windows.
+
+        var dir = Path.Combine(Path.GetTempPath(), "ps-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "nginx.conf");
+            File.WriteAllText(path, "old");
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite
+                | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+            NginxConfigGenerator.WriteOwnerOnlyFile(path, "new");
+
+            File.ReadAllText(path).Should().Be("new");
+            File.GetUnixFileMode(path).Should().Be(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            Directory.GetFiles(dir).Should().HaveCount(1, "no temp file is left behind");
+        }
+        finally { TryDeleteDir(dir); }
+    }
+
     private static void TryDeleteDir(string dir)
     {
         try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
