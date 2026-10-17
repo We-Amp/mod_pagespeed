@@ -30,6 +30,8 @@
 
 namespace net_instaweb {
 
+const int64 CompressedCache::kDefaultMaxInflatedValueSize;
+
 namespace {
 
 // A few bytes to put at the end of the physical payload we can track

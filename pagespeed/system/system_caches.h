@@ -91,6 +91,14 @@ class SystemCaches {
   // Registers all statistics the cache backends may use.
   static void InitStats(Statistics* statistics);
 
+  // Inflated-size cap for the CompressedCache wrappers around the metadata
+  // and property caches. Metadata entries are not HTTP responses, so the
+  // largest-cacheable-response setting only floors this cap: a small or zero
+  // operator value must not mark every larger metadata entry as corrupt. A
+  // negative setting means unlimited and is passed through unchanged.
+  static int64 MaxMetadataInflatedValueSize(
+      int64 max_cacheable_response_content_length);
+
   // thread_limit is an estimate of number of threads that may access the
   // cache at the same time. Does not take ownership of shm_runtime.
   SystemCaches(RewriteDriverFactory* factory, AbstractSharedMem* shm_runtime,

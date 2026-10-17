@@ -19,6 +19,7 @@
 
 #include "pagespeed/system/system_caches.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
@@ -664,11 +665,14 @@ void SystemCaches::SetupCaches(ServerContext* server_context,
     property_store_cache = metadata_l2;
   }
   if (config->compress_metadata_cache()) {
-    // Cap the inflated size of cached payloads at the configured largest
-    // cacheable response, so an oversized entry is reported as corruption
-    // instead of being inflated in full.
-    const int64 max_inflated_value_size =
-        config->max_cacheable_response_content_length();
+    // Cap the inflated size of cached payloads so an oversized entry is
+    // reported as corruption instead of being inflated in full. The cap is
+    // floored at the CompressedCache default: metadata and property-cache
+    // entries are not HTTP responses, and tying them to a small
+    // largest-cacheable-response setting would silently mark every larger
+    // entry corrupt.
+    const int64 max_inflated_value_size = MaxMetadataInflatedValueSize(
+        config->max_cacheable_response_content_length());
     metadata_cache =
         new CompressedCache(metadata_cache, stats, max_inflated_value_size);
     server_context->DeleteCacheOnDestruction(metadata_cache);
@@ -790,6 +794,20 @@ void SystemCaches::StopCacheActivity() {
   }
 
   // TODO(morlovich): Also shutdown shm caches
+}
+
+int64 SystemCaches::MaxMetadataInflatedValueSize(
+    int64 max_cacheable_response_content_length) {
+  // -1 means unlimited for both settings; pass it through so an unlimited
+  // response limit does not impose a metadata limit.
+  if (max_cacheable_response_content_length < 0) {
+    return max_cacheable_response_content_length;
+  }
+  // Otherwise the response limit only floors the cap: metadata entries are
+  // not HTTP responses, and a small operator value must not mark every
+  // larger entry corrupt.
+  return std::max<int64>(max_cacheable_response_content_length,
+                         CompressedCache::kDefaultMaxInflatedValueSize);
 }
 
 void SystemCaches::InitStats(Statistics* statistics) {
