@@ -233,6 +233,35 @@ TEST_F(CssImageCombineTest, NoSpritesMultiple) {
   ValidateNoChanges("no_sprite", in_text);
 }
 
+// Spriting must apply the same image resolution limit as the image-rewrite
+// path: a candidate whose dimensions exceed image_resolution_limit_bytes is
+// skipped rather than laid out into a canvas of its declared size.
+class CssImageCombineResolutionLimitTest : public CssImageCombineTest {
+ protected:
+  void SetUp() override {
+    // 5000 pixels at 4 bytes per pixel. Cuppa.png is 65x70 (4550 pixels,
+    // under the limit); BikeCrashIcn.png is 100x100 (10000 pixels, over it).
+    options()->set_image_resolution_limit_bytes(20000);
+    CssImageCombineTest::SetUp();
+  }
+};
+
+TEST_F(CssImageCombineResolutionLimitTest, NoSpriteImagePastResolutionLimit) {
+  constexpr char kBefore[] =
+      "<head><style>"
+      "#div1 { background-image:url('Cuppa.png');width:10px;height:10px}"
+      "#div2 { background-image:url('BikeCrashIcn.png');width:10px;height:10px}"
+      "</style></head>";
+  // The CSS parser normalizes quoting and whitespace on serialization, so
+  // pin the exact serialized form.
+  constexpr char kAfter[] =
+      "<head><style>"
+      "#div1{background-image:url(Cuppa.png);width:10px;height:10px}"
+      "#div2{background-image:url(BikeCrashIcn.png);width:10px;height:10px}"
+      "</style></head>";
+  ValidateExpected("sprite_resolution_limit", kBefore, kAfter);
+}
+
 TEST_F(CssImageCombineTest, NoCrashUnknownType) {
   // Make sure we don't crash trying to sprite an image with an unknown mimetype
   ResponseHeaders response_headers;
