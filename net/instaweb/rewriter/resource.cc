@@ -144,6 +144,12 @@ bool Resource::IsSafeToRewrite(bool rewrite_uncacheable,
   } else if (IsContentsEmpty()) {
     // https://github.com/apache/incubator-pagespeed-mod/issues/1050
     StrAppend(reason, "Resource is empty, ");
+  } else if (response_headers_.IsGzipped() && !EnsureExtractedIfNeeded()) {
+    // The compressed body inflates past the largest response we are willing
+    // to handle, so ExtractUncompressedContents() hands back the compressed
+    // bytes. Those are not content any parser can work with, so serve the
+    // resource unmodified rather than rewrite garbage.
+    StrAppend(reason, "Compressed content could not be inflated, ");
   } else {
     // Safe.
     stats->num_cache_control_rewritable_resources()->Add(1);
