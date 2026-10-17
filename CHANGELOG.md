@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Image optimization: GIF images could expose uninitialized process
+  memory in decoded pixels.** A pixel index beyond the end of the
+  color map expanded to bytes from an uninitialized stack buffer. Such
+  pixels now decode to deterministic black. Affects the module and the
+  optimizer worker in releases up to and including 2.4.0 with image
+  optimization enabled. **Update recommended.**
 - **Image optimization: certain GIF images could make a worker process
   exit (denial of service).** A GIF extension block carrying no data
   crashed the image reader on three decode paths: the per-frame

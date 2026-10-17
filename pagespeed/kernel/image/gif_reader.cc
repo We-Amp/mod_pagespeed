@@ -409,7 +409,10 @@ bool ReadGifToPng(GifFileType* gif_file, png_structp png_ptr,
 
   int transparent_palette_index = -1;
   bool found_terminator = false;
-  png_color palette[kNumColorForUint8];
+  // Zero-fill so that pixel indices beyond the end of the color map
+  // expand to deterministic black instead of to uninitialized stack
+  // contents.
+  png_color palette[kNumColorForUint8] = {};
   while (!found_terminator) {
     GifRecordType record_type = UNDEFINED_RECORD_TYPE;
     if (DGifGetRecordType(gif_file, &record_type) == GIF_ERROR) {
