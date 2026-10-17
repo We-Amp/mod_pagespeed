@@ -369,9 +369,13 @@ ImageConverter::ImageType ImageConverter::GetSmallestOfPngJpegWebp(
     PS_DLOG_INFO(handler, "Could not convert image to lossless WebP");
     webp_lossless_out.clear();
   }
+  // A failed lossless conversion leaves no writer allocated (for
+  // example when the input cannot be decoded), so the custom-quality
+  // attempt can only run on a writer that exists.
   if ((webp_config != nullptr) &&
-      (!webp_writer->InitializeWrite(webp_config, &webp_lossy_out) ||
-       !webp_writer->FinalizeWrite())) {
+      (webp_writer == nullptr ||
+       (!webp_writer->InitializeWrite(webp_config, &webp_lossy_out) ||
+        !webp_writer->FinalizeWrite()))) {
     PS_DLOG_INFO(handler, "Could not convert image to custom WebP");
     webp_lossy_out.clear();
   }
@@ -411,8 +415,12 @@ ImageConverter::ImageType ImageConverter::GetSmallestOfPngJpegWebp(
                                            : kMinJpegSavingsRatio);
   best_image_type = best_lossless_image_type;
   best_image = best_lossless_image;
-  SelectSmallerImage(best_lossy_image_type, *best_lossy_image, threshold_ratio,
-                     &best_image_type, &best_image, handler);
+  // No conversion producing a lossy image means there is no lossy
+  // candidate to compare against the lossless best.
+  if (best_lossy_image != nullptr) {
+    SelectSmallerImage(best_lossy_image_type, *best_lossy_image,
+                       threshold_ratio, &best_image_type, &best_image, handler);
+  }
 
   out->clear();
   out->assign((best_image != nullptr) ? *best_image : in);
