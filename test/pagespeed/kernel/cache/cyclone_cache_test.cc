@@ -374,6 +374,68 @@ TEST_F(CycloneCacheTest, ShutDownWhileOperationsInFlight) {
   }
 }
 
+// Two writers storing the same key race between the wrapper's pre-write
+// remove and its write; a reader must only ever see one complete value, never
+// an empty or mixed one.  The RAM tier is on: overwrites with it enabled are
+// the case the pre-write remove guards.
+TEST_F(CycloneCacheTest, ConcurrentWritersOfOneKey) {
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+  // The cache library's directory probes are optimistic seqlock reads that
+  // a concurrent insert into the same bucket races by design.
+  GTEST_SKIP() << "same-bucket seqlock reads are reported by TSan";
+#endif
+#endif
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_writers");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.ram_cache_size_bytes = 1024 * 1024;
+  config.enable_checksum = true;
+  config.num_segments = 0;
+  CycloneCache cache(config, stats_.get(), handler_.get());
+  if (!cache.IsHealthy()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  const GoogleString value_a(3000, 'a');
+  const GoogleString value_b(5000, 'b');
+  const int kIterations = 500;
+  std::atomic<int> unexpected(0);
+  std::atomic<bool> stop(false);
+  auto writer = [&cache, kIterations](const GoogleString& value) {
+    SharedString shared(value);
+    for (int i = 0; i < kIterations; ++i) {
+      cache.Put("contended", shared);
+    }
+  };
+  std::thread reader([&]() {
+    while (!stop.load()) {
+      CacheInterface::SynchronousCallback callback;
+      cache.Get("contended", &callback);
+      if (callback.state() == CacheInterface::kAvailable) {
+        StringPiece got = callback.value().Value();
+        if (got != value_a && got != value_b) {
+          unexpected.fetch_add(1);
+        }
+      }
+    }
+  });
+  std::thread writer_a(writer, value_a);
+  std::thread writer_b(writer, value_b);
+  writer_a.join();
+  writer_b.join();
+  stop.store(true);
+  reader.join();
+
+  EXPECT_EQ(0, unexpected.load());
+  CacheInterface::SynchronousCallback callback;
+  cache.Get("contended", &callback);
+  ASSERT_EQ(CacheInterface::kAvailable, callback.state());
+  StringPiece last = callback.value().Value();
+  EXPECT_TRUE(last == value_a || last == value_b);
+  cache.ShutDown();
+}
+
 // Test empty key
 TEST_F(CycloneCacheTest, EmptyKey) {
   if (!IsHealthyTest()) {
