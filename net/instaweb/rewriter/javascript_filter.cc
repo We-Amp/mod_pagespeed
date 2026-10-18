@@ -536,41 +536,39 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
     driver()->InfoHere("Script is inlined version of %s",
                        library_url.as_string().c_str());
   }
-  if (code_block.successfully_rewritten() &&
+  // Minification can join adjacent brackets into "]]>", which is not allowed
+  // in XHTML character data; keep the original script in that case.
+  const bool joins_cdata_end =
+      code_block.successfully_rewritten() &&
       driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml &&
       code_block.rewritten_code().find("]]>") != StringPiece::npos &&
-      script->find("]]>") == GoogleString::npos) {
-    // Minification can join adjacent brackets into "]]>", which is not allowed
-    // in XHTML character data; keep the original script.
+      script->find("]]>") == GoogleString::npos;
+  if (!code_block.successfully_rewritten() || joins_cdata_end) {
     config_->did_not_shrink()->Add(1);
-  } else if (code_block.successfully_rewritten()) {
-    // Replace the old script string with the new, minified one.
-    if ((driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml) &&
-        (script->find("<![CDATA[") != StringPiece::npos) &&
-        !code_block.rewritten_code().starts_with(
-            "<![CDATA")) {  // See Issue 542.
-      // Minifier strips leading and trailing CDATA comments from scripts.
-      // Restore them if necessary and safe according to the original script.
-      if (code_block.rewritten_code().find("]]>") != StringPiece::npos) {
-        // Minification can join adjacent brackets into "]]>", which would end
-        // the wrapper early; keep the original script.
-        config_->did_not_shrink()->Add(1);
-        return;
-      }
-      script->clear();
-      StrAppend(script, "//<![CDATA[\n", code_block.rewritten_code(),
-                "\n//]]>");
-    } else {
-      // Swap in the minified code to replace the original code.
-      code_block.SwapRewrittenString(script);
-      // Note: code_block and rewritten_script are INVALID after this point.
-    }
-    config_->num_uses()->Add(1);
-    driver()->log_record()->SetRewriterLoggingStatus(
-        id(), RewriterApplication::APPLIED_OK);
-  } else {
-    config_->did_not_shrink()->Add(1);
+    return;
   }
+  // Replace the old script string with the new, minified one.
+  if ((driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml) &&
+      (script->find("<![CDATA[") != StringPiece::npos) &&
+      !code_block.rewritten_code().starts_with("<![CDATA")) {  // See Issue 542.
+    // Minifier strips leading and trailing CDATA comments from scripts.
+    // Restore them if necessary and safe according to the original script.
+    if (code_block.rewritten_code().find("]]>") != StringPiece::npos) {
+      // Minification can join adjacent brackets into "]]>", which would end
+      // the wrapper early; keep the original script.
+      config_->did_not_shrink()->Add(1);
+      return;
+    }
+    script->clear();
+    StrAppend(script, "//<![CDATA[\n", code_block.rewritten_code(), "\n//]]>");
+  } else {
+    // Swap in the minified code to replace the original code.
+    code_block.SwapRewrittenString(script);
+    // Note: code_block and rewritten_script are INVALID after this point.
+  }
+  config_->num_uses()->Add(1);
+  driver()->log_record()->SetRewriterLoggingStatus(
+      id(), RewriterApplication::APPLIED_OK);
 }
 
 // External script; minify and replace with rewritten version (also external).
