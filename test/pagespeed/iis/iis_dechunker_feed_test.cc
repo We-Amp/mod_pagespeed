@@ -5,22 +5,21 @@
 // response body before it reaches the rewriter: chunk extensions on the
 // size line, and the size accounting for a single very large feed.
 
-#include "pagespeed/iis/dechunker.h"
-
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
 
+#include "pagespeed/iis/dechunker.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace {
 
 // Feeds |input| to |dechunker| in pieces of at most |piece| bytes and
 // returns the decoded body. |valid| reports whether every feed was accepted.
-std::string Decode(Dechunker* dechunker, const std::string& input,
-                   size_t piece, bool* valid) {
+std::string Decode(Dechunker* dechunker, const std::string& input, size_t piece,
+                   bool* valid) {
   std::vector<char> copy(input.begin(), input.end());
   std::string body;
   *valid = true;
@@ -44,9 +43,9 @@ std::string Decode(Dechunker* dechunker, const std::string& input,
 TEST(IisDechunkerFeedTest, PlainChunks) {
   Dechunker dechunker(true);
   bool valid = false;
-  EXPECT_EQ("Hello World",
-            Decode(&dechunker, "5\r\nHello\r\n6\r\n World\r\n0\r\n\r\n", 64,
-                   &valid));
+  EXPECT_EQ(
+      "Hello World",
+      Decode(&dechunker, "5\r\nHello\r\n6\r\n World\r\n0\r\n\r\n", 64, &valid));
   EXPECT_TRUE(valid);
 }
 
@@ -69,8 +68,7 @@ TEST(IisDechunkerFeedTest, ChunkExtensionAfterWhitespace) {
 }
 
 TEST(IisDechunkerFeedTest, ChunkExtensionSplitAcrossFeeds) {
-  const std::string input =
-      "4;ext=value\r\nabcd\r\n2;x\r\nef\r\n0\r\n\r\n";
+  const std::string input = "4;ext=value\r\nabcd\r\n2;x\r\nef\r\n0\r\n\r\n";
   for (size_t piece = 1; piece <= input.size(); ++piece) {
     Dechunker dechunker(true);
     bool valid = false;
@@ -79,6 +77,17 @@ TEST(IisDechunkerFeedTest, ChunkExtensionSplitAcrossFeeds) {
     EXPECT_EQ("abcdef", Decode(&dechunker, input, piece, &valid))
         << "piece size " << piece;
   }
+}
+
+TEST(IisDechunkerFeedTest, ChunkExtensionEndedByBareLfInvalidates) {
+  // The size line must end in CRLF; a bare LF after an extension must not
+  // make the parser swallow body bytes up to a later CR.
+  const std::string input = "1a;x\nabc\r\ndefghijklmnopqrstuvwxyz\r\n0\r\n\r\n";
+  Dechunker dechunker(true);
+  bool valid = true;
+  EXPECT_EQ("", Decode(&dechunker, input, input.size(), &valid));
+  char more[] = "5\r\nHello\r\n";
+  EXPECT_FALSE(dechunker.FeedChunk(more, sizeof(more) - 1));
 }
 
 TEST(IisDechunkerFeedTest, GarbageAfterSizeStillInvalidates) {

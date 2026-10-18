@@ -180,7 +180,16 @@ public:
 			case 4: if (!expect(c,'\r',5)) return false; break; // parse '\r'
 			case 5: if (!expect(c,'\n',0)) return false; break; // parse '\n'
 			case 6: // chunk extensions carry nothing we use: skip to the \r
-				if (c=='\r') currentmode=2;
+				if (c=='\r')
+				{
+					currentmode=2;
+				}
+				else if (c=='\n')
+				{
+					// A bare LF ends no size line (mode 1 rejects it too).
+					setInvalidStream();
+					return false;
+				}
 				break;
 
 			}
