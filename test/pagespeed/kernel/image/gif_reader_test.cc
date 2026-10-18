@@ -695,6 +695,44 @@ TEST(GifFrameReaderInvalidInput, EmptyLoopCountSubblock) {
   EXPECT_FALSE(reader->Initialize(in.data(), in.length()).Success());
 }
 
+// Builds a one-frame image whose NETSCAPE2.0 loop-count sub-block is
+// `subblock` (length byte first).
+GoogleString GifWithLoopCountSubblock(const GoogleString& subblock) {
+  GoogleString in;
+  AppendGifHeaderNoGct(&in);
+  const char app_ext[] = {0x21, '\xFF', 0x0B, 'N', 'E', 'T', 'S',
+                          'C',  'A',    'P',  'E', '2', '.', '0'};
+  in.append(app_ext, sizeof(app_ext));
+  in.append(subblock);
+  in.push_back(0x00);  // sub-block terminator
+  AppendOnePixelImageDescriptor(&in, 0);
+  in.push_back(0x3B);
+  return in;
+}
+
+TEST(GifFrameReaderInvalidInput, ShortLoopCountSubblock) {
+  // A loop-count sub-block too short to hold a loop count must be rejected
+  // even when its first data byte holds the expected marker; so must one
+  // with the wrong marker.
+  MockMessageHandler message_handler(new NullMutex);
+  std::unique_ptr<MultipleFrameReader> reader(
+      new TestGifFrameReader(&message_handler));
+  const char valid_block[] = {0x03, 0x01, 0x05, 0x00};
+  GoogleString valid =
+      GifWithLoopCountSubblock(GoogleString(valid_block, sizeof(valid_block)));
+  EXPECT_TRUE(reader->Initialize(valid.data(), valid.length()).Success());
+
+  const char short_block[] = {0x02, 0x01, 0x05};
+  GoogleString in =
+      GifWithLoopCountSubblock(GoogleString(short_block, sizeof(short_block)));
+  EXPECT_FALSE(reader->Initialize(in.data(), in.length()).Success());
+
+  const char wrong_marker[] = {0x03, 0x02, 0x05, 0x00};
+  GoogleString marker = GifWithLoopCountSubblock(
+      GoogleString(wrong_marker, sizeof(wrong_marker)));
+  EXPECT_FALSE(reader->Initialize(marker.data(), marker.length()).Success());
+}
+
 TEST(GifReaderUtil, DisposalMethod) {
   for (int i = -1; i < 4; ++i) {
     FrameSpec::DisposalMethod actual_disposal =
