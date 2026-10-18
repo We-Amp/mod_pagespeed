@@ -43,9 +43,7 @@ AsyncFetch::AsyncFetch()
       owns_response_headers_(false),
       owns_extra_response_headers_(false),
       headers_complete_(false),
-      content_length_(kContentLengthUnknown),
-      fetch_timeout_ms_(0),
-      follow_redirects_(true) {}
+      content_length_(kContentLengthUnknown) {}
 
 AsyncFetch::AsyncFetch(const RequestContextPtr& request_ctx)
     : request_headers_(nullptr),
@@ -56,9 +54,7 @@ AsyncFetch::AsyncFetch(const RequestContextPtr& request_ctx)
       owns_response_headers_(false),
       owns_extra_response_headers_(false),
       headers_complete_(false),
-      content_length_(kContentLengthUnknown),
-      fetch_timeout_ms_(0),
-      follow_redirects_(true) {
+      content_length_(kContentLengthUnknown) {
   DCHECK(request_ctx_.get() != nullptr);
 }
 
