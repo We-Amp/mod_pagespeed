@@ -296,7 +296,9 @@ DAEMON_RUN=/run/pagespeed-optimizer
 # ModPagespeedDaemonVolumePath at v3/cache). 2.5.0 is the first release that
 # carries generation 3: the module line moved from 1.19.0 straight to 2.5.0
 # (2.N == 1.(N+15)), nothing from 1.19.1 ships, and the 1.19.1-pre.N tags are
-# dry runs. Versions compare numerically (semver_ge), so 1.100.0 < 2.5.0.
+# old dry runs that now map to v2 while master ships the v3 drop-in: cut
+# future dry-run tags as module-v2.5.0-pre.N (docs/ci/release.md). Versions
+# compare numerically (semver_ge), so 1.100.0 < 2.5.0.
 # tools/ci/test_cache_gen_for_version.sh holds the version -> generation table
 # for this copy and the one in test/system/el9-selinux/. The
 # directory under test follows the --rc version; the baseline's follows the

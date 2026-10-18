@@ -560,13 +560,18 @@ jobs:
             "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/$OPTIMIZER_COMMIT/MODULE.bazel" \
             -o optimizer-MODULE.bazel
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" optimizer-MODULE.bazel bazel/repositories.bzl
-          # From 2.5.0 on the module version equals the pinned optimizer's VERSION.txt.
-          curl -fsSL --retry 5 --retry-all-errors \
-            "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/$OPTIMIZER_COMMIT/VERSION.txt" \
-            -o optimizer-VERSION.txt
+          # From 2.5.0 on the module version equals the pinned optimizer's
+          # VERSION.txt. Only while the pin is not yet the pair this release
+          # needs (a dry run, see above) does a mismatch warn instead of fail.
+          GUARD=lane-tools/tools/ci/check_module_optimizer_version.py
+          if python3 "$GUARD" --enforced --module-version "$RELEASE_VERSION"; then
+            curl -fsSL --retry 5 --retry-all-errors \
+              "https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/$OPTIMIZER_COMMIT/VERSION.txt" \
+              -o optimizer-VERSION.txt
+          fi
           VERSION_ARGS=(--module-version "$RELEASE_VERSION" --optimizer-version-file optimizer-VERSION.txt)
-          if [ "$DRY_RUN" = true ]; then VERSION_ARGS+=(--dry-run); fi
-          python3 lane-tools/tools/ci/check_module_optimizer_version.py "${VERSION_ARGS[@]}"
+          if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then VERSION_ARGS+=(--dry-run); fi
+          python3 "$GUARD" "${VERSION_ARGS[@]}"
 
           rm -rf optimizer-dist && mkdir optimizer-dist
           curl -fsSL --retry 5 --retry-all-errors \

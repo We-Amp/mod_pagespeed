@@ -231,9 +231,11 @@ self_test() {
   printf 'MAJOR=2\nMINOR=5\nBUILD=0\nPRERELEASE=\nLASTCHANGE=1\n' > "$t/V25"
   chk "expected name 2.5.0" "$(expected_name "$t/V25")" "mod-pagespeed-2.5.0-1.x86_64.rpm"
   printf '%%global mps_version 1.19.0\n%%global mps_release 1\n' > "$t/spec-dir/ea-apache24-mod_pagespeed.spec"
-  if run --os el9 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" >/dev/null 2>&1; then
+  if run --os el9 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" >"$t/err" 2>&1; then
     echo "FAIL: spec mps_version 1.19.0 accepted for a 2.5.0 release"; fail=1
   fi
+  grep -qF '::error::%global mps_version 1.19.0 in packaging/cpanel/ea-apache24-mod_pagespeed.spec is not the release version 2.5.0' "$t/err" \
+    || { echo "FAIL: spec mismatch error text: $(cat "$t/err")"; fail=1; }
   run --os el10 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" 2>/dev/null | grep -qx 'built=false' \
     || { echo "FAIL: el10 spec mismatch should skip"; fail=1; }
   : > "$t/up/mod-pagespeed-1.19.0-2.x86_64.rpm"

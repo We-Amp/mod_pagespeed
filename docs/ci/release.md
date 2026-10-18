@@ -60,6 +60,44 @@ The tag must exist, and its commit must be reachable from `master`. The ref
 guard (`.github/actions/ref-guard`) refuses any other ref and any event but a
 tag push or a manual dispatch, for a dry run as well.
 
+### One version from 2.5.0 on, and the cut sequence
+
+From 2.5.0 the module and the optimizer release one number: the module
+version must equal the optimizer's `VERSION.txt` at the pinned
+`optimizer_commit` (`tools/ci/check_module_optimizer_version.py`, run by
+`optimizer-fetch`). The tags published on the old numbering (`module-v1.15.0`
+to `module-v1.19.0`, where module 1.19.0 paired with `VERSION.txt` 2.4.0) are
+below 2.5.0 and pass with a notice. While the pin does not yet name the
+optimizer tag this release needs (only possible in a dry run, see above), a
+mismatch is a warning, shown as an annotation and in the job summary. Once
+the pin names the paired tag, a mismatch fails, a dry run included.
+
+Dry-run tags for this line are `module-v2.5.0-pre.N`. Do not cut new
+`module-v1.19.1-pre.N` tags: the upgrade rehearsals map 1.19.1 to cache
+generation v2 (`CACHE_GEN3_SINCE=2.5.0`) while `master` ships the v3 drop-in,
+so such a rehearsal checks the wrong directory. The existing
+`module-v1.19.1-pre.1` and `-pre.2` stay on the remote as records. A pushed
+`-pre` tag is a real run like any other tag (it is released as a GitHub
+pre-release), so from 2.5.0 on it is checked like a release candidate: its
+`X.Y.Z` core must equal `VERSION.txt`.
+
+**The pin-pair check fails on `master` until the 2.5.0 cut.** `master` links
+Cyclone `22f6553` (on-disk format v9, cache generation v3) while
+`install/debian/optimizer-pin.json` still pins `optimizer-v1.19.0`, whose
+optimizer commit builds an older cache library. `check_optimizer_pin_pair.py`
+refuses that pair, and that is intended: it blocks shipping a module and an
+optimizer on different cache formats and generations. Do not "fix" the
+check; the cut fixes the pin. The cut, in this order:
+
+1. On the optimizer's `main`, bump `VERSION.txt` to `2.5.0` (with its
+   changelog heading and chart version, as each product release does).
+2. Tag `optimizer-v2.5.0` on that commit and let its release lane publish
+   (its own guard refuses a tag that is not `VERSION.txt`).
+3. Record the pin here: `install/debian/optimizer-pin.json` gets
+   `optimizer-v2.5.0`, the optimizer commit and the hash of its `SHA256SUMS`;
+   bump `%global mps_version` in `packaging/cpanel` to `2.5.0`.
+4. Tag `module-v2.5.0`.
+
 ## Running it
 
 A push of a tag matching `module-v*` runs the lane with `dry_run` false. A
@@ -446,7 +484,7 @@ the optimizer packages of `optimizer_tag` beside it).
 | `tools/ci/release_manifest.py` | asset set, `SHA256SUMS`, `manifest.json`, verification (`--self-test`) |
 | `tools/ci/release_nginx.sh` | the nginx distro legs and their gates (`--self-test`) |
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |
-| `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 and on `-pre` dry-run tags it passes with a notice (`--self-test`) |
+| `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 it passes with a notice; `--dry-run` (passed while the pin is not the paired tag) turns a mismatch into a warning and skips `-pre` tags (`--self-test`) |
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification, used by the two signing jobs |
