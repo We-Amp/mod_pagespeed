@@ -225,17 +225,6 @@ pagespeed_cc_test(
     ],
 )
 
-# Dechunker - HTTP chunked transfer encoding decoder
-# Platform-independent test
-pagespeed_cc_test(
-    name = "iis_dechunker_test",
-    tags = ["manual"],  # Old 1.1 Dechunker API; new IISpeed dechunker needs new test
-    srcs = ["iis_dechunker_test.cc"],
-    deps = [
-        "//pagespeed/iis:iis_dechunker",
-    ],
-)
-
 # The chunked transfer-coding parser the module runs over response bodies
 # (pagespeed/iis/dechunker.h; it includes <Windows.h>).
 pagespeed_cc_test(
