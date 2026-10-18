@@ -89,6 +89,23 @@ pagespeed_cc_test(
     ],
 )
 
+# IisModuleBaseFetch's buffered body writes against a stub IHttpContext
+# whose request-memory allocator can be made to fail.
+pagespeed_cc_test(
+    name = "iis_module_base_fetch_write_test",
+    srcs = [
+        "iis_module_base_fetch_write_test.cc",
+        "stub_iis_http_context.h",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/thread:win_thread",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 pagespeed_cc_test(
     name = "iis_inplace_resource_handler_test",
     tags = ["manual"],  # Old 1.1 API; needs rewrite for IISpeed adoption
