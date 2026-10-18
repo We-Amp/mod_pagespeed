@@ -231,10 +231,13 @@ TEST_F(CachingHeadersTest, CaseInsensitiveDirectives) {
   EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
 }
 
-TEST_F(CachingHeadersTest, SMaxAgeOverridesMaxAgeForSharedCaches) {
-  // This cache is shared, so s-maxage, not max-age, sets the freshness
-  // lifetime (RFC 7234 4.2.1). A response that forbids shared-cache storage
-  // via s-maxage=0 must not be held for max-age's full year.
+TEST_F(CachingHeadersTest, SMaxAgeOnlyShortensFreshness) {
+  // s-maxage is the shared-cache window (RFC 7234 4.2.1). It may shorten
+  // the freshness that max-age or Expires grants, but must not lengthen
+  // it: the computed lifetime also becomes the max-age handed to browsers,
+  // which honor max-age and not s-maxage. A response that forbids
+  // shared-cache storage via s-maxage=0 must not be held for max-age's
+  // full year.
   SetCacheControl("max-age=31536000, s-maxage=0");
   EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
   EXPECT_FALSE(headers_->IsCacheable());
@@ -243,16 +246,27 @@ TEST_F(CachingHeadersTest, SMaxAgeOverridesMaxAgeForSharedCaches) {
   EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
   EXPECT_EQ(0, freshness_ms);
 
-  // The reverse: a long s-maxage outranks max-age=0 for this cache.
+  // A long s-maxage does not turn max-age=0 into a cacheable response:
+  // the no-cache decision from max-age<=0 is never overridden.
   SetCacheControl("s-maxage=31536000, max-age=0");
-  EXPECT_FALSE(headers_->HasExplicitNoCacheDirective());
-  EXPECT_TRUE(headers_->IsCacheable());
-  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+  EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
+  EXPECT_FALSE(headers_->IsCacheable());
+  EXPECT_FALSE(headers_->IsExplicitlyCacheable());
   freshness_ms = -1;
   EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
-  EXPECT_EQ(31536000000LL, freshness_ms);
+  EXPECT_EQ(0, freshness_ms);
 
-  // When both are positive, s-maxage wins on magnitude too.
+  // A longer s-maxage does not extend the max-age lifetime.
+  SetCacheControl("max-age=60, s-maxage=86400");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(60000, freshness_ms);
+
+  // A shorter one shortens it.
+  SetCacheControl("max-age=86400, s-maxage=60");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(60000, freshness_ms);
+
+  // When both are positive and s-maxage is smaller, it wins on magnitude.
   SetCacheControl("max-age=60, s-maxage=30");
   EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
   EXPECT_EQ(30000, freshness_ms);
