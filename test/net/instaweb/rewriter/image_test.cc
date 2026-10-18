@@ -1568,6 +1568,28 @@ TEST_F(ImageTest, DrawImage) {
   EXPECT_GT(image1->input_size() + image2->input_size(), canvas->output_size());
 }
 
+// Offsets outside the canvas are rejected, including negative ones.
+TEST_F(ImageTest, DrawImageRejectsOutOfBoundsOffsets) {
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  GoogleString buf1;
+  ImagePtr image1(ReadFromFileWithOptions(kBikeCrash, &buf1, options));
+  ImageDim image_dim1;
+  image1->Dimensions(&image_dim1);
+
+  options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  ImagePtr canvas(BlankImageWithOptions(
+      image_dim1.width() + 10, image_dim1.height() + 10, IMAGE_PNG,
+      GTestTempDir(), &timer_, &message_handler_, options));
+  EXPECT_FALSE(canvas->DrawImage(image1.get(), -1, 0));
+  EXPECT_FALSE(canvas->DrawImage(image1.get(), 0, -1));
+  EXPECT_FALSE(canvas->DrawImage(image1.get(), -100000, -100000));
+  EXPECT_FALSE(canvas->DrawImage(image1.get(), 11, 0));
+  EXPECT_FALSE(canvas->DrawImage(image1.get(), 0, 11));
+  EXPECT_TRUE(canvas->DrawImage(image1.get(), 10, 10));
+}
+
 // Make sure that the image produced by 'DrawImage()' is accurate for every
 // pixel.
 TEST_F(ImageTest, DrawImageDetails) {
