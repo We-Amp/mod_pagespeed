@@ -41,6 +41,16 @@
 #include "cyclone/error.hpp"
 #include "cyclone/key.hpp"
 
+// Thread cancellation on glibc unwinds the stack with abi::__forced_unwind,
+// which must not be swallowed: the runtime aborts the process if it is.  The
+// barriers below rethrow it, which is also why they are not noexcept.
+#if defined(__GLIBCXX__) && __has_include(<cxxabi.h>)
+#include <cxxabi.h>
+#define CYCLONE_WRAPPER_FORCED_UNWIND 1
+#else
+#define CYCLONE_WRAPPER_FORCED_UNWIND 0
+#endif
+
 // Thread-local storage for error messages.
 // This allows each thread to have its own error message without synchronization.
 thread_local std::string g_last_error;
@@ -107,11 +117,16 @@ static void SetLastErrorNoThrow(const char* msg) noexcept {
 // (CYCLONE_INTERNAL_ERROR for functions returning a CycloneError), with the
 // reason in the thread's last-error message.  Each body leaves its handles
 // in a consistent state before an exception can leave it (see
-// CycloneCacheWriteInternal), so the barrier only translates.
+// CycloneCacheWriteInternal), so the barrier only translates.  A forced
+// unwind (thread cancellation) passes through, see above.
 template <typename Result, typename Body>
-static Result Guarded(Result on_exception, Body&& body) noexcept {
+static Result Guarded(Result on_exception, Body&& body) {
   try {
     return body();
+#if CYCLONE_WRAPPER_FORCED_UNWIND
+  } catch (abi::__forced_unwind&) {
+    throw;
+#endif
   } catch (const std::bad_alloc&) {
     SetLastErrorNoThrow("Out of memory in the cache library - not completed");
   } catch (...) {
@@ -122,9 +137,13 @@ static Result Guarded(Result on_exception, Body&& body) noexcept {
 
 // The same for functions without a result: an exception is dropped.
 template <typename Body>
-static void GuardedVoid(Body&& body) noexcept {
+static void GuardedVoid(Body&& body) {
   try {
     body();
+#if CYCLONE_WRAPPER_FORCED_UNWIND
+  } catch (abi::__forced_unwind&) {
+    throw;
+#endif
   } catch (const std::bad_alloc&) {
     SetLastErrorNoThrow("Out of memory in the cache library - not completed");
   } catch (...) {
@@ -337,7 +356,11 @@ static CycloneError CycloneCacheReadInternal(CycloneCacheHandle* cache,
   cyclone::CacheKey ckey(std::string_view(key, key_len));
 
   // Perform synchronous read
-  int seam = g_test_fail_next_read.exchange(0, std::memory_order_relaxed);
+  // Load first: the exchange writes the shared line, which production
+  // reads must not do on every call.
+  int seam = g_test_fail_next_read.load(std::memory_order_relaxed)
+                 ? g_test_fail_next_read.exchange(0, std::memory_order_relaxed)
+                 : 0;
   auto result = seam != 0
                     ? std::expected<cyclone::ReadHandle, cyclone::CacheError>(
                           std::unexpected(TestSeamError(seam)))
@@ -643,7 +666,10 @@ static CycloneError CommitWrite(cyclone::WriteHandle* handle_result,
   }
 
   // Finalize the write
-  int seam = g_test_fail_next_commit.exchange(0, std::memory_order_relaxed);
+  int seam =
+      g_test_fail_next_commit.load(std::memory_order_relaxed)
+          ? g_test_fail_next_commit.exchange(0, std::memory_order_relaxed)
+          : 0;
   auto close_result = seam != 0 ? std::expected<void, cyclone::CacheError>(
                                       std::unexpected(TestSeamError(seam)))
                                 : handle_result->close_sync();

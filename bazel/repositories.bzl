@@ -354,9 +354,9 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 #    take a lock after tens of microseconds; it now waits out a live holder,
 #    and inserts, removes, hit-count updates and write-slot reservation give
 #    up with CacheError::Busy (publishing nothing) once the holders they have
-#    seen add up to 250 ms.  The wrapper reports a busy write as a failed
-#    write (with its own last-error text) and a busy delete as
-#    CYCLONE_UNAVAILABLE, not as NOT_FOUND, so it is never counted as a
+#    seen add up to 250 ms.  The wrapper reports a busy write as
+#    CYCLONE_BUSY, which CycloneCache skips (not a failed write), and a busy
+#    delete as CYCLONE_BUSY, not as NOT_FOUND, so it is never counted as a
 #    delete that happened.
 #
 # 3a. WRITE-LOCK LIVENESS NO LONGER USES PIDS (since b5c31e8, #37).  Each

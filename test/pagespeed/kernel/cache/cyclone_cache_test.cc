@@ -68,6 +68,9 @@
 
 namespace {
 thread_local bool t_fail_next_allocation = false;
+// When >= 0: let this many allocations on the thread succeed, then fail the
+// next one, once (the hook then disarms itself).
+thread_local int t_allocations_before_failure = -1;
 thread_local int t_failed_allocations = 0;
 }  // namespace
 
@@ -75,6 +78,10 @@ thread_local int t_failed_allocations = 0;
 void* operator new(size_t size) {
   if (t_fail_next_allocation) {
     t_fail_next_allocation = false;
+    ++t_failed_allocations;
+    throw std::bad_alloc();
+  }
+  if (t_allocations_before_failure >= 0 && t_allocations_before_failure-- == 0) {
     ++t_failed_allocations;
     throw std::bad_alloc();
   }
@@ -544,6 +551,30 @@ TEST_F(CycloneCacheTest, AllocationFailureDoesNotEscape) {
   EXPECT_EQ(1, t_failed_allocations);
   WaitAndCheckNotFound(callback);
   EXPECT_EQ(misses + 1, stats.GetVariable(CycloneCache::kMisses)->Get());
+
+  // Fail each allocation of a write in turn, including the ones made after
+  // the write handle is open (the abort-then-report path): every one is a
+  // failed write and nothing escapes, until a write needs fewer allocations
+  // than were let through and succeeds.
+  int64 failures = stats.GetVariable(CycloneCache::kFailures)->Get();
+  bool completed = false;
+  for (int skip = 0; skip < 256 && !completed; ++skip) {
+    GoogleString step_key = StrCat("step", IntegerToString(skip));
+    SharedString step_value(GoogleString(4096, 'x'));
+    t_failed_allocations = 0;
+    t_allocations_before_failure = skip;
+    cache->Put(step_key, step_value);
+    t_allocations_before_failure = -1;
+    if (t_failed_allocations == 0) {
+      completed = true;
+      CheckGet(cache.get(), step_key, GoogleString(4096, 'x'));
+    } else {
+      EXPECT_EQ(++failures, stats.GetVariable(CycloneCache::kFailures)->Get())
+          << "allocation " << skip;
+      CheckNotFound(cache.get(), step_key.c_str());
+    }
+  }
+  EXPECT_TRUE(completed);
 
   // Nothing was left half-done: both keys work normally afterwards.
   CheckGet(cache.get(), "key", "value");
