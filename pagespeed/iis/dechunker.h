@@ -143,11 +143,18 @@ public:
 					continue; // pushback
 				}				
 				break;
-			case 1: if (!expect(c,'\r',2)) return false; break; // expect \r
+			case 1: // expect \r, or the start of chunk extensions
+				if (c==';' || c==' ' || c=='\t')
+				{
+					currentmode=6;
+					break;
+				}
+				if (!expect(c,'\r',2)) return false;
+				break;
 			case 2: if (!expect(c,'\n',3)) return false; break;// parse '\n''				
 			case 3: // parse data (optimized, not char by char)
 				{
-					int dataleft=endptr-data;
+					size_t dataleft=static_cast<size_t>(endptr-data);
 					if (dataleft==0) // no data in block
 					{
 						data=NULL;
@@ -172,6 +179,9 @@ public:
 				}
 			case 4: if (!expect(c,'\r',5)) return false; break; // parse '\r'
 			case 5: if (!expect(c,'\n',0)) return false; break; // parse '\n'
+			case 6: // chunk extensions carry nothing we use: skip to the \r
+				if (c=='\r') currentmode=2;
+				break;
 
 			}
 			data++;
