@@ -44,4 +44,15 @@ public class InfoEndpointAuthorizationTests
         var endpoint = MapAndGet(app => app.MapPageSpeedInfo(requireAuthorization: false));
         endpoint.Metadata.GetMetadata<IAuthorizeData>().Should().BeNull();
     }
+
+    [Fact]
+    public void MapPageSpeedInfo_KeepsTheTwoParameterOverloadAndRequiresAuthorization()
+    {
+        typeof(PageSpeedApplicationBuilderExtensions).GetMethod(
+            nameof(PageSpeedApplicationBuilderExtensions.MapPageSpeedInfo),
+            new[] { typeof(IEndpointRouteBuilder), typeof(string) }).Should().NotBeNull();
+
+        var endpoint = MapAndGet(app => app.MapPageSpeedInfo("/custom/info"));
+        endpoint.Metadata.GetMetadata<IAuthorizeData>().Should().NotBeNull();
+    }
 }
