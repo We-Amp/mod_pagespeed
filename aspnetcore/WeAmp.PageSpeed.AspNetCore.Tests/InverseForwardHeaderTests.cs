@@ -41,6 +41,20 @@ public class InverseForwardHeaderTests
         req.Headers.TryGetValues(name, out var v) ? v.Count() : 0;
 
     [Fact]
+    public async Task ForwardedRequest_DoesNotRelayClientOriginalHeaders()
+    {
+        var req = await Transform(InverseTestSupport.NewEndpoint(), headers: new Dictionary<string, string>
+        {
+            ["X-Original-For"] = "203.0.113.7",
+            ["X-Original-Proto"] = "http",
+            ["X-Original-Host"] = "evil.example"
+        });
+        Count(req, "X-Original-For").Should().Be(0);
+        Count(req, "X-Original-Proto").Should().Be(0);
+        Count(req, "X-Original-Host").Should().Be(0);
+    }
+
+    [Fact]
     public async Task ForwardedRequest_PreservesHostHeader()
     {
         var req = await Transform(InverseTestSupport.NewEndpoint());
