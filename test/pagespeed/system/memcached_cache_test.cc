@@ -164,8 +164,10 @@ TEST_F(MemcachedCacheTest, MultiGet) {
   EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
 }
 
-// A batch that carries the same key twice must answer both requests, not
-// report the earlier copy as missing.
+// A batch that carries the same key twice must answer both requests from
+// the key's result, whichever count the server returns it with: a single
+// result satisfies both requests, and a repeated result answers no
+// request twice.
 TEST_F(MemcachedCacheTest, MultiGetWithDuplicatedKey) {
   if (!InitMemcachedOrSkip(true)) {
     return;
