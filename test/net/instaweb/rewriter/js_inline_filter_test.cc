@@ -658,14 +658,12 @@ TEST_F(JsInlineFilterTest, CharsetMismatchNotInlined) {
   latin1_headers.MergeContentType("text/javascript; charset=iso-8859-1");
   const GoogleString non_ascii = "var s = 'caf\xE9';\n";
   const GoogleString ascii_only = "var s = 'cafe';\n";
-  SetFetchResponse(StrCat(kTestDomain, "latin1.js"), latin1_headers,
-                   non_ascii);
-  SetFetchResponse(StrCat(kTestDomain, "ascii.js"), latin1_headers,
-                   ascii_only);
+  SetFetchResponse(StrCat(kTestDomain, "latin1.js"), latin1_headers, non_ascii);
+  SetFetchResponse(StrCat(kTestDomain, "ascii.js"), latin1_headers, ascii_only);
 
   const char kUtf8Page[] = "<meta charset=\"utf-8\">";
-  ValidateNoChanges(
-      "mismatch", StrCat(kUtf8Page, "<script src=latin1.js></script>"));
+  ValidateNoChanges("mismatch",
+                    StrCat(kUtf8Page, "<script src=latin1.js></script>"));
   // Pure ASCII is the same in both charsets, so it is still inlined.
   ValidateExpected("ascii", StrCat(kUtf8Page, "<script src=ascii.js></script>"),
                    StrCat(kUtf8Page, "<script>", ascii_only, "</script>"));
@@ -684,6 +682,34 @@ TEST_F(JsInlineFilterTest, CharsetMatchInlined) {
   const char kUtf8Page[] = "<meta charset=\"utf-8\">";
   ValidateExpected("match", StrCat(kUtf8Page, "<script src=utf8.js></script>"),
                    StrCat(kUtf8Page, "<script>", body, "</script>"));
+}
+
+// A BOM names the script's charset when nothing else does.
+TEST_F(JsInlineFilterTest, Utf16BomScriptNotInlinedOnUtf8Page) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  // "a;" in UTF-16LE with a BOM.
+  const GoogleString body(
+      "\xFF\xFE"
+      "a\0;\0",
+      6);
+  SetResponseWithDefaultHeaders(StrCat(kTestDomain, "u16.js"),
+                                kContentTypeJavascript, body, 3000);
+  ValidateNoChanges("utf16",
+                    "<meta charset=\"utf-8\"><script src=u16.js></script>");
+}
+
+TEST_F(JsInlineFilterTest, Utf8BomScriptInlinedOnUtf8Page) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  const GoogleString body =
+      "\xEF\xBB\xBF"
+      "var s = 'caf\xC3\xA9';\n";
+  SetResponseWithDefaultHeaders(StrCat(kTestDomain, "u8.js"),
+                                kContentTypeJavascript, body, 3000);
+  ValidateExpected(
+      "utf8bom", "<meta charset=\"utf-8\"><script src=u8.js></script>",
+      StrCat("<meta charset=\"utf-8\"><script>", body, "</script>"));
 }
 
 TEST_F(JsInlineFilterTest, BasicCsp) {
