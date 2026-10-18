@@ -445,7 +445,9 @@ the optimizer packages of `optimizer_tag` beside it).
 | `tools/ci/release_version.sh` | tag grammar, derived versions, VERSION stamping (`--self-test`) |
 | `tools/ci/release_manifest.py` | asset set, `SHA256SUMS`, `manifest.json`, verification (`--self-test`) |
 | `tools/ci/release_nginx.sh` | the nginx distro legs and their gates (`--self-test`) |
-| `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm (`--self-test`) |
+| `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |
+| `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 and on `-pre` dry-run tags it passes with a notice (`--self-test`) |
+| `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification, used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |

@@ -292,14 +292,19 @@ DAEMON_UNIT=pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
 # The optimizer's cache directory carries the cache directory generation in
 # its name: v1 up to 1.16.x, v2 from 1.17.0 on (cache library on-disk format 8),
-# v3 after 1.19.0 (format 9; the packaged drop-in points
-# ModPagespeedDaemonVolumePath at v3/cache). The
+# v3 from 2.5.0 on (format 9; the packaged drop-in points
+# ModPagespeedDaemonVolumePath at v3/cache). 2.5.0 is the first release that
+# carries generation 3: the module line moved from 1.19.0 straight to 2.5.0
+# (2.N == 1.(N+15)), nothing from 1.19.1 ships, and the 1.19.1-pre.N tags are
+# dry runs. Versions compare numerically (semver_ge), so 1.100.0 < 2.5.0.
+# tools/ci/test_cache_gen_for_version.sh holds the version -> generation table
+# for this copy and the one in test/system/el9-selinux/. The
 # directory under test follows the --rc version; the baseline's follows the
 # baseline version once it is resolved (step 3). An upgrade across a
 # generation leaves the old directory on disk for a rollback.
 DAEMON_CACHE_ROOT=/var/cache/pagespeed-optimizer
 CACHE_GEN2_SINCE="1.17.0"
-CACHE_GEN3_SINCE="1.19.1"
+CACHE_GEN3_SINCE="2.5.0"
 FIXTURE_URL_DIR=/upgrade-fixture
 IMAGE_NAME=Puzzle.jpg
 # Same bytes under a URL the 1.15 module never saw: the post-upgrade in-place

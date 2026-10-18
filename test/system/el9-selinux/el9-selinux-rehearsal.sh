@@ -272,12 +272,12 @@ DAEMON_UNIT=pagespeed-optimizer
 DAEMON_BIN=/usr/bin/pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
 # The optimizer's cache directory carries the cache directory generation in
-# its name (v1 up to 1.16.x, v2 from 1.17.0, v3 after 1.19.0); DAEMON_CACHE is
+# its name (v1 up to 1.16.x, v2 from 1.17.0, v3 from 2.5.0); DAEMON_CACHE is
 # derived from --rc below, once semver_ge is defined, the same way
 # install/upgrade_test/run_upgrade_test.sh derives it.
 DAEMON_CACHE_ROOT=/var/cache/pagespeed-optimizer
 CACHE_GEN2_SINCE="1.17.0"
-CACHE_GEN3_SINCE="1.19.1"
+CACHE_GEN3_SINCE="2.5.0"
 MODULE_CACHE=/var/cache/mod_pagespeed
 MODULE_LOG=/var/log/pagespeed
 FIXTURE_URL_DIR=/upgrade-fixture
