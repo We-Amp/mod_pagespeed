@@ -26,6 +26,7 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 
 Provides        : @@PROVIDES@@ = %{version}
 Requires        : @@DEPENDS@@
+Conflicts       : @@REPLACES@@
 @@SELINUX_REQUIRES_POST@@
 @@SELINUX_REQUIRES_POSTUN@@
 
@@ -75,6 +76,7 @@ rm -rf "$RPM_BUILD_ROOT"
 %files
 %defattr(-,root,root)
 @@APACHE_MODULEDIR@@/mod_pagespeed.so
+@@APACHE_MODULEDIR@@/mod_pagespeed_ap24.so
 %dir /usr/share/doc/@@PACKAGE@@
 %license /usr/share/doc/@@PACKAGE@@/LICENSE
 %doc /usr/share/doc/@@PACKAGE@@/NOTICE

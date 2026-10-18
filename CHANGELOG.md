@@ -153,6 +153,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Moving from Google's archived package works in one step.** The
+  `mod-pagespeed` deb now declares `Conflicts` and `Replaces` for
+  `mod-pagespeed-stable` and `mod-pagespeed-beta`, so
+  `apt-get install mod-pagespeed` removes the archived 1.13.35.2 package and
+  takes over its files in the same run; before, apt stopped with "trying to
+  overwrite '/etc/apache2/conf-available/pagespeed_libraries.conf'" and left
+  the package half-installed. The rpm declares `Conflicts` (below 1.15) on the
+  same names: on Enterprise Linux the move is
+  `dnf swap mod-pagespeed-stable mod-pagespeed`, and a `dnf upgrade` never
+  replaces Google's package unasked. Both packages also ship
+  `mod_pagespeed_ap24.so` as a link to `mod_pagespeed.so`, so a kept, edited
+  Google configuration that still loads the module under that name keeps
+  working.
 - Disk cache: an unexpected internal failure in the cache library, such as
   running out of memory, is now reported as a failed read or write instead of
   being able to terminate the worker process.
