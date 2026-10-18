@@ -152,6 +152,42 @@ public class InverseLoopGuardTests
     }
 
     [Fact]
+    public async Task RewrittenRemoteIp_IsNotTrustedAsLoopbackPeer_OnRawOriginBranch()
+    {
+        // When forwarded-header processing ran BEFORE this middleware it rewrites
+        // RemoteIpAddress (possibly to loopback) and records the original in
+        // X-Original-For. The rewritten address is not the transport peer, so the
+        // loopback assertion must fail closed.
+        var fwd = new StubPageSpeedForwarder();
+        var mw = InverseTestSupport.NewMiddleware(fwd, InverseTestSupport.NewEndpoint());
+        var ctx = InverseTestSupport.NewContext(rawOrigin: true, remoteIp: "127.0.0.1",
+            headers: new Dictionary<string, string> { ["X-Original-For"] = "203.0.113.7" });
+
+        await mw.InvokeAsync(ctx);
+
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status421MisdirectedRequest);
+        InverseTestSupport.NextWasCalled(ctx).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RewrittenRemoteIp_DoesNotPreserveClientHopHeader_OnPublicBranch()
+    {
+        var fwd = new StubPageSpeedForwarder();
+        var mw = InverseTestSupport.NewMiddleware(fwd, InverseTestSupport.NewEndpoint());
+        var ctx = InverseTestSupport.NewContext(remoteIp: "127.0.0.1",
+            headers: new Dictionary<string, string>
+            {
+                ["X-Original-For"] = "203.0.113.7",
+                [InverseForwardTransformer.HopHeader] = "1"
+            });
+
+        await mw.InvokeAsync(ctx);
+
+        ctx.Request.Headers.ContainsKey(InverseForwardTransformer.HopHeader)
+            .Should().BeFalse("a rewritten peer address is not a trusted loopback transport peer");
+    }
+
+    [Fact]
     public async Task PagespeedSubrequestUserAgent_IsRecognized_DefenseInDepthOnly()
     {
         // The mod_pagespeed UA is recognized as defense-in-depth on the PUBLIC port
