@@ -29,6 +29,7 @@
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 #include "net/instaweb/rewriter/public/image_rewrite_filter.h"
+#include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -46,6 +47,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/empty_html_filter.h"
@@ -287,6 +289,36 @@ TEST_F(RewriteDriverTest, TestIgnoringUrlSignatures) {
       "http://signed-urls.example.com/mod_pagespeed_example/styles/"
       "A.all_styles.css.pagespeed.cf.U.css"))
       << "no signature, ignored";
+}
+
+// A rejected signature is logged for diagnostics, but the log line must name
+// only the URL and the provided signature: logging the computed signature
+// would hand anyone with log access a valid signed URL for that resource.
+TEST_F(RewriteDriverTest, InvalidSignatureLogOmitsComputedSignature) {
+  options()->set_url_signing_key("helloworld");
+  rewrite_driver()->AddFilters();
+
+  // Decode a correctly signed URL to learn the valid signature value.
+  GoogleUrl valid_gurl(
+      "http://signed-urls.example.com/mod_pagespeed_example/styles/"
+      "A.all_styles.css.pagespeed.cf.UQ_aP9rObnq.css");
+  RewriteFilter* filter;
+  OutputResourcePtr valid_resource(
+      rewrite_driver()->DecodeOutputResource(valid_gurl, &filter));
+  ASSERT_TRUE(valid_resource.get() != nullptr);
+  const GoogleString valid_signature =
+      valid_resource->full_name().signature().as_string();
+  ASSERT_FALSE(valid_signature.empty());
+
+  // A bad signature rejects the URL and logs the provided value only.
+  EXPECT_FALSE(CanDecodeUrl(
+      "http://signed-urls.example.com/mod_pagespeed_example/styles/"
+      "A.all_styles.css.pagespeed.cf.UAAAAAAAAAA.css"));
+  GoogleString log;
+  StringWriter writer(&log);
+  message_handler()->Dump(&writer);
+  EXPECT_NE(GoogleString::npos, log.find("UAAAAAAAAAA")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find(valid_signature)) << log;
 }
 
 TEST_F(RewriteDriverTest, PagespeedObliviousPositiveTest) {
