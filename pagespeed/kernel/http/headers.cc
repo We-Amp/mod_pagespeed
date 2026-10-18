@@ -58,7 +58,9 @@ bool RemoveCookieString(const StringPiece& cookie_name,
   for (int i = 0, n = pieces.size(); i < n; ++i) {
     StringPiece working_cookie = pieces[i];
     TrimLeadingWhitespace(&working_cookie);
-    if (StringCaseStartsWith(working_cookie, cookie_prefix)) {
+    // Cookie names are case-sensitive, so the name= prefix must match
+    // exactly: removing "VICTIM" must leave a "Victim=..." cookie alone.
+    if (working_cookie.starts_with(cookie_prefix)) {
       cookie_found = true;
     } else {
       // Don't trim the whitespace off the cookie, just in case it actually
