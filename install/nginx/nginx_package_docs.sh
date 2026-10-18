@@ -145,7 +145,7 @@ fi
 cat > "${DOCDIR}/README.md" << EOF
 # nginx-module-pagespeed ${VERSION}
 
-nginx dynamic module for PageSpeed web optimization (We-Amp mod_pagespeed 1.15).
+nginx dynamic module for PageSpeed web optimization (We-Amp mod_pagespeed ${VERSION}).
 
 ## Installation
 
