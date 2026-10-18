@@ -271,7 +271,13 @@ DROPIN_SINCE="1.16.0-rc.14"
 DAEMON_UNIT=pagespeed-optimizer
 DAEMON_BIN=/usr/bin/pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
-DAEMON_CACHE=/var/cache/pagespeed-optimizer/v1
+# The optimizer's cache directory carries the cache directory generation in
+# its name (v1 up to 1.16.x, v2 from 1.17.0, v3 after 1.19.0); DAEMON_CACHE is
+# derived from --rc below, once semver_ge is defined, the same way
+# install/upgrade_test/run_upgrade_test.sh derives it.
+DAEMON_CACHE_ROOT=/var/cache/pagespeed-optimizer
+CACHE_GEN2_SINCE="1.17.0"
+CACHE_GEN3_SINCE="1.19.1"
 MODULE_CACHE=/var/cache/mod_pagespeed
 MODULE_LOG=/var/log/pagespeed
 FIXTURE_URL_DIR=/upgrade-fixture
@@ -326,6 +332,16 @@ semver_ge() {
   done
   return 0
 }
+
+# cache_gen_for_version <X.Y.Z[-pre]>: the optimizer cache directory name for
+# that upstream version (v1, v2 or v3). Compared on the X.Y.Z core so every
+# prerelease of a release takes that release's layout.
+cache_gen_for_version() {
+  if semver_ge "${1%%-*}" "$CACHE_GEN3_SINCE"; then printf 'v3'
+  elif semver_ge "${1%%-*}" "$CACHE_GEN2_SINCE"; then printf 'v2'
+  else printf 'v1'; fi
+}
+DAEMON_CACHE="${DAEMON_CACHE_ROOT}/$(cache_gen_for_version "$RC")"
 
 echo "enforcing-SELinux upgrade rehearsal: newest published GA${BASELINE_PREFIX:+ ${BASELINE_PREFIX}.x} older than ${RC} -> ${RC} (package ${PKGV})"
 if [[ -n "$PKGS_DIR" ]]; then
@@ -460,7 +476,7 @@ avc_classes() {
   [[ -n "$in" ]] || return 0
   printf '%s\n' "$in" | grep -q -E "connectto" && echo "  class: connectto (httpd_t -> the daemon's unix stream socket)"
   printf '%s\n' "$in" | grep -q -E "${DAEMON_RUN}|notify\.sock|pagespeed_runtime_t" && echo "  class: notify socket (${DAEMON_RUN})"
-  printf '%s\n' "$in" | grep -q -E "pagespeed-optimizer/v1|pagespeed_cache_t|cache-[0-9]" && echo "  class: daemon cache volume (${DAEMON_CACHE})"
+  printf '%s\n' "$in" | grep -q -E "pagespeed-optimizer/v[0-9]+|pagespeed_cache_t|cache-[0-9]" && echo "  class: daemon cache volume (${DAEMON_CACHE})"
   printf '%s\n' "$in" | grep -q -E "mod_pagespeed|/var/log/pagespeed" && echo "  class: the module's own cache/log directories (1.15-era layout)"
   printf '%s\n' "$in" | grep -q -E 'scontext=[^: ]+:[^: ]+:pagespeed_t:' && echo "  class: the daemon itself (pagespeed_t)"
   # A record set matching none of the classes above is still a valid outcome

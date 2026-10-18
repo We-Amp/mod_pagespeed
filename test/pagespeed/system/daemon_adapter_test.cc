@@ -1797,12 +1797,12 @@ TEST_F(DaemonAdapterTest, APermissionDeniedSocketNamesTheGroup) {
 // cache_dir_generation.  A skew is a loud handshake failure; an absent field
 // is the legacy layout, tolerated and announced once.
 
-TEST_F(DaemonAdapterTest, TheCompiledGenerationIsTwo) {
-  EXPECT_EQ(2u, DaemonAdapter::kCacheDirGeneration);
+TEST_F(DaemonAdapterTest, TheCompiledGenerationIsThree) {
+  EXPECT_EQ(3u, DaemonAdapter::kCacheDirGeneration);
 }
 
 TEST_F(DaemonAdapterTest, AGenerationMismatchIsALoudHandshakeFailure) {
-  // A v1 daemon vs a v2 module: the two layouts share nothing, so the
+  // A v1 daemon vs a v3 module: the two layouts share nothing, so the
   // substrate goes down loudly -- and the volume is NEVER opened at the
   // other generation's geometry.
   published_generation_ = 1;
@@ -1846,7 +1846,7 @@ TEST_F(DaemonAdapterTest, APreH1DaemonIsToleratedWithOneLoudLine) {
 TEST_F(DaemonAdapterTest, AGenerationOfZeroIsUnknownNotAMismatch) {
   // The reader exists but the field is absent from the shared config: the
   // same tolerance as a pre-H1 daemon, and definitely not read as
-  // "generation 0" refusing against a build for generation 2.
+  // "generation 0" refusing against a build for generation 3.
   published_generation_ = 0;
   DaemonCreatedItsVolume(kDaemonSize);
   const GoogleString socket_path = SocketPath("genzero.sock");
