@@ -1688,7 +1688,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     ret = APACHE_OK;
   } else if (strcmp(request->handler, kGenerateResponseWithOptionsHandler) ==
                  0 &&
-             request->uri != nullptr) {
+             request->uri != nullptr && request->parsed_uri.query != nullptr) {
     // This handler is only needed for apache_system_test. It adds headers to
     // headers_out and/or err_headers_out to test handling of parameters in
     // those resources.
