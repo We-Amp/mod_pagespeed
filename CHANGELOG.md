@@ -119,7 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Redis Cluster: invalid redirections and slot maps are rejected and the number
   of cluster connections is capped.
 - `s-maxage` is honored for shared-cache freshness; it can only shorten the
-  lifetime set by `max-age` or `Expires`. Unoptimized in-place responses carry
+  lifetime set by `max-age` or `Expires`, and `s-maxage=0` keeps a response
+  out of the cache. Setting the in-place `s-maxage` window option to 0
+  therefore also stops in-place recording. Unoptimized in-place responses carry
   the in-place `s-maxage` window (default 10 s) in their cached lifetime.
 - A response header line longer than 64 KiB is dropped and the response is
   served as `max-age=0, no-cache`.
