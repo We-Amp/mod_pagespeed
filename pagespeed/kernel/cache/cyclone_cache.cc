@@ -318,12 +318,14 @@ void CycloneCache::PutWithTier(const GoogleString& key,
         write_failure_log_count_.fetch_add(1, std::memory_order_relaxed);
     if ((n & 1023) == 0) {
       const char* error = cyclone_get_last_error();
+      // Keys embed request URLs; escape the key so control characters in it
+      // cannot forge log lines or emit terminal escapes.
       handler_->Message(
           kWarning,
           "CycloneCache: Write failed for key %s: %s (failure #%llu on this "
           "cache; every failure is counted in cyclone_cache_failures, this "
           "warning is logged 1-in-1024)",
-          key.c_str(), error ? error : "unknown error",
+          CEscape(key).c_str(), error ? error : "unknown error",
           static_cast<unsigned long long>(n) + 1);
     }
   }

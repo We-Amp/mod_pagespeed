@@ -37,13 +37,16 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/null_statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 
 namespace net_instaweb {
@@ -276,6 +279,46 @@ TEST_F(CycloneCacheTest, BusyPreWriteExistsDropsWrite) {
   CheckGet(&cache, "busy_key", "new_value");
   EXPECT_EQ(2, stats.GetVariable(CycloneCache::kInserts)->Get());
   EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  cache.ShutDown();
+}
+
+// Cache keys embed request URLs, so the write-failure diagnostic must escape
+// the key: control characters in it must not forge extra log lines or emit
+// terminal escapes.
+TEST_F(CycloneCacheTest, WriteFailureLogEscapesKey) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+
+  CycloneCache::Config config;
+  config.cache_path = StrCat(cache_path_, "_key_escape");
+  config.cache_size_bytes = 10 * 1024 * 1024;
+  config.ram_cache_size_bytes = 0;
+  config.enable_checksum = true;
+  config.num_segments = 0;
+  CycloneCache cache(config, &stats, &handler);
+  ASSERT_TRUE(cache.IsHealthy());
+
+  const GoogleString key = "key-with-\r\nforged-line-and-\x1b" "escape";
+  cyclone_cache_test_busy_next_pre_write_exists();
+  SharedString value("value");
+  cache.Put(key, value);
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  GoogleString log;
+  StringWriter writer(&log);
+  handler.Dump(&writer);
+  // No control characters from the key may reach the log verbatim; the key
+  // must appear only in escaped form.
+  EXPECT_EQ(GoogleString::npos, log.find('\r')) << log;
+  EXPECT_EQ(GoogleString::npos, log.find('\x1b')) << log;
+  EXPECT_NE(GoogleString::npos, log.find(CEscape(key))) << log;
 
   cache.ShutDown();
 }
