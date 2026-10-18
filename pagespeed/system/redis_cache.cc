@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <set>
 #include <utility>
 
 #include "base/logging.h"
@@ -440,7 +441,14 @@ void RedisCache::FetchClusterSlotMapping(Connection* connection) {
     return;  // error
   }
 
-  std::vector<ClusterMapping> new_cluster_mappings;
+  // The whole reply is validated before any connection is opened, so that a
+  // rejected reply leaves the connection budget untouched.
+  struct ValidatedMapping {
+    int start_slot_range;
+    int end_slot_range;
+    ExternalServerSpec master;
+  };
+  std::vector<ValidatedMapping> validated;
   for (size_t i = 0; i < reply->elements; i++) {
     // For each server we have an array in the form:
     // 1) [int] start slot range, inclusive
@@ -497,35 +505,60 @@ void RedisCache::FetchClusterSlotMapping(Connection* connection) {
       return;
     }
     // Everything is there and is the right type.  Store it.
+    validated.push_back(
+        {static_cast<int>(start_slot_range->integer),
+         static_cast<int>(end_slot_range->integer),
+         ExternalServerSpec(master_ip->str,
+                            static_cast<int>(master_port->integer))});
+  }
+
+  // Sort based on start_slot_range.
+  sort(validated.begin(), validated.end(),
+       [](const ValidatedMapping& a, const ValidatedMapping& b) {
+         return a.start_slot_range < b.start_slot_range;
+       });
+
+  // Now they are sorted, verify that the slot ranges don't overlap.
+  // Note: This starts at 1, not 0, because we are looking backwards.
+  for (size_t i = 1; i < validated.size(); ++i) {
+    if (validated[i].start_slot_range <= validated[i - 1].end_slot_range) {
+      message_handler_->Message(
+          kError, "Redis returned overlapping slot ranges for CLUSTER SLOTS");
+      return;
+    }
+  }
+
+  // Reject the reply if the servers it names that are not connected yet do
+  // not fit in the connection budget.
+  {
+    std::set<GoogleString> new_servers;
+    ScopedMutex lock(connections_lock_.get());
+    for (const ValidatedMapping& mapping : validated) {
+      GoogleString name = mapping.master.ToString();
+      if (connections_.find(name) == connections_.end()) {
+        new_servers.insert(std::move(name));
+      }
+    }
+    if (connections_.size() + new_servers.size() > kMaxClusterConnections) {
+      message_handler_->Message(kError,
+                                "Too many servers in reply from CLUSTER SLOTS");
+      return;
+    }
+  }
+
+  std::vector<ClusterMapping> new_cluster_mappings;
+  for (const ValidatedMapping& mapping : validated) {
     // Using database 0 for cluster
-    Connection* master_connection = GetOrCreateConnection(
-        ExternalServerSpec(master_ip->str, master_port->integer),
-        kDefaultDatabaseIndex);
+    Connection* master_connection =
+        GetOrCreateConnection(mapping.master, kDefaultDatabaseIndex);
     if (master_connection == nullptr) {
+      // Only reachable if concurrent redirections used up the budget.
       message_handler_->Message(kError,
                                 "Too many servers in reply from CLUSTER SLOTS");
       return;
     }
     new_cluster_mappings.emplace_back(
-        start_slot_range->integer, end_slot_range->integer, master_connection);
-  }
-
-  // Sort new_cluster_mappings based on start_slot_range_.
-  sort(new_cluster_mappings.begin(), new_cluster_mappings.end(),
-       [](const RedisCache::ClusterMapping& a,
-          const RedisCache::ClusterMapping& b) {
-         return a.start_slot_range_ < b.start_slot_range_;
-       });
-
-  // Now they are sorted, verify that the slot ranges don't overlap.
-  // Note: This starts at 1, not 0, because we are looking backwards.
-  for (size_t i = 1; i < new_cluster_mappings.size(); ++i) {
-    if (new_cluster_mappings[i].start_slot_range_ <=
-        new_cluster_mappings[i - 1].end_slot_range_) {
-      message_handler_->Message(
-          kError, "Redis returned overlapping slot ranges for CLUSTER SLOTS");
-      return;
-    }
+        mapping.start_slot_range, mapping.end_slot_range, master_connection);
   }
 
   // We don't verify that it's a complete mapping, because Redis allows the
