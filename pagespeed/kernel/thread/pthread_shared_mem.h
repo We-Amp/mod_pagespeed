@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_KERNEL_THREAD_PTHREAD_SHARED_MEM_H_
 #define PAGESPEED_KERNEL_THREAD_PTHREAD_SHARED_MEM_H_
 
+#include <atomic>
 #include <cstddef>
 #include <map>
 #include <utility>
@@ -80,7 +81,7 @@ class PthreadSharedMem : public AbstractSharedMem {
   static SegmentBaseMap* segment_bases_;
 
   // Holds the number of times a PthreadSharedMem has been created.
-  static size_t s_instance_count_;
+  static std::atomic<size_t> s_instance_count_;
   // Used to prefix segment names, so that when two runtimes are active at the
   // same moment they will not have overlapping segment names. This occurs in
   // ngx_pagespeed during a configuration reload, where first a new factory is
