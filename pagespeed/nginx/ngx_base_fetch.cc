@@ -501,8 +501,8 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
         // PsZeroCopyAlias: a client abort mid-stream must release the read
         // lease even though this NgxBaseFetch is long gone by then.
         // nothrow: this runs on nginx's C call stack.
-        ring->pin = new (std::nothrow) MappedSharedString(
-            std::move(pinned_pending_));
+        ring->pin =
+            new (std::nothrow) MappedSharedString(std::move(pinned_pending_));
         if (ring->pin == nullptr) {
           return NGX_ERROR;
         }
@@ -624,8 +624,8 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
         }
         a->buf = b;
         // nothrow: this runs on nginx's C call stack.
-        a->pin = new (std::nothrow) MappedSharedString(
-            std::move(pinned_pending_));
+        a->pin =
+            new (std::nothrow) MappedSharedString(std::move(pinned_pending_));
         if (a->pin == nullptr) {
           return NGX_ERROR;
         }
