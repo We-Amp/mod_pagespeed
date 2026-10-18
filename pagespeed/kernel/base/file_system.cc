@@ -251,14 +251,21 @@ void FileSystem::GetDirInfoWithProgress(const StringPiece& path,
     for (it = dir_contents.begin(); it != dir_contents.end(); ++it) {
       notifier->Notify();
       GoogleString file_name = *it;
-      // Add size for both files and directories
-      int64 file_size;
-      Size(file_name, &file_size, handler);
+      // Add size for both files and directories.  A file whose stat fails
+      // (e.g. it was removed after the listing) is skipped entirely: its
+      // size and access time are unknown, and recording stale values would
+      // feed wrong numbers into cache-cleaning decisions.
+      int64 file_size = 0;
+      if (!Size(file_name, &file_size, handler)) {
+        continue;
+      }
       dirinfo->size_bytes += file_size;
       BoolOrError is_dir = IsDir(file_name.c_str(), handler);
       if (is_dir.is_false()) {
-        int64 file_atime;
-        Atime(file_name, &file_atime, handler);
+        int64 file_atime = 0;
+        if (!Atime(file_name, &file_atime, handler)) {
+          continue;
+        }
         dirinfo->files.emplace_back(file_size, file_atime, file_name);
       } else if (is_dir.is_true()) {
         dirs_to_traverse.push_back(file_name);

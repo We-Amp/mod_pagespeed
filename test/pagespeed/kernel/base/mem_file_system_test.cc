@@ -147,4 +147,66 @@ TEST_F(MemFileSystemTest, TestSizeOld) {
 // TestRecursivelyMakeDir_NoPermission
 // TestRecursivelyMakeDir_FileInPath
 
+namespace {
+
+// Fails Size and Atime for one named path, as a real filesystem does when
+// the file is removed between the directory listing and the stat calls of
+// a directory walk.
+class StatFailsForOneFile : public MemFileSystem {
+ public:
+  using MemFileSystem::MemFileSystem;
+
+  void set_stat_failure(const GoogleString& path) { failing_path_ = path; }
+
+  bool Size(const StringPiece& path, int64* size,
+            MessageHandler* handler) const override {
+    if (path == failing_path_) {
+      return false;
+    }
+    return MemFileSystem::Size(path, size, handler);
+  }
+
+  bool Atime(const StringPiece& path, int64* timestamp_sec,
+             MessageHandler* handler) override {
+    if (path == failing_path_) {
+      return false;
+    }
+    return MemFileSystem::Atime(path, timestamp_sec, handler);
+  }
+
+ private:
+  GoogleString failing_path_;
+};
+
+}  // namespace
+
+// A file whose stat fails mid-traversal must be skipped, not recorded with
+// uninitialized size and access time: that info feeds cache-cleaning
+// decisions.
+TEST(MemFileSystemStatTest, GetDirInfoSkipsFilesThatCannotBeStatted) {
+  NullThreadSystem thread_system;
+  MockTimer timer(thread_system.NewMutex(), 0);
+  StatFailsForOneFile fs(&thread_system, &timer);
+  fs.set_advance_time_on_update(true, &timer);
+  GoogleMessageHandler handler;
+
+  const GoogleString dir = StrCat(GTestTempDir(), "/stat_fail");
+  const GoogleString survivor = StrCat(dir, "/survivor");
+  const GoogleString removed = StrCat(dir, "/removed");
+  ASSERT_TRUE(fs.MakeDir(dir.c_str(), &handler));
+  ASSERT_TRUE(fs.WriteFile(survivor.c_str(), "12345", &handler));
+  ASSERT_TRUE(fs.WriteFile(removed.c_str(), "1234567", &handler));
+
+  fs.set_stat_failure(removed);
+  FileSystem::DirInfo dir_info;
+  fs.GetDirInfo(dir, &dir_info, &handler);
+
+  ASSERT_EQ(static_cast<size_t>(1), dir_info.files.size());
+  EXPECT_STREQ(survivor, dir_info.files[0].name);
+  EXPECT_EQ(5, dir_info.files[0].size_bytes);
+  EXPECT_GT(dir_info.files[0].atime_sec, 0);
+  // Only the survivor's size is accounted.
+  EXPECT_EQ(5, dir_info.size_bytes);
+}
+
 }  // namespace net_instaweb
