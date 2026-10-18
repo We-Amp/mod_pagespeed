@@ -171,7 +171,7 @@ run() {
       echo "::warning::%global mps_version $spec_version in the spec is not the release version $file_version; skipping the el10 cPanel package (additive)" >&2
       emit false; return 0
     fi
-    echo "::error::%global mps_version $spec_version in packaging/cpanel/ea-apache24-mod_pagespeed.spec is not the release version $file_version. Bump it (and add a %changelog entry) with the module version." >&2
+    echo "::error::%global mps_version $spec_version in $SPEC_DIR/ea-apache24-mod_pagespeed.spec is not the release version $file_version. Bump it (and add a %changelog entry) with the module version." >&2
     return 1
   fi
 
@@ -234,7 +234,7 @@ self_test() {
   if run --os el9 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" >"$t/err" 2>&1; then
     echo "FAIL: spec mps_version 1.19.0 accepted for a 2.5.0 release"; fail=1
   fi
-  grep -qF '::error::%global mps_version 1.19.0 in packaging/cpanel/ea-apache24-mod_pagespeed.spec is not the release version 2.5.0' "$t/err" \
+  grep -qF "::error::%global mps_version 1.19.0 in $t/spec-dir/ea-apache24-mod_pagespeed.spec is not the release version 2.5.0" "$t/err" \
     || { echo "FAIL: spec mismatch error text: $(cat "$t/err")"; fail=1; }
   run --os el10 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" 2>/dev/null | grep -qx 'built=false' \
     || { echo "FAIL: el10 spec mismatch should skip"; fail=1; }

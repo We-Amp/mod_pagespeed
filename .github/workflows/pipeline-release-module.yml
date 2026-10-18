@@ -570,7 +570,11 @@ jobs:
               -o optimizer-VERSION.txt
           fi
           VERSION_ARGS=(--module-version "$RELEASE_VERSION" --optimizer-version-file optimizer-VERSION.txt)
-          if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then VERSION_ARGS+=(--dry-run); fi
+          if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
+            VERSION_ARGS+=(--dry-run)
+          elif [ "$DRY_RUN" = true ]; then
+            echo "::notice::dry run with a final pin: optimizer-pin.json already names $PIN_TAG, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished pair, dispatch a dry run of a module-v2.5.0-pre.N tag instead."
+          fi
           python3 "$GUARD" "${VERSION_ARGS[@]}"
 
           rm -rf optimizer-dist && mkdir optimizer-dist

@@ -72,7 +72,10 @@ old numbering are the lane's dry runs, `module-v1.19.1-pre.1` and `-pre.2`
 2.5.0 and pass with a notice. While the pin does not yet name the
 optimizer tag this release needs (only possible in a dry run, see above), a
 mismatch is a warning, shown as an annotation and in the job summary. Once
-the pin names the paired tag, a mismatch fails, a dry run included.
+the pin names the paired tag, a mismatch fails, a dry run included; such a
+dry run says so in a `::notice::` (the pin is final, so the check is as
+strict as in a real run) and names the way to rehearse an unfinished pair: a
+dry-run dispatch of a `module-v2.5.0-pre.N` tag.
 
 Dry-run tags for this line are `module-v2.5.0-pre.N`. Do not cut new
 `module-v1.19.1-pre.N` tags: the upgrade rehearsals map 1.19.1 to cache
