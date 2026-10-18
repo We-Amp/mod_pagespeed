@@ -254,20 +254,23 @@ void FileSystem::GetDirInfoWithProgress(const StringPiece& path,
       // Add size for both files and directories.  A file whose stat fails
       // (e.g. it was removed after the listing) is skipped entirely: its
       // size and access time are unknown, and recording stale values would
-      // feed wrong numbers into cache-cleaning decisions.
+      // feed wrong numbers into cache-cleaning decisions.  Its size is
+      // counted only once both its size and access time are known, so the
+      // total matches the entries the walk collected.
       int64 file_size = 0;
       if (!Size(file_name, &file_size, handler)) {
         continue;
       }
-      dirinfo->size_bytes += file_size;
       BoolOrError is_dir = IsDir(file_name.c_str(), handler);
       if (is_dir.is_false()) {
         int64 file_atime = 0;
         if (!Atime(file_name, &file_atime, handler)) {
           continue;
         }
+        dirinfo->size_bytes += file_size;
         dirinfo->files.emplace_back(file_size, file_atime, file_name);
       } else if (is_dir.is_true()) {
+        dirinfo->size_bytes += file_size;
         dirs_to_traverse.push_back(file_name);
       }
     }

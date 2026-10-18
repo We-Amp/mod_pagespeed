@@ -149,14 +149,18 @@ TEST_F(MemFileSystemTest, TestSizeOld) {
 
 namespace {
 
-// Fails Size and Atime for one named path, as a real filesystem does when
-// the file is removed between the directory listing and the stat calls of
-// a directory walk.
+// Fails Size and Atime, or only Atime, for one named path, as a real
+// filesystem does when the file is removed between the directory listing
+// and the stat calls of a directory walk.
 class StatFailsForOneFile : public MemFileSystem {
  public:
   using MemFileSystem::MemFileSystem;
 
   void set_stat_failure(const GoogleString& path) { failing_path_ = path; }
+
+  void set_atime_failure(const GoogleString& path) {
+    atime_failing_path_ = path;
+  }
 
   bool Size(const StringPiece& path, int64* size,
             MessageHandler* handler) const override {
@@ -168,7 +172,7 @@ class StatFailsForOneFile : public MemFileSystem {
 
   bool Atime(const StringPiece& path, int64* timestamp_sec,
              MessageHandler* handler) override {
-    if (path == failing_path_) {
+    if (path == failing_path_ || path == atime_failing_path_) {
       return false;
     }
     return MemFileSystem::Atime(path, timestamp_sec, handler);
@@ -176,6 +180,7 @@ class StatFailsForOneFile : public MemFileSystem {
 
  private:
   GoogleString failing_path_;
+  GoogleString atime_failing_path_;
 };
 
 }  // namespace
@@ -206,6 +211,32 @@ TEST(MemFileSystemStatTest, GetDirInfoSkipsFilesThatCannotBeStatted) {
   EXPECT_EQ(5, dir_info.files[0].size_bytes);
   EXPECT_GT(dir_info.files[0].atime_sec, 0);
   // Only the survivor's size is accounted.
+  EXPECT_EQ(5, dir_info.size_bytes);
+}
+
+// A file whose Atime fails after its Size succeeded must not contribute
+// its size either: the total feeds cache-cleaning decisions and must
+// match the entries the walk collected.
+TEST(MemFileSystemStatTest, GetDirInfoDoesNotCountAFileWhoseAtimeFails) {
+  NullThreadSystem thread_system;
+  MockTimer timer(thread_system.NewMutex(), 0);
+  StatFailsForOneFile fs(&thread_system, &timer);
+  fs.set_advance_time_on_update(true, &timer);
+  GoogleMessageHandler handler;
+
+  const GoogleString dir = StrCat(GTestTempDir(), "/atime_fail");
+  const GoogleString survivor = StrCat(dir, "/survivor");
+  const GoogleString removed = StrCat(dir, "/removed");
+  ASSERT_TRUE(fs.MakeDir(dir.c_str(), &handler));
+  ASSERT_TRUE(fs.WriteFile(survivor.c_str(), "12345", &handler));
+  ASSERT_TRUE(fs.WriteFile(removed.c_str(), "1234567", &handler));
+
+  fs.set_atime_failure(removed);
+  FileSystem::DirInfo dir_info;
+  fs.GetDirInfo(dir, &dir_info, &handler);
+
+  ASSERT_EQ(static_cast<size_t>(1), dir_info.files.size());
+  EXPECT_STREQ(survivor, dir_info.files[0].name);
   EXPECT_EQ(5, dir_info.size_bytes);
 }
 
