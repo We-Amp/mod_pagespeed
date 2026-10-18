@@ -16,14 +16,31 @@
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
+// AddressSanitizer replaces the global allocation functions itself, so the
+// array-allocation count is only kept in builds without it.
+#if defined(__SANITIZE_ADDRESS__)
+#define IIS_INFLATER_TEST_UNDER_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define IIS_INFLATER_TEST_UNDER_ASAN 1
+#endif
+#endif
+
 namespace {
 
 // Net count of array allocations made through operator new[] and not yet
 // released through operator delete[], across the whole test binary.
 std::atomic<long> g_outstanding_arrays{0};
 
+#ifdef IIS_INFLATER_TEST_UNDER_ASAN
+constexpr bool kCountsArrays = false;
+#else
+constexpr bool kCountsArrays = true;
+#endif
+
 }  // namespace
 
+#ifndef IIS_INFLATER_TEST_UNDER_ASAN
 void* operator new[](size_t size) {
   void* p = malloc(size == 0 ? 1 : size);
   if (p == nullptr) {
@@ -41,6 +58,7 @@ void operator delete[](void* p) noexcept {
 }
 
 void operator delete[](void* p, size_t) noexcept { operator delete[](p); }
+#endif  // IIS_INFLATER_TEST_UNDER_ASAN
 
 class ConfigFactory;
 
@@ -102,6 +120,9 @@ TEST(IisContentEncodingInflaterTest, ValueIsNotNulTerminated) {
 }
 
 TEST(IisContentEncodingInflaterTest, RepeatedChoicesKeepNoMemory) {
+  if (!kCountsArrays) {
+    GTEST_SKIP() << "array allocations are not counted under AddressSanitizer";
+  }
   long before = g_outstanding_arrays.load();
   for (int i = 0; i < 1000; ++i) {
     GoogleString name;
