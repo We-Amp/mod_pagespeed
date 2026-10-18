@@ -149,8 +149,10 @@ KeyLookupResult NetFetchKeyDirectory::GetKey(StringPiece host,
     return KeyLookupResult::Error();
   }
 
-  // NOTE on SSRF/DNS-rebinding: the strongest control we can apply at this
-  // layer is the https-only + origin-allowlist + no-redirect policy below. A
+  // NOTE on DNS-rebinding: the strongest control we can apply at this layer
+  // is the https-only + origin-allowlist policy, plus the 200-only response
+  // check below: the fetchers used here never follow redirects, so a redirect
+  // response can only surface unfollowed and be rejected there. A
   // resolve->pin->connect check on the actually-connected IP requires the
   // fetcher to expose its connected peer address; the engine serf fetcher does
   // not surface that here, so DNS-rebinding to a private IP remains a DOCUMENTED
@@ -159,18 +161,12 @@ KeyLookupResult NetFetchKeyDirectory::GetKey(StringPiece host,
   // that re-validates the IP). IsGloballyRoutableIp() is provided and unit-
   // tested so a future fetcher that exposes the peer IP can enforce it.
 
-  // 3. Fetch with a bounded timeout and (separately) a response-size cap.
+  // 3. Fetch. The wait is bounded by the fetcher's own blocking-fetch
+  // timeout; the response-size cap is applied below.
   if (fetcher_ == nullptr) return KeyLookupResult::Error();
 
   GoogleString body;
   StringAsyncFetch fetch(request_context_, &body);
-  // Carry the fetch policy on the request: the bounded total timeout, and the
-  // no-redirect directive.  A redirect can only ever point off the allowlist,
-  // so it is never chased.  (If a fetcher follows redirects on its own despite
-  // the directive, the residual risk documented above stands; the 200-only
-  // check below still rejects any redirect response that surfaces unfollowed.)
-  fetch.set_fetch_timeout_ms(options_.fetch_timeout_ms);
-  fetch.set_follow_redirects(options_.follow_redirects);
   fetcher_->Fetch(url, handler_, &fetch);
 
   // The serf fetcher in the nginx context is driven by the event loop; in a

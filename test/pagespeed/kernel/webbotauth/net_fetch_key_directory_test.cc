@@ -5,12 +5,13 @@
 // trust boundary for key-directory fetches.
 // Exercises the pure predicates IsGloballyRoutableIp / IsAllowlistedHttpsUrl,
 // the fail-closed branches of GetKey that return BEFORE any network I/O, and
-// the fetch path itself through a recording fake fetcher: the fetch policy
-// carried on the request, and the rejection of a redirect response.
+// the fetch path itself through a recording fake fetcher: a non-200 response
+// is rejected after the single fetch, its body unparsed.
 
 #include "pagespeed/kernel/webbotauth/net_fetch_key_directory.h"
 
 #include <memory>
+#include <utility>
 
 #include "gtest/gtest.h"
 #include "net/instaweb/http/public/async_fetch.h"
@@ -126,20 +127,16 @@ NetFetchKeyDirectory::Options MappedOptions() {
   return opts;
 }
 
-// Serves a canned response inline and records the fetch it is handed, so the
-// policy carried on the request and the number of fetches can be asserted.
+// Serves a canned response inline and records how many fetches it is handed.
 class RecordingFetcher : public UrlAsyncFetcher {
  public:
   explicit RecordingFetcher(GoogleString body) : body_(std::move(body)) {}
   void set_status(int status) { status_ = status; }
   void set_location(GoogleString location) { location_ = std::move(location); }
 
-  void Fetch(const GoogleString& url, MessageHandler* handler,
+  void Fetch(const GoogleString& /*url*/, MessageHandler* handler,
              AsyncFetch* fetch) override {
     ++calls_;
-    last_url_ = url;
-    last_timeout_ms_ = fetch->fetch_timeout_ms();
-    last_follow_redirects_ = fetch->follow_redirects();
     ResponseHeaders* headers = fetch->response_headers();
     headers->SetStatusAndReason(static_cast<HttpStatus::Code>(status_));
     if (!location_.empty()) {
@@ -150,40 +147,28 @@ class RecordingFetcher : public UrlAsyncFetcher {
   }
 
   int calls() const { return calls_; }
-  const GoogleString& last_url() const { return last_url_; }
-  int64 last_timeout_ms() const { return last_timeout_ms_; }
-  bool last_follow_redirects() const { return last_follow_redirects_; }
 
  private:
   GoogleString body_;
   int status_ = HttpStatus::kOK;
   GoogleString location_;
   int calls_ = 0;
-  GoogleString last_url_;
-  int64 last_timeout_ms_ = -1;
-  bool last_follow_redirects_ = true;
 };
 
-// The configured fetch policy reaches the fetcher: the request carries the
-// bounded timeout and the no-redirect directive.
-TEST(NetFetchKeyDirectoryTest, CarriesFetchPolicyOnTheRequest) {
+// A non-200 response is rejected after the single fetch: its body, even a
+// well-formed JWKS, is never parsed, and no second fetch is issued.
+TEST(NetFetchKeyDirectoryTest, NonOkResponseIsRejectedWithoutRetry) {
   std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
   NullMessageHandler handler;
   RecordingFetcher fetcher(OneKeyDoc());
-
-  NetFetchKeyDirectory::Options opts = MappedOptions();
-  opts.fetch_timeout_ms = 1234;
+  fetcher.set_status(HttpStatus::kInternalServerError);
 
   RequestContextPtr ctx =
       RequestContext::NewTestRequestContext(thread_system.get());
-  NetFetchKeyDirectory dir(&fetcher, &handler, ctx, opts);
-  EXPECT_EQ(KeyLookupResult::kFound,
+  NetFetchKeyDirectory dir(&fetcher, &handler, ctx, MappedOptions());
+  EXPECT_EQ(KeyLookupResult::kError,
             dir.GetKey("keys.example.com", "only", 0).status);
   EXPECT_EQ(1, fetcher.calls());
-  EXPECT_EQ("https://keys.example.com/.well-known/jwks.json",
-            fetcher.last_url());
-  EXPECT_EQ(1234, fetcher.last_timeout_ms());
-  EXPECT_FALSE(fetcher.last_follow_redirects());
 }
 
 // A redirect status is never chased and its body never parsed, even when that

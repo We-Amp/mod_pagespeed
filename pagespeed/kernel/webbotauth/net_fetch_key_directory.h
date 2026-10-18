@@ -17,7 +17,10 @@
 //   * SSRF GUARD -- https only; reject private (RFC1918), loopback, link-local
 //     (incl. 169.254.169.254 metadata), unique-local, multicast, reserved /
 //     non-global resolved IPs; no off-allowlist redirects.
-//   * RESPONSE SIZE CAP and CONNECT+TOTAL TIMEOUT.
+//   * RESPONSE SIZE CAP. The fetch wait is bounded by the fetcher's own
+//     blocking-fetch timeout, and the fetchers used here never follow
+//     redirects, so a redirect response surfaces unfollowed and fails the
+//     200-only check in GetKey.
 // Every failure -> KeyLookupResult::kError -> Verdict::kUnknown.
 
 #ifndef PAGESPEED_KERNEL_WEBBOTAUTH_NET_FETCH_KEY_DIRECTORY_H_
@@ -54,10 +57,7 @@ class NetFetchKeyDirectory : public KeyDirectoryProvider {
     std::set<GoogleString> host_allowlist;  // operator https origins
     std::map<GoogleString, GoogleString>
         host_to_directory_url;               // host->JWKS url
-    int64_t fetch_timeout_ms = 2000;         // carried on the fetch request
     size_t max_response_bytes = 256 * 1024;  // 256 KiB
-    bool follow_redirects =
-        false;  // carried on the fetch request; never chased
   };
 
   // Does NOT take ownership of fetcher or handler.
