@@ -355,6 +355,8 @@ LoadedRulePack RulePackStore::CheckSignature(
         slot = loaded;
       }
       accepted = loaded;
+      // Bounded like reported_: one load adds at most three lines here.
+      if (announced_.size() > kMaxAnnounced - 3) announced_.clear();
       log_signed =
           verified &&
           announced_.insert(absl::StrCat(loaded.sha256, "|signed")).second;

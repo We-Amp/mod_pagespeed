@@ -263,6 +263,18 @@ TEST_F(RulePackStoreTest, AChangedFileIsReloadedAfterTheRecheckInterval) {
   EXPECT_EQ("0.1.0", first.pack->info.version);
 }
 
+TEST_F(RulePackStoreTest, TheRecordOfAnnouncedLoadsIsBounded) {
+  // Every distinct pack version announces its load; a long-lived process
+  // that sees many versions must not remember them all.
+  const size_t kVersions = RulePackStore::kMaxAnnounced / 2 + 16;
+  for (size_t i = 0; i < kVersions; ++i) {
+    WritePack(PackJson(absl::StrCat("0.", i, ".0"), "A"));
+    PassRecheckInterval();
+    ASSERT_NE(nullptr, Get().pack) << i;
+  }
+  EXPECT_LE(store_.announced_size_for_testing(), RulePackStore::kMaxAnnounced);
+}
+
 TEST_F(RulePackStoreTest, StatusReportsTheLoadStateWithoutLoading) {
   using State = RulePackStatus::State;
   WritePack(PackJson("0.1.0", "A"));
