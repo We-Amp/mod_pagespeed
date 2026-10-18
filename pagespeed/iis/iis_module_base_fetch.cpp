@@ -61,6 +61,7 @@ IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fet
 	currentblock=0;
 	currentblockpos=NULL;
 	currentblocksize=0;
+	write_failed_=false;
 	PopulateRequestHeaders(http_context_, request_headers());
 }
 
@@ -208,6 +209,13 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
                                MessageHandler* handler) 
 {
 	Lock();
+	if (write_failed_)
+	{
+		// An earlier block could not be allocated; the body already has a
+		// hole, so nothing more is buffered.
+		Unlock();
+		return false;
+	}
 	const char *data=sp.data();
 	auto size=sp.size();
 	const char *end=data+size;
@@ -230,9 +238,11 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 			if (currentblock == NULL)
 			{
 				// The request pool is exhausted: drop the block bookkeeping so a
-				// later write or SendData never stores through a missing block.
+				// later write or SendData never stores through a missing block,
+				// and fail the rest of the response.
 				currentblocksize=0;
 				currentblockpos=0;
+				write_failed_=true;
 				Unlock();
 				return false;
 			}
@@ -1032,6 +1042,21 @@ void IisModuleBaseFetch::HandleDone(bool success)
 	alive=0;
 	donetime=GetTickCount();	
 	log("handle done [%s]!", success? "true" : "false");
+	if (write_failed_)
+	{
+		// Part of the body was dropped. Completing the response would serve
+		// it with a hole; reset the connection so no client or cache takes
+		// the short body for the whole one.
+		success = false;
+		if (http_context_ != NULL)
+		{
+			IHttpResponse* r = http_context_->GetResponse();
+			if (r != NULL)
+			{
+				r->ResetConnection();
+			}
+		}
+	}
 	if (zc_has_borrowed_)
 	{
 		// Zero-copy aliased serve (CycloneZeroCopyServe): WriteMapped
