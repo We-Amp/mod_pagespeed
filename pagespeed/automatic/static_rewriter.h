@@ -81,8 +81,8 @@ class StaticRewriter {
   explicit StaticRewriter(const ProcessContext& process_context);
   ~StaticRewriter();
 
-  bool ParseText(const StringPiece& text, const StringPiece& url,
-                 const StringPiece& id, const StringPiece& output_dir,
+  bool ParseText(const StringPiece& url, const StringPiece& id,
+                 const StringPiece& text, const StringPiece& output_dir,
                  Writer* writer);
 
   FileSystem* file_system();
