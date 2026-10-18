@@ -31,6 +31,7 @@ void ResponseHeadersParser::Clear() {
   parsing_http_ = false;
   parsing_value_ = false;
   headers_complete_ = false;
+  skipping_overlong_line_ = false;
 }
 
 // TODO(jmaessen): http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
@@ -45,6 +46,15 @@ int ResponseHeadersParser::ParseChunk(const StringPiece& text,
 
   for (; num_consumed < num_bytes; ++num_consumed) {
     char c = text[num_consumed];
+    if (skipping_overlong_line_) {
+      // Drop the remainder of a line that exceeded the size cap without
+      // buffering it, then resume with the next header line.
+      if (c == '\n') {
+        skipping_overlong_line_ = false;
+        parsing_value_ = false;
+      }
+      continue;
+    }
     if ((c == '/') && (parse_name_ == "HTTP")) {
       if (response_headers_->has_major_version()) {
         handler->MessageS(kError, "Multiple HTTP Lines");
@@ -78,13 +88,36 @@ int ResponseHeadersParser::ParseChunk(const StringPiece& text,
     } else if (parsing_value_) {
       // Skip leading whitespace (form feeds don't count, unlike html)
       if (!parse_value_.empty() || !IsHtmlSpace(c) || c == '\f') {
-        parse_value_ += c;
+        if (parse_name_.size() + parse_value_.size() >= kMaxHeaderLineBytes) {
+          DropOverlongLine(handler);
+        } else {
+          parse_value_ += c;
+        }
       }
     } else {
-      parse_name_ += c;
+      if (parse_name_.size() + parse_value_.size() >= kMaxHeaderLineBytes) {
+        DropOverlongLine(handler);
+      } else {
+        parse_name_ += c;
+      }
     }
   }
   return num_consumed;
+}
+
+void ResponseHeadersParser::DropOverlongLine(MessageHandler* handler) {
+  handler->MessageS(kError,
+                    StrCat("Header line exceeds ",
+                           Integer64ToString(kMaxHeaderLineBytes),
+                           " bytes and is dropped")
+                        .c_str());
+  // Reset the line state and consume the rest of it without storing it.
+  // The header count cap keeps the stored set bounded; this keeps each
+  // individual line bounded as well.
+  parsing_http_ = false;
+  skipping_overlong_line_ = true;
+  parse_name_.clear();
+  parse_value_.clear();
 }
 
 }  // namespace net_instaweb
