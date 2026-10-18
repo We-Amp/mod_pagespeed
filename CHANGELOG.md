@@ -21,27 +21,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   releases. **Update recommended.**
 - **Memory-safety issues under concurrent load in background cache refresh, the
   curl-based fetcher and cache shutdown.** Several lifetime and ordering defects
-  could corrupt memory or leak resources. Same affected releases.
-  **Update recommended.**
+  could corrupt memory or leak resources. Affects the module in releases up to
+  and including 1.19.0. **Update recommended.**
 - **Resource exhaustion from crafted inputs.** Parsing of certain JavaScript and
   CSS no longer takes quadratic time; decompression of fetched resources and of
   compressed cache entries, spooled request bodies in the nginx module, and the
-  image sprite canvas are now bounded. Same affected releases.
-  **Update recommended.**
+  image sprite canvas are now bounded. Affects the module in releases up to and
+  including 1.19.0 and, for the parsing and decompression items, the optimizer
+  worker up to and including 2.4.0. **Update recommended.**
 - **Cached-resource handling: crafted cache contents could cause out-of-bounds
-  reads or use out-of-range indexes into served responses.** Metadata-cache
-  entries with invalid slot indexes are rejected, and a corrupt cached value is
+  reads or use out-of-range indexes into served responses.** Corrupt
+  metadata-cache entries are rejected, and a corrupt cached value is
   detected before any of it is served. Same affected releases.
   **Update recommended.**
-- **nginx module: a truncated origin response could be cached as complete, and a
-  statistics logfile left behind by a crashed process could hang the admin
-  endpoint.** Both fixed. Same affected releases. **Update recommended.**
+- **nginx module: a truncated origin response could be cached as complete.**
+  Fixed. Affects the module in releases up to and including 1.19.0.
+  **Update recommended.**
+- **A truncated statistics logfile could hang the statistics admin page.** Fixed.
+  Affects the module in releases up to and including 1.19.0.
+  **Update recommended.**
 - **IIS module and Windows shared memory: certain requests or configuration
   values could abort the worker process, and several lifetime and cross-process
-  defects were fixed.** Same affected releases. **Update recommended.**
-- **ASP.NET Core sidecar: the generated configuration directory and file are now
-  created owner-only from the start, and the sidecar manager no longer raises
-  its state event while holding its lock.**
+  defects were fixed.** Affects the module in releases up to and including
+  1.19.0. **Update recommended.**
+- **ASP.NET Core sidecar: the generated configuration could briefly be readable
+  by other local users.** The directory and file are now created owner-only and
+  replaced atomically. Affects WeAmp.PageSpeed up to and including 2.4.0.
+  **Update recommended.**
 - **Build scripts: the nginx build script now verifies the nginx download against
   a pinned digest, and the container build script configures the LLVM apt
   source instead of executing a downloaded installer.**
@@ -54,34 +60,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A build from source now reports the module version (1.19.0) instead of 2.4.0.
 - Resources whose gzip-compressed body would decompress to more than
   `MaxCacheableContentLength` (default 16 MB) are no longer optimized; they are
-  served unmodified. Compressed metadata-cache entries past the same size are
-  treated as cache misses.
-- An out-of-range `MessageBufferSize` is rejected as a configuration error.
+  served unmodified. Compressed metadata-cache entries that would
+  decompress past the larger of `MaxCacheableContentLength` and 16 MB are treated
+  as cache misses.
+- A negative `MessageBufferSize`, or one above 1 GiB, is now a configuration
+  error on all servers, IIS included.
 - Image spriting now honours `ImageResolutionLimitBytes`, like image rewriting.
 - The nginx module's native fetcher no longer accepts an origin body whose
   length does not match the declared `Content-Length`.
 - The nginx module reads its local signed-agent key file once per change
   instead of once per request.
+- The nginx module rejects spooled request bodies over 128 KiB for its own
+  handlers, matching Apache, and answers an admin POST whose body could not be
+  loaded with 413.
 
 ### Fixed
 
 - Shutting down a memcached or Redis cache with lookups still queued no longer
-  aborts the process, and Cyclone cache shutdown waits for in-progress
-  operations.
+  aborts the process, Cyclone cache shutdown waits for in-progress operations,
+  and a task sequence no longer hangs at shutdown.
+- The ASP.NET Core sidecar manager no longer raises `StateChanged` while holding
+  its lock.
 - Parallel resource fetches for one page no longer race on the per-request set
   of authorized origins; a rejected proxied request no longer leaks its
   property-cache lookup state.
 - Very large values in the two-tier cache are stored in the large-object tier.
 - The nginx module's automatic gzip setup survives configuration reloads.
-- Statistics logfile parsing tolerates truncated and malformed records.
 - Cache-Control and Pragma directives are matched case-insensitively, so a
   response marked private or no-store in any letter case is no longer treated
   as shareable.
 - A rewritten attribute value that needs quoting is always quoted.
 - A domain mapping that fails validation no longer leaves the target domain
   authorized for fetching.
-- The key-directory fetch for signed-agent verification applies its documented
-  timeout and never follows redirects.
+- Signed-agent verification accepts a key directory only from a successful (200)
+  response; a redirect or error response is rejected without being read.
 - An in-place optimized response whose body exceeds the cacheable size is
   passed through consistently instead of with a mismatched length.
 
