@@ -895,7 +895,9 @@ bool DomainLawyer::MapDomainHelper(
     DCHECK(host_header.empty() || !to_domain->is_proxy())
         << "It makes no sense to specify a host header for a proxy:"
         << host_header << ", " << to_domain_name;
-    to_domain->set_host_header(host_header);
+    if (mapped_a_domain) {
+      to_domain->set_host_header(host_header);
+    }
   }
   return (ret && mapped_a_domain);
 }
