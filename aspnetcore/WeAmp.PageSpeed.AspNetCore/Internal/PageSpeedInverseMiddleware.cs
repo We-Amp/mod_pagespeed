@@ -55,6 +55,9 @@ internal sealed class PageSpeedInverseMiddleware
         "/pagespeed_console",
     };
 
+    // Set by the framework's forwarded-headers middleware when it rewrites the peer.
+    private const string OriginalForHeader = "X-Original-For";
+
     private const string PagespeedStaticPrefix = "/pagespeed_static/";
     private const string BeaconPath = "/ngx_pagespeed_beacon";
 
@@ -81,7 +84,20 @@ internal sealed class PageSpeedInverseMiddleware
     {
         var opts = _options.Value;
         var peer = context.Connection.RemoteIpAddress;
-        var peerIsLoopback = peer is not null && System.Net.IPAddress.IsLoopback(peer);
+        // Forwarded-header processing that ran before this middleware replaces
+        // RemoteIpAddress with a client-supplied value and records the original in
+        // X-Original-For. That address is not the transport peer, so never trust it
+        // as loopback (fail closed). UsePageSpeed must run before UseForwardedHeaders.
+        var peerRewritten = context.Request.Headers.ContainsKey(OriginalForHeader);
+        if (peerRewritten)
+        {
+            _logger.LogWarning(
+                "PageSpeed Inverse: forwarded-header processing ran before UsePageSpeed; " +
+                "the remote address is not the transport peer and is not trusted as loopback. " +
+                "Call UsePageSpeed() before UseForwardedHeaders().");
+        }
+
+        var peerIsLoopback = !peerRewritten && peer is not null && System.Net.IPAddress.IsLoopback(peer);
 
         // (0) HOP HYGIENE — a client-supplied X-PageSpeed-Hop is untrusted. Strip it
         // when the transport peer is NON-loopback (a real external client) so a
