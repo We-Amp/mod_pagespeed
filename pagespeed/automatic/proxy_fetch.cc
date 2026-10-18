@@ -934,7 +934,9 @@ bool ProxyFetch::HandleWrite(const StringPiece& str,
     // as it will make it easier to insert flushes in between them in
     // ExecuteQueued(), which we want to do in order to limit memory use and
     // latency.
-    size_t chunk_size = Options()->flush_buffer_limit_bytes();
+    // A zero limit would never advance the loop below.
+    size_t chunk_size =
+        std::max<size_t>(1, Options()->flush_buffer_limit_bytes());
     StringStarVector chunks;
     for (size_t pos = 0; pos < str.size(); pos += chunk_size) {
       GoogleString* buffer = new GoogleString(
