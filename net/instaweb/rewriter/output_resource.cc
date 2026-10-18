@@ -315,10 +315,9 @@ bool OutputResource::CheckSignature() {
     MessageHandler* handler = server_context_->message_handler();
     // Name the URL and the provided signature only: logging the computed
     // signature would hand anyone with log access a valid signed URL.
-    handler->Message(kInfo,
-                     "Invalid resource signature for %s provided. Received %s",
-                     UrlEvenIfHashNotSet().c_str(),
-                     provided_signature.as_string().c_str());
+    handler->Message(
+        kInfo, "Invalid resource signature for %s provided. Received %s",
+        UrlEvenIfHashNotSet().c_str(), provided_signature.as_string().c_str());
   }
   // If signing isn't enforced, return true always, but do this after checking
   // if the signature was correct for logging purposes.

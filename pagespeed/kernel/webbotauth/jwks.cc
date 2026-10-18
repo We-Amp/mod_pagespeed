@@ -153,7 +153,6 @@ class JsonScanner {
   }
 
  public:
-
   // Skip a JSON value (string, number, object, array, literal). Returns false
   // on malformed nesting.
   bool SkipValue() {
