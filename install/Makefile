@@ -83,17 +83,17 @@ export PAGESPEED_TEST_HOST
 BINDIR = /usr/bin
 
 # A temp directory to stage generated configuration files.  This must be
-# writable by the user, and readable by root.  It is created fresh with an
-# unpredictable name (mode 0700) so other local users cannot pre-create or
-# replace it; override on the command line to reuse a directory.
-ifndef STAGING_DIR
-STAGING_DIR := $(shell mktemp -d "$${TMPDIR:-/tmp}/mod_pagespeed.install.XXXXXXXX")
-endif
-# Sub-makes (e.g. "restart") must see the same directory.
-export STAGING_DIR
+# writable by the user, and readable by root.  The default is a stable per-user
+# path so "make staging" and a later "sudo make install" agree on it; staging
+# recreates it with a plain mkdir (no -p), which fails if another user
+# pre-created the path, and install refuses a directory not owned by the
+# invoking user.  Override on the command line to use another directory.
+STAGING_OWNER = $(or $(SUDO_USER),$(USER))
+STAGING_DIR ?= $(or $(TMPDIR),/tmp)/mod_pagespeed.install.$(STAGING_OWNER)
 
-# Marker recording that the SELinux setup below has been done.  Kept in the
-# user's home directory rather than a shared, world-writable location.
+# Marker recording that the SELinux setup below has been done.  It lives under
+# $(HOME): the developer's home when run unprivileged, root's under sudo
+# (idempotent either way), never in a shared, world-writable location.
 SEMANAGE_SENTINEL = $(HOME)/.mod_pagespeed_semanage.set
 
 # The mod_pagespeed module is specified relative to the install directory,
@@ -295,7 +295,7 @@ CONF_TEMPLATES = $(STAGING_DIR)/pagespeed.conf \
 
 setup_staging_dir :
 	rm -rf $(STAGING_DIR)
-	mkdir -m 700 $(STAGING_DIR)
+	mkdir -m 711 $(STAGING_DIR)
 
 LIBRARY_CONF_SOURCE = \
     $(GIT_SRC)/net/instaweb/genfiles/conf/pagespeed_libraries.conf
@@ -318,7 +318,17 @@ staging : staging_except_module
 	cp $(PAGESPEED_MODULE_24) $(STAGING_DIR)/mod_pagespeed_ap24.so
 	cp $(PAGESPEED_JS_MINIFY) $(STAGING_DIR)/pagespeed_js_minify
 
-install_except_module : mod_pagespeed_file_root
+# Refuse to copy files as root out of a staging directory that is missing or
+# owned by someone other than the invoking user.
+check_staging_dir :
+	@if [ ! -d "$(STAGING_DIR)" ] || \
+	    [ "$$(stat -c %U "$(STAGING_DIR)")" != "$(STAGING_OWNER)" ]; then \
+	  echo "$(STAGING_DIR) is missing or not owned by $(STAGING_OWNER);" \
+	       "run 'make staging' first." >&2; \
+	  exit 1; \
+	fi
+
+install_except_module : check_staging_dir mod_pagespeed_file_root
 	$(MODS_ENABLED_INSTALL_COMMANDS)
 	cat $(CONF_SOURCES) > $(APACHE_CONF_DIR)/pagespeed.conf
 	ln -Tsf $(STAGING_DIR)/mod_pagespeed_example \
