@@ -2251,10 +2251,10 @@ TEST_F(AttributeManipulationTest, SetValueWithSpaceUpgradesUnquotedAttribute) {
   // attributes.
   HtmlElement::Attribute* id = node_->FindAttribute(HtmlName::kId);
   ASSERT_TRUE(id != nullptr);
-  id->SetValue("37 onmouseover=alert(1)");
+  id->SetValue("37 extra=1");
   EXPECT_EQ(HtmlElement::DOUBLE_QUOTE, id->quote_style());
   CheckExpected(
-      "<a href=\"http://www.google.com/\" id=\"37 onmouseover=alert(1)\""
+      "<a href=\"http://www.google.com/\" id=\"37 extra=1\""
       " class='search!' selected />");
 }
 

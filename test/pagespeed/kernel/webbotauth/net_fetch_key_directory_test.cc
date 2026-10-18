@@ -1,8 +1,8 @@
 // Copyright 2026 We-Amp B.V.
 // Licensed under the Apache License, Version 2.0 (the "License").
 //
-// Hermetic unit tests for the SSRF guard of NetFetchKeyDirectory, the network
-// trust boundary for key-directory fetches.
+// Hermetic unit tests for the network trust boundary of
+// NetFetchKeyDirectory, which guards key-directory fetches.
 // Exercises the pure predicates IsGloballyRoutableIp / IsAllowlistedHttpsUrl,
 // the fail-closed branches of GetKey that return BEFORE any network I/O, and
 // the fetch path itself through a recording fake fetcher: a non-200 response
@@ -178,7 +178,7 @@ TEST(NetFetchKeyDirectoryTest, RedirectResponseIsRejectedNotFollowed) {
   NullMessageHandler handler;
   RecordingFetcher fetcher(OneKeyDoc());
   fetcher.set_status(HttpStatus::kFound);
-  fetcher.set_location("https://evil.example.com/jwks");
+  fetcher.set_location("https://other.example.com/jwks");
 
   RequestContextPtr ctx =
       RequestContext::NewTestRequestContext(thread_system.get());
