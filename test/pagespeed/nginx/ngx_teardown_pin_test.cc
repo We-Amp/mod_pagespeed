@@ -82,5 +82,14 @@ TEST(NgxTeardownPinTest, ShutDownDoesNotIterateTheLiveActivePool) {
   EXPECT_NE(GoogleString::npos, body.find("CancelActiveFetches();"));
 }
 
+TEST(NgxTeardownPinTest, BodyPinsAreAllocatedWithoutThrowing) {
+  // These allocations run on nginx's C call stack, where an exception
+  // cannot unwind.
+  const GoogleString cc = ReadStrippedSource("pagespeed/nginx/ngx_base_fetch.cc");
+  EXPECT_EQ(GoogleString::npos, cc.find("=newMappedSharedString("));
+  EXPECT_NE(GoogleString::npos,
+            cc.find("=new(std::nothrow)MappedSharedString("));
+}
+
 }  // namespace
 }  // namespace net_instaweb

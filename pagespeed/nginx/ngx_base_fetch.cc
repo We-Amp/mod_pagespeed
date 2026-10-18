@@ -500,7 +500,12 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
         // The pool cleanup is the ownership root for the pin, exactly like
         // PsZeroCopyAlias: a client abort mid-stream must release the read
         // lease even though this NgxBaseFetch is long gone by then.
-        ring->pin = new MappedSharedString(std::move(pinned_pending_));
+        // nothrow: this runs on nginx's C call stack.
+        ring->pin = new (std::nothrow) MappedSharedString(
+            std::move(pinned_pending_));
+        if (ring->pin == nullptr) {
+          return NGX_ERROR;
+        }
         ring->refills_stat =
             stats != nullptr
                 ? stats->FindVariable("zerocopy_serve_ring_refills")
@@ -618,7 +623,12 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
           return NGX_ERROR;
         }
         a->buf = b;
-        a->pin = new MappedSharedString(std::move(pinned_pending_));
+        // nothrow: this runs on nginx's C call stack.
+        a->pin = new (std::nothrow) MappedSharedString(
+            std::move(pinned_pending_));
+        if (a->pin == nullptr) {
+          return NGX_ERROR;
+        }
         a->copied_out_stat = copied_stat;
         a->renew_fail_stat = renew_fail_stat;
         a->done = false;
