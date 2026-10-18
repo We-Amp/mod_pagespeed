@@ -170,6 +170,52 @@ public class InverseLoopGuardTests
     }
 
     [Fact]
+    public async Task MisorderWarning_IsLoggedOnce_ThenDebug()
+    {
+        PageSpeedInverseMiddleware.ResetMisorderWarningForTests();
+        var logger = new LevelRecordingLogger();
+        var mw = new PageSpeedInverseMiddleware(
+            ctx => Task.CompletedTask,
+            Microsoft.Extensions.Options.Options.Create(new WeAmp.PageSpeed.AspNetCore.Options.PageSpeedOptions
+            {
+                Sidecar = new WeAmp.PageSpeed.AspNetCore.Options.SidecarOptions
+                {
+                    Mode = WeAmp.PageSpeed.AspNetCore.Options.SidecarMode.Inverse
+                },
+            }),
+            new FakeSidecarManager { State = WeAmp.PageSpeed.AspNetCore.Sidecar.SidecarState.Running },
+            InverseTestSupport.NewEndpoint(),
+            new StubPageSpeedForwarder(),
+            logger);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var ctx = InverseTestSupport.NewContext(rawOrigin: true, remoteIp: "127.0.0.1",
+                headers: new Dictionary<string, string> { ["X-Original-For"] = "203.0.113.7" });
+            await mw.InvokeAsync(ctx);
+        }
+
+        logger.Levels.Count(l => l == Microsoft.Extensions.Logging.LogLevel.Warning).Should().Be(1);
+        logger.Levels.Count(l => l == Microsoft.Extensions.Logging.LogLevel.Debug).Should().Be(2);
+    }
+
+    private sealed class LevelRecordingLogger : Microsoft.Extensions.Logging.ILogger<PageSpeedInverseMiddleware>
+    {
+        public List<Microsoft.Extensions.Logging.LogLevel> Levels { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            // The 421 rejection logs at Error; only the misorder message is of interest.
+            if (logLevel is Microsoft.Extensions.Logging.LogLevel.Warning or Microsoft.Extensions.Logging.LogLevel.Debug)
+            {
+                Levels.Add(logLevel);
+            }
+        }
+    }
+
+    [Fact]
     public async Task RewrittenRemoteIp_DoesNotPreserveClientHopHeader_OnPublicBranch()
     {
         var fwd = new StubPageSpeedForwarder();

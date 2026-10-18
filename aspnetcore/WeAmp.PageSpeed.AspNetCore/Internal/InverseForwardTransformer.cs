@@ -70,6 +70,13 @@ public sealed class InverseForwardTransformer : HttpTransformer
         // and set the destination URI from destinationPrefix + path + query.
         await base.TransformRequestAsync(httpContext, proxyRequest, destinationPrefix, cancellationToken);
 
+        // X-Original-*: these are written by forwarded-header processing and are
+        // client-controlled on the way in. Never relay them to the raw-origin hop; they
+        // may only appear there when this app's own forwarded-header processing sets them.
+        proxyRequest.Headers.Remove("X-Original-For");
+        proxyRequest.Headers.Remove("X-Original-Proto");
+        proxyRequest.Headers.Remove("X-Original-Host");
+
         // Host = the original client host (override YARP's destination-authority
         // rewrite). RequestUtilities.MakeDestinationAddress keeps the path/query;
         // the Host header drives the pagespeed cache key + emitted asset URLs.

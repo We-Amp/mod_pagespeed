@@ -55,6 +55,10 @@ internal sealed class PageSpeedInverseMiddleware
         "/pagespeed_console",
     };
 
+    private static int _misorderWarned;
+
+    internal static void ResetMisorderWarningForTests() => Interlocked.Exchange(ref _misorderWarned, 0);
+
     // Set by the framework's forwarded-headers middleware when it rewrites the peer.
     private const string OriginalForHeader = "X-Original-For";
 
@@ -91,7 +95,11 @@ internal sealed class PageSpeedInverseMiddleware
         var peerRewritten = context.Request.Headers.ContainsKey(OriginalForHeader);
         if (peerRewritten)
         {
-            _logger.LogWarning(
+            // Warn once per process; later occurrences are Debug to avoid log spam.
+            var level = Interlocked.Exchange(ref _misorderWarned, 1) == 0
+                ? LogLevel.Warning
+                : LogLevel.Debug;
+            _logger.Log(level,
                 "PageSpeed Inverse: forwarded-header processing ran before UsePageSpeed; " +
                 "the remote address is not the transport peer and is not trusted as loopback. " +
                 "Call UsePageSpeed() before UseForwardedHeaders().");
