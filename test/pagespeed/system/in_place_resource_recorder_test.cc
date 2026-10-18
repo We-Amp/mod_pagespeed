@@ -68,12 +68,17 @@ class InPlaceResourceRecorderTest : public RewriteTestBase {
   }
 
   InPlaceResourceRecorder* MakeRecorder(StringPiece url) {
+    return MakeRecorderWithLimit(url, kMaxResponseBytes);
+  }
+
+  InPlaceResourceRecorder* MakeRecorderWithLimit(StringPiece url,
+                                                 int max_response_bytes) {
     RequestHeaders headers;
     return new InPlaceResourceRecorder(
         RequestContext::NewTestRequestContext(
             server_context()->thread_system()),
         url, rewrite_driver_->CacheFragment(), headers.GetProperties(),
-        kMaxResponseBytes, 4, /* max_concurrent_recordings*/
+        max_response_bytes, 4, /* max_concurrent_recordings*/
         http_cache(), statistics(), message_handler());
   }
 
@@ -503,6 +508,48 @@ TEST_F(InPlaceResourceRecorderTest, OversizeCountsDroppedDueToSize) {
   EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
   ExpectTerminalInvariant();
   EXPECT_THAT(MessageDump(), ::testing::HasSubstr("exceeds the size limit"));
+}
+
+TEST_F(InPlaceResourceRecorderTest, UnlimitedResponseBytesRecordsLargeBody) {
+  // A limit of 0 means "unlimited": a positive Content-Length must not make
+  // the recorder drop the response.
+  const GoogleString body(4 * kMaxResponseBytes, 'a');
+  ResponseHeaders prelim_headers;
+  prelim_headers.set_status_code(HttpStatus::kOK);
+  prelim_headers.Add(HttpAttributes::kContentLength,
+                     Integer64ToString(body.size()));
+  ResponseHeaders ok_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &ok_headers);
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(
+      MakeRecorderWithLimit(kTestUrl, 0));
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+  recorder->Write(body, message_handler());
+  recorder.release()->DoneAndSetHeaders(&ok_headers, true /* complete */);
+
+  EXPECT_EQ(0, IproVar("ipro_recorder_dropped_due_to_size"));
+  EXPECT_EQ(1, IproVar("ipro_recorder_inserted_into_cache"));
+  ExpectTerminalInvariant();
+}
+
+TEST_F(InPlaceResourceRecorderTest, OversizeContentLengthDropsEarly) {
+  // With a positive limit, a Content-Length above it is rejected as soon as
+  // the headers are seen, before any body is written.
+  ResponseHeaders prelim_headers;
+  prelim_headers.set_status_code(HttpStatus::kOK);
+  prelim_headers.Add(HttpAttributes::kContentLength,
+                     Integer64ToString(kMaxResponseBytes + 100));
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+
+  // The early rejection happens before the response completes.
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_due_to_size"));
+  ResponseHeaders ok_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &ok_headers);
+  recorder.release()->DoneAndSetHeaders(&ok_headers, true /* complete */);
 }
 
 TEST_F(InPlaceResourceRecorderTest, LoadShedCountsDroppedDueToLoad) {

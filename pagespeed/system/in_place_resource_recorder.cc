@@ -196,7 +196,7 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
 
   // Shortcut for bailing out early when the response will be too large.
   int64 content_length;
-  if (max_response_bytes_ <= 0 &&
+  if (max_response_bytes_ > 0 &&
       response_headers->FindContentLength(&content_length) &&
       content_length > max_response_bytes_) {
     VLOG(1) << "IPRO: Content-Length header indicates that [" << url_
