@@ -66,11 +66,17 @@ bool EscapedValueNeedsQuotes(const StringPiece& escaped_value) {
 
 // An attribute whose value is replaced with one that cannot be serialized
 // unquoted must be quoted, or the serialized form would silently split the
-// value into additional attributes.
+// value into additional attributes.  When the value carries a literal double
+// quote but no single quote, wrap it in single quotes so the double quote
+// stays inside the value.
 HtmlElement::QuoteStyle QuoteStyleForEscapedValue(HtmlElement::QuoteStyle style,
                                                   const char* escaped_value) {
   if (style == HtmlElement::NO_QUOTE && escaped_value != nullptr &&
       EscapedValueNeedsQuotes(escaped_value)) {
+    if (strchr(escaped_value, '"') != nullptr &&
+        strchr(escaped_value, '\'') == nullptr) {
+      return HtmlElement::SINGLE_QUOTE;
+    }
     return HtmlElement::DOUBLE_QUOTE;
   }
   return style;

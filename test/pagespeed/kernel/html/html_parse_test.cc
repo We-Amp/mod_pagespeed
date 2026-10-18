@@ -2268,6 +2268,19 @@ TEST_F(AttributeManipulationTest, SetValueWithoutUnsafeCharsKeepsNoQuote) {
       "<a href=\"http://www.google.com/\" id=38 class='search!' selected />");
 }
 
+TEST_F(AttributeManipulationTest, EscapedValueWithDoubleQuoteGetsSingleQuote) {
+  // An escaped value carrying a literal double quote (but no single quote)
+  // must be wrapped in single quotes, or the double quote would terminate
+  // the attribute in the serialized form.
+  HtmlElement::Attribute* id = node_->FindAttribute(HtmlName::kId);
+  ASSERT_TRUE(id != nullptr);
+  id->SetEscapedValue("37\"a b");
+  EXPECT_EQ(HtmlElement::SINGLE_QUOTE, id->quote_style());
+  CheckExpected(
+      "<a href=\"http://www.google.com/\" id='37\"a b' class='search!'"
+      " selected />");
+}
+
 TEST_F(AttributeManipulationTest, ModifyKeepAttribute) {
   HtmlElement::Attribute* href = node_->FindAttribute(HtmlName::kHref);
   EXPECT_TRUE(href != nullptr);
