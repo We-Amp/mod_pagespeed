@@ -261,6 +261,16 @@ In Process mode the endpoints are gated to the loopback ACL (`AdminAuth.AllowedI
 default loopback only) and, when `AdminAuth.Enabled`, behind the bearer token. Widen
 `AdminAuth.AllowedIps` only if you understand the exposure.
 
+### Info endpoint
+
+`MapPageSpeedInfo()` exposes sidecar status and internal ports, so it requires an
+authorized caller by default. The host must call `AddAuthorization()` and register an
+authentication scheme; without `AddAuthorization()` the endpoint fails closed with a 500
+at request time ("contains authorization metadata, but a middleware was not found"), and
+with authorization but no authentication scheme the challenge throws. Apps without
+authentication pass `requireAuthorization: false`, and should then protect the route
+some other way.
+
 ## License
 
 Apache License 2.0. See the bundled `LICENSE` file.

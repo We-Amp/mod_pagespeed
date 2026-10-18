@@ -79,6 +79,18 @@ public static class PageSpeedApplicationBuilderExtensions
     }
 
     /// <summary>
+    /// Maps the PageSpeed admin info endpoint, requiring authorization.
+    /// Kept as a separate overload so the published method signature stays binary compatible.
+    /// </summary>
+    /// <param name="app">The endpoint route builder.</param>
+    /// <param name="pattern">The route pattern.</param>
+    /// <returns>The endpoint route builder for chaining.</returns>
+    public static IEndpointRouteBuilder MapPageSpeedInfo(
+        this IEndpointRouteBuilder app,
+        string pattern) =>
+        MapPageSpeedInfo(app, pattern, requireAuthorization: true);
+
+    /// <summary>
     /// Maps PageSpeed admin info endpoint (shows sidecar status, internal ports and the
     /// last error; it never returns the admin token). Requires authorization by default
     /// because it discloses internal state.
