@@ -64,7 +64,7 @@ typedef enum CycloneTier : uint8_t {
 } CycloneTier;
 
 // Error codes returned by Cyclone operations.
-// These map to the internal Cyclone error codes.
+// Module-local values; not numerically compatible with upstream cyclone_c.h.
 typedef enum CycloneError {
   CYCLONE_OK = 0,                  // Operation succeeded
   CYCLONE_NOT_FOUND = 1,           // Key not found in cache
@@ -75,7 +75,16 @@ typedef enum CycloneError {
   CYCLONE_IO_ERROR = 6,            // I/O error during operation
   CYCLONE_INTERNAL_ERROR = 7,      // Internal error
   CYCLONE_UNAVAILABLE = 8,         // Service unavailable
-  CYCLONE_NOT_INITIALIZED = 9      // Cache not initialized or not running
+  CYCLONE_NOT_INITIALIZED = 9,     // Cache not initialized or not running
+  // Appended values; existing values never change.
+  CYCLONE_BUSY = 10,      // Transient contention (a lock held by another
+                          // thread or process past the library's wait cap).
+                          // Nothing was read, written or deleted; the call
+                          // may simply be skipped or retried later.  From a
+                          // read, whether the key is present is unknown.
+  CYCLONE_CORRUPTED = 11  // The stored entry failed validation and was not
+                          // returned.  A read reporting this is a miss for
+                          // the caller.
 } CycloneError;
 
 // Configuration for creating a Cyclone cache instance.
@@ -205,7 +214,19 @@ int cyclone_cache_is_running(const CycloneCacheHandle* cache);
 // closed when the reference count reaches zero.
 //
 // Returns CYCLONE_NOT_FOUND if the key does not exist.
+// Returns CYCLONE_BUSY if the lookup could not complete because of
+// contention; whether the key is present is unknown.
+// Returns CYCLONE_CORRUPTED if the stored entry failed validation.
+// Returns CYCLONE_IO_ERROR if the entry could not be read from disk.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
+// Returns CYCLONE_INTERNAL_ERROR on any other failure, including running out
+// of memory.  Every result other than CYCLONE_OK leaves *out_handle unset
+// and means a miss for the caller.
+//
+// No function in this header lets a C++ exception escape: an allocation
+// failure or other exception inside the library is reported as
+// CYCLONE_INTERNAL_ERROR (or NULL / 0 for functions that return a pointer
+// or a flag), and functions without a result ignore it.
 CycloneError cyclone_cache_read(CycloneCacheHandle* cache, const char* key,
                                 size_t key_len, CycloneReadHandle** out_handle);
 
@@ -300,8 +321,16 @@ uint64_t cyclone_read_handle_ns_until_forced_wrap(
 //
 // Returns CYCLONE_OK on success.
 // Returns CYCLONE_RESOURCE_EXHAUSTED if the cache is full and cannot
-// evict enough space.
+// evict enough space, or the value exceeds the per-object size limit.
+// Returns CYCLONE_BUSY if contention kept the write from completing;
+// nothing was stored and the previous entry, if any, may be gone.  The
+// write can be skipped: it is not a cache fault.
+// Returns CYCLONE_IO_ERROR if the value could not be written.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
+// Returns CYCLONE_INVALID_ARGUMENT if key is NULL, or data is NULL with a
+// nonzero data_len.
+// Returns CYCLONE_INTERNAL_ERROR on any other failure, including running out
+// of memory.
 CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
                                  size_t key_len, const char* data,
                                  size_t data_len);
@@ -310,8 +339,8 @@ CycloneError cyclone_cache_write(CycloneCacheHandle* cache, const char* key,
 //
 // Returns CYCLONE_OK on success.
 // Returns CYCLONE_NOT_FOUND if the key does not exist.
-// Returns CYCLONE_UNAVAILABLE if another process held the cache's
-// cross-process locks past the library's wait cap; nothing was removed.
+// Returns CYCLONE_BUSY if another process held the cache's cross-process
+// locks past the library's wait cap; nothing was removed.
 // Returns CYCLONE_NOT_INITIALIZED if the cache is not running.
 CycloneError cyclone_cache_delete(CycloneCacheHandle* cache, const char* key,
                                   size_t key_len);

@@ -22,7 +22,9 @@
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
 #include <atomic>
+#include <cstdlib>
 #include <memory>
+#include <new>
 #include <thread>
 #include <vector>
 
@@ -48,6 +50,61 @@
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
+
+// Allocation-failure injection for the exception-barrier tests below.  The
+// replacement global operator new is inert unless a test arms it for the
+// calling thread: then the next allocation on that thread throws
+// std::bad_alloc, once.  Sanitizers interpose operator new themselves, so
+// the replacement (and the tests that need it) is left out of those builds.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define CYCLONE_CACHE_TEST_NO_ALLOC_HOOK 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define CYCLONE_CACHE_TEST_NO_ALLOC_HOOK 1
+#endif
+
+namespace {
+thread_local bool t_fail_next_allocation = false;
+// When >= 0: let this many allocations on the thread succeed, then fail the
+// next one, once (the hook then disarms itself).
+thread_local int t_allocations_before_failure = -1;
+thread_local int t_failed_allocations = 0;
+}  // namespace
+
+#ifndef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
+void* operator new(size_t size) {
+  if (t_fail_next_allocation) {
+    t_fail_next_allocation = false;
+    ++t_failed_allocations;
+    throw std::bad_alloc();
+  }
+  if (t_allocations_before_failure >= 0 && t_allocations_before_failure-- == 0) {
+    ++t_failed_allocations;
+    throw std::bad_alloc();
+  }
+  void* p = std::malloc(size == 0 ? 1 : size);
+  if (p == nullptr) {
+    throw std::bad_alloc();
+  }
+  return p;
+}
+
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, size_t) noexcept { std::free(p); }
+#endif  // CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
+
+// Test-only seams exported by the Cyclone wrapper (cyclone_wrapper.cc),
+// not part of the vendored C ABI header: the next read, or the next commit
+// of a write, fails with the selected library error without touching the
+// volume.
+extern "C" void cyclone_cache_test_fail_next_read(int kind);
+extern "C" void cyclone_cache_test_fail_next_commit(int kind);
+constexpr int kSeamBusy = 1;
+constexpr int kSeamIoError = 2;
+constexpr int kSeamCorrupted = 3;
 
 namespace net_instaweb {
 
@@ -105,6 +162,20 @@ class CycloneCacheTest : public CacheTestBase {
 
   bool IsHealthyTest() {
     return cache_ != nullptr && cache_->IsHealthy();
+  }
+
+  // A cache of its own (own path, own statistics and message handler) for
+  // tests that count statistics or log lines.
+  std::unique_ptr<CycloneCache> MakeCountingCache(Statistics* stats,
+                                                  MessageHandler* handler,
+                                                  const char* suffix) {
+    CycloneCache::Config config;
+    config.cache_path = StrCat(cache_path_, "_", suffix);
+    config.cache_size_bytes = 10 * 1024 * 1024;
+    config.ram_cache_size_bytes = 0;
+    config.enable_checksum = true;
+    config.num_segments = 0;
+    return std::make_unique<CycloneCache>(config, stats, handler);
   }
 
   std::unique_ptr<NullStatistics> stats_;
@@ -181,8 +252,9 @@ extern "C" void cyclone_cache_test_busy_next_pre_write_remove(void);
 
 // A write whose pre-write remove cannot complete must be dropped, not
 // stored over the live entry: overwriting in place is exactly what the
-// remove-first step exists to prevent.  The dropped write is counted as a
-// cache failure like any other, and the next uncontended write succeeds.
+// remove-first step exists to prevent.  Contention is not a cache fault, so
+// the dropped write is skipped (not counted as a failure), and the next
+// uncontended write succeeds.
 TEST_F(CycloneCacheTest, BusyPreWriteRemoveDropsWrite) {
   if (!IsHealthyTest()) {
     GTEST_SKIP() << "CycloneCache not available";
@@ -212,9 +284,9 @@ TEST_F(CycloneCacheTest, BusyPreWriteRemoveDropsWrite) {
   SharedString new_value("new_value");
   cache.Put("busy_key", new_value);
 
-  // The write was dropped and counted, and reads still see the old entry.
+  // The write was dropped and skipped, and reads still see the old entry.
   EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
-  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
   CheckGet(&cache, "busy_key", "old_value");
 
   // The seam is one-shot: the next overwrite takes the normal
@@ -222,7 +294,7 @@ TEST_F(CycloneCacheTest, BusyPreWriteRemoveDropsWrite) {
   CheckPut(&cache, "busy_key", "new_value");
   CheckGet(&cache, "busy_key", "new_value");
   EXPECT_EQ(2, stats.GetVariable(CycloneCache::kInserts)->Get());
-  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
 
   cache.ShutDown();
 }
@@ -237,8 +309,8 @@ extern "C" void cyclone_cache_test_busy_next_pre_write_exists(void);
 // A write whose pre-write presence check cannot answer must also be
 // dropped, not stored blind: with presence unknown the slot may hold a
 // live entry, and overwriting in place is what the remove-first step
-// exists to prevent.  Counted as a cache failure like any other; the next
-// uncontended write succeeds.
+// exists to prevent.  Skipped like any contended write (not counted as a
+// failure); the next uncontended write succeeds.
 TEST_F(CycloneCacheTest, BusyPreWriteExistsDropsWrite) {
   if (!IsHealthyTest()) {
     GTEST_SKIP() << "CycloneCache not available";
@@ -268,9 +340,9 @@ TEST_F(CycloneCacheTest, BusyPreWriteExistsDropsWrite) {
   SharedString new_value("new_value");
   cache.Put("busy_key", new_value);
 
-  // The write was dropped and counted, and reads still see the old entry.
+  // The write was dropped and skipped, and reads still see the old entry.
   EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
-  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
   CheckGet(&cache, "busy_key", "old_value");
 
   // The seam is one-shot: the next overwrite takes the normal
@@ -278,7 +350,7 @@ TEST_F(CycloneCacheTest, BusyPreWriteExistsDropsWrite) {
   CheckPut(&cache, "busy_key", "new_value");
   CheckGet(&cache, "busy_key", "new_value");
   EXPECT_EQ(2, stats.GetVariable(CycloneCache::kInserts)->Get());
-  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
 
   cache.ShutDown();
 }
@@ -306,7 +378,7 @@ TEST_F(CycloneCacheTest, WriteFailureLogEscapesKey) {
   ASSERT_TRUE(cache.IsHealthy());
 
   const GoogleString key = "key-with-\r\nforged-line-and-\x1b" "escape";
-  cyclone_cache_test_busy_next_pre_write_exists();
+  cyclone_cache_test_fail_next_commit(kSeamIoError);
   SharedString value("value");
   cache.Put(key, value);
   EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
@@ -321,6 +393,196 @@ TEST_F(CycloneCacheTest, WriteFailureLogEscapesKey) {
   EXPECT_NE(GoogleString::npos, log.find(CEscape(key))) << log;
 
   cache.ShutDown();
+}
+
+// A write whose commit reports contention stored nothing, but it is a
+// skipped write, not a cache fault: not counted as a failure and not
+// logged, however often it happens.
+TEST_F(CycloneCacheTest, BusyCommitIsSkippedWrite) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+  std::unique_ptr<CycloneCache> cache =
+      MakeCountingCache(&stats, &handler, "busy_commit");
+  ASSERT_TRUE(cache->IsHealthy());
+  int warnings_before = handler.MessagesOfType(kWarning);
+
+  for (int i = 0; i < 3; ++i) {
+    cyclone_cache_test_fail_next_commit(kSeamBusy);
+    SharedString value("value");
+    cache->Put("contended_key", value);
+  }
+
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kFailures)->Get());
+  EXPECT_EQ(warnings_before, handler.MessagesOfType(kWarning));
+  CheckNotFound(cache.get(), "contended_key");
+
+  // The next uncontended write is stored.
+  CheckPut(cache.get(), "contended_key", "value");
+  CheckGet(cache.get(), "contended_key", "value");
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kInserts)->Get());
+
+  cache->ShutDown();
+}
+
+// A commit that fails for any other reason is a real write failure:
+// counted and (sampled) logged.
+TEST_F(CycloneCacheTest, FailedCommitIsCountedFailure) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+  std::unique_ptr<CycloneCache> cache =
+      MakeCountingCache(&stats, &handler, "failed_commit");
+  ASSERT_TRUE(cache->IsHealthy());
+  int warnings_before = handler.MessagesOfType(kWarning);
+
+  cyclone_cache_test_fail_next_commit(kSeamIoError);
+  SharedString value("value");
+  cache->Put("key", value);
+
+  EXPECT_EQ(0, stats.GetVariable(CycloneCache::kInserts)->Get());
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+  EXPECT_EQ(warnings_before + 1, handler.MessagesOfType(kWarning));
+  CheckNotFound(cache.get(), "key");
+
+  cache->ShutDown();
+}
+
+// Every failed read is a miss for the caller.  Contention is a silent miss
+// like a plain one; a damaged entry or an unreadable disk is a miss too,
+// but logged, because it points at the cache file or the device.
+TEST_F(CycloneCacheTest, ReadErrorsAreMisses) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+  std::unique_ptr<CycloneCache> cache =
+      MakeCountingCache(&stats, &handler, "read_errors");
+  ASSERT_TRUE(cache->IsHealthy());
+
+  CheckPut(cache.get(), "key", "value");
+  CheckGet(cache.get(), "key", "value");
+  int warnings = handler.MessagesOfType(kWarning);
+  int64 misses = stats.GetVariable(CycloneCache::kMisses)->Get();
+
+  // Plain miss: silent.
+  CheckNotFound(cache.get(), "absent");
+  EXPECT_EQ(++misses, stats.GetVariable(CycloneCache::kMisses)->Get());
+  EXPECT_EQ(warnings, handler.MessagesOfType(kWarning));
+
+  // Contention: a silent miss, although the entry is there.
+  cyclone_cache_test_fail_next_read(kSeamBusy);
+  CheckNotFound(cache.get(), "key");
+  EXPECT_EQ(++misses, stats.GetVariable(CycloneCache::kMisses)->Get());
+  EXPECT_EQ(warnings, handler.MessagesOfType(kWarning));
+
+  // Damaged entry: a miss, and logged.
+  cyclone_cache_test_fail_next_read(kSeamCorrupted);
+  CheckNotFound(cache.get(), "key");
+  EXPECT_EQ(++misses, stats.GetVariable(CycloneCache::kMisses)->Get());
+  EXPECT_EQ(++warnings, handler.MessagesOfType(kWarning));
+
+  // Unreadable disk: a miss, and logged.  Log lines are sampled 1-in-1024
+  // per cache, so the second failure on this cache is counted but not
+  // logged.
+  cyclone_cache_test_fail_next_read(kSeamIoError);
+  CheckNotFound(cache.get(), "key");
+  EXPECT_EQ(++misses, stats.GetVariable(CycloneCache::kMisses)->Get());
+  EXPECT_EQ(warnings, handler.MessagesOfType(kWarning));
+
+  // The seams are one-shot: the entry is served again.
+  CheckGet(cache.get(), "key", "value");
+
+  cache->ShutDown();
+}
+
+// No exception from the cache library may cross the C API into the
+// module: an allocation failure inside a write or a read is reported as a
+// failed operation and the cache keeps working.
+TEST_F(CycloneCacheTest, AllocationFailureDoesNotEscape) {
+#ifdef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
+  GTEST_SKIP() << "operator new is interposed by the sanitizer";
+#else
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+  std::unique_ptr<CycloneCache> cache =
+      MakeCountingCache(&stats, &handler, "alloc_failure");
+  ASSERT_TRUE(cache->IsHealthy());
+  CheckPut(cache.get(), "key", "value");
+
+  // A write that runs out of memory is a failed write.
+  SharedString value("other value");
+  t_failed_allocations = 0;
+  t_fail_next_allocation = true;
+  cache->Put("other", value);
+  t_fail_next_allocation = false;
+  EXPECT_EQ(1, t_failed_allocations);
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  // A read that runs out of memory is a miss.  The callback is made
+  // before arming, so the injected failure lands inside the lookup.
+  int64 misses = stats.GetVariable(CycloneCache::kMisses)->Get();
+  Callback* callback = NewCallback();
+  t_failed_allocations = 0;
+  t_fail_next_allocation = true;
+  cache->Get("key", callback);
+  t_fail_next_allocation = false;
+  EXPECT_EQ(1, t_failed_allocations);
+  WaitAndCheckNotFound(callback);
+  EXPECT_EQ(misses + 1, stats.GetVariable(CycloneCache::kMisses)->Get());
+
+  // Fail each allocation of a write in turn, including the ones made after
+  // the write handle is open (the abort-then-report path): every one is a
+  // failed write and nothing escapes, until a write needs fewer allocations
+  // than were let through and succeeds.
+  int64 failures = stats.GetVariable(CycloneCache::kFailures)->Get();
+  bool completed = false;
+  for (int skip = 0; skip < 256 && !completed; ++skip) {
+    GoogleString step_key = StrCat("step", IntegerToString(skip));
+    SharedString step_value(GoogleString(4096, 'x'));
+    t_failed_allocations = 0;
+    t_allocations_before_failure = skip;
+    cache->Put(step_key, step_value);
+    t_allocations_before_failure = -1;
+    if (t_failed_allocations == 0) {
+      completed = true;
+      CheckGet(cache.get(), step_key, GoogleString(4096, 'x'));
+    } else {
+      EXPECT_EQ(++failures, stats.GetVariable(CycloneCache::kFailures)->Get())
+          << "allocation " << skip;
+      CheckNotFound(cache.get(), step_key.c_str());
+    }
+  }
+  EXPECT_TRUE(completed);
+
+  // Nothing was left half-done: both keys work normally afterwards.
+  CheckGet(cache.get(), "key", "value");
+  CheckPut(cache.get(), "other", "other value");
+  CheckGet(cache.get(), "other", "other value");
+
+  cache->ShutDown();
+#endif
 }
 
 // Test multiple keys

@@ -291,13 +291,15 @@ PKG_DOCDIR=/usr/share/doc/mod-pagespeed
 DAEMON_UNIT=pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
 # The optimizer's cache directory carries the cache directory generation in
-# its name: v1 up to 1.16.x, v2 from 1.17.0 on (cache library on-disk format 8;
-# the packaged drop-in points ModPagespeedDaemonVolumePath at v2/cache). The
+# its name: v1 up to 1.16.x, v2 from 1.17.0 on (cache library on-disk format 8),
+# v3 after 1.19.0 (format 9; the packaged drop-in points
+# ModPagespeedDaemonVolumePath at v3/cache). The
 # directory under test follows the --rc version; the baseline's follows the
 # baseline version once it is resolved (step 3). An upgrade across a
 # generation leaves the old directory on disk for a rollback.
 DAEMON_CACHE_ROOT=/var/cache/pagespeed-optimizer
 CACHE_GEN2_SINCE="1.17.0"
+CACHE_GEN3_SINCE="1.19.1"
 FIXTURE_URL_DIR=/upgrade-fixture
 IMAGE_NAME=Puzzle.jpg
 # Same bytes under a URL the 1.15 module never saw: the post-upgrade in-place
@@ -403,10 +405,12 @@ semver_ge() {
 }
 
 # cache_gen_for_version <X.Y.Z[-pre]>: the optimizer cache directory name for
-# that upstream version (v1 or v2). Compared on the X.Y.Z core so every
+# that upstream version (v1, v2 or v3). Compared on the X.Y.Z core so every
 # prerelease of a release takes that release's layout.
 cache_gen_for_version() {
-  if semver_ge "${1%%-*}" "$CACHE_GEN2_SINCE"; then printf 'v2'; else printf 'v1'; fi
+  if semver_ge "${1%%-*}" "$CACHE_GEN3_SINCE"; then printf 'v3'
+  elif semver_ge "${1%%-*}" "$CACHE_GEN2_SINCE"; then printf 'v2'
+  else printf 'v1'; fi
 }
 DAEMON_CACHE="${DAEMON_CACHE_ROOT}/$(cache_gen_for_version "$RC")"
 
@@ -551,7 +555,7 @@ echo "  license files:  ${PKG_DOCDIR}/{LICENSE,NOTICE} expected from ${LICENSE_S
 TPN_STRICT=0
 if [[ "$MODULE_IS_LOCAL" -eq 1 ]] || semver_ge "$RC" "$TPN_SINCE"; then TPN_STRICT=1; fi
 echo "  notices:        ${PKG_DOCDIR}/THIRD-PARTY-NOTICES -- strict whenever the package under test ships it; an absence fails from ${TPN_SINCE} on (currently $( [[ "$TPN_STRICT" -eq 1 ]] && echo strict || echo 'advisory (older pair)'))"
-echo "  optimizer cache: ${DAEMON_CACHE} expected after the upgrade (v2 from ${CACHE_GEN2_SINCE} on)"
+echo "  optimizer cache: ${DAEMON_CACHE} expected after the upgrade (v2 from ${CACHE_GEN2_SINCE}, v3 from ${CACHE_GEN3_SINCE} on)"
 
 # ---------------------------------------------------------------------------
 # 1. Fixture: a page with an image and a stylesheet

@@ -217,8 +217,13 @@ class DaemonAdapter {
   //
   // N = 2: the cache format major went 7 -> 8 (CRC-32C) after generation 1
   // shipped, so the daemon moved to /var/cache/pagespeed-optimizer/v2 and
-  // publishes cache_dir_generation=2.  This moves with it, in lockstep.
-  static constexpr uint32_t kCacheDirGeneration = 2;
+  // publishes cache_dir_generation=2.  This moved with it, in lockstep.
+  //
+  // N = 3: the cache format major went 8 -> 9 (the checksum also covers the
+  // fixed document header) after generation 2 shipped, so the daemon moves
+  // to /var/cache/pagespeed-optimizer/v3 and publishes
+  // cache_dir_generation=3.  This moves with it, in lockstep.
+  static constexpr uint32_t kCacheDirGeneration = 3;
 
   // What stands between this process and the directory the daemon's volume
   // lives in.  After the privilege drop the volume, socket and shared config
