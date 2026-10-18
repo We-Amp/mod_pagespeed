@@ -60,7 +60,7 @@ void RedirectOnSizeLimitFilter::EndElementImpl(HtmlElement* element) {
 void RedirectOnSizeLimitFilter::InsertScriptIfNeeded(HtmlElement* element,
                                                      bool is_start) {
   if (!redirect_inserted_ && noscript_element() == nullptr &&
-      driver()->size_limit_exceeded()) {
+      driver()->size_limit_exceeded() && CspPermitsInlineScript()) {
     std::unique_ptr<GoogleUrl> url_with_psa_off(
         driver()->google_url().CopyAndAddQueryParam(RewriteQuery::kPageSpeed,
                                                     "off"));

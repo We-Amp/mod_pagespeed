@@ -228,4 +228,20 @@ TEST_F(RedirectOnSizeLimitFilterTest, TestEscapingAndFlush) {
   EXPECT_EQ(kOutput, output_);
 }
 
+TEST_F(RedirectOnSizeLimitFilterTest, NoRedirectScriptWhenCspForbidsInline) {
+  // The redirect is an inline script; a policy without 'unsafe-inline' would
+  // block it, so none is injected.
+  static const char kFirst[] =
+      "<html>"
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src *;\">";
+  static const char kSecond[] = "<table><tr><td>blah</td></tr></table></html>";
+  SetupDriver(80);
+  html_parse()->StartParse("http://test.com/in.html");
+  html_parse()->ParseText(kFirst);
+  html_parse()->Flush();
+  html_parse()->ParseText(kSecond);
+  html_parse()->FinishParse();
+  EXPECT_EQ(StringPiece::npos, output_.find("window.location")) << output_;
+}
+
 }  // namespace net_instaweb
