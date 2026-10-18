@@ -164,6 +164,24 @@ TEST_F(MemcachedCacheTest, MultiGet) {
   EXPECT_EQ(0, lru_cache_->size_bytes()) << "fallback not used.";
 }
 
+// A batch that carries the same key twice must answer both requests, not
+// report the earlier copy as missing.
+TEST_F(MemcachedCacheTest, MultiGetWithDuplicatedKey) {
+  if (!InitMemcachedOrSkip(true)) {
+    return;
+  }
+  CheckPut(servers_.get(), "duplicated", "value");
+  Callback* first = AddCallback();
+  Callback* second = AddCallback();
+  CacheInterface::MultiGetRequest* request =
+      new CacheInterface::MultiGetRequest;
+  request->push_back(CacheInterface::KeyCallback("duplicated", first));
+  request->push_back(CacheInterface::KeyCallback("duplicated", second));
+  servers_->MultiGet(request);
+  WaitAndCheck(first, "value");
+  WaitAndCheck(second, "value");
+}
+
 TEST_F(MemcachedCacheTest, MultiGetWithoutServer) {
   cluster_spec_.servers = {ExternalServerSpec("localhost", 99999)};
   // libmemcached-awesome connects lazily, so Connect()+GetStatus() may not

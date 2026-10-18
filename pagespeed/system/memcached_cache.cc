@@ -210,10 +210,12 @@ void MemcachedCache::MultiGet(MultiGetRequest* request) {
     return;
   }
 
-  // Build a map from hashed_key -> index for result matching.
-  std::map<GoogleString, int> key_index_map;
+  // Build a map from hashed_key -> pending indexes for result matching.
+  // A batch can carry the same key more than once; each returned result
+  // answers one pending request for that key, in order.
+  std::map<GoogleString, std::vector<int>> key_index_map;
   for (int i = 0; i < n; ++i) {
-    key_index_map[hashed_keys[i]] = i;
+    key_index_map[hashed_keys[i]].push_back(i);
   }
 
   // Track which keys got results.
@@ -234,8 +236,9 @@ void MemcachedCache::MultiGet(MultiGetRequest* request) {
       GoogleString result_key(memcached_result_key_value(result),
                               memcached_result_key_length(result));
       auto it = key_index_map.find(result_key);
-      if (it != key_index_map.end()) {
-        int idx = it->second;
+      if (it != key_index_map.end() && !it->second.empty()) {
+        int idx = it->second.front();
+        it->second.erase(it->second.begin());
         found[idx] = true;
         const char* data = memcached_result_value(result);
         size_t data_len = memcached_result_length(result);
