@@ -705,26 +705,35 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         var retryDelay = 100;
         const int maxRetryDelay = 2000;
 
-        while (!timeoutCts.Token.IsCancellationRequested)
+        try
         {
-            var process = CurrentProcess();
-            if (process?.HasExited == true)
+            while (!timeoutCts.Token.IsCancellationRequested)
             {
-                throw new InvalidOperationException(
-                    $"nginx process exited with code {process.ExitCode}");
-            }
+                var process = CurrentProcess();
+                if (process?.HasExited == true)
+                {
+                    throw new InvalidOperationException(
+                        $"nginx process exited with code {process.ExitCode}");
+                }
 
-            if (await CheckHealthAsync(timeoutCts.Token))
-            {
-                var elapsed = DateTime.UtcNow - startTime;
-                _logger.LogDebug("Sidecar became healthy after {Elapsed}ms", elapsed.TotalMilliseconds);
-                return;
-            }
+                if (await CheckHealthAsync(timeoutCts.Token))
+                {
+                    var elapsed = DateTime.UtcNow - startTime;
+                    _logger.LogDebug("Sidecar became healthy after {Elapsed}ms", elapsed.TotalMilliseconds);
+                    return;
+                }
 
-            await Task.Delay(retryDelay, timeoutCts.Token);
-            retryDelay = Math.Min(retryDelay * 2, maxRetryDelay);
+                await Task.Delay(retryDelay, timeoutCts.Token);
+                retryDelay = Math.Min(retryDelay * 2, maxRetryDelay);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Only the startup deadline fired (not the caller): fall through to the
+            // descriptive timeout below.
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         throw new TimeoutException("Timed out waiting for sidecar to become healthy");
     }
 
