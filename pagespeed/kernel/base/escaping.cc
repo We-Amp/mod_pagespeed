@@ -124,13 +124,11 @@ size_t Utf8SequenceLengthIfValid(const StringPiece& sequence) {
   } else if (lead == 0xE0) {
     length = 3;
     min_second = 0xA0;  // Below that the sequence would be overlong.
-  } else if (lead >= 0xE1 && lead <= 0xEC) {
-    length = 3;
   } else if (lead == 0xED) {
     length = 3;
     max_second = 0x9F;  // Above that the sequence is a surrogate half.
-  } else if (lead >= 0xEE && lead <= 0xEF) {
-    length = 3;
+  } else if (lead >= 0xE1 && lead <= 0xEF) {
+    length = 3;  // 0xED is handled above.
   } else if (lead == 0xF0) {
     length = 4;
     min_second = 0x90;  // Below that the sequence would be overlong.
