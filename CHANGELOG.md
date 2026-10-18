@@ -51,6 +51,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Build scripts: the nginx build script now verifies the nginx download against
   a pinned digest, and the container build script configures the LLVM apt
   source instead of executing a downloaded installer.**
+- **Signed resource URLs: an invalid signed-resource URL could cause the expected
+  signature to be written to the server log.** The log now records only the URL
+  and the value provided. Affects the module in releases up to and including
+  1.19.0 with URL signing enabled. **Update recommended.**
+- **Shared caching now honors stricter freshness and storage signals.**
+  `s-maxage` limits how long the shared cache keeps a response (it never extends
+  the lifetime browsers receive), header names in the end-to-end list are
+  recognized reliably, and a response with an oversized header line is treated
+  as uncacheable instead of being cached as if the line were absent (clients then
+  receive it as uncacheable too). Affects the module in releases up to and
+  including 1.19.0. **Update recommended.**
+- **IIS module: chunked origin responses using chunk extensions lost their body,
+  a response body larger than 2 GB in one read was mishandled, and running out of
+  request memory while buffering a rewritten response could crash the worker
+  process.** The connection is now reset in that last case, including for
+  in-place fetches that previously fell back to the original file. Affects the
+  module in releases up to and including 1.19.0. **Update recommended.**
+- **ASP.NET Core sidecar: the sidecar information endpoint now requires
+  authorization by default, and a remote address rewritten by forwarded-header
+  processing is no longer trusted as a loopback peer.** Affects WeAmp.PageSpeed
+  up to and including 2.4.0. **Update recommended.**
+- **Image spriting: out-of-range image offsets could corrupt memory.** Fixed.
+  Affects the module in releases up to and including 1.19.0.
+  **Update recommended.**
+- **Source builds: the Apache development install no longer stages
+  configuration in a fixed shared temporary path, and the CentOS toolchain
+  signing key is fetched over HTTPS.**
 
 ### Changed
 
@@ -73,6 +100,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The nginx module rejects spooled request bodies over 128 KiB for its own
   handlers, matching Apache, and answers an admin POST whose body could not be
   loaded with 413.
+- `MapPageSpeedInfo` requires authorization by default; apps without
+  authentication pass `requireAuthorization: false`. With `UseForwardedHeaders()`
+  before `UsePageSpeed()`, raw-origin requests are rejected with 421; call
+  `UsePageSpeed()` first.
+- The Apache development install stages configuration in
+  `/tmp/mod_pagespeed.install.<user>` and refuses a missing or foreign-owned
+  staging directory.
+- `IproMaxResponseBytes 0` (unlimited) no longer stops in-place optimization of
+  responses that send a Content-Length; oversized responses are rejected as soon
+  as their headers arrive.
+- JavaScript inlining declines scripts whose character set differs from the
+  page's unless the content is plain ASCII.
+- The size-limit redirect script is not injected when the page's
+  Content-Security-Policy forbids inline scripts.
+- Cookie names are matched case-sensitively when a cookie is removed.
+- Redis Cluster: invalid redirections and slot maps are rejected and the number
+  of cluster connections is capped.
 
 ### Fixed
 
@@ -96,6 +140,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response; a redirect or error response is rejected without being read.
 - An in-place optimized response whose body exceeds the cacheable size is
   passed through consistently instead of with a mismatched length.
+- Comparison of the measurement-proxy password and the beacon nonce is
+  hardened against timing analysis, and the configured beacon URL is escaped
+  correctly in the injected instrumentation script.
+- Key directories using `\uXXXX` escapes in key ids now match correctly;
+  malformed escapes reject the document. A failure to read random data for
+  beacon nonces is logged as an error.
+- Cache keys in cache write-failure warnings are escaped.
+- JavaScript minification in XHTML pages no longer produces markup that breaks
+  the page for some bracket patterns.
+- Apache: an empty log message no longer reads outside the message.
+- A memory leak on every gzip or deflate response rewritten by the IIS module;
+  destroying an unjoined background thread on Windows no longer ends the worker
+  process.
+- Posting to the background event loop no longer blocks when the loop is busy;
+  proxied HTML with a zero flush buffer limit no longer exhausts memory;
+  shared-memory runtimes created at the same time no longer risk sharing segment
+  names; malformed GIF loop-count blocks are rejected.
+- nginx: fetcher shutdown and memory-pressure serve paths no longer crash the
+  worker.
+- A long-running worker watching frequently republished rule packs no longer
+  grows memory without limit.
+- In-place optimization: an origin that fails mid-response no longer leaks
+  resources or leaves the client without a response.
+- Cache inspection output keeps multi-byte text intact; duplicated keys in a
+  memcached multi-get are all answered; directory walks for cache cleaning skip
+  files that disappear during the walk.
+- Link header repair considers every `rel` parameter of a link-value.
+- A sidecar startup timeout is reported as a timeout; version comparison in the
+  install helper scripts detects "greater than".
 
 ## [2.4.0] - 2026-10-14
 
