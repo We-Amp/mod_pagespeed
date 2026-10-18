@@ -492,8 +492,8 @@ void RedisCache::FetchClusterSlotMapping(Connection* connection) {
     }
     if (master_ip->len == 0 || master_port->integer < 1 ||
         master_port->integer > 65535) {
-      message_handler_->Message(kError,
-                                "Got invalid master address from CLUSTER SLOTS");
+      message_handler_->Message(
+          kError, "Got invalid master address from CLUSTER SLOTS");
       return;
     }
     // Everything is there and is the right type.  Store it.
@@ -502,13 +502,12 @@ void RedisCache::FetchClusterSlotMapping(Connection* connection) {
         ExternalServerSpec(master_ip->str, master_port->integer),
         kDefaultDatabaseIndex);
     if (master_connection == nullptr) {
-      message_handler_->Message(
-          kError, "Too many servers in reply from CLUSTER SLOTS");
+      message_handler_->Message(kError,
+                                "Too many servers in reply from CLUSTER SLOTS");
       return;
     }
-    new_cluster_mappings.emplace_back(start_slot_range->integer,
-                                      end_slot_range->integer,
-                                      master_connection);
+    new_cluster_mappings.emplace_back(
+        start_slot_range->integer, end_slot_range->integer, master_connection);
   }
 
   // Sort new_cluster_mappings based on start_slot_range_.
