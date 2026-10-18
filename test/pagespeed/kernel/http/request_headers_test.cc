@@ -190,6 +190,20 @@ TEST_F(RequestHeadersTest, HasCookie) {
   EXPECT_TRUE(request_headers_.HasCookieValue("x", "b"));
 }
 
+TEST_F(RequestHeadersTest, RemoveCookieMatchesNameCaseSensitively) {
+  // Cookie names are case-sensitive, so removing VICTIM must leave a
+  // cookie named Victim in place (and vice versa).
+  request_headers_.Clear();
+  request_headers_.Add(HttpAttributes::kCookie, "VICTIM=1; Victim=2");
+  request_headers_.RemoveCookie("VICTIM");
+  EXPECT_STREQ("Victim=2", request_headers_.Lookup1(HttpAttributes::kCookie));
+
+  request_headers_.Clear();
+  request_headers_.Add(HttpAttributes::kCookie, "VICTIM=1; Victim=2");
+  request_headers_.RemoveCookie("Victim");
+  EXPECT_STREQ("VICTIM=1", request_headers_.Lookup1(HttpAttributes::kCookie));
+}
+
 TEST_F(RequestHeadersTest, MethodFromStringMapsEveryMethodCaseInsensitively) {
   EXPECT_EQ(RequestHeaders::kGet, RequestHeaders::MethodFromString("GET"));
   EXPECT_EQ(RequestHeaders::kGet, RequestHeaders::MethodFromString("get"));
