@@ -59,6 +59,8 @@ bool EscapedValueNeedsQuotes(const StringPiece& escaped_value) {
       case '>':
       case '`':
         return true;
+      default:
+        break;
     }
   }
   return false;
