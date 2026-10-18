@@ -400,6 +400,36 @@ TEST_F(ResponseHeadersTest, TestCachingPublic) {
                             response_headers_.date_ms());
 }
 
+// A mixed-case "public" still authorizes proxy caching of a response to an
+// authorized request: Cache-Control directive names are case-insensitive
+// (RFC 7234 5.2).
+TEST_F(ResponseHeadersTest, TestCachingPublicMixedCase) {
+  ParseHeaders(
+      StrCat("HTTP/1.0 200 OK\r\n"
+             "Date: ",
+             start_time_string_,
+             "\r\n"
+             "Cache-control: PUBLIC, max-age=300\r\n\r\n"));
+
+  EXPECT_TRUE(response_headers_.IsBrowserCacheable());
+  EXPECT_TRUE(response_headers_.IsProxyCacheable());
+  EXPECT_TRUE(IsProxyCacheable(with_auth_));
+  EXPECT_TRUE(IsProxyCacheable(without_auth_));
+}
+
+// Mixed-case No-Transform and No-Store must survive a rewrite exactly like
+// the lowercase spellings.
+TEST_F(ResponseHeadersTest, CacheControlValuesToPreserveMixedCase) {
+  ParseHeaders(
+      StrCat("HTTP/1.0 200 OK\r\n"
+             "Date: ",
+             start_time_string_,
+             "\r\n"
+             "Cache-control: No-Transform, No-Store, max-age=300\r\n\r\n"));
+  EXPECT_STREQ(", no-transform, no-store",
+               response_headers_.CacheControlValuesToPreserve(false));
+}
+
 TEST_F(ResponseHeadersTest, TestCachingPartialReply) {
   // Make sure we don't cache a partial reply.
   ParseHeaders(

@@ -439,7 +439,9 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
       ResponseHeaders::kHasValidator);
 
   bool browser_cacheable = headers->IsBrowserCacheable();
-  bool no_store = headers->HasValue(HttpAttributes::kCacheControl, "no-store");
+  // Cache-Control directive names are case-insensitive (RFC 7234 5.2).
+  bool no_store = headers->HasValueCaseInsensitive(
+      HttpAttributes::kCacheControl, "no-store");
   bool is_public = true;  // Only used if we see a non-empty resource.
   bool saw_nonempty_resource = false;
   int64 max_age = headers->cache_ttl_ms();
@@ -456,10 +458,10 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
           ResponseHeaders::kHasValidator);
       proxy_cacheable &= resource_cacheable;
       browser_cacheable &= input_headers->IsBrowserCacheable();
-      no_store |=
-          input_headers->HasValue(HttpAttributes::kCacheControl, "no-store");
-      is_public &=
-          input_headers->HasValue(HttpAttributes::kCacheControl, "public");
+      no_store |= input_headers->HasValueCaseInsensitive(
+          HttpAttributes::kCacheControl, "no-store");
+      is_public &= input_headers->HasValueCaseInsensitive(
+          HttpAttributes::kCacheControl, "public");
       saw_nonempty_resource = true;
     }
   }

@@ -421,8 +421,9 @@ bool ResponseHeaders::IsProxyCacheable(
   // do not do) or something that has a Cache-Control: public.
   // See RFC2616, 14.8
   // (http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.8)
+  // The directive name is case-insensitive (RFC 7234 5.2).
   if (req_properties.has_authorization &&
-      !HasValue(HttpAttributes::kCacheControl, "public")) {
+      !HasValueCaseInsensitive(HttpAttributes::kCacheControl, "public")) {
     return false;
   }
 
@@ -838,11 +839,13 @@ void ResponseHeaders::ComputeCaching() {
 
 GoogleString ResponseHeaders::CacheControlValuesToPreserve(
     bool preserve_s_maxage) {
+  // Cache-Control directive names are case-insensitive (RFC 7234 5.2), so a
+  // mixed-case No-Transform or No-Store must survive the rewrite as well.
   GoogleString to_preserve;
-  if (HasValue(HttpAttributes::kCacheControl, "no-transform")) {
+  if (HasValueCaseInsensitive(HttpAttributes::kCacheControl, "no-transform")) {
     to_preserve = ", no-transform";
   }
-  if (HasValue(HttpAttributes::kCacheControl, "no-store")) {
+  if (HasValueCaseInsensitive(HttpAttributes::kCacheControl, "no-store")) {
     to_preserve += ", no-store";
   }
 
