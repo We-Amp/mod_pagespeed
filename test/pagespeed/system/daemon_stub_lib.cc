@@ -36,7 +36,7 @@
 //                                  the size it was given (default 0)
 //   PS_STUB_VOLUME_SIZE            what the shared-config reader returns
 //   PS_STUB_GENERATION             what the cache-dir-generation reader
-//                                  returns (default 1, the post-H1 contract)
+//                                  returns (default 3, the current generation)
 //   PS_STUB_LOG                    file the record arm's calls are appended
 //                                  to, one `key=value ...` line each, so a
 //                                  test can assert what the peer was ASKED
@@ -741,7 +741,7 @@ uint64_t ps_read_shared_config_volume_size(const char* cache_path) {
 // the current generation (DaemonAdapter::kCacheDirGeneration), so a module
 // test attaching through this stub sees a daemon it agrees with.
 uint32_t ps_read_shared_config_generation(const char* cache_path) {
-  return static_cast<uint32_t>(EnvOr("PS_STUB_GENERATION", 2));
+  return static_cast<uint32_t>(EnvOr("PS_STUB_GENERATION", 3));
 }
 #endif  // PS_STUB_OMIT_GENERATION
 

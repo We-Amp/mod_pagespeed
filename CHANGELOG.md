@@ -90,7 +90,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process of the previous version runs. During a rolling restart old and new
   processes use separate cache files, so disk use temporarily doubles, and with
   several worker processes the hit rate stays low until all of them run the new
-  version. Rolling back finds the previous cache file intact.
+  version. Rolling back finds the previous cache file intact. The optimizer
+  daemon moves its cache to `/var/cache/pagespeed-optimizer/v3` for the same
+  reason and publishes cache-directory generation 3; this module is built for
+  generation 3 and the packaged `pagespeed_daemon.conf` points
+  `ModPagespeedDaemonVolumePath` at `/var/cache/pagespeed-optimizer/v3/cache`.
+  If you set that directive yourself, change `v2` to `v3`: a module and daemon
+  on different generations refuse to attach, loudly, and in-place
+  optimization stays off until they agree. Install the module and the daemon
+  as the matching pair the packages already require.
 
 - The EL10 Apache package now requires the matching `pagespeed-optimizer`
   package and ships the daemon configuration and SELinux policy; it was built
