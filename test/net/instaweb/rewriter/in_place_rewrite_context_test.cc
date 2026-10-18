@@ -364,6 +364,24 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     EXPECT_EQ(date_ms, response_headers_.date_ms()) << url;
   }
 
+  // Fetches `url`, whose origin fails after part of the body, and checks
+  // that the client is answered with a failure and the driver is released
+  // (WaitForShutDown returns).
+  void FetchFailingMidStream(const GoogleString& url) {
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    NotifyingFetch notifying_fetch(request_context, options(), url, &sync,
+                                   &response_headers_);
+    rewrite_driver()->FetchResource(url, &notifying_fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    EXPECT_TRUE(notifying_fetch.done());
+    EXPECT_FALSE(notifying_fetch.success());
+    EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
+  }
+
   void ResetHeadersAndStats() {
     response_headers_.Clear();
     img_filter_->ClearStats();
@@ -1419,6 +1437,22 @@ TEST_F(InPlaceRewriteContextTest, FetchFailedNoRewriting) {
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
+}
+
+TEST_F(InPlaceRewriteContextTest, MidStreamFetchFailureWhileStreaming) {
+  Init();
+  mock_url_fetcher()->SetResponseFailure(cache_js_url_);
+  FetchFailingMidStream(cache_js_url_);
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+}
+
+TEST_F(InPlaceRewriteContextTest, MidStreamFetchFailureWhileWaitingToOptimize) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  mock_url_fetcher()->SetResponseFailure(cache_js_url_);
+  FetchFailingMidStream(cache_js_url_);
+  EXPECT_EQ(0, js_filter_->num_rewrites());
+  EXPECT_TRUE(response_headers_.IsErrorStatus());
 }
 
 TEST_F(InPlaceRewriteContextTest, HandleResourceCreationFailure) {

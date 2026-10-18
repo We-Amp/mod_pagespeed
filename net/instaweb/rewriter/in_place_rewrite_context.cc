@@ -220,9 +220,15 @@ void RecordingFetch::HandleDone(bool success) {
 
   if (streaming_) {
     SharedAsyncFetch::HandleDone(success);
+  } else if (!success && can_in_place_rewrite_) {
+    // The headers were held back for the rewrite; answer with the failure.
+    SharedAsyncFetch::HandleDone(false);
   }
 
-  if (success && can_in_place_rewrite_) {
+  if (!success && can_in_place_rewrite_) {
+    // No rewrite will run, so nothing else releases the driver.
+    FreeDriver();
+  } else if (success && can_in_place_rewrite_) {
     if (resource_->UseHttpCache()) {
       // Note, if !UseHttpCache() then the value will already be populated.
       // See InPlaceRewriteContext::StartFetchReconstruction.
