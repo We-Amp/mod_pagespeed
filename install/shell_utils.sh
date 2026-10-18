@@ -254,7 +254,7 @@ function version_compare() {
     # Now do the integer comparison between a and b.
     if [ "$a_tok" -lt "$b_tok" ]; then
       difference=-1
-    elif [ "$b_tok" -gt "$b_tok" ]; then
+    elif [ "$a_tok" -gt "$b_tok" ]; then
       difference=1
     fi
   done

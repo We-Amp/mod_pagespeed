@@ -83,8 +83,18 @@ export PAGESPEED_TEST_HOST
 BINDIR = /usr/bin
 
 # A temp directory to stage generated configuration files.  This must be
-# writable by the user, and readable by root.
-STAGING_DIR = /tmp/mod_pagespeed.install
+# writable by the user, and readable by root.  It is created fresh with an
+# unpredictable name (mode 0700) so other local users cannot pre-create or
+# replace it; override on the command line to reuse a directory.
+ifndef STAGING_DIR
+STAGING_DIR := $(shell mktemp -d "$${TMPDIR:-/tmp}/mod_pagespeed.install.XXXXXXXX")
+endif
+# Sub-makes (e.g. "restart") must see the same directory.
+export STAGING_DIR
+
+# Marker recording that the SELinux setup below has been done.  Kept in the
+# user's home directory rather than a shared, world-writable location.
+SEMANAGE_SENTINEL = $(HOME)/.mod_pagespeed_semanage.set
 
 # The mod_pagespeed module is specified relative to the install directory,
 # which is src/install.
@@ -285,7 +295,7 @@ CONF_TEMPLATES = $(STAGING_DIR)/pagespeed.conf \
 
 setup_staging_dir :
 	rm -rf $(STAGING_DIR)
-	mkdir -p $(STAGING_DIR)
+	mkdir -m 700 $(STAGING_DIR)
 
 LIBRARY_CONF_SOURCE = \
     $(GIT_SRC)/net/instaweb/genfiles/conf/pagespeed_libraries.conf
@@ -404,7 +414,7 @@ apache_debug_stop : stop
 # connection-refused handling via modpagespeed.com.  We don't actually
 # create a VirtualHost on 1023.
 enable_ports_and_file_access :
-	if [[ -x /usr/sbin/semanage && ! -f /tmp/semanage.set ]]; then \
+	if [[ -x /usr/sbin/semanage && ! -f $(SEMANAGE_SENTINEL) ]]; then \
 	  set -x; \
 	  for port in 1023 8081 8082 $(APACHE_SECONDARY_PORT) \
 	      $(APACHE_TERTIARY_PORT); do \
@@ -419,7 +429,7 @@ enable_ports_and_file_access :
 	    sudo chcon -R --reference=$(APACHE_DOC_ROOT) $$dir || true; \
 	  done; \
 	  /usr/sbin/setsebool httpd_can_network_connect on; \
-	  touch /tmp/semanage.set; \
+	  touch $(SEMANAGE_SENTINEL); \
 	fi
 
 # Hooks for tests we can only run in development due to needing extensive
