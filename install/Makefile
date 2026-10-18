@@ -88,7 +88,13 @@ BINDIR = /usr/bin
 # recreates it with a plain mkdir (no -p), which fails if another user
 # pre-created the path, and install refuses a directory not owned by the
 # invoking user.  Override on the command line to use another directory.
-STAGING_OWNER = $(or $(SUDO_USER),$(USER))
+# The owner falls back to the current account when neither SUDO_USER nor USER
+# is set (container entrypoints, cron).  TMPDIR is dropped by sudo's env_reset,
+# so a developer who sets it must pass STAGING_DIR explicitly to the sudo run;
+# the ownership check makes a mismatch fail loudly.  "make restart" is meant
+# to run unprivileged: under sudo the staging step would run as root and the
+# ownership check would refuse the directory.
+STAGING_OWNER = $(or $(SUDO_USER),$(USER),$(shell id -un))
 STAGING_DIR ?= $(or $(TMPDIR),/tmp)/mod_pagespeed.install.$(STAGING_OWNER)
 
 # Marker recording that the SELinux setup below has been done.  It lives under
