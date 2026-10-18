@@ -136,7 +136,7 @@ unset, the classic in-place path is unchanged.
   membership takes effect only in a restarted nginx.
 - **Find the two paths.** The packaged daemon's defaults are
   `/run/pagespeed-optimizer/notify.sock` (notification socket) and
-  `/var/cache/pagespeed-optimizer/v2/cache` (cache volume). If `SOCKET_PATH`
+  `/var/cache/pagespeed-optimizer/v3/cache` (cache volume). If `SOCKET_PATH`
   or `CACHE_DIR` was changed in `/etc/default/pagespeed-optimizer`, use those
   values: the volume path is the cache directory followed by `/cache`.
 
@@ -152,7 +152,7 @@ server {
 
     # The optimizer daemon: its notification socket and its cache volume.
     pagespeed DaemonSocketPath /run/pagespeed-optimizer/notify.sock;
-    pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v2/cache;
+    pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;
 }
 ```
 

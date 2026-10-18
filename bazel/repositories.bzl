@@ -516,6 +516,13 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # multi-process mode each file is written only by the processes on its
 # version, so the hit rate stays low until every process runs the new
 # version.  Rollback is warm: the old binary finds its own file untouched.
+# LOCKSTEP with the optimizer: its format move takes its cache-directory
+# generation from 2 to 3 (/var/cache/pagespeed-optimizer/v3), so
+# DaemonAdapter::kCacheDirGeneration moves to 3 and the packaged
+# pagespeed_daemon.conf points ModPagespeedDaemonVolumePath at v3/cache.  A
+# module and daemon on different generations refuse to attach (loudly), so
+# the two ship as a pair; install/debian/optimizer-pin.json records the
+# optimizer release cut from the same library commit when the train is cut.
 #
 # What else comes along, generically: integrity checks on the read path
 # reject damaged or stale contents (including after a crash and restart, and

@@ -55,7 +55,7 @@ Since the daemon's privilege drop (2.1), the optimizer daemon runs as the
 unprivileged `pagespeed` user and its artifacts are group-scoped: the cache
 volume, the notify socket and the shared configuration are mode `0660`/`0640`
 owned by `pagespeed:pagespeed`, under the versioned cold-start cache directory
-(`/var/cache/pagespeed-optimizer/v2/`) and `/run/pagespeed-optimizer/`. The
+(`/var/cache/pagespeed-optimizer/v3/`) and `/run/pagespeed-optimizer/`. The
 module reaches all three as a **group member**, never as their owner — it
 still never creates the volume, and it still refuses to start if an open
 authors a stray second volume file.
@@ -76,7 +76,7 @@ Two consequences are visible at startup:
   process, where the volume is really opened.
 * **The cache-directory generation is checked.** The daemon publishes
   `cache_dir_generation` in its shared configuration; this module is built
-  for generation 2. A daemon publishing a different generation is a loud
+  for generation 3. A daemon publishing a different generation is a loud
   handshake failure — in-place optimization off, nothing opened, never a
   silent split-brain across two layouts that share nothing. A daemon
   publishing no generation at all (a package from before the privilege drop)
