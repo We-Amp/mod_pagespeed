@@ -52,20 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a pinned digest, and the container build script configures the LLVM apt
   source instead of executing a downloaded installer.**
 - **Signed resource URLs: an invalid signed-resource URL could cause the expected
-  signature to be written to the server log.** The log now records only the URL
-  and the value provided. Affects the module in releases up to and including
+  signature to be written to the server log, where anyone with log access could
+  use it.** The log now records only the URL and the value provided. Affects the module in releases up to and including
   1.19.0 with URL signing enabled. **Update recommended.**
-- **Shared caching now honors stricter freshness and storage signals.**
-  `s-maxage` limits how long the shared cache keeps a response (it never extends
-  the lifetime browsers receive), header names in the end-to-end list are
-  recognized reliably, and a response with an oversized header line is treated
-  as uncacheable instead of being cached as if the line were absent (clients then
-  receive it as uncacheable too). Affects the module in releases up to and
-  including 1.19.0. **Update recommended.**
-- **IIS module: chunked origin responses using chunk extensions lost their body,
-  a response body larger than 2 GB in one read was mishandled, and running out of
-  request memory while buffering a rewritten response could crash the worker
-  process.** The connection is now reset in that last case, including for
+- **Shared caching: certain origin responses could be stored or served with a
+  longer lifetime than the origin allowed, including responses marked
+  private.** Affects the module in releases up to and including 1.19.0.
+  **Update recommended.**
+- **IIS module: very large or chunked origin responses could be truncated or
+  mishandled, and memory pressure could crash the worker process.** The
+  connection is now reset in that last case, including for
   in-place fetches that previously fell back to the original file. Affects the
   module in releases up to and including 1.19.0. **Update recommended.**
 - **ASP.NET Core sidecar: the sidecar information endpoint now requires
@@ -75,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Image spriting: out-of-range image offsets could corrupt memory.** Fixed.
   Affects the module in releases up to and including 1.19.0.
   **Update recommended.**
+- **Measurement proxy and beacons: the proxy password and beacon nonces were
+  exposed to guessing through response timing, and a failed read of random data
+  could produce an unsafe nonce.** Affects the module in releases up to and
+  including 1.19.0. **Update recommended.**
 - **Source builds: the Apache development install no longer stages
   configuration in a fixed shared temporary path, and the CentOS toolchain
   signing key is fetched over HTTPS.**
@@ -105,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before `UsePageSpeed()`, raw-origin requests are rejected with 421; call
   `UsePageSpeed()` first.
 - The Apache development install stages configuration in
-  `/tmp/mod_pagespeed.install.<user>` and refuses a missing or foreign-owned
+  `$TMPDIR/mod_pagespeed.install.<user>` (default `/tmp`, override with
+  `STAGING_DIR`) and refuses a missing or foreign-owned
   staging directory.
 - `IproMaxResponseBytes 0` (unlimited) no longer stops in-place optimization of
   responses that send a Content-Length; oversized responses are rejected as soon
@@ -117,6 +118,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cookie names are matched case-sensitively when a cookie is removed.
 - Redis Cluster: invalid redirections and slot maps are rejected and the number
   of cluster connections is capped.
+- `s-maxage` is honored for shared-cache freshness; it can only shorten the
+  lifetime set by `max-age` or `Expires`. Unoptimized in-place responses carry
+  the in-place `s-maxage` window (default 10 s) in their cached lifetime.
+- A response header line longer than 64 KiB is dropped and the response is
+  served as `max-age=0, no-cache`.
+- ASP.NET Core: client-supplied `X-Original-For`, `X-Original-Proto` and
+  `X-Original-Host` headers are no longer relayed to the origin hop.
 
 ### Fixed
 
@@ -140,18 +148,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response; a redirect or error response is rejected without being read.
 - An in-place optimized response whose body exceeds the cacheable size is
   passed through consistently instead of with a mismatched length.
-- Comparison of the measurement-proxy password and the beacon nonce is
-  hardened against timing analysis, and the configured beacon URL is escaped
-  correctly in the injected instrumentation script.
+- The configured beacon URL is escaped correctly in the injected
+  instrumentation script.
 - Key directories using `\uXXXX` escapes in key ids now match correctly;
-  malformed escapes reject the document. A failure to read random data for
-  beacon nonces is logged as an error.
+  malformed escapes reject the document.
 - Cache keys in cache write-failure warnings are escaped.
 - JavaScript minification in XHTML pages no longer produces markup that breaks
   the page for some bracket patterns.
-- Apache: an empty log message no longer reads outside the message.
-- A memory leak on every gzip or deflate response rewritten by the IIS module;
-  destroying an unjoined background thread on Windows no longer ends the worker
+- Apache: logging an empty message no longer reads outside the message buffer.
+- The IIS module no longer leaks memory on every gzip or deflate response it
+  rewrites; destroying an unjoined background thread on Windows no longer ends the worker
   process.
 - Posting to the background event loop no longer blocks when the loop is busy;
   proxied HTML with a zero flush buffer limit no longer exhausts memory;
@@ -167,6 +173,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memcached multi-get are all answered; directory walks for cache cleaning skip
   files that disappear during the walk.
 - Link header repair considers every `rel` parameter of a link-value.
+- End-to-end response headers are no longer wrongly removed from cached and
+  forwarded responses.
+- A domain mapping that fails no longer applies its host header.
+- ASP.NET Core: requests carrying client-supplied `X-Original-*` headers are no
+  longer wrongly rejected.
 - A sidecar startup timeout is reported as a timeout; version comparison in the
   install helper scripts detects "greater than".
 
