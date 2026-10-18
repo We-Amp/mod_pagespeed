@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-using System.Reflection;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using WeAmp.PageSpeed.AspNetCore.Config;
@@ -27,9 +26,7 @@ public class SidecarStartupTimeoutTests
             new NginxConfigGenerator(NullLogger<NginxConfigGenerator>.Instance, endpoint),
             new StubHttpClientFactory(),
             endpoint);
-        var method = typeof(ProcessSidecarManager).GetMethod(
-            "WaitForHealthyAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        return (Task)method.Invoke(manager, new object[] { timeoutMs, token })!;
+        return manager.WaitForHealthyAsync(timeoutMs, token);
     }
 
     [Fact]

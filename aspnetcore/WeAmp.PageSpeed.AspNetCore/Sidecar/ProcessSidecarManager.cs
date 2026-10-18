@@ -696,7 +696,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         return process;
     }
 
-    private async Task WaitForHealthyAsync(int timeoutMs, CancellationToken cancellationToken)
+    internal async Task WaitForHealthyAsync(int timeoutMs, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeoutMs);
