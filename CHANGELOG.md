@@ -78,8 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Source builds: the Apache development install no longer stages
   configuration in a fixed shared temporary path, and the CentOS toolchain
   signing key is fetched over HTTPS.**
+- **Disk cache: damaged or stale cache contents could be served, and a damaged
+  cache file could terminate the worker process.** Affects the module in
+  releases up to and including 1.19.0. **Update recommended.**
 
 ### Changed
+
+- The bundled Cyclone cache library moves to a new on-disk format, so the disk
+  cache starts empty after upgrading (expect a one-time rise in origin
+  fetches). The previous cache file is left on disk and can be deleted once no
+  process of the previous version runs. During a rolling restart old and new
+  processes use separate cache files, so disk use temporarily doubles, and with
+  several worker processes the hit rate stays low until all of them run the new
+  version. Rolling back finds the previous cache file intact.
 
 - The EL10 Apache package now requires the matching `pagespeed-optimizer`
   package and ships the daemon configuration and SELinux policy; it was built

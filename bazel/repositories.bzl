@@ -502,7 +502,45 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 #   - In the optional optimization engine (not used here) a result that
 #     cannot be written because the engine is stopping is reported as
 #     cancelled.  The remaining two commits change tests only.
-CYCLONE_COMMIT = "6e64530dda457d4cbfcac68fee432fc64d16d94c"
+#
+# Bumped to cyclone 22f6553, a hardening round across the library.
+# OPERATIONAL: the on-disk format moves to v9 (the document checksum now
+# also covers the fixed document header, so a damaged header field reads as
+# a miss instead of being served).  The format major is part of the
+# fingerprinted cache filename, so the new binary opens a NEW file: a cold
+# cache on upgrade (one-time origin-fetch spike; prefer an off-peak window),
+# and the previous file stays on disk until it is reclaimed manually (we do
+# not enable gc_superseded_on_start).  During a rolling restart (nginx
+# binary upgrade, apachectl graceful, IIS overlapped recycle) old and new
+# processes use separate files, so disk use temporarily doubles, and in
+# multi-process mode each file is written only by the processes on its
+# version, so the hit rate stays low until every process runs the new
+# version.  Rollback is warm: the old binary finds its own file untouched.
+#
+# What else comes along, generically: integrity checks on the read path
+# reject damaged or stale contents (including after a crash and restart, and
+# in multi-process mode) instead of serving them, a damaged cache file no
+# longer terminates the process when the volume cannot be mapped as a whole,
+# and multi-process lock recovery, crash consistency and memory/wait bounds
+# under load are tightened.  A plain write now gives up with CacheError::Busy
+# after 32 lost publish rounds, like an alternate write already did.
+#
+# The C++ API changes layout (ReadHandle, CacheStats, CacheConfig,
+# OptimizationConfig), which this build recompiles anyway; CacheError is
+# unchanged.  CacheStats gains hit_overload_drops and
+# volumes_without_whole_file_map; the wrapper's field-by-field stats copy is
+# unaffected.  The library's own C API (src/c_api, not built here) gains
+# error codes; the module keeps its own wrapper.
+#
+# Sources: src/io/executor.cpp and src/core/thread_util.hpp are deleted, and
+# src/core/write_commit_observer.hpp and src/c_api/c_error_map.hpp are new.
+# The globs in //bazel:cyclone.bzl pick up the new src/core header, drop the
+# deleted files on their own and leave src/c_api out (as before), so it needs
+# no change.  No new copts, defines or link flags: the CRC-32C hardware paths
+# use per-function target attributes and runtime dispatch, and
+# CYCLONE_USE_BUNDLED_SHA256 (a source-level switch this build leaves unset;
+# the CMake default flipped) still hashes through @boringssl//:crypto.
+CYCLONE_COMMIT = "22f65531115913ab7ce836639823df6c07281219"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)
