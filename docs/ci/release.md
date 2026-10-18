@@ -65,9 +65,11 @@ tag push or a manual dispatch, for a dry run as well.
 From 2.5.0 the module and the optimizer release one number: the module
 version must equal the optimizer's `VERSION.txt` at the pinned
 `optimizer_commit` (`tools/ci/check_module_optimizer_version.py`, run by
-`optimizer-fetch`). The tags published on the old numbering (`module-v1.15.0`
-to `module-v1.19.0`, where module 1.19.0 paired with `VERSION.txt` 2.4.0) are
-below 2.5.0 and pass with a notice. While the pin does not yet name the
+`optimizer-fetch`). The 1.15.0 to 1.19.0 packages were cut before this lane
+existed and carry no `module-v` tag or GitHub release; the only tags on the
+old numbering are the lane's dry runs, `module-v1.19.1-pre.1` and `-pre.2`
+(where the 1.19.0 packages paired with `VERSION.txt` 2.4.0). Those are below
+2.5.0 and pass with a notice. While the pin does not yet name the
 optimizer tag this release needs (only possible in a dry run, see above), a
 mismatch is a warning, shown as an annotation and in the job summary. Once
 the pin names the paired tag, a mismatch fails, a dry run included.

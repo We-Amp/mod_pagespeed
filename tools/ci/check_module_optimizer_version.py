@@ -13,11 +13,12 @@ itself reports: VERSION.txt at the pinned `optimizer_commit`, which its
 packages, its --version and its health endpoint are generated from. This does.
 
 Before 2.5.0 the module line was numbered 1.x while the optimizer's
-VERSION.txt carried the product line (2.N == 1.(N+15): module 1.19.0 paired
-with VERSION.txt 2.4.0). Nothing more ships on that numbering, but the tags
-already published on it (module-v1.15.0 to module-v1.19.0, and the
-module-v1.19.1-pre.N dry-run tags) must still verify, so the equality is
-enforced from 2.5.0 on only; below it the check passes with a notice.
+VERSION.txt carried the product line (2.N == 1.(N+15): the 1.19.0 packages
+paired with VERSION.txt 2.4.0). Nothing more ships on that numbering, but the
+tags this lane already carries on it (module-v1.19.1-pre.1 and -pre.2, the
+dry runs of this lane; the 1.15.0 to 1.19.0 packages predate it and have no
+module-v tag) must still verify, so the equality is enforced from 2.5.0 on
+only; below it the check passes with a notice.
 
 --dry-run means the pair is not final yet: the pin does not name the
 optimizer tag this release needs (the lane passes the flag only then). In
@@ -188,10 +189,15 @@ def self_test():
             print("  %-38s FAIL" % name)
             failed += 1
     extra += 1
-    if check("1.19.1", _missing)[0] == "skip":
-        print("  %-38s ok" % "below 2.5.0 the file is never read")
+    name = "below 2.5.0 the file is never read"
+    try:
+        got = check("1.19.1", _missing)[0]
+    except VersionError:
+        got = "read (refused)"
+    if got == "skip":
+        print("  %-38s ok" % name)
     else:
-        print("  below 2.5.0 the file is never read     FAIL")
+        print("  %-38s FAIL (got %s)" % (name, got))
         failed += 1
     # main(): exit codes end to end, including a missing file (2, not a
     # traceback) and the --enforced probe.
