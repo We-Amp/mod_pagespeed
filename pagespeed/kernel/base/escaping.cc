@@ -118,7 +118,12 @@ void EscapeToJsonStringLiteral(const StringPiece& original, bool add_quotes,
   for (size_t c = 0; c < original.length(); ++c) {
     unsigned char code = static_cast<unsigned char>(original[c]);
 
-    if (code <= 0x1F || code > 0x7F || code == '<' || code == '>' ||
+    // Bytes above 0x7F are passed through: in the UTF-8 input callers
+    // should feed a JSON encoder they belong to multi-byte sequences,
+    // and escaping each one as \u00xx would decode to unrelated Latin-1
+    // characters, corrupting the text. Control characters, the JSON
+    // metacharacters and < > stay escaped.
+    if (code <= 0x1F || code == '<' || code == '>' ||
         code == '"' || code == '\\') {
       *(escaped) += absl::StrFormat("\\u00%02x", code);
     } else {

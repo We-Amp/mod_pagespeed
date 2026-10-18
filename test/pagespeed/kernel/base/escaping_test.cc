@@ -110,6 +110,20 @@ TEST_F(EscapingTest, JsonEscapeAppend) {
   EXPECT_EQ("\"ab\"cd", out);
 }
 
+TEST_F(EscapingTest, JsonEscapeKeepsUtf8Verbatim) {
+  // Bytes above 0x7F in valid UTF-8 input are part of multi-byte
+  // sequences and need no escaping in JSON; writing each one as \u00xx
+  // would decode to unrelated Latin-1 characters and corrupt the text.
+  GoogleString out;
+  // "caf<0xC3><0xA9>" is "café"; <0xE2><0x82><0xAC> is the euro sign.
+  EscapeToJsonStringLiteral("caf\xC3\xA9 \xE2\x82\xAC", true, &out);
+  EXPECT_EQ("\"caf\xC3\xA9 \xE2\x82\xAC\"", out);
+  // Control characters and JSON metacharacters are still escaped.
+  out.clear();
+  EscapeToJsonStringLiteral("a\x01\"\\\x7F", true, &out);
+  EXPECT_EQ("\"a\\u0001\\u0022\\u005c\x7F\"", out);
+}
+
 }  // namespace
 
 }  // namespace net_instaweb
