@@ -106,12 +106,13 @@ stage_install_rpm() {
 do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PROVIDES="${PACKAGE}"
-  # The archived Google packages ship the same files; obsoleting them lets
-  # `dnf install mod-pagespeed` replace mod-pagespeed-stable/-beta in one
-  # transaction instead of failing on file conflicts. Versioned, as the
-  # packaging guidelines want: the last build of both Google channels is
-  # 1.13.35.2, and Google never published a 1.15. On an EasyApache 4 host
-  # neither package is installed, so the fields are a no-op there.
+  # The archived Google packages ship the same files. Conflicts (not
+  # Obsoletes: that would let a plain `dnf upgrade` replace Google's package
+  # unasked) makes the move an explicit
+  # `dnf swap mod-pagespeed-stable mod-pagespeed`. Versioned: the last build
+  # of both Google channels is 1.13.35.2, and Google never published a 1.15.
+  # On an EasyApache 4 host neither package is installed, so the field is a
+  # no-op there.
   REPLACES="mod-pagespeed-stable < 1.15, mod-pagespeed-beta < 1.15"
 
   # If we specify a dependecy of foo.so below, we would depend on both the
