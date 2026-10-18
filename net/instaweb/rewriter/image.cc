@@ -1894,7 +1894,13 @@ bool ImageImpl::DrawImage(Image* image, int x, int y) {
   const size_t image_height = image_reader->GetImageHeight();
   const PixelFormat image_pixel_format = image_reader->GetPixelFormat();
 
-  if (x + image_width > canvas_width || y + image_height > canvas_height) {
+  // The offsets are signed; compare in 64 bits so that a negative offset can
+  // neither wrap around nor slip past the bounds check.
+  if (x < 0 || y < 0 ||
+      static_cast<int64_t>(x) + static_cast<int64_t>(image_width) >
+          static_cast<int64_t>(canvas_width) ||
+      static_cast<int64_t>(y) + static_cast<int64_t>(image_height) >
+          static_cast<int64_t>(canvas_height)) {
     PS_LOG_INFO(handler_, "The new image cannot fit into the canvas.");
     return false;
   }
