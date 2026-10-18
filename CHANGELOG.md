@@ -130,6 +130,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Disk cache: an unexpected internal failure in the cache library, such as
+  running out of memory, is now reported as a failed read or write instead of
+  being able to terminate the worker process.
+- Disk cache: a write skipped because of momentary contention (another writer
+  of the same entry, or another process holding the cache's locks) no longer
+  counts in `cyclone_cache_failures` or logs a warning, so that statistic again
+  means an unwritable or unhealthy cache. A read of a damaged entry, or one the
+  disk could not deliver, is still served as a miss and is now logged
+  (sampled, one in every 1024 such reads per cache).
+
 - Shutting down a memcached or Redis cache with lookups still queued no longer
   aborts the process, Cyclone cache shutdown waits for in-progress operations,
   and a task sequence no longer hangs at shutdown.

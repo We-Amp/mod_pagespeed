@@ -219,6 +219,13 @@ class CycloneCache : public CacheInterface {
   // still counts each failure.
   std::atomic<uint64_t> write_failure_log_count_{0};
 
+  // Reads that failed because a stored entry was damaged or the disk could
+  // not be read.  Such a read is a miss like any other (counted in
+  // cyclone_cache_misses), but unlike a miss it points at the cache file or
+  // the device, so LookupWithTier logs it, sampled off this count the same
+  // way.
+  std::atomic<uint64_t> read_failure_log_count_{0};
+
   // Statistics variables
   Variable* hits_;
   Variable* misses_;
