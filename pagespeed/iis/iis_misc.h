@@ -52,6 +52,14 @@ namespace net_instaweb
 		net_instaweb::RewriteOptions* options,
 		const StringPiece& host);
 
+	class GzipInflater;
+
+	// Returns a new inflater for a gzip or deflate Content-Encoding value
+	// (case-insensitive), or NULL for any other coding. The header value is
+	// not NUL-terminated; |name| receives it as text either way.
+	GzipInflater* NewContentEncodingInflater(const HTTP_KNOWN_HEADER& header,
+	                                         GoogleString* name);
+
 	 GoogleString size_t_to_str(size_t i);
 	 
 	 HRESULT WriteResponseMessage(IHttpContext * pHttpContext, PVOID buf, size_t len, bool is_last);
