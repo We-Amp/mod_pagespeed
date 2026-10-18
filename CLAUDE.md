@@ -483,7 +483,7 @@ Tests in `test/iis/` (26 Python files):
 C++ unit tests in `test/pagespeed/iis/` (`*_test.cc`, e.g.):
 - Core: `iis_config_test.cc`, `iis_server_context_test.cc`, `iis_module_factory_test.cc`
 - HTTP: `iis_http_module_test.cc`, `iis_header_util_test.cc`, `iis_base_fetch_test.cc`
-- Streaming: `iis_streaming_fetch_test.cc`, `iis_dechunker_test.cc`, `iis_content_decoder_test.cc`
+- Streaming: `iis_streaming_fetch_test.cc`, `iis_dechunker_feed_test.cc`, `iis_content_decoder_test.cc`
 - Integration: `iis_rewrite_integration_test.cc`, `iis_html_flushing_integration_test.cc`
 
 ### Platform Differences
