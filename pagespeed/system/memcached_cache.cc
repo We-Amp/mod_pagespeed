@@ -211,8 +211,9 @@ void MemcachedCache::MultiGet(MultiGetRequest* request) {
   }
 
   // Build a map from hashed_key -> pending indexes for result matching.
-  // A batch can carry the same key more than once; each returned result
-  // answers one pending request for that key, in order.
+  // A batch can carry the same key more than once, and the server may
+  // answer a repeated key with a single result, so the first result for
+  // a key must satisfy every pending request of that key.
   std::map<GoogleString, std::vector<int>> key_index_map;
   for (int i = 0; i < n; ++i) {
     key_index_map[hashed_keys[i]].push_back(i);
@@ -237,14 +238,18 @@ void MemcachedCache::MultiGet(MultiGetRequest* request) {
                               memcached_result_key_length(result));
       auto it = key_index_map.find(result_key);
       if (it != key_index_map.end() && !it->second.empty()) {
-        int idx = it->second.front();
-        it->second.erase(it->second.begin());
-        found[idx] = true;
         const char* data = memcached_result_value(result);
         size_t data_len = memcached_result_length(result);
-        DecodeValueMatchingKeyAndCallCallback((*request)[idx].key, data,
-                                              data_len, "MultiGet",
-                                              (*request)[idx].callback);
+        // Answer every pending request of this key from the one result,
+        // then clear the list: further results for the same key (servers
+        // that repeat them) must not answer anything twice.
+        for (int idx : it->second) {
+          found[idx] = true;
+          DecodeValueMatchingKeyAndCallCallback((*request)[idx].key, data,
+                                                data_len, "MultiGet",
+                                                (*request)[idx].callback);
+        }
+        it->second.clear();
       }
     } else if (rc != MEMCACHED_END) {
       if (!error_recorded) {
