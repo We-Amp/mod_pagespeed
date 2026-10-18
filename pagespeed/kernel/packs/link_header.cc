@@ -127,11 +127,14 @@ std::optional<std::string> LinkValue::Param(std::string_view name) const {
 }
 
 bool LinkValue::HasRel(std::string_view token) const {
-  std::optional<std::string> rel = Param("rel");
-  if (!rel.has_value()) return false;
-  for (std::string_view t :
-       absl::StrSplit(*rel, absl::ByAnyChar(" \t"), absl::SkipEmpty())) {
-    if (absl::EqualsIgnoreCase(t, token)) return true;
+  // A link-value can carry several rel parameters; every one of them
+  // counts, in any order.
+  for (const auto& [n, v] : params) {
+    if (!absl::EqualsIgnoreCase(n, "rel")) continue;
+    for (std::string_view t :
+         absl::StrSplit(v, absl::ByAnyChar(" \t"), absl::SkipEmpty())) {
+      if (absl::EqualsIgnoreCase(t, token)) return true;
+    }
   }
   return false;
 }
@@ -191,22 +194,28 @@ std::optional<std::string> MakeCanonicalLinkValue(std::string_view url) {
 std::string LinkValueWithoutRelToken(const LinkValue& value,
                                      std::string_view token) {
   if (!value.HasRel(token)) return value.raw;
-  std::string out = absl::StrCat("<", value.target, ">");
-  bool first_rel = true;
+  // The token is dropped from the merged tokens of every rel parameter;
+  // the merged set is written where the first rel parameter stood and the
+  // other rel parameters are not repeated.
+  std::string kept;
   for (const auto& [name, param] : value.params) {
-    // Only the first rel counts (see HasRel); later ones are ordinary
-    // parameters.
-    if (name == "rel" && first_rel) {
-      first_rel = false;
-      std::string kept;
-      for (std::string_view t :
-           absl::StrSplit(param, absl::ByAnyChar(" \t"), absl::SkipEmpty())) {
-        if (absl::EqualsIgnoreCase(t, token)) continue;
-        if (!kept.empty()) kept.push_back(' ');
-        kept.append(t);
+    if (name != "rel") continue;
+    for (std::string_view t :
+         absl::StrSplit(param, absl::ByAnyChar(" \t"), absl::SkipEmpty())) {
+      if (absl::EqualsIgnoreCase(t, token)) continue;
+      if (!kept.empty()) kept.push_back(' ');
+      kept.append(t);
+    }
+  }
+  if (kept.empty()) return std::string();
+  std::string out = absl::StrCat("<", value.target, ">");
+  bool rel_written = false;
+  for (const auto& [name, param] : value.params) {
+    if (name == "rel") {
+      if (!rel_written) {
+        rel_written = true;
+        absl::StrAppend(&out, "; rel=\"", kept, "\"");
       }
-      if (kept.empty()) return std::string();
-      absl::StrAppend(&out, "; rel=\"", kept, "\"");
       continue;
     }
     if (param.empty()) {
