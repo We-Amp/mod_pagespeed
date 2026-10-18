@@ -33,9 +33,11 @@ class ResponseHeaders;
 class ResponseHeadersParser {
  public:
   // Maximum accumulated bytes of one header line (name plus value).  A
-  // longer line is dropped rather than buffered, bounding what a single
-  // crafted response can make us hold, while the remaining headers of
-  // the response still parse.
+  // longer line of an origin response is dropped rather than buffered,
+  // bounding what a single header line can make us hold, while the
+  // remaining headers of the response still parse.  A response that had
+  // a line dropped is marked uncacheable when its headers complete: the
+  // parsed set no longer represents the origin's caching directives.
   static const size_t kMaxHeaderLineBytes = 64 * 1024;
 
   explicit ResponseHeadersParser(ResponseHeaders* rh) : response_headers_(rh) {
@@ -61,6 +63,7 @@ class ResponseHeadersParser {
   bool parsing_value_;
   bool headers_complete_;
   bool skipping_overlong_line_;
+  bool dropped_overlong_line_;
   GoogleString parse_name_;
   GoogleString parse_value_;
 
