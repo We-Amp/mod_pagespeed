@@ -851,6 +851,15 @@ TEST_F(JavascriptFilterTest, XhtmlInlineJavascriptNeverEmitsCdataEnd) {
   ValidateExpected("xhtml cdata end", original, original);
 }
 
+// Same as above for an XHTML script without a CDATA wrapper, where the
+// minified code would otherwise be emitted as bare character data.
+TEST_F(JavascriptFilterTest, XhtmlInlineJavascriptWithoutCdataNeverEmitsCdataEnd) {
+  InitFiltersAndTest(100);
+  const GoogleString original =
+      StrCat(kXhtmlDtd, absl::StrFormat(kInlineJs, "x[y[0] ] > 1;"));
+  ValidateExpected("xhtml no cdata", original, original);
+}
+
 // http://github.com/apache/incubator-pagespeed-mod/issues/324
 TEST_F(JavascriptFilterTest, RetainExtraHeaders) {
   InitFilters();
