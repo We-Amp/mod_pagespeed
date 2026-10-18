@@ -35,7 +35,9 @@ var app = builder.Build();
 app.UsePageSpeed();
 app.MapHealthChecks("/health");
 app.MapPageSpeedHealthCheck("/health/pagespeed");
-app.MapPageSpeedInfo("/pagespeed/info");
+// The sample has no authentication configured, so it opts out of the default
+// authorization requirement; real applications should keep it enabled.
+app.MapPageSpeedInfo("/pagespeed/info", requireAuthorization: false);
 
 // Origin HTML referencing an EXTERNAL stylesheet so PageSpeed fetches, minifies
 // and inlines it (CoreFilters: rewrite_css + inline_css). Prove optimization via
