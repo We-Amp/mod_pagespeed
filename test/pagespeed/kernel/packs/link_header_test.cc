@@ -79,11 +79,11 @@ TEST(SplitLinkHeaderTest, RelHoldsSeveralTokensCaseInsensitively) {
   EXPECT_FALSE(v[0].HasRel("canon"));
 }
 
-TEST(SplitLinkHeaderTest, OnlyTheFirstRelCounts) {
+TEST(SplitLinkHeaderTest, EveryRelParameterCounts) {
   auto v = SplitLinkHeader("<https://a.test/x>; rel=next; rel=canonical");
   ASSERT_EQ(v.size(), 1u);
   EXPECT_TRUE(v[0].HasRel("next"));
-  EXPECT_FALSE(v[0].HasRel("canonical"));
+  EXPECT_TRUE(v[0].HasRel("canonical"));
 }
 
 TEST(SplitLinkHeaderTest, ParametersWithoutValueAndExtendedNames) {
@@ -224,14 +224,31 @@ TEST(LinkValueWithoutRelTokenTest, DropsOnlyThatToken) {
 }
 
 TEST(LinkValueWithoutRelTokenTest,
-     ExtendedValuesStayTokensAndOnlyTheFirstRelIsEdited) {
+     ExtendedValuesStayTokensAndRelsAreMerged) {
   auto v = SplitLinkHeader(
       "<https://a.test/x>; title*=UTF-8''a%20b; rel=\"canonical preload\"; "
       "rel=\"canonical\"");
   ASSERT_EQ(v.size(), 1u);
   EXPECT_EQ(LinkValueWithoutRelToken(v[0], "canonical"),
-            "<https://a.test/x>; title*=UTF-8''a%20b; rel=\"preload\"; "
-            "rel=\"canonical\"");
+            "<https://a.test/x>; title*=UTF-8''a%20b; rel=\"preload\"");
+}
+
+TEST(LinkValueWithoutRelTokenTest, EveryRelParameterIsFiltered) {
+  // Both orders: the token is dropped from the merged rel parameters and
+  // the link-value keeps its remaining meaning.
+  auto a =
+      SplitLinkHeader("<https://a.test/x>; rel=\"canonical\"; rel=\"next\"");
+  ASSERT_EQ(a.size(), 1u);
+  EXPECT_EQ(LinkValueWithoutRelToken(a[0], "canonical"),
+            "<https://a.test/x>; rel=\"next\"");
+
+  auto b =
+      SplitLinkHeader("<https://a.test/x>; rel=\"next\"; rel=\"canonical\"");
+  ASSERT_EQ(b.size(), 1u);
+  EXPECT_EQ(LinkValueWithoutRelToken(b[0], "canonical"),
+            "<https://a.test/x>; rel=\"next\"");
+  EXPECT_EQ(LinkValueWithoutRelToken(b[0], "next"),
+            "<https://a.test/x>; rel=\"canonical\"");
 }
 
 TEST(LinkValueWithoutRelTokenTest, OnlyTokenLeavesNothing) {
@@ -397,6 +414,27 @@ TEST(PlanCanonicalLinkHeaderTest, ALineWithUnparsedTextIsNeverRebuilt) {
 TEST(PlanCanonicalLinkHeaderTest, AnUnparsableTargetIsAConflict) {
   CanonicalLinkEdit e = Plan({"<mailto:x@a.test>; rel=canonical"});
   EXPECT_EQ(e.reason, Reason::kHeaderConflict);
+}
+
+TEST(PlanCanonicalLinkHeaderTest, ACanonicalBehindADuplicateRelIsStillSeen) {
+  // A second rel parameter must not hide a canonical behind it, and a
+  // repair of a duplicated rel keeps the remaining tokens.
+  CanonicalLinkEdit e =
+      Plan({"<https://a.test/stale>; rel=\"next\"; rel=\"canonical\""},
+           OnPresent::kRepair);
+  ASSERT_TRUE(e.applicable);
+  EXPECT_EQ(e.action, Action::kReplace);
+  EXPECT_EQ(e.reason, Reason::kHeaderConflict);
+  EXPECT_EQ(e.lines, (std::vector<std::string>{
+                         "<https://a.test/stale>; rel=\"next\"",
+                         "<https://a.test/page>; rel=\"canonical\""}));
+
+  e = Plan({"<https://a.test/stale>; rel=\"canonical\"; rel=\"next\""},
+           OnPresent::kRepair);
+  EXPECT_EQ(e.action, Action::kReplace);
+  EXPECT_EQ(e.lines, (std::vector<std::string>{
+                         "<https://a.test/stale>; rel=\"next\"",
+                         "<https://a.test/page>; rel=\"canonical\""}));
 }
 
 TEST(PlanCanonicalLinkHeaderTest, ACommaInTheTargetStaysOneEntry) {
