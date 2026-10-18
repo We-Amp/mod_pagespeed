@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/util/input_file_nonce_generator.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/message_handler.h"
 
 namespace net_instaweb {
 
@@ -28,8 +29,21 @@ InputFileNonceGenerator::~InputFileNonceGenerator() {
 }
 
 uint64 InputFileNonceGenerator::NewNonceImpl() {
-  uint64 result;
-  file_->Read(reinterpret_cast<char*>(&result), sizeof(result), handler_);
+  uint64 result = 0;
+  int bytes_read = 0;
+  char* out = reinterpret_cast<char*>(&result);
+  while (bytes_read < static_cast<int>(sizeof(result))) {
+    int n = file_->Read(out + bytes_read, sizeof(result) - bytes_read, handler_);
+    if (n <= 0) {
+      // Never surface partially uninitialized bytes as a nonce.
+      handler_->Message(kError,
+                        "InputFileNonceGenerator: entropy source returned %d "
+                        "bytes after %d of %d; returning a zero nonce",
+                        n, bytes_read, static_cast<int>(sizeof(result)));
+      return 0;
+    }
+    bytes_read += n;
+  }
   return result;
 }
 
