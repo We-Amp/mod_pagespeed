@@ -544,6 +544,12 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
             "<![CDATA")) {  // See Issue 542.
       // Minifier strips leading and trailing CDATA comments from scripts.
       // Restore them if necessary and safe according to the original script.
+      if (code_block.rewritten_code().find("]]>") != StringPiece::npos) {
+        // Minification can join adjacent brackets into "]]>", which would end
+        // the wrapper early; keep the original script.
+        config_->did_not_shrink()->Add(1);
+        return;
+      }
       script->clear();
       StrAppend(script, "//<![CDATA[\n", code_block.rewritten_code(),
                 "\n//]]>");
