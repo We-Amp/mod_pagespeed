@@ -25,14 +25,16 @@ test_version_compare_lt() {
     ! version_compare 2.0 -lt 1.9 &&
     ! version_compare 2.0 -lt 2.0 &&
     ! version_compare 10.0 -lt 9.9 &&
-    version_compare 9.9 -lt 10.0
+    version_compare 9.9 -lt 10.0 &&
+    version_compare 2.0 -lt 2.0.1
 }
 test_version_compare_gt() {
   version_compare 2.0 -gt 1.9 &&
     ! version_compare 1.9 -gt 2.0 &&
     ! version_compare 2.0 -gt 2.0 &&
     version_compare 10.0 -gt 9.9 &&
-    version_compare 1.2.4 -gt 1.2.3
+    version_compare 1.2.4 -gt 1.2.3 &&
+    version_compare 2.0.1 -gt 2.0
 }
 test_version_compare_ge_le_eq() {
   version_compare 2.0 -ge 1.9 &&
@@ -53,37 +55,60 @@ make_var() {
     sed -n "s/^ *$1=//p"
 }
 
-test_staging_dir_unpredictable() {
+test_staging_dir_stable_per_user() {
   local a b
   a="$(make_var STAGING_DIR)"
   b="$(make_var STAGING_DIR)"
-  [ -n "$a" ] && [ -n "$b" ] &&
-    [ "$a" != "/tmp/mod_pagespeed.install" ] && [ "$a" != "$b" ]
+  [ -n "$a" ] && [ "$a" = "$b" ] && [ "$a" != "/tmp/mod_pagespeed.install" ] &&
+    [[ "$a" == *mod_pagespeed.install.* ]]
 }
+test_staging_dir_follows_sudo_user() {
+  [ "$(SUDO_USER=alice USER=root make_var STAGING_DIR | sed 's|.*/||')" = \
+    "mod_pagespeed.install.alice" ]
+}
+test_parse_creates_no_directories() {
+  local tmp n
+  tmp="$(mktemp -d)"
+  TMPDIR="$tmp" make -s -C "$this_dir" echo_vars >/dev/null 2>&1
+  n="$(find "$tmp" -mindepth 1 | wc -l)"
+  rm -rf "$tmp"
+  [ "$n" -eq 0 ]
+}
+test_staging_dir_mode() {
+  local tmp d mode
+  tmp="$(mktemp -d)"
+  d="$(TMPDIR="$tmp" make_var STAGING_DIR)"
+  # Staging recreates the directory with mode 711.
+  TMPDIR="$tmp" make -s -C "$this_dir" setup_staging_dir >/dev/null 2>&1
+  mode="$(stat -c %a "$d")"
+  rm -rf "$tmp"
+  [ "$mode" = "711" ]
+}
+test_install_requires_owned_staging_dir() {
+  local tmp
+  tmp="$(mktemp -d)"
+  # Missing directory: refuse.
+  ! make -s -C "$this_dir" check_staging_dir STAGING_DIR="$tmp/missing" >/dev/null 2>&1 &&
+    # Directory owned by the invoking user: accept.
+    make -s -C "$this_dir" check_staging_dir STAGING_DIR="$tmp" >/dev/null 2>&1 &&
+    # Directory owned by a different user: refuse.
+    ! SUDO_USER=nobody-such-user make -s -C "$this_dir" check_staging_dir \
+        STAGING_DIR="$tmp" >/dev/null 2>&1
+  local rc=$?
+  rm -rf "$tmp"
+  return $rc
+}
+check staging_dir_stable_per_user test_staging_dir_stable_per_user
+check staging_dir_follows_sudo_user test_staging_dir_follows_sudo_user
+check parse_creates_no_directories test_parse_creates_no_directories
+check staging_dir_mode test_staging_dir_mode
+check install_requires_owned_staging_dir test_install_requires_owned_staging_dir
 test_staging_dir_overridable() {
   [ "$(make_var STAGING_DIR STAGING_DIR=/var/tmp/x)" = "/var/tmp/x" ]
 }
 test_no_fixed_tmp_sentinel() {
   ! grep -q '/tmp/semanage.set' "$this_dir/Makefile"
 }
-test_staging_dir_shared_with_submake() {
-  local tmp out
-  tmp="$(mktemp -d)"
-  {
-    echo "include $this_dir/Makefile"
-    echo ".DEFAULT_GOAL := probe"
-    echo "probe:"
-    printf '\t@echo $(STAGING_DIR)\n'
-    printf '\t@$(MAKE) -s -f %s inner\n' "$tmp/m.mk"
-    echo "inner:"
-    printf '\t@echo $(STAGING_DIR)\n'
-  } > "$tmp/m.mk"
-  out="$(make -s -C "$this_dir" -f "$tmp/m.mk" 2>/dev/null | sort -u | wc -l)"
-  rm -rf "$tmp"
-  [ "$out" -eq 1 ]
-}
-check staging_dir_unpredictable test_staging_dir_unpredictable
-check staging_dir_shared_with_submake test_staging_dir_shared_with_submake
 check staging_dir_overridable test_staging_dir_overridable
 check no_fixed_tmp_sentinel test_no_fixed_tmp_sentinel
 
