@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Self-tests for install/shell_utils.sh and install/Makefile.
 # Usage: bash install/test_install_scripts.sh
