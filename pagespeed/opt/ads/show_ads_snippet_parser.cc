@@ -58,8 +58,8 @@ StringPiece StripAnyEnclosingCommentTag(StringPiece input) {
 
 // Removes enclosing quotes for string 'input'.
 StringPiece StripAnyEnclosingQuotes(StringPiece input) {
-  if ((strings::StartsWith(input, "\"") && strings::StartsWith(input, "\"")) ||
-      (strings::StartsWith(input, "\'") && strings::StartsWith(input, "\'"))) {
+  if ((strings::StartsWith(input, "\"") && strings::EndsWith(input, "\"")) ||
+      (strings::StartsWith(input, "\'") && strings::EndsWith(input, "\'"))) {
     return input.substr(1, input.length() - 2);
   }
   return input;
