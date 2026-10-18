@@ -104,6 +104,38 @@ TEST(StaticKeyDirectoryTest, KidlessSingleJwkStillResolves) {
   EXPECT_EQ(expected, r.raw_key_32);
 }
 
+// A \uXXXX escape in a member must be decoded like any other JSON string
+// escape: silently dropping the escape would change the keyid the directory
+// matches against, so "k1" written with an escaped digit must match "k1".
+TEST(StaticKeyDirectoryTest, UnicodeEscapeInKidIsDecoded) {
+  StaticKeyDirectory dir(MakeDoc("k\\u0031", kX));
+  EXPECT_EQ(KeyLookupResult::kFound, dir.GetKey("any.host", "k1", 0).status);
+}
+
+// Non-BMP code points arrive as a UTF-16 surrogate pair; the pair must decode
+// to the UTF-8 encoding of the combined code point. "a" U+1F600 "b".
+TEST(StaticKeyDirectoryTest, UnicodeEscapeSurrogatePairIsDecoded) {
+  StaticKeyDirectory dir(MakeDoc("a\\uD83D\\uDE00b", kX));
+  EXPECT_EQ(KeyLookupResult::kFound,
+            dir.GetKey("any.host", "a\xF0\x9F\x98\x80" "b", 0).status);
+}
+
+// A lone surrogate half has no valid decoding; the document is rejected rather
+// than parsed with a silently mangled keyid.
+TEST(StaticKeyDirectoryTest, LoneSurrogateEscapeIsRejected) {
+  StaticKeyDirectory dir(MakeDoc("a\\uD83Db", kX));
+  EXPECT_EQ(KeyLookupResult::kNotFound, dir.GetKey("any.host", "ab", 0).status);
+  EXPECT_EQ(KeyLookupResult::kNotFound, dir.GetKey("any.host", "a", 0).status);
+}
+
+// Truncated or non-hex \u escapes are malformed, not skippable.
+TEST(StaticKeyDirectoryTest, MalformedUnicodeEscapeIsRejected) {
+  StaticKeyDirectory dir(MakeDoc("k\\u03", kX));
+  EXPECT_EQ(KeyLookupResult::kNotFound, dir.GetKey("any.host", "k", 0).status);
+  StaticKeyDirectory dir2(MakeDoc("k\\u00zz", kX));
+  EXPECT_EQ(KeyLookupResult::kNotFound, dir2.GetKey("any.host", "k", 0).status);
+}
+
 }  // namespace
 }  // namespace webbotauth
 }  // namespace net_instaweb

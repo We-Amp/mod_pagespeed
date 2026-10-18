@@ -3,6 +3,7 @@
 
 #include "pagespeed/kernel/webbotauth/jwks.h"
 
+#include <cstdint>
 #include <vector>
 
 #include "pagespeed/kernel/webbotauth/base64.h"
@@ -43,7 +44,8 @@ class JsonScanner {
   }
 
   // Parse a JSON string (assumes current non-ws char is '"'). Handles the
-  // common escapes; rejects on malformed input.
+  // common escapes plus \uXXXX (decoded to UTF-8, including surrogate pairs);
+  // rejects on malformed input.
   bool ParseString(GoogleString* out) {
     SkipWs();
     if (Peek() != '"') return false;
@@ -81,11 +83,39 @@ class JsonScanner {
             out->push_back('\f');
             break;
           case 'u': {
-            // Skip the 4 hex digits; we only need ASCII JWK members so a basic
-            // passthrough of the literal sequence is acceptable. Reject if
-            // fewer than 4 remain.
-            if (pos_ + 4 > s_.size()) return false;
-            pos_ += 4;  // do not interpret; JWK members we read are ASCII
+            // Decode the escape to its code point and emit it as UTF-8, so an
+            // escaped member byte-compares equal to its literal form.
+            uint32_t cp;
+            if (!ParseHex4(&cp)) return false;
+            if (cp >= 0xD800 && cp <= 0xDBFF) {
+              // High surrogate: only valid as the first half of a pair.
+              uint32_t lo;
+              if (pos_ + 6 > s_.size() || s_[pos_] != '\\' ||
+                  s_[pos_ + 1] != 'u') {
+                return false;
+              }
+              pos_ += 2;
+              if (!ParseHex4(&lo)) return false;
+              if (lo < 0xDC00 || lo > 0xDFFF) return false;
+              cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+            } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+              return false;  // lone low surrogate
+            }
+            if (cp < 0x80) {
+              out->push_back(static_cast<char>(cp));
+            } else if (cp < 0x800) {
+              out->push_back(static_cast<char>(0xC0 | (cp >> 6)));
+              out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            } else if (cp < 0x10000) {
+              out->push_back(static_cast<char>(0xE0 | (cp >> 12)));
+              out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+              out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            } else {
+              out->push_back(static_cast<char>(0xF0 | (cp >> 18)));
+              out->push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+              out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+              out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            }
             break;
           }
           default:
@@ -99,6 +129,30 @@ class JsonScanner {
     }
     return false;  // unterminated
   }
+
+ private:
+  // Consume exactly 4 hex digits as a code point value.
+  bool ParseHex4(uint32_t* out) {
+    if (pos_ + 4 > s_.size()) return false;
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) {
+      char h = s_[pos_++];
+      v <<= 4;
+      if (h >= '0' && h <= '9') {
+        v |= static_cast<uint32_t>(h - '0');
+      } else if (h >= 'a' && h <= 'f') {
+        v |= static_cast<uint32_t>(h - 'a' + 10);
+      } else if (h >= 'A' && h <= 'F') {
+        v |= static_cast<uint32_t>(h - 'A' + 10);
+      } else {
+        return false;
+      }
+    }
+    *out = v;
+    return true;
+  }
+
+ public:
 
   // Skip a JSON value (string, number, object, array, literal). Returns false
   // on malformed nesting.
