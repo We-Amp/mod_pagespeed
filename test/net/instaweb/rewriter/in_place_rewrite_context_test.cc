@@ -409,8 +409,10 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
   }
 
   void ExpectInPlaceImageSuccessFlow(const GoogleString& url) {
-    FetchAndCheckResponse(url, cache_body_, true, ttl_ms_, original_etag_,
-                          start_time_ms());
+    // The first serve streams the not-yet-optimized bytes with the
+    // injected s-maxage window.
+    FetchAndCheckResponse(url, cache_body_, true, kInjectedSMaxAgeMs,
+                          original_etag_, start_time_ms());
 
     // First fetch misses initial metadata cache lookup, finds original in
     // cache; the resource gets rewritten and the rewritten
@@ -436,8 +438,9 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
 
     AdvanceTimeMs(2 * ttl_ms_);
     ResetHeadersAndStats();
-    FetchAndCheckResponse(url, cache_body_, true, ttl_ms_, original_etag_,
-                          timer()->NowMs());
+    // Serves the original bytes again, with the injected window.
+    FetchAndCheckResponse(url, cache_body_, true, kInjectedSMaxAgeMs,
+                          original_etag_, timer()->NowMs());
     // The metadata and cache entry is stale now. Fetch the content and serve
     // out the original. The background rewrite work then revalidates
     // the response and updates metadata.
@@ -457,7 +460,9 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
                                   const GoogleString& expected_mime_type,
                                   const GoogleString& cache_body,
                                   const GoogleString& filter_prefix) {
-    FetchAndCheckResponse(url, cache_body, true, ttl_ms_, nullptr,
+    // First serve streams the not-yet-optimized bytes with the injected
+    // s-maxage window.
+    FetchAndCheckResponse(url, cache_body, true, kInjectedSMaxAgeMs, nullptr,
                           start_time_ms());
     EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
     EXPECT_EQ(0, http_cache()->cache_hits()->Get());
@@ -536,6 +541,10 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
   const GoogleString redirect_body_;
 
   const int ttl_ms_;
+  // The in-place flow injects s-maxage=10 (InPlaceSMaxAgeSec's default)
+  // on serves of not-yet-optimized bytes, and the served TTL is clamped
+  // to it: the injected window may only shorten the origin's TTL.
+  static const int64 kInjectedSMaxAgeMs = 10 * Timer::kSecondMs;
   const char* etag_;
   const char* original_etag_;
   bool exceed_deadline_;
@@ -861,8 +870,9 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeOversizedNoShortContentLength) 
 
 TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   Init();
-  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, ttl_ms_, nullptr,
-                        start_time_ms());
+  // First serve streams the not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
 
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
@@ -921,11 +931,12 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   lru_cache()->Delete(HttpCacheKey(rewritten_jpg_url_));
 
   ResetHeadersAndStats();
-  // Original resource is served with the date set to start time.
+  // Original resource is served with the date set to start time, with the
+  // injected s-maxage window.
   // The ETag we check for here is the ETag HTTPCache synthesized for
   // the original resource.
-  FetchAndCheckResponse(cache_jpg_url_, "good", true, ttl_ms_, kEtag0.c_str(),
-                        start_time_ms());
+  FetchAndCheckResponse(cache_jpg_url_, "good", true, kInjectedSMaxAgeMs,
+                        kEtag0.c_str(), start_time_ms());
   // We find the metadata in cache, but don't find the rewritten resource.
   // Hence, we reconstruct the resource and insert it into cache. We see 2
   // identical reinserts - one for the image rewrite filter metadata and one for
@@ -978,8 +989,9 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
 
   AdvanceTimeMs(2 * ttl_ms_);
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, ttl_ms_, nullptr,
-                        timer()->NowMs());
+  // Serves the original bytes again, with the injected window.
+  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, timer()->NowMs());
   // The metadata and cache entry is stale now. Fetch the content and serve out
   // the original. We will however notice that the contents did not
   // actually change and update the metadata cache promptly, without
@@ -1008,9 +1020,10 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
 // usually means the stored .pagespeed. entry got stamped unconditionally.
 TEST_F(InPlaceRewriteContextTest, OptimizedOriginalUrlServeNotPublicImmutable) {
   Init();
-  // First fetch triggers the background rewrite.
-  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, ttl_ms_, nullptr,
-                        start_time_ms());
+  // First fetch triggers the background rewrite; it streams the
+  // not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_jpg_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
   ResetHeadersAndStats();
   SetTimeMs(start_time_ms() + ttl_ms_ / 2);
   // Second fetch serves the optimized bytes at the original URL.
@@ -1053,7 +1066,8 @@ TEST_F(InPlaceRewriteContextTest, CacheablePngUrlRewritingFails) {
   // Setup the image filter to fail at rewriting.
   Init();
   img_filter_->set_enabled(false);
-  FetchAndCheckResponse(cache_png_url_, cache_body_, true, ttl_ms_,
+  // The first serve streams the not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_png_url_, cache_body_, true, kInjectedSMaxAgeMs,
                         original_etag_, start_time_ms());
 
   // First fetch misses initial metadata lookup, finds original in cache.
@@ -1080,8 +1094,9 @@ TEST_F(InPlaceRewriteContextTest, CacheablePngUrlRewritingFails) {
 
 TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingSucceeds) {
   Init();
-  FetchAndCheckResponse(cache_js_url_, cache_body_, true, ttl_ms_, nullptr,
-                        start_time_ms());
+  // First serve streams the not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
 
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
@@ -1107,8 +1122,9 @@ TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingSucceeds) {
 
   AdvanceTimeMs(2 * ttl_ms_);
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_js_url_, cache_body_, true, ttl_ms_, nullptr,
-                        timer()->NowMs());
+  // Serves the original bytes again, with the injected window.
+  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, timer()->NowMs());
   // The metadata and cache entry is stale now. Fetch the content and serve it
   // out without rewriting. The background rewrite will then revalidate
   // a previous rewrite's result and reuse it.
@@ -1130,8 +1146,9 @@ TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingWithStaleServing) {
   options()->set_metadata_cache_staleness_threshold_ms(ttl_ms_);
   server_context()->ComputeSignature(options());
 
-  FetchAndCheckResponse(cache_js_url_, cache_body_, true, ttl_ms_, nullptr,
-                        start_time_ms());
+  // First serve streams the not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
 
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
@@ -1175,9 +1192,11 @@ TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingWithStaleServing) {
 TEST_F(InPlaceRewriteContextTest, CacheableJsUrlModifiedImplicitCacheTtl) {
   Init();
   response_headers_.set_implicit_cache_ttl_ms(500 * Timer::kSecondMs);
+  // The implicit TTL applies to the recorded entry; the streamed
+  // not-yet-optimized serve is clamped to the injected s-maxage window.
   FetchAndCheckResponse(cache_js_no_max_age_url_, cache_body_,
                         /* expected_success= */ true,
-                        /* expected_ttl= */ 500 * Timer::kSecondMs,
+                        /* expected_ttl= */ kInjectedSMaxAgeMs,
                         /* etag= */ nullptr,
                         /* date_ms= */ start_time_ms());
 }
@@ -1187,8 +1206,9 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlIfCssRewritingDisabled) {
   options()->ClearSignatureForTesting();
   options()->DisableFilter(RewriteOptions::kRewriteCss);
   server_context()->ComputeSignature(options());
-  FetchAndCheckResponse(cache_css_url_, cache_body_, true, ttl_ms_, nullptr,
-                        start_time_ms());
+  // First serve streams the not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_css_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
 
   // First fetch succeeds at the fetcher, no rewriting happens since the css
   // filter is disabled, and metadata indicating a rewriting failure gets
@@ -1219,8 +1239,9 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlIfCssRewritingDisabled) {
 TEST_F(InPlaceRewriteContextTest, CacheableCssUrlRewritingSucceeds) {
   Init();
   EnableCachePurge();
-  FetchAndCheckResponse(cache_css_url_, cache_body_, true, ttl_ms_, nullptr,
-                        start_time_ms());
+  // First serve streams the not-yet-optimized bytes.
+  FetchAndCheckResponse(cache_css_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, start_time_ms());
 
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
@@ -1256,8 +1277,9 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlRewritingSucceeds) {
   AdvanceTimeMs(2 * ttl_ms_);
   ResetHeadersAndStats();
   int64 date_of_css_ms = timer()->NowMs();
-  FetchAndCheckResponse(cache_css_url_, cache_body_, true, ttl_ms_, nullptr,
-                        date_of_css_ms);
+  // Serves the original bytes again, with the injected window.
+  FetchAndCheckResponse(cache_css_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, date_of_css_ms);
   // The metadata and cache entry is stale now. Fetch the content and serve it
   // out without rewriting. The background rewrite attempt will end up reusing
   // the old result due to revalidation, however.
@@ -1277,9 +1299,10 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlRewritingSucceeds) {
   SetCacheInvalidationTimestamp();
   date_of_css_ms = timer()->NowMs();
 
-  // Having flushed cache, we are now back to serving the origin content.
-  FetchAndCheckResponse(cache_css_url_, cache_body_, true, ttl_ms_, nullptr,
-                        date_of_css_ms);
+  // Having flushed cache, we are now back to serving the origin content,
+  // with the injected window.
+  FetchAndCheckResponse(cache_css_url_, cache_body_, true, kInjectedSMaxAgeMs,
+                        nullptr, date_of_css_ms);
 
   // Next time we'll serve optimized content.
   AdvanceTimeMs(ttl_ms_ / 2);
@@ -1614,7 +1637,9 @@ TEST_F(InPlaceRewriteContextTest, LoadFromFile) {
 
   Init();
 
-  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kIproFileTtlMs,
+  // Serves of the file's original bytes carry the injected s-maxage window,
+  // which is shorter than the file TTL.
+  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kInjectedSMaxAgeMs,
                         nullptr, start_time_ms());
 
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
@@ -1669,7 +1694,7 @@ TEST_F(InPlaceRewriteContextTest, LoadFromFile) {
   AdvanceTimeMs(1 * Timer::kSecondMs);
   WriteFile("/test/cacheable.js", cache_body_ /*"   alert ( 'foo ')   "*/);
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kIproFileTtlMs,
+  FetchAndCheckResponse(cache_js_url_, cache_body_, true, kInjectedSMaxAgeMs,
                         nullptr, timer()->NowMs());
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(0, http_cache()->cache_hits()->Get());
@@ -1692,8 +1717,8 @@ TEST_F(InPlaceRewriteContextTest, LoadFromFile) {
   AdvanceTimeMs(1 * Timer::kSecondMs);
   WriteFile("/test/cacheable.js", "new_content");
   ResetHeadersAndStats();
-  FetchAndCheckResponse(cache_js_url_, "new_content", true, kIproFileTtlMs,
-                        nullptr, timer()->NowMs());
+  FetchAndCheckResponse(cache_js_url_, "new_content", true,
+                        kInjectedSMaxAgeMs, nullptr, timer()->NowMs());
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(0, http_cache()->cache_hits()->Get());
   EXPECT_EQ(0, http_cache()->cache_misses()->Get());
