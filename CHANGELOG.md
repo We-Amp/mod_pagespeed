@@ -32,8 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cached-resource handling: crafted cache contents could cause out-of-bounds
   reads or use out-of-range indexes into served responses.** Corrupt
   metadata-cache entries are rejected, and a corrupt cached value is
-  detected before any of it is served. Same affected releases.
-  **Update recommended.**
+  detected before any of it is served. Affects the module in releases up to
+  and including 1.19.0. **Update recommended.**
 - **nginx module: a truncated origin response could be cached as complete.**
   Fixed. Affects the module in releases up to and including 1.19.0.
   **Update recommended.**
