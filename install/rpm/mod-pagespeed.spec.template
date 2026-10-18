@@ -26,6 +26,8 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 
 Provides        : @@PROVIDES@@ = %{version}
 Requires        : @@DEPENDS@@
+Obsoletes       : @@REPLACES@@
+Conflicts       : @@REPLACES@@
 @@SELINUX_REQUIRES_POST@@
 @@SELINUX_REQUIRES_POSTUN@@
 

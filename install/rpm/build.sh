@@ -106,7 +106,13 @@ stage_install_rpm() {
 do_package() {
   echo "Packaging ${HOST_ARCH}..."
   PROVIDES="${PACKAGE}"
-  REPLACES=""
+  # The archived Google packages ship the same files; obsoleting them lets
+  # `dnf install mod-pagespeed` replace mod-pagespeed-stable/-beta in one
+  # transaction instead of failing on file conflicts. Versioned, as the
+  # packaging guidelines want: the last build of both Google channels is
+  # 1.13.35.2, and Google never published a 1.15. On an EasyApache 4 host
+  # neither package is installed, so the fields are a no-op there.
+  REPLACES="mod-pagespeed-stable < 1.15, mod-pagespeed-beta < 1.15"
 
   # If we specify a dependecy of foo.so below, we would depend on both the
   # 32 and 64-bit versions on a 64-bit machine. The current version of RPM

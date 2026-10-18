@@ -123,8 +123,15 @@ do_package() {
       "a serving pair build must pass -d <optimizer-deb-version>" >&2
   fi
   PROVIDES="${PACKAGE}"
-  CONFLICTS=""
-  REPLACES=""
+  # Take over from the archived Google packages in one step: they ship the
+  # same files (the module, pagespeed.load, pagespeed.conf,
+  # pagespeed_libraries.conf), so without these fields dpkg refuses to
+  # overwrite them and leaves this package half-installed. Conflicts plus
+  # Replaces is a full package replacement (Debian Policy 7.6.2): a plain
+  # `apt-get install mod-pagespeed` removes mod-pagespeed-stable/-beta and
+  # takes over their files and conffiles in the same run.
+  CONFLICTS="mod-pagespeed-stable, mod-pagespeed-beta"
+  REPLACES="${CONFLICTS}"
 
   gen_changelog
   process_template "${SCRIPTDIR}/control.template" "${DEB_CONTROL}"
