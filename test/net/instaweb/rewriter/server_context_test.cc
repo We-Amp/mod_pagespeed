@@ -1695,6 +1695,35 @@ TEST_F(ServerContextCacheControlTest, NoStore) {
   EXPECT_TRUE(HasCacheControl("max-age=0"));
 }
 
+TEST_F(ServerContextCacheControlTest, NoStoreMixedCase) {
+  // A mixed-case No-Store on an input must propagate exactly like the
+  // lowercase spelling: Cache-Control directive names are case-insensitive
+  // (RFC 7234 5.2).
+  ResourcePtr mixed_no_store_200 =
+      CreateCustomCachingResource("nos_mixed_200", 200, ",No-Store");
+  resources_.push_back(implicit_public_100_);
+  resources_.push_back(private_300_);
+  resources_.push_back(private_400_);
+  resources_.push_back(no_cache_150_);
+  resources_.push_back(mixed_no_store_200);
+  server_context()->ApplyInputCacheControl(resources_, &response_headers_);
+  EXPECT_FALSE(HasCacheControl("public"));
+  EXPECT_TRUE(HasCacheControl("no-cache"));
+  EXPECT_TRUE(HasCacheControl("no-store"));
+  EXPECT_TRUE(HasCacheControl("max-age=0"));
+}
+
+TEST_F(ServerContextCacheControlTest, ExplicitPublicMixedCase) {
+  // A mixed-case Public on every input still marks the output public.
+  ResourcePtr mixed_public_200 =
+      CreateCustomCachingResource("epub_mixed_200", 200, ",Public");
+  resources_.push_back(mixed_public_200);
+  server_context()->ApplyInputCacheControl(resources_, &response_headers_);
+  EXPECT_TRUE(HasCacheControl("public"));
+  EXPECT_FALSE(HasCacheControl("private"));
+  EXPECT_TRUE(HasCacheControl(LongCacheTtl()));
+}
+
 TEST_F(ServerContextTest, WriteChecksInputVector) {
   // Make sure ->Write incorporates the cache control info from inputs,
   // and doesn't cache a private resource improperly. Also make sure

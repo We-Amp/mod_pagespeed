@@ -2910,6 +2910,21 @@ TEST_F(ProxyInterfaceTest, NoStore) {
                RewriteHtmlCacheHeader("no-store2", "no-store, max-age=300"));
 }
 
+// A mixed-case no-cache or must-revalidate on the original HTML takes the
+// same ttl=0 branch as the lowercase spelling: Cache-Control directive names
+// are case-insensitive (RFC 7234 5.2).
+TEST_F(ProxyInterfaceTest, MixedCaseNoCacheDirectives) {
+  // The fixture leaves max_html_cache_time_ms nonzero (and larger than the
+  // input max-age), so a cacheable page keeps its ttl and a private suffix.
+  EXPECT_STREQ("max-age=300, private",
+               RewriteHtmlCacheHeader("mc-plain", "max-age=300"));
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("mc-no-cache", "No-Cache"));
+  EXPECT_STREQ(
+      "max-age=0, no-cache",
+      RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
+}
+
 // Rewritten HTML must never invite shared caches via s-maxage: the HTML
 // embeds .pagespeed. URLs that can commit to a content variant chosen for
 // the requesting client, so a shared cache holding it can serve one

@@ -688,11 +688,12 @@ void ProxyFetch::SetupForHtml() {
       // Add, remove and update headers as appropriate.
       int64 ttl_ms;
       GoogleString cache_control_suffix;
+      // Cache-Control directive names are case-insensitive (RFC 7234 5.2).
       if ((options->max_html_cache_time_ms() == 0) ||
-          response_headers()->HasValue(HttpAttributes::kCacheControl,
-                                       "no-cache") ||
-          response_headers()->HasValue(HttpAttributes::kCacheControl,
-                                       "must-revalidate")) {
+          response_headers()->HasValueCaseInsensitive(
+              HttpAttributes::kCacheControl, "no-cache") ||
+          response_headers()->HasValueCaseInsensitive(
+              HttpAttributes::kCacheControl, "must-revalidate")) {
         ttl_ms = 0;
         cache_control_suffix = ", no-cache";
         // Preserve values like no-store and no-transform, but not s-maxage:
