@@ -2471,7 +2471,39 @@ TEST_F(ResponseHeadersTest, OversizedHeaderLineIsDropped) {
   EXPECT_TRUE(response_headers_.Lookup(HttpAttributes::kContentType, &values));
   EXPECT_EQ(1, values.size());
   EXPECT_FALSE(response_headers_.Lookup("X-Huge", &values));
-  EXPECT_EQ(1, response_headers_.NumAttributes());
+  // Content-Type plus the no-cache directive injected for the dropped line.
+  EXPECT_EQ(2, response_headers_.NumAttributes());
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0,
+               response_headers_.LookupJoined(HttpAttributes::kCacheControl));
+}
+
+// A response whose overlong header line was dropped no longer carries
+// the headers the origin sent: the dropped line may have held the very
+// directives that made the response uncacheable (Cache-Control, Vary).
+// The parsed remainder must therefore never be treated as cacheable.
+TEST_F(ResponseHeadersTest, DroppedOverlongLineMakesResponseUncacheable) {
+  const GoogleString huge_private(
+      ResponseHeadersParser::kMaxHeaderLineBytes + 1000, 'x');
+  const GoogleString http_data = StrCat(
+      "HTTP/1.1 200 OK\r\n"
+      "Date: ",
+      start_time_string_, "\r\n"
+      "Content-Type: text/css\r\n"
+      "Cache-Control: private, ",
+      huge_private, "\r\n"
+      "\r\n");
+  int num_consumed = parser_.ParseChunk(http_data, &message_handler_);
+  EXPECT_TRUE(parser_.headers_complete());
+  EXPECT_EQ(http_data.size(), static_cast<size_t>(num_consumed));
+
+  // The rest of the response still parses.
+  ConstStringStarVector values;
+  EXPECT_TRUE(response_headers_.Lookup(HttpAttributes::kContentType, &values));
+
+  // But nothing may cache it: without the fix the dropped "private" made
+  // this implicitly cacheable.
+  EXPECT_FALSE(response_headers_.IsBrowserCacheable());
+  EXPECT_FALSE(response_headers_.IsProxyCacheable());
 }
 
 }  // namespace net_instaweb

@@ -23,6 +23,7 @@
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
 namespace net_instaweb {
@@ -32,6 +33,7 @@ void ResponseHeadersParser::Clear() {
   parsing_value_ = false;
   headers_complete_ = false;
   skipping_overlong_line_ = false;
+  dropped_overlong_line_ = false;
 }
 
 // TODO(jmaessen): http://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
@@ -73,6 +75,15 @@ int ResponseHeadersParser::ParseChunk(const StringPiece& text,
         // blank line.  This marks the end of the headers.
         ++num_consumed;
         headers_complete_ = true;
+        if (dropped_overlong_line_) {
+          // At least one header line was dropped, so the parsed headers
+          // are not the ones the origin sent: the dropped line may have
+          // carried the directives that made the response uncacheable
+          // (Cache-Control, Vary).  Serve the response, but make sure no
+          // cache stores it.
+          response_headers_->Add(HttpAttributes::kCacheControl,
+                                 HttpAttributes::kNoCacheMaxAge0);
+        }
         response_headers_->ComputeCaching();
         break;
       }
@@ -112,9 +123,11 @@ void ResponseHeadersParser::DropOverlongLine(MessageHandler* handler) {
                                 .c_str());
   // Reset the line state and consume the rest of it without storing it.
   // The header count cap keeps the stored set bounded; this keeps each
-  // individual line bounded as well.
+  // individual line bounded as well.  Remember the drop so the response
+  // can be kept out of every cache when the headers complete.
   parsing_http_ = false;
   skipping_overlong_line_ = true;
+  dropped_overlong_line_ = true;
   parse_name_.clear();
   parse_value_.clear();
 }
