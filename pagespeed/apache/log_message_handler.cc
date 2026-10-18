@@ -77,9 +77,8 @@ bool LogMessageHandler(int severity, const char* file, int line,
       net_instaweb::log_message_handler::GetApacheLogLevel(severity);
   GoogleString message(str);
   // Trim the newline off the end of the message string.
-  size_t last_msg_character_index = message.length() - 1;
-  if (message[last_msg_character_index] == '\n') {
-    message.resize(last_msg_character_index);
+  if (!message.empty() && message.back() == '\n') {
+    message.pop_back();
   }
 
   if (this_log_level <= log_level_cutoff || log_level_cutoff == kMaxInt) {

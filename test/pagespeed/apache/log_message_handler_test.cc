@@ -144,4 +144,19 @@ TEST(VlogRoutingTest, VlogIsNotMirroredToTheDefaultLogger) {
   EXPECT_EQ(0, counting_sink->vlog_count());
 }
 
+// The Apache sink strips the trailing newline of each message; an empty
+// message has none to strip and must be handled without reading before the
+// start of the string.
+TEST(ApacheSinkTest, EmptyAndNewlineOnlyMessagesAreHandled) {
+  ASSERT_EQ(APR_SUCCESS, apr_initialize());
+  apr_pool_t* pool = nullptr;
+  ASSERT_EQ(APR_SUCCESS, apr_pool_create(&pool, nullptr));
+  net_instaweb::log_message_handler::Install(pool);
+
+  LOG(INFO) << "";
+  LOG(INFO) << "\n";
+  LOG(INFO) << "text";
+  SUCCEED();
+}
+
 }  // namespace
