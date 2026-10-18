@@ -185,7 +185,7 @@ bool ValidateAndExpireNonce(int64 now_ms, StringPiece nonce,
   ClearInvalidNonces(now_ms, critical_keys);
   for (int i = 0; i < critical_keys->pending_nonce_size(); ++i) {
     CriticalKeys::PendingNonce* entry = critical_keys->mutable_pending_nonce(i);
-    if (nonce == entry->nonce()) {
+    if (ConstantTimeCompare(nonce, entry->nonce())) {
       // Matched.  Entry is valid.  Remove it.
       entry->clear_timestamp_ms();
       entry->clear_nonce();

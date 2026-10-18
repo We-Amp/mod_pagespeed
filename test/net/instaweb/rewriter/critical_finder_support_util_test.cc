@@ -108,4 +108,23 @@ TEST_F(CriticalFinderSupportUtilTest,
 }
 
 }  // namespace
+
+TEST_F(CriticalFinderSupportUtilTest, ValidateAndExpireNonceExactMatchOnly) {
+  const int64 now_ms = 1000;
+  CriticalKeys keys;
+  CriticalKeys::PendingNonce* entry = keys.add_pending_nonce();
+  entry->set_timestamp_ms(now_ms);
+  entry->set_nonce("nonce-abc");
+
+  // A near-miss nonce (differing content, prefix, or longer) does not
+  // validate and leaves the pending entry intact.
+  EXPECT_FALSE(ValidateAndExpireNonce(now_ms, "nonce-abd", &keys));
+  EXPECT_FALSE(ValidateAndExpireNonce(now_ms, "nonce-ab", &keys));
+  EXPECT_FALSE(ValidateAndExpireNonce(now_ms, "nonce-abcd", &keys));
+  ASSERT_TRUE(keys.pending_nonce(0).has_nonce());
+
+  // The exact nonce validates and consumes the entry.
+  EXPECT_TRUE(ValidateAndExpireNonce(now_ms, "nonce-abc", &keys));
+  EXPECT_FALSE(keys.pending_nonce(0).has_nonce());
+}
 }  // namespace net_instaweb
