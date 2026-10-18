@@ -218,56 +218,59 @@ bool CachingHeaders::ComputeFreshnessLifetimeMillis(
     return true;
   }
 
-  // This is a shared cache, so Cache-Control: s-maxage sets the freshness
-  // lifetime when present and overrides max-age (RFC 7234 4.2.1).
-  if (s_max_age_seconds_.has_value()) {
-    *out_freshness_lifetime_ms = 1000LL * s_max_age_seconds_.value();
-    return true;
-  }
+  // Compute the freshness lifetime that max-age or Expires grants.
+  // An invalid Expires header never reaches this point: it counts as an
+  // explicit no-cache directive above, and from HTTP/1.1 RFC 14.21
+  // invalid dates "MUST ... be treated as in the past (i.e., 'already
+  // expired')".
+  bool has_explicit_lifetime = false;
+  int64 lifetime_ms = 0;
 
-  // Next look for Cache-Control: max-age. The HTTP/1.1 RFC
+  // First look for Cache-Control: max-age. The HTTP/1.1 RFC
   // indicates that CC: max-age takes precedence to Expires.
   if (max_age_seconds_.has_value()) {
-    *out_freshness_lifetime_ms = 1000LL * max_age_seconds_.value();
-    return true;
+    lifetime_ms = 1000LL * max_age_seconds_.value();
+    has_explicit_lifetime = true;
+  } else if (expires_ms_.has_value()) {
+    // We've determined that there is an Expires header. Thus, the
+    // resource has a freshness lifetime, computed from the Date header.
+    int64 date_value_ms = 0;
+    StringPieceVector date;
+    if (Lookup(HttpAttributes::kDate, &date) && (date.size() == 1) &&
+        ConvertStringToTime(date[0], &date_value_ms)) {
+      lifetime_ms = expires_ms_.value() - date_value_ms;
+      if (lifetime_ms < 0) {
+        lifetime_ms = 0;
+      }
+      has_explicit_lifetime = true;
+    }
+    // Without a Date header to reference from, we assume that the
+    // resource is heuristically cacheable, but not explicitly cacheable
+    // (unless s-maxage below supplies a lifetime on its own).
   }
 
-  // Next look for Expires.
-  if (!expires_ms_.has_value()) {
+  // Cache-Control: s-maxage limits how long this shared cache may hold
+  // the response (RFC 7234 4.2.1), but it may only shorten the lifetime
+  // that max-age or Expires grant, never extend it: the computed
+  // lifetime also becomes the max-age handed to browsers, which honor
+  // max-age and not s-maxage. A response that max-age<=0 or
+  // s-maxage<=0 marks uncacheable was already handled above.
+  if (s_max_age_seconds_.has_value()) {
+    int64 s_max_age_ms = 1000LL * s_max_age_seconds_.value();
+    if (!has_explicit_lifetime || s_max_age_ms < lifetime_ms) {
+      lifetime_ms = s_max_age_ms;
+    }
+    has_explicit_lifetime = true;
+  }
+
+  if (!has_explicit_lifetime) {
     // If there's no expires header and we previously determined there
     // was no Cache-Control: max-age, then the resource doesn't have
     // an explicit freshness lifetime.
     return false;
   }
 
-  // We've determined that there is an Expires header. Thus, the
-  // resource has a freshness lifetime. Even if the Expires header
-  // doesn't contain a valid date, it should be considered stale. From
-  // HTTP/1.1 RFC 14.21: "HTTP/1.1 clients and caches MUST treat other
-  // invalid date formats, especially including the value "0", as in
-  // the past (i.e., "already expired")."
-
-  int64 date_value_ms = 0;
-  StringPieceVector date;
-  if (!Lookup(HttpAttributes::kDate, &date) || (date.size() != 1) ||
-      !ConvertStringToTime(date[0], &date_value_ms)) {
-    // We have an Expires header, but no Date header to reference
-    // from. Thus we assume that the resource is heuristically
-    // cacheable, but not explicitly cacheable.
-    return false;
-  }
-
-  if (expires_invalid_) {
-    // If we can't parse the Expires header, then treat the resource as
-    // stale.
-    return true;
-  }
-
-  int64 freshness_lifetime_ms = expires_ms_.value() - date_value_ms;
-  if (freshness_lifetime_ms < 0) {
-    freshness_lifetime_ms = 0;
-  }
-  *out_freshness_lifetime_ms = freshness_lifetime_ms;
+  *out_freshness_lifetime_ms = lifetime_ms;
   return true;
 }
 
@@ -333,10 +336,11 @@ void CachingHeaders::ParseCacheControlIfNecessary() {
 bool CachingHeaders::ComputeHasExplicitNoCacheDirective() {
   ParseCacheControlIfNecessary();
 
+  // s-maxage<=0 forbids storing in shared caches; max-age<=0 makes the
+  // response stale for every cache, and s-maxage never overrides that.
   if (no_cache_ || no_store_ ||
       (s_max_age_seconds_.has_value() && s_max_age_seconds_.value() <= 0) ||
-      (max_age_seconds_.has_value() && max_age_seconds_.value() <= 0 &&
-       !s_max_age_seconds_.has_value())) {
+      (max_age_seconds_.has_value() && max_age_seconds_.value() <= 0)) {
     return true;
   }
 
