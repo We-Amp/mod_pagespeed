@@ -64,7 +64,7 @@ typedef enum CycloneTier : uint8_t {
 } CycloneTier;
 
 // Error codes returned by Cyclone operations.
-// These map to the internal Cyclone error codes.
+// Module-local values; not numerically compatible with upstream cyclone_c.h.
 typedef enum CycloneError {
   CYCLONE_OK = 0,                  // Operation succeeded
   CYCLONE_NOT_FOUND = 1,           // Key not found in cache
