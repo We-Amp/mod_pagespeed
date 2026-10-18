@@ -169,10 +169,13 @@ bool LibeventDispatcher::Start() {
     return false;
   }
 
-  // Make the read end non-blocking.
-  int flags = fcntl(wakeup_pipe_[0], F_GETFL);
-  if (flags >= 0) {
-    fcntl(wakeup_pipe_[0], F_SETFL, flags | O_NONBLOCK);
+  // Make both ends non-blocking. A full pipe already holds a pending
+  // wakeup, so a write that would block can be dropped.
+  for (int fd : wakeup_pipe_) {
+    int flags = fcntl(fd, F_GETFL);
+    if (flags >= 0) {
+      fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
   }
 
   // Create the wakeup event.
@@ -268,7 +271,8 @@ void LibeventDispatcher::WakeupEventLoop() {
   // Write a byte to the wakeup pipe.
   if (wakeup_pipe_[1] >= 0) {
     char c = 1;
-    // Ignore write errors - the event loop will wake up eventually.
+    // Ignore write errors: EAGAIN means the pipe is full, so a wakeup is
+    // already pending.
     (void)write(wakeup_pipe_[1], &c, 1);
   }
 }
