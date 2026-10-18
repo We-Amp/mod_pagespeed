@@ -860,10 +860,12 @@ ScanlineStatus GifFrameReader::ProcessExtensionAffectingImage(
                                 SCANLINE_STATUS_PARSE_ERROR, FRAME_GIFREADER,
                                 "NULL animation loop count block.");
       }
-      if (((extension[kGifAeLoopCountLengthIndex] !=
-            kGifAeLoopCountExpectedLength) &&
-           (extension[kGifAeLoopCountFixedConstIndex] !=
-            kGifAeLoopCountExpectedFixedConst))) {
+      // Longer sub-blocks occur in practice and still carry the loop count
+      // in their first three bytes.
+      if ((extension[kGifAeLoopCountLengthIndex] <
+           kGifAeLoopCountExpectedLength) ||
+          (extension[kGifAeLoopCountFixedConstIndex] !=
+           kGifAeLoopCountExpectedFixedConst)) {
         return PS_LOGGED_STATUS(PS_LOG_INFO, message_handler(),
                                 SCANLINE_STATUS_PARSE_ERROR, FRAME_GIFREADER,
                                 "animation loop count: wrong size/marker");
