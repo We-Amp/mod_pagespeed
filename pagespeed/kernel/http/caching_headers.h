@@ -166,6 +166,7 @@ class CachingHeaders {
   bool cache_control_parse_error_;
   bool expires_invalid_;
   Optional<int> max_age_seconds_;
+  Optional<int> s_max_age_seconds_;
   Optional<int64> expires_ms_;
 
   // Computed caching properties, taking into account response-code, type,
