@@ -276,14 +276,16 @@ TEST_F(CachingHeadersTest, SMaxAgeOnlyShortensFreshness) {
   EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
 }
 
-TEST_F(CachingHeadersTest, SMaxAgeAloneSetsFreshness) {
-  // s-maxage with no max-age: explicit freshness without Expires.
+TEST_F(CachingHeadersTest, SMaxAgeAloneDoesNotSetFreshness) {
+  // s-maxage only shortens a lifetime that max-age or Expires grants. On
+  // its own it must not create one: the computed lifetime becomes the
+  // max-age browsers receive, and the origin gave browsers none.
   SetCacheControl("s-maxage=600");
-  EXPECT_TRUE(headers_->HasExplicitFreshnessLifetime());
-  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+  EXPECT_FALSE(headers_->HasExplicitFreshnessLifetime());
+  EXPECT_FALSE(headers_->IsExplicitlyCacheable());
   int64 freshness_ms = -1;
-  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
-  EXPECT_EQ(600000, freshness_ms);
+  EXPECT_FALSE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(0, freshness_ms);
 }
 
 }  // namespace net_instaweb

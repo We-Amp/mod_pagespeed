@@ -245,22 +245,20 @@ bool CachingHeaders::ComputeFreshnessLifetimeMillis(
       has_explicit_lifetime = true;
     }
     // Without a Date header to reference from, we assume that the
-    // resource is heuristically cacheable, but not explicitly cacheable
-    // (unless s-maxage below supplies a lifetime on its own).
+    // resource is heuristically cacheable, but not explicitly cacheable.
   }
 
   // Cache-Control: s-maxage limits how long this shared cache may hold
   // the response (RFC 7234 4.2.1), but it may only shorten the lifetime
-  // that max-age or Expires grant, never extend it: the computed
-  // lifetime also becomes the max-age handed to browsers, which honor
-  // max-age and not s-maxage. A response that max-age<=0 or
-  // s-maxage<=0 marks uncacheable was already handled above.
-  if (s_max_age_seconds_.has_value()) {
+  // that max-age or Expires grant, never extend it or supply one on its
+  // own: the computed lifetime also becomes the max-age handed to
+  // browsers, which honor max-age and not s-maxage. A response that
+  // max-age<=0 or s-maxage<=0 marks uncacheable was already handled above.
+  if (has_explicit_lifetime && s_max_age_seconds_.has_value()) {
     int64 s_max_age_ms = 1000LL * s_max_age_seconds_.value();
-    if (!has_explicit_lifetime || s_max_age_ms < lifetime_ms) {
+    if (s_max_age_ms < lifetime_ms) {
       lifetime_ms = s_max_age_ms;
     }
-    has_explicit_lifetime = true;
   }
 
   if (!has_explicit_lifetime) {
