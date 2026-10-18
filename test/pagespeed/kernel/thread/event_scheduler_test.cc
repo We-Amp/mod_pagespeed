@@ -35,18 +35,33 @@
 namespace net_instaweb {
 namespace {
 
-// Helper function class for counting (with Cancel for proper testing).
-class SchedulerCountFunction : public Function {
+// Alarm callback that records firing for a thread polling from outside the
+// scheduler. Alarms may run on the dispatcher thread as well as on the test
+// thread, so the count is atomic.
+class AtomicCountFunction : public Function {
  public:
-  explicit SchedulerCountFunction(int* counter) : counter_(counter) {}
+  explicit AtomicCountFunction(std::atomic<int>* counter) : counter_(counter) {}
 
  protected:
-  void Run() override { ++(*counter_); }
-  void Cancel() override { /* Do nothing - counter should stay unchanged */ }
+  void Run() override { counter_->fetch_add(1, std::memory_order_acq_rel); }
+  void Cancel() override {}
 
  private:
-  int* counter_;
+  std::atomic<int>* counter_;
 };
+
+// Polls until *counter >= expected or timeout_us elapses; returns the final
+// counter value. Deliberately never calls into the scheduler, so it does not
+// drive any alarm itself.
+int AwaitCount(Timer* timer, std::atomic<int>* counter, int expected,
+               int64 timeout_us) {
+  int64 end_us = timer->NowUs() + timeout_us;
+  while (counter->load(std::memory_order_acquire) < expected &&
+         timer->NowUs() < end_us) {
+    timer->SleepUs(2 * Timer::kMsUs);
+  }
+  return counter->load(std::memory_order_acquire);
+}
 
 class EventSchedulerTest : public WorkerTestBase {
  protected:
@@ -84,20 +99,21 @@ class EventSchedulerTest : public WorkerTestBase {
 
 TEST_F(EventSchedulerTest, AlarmsGetRun) {
   int64 start_us = timer_->NowUs();
-  int counter = 0;
+  std::atomic<int> counter(0);
 
   // Add alarms with different delays.
   scheduler_.AddAlarmAtUs(start_us + 10 * Timer::kMsUs,
-                          new SchedulerCountFunction(&counter));
+                          new AtomicCountFunction(&counter));
   scheduler_.AddAlarmAtUs(start_us + 20 * Timer::kMsUs,
-                          new SchedulerCountFunction(&counter));
+                          new AtomicCountFunction(&counter));
   scheduler_.AddAlarmAtUs(start_us + 30 * Timer::kMsUs,
-                          new SchedulerCountFunction(&counter));
+                          new AtomicCountFunction(&counter));
 
   // Wait for all alarms to fire.
   QuiesceAlarms(1 * Timer::kSecondUs);
 
-  EXPECT_EQ(3, counter);
+  // The last alarm may still be running on the dispatcher thread.
+  EXPECT_EQ(3, AwaitCount(timer_.get(), &counter, 3, 2 * Timer::kSecondUs));
 }
 
 // Helper function to push an int to a vector, under a mutex.
@@ -163,11 +179,11 @@ TEST_F(EventSchedulerTest, AlarmsRunInOrder) {
 
 TEST_F(EventSchedulerTest, CancelAlarm) {
   int64 start_us = timer_->NowUs();
-  int counter = 0;
+  std::atomic<int> counter(0);
 
   // Add an alarm far in the future.
   Scheduler::Alarm* alarm = scheduler_.AddAlarmAtUs(
-      start_us + 10 * Timer::kSecondUs, new SchedulerCountFunction(&counter));
+      start_us + 10 * Timer::kSecondUs, new AtomicCountFunction(&counter));
 
   // Cancel it.
   {
@@ -177,7 +193,7 @@ TEST_F(EventSchedulerTest, CancelAlarm) {
 
   // Wait a bit and verify it didn't run.
   timer_->SleepUs(100 * Timer::kMsUs);
-  EXPECT_EQ(0, counter);
+  EXPECT_EQ(0, counter.load(std::memory_order_acquire));
 }
 
 TEST_F(EventSchedulerTest, BlockingTimedWait) {
@@ -195,49 +211,22 @@ TEST_F(EventSchedulerTest, BlockingTimedWait) {
 }
 
 TEST_F(EventSchedulerTest, Signal) {
-  int counter = 0;
+  std::atomic<int> counter(0);
 
   // TimedWait with a callback that will be run when Signal is called.
   {
     ScopedMutex lock(scheduler_.mutex());
     scheduler_.TimedWaitMs(
-        10 * 1000, new SchedulerCountFunction(&counter));  // Long timeout.
+        10 * 1000, new AtomicCountFunction(&counter));  // Long timeout.
     scheduler_.Signal();  // Signal immediately.
   }
 
   // The callback should have been invoked.
-  EXPECT_EQ(1, counter);
+  EXPECT_EQ(1, AwaitCount(timer_.get(), &counter, 1, 2 * Timer::kSecondUs));
 }
 
 TEST_F(EventSchedulerTest, TimerAccessor) {
   EXPECT_EQ(dispatcher_->timer(), scheduler_.timer());
-}
-
-// Alarm callback that records firing for a thread polling from outside the
-// scheduler (alarms fire on the dispatcher thread in these tests).
-class AtomicCountFunction : public Function {
- public:
-  explicit AtomicCountFunction(std::atomic<int>* counter) : counter_(counter) {}
-
- protected:
-  void Run() override { counter_->fetch_add(1, std::memory_order_acq_rel); }
-  void Cancel() override {}
-
- private:
-  std::atomic<int>* counter_;
-};
-
-// Polls until *counter >= expected or timeout_us elapses; returns the final
-// counter value. Deliberately never calls into the scheduler: these tests
-// verify the dispatcher drives alarms with NO waiting thread.
-int AwaitCount(Timer* timer, std::atomic<int>* counter, int expected,
-               int64 timeout_us) {
-  int64 end_us = timer->NowUs() + timeout_us;
-  while (counter->load(std::memory_order_acquire) < expected &&
-         timer->NowUs() < end_us) {
-    timer->SleepUs(2 * Timer::kMsUs);
-  }
-  return counter->load(std::memory_order_acquire);
 }
 
 // The core regression test for the half-wired integration: an alarm must
