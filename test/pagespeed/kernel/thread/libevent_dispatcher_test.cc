@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <memory>
+#include <thread>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/condvar.h"
@@ -80,6 +81,27 @@ class TallyFunction : public Function {
  private:
   std::atomic<int>* runs_;
   std::atomic<int>* cancels_;
+};
+
+// Blocks the event loop until *release is set.
+class BlockFunction : public Function {
+ public:
+  BlockFunction(std::atomic<bool>* started, std::atomic<bool>* release,
+                Timer* timer)
+      : started_(started), release_(release), timer_(timer) {}
+
+ protected:
+  void Run() override {
+    started_->store(true);
+    while (!release_->load()) {
+      timer_->SleepUs(Timer::kMsUs);
+    }
+  }
+
+ private:
+  std::atomic<bool>* started_;
+  std::atomic<bool>* release_;
+  Timer* timer_;
 };
 
 class LibeventDispatcherTest : public testing::Test {
@@ -256,6 +278,50 @@ TEST_F(LibeventDispatcherTest, PostDuringShutdownCancels) {
 
   // The function should have been cancelled.
   EXPECT_EQ(-100, counter.load());
+}
+
+// While the event loop is busy, posting must not block even after more
+// wakeups were requested than the wakeup pipe can hold.
+TEST_F(LibeventDispatcherTest, PostDoesNotBlockWhileLoopIsBusy) {
+  ASSERT_TRUE(dispatcher_->Start());
+
+  std::atomic<bool> started(false);
+  std::atomic<bool> release(false);
+  dispatcher_->Post(new BlockFunction(&started, &release, timer_.get()));
+  int64 start_us = timer_->NowUs();
+  while (!started.load() &&
+         (timer_->NowUs() - start_us) < 5 * Timer::kSecondUs) {
+    timer_->SleepUs(Timer::kMsUs);
+  }
+  ASSERT_TRUE(started.load());
+
+  // Far more posts than a pipe buffer has bytes.
+  const int kNumPosts = 1 << 20;
+  std::atomic<int> counter(0);
+  std::atomic<bool> posted_all(false);
+  std::thread poster([&]() {
+    for (int i = 0; i < kNumPosts; ++i) {
+      dispatcher_->Post(new CountFunction(&counter));
+    }
+    posted_all.store(true);
+  });
+
+  start_us = timer_->NowUs();
+  while (!posted_all.load() &&
+         (timer_->NowUs() - start_us) < 20 * Timer::kSecondUs) {
+    timer_->SleepUs(Timer::kMsUs);
+  }
+  EXPECT_TRUE(posted_all.load());
+
+  // Let the loop drain the pipe so a blocked poster can finish.
+  release.store(true);
+  poster.join();
+  start_us = timer_->NowUs();
+  while (counter.load() < kNumPosts &&
+         (timer_->NowUs() - start_us) < 20 * Timer::kSecondUs) {
+    timer_->SleepUs(Timer::kMsUs);
+  }
+  EXPECT_EQ(kNumPosts, counter.load());
 }
 
 TEST_F(LibeventDispatcherTest, TimerAccessor) {
