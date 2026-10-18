@@ -647,6 +647,45 @@ TEST_F(JsInlineFilterTest, NoFlushSplittingScriptTag) {
                output_buffer_);
 }
 
+// A script whose charset differs from the page's is copied verbatim into the
+// page, so it can only be inlined when its bytes are charset-neutral.
+TEST_F(JsInlineFilterTest, CharsetMismatchNotInlined) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  ResponseHeaders latin1_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &latin1_headers);
+  latin1_headers.MergeContentType("text/javascript; charset=iso-8859-1");
+  const GoogleString non_ascii = "var s = 'caf\xE9';\n";
+  const GoogleString ascii_only = "var s = 'cafe';\n";
+  SetFetchResponse(StrCat(kTestDomain, "latin1.js"), latin1_headers,
+                   non_ascii);
+  SetFetchResponse(StrCat(kTestDomain, "ascii.js"), latin1_headers,
+                   ascii_only);
+
+  const char kUtf8Page[] = "<meta charset=\"utf-8\">";
+  ValidateNoChanges(
+      "mismatch", StrCat(kUtf8Page, "<script src=latin1.js></script>"));
+  // Pure ASCII is the same in both charsets, so it is still inlined.
+  ValidateExpected("ascii", StrCat(kUtf8Page, "<script src=ascii.js></script>"),
+                   StrCat(kUtf8Page, "<script>", ascii_only, "</script>"));
+}
+
+TEST_F(JsInlineFilterTest, CharsetMatchInlined) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+
+  ResponseHeaders utf8_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &utf8_headers);
+  utf8_headers.MergeContentType("text/javascript; charset=UTF-8");
+  const GoogleString body = "var s = 'caf\xC3\xA9';\n";
+  SetFetchResponse(StrCat(kTestDomain, "utf8.js"), utf8_headers, body);
+
+  const char kUtf8Page[] = "<meta charset=\"utf-8\">";
+  ValidateExpected("match", StrCat(kUtf8Page, "<script src=utf8.js></script>"),
+                   StrCat(kUtf8Page, "<script>", body, "</script>"));
+}
+
 TEST_F(JsInlineFilterTest, BasicCsp) {
   SetHtmlMimetype();
   AddFilter(RewriteOptions::kInlineJavascript);

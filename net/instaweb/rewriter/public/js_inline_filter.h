@@ -71,7 +71,9 @@ class JsInlineFilter : public CommonFilter {
   class Context;
   friend class Context;
 
-  bool ShouldInline(const ResourcePtr& resource, GoogleString* reason) const;
+  bool ShouldInline(const ResourcePtr& resource,
+                    const StringPiece& attrs_charset,
+                    GoogleString* reason) const;
   void RenderInline(const ResourcePtr& resource, const StringPiece& text,
                     HtmlElement* element);
 
