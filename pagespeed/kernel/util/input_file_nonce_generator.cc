@@ -33,7 +33,8 @@ uint64 InputFileNonceGenerator::NewNonceImpl() {
   int bytes_read = 0;
   char* out = reinterpret_cast<char*>(&result);
   while (bytes_read < static_cast<int>(sizeof(result))) {
-    int n = file_->Read(out + bytes_read, sizeof(result) - bytes_read, handler_);
+    int n =
+        file_->Read(out + bytes_read, sizeof(result) - bytes_read, handler_);
     if (n <= 0) {
       // Never surface partially uninitialized bytes as a nonce.
       handler_->Message(kError,
