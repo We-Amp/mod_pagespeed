@@ -261,6 +261,12 @@ CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
     } else {
       // Fall back to the copied data (e.g., RAM cache hits may not have mmap)
       const char* data = cyclone_read_handle_data(read_handle);
+      if (data == nullptr && size > 0) {
+        // The copy could not be made (out of memory): nothing to serve.
+        cyclone_read_handle_close(read_handle);
+        misses_->Add(1);
+        return kNotFound;
+      }
       SharedString value;
       value.Assign(StringPiece(data, size));
       callback->set_value(value);
@@ -279,8 +285,28 @@ CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
     bytes_read_->Add(static_cast<int64>(size));
     return kAvailable;
   }
-  // Cache miss
+  // Cache miss.  Every failed read is one: a plain miss, contention
+  // (CYCLONE_BUSY), a cache that is not running, and also a damaged entry or
+  // a failing disk, which are not served either.  Only the last two say
+  // something about the cache file or the device, so only they are logged,
+  // sampled like write failures because a damaged or unreadable file can
+  // fail reads at request rate.
   misses_->Add(1);
+  if (err == CYCLONE_CORRUPTED || err == CYCLONE_IO_ERROR) {
+    uint64_t n =
+        read_failure_log_count_.fetch_add(1, std::memory_order_relaxed);
+    if ((n & 1023) == 0) {
+      const char* error = cyclone_get_last_error();
+      handler_->Message(
+          kWarning,
+          "CycloneCache: Read failed for key %s, served as a miss: %s "
+          "(failure #%llu on this cache; this warning is logged 1-in-1024)",
+          CEscape(key).c_str(),
+          error ? error
+                : (err == CYCLONE_CORRUPTED ? "damaged entry" : "I/O error"),
+          static_cast<unsigned long long>(n) + 1);
+    }
+  }
   return kNotFound;
 }
 
@@ -308,6 +334,13 @@ void CycloneCache::PutWithTier(const GoogleString& key,
   if (err == CYCLONE_OK) {
     inserts_->Add(1);
     bytes_written_->Add(static_cast<int64>(data.size()));
+  } else if (err == CYCLONE_BUSY) {
+    // Contention (another writer of the same entry, or another process
+    // holding the cache's locks past the library's wait) kept the write from
+    // completing.  Nothing was stored, as for any write the cache drops, and
+    // the next write of the key tries again.  Not a cache fault, so neither
+    // counted in cyclone_cache_failures nor logged: under heavy contention
+    // that would report a healthy cache as failing.
   } else {
     failures_->Add(1);
     // A full or unwritable cache fails every write, so a per-failure warning
