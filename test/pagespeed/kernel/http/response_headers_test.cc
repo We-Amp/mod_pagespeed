@@ -2427,4 +2427,28 @@ TEST_F(ResponseHeadersTest, MaxHeaderCountGuard) {
                      &values));
 }
 
+// The end-to-end header table is binary-searched (IsHopByHopIndication,
+// Remove), so its entries must stay sorted case-insensitively.  A single
+// inversion makes entries unfindable, which would classify end-to-end
+// headers as hop-by-hop and strip them from sanitized responses.
+TEST_F(ResponseHeadersTest, EndToEndHeaderTableIsSorted) {
+  const StringPieceVector& names = HttpAttributes::SortedEndToEndHeaders();
+  ASSERT_GT(names.size(), 1u);
+  StringCompareInsensitive compare;
+  for (size_t i = 1; i < names.size(); ++i) {
+    EXPECT_FALSE(compare(names[i], names[i - 1]))
+        << names[i - 1] << " must not be listed after " << names[i];
+  }
+}
+
+TEST_F(ResponseHeadersTest, EndToEndHeadersAreNotHopByHop) {
+  // Every name in the table, looked up one by one, must be found by the
+  // binary search and classified end-to-end.
+  const StringPieceVector& names = HttpAttributes::SortedEndToEndHeaders();
+  for (const StringPiece& name : names) {
+    EXPECT_FALSE(ResponseHeaders::IsHopByHopIndication(name))
+        << name << " is an end-to-end header";
+  }
+}
+
 }  // namespace net_instaweb

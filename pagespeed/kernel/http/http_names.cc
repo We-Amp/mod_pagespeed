@@ -238,9 +238,12 @@ class EndToEndHeadersContainer {
 
     names[index++] = StringPiece(HttpAttributes::kAccept);
     names[index++] = StringPiece(HttpAttributes::kAcceptEncoding);
-    names[index++] = StringPiece(HttpAttributes::kAccessControlAllowOrigin);
+    // The table must stay sorted case-insensitively: it is consumed by
+    // std::binary_search (IsHopByHopIndication, Remove), and an inversion
+    // makes the misplaced entries unfindable.
     names[index++] =
         StringPiece(HttpAttributes::kAccessControlAllowCredentials);
+    names[index++] = StringPiece(HttpAttributes::kAccessControlAllowOrigin);
     names[index++] = StringPiece(HttpAttributes::kAge);
     names[index++] = StringPiece(HttpAttributes::kAllow);
     names[index++] = StringPiece(HttpAttributes::kAuthorization);
@@ -267,8 +270,8 @@ class EndToEndHeadersContainer {
     names[index++] = StringPiece(HttpAttributes::kReferer);
     names[index++] = StringPiece(HttpAttributes::kRefresh);
     names[index++] = StringPiece(HttpAttributes::kServer);
-    names[index++] = StringPiece(HttpAttributes::kSetCookie2);
     names[index++] = StringPiece(HttpAttributes::kSetCookie);
+    names[index++] = StringPiece(HttpAttributes::kSetCookie2);
     names[index++] = StringPiece(HttpAttributes::kUserAgent);
     names[index++] = StringPiece(HttpAttributes::kVary);
     names[index++] = StringPiece(HttpAttributes::kVia);
