@@ -140,6 +140,9 @@ class IisModuleBaseFetch : public IisBaseFetch {
   char *currentblock;
   int currentblocksize;
   int currentblockpos;
+  // Set once request memory could not be had for the body: every later
+  // write fails and the response is reset instead of completed.
+  bool write_failed_;
   DWORD lastwritetime;
   DWORD donetime;
   DWORD alive;

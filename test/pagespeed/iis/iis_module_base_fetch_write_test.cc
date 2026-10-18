@@ -5,12 +5,11 @@
 // pool cannot satisfy an allocation, the write fails instead of storing
 // through the missing block.
 
-#include "pagespeed/iis/iis_module_base_fetch.h"
-
 #include <cstdlib>
 #include <memory>
 #include <vector>
 
+#include "pagespeed/iis/iis_module_base_fetch.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -46,6 +45,11 @@ class FakeResponse : public StubHttpResponse {
  public:
   // Suppressed headers make the fetch skip copying response headers.
   BOOL GetHeadersSuppressed() const override { return TRUE; }
+  VOID ResetConnection() override { ++resets_; }
+  int resets() const { return resets_; }
+
+ private:
+  int resets_ = 0;
 };
 
 // Hands out request memory until |budget| allocations have been made; every
@@ -74,6 +78,8 @@ class FakeContext : public StubHttpContext {
     return p;
   }
   int calls() const { return calls_; }
+  void set_budget(int budget) { budget_ = budget; }
+  const FakeResponse& response() const { return response_; }
 
  private:
   FakeRequest request_;
@@ -134,6 +140,24 @@ TEST_F(IisModuleBaseFetchWriteTest, FailedFollowUpAllocationFailsTheWrite) {
   FetchPtr fetch = NewFetch(&context);
   EXPECT_FALSE(fetch->Write(GoogleString(70000, 'z'), &handler_));
   EXPECT_EQ(2, context.calls());
+}
+
+TEST_F(IisModuleBaseFetchWriteTest, FailedWriteFailsTheResponse) {
+  FakeContext context(0);
+  IisModuleBaseFetch* fetch = new IisModuleBaseFetch(
+      &context, kHtml, &handler_,
+      RequestContext::NewTestRequestContext(&thread_system_), nullptr);
+  fetch->response_headers()->set_status_code(200);
+  EXPECT_FALSE(fetch->Write("hello", &handler_));
+  // Memory is available again, but the body already has a hole.
+  context.set_budget(10);
+  EXPECT_FALSE(fetch->Write(" world", &handler_));
+  EXPECT_EQ(1, context.calls());
+  EXPECT_EQ(0, context.response().resets());
+  // Done releases one reference; the test holds the other.
+  fetch->Done(true);
+  EXPECT_EQ(1, context.response().resets());
+  fetch->ReleaseRef();
 }
 
 }  // namespace
