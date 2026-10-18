@@ -263,7 +263,8 @@ class Image {
   StringPiece Contents();
 
   // Draws the given image on top of this one at the given offset.  Returns true
-  // if successful.
+  // if successful.  Offsets must be non-negative and the image must fit
+  // entirely within this image; returns false otherwise.
   virtual bool DrawImage(Image* image, int x, int y) = 0;
 
   // Attempts to decode this image and load its raster into memory.  If this
