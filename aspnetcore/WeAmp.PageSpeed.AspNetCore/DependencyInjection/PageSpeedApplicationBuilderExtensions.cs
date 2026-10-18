@@ -79,16 +79,24 @@ public static class PageSpeedApplicationBuilderExtensions
     }
 
     /// <summary>
-    /// Maps PageSpeed admin info endpoint (shows sidecar status and admin token).
+    /// Maps PageSpeed admin info endpoint (shows sidecar status, internal ports and the
+    /// last error; it never returns the admin token). Requires authorization by default
+    /// because it discloses internal state.
     /// </summary>
     /// <param name="app">The endpoint route builder.</param>
     /// <param name="pattern">The route pattern. Default: "/pagespeed/info"</param>
+    /// <param name="requireAuthorization">
+    /// When true (default) the endpoint requires an authorized caller, which needs
+    /// authorization services and middleware in the host. Pass false only when the
+    /// endpoint is otherwise protected.
+    /// </param>
     /// <returns>The endpoint route builder for chaining.</returns>
     public static IEndpointRouteBuilder MapPageSpeedInfo(
         this IEndpointRouteBuilder app,
-        string pattern = "/pagespeed/info")
+        string pattern = "/pagespeed/info",
+        bool requireAuthorization = true)
     {
-        app.MapGet(pattern, (
+        var info = app.MapGet(pattern, (
             ISidecarManager sidecarManager,
             IOptions<PageSpeedOptions> options,
             InternalSidecarEndpoint endpoint) =>
@@ -126,6 +134,11 @@ public static class PageSpeedApplicationBuilderExtensions
                 error = sidecarManager.ErrorMessage
             });
         }).WithTags("PageSpeed").WithName("GetPageSpeedInfo");
+
+        if (requireAuthorization)
+        {
+            info.RequireAuthorization();
+        }
 
         return app;
     }
