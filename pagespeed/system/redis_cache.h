@@ -281,6 +281,10 @@ class RedisCache : public CacheInterface {
   Variable* redirections_;
   Variable* cluster_slots_fetches_;
 
+  // At most this many connections are kept, the main one included. Servers
+  // named by redirections or slot mappings beyond it are not connected to.
+  static constexpr size_t kMaxClusterConnections = 1024;
+
   // It's expected that connections are only added to the map. That way we can
   // safely use raw pointers to them during RedisCache lifetime.
   ConnectionsMap connections_ GUARDED_BY(connections_lock_);

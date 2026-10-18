@@ -23,6 +23,8 @@
 
 #include <cstdlib>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "apr_network_io.h"  // NOLINT
 #include "base/logging.h"
@@ -54,6 +56,42 @@ static const char kSomeValue[] = "SomeValue";
 }  // namespace
 
 using testing::HasSubstr;
+
+// Answers each request it reads with the next scripted reply, in order,
+// then closes the connection. The first request is the SELECT sent on
+// connect.
+class RedisScriptedServerThread : public TcpServerThreadForTesting {
+ public:
+  RedisScriptedServerThread(apr_port_t listen_port, ThreadSystem* thread_system,
+                            std::vector<GoogleString> replies)
+      : TcpServerThreadForTesting(listen_port, "redis_scripted_server",
+                                  thread_system),
+        replies_(std::move(replies)) {}
+
+  ~RedisScriptedServerThread() override { ShutDown(); }
+
+ private:
+  void HandleClientConnection(apr_socket_t* sock) override {
+    for (const GoogleString& reply : replies_) {
+      char buf[4096];
+      apr_size_t size = sizeof(buf);
+      if (apr_socket_recv(sock, buf, &size) != APR_SUCCESS) {
+        break;
+      }
+      for (size_t sent = 0; sent < reply.size();) {
+        apr_size_t chunk = reply.size() - sent;
+        if (apr_socket_send(sock, reply.data() + sent, &chunk) !=
+            APR_SUCCESS) {
+          break;
+        }
+        sent += chunk;
+      }
+    }
+    apr_socket_close(sock);
+  }
+
+  const std::vector<GoogleString> replies_;
+};
 
 // TODO(yeputons): refactor this class with MemcachedCacheTest, see details in
 // memcached_cache_test.cc
@@ -139,6 +177,41 @@ class RedisCacheTest : public CacheTestBase {
   }
 
   void WaitForCustomServerShutdown() { custom_server_.reset(); }
+
+  bool StartScriptedServer(std::vector<GoogleString> replies) {
+    WaitForCustomServerShutdown();
+    custom_server_ = std::make_unique<RedisScriptedServerThread>(
+        custom_server_port_, thread_system_.get(), std::move(replies));
+    if (!custom_server_->Start()) {
+      return false;
+    }
+    return custom_server_->GetListeningPort() == custom_server_port_;
+  }
+
+  // Sends one GET to a scripted server that redirects it to a refusing
+  // port and then answers the slot-mapping query with `cluster_slots`.
+  void GetRedirectedThenMapped(const GoogleString& cluster_slots) {
+    InitRedisWithCustomServer();
+    ASSERT_TRUE(StartScriptedServer(
+        {"+OK\r\n", "-MOVED 1 127.0.0.1:1\r\n", cluster_slots}));
+    cache_[0]->StartUp();
+    CheckNotFound(kSomeKey);
+    WaitForCustomServerShutdown();
+  }
+
+  size_t ClusterMappingCount() {
+    ScopedMutex lock(cache_[0]->cluster_map_lock_.get());
+    return cache_[0]->cluster_mappings_.size();
+  }
+
+  size_t ConnectionCount() {
+    ScopedMutex lock(cache_[0]->connections_lock_.get());
+    return cache_[0]->connections_.size();
+  }
+
+  static size_t MaxClusterConnections() {
+    return RedisCache::kMaxClusterConnections;
+  }
 
   static void TearDownTestCase() { apr_terminate(); }
 
@@ -444,6 +517,83 @@ TEST_F(RedisCacheTest, DoesNotReconnectAfterShutdown) {
 
   EXPECT_FALSE(Cache()->IsHealthy());  // Reconnection is not allowed.
   CheckNotFound(kSomeKey);
+}
+
+// One CLUSTER SLOTS entry: slots [start, end] served by host:port.
+GoogleString ClusterSlotsEntry(const GoogleString& start,
+                               const GoogleString& end, const GoogleString& host,
+                               const GoogleString& port) {
+  return StrCat("*3\r\n:", start, "\r\n:", end, "\r\n*2\r\n$",
+                IntegerToString(host.size()), "\r\n", host, "\r\n:", port,
+                "\r\n");
+}
+
+TEST_F(RedisCacheTest, RedirectionToAnInvalidPortIsIgnored) {
+  InitRedisWithCustomServer();
+  ASSERT_TRUE(
+      StartScriptedServer({"+OK\r\n", "-MOVED 1 127.0.0.1:0\r\n"}));
+  cache_[0]->StartUp();
+  CheckNotFound(kSomeKey);
+  EXPECT_EQ(1u, ConnectionCount());
+}
+
+TEST_F(RedisCacheTest, RedirectionToAnEmptyHostIsIgnored) {
+  InitRedisWithCustomServer();
+  ASSERT_TRUE(StartScriptedServer({"+OK\r\n", "-MOVED 1 :6379\r\n"}));
+  cache_[0]->StartUp();
+  CheckNotFound(kSomeKey);
+  EXPECT_EQ(1u, ConnectionCount());
+}
+
+TEST_F(RedisCacheTest, ClusterSlotsWithAValidRangeIsUsed) {
+  GetRedirectedThenMapped(
+      StrCat("*1\r\n", ClusterSlotsEntry("0", "16383", "127.0.0.1", "2")));
+  EXPECT_EQ(1u, ClusterMappingCount());
+}
+
+TEST_F(RedisCacheTest, ClusterSlotsWithAnOversizedSlotIsRejected) {
+  // 2^32 + 5 would wrap to 5 in an int.
+  GetRedirectedThenMapped(StrCat(
+      "*1\r\n", ClusterSlotsEntry("0", "4294967301", "127.0.0.1", "2")));
+  EXPECT_EQ(0u, ClusterMappingCount());
+}
+
+TEST_F(RedisCacheTest, ClusterSlotsWithANegativeSlotIsRejected) {
+  GetRedirectedThenMapped(
+      StrCat("*1\r\n", ClusterSlotsEntry("-1", "5", "127.0.0.1", "2")));
+  EXPECT_EQ(0u, ClusterMappingCount());
+}
+
+TEST_F(RedisCacheTest, ClusterSlotsWithPortZeroIsRejected) {
+  GetRedirectedThenMapped(
+      StrCat("*1\r\n", ClusterSlotsEntry("0", "5", "127.0.0.1", "0")));
+  EXPECT_EQ(0u, ClusterMappingCount());
+}
+
+TEST_F(RedisCacheTest, ClusterSlotsWithAnOversizedPortIsRejected) {
+  GetRedirectedThenMapped(
+      StrCat("*1\r\n", ClusterSlotsEntry("0", "5", "127.0.0.1", "65536")));
+  EXPECT_EQ(0u, ClusterMappingCount());
+}
+
+TEST_F(RedisCacheTest, ClusterSlotsWithAnEmptyHostIsRejected) {
+  GetRedirectedThenMapped(
+      StrCat("*1\r\n", ClusterSlotsEntry("0", "5", "", "2")));
+  EXPECT_EQ(0u, ClusterMappingCount());
+}
+
+TEST_F(RedisCacheTest, ClusterConnectionsAreCapped) {
+  // A slot mapping naming more servers than the cap: one slot each, every
+  // one on its own port.
+  const size_t servers = MaxClusterConnections() + 8;
+  GoogleString reply = StrCat("*", IntegerToString(servers), "\r\n");
+  for (size_t i = 0; i < servers; ++i) {
+    const GoogleString slot = IntegerToString(i);
+    StrAppend(&reply, ClusterSlotsEntry(slot, slot, "127.0.0.1",
+                                        IntegerToString(20000 + i)));
+  }
+  GetRedirectedThenMapped(reply);
+  EXPECT_LE(ConnectionCount(), MaxClusterConnections());
 }
 
 // This server always waits until connection is received to avoid race
