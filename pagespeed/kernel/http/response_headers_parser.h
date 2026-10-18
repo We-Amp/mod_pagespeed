@@ -32,6 +32,12 @@ class ResponseHeaders;
 // Parses a stream of HTTP header text into a ResponseHeaders instance.
 class ResponseHeadersParser {
  public:
+  // Maximum accumulated bytes of one header line (name plus value).  A
+  // longer line is dropped rather than buffered, bounding what a single
+  // crafted response can make us hold, while the remaining headers of
+  // the response still parse.
+  static const size_t kMaxHeaderLineBytes = 64 * 1024;
+
   explicit ResponseHeadersParser(ResponseHeaders* rh) : response_headers_(rh) {
     Clear();
   }
@@ -45,11 +51,16 @@ class ResponseHeadersParser {
   void set_headers_complete(bool x) { headers_complete_ = x; }
 
  private:
+  // Reports the cap and puts the parser into line-skipping mode for the
+  // current, overlong header line.
+  void DropOverlongLine(MessageHandler* handler);
+
   ResponseHeaders* response_headers_;
 
   bool parsing_http_;
   bool parsing_value_;
   bool headers_complete_;
+  bool skipping_overlong_line_;
   GoogleString parse_name_;
   GoogleString parse_value_;
 
