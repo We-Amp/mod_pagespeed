@@ -89,6 +89,19 @@ pagespeed_cc_test(
     ],
 )
 
+# Choosing the inflater for a compressed origin response (iis_misc).
+pagespeed_cc_test(
+    name = "iis_content_encoding_inflater_test",
+    srcs = ["iis_content_encoding_inflater_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/util",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # IisModuleBaseFetch's buffered body writes against a stub IHttpContext
 # whose request-memory allocator can be made to fail.
 pagespeed_cc_test(

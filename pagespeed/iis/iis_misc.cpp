@@ -28,6 +28,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/std_timer.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 
 
 #include "pagespeed/iis/iis_request_context.h"
@@ -291,6 +292,19 @@ namespace net_instaweb
 		return NULL;
 	}
 
+
+	GzipInflater* NewContentEncodingInflater(const HTTP_KNOWN_HEADER& header,
+	                                         GoogleString* name)
+	{
+		name->assign(header.pRawValue, header.RawValueLength);
+		if (StringCaseEqual(*name, "gzip")) {
+			return new GzipInflater(GzipInflater::InflateType::kGzip);
+		}
+		if (StringCaseEqual(*name, "deflate")) {
+			return new GzipInflater(GzipInflater::InflateType::kDeflate);
+		}
+		return NULL;
+	}
 
 	//todo: efficiency
 	GoogleString size_t_to_str(size_t i)

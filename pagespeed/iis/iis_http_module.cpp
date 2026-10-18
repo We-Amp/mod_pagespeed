@@ -1595,23 +1595,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 						if (content_encoding.pRawValue != NULL && content_encoding.RawValueLength > 0)
 						{
-							char *encoding = new char[content_encoding.RawValueLength + 1];
-							strncpy(encoding, content_encoding.pRawValue, content_encoding.RawValueLength);
-							encoding[content_encoding.RawValueLength] = 0;
-
-							GzipInflater* inflater = NULL;
-
-							if (StringCaseEqual(StringPiece(encoding), "gzip")) {
-								inflater = new GzipInflater(GzipInflater::InflateType::kGzip);
-							}
-							else if (StringCaseEqual(StringPiece(encoding), "deflate")) {
-								inflater = new GzipInflater(GzipInflater::InflateType::kDeflate);
-							}
+							GoogleString encoding;
+							GzipInflater* inflater =
+								NewContentEncodingInflater(content_encoding, &encoding);
 
 							if (inflater == NULL)
 							{
-								log(pHttpContext, "OnSendResponse ---  unknown encoding %s", encoding);
-								delete[] encoding;
+								log(pHttpContext, "OnSendResponse ---  unknown encoding %s", encoding.c_str());
 								delete innerContext->base_fetch();
 								innerContext->set_base_fetch(NULL);
 								
@@ -1620,7 +1610,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 							}
 							else
 							{
-								log(pHttpContext, "adding inflater for [%s], and removing content encoding header", encoding);
+								log(pHttpContext, "adding inflater for [%s], and removing content encoding header", encoding.c_str());
 								inflater->Init();
 								request_context->set_inflater(inflater);
 								pHttpContext->GetResponse()->DeleteHeader("Content-Encoding");
