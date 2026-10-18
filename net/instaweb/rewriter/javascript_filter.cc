@@ -536,7 +536,14 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
     driver()->InfoHere("Script is inlined version of %s",
                        library_url.as_string().c_str());
   }
-  if (code_block.successfully_rewritten()) {
+  if (code_block.successfully_rewritten() &&
+      driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml &&
+      code_block.rewritten_code().find("]]>") != StringPiece::npos &&
+      script->find("]]>") == GoogleString::npos) {
+    // Minification can join adjacent brackets into "]]>", which is not allowed
+    // in XHTML character data; keep the original script.
+    config_->did_not_shrink()->Add(1);
+  } else if (code_block.successfully_rewritten()) {
     // Replace the old script string with the new, minified one.
     if ((driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml) &&
         (script->find("<![CDATA[") != StringPiece::npos) &&
