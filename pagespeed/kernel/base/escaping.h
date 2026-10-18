@@ -33,10 +33,12 @@ void EscapeToJsStringLiteral(const StringPiece& original, bool add_quotes,
 // Appends version of original escaped for JSON string syntax to *escaped,
 // (optionally with quotes, if asked).
 //
-// Warning: this is dangerous if you have non-ASCII characters, in that it
-// doesn't interpret the input encoding, and will just blindly turn them
-// into \u escapes. However, it will ensure that the output won't have any
-// dangerous characters that can cause format sniff.
+// Well-formed multi-byte UTF-8 sequences are copied verbatim, so the
+// output decodes back to the same text. A byte that is not part of a
+// well-formed UTF-8 sequence (a lone continuation byte, a truncated,
+// overlong or surrogate sequence) is escaped as \u00xx, as are control
+// characters and the JSON metacharacters, so the output is always valid
+// JSON and has none of the characters that can cause format sniffing.
 void EscapeToJsonStringLiteral(const StringPiece& original, bool add_quotes,
                                GoogleString* escaped);
 

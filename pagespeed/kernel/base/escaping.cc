@@ -107,6 +107,60 @@ void EscapeToJsStringLiteral(const StringPiece& original, bool add_quotes,
   }
 }
 
+namespace {
+
+// Returns the length in bytes (2..4) of the well-formed UTF-8 sequence
+// starting at the beginning of the given string, or 0 when the lead byte
+// cannot begin one (a lone continuation byte or a reserved byte) or the
+// sequence is truncated or ill-formed (overlong encodings and surrogate
+// halves included).
+size_t Utf8SequenceLengthIfValid(const StringPiece& sequence) {
+  unsigned char lead = static_cast<unsigned char>(sequence[0]);
+  size_t length;
+  unsigned char min_second = 0x80;
+  unsigned char max_second = 0xBF;
+  if (lead >= 0xC2 && lead <= 0xDF) {
+    length = 2;  // 0xC0 and 0xC1 could only start overlong sequences.
+  } else if (lead == 0xE0) {
+    length = 3;
+    min_second = 0xA0;  // Below that the sequence would be overlong.
+  } else if (lead >= 0xE1 && lead <= 0xEC) {
+    length = 3;
+  } else if (lead == 0xED) {
+    length = 3;
+    max_second = 0x9F;  // Above that the sequence is a surrogate half.
+  } else if (lead >= 0xEE && lead <= 0xEF) {
+    length = 3;
+  } else if (lead == 0xF0) {
+    length = 4;
+    min_second = 0x90;  // Below that the sequence would be overlong.
+  } else if (lead >= 0xF1 && lead <= 0xF3) {
+    length = 4;
+  } else if (lead == 0xF4) {
+    length = 4;
+    max_second = 0x8F;  // Above that the code point exceeds U+10FFFF.
+  } else {
+    return 0;
+  }
+
+  if (sequence.size() < length) {
+    return 0;
+  }
+  unsigned char second = static_cast<unsigned char>(sequence[1]);
+  if (second < min_second || second > max_second) {
+    return 0;
+  }
+  for (size_t i = 2; i < length; ++i) {
+    unsigned char continuation = static_cast<unsigned char>(sequence[i]);
+    if (continuation < 0x80 || continuation > 0xBF) {
+      return 0;
+    }
+  }
+  return length;
+}
+
+}  // namespace
+
 void EscapeToJsonStringLiteral(const StringPiece& original, bool add_quotes,
                                GoogleString* escaped) {
   // Optimistically assume no escaping will be required and reserve enough space
@@ -118,16 +172,28 @@ void EscapeToJsonStringLiteral(const StringPiece& original, bool add_quotes,
   for (size_t c = 0; c < original.length(); ++c) {
     unsigned char code = static_cast<unsigned char>(original[c]);
 
-    // Bytes above 0x7F are passed through: in the UTF-8 input callers
-    // should feed a JSON encoder they belong to multi-byte sequences,
-    // and escaping each one as \u00xx would decode to unrelated Latin-1
-    // characters, corrupting the text. Control characters, the JSON
-    // metacharacters and < > stay escaped.
+    // Control characters, the JSON metacharacters and < > stay escaped.
     if (code <= 0x1F || code == '<' || code == '>' || code == '"' ||
         code == '\\') {
       *(escaped) += absl::StrFormat("\\u00%02x", code);
+      continue;
+    }
+
+    if (code < 0x80) {
+      (*escaped) += original[c];
+      continue;
+    }
+
+    // Well-formed multi-byte UTF-8 sequences are copied verbatim so the
+    // output decodes back to the same text; a byte that does not belong
+    // to one (or continues a malformed sequence) is escaped as \u00xx so
+    // the output stays valid JSON.
+    size_t sequence_length = Utf8SequenceLengthIfValid(original.substr(c));
+    if (sequence_length > 0) {
+      escaped->append(original.substr(c, sequence_length).as_string());
+      c += sequence_length - 1;
     } else {
-      *(escaped) += original[c];
+      *(escaped) += absl::StrFormat("\\u00%02x", code);
     }
   }
   if (add_quotes) {

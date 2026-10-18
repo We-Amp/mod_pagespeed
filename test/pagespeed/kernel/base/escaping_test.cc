@@ -118,10 +118,50 @@ TEST_F(EscapingTest, JsonEscapeKeepsUtf8Verbatim) {
   // "caf<0xC3><0xA9>" is "café"; <0xE2><0x82><0xAC> is the euro sign.
   EscapeToJsonStringLiteral("caf\xC3\xA9 \xE2\x82\xAC", true, &out);
   EXPECT_EQ("\"caf\xC3\xA9 \xE2\x82\xAC\"", out);
+  // A four-byte sequence stays verbatim as well.
+  out.clear();
+  EscapeToJsonStringLiteral("\xF0\x9F\x92\xA9", true, &out);
+  EXPECT_EQ("\"\xF0\x9F\x92\xA9\"", out);
   // Control characters and JSON metacharacters are still escaped.
   out.clear();
   EscapeToJsonStringLiteral("a\x01\"\\\x7F", true, &out);
   EXPECT_EQ("\"a\\u0001\\u0022\\u005c\x7F\"", out);
+}
+
+TEST_F(EscapingTest, JsonEscapeEscapesMalformedUtf8) {
+  // Bytes that do not form a well-formed UTF-8 sequence would make the
+  // output invalid JSON if passed through, so each is escaped as \u00xx.
+  GoogleString out;
+
+  // A continuation byte with no lead byte.
+  EscapeToJsonStringLiteral("a\x80" "b", true, &out);
+  EXPECT_EQ("\"a\\u0080b\"", out);
+
+  // A truncated two-byte sequence at the end of the input.
+  out.clear();
+  EscapeToJsonStringLiteral("caf\xC3", true, &out);
+  EXPECT_EQ("\"caf\\u00c3\"", out);
+
+  // A three-byte sequence whose last continuation byte is missing: the
+  // lead byte and the orphaned continuation byte are escaped singly.
+  out.clear();
+  EscapeToJsonStringLiteral("\xE2\x82z", true, &out);
+  EXPECT_EQ("\"\\u00e2\\u0082z\"", out);
+
+  // An overlong encoding is not well-formed UTF-8.
+  out.clear();
+  EscapeToJsonStringLiteral("\xC0\xAF", true, &out);
+  EXPECT_EQ("\"\\u00c0\\u00af\"", out);
+
+  // A surrogate half (U+D800) is not a character and not valid UTF-8.
+  out.clear();
+  EscapeToJsonStringLiteral("\xED\xA0\x80", true, &out);
+  EXPECT_EQ("\"\\u00ed\\u00a0\\u0080\"", out);
+
+  // A code point above U+10FFFF is not valid UTF-8 either.
+  out.clear();
+  EscapeToJsonStringLiteral("\xF4\x90\x80\x80", true, &out);
+  EXPECT_EQ("\"\\u00f4\\u0090\\u0080\\u0080\"", out);
 }
 
 }  // namespace
