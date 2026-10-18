@@ -596,6 +596,35 @@ TEST_F(RedisCacheTest, ClusterConnectionsAreCapped) {
   EXPECT_LE(ConnectionCount(), MaxClusterConnections());
 }
 
+TEST_F(RedisCacheTest, RejectedClusterSlotsOpenNoConnections) {
+  // A slot mapping naming as many servers as the cap does not fit next to
+  // the two connections already open, so it is rejected as a whole.
+  const size_t servers = MaxClusterConnections();
+  GoogleString oversized = StrCat("*", IntegerToString(servers), "\r\n");
+  for (size_t i = 0; i < servers; ++i) {
+    const GoogleString slot = IntegerToString(i);
+    StrAppend(&oversized, ClusterSlotsEntry(slot, slot, "127.0.0.1",
+                                            IntegerToString(20000 + i)));
+  }
+  const GoogleString valid =
+      StrCat("*1\r\n", ClusterSlotsEntry("0", "16383", "127.0.0.1", "2"));
+  InitRedisWithCustomServer();
+  ASSERT_TRUE(StartScriptedServer({"+OK\r\n", "-MOVED 1 127.0.0.1:1\r\n",
+                                   oversized, "-MOVED 1 127.0.0.1:1\r\n",
+                                   valid}));
+  cache_[0]->StartUp();
+  CheckNotFound(kSomeKey);
+  EXPECT_EQ(0u, ClusterMappingCount());
+  // The main connection and the redirection target.
+  EXPECT_EQ(2u, ConnectionCount());
+
+  // A later valid mapping is still accepted.
+  CheckNotFound(kSomeKey);
+  WaitForCustomServerShutdown();
+  EXPECT_EQ(1u, ClusterMappingCount());
+  EXPECT_EQ(3u, ConnectionCount());
+}
+
 // This server always waits until connection is received to avoid race
 // condition between server destruction and accepting connection (like in
 // ShutDownDuringConnection). Other servers do not do that because tests
