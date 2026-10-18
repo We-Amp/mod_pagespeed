@@ -227,6 +227,15 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 			if (currentblocksize>65536) currentblocksize=65536;
 			currentblockpos=0;
 			currentblock=(char *) http_context_->AllocateRequestMemory(currentblocksize);
+			if (currentblock == NULL)
+			{
+				// The request pool is exhausted: drop the block bookkeeping so a
+				// later write or SendData never stores through a missing block.
+				currentblocksize=0;
+				currentblockpos=0;
+				Unlock();
+				return false;
+			}
 			if (currentblocksize<=sizetowrite)
 			{
 				memcpy(currentblock,data,currentblocksize);
