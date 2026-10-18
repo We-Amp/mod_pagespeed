@@ -244,4 +244,17 @@ TEST_F(RedirectOnSizeLimitFilterTest, NoRedirectScriptWhenCspForbidsInline) {
   EXPECT_EQ(StringPiece::npos, output_.find("window.location")) << output_;
 }
 
+TEST_F(RedirectOnSizeLimitFilterTest, NoRedirectScriptWhenCspHeaderForbidsInline) {
+  // Same as above with the policy delivered as a response header, so it is
+  // known before the first byte of the document.
+  static const char input[] =
+      "<html><table><tr><td>blah</td></tr></table></html>";
+  SetupDriver(10);
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy", "script-src *;");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+  Parse("in", input);
+  EXPECT_EQ(StringPiece::npos, output_.find("window.location")) << output_;
+}
+
 }  // namespace net_instaweb
