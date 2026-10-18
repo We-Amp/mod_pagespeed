@@ -2141,6 +2141,25 @@ TEST_F(ProxyInterfaceTest, FlushHugeHtml) {
             out);
 }
 
+TEST_F(ProxyInterfaceTest, FlushBufferLimitZeroStillCompletes) {
+  // A zero limit must not stall the chunking of incoming HTML.
+  RewriteOptions* options = server_context()->global_options();
+  options->ClearSignatureForTesting();
+  options->set_flush_buffer_limit_bytes(0);
+  options->set_flush_html(true);
+  options->DisableFilter(RewriteOptions::kAddHead);
+  rewrite_driver()->AddFilters();
+  server_context()->ComputeSignature(options);
+
+  SetResponseWithDefaultHeaders("page.html", kContentTypeHtml, "<a/><b/>",
+                                kHtmlCacheTimeSec * 2);
+
+  GoogleString out;
+  FetchFromProxyLoggingFlushes("page.html", true /*success*/, &out);
+  GlobalReplaceSubstring("|Flush|", "", &out);
+  EXPECT_EQ("<a/><b/>", out);
+}
+
 TEST_F(ProxyInterfaceTest, DontRewriteDisallowedHtml) {
   // Blacklisted URL should not be rewritten.
   SetResponseWithDefaultHeaders("blacklist.html", kContentTypeHtml,
