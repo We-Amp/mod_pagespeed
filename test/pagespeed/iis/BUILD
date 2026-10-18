@@ -206,6 +206,18 @@ pagespeed_cc_test(
     ],
 )
 
+# The chunked transfer-coding parser the module runs over response bodies
+# (pagespeed/iis/dechunker.h; it includes <Windows.h>).
+pagespeed_cc_test(
+    name = "iis_dechunker_feed_test",
+    srcs = ["iis_dechunker_feed_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_dechunker",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # ContentDecoder - gzip/deflate decompression
 # Platform-independent test (uses zlib)
 pagespeed_cc_test(
