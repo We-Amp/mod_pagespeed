@@ -300,12 +300,7 @@ void NgxUrlAsyncFetcher::ShutDown() {
   }
 
   if (!active_fetches_.empty()) {
-    for (Pool<NgxFetch>::iterator p = active_fetches_.begin(),
-                                  e = active_fetches_.end();
-         p != e; p++) {
-      NgxFetch* fetch = *p;
-      fetch->CallbackDone(false);
-    }
+    CancelActiveFetches();
     active_fetches_.Clear();
   }
   if (event_connection_ != nullptr) {
