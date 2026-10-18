@@ -83,11 +83,12 @@ TEST_F(DaemonSeamTest, TheOptionsTestHandlerChecksForAQueryBeforeReadingIt) {
   const GoogleString source =
       ReadSource("pagespeed/apache/instaweb_handler.cc");
 
-  const size_t handler =
-      source.find("strcmp(request->handler, kGenerateResponseWithOptionsHandler)");
+  const size_t handler = source.find(
+      "strcmp(request->handler, kGenerateResponseWithOptionsHandler)");
   ASSERT_NE(GoogleString::npos, handler)
       << "the options test handler has been renamed; this pin needs updating";
-  const size_t first_read = source.find("strstr(request->parsed_uri.query", handler);
+  const size_t first_read =
+      source.find("strstr(request->parsed_uri.query", handler);
   ASSERT_NE(GoogleString::npos, first_read);
   // A request without a query string has a null query pointer.
   const size_t guard = source.find("parsed_uri.query != nullptr", handler);
