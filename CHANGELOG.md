@@ -148,6 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ASP.NET Core: client-supplied `X-Original-For`, `X-Original-Proto` and
   `X-Original-Host` headers are no longer relayed to the origin hop.
 
+- The admin console's description of the disk cache failures statistic now says
+  that writes skipped under momentary contention are not counted.
+
 ### Fixed
 
 - Disk cache: an unexpected internal failure in the cache library, such as
