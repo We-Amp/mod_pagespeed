@@ -123,8 +123,8 @@ void EscapeToJsonStringLiteral(const StringPiece& original, bool add_quotes,
     // and escaping each one as \u00xx would decode to unrelated Latin-1
     // characters, corrupting the text. Control characters, the JSON
     // metacharacters and < > stay escaped.
-    if (code <= 0x1F || code == '<' || code == '>' ||
-        code == '"' || code == '\\') {
+    if (code <= 0x1F || code == '<' || code == '>' || code == '"' ||
+        code == '\\') {
       *(escaped) += absl::StrFormat("\\u00%02x", code);
     } else {
       *(escaped) += original[c];

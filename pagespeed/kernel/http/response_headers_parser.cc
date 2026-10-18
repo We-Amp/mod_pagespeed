@@ -106,11 +106,10 @@ int ResponseHeadersParser::ParseChunk(const StringPiece& text,
 }
 
 void ResponseHeadersParser::DropOverlongLine(MessageHandler* handler) {
-  handler->MessageS(kError,
-                    StrCat("Header line exceeds ",
-                           Integer64ToString(kMaxHeaderLineBytes),
-                           " bytes and is dropped")
-                        .c_str());
+  handler->MessageS(kError, StrCat("Header line exceeds ",
+                                   Integer64ToString(kMaxHeaderLineBytes),
+                                   " bytes and is dropped")
+                                .c_str());
   // Reset the line state and consume the rest of it without storing it.
   // The header count cap keeps the stored set bounded; this keeps each
   // individual line bounded as well.
