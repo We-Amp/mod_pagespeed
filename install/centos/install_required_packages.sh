@@ -78,7 +78,7 @@ fi
 if [ -n "$install_sl_gcc" ]; then
   # The signing cert is the same for all versions.
   curl -o /etc/pki/rpm-gpg/RPM-GPG-KEY-cern \
-    http://linuxsoft.cern.ch/cern/slc6X/i386/RPM-GPG-KEY-cern
+    https://linuxsoft.cern.ch/cern/slc6X/i386/RPM-GPG-KEY-cern
   rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-cern
   # We have to use curl; wget can't parse their SAN.
   curl -o /etc/yum.repos.d/slc${install_sl_gcc}-devtoolset.repo \
