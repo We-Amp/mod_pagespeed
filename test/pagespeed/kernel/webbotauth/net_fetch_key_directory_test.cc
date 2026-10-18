@@ -188,6 +188,20 @@ TEST(NetFetchKeyDirectoryTest, RedirectResponseIsRejectedNotFollowed) {
   EXPECT_EQ(1, fetcher.calls());  // no second fetch to the redirect target
 }
 
+// A 200 response is accepted: the key is found after a single fetch.
+TEST(NetFetchKeyDirectoryTest, OkResponseIsAcceptedAfterOneFetch) {
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  NullMessageHandler handler;
+  RecordingFetcher fetcher(OneKeyDoc());
+
+  RequestContextPtr ctx =
+      RequestContext::NewTestRequestContext(thread_system.get());
+  NetFetchKeyDirectory dir(&fetcher, &handler, ctx, MappedOptions());
+  EXPECT_EQ(KeyLookupResult::kFound,
+            dir.GetKey("keys.example.com", "only", 0).status);
+  EXPECT_EQ(1, fetcher.calls());
+}
+
 }  // namespace
 }  // namespace webbotauth
 }  // namespace net_instaweb
