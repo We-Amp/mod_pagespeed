@@ -100,40 +100,65 @@ TEST_F(EventSchedulerTest, AlarmsGetRun) {
   EXPECT_EQ(3, counter);
 }
 
-// Helper function to push an int to a vector.
+// Helper function to push an int to a vector, under a mutex.
 class PushIntFunction : public Function {
  public:
-  PushIntFunction(int value, std::vector<int>* order)
-      : value_(value), order_(order) {}
+  PushIntFunction(int value, AbstractMutex* mutex, std::vector<int>* order)
+      : value_(value), mutex_(mutex), order_(order) {}
 
  protected:
-  void Run() override { order_->push_back(value_); }
+  void Run() override {
+    ScopedMutex lock(mutex_);
+    order_->push_back(value_);
+  }
 
  private:
   int value_;
+  AbstractMutex* mutex_;
   std::vector<int>* order_;
 };
 
 TEST_F(EventSchedulerTest, AlarmsRunInOrder) {
-  int64 start_us = timer_->NowUs();
+  std::unique_ptr<AbstractMutex> order_mutex(thread_system_->NewMutex());
   std::vector<int> order;
 
-  // This test verifies that alarms are run in time order.
-  // Add alarms out of order.
-  scheduler_.AddAlarmAtUs(start_us + 30 * Timer::kMsUs,
-                          new PushIntFunction(3, &order));
-  scheduler_.AddAlarmAtUs(start_us + 10 * Timer::kMsUs,
-                          new PushIntFunction(1, &order));
-  scheduler_.AddAlarmAtUs(start_us + 20 * Timer::kMsUs,
-                          new PushIntFunction(2, &order));
+  // This test verifies that alarms are run in time order.  Add them out of
+  // order, all under the scheduler mutex so none can run before the last is
+  // queued.  Then leave running them to the dispatcher thread alone: alarm
+  // callbacks run without the scheduler mutex, so processing alarms here as
+  // well would let two threads run them concurrently.
+  {
+    ScopedMutex lock(scheduler_.mutex());
+    int64 start_us = timer_->NowUs();
+    scheduler_.AddAlarmAtUsMutexHeld(
+        start_us + 30 * Timer::kMsUs,
+        new PushIntFunction(3, order_mutex.get(), &order));
+    scheduler_.AddAlarmAtUsMutexHeld(
+        start_us + 10 * Timer::kMsUs,
+        new PushIntFunction(1, order_mutex.get(), &order));
+    scheduler_.AddAlarmAtUsMutexHeld(
+        start_us + 20 * Timer::kMsUs,
+        new PushIntFunction(2, order_mutex.get(), &order));
+  }
 
   // Wait for all alarms to fire.
-  QuiesceAlarms(1 * Timer::kSecondUs);
+  int64 deadline_us = timer_->NowUs() + 10 * Timer::kSecondUs;
+  std::vector<int> result;
+  while (timer_->NowUs() < deadline_us) {
+    {
+      ScopedMutex lock(order_mutex.get());
+      result = order;
+    }
+    if (result.size() == 3) {
+      break;
+    }
+    timer_->SleepUs(Timer::kMsUs);
+  }
 
-  ASSERT_EQ(3u, order.size());
-  EXPECT_EQ(1, order[0]);
-  EXPECT_EQ(2, order[1]);
-  EXPECT_EQ(3, order[2]);
+  ASSERT_EQ(3u, result.size());
+  EXPECT_EQ(1, result[0]);
+  EXPECT_EQ(2, result[1]);
+  EXPECT_EQ(3, result[2]);
 }
 
 TEST_F(EventSchedulerTest, CancelAlarm) {
