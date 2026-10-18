@@ -51,6 +51,9 @@ class Timer;
 class RulePackStore : public RulePackProvider {
  public:
   static constexpr int64_t kPackRecheckIntervalSec = 10;
+  // How many announced load lines are remembered before the record starts
+  // over (which can repeat a line).
+  static constexpr size_t kMaxAnnounced = 4096;
 
   // `timer` paces the recheck; it must outlive the store. `engine_version`
   // is what a pack's engine_min is compared against.
@@ -86,6 +89,11 @@ class RulePackStore : public RulePackProvider {
   // looked at. For tests that hold a refresh open.
   void set_refresh_hook_for_testing(std::function<void()> hook) {
     refresh_hook_ = std::move(hook);
+  }
+
+  size_t announced_size_for_testing() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return announced_.size();
   }
 
  private:
