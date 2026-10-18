@@ -57,7 +57,7 @@ void MeasurementProxyRewriteOptionsManager::GetRewriteOptions(
     Force403(options);
   } else if (MeasurementProxyUrlNamer::DecodePathDetails(
                  url, &config, &config_domain, &password, &res_url)) {
-    if (password != password_) {
+    if (!ConstantTimeCompare(password, password_)) {
       Force403(options);
     } else {
       GoogleUrl decoded_url(res_url);
