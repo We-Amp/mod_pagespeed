@@ -2724,7 +2724,15 @@ jobs:
             dep="$(dpkg-deb -f "$deb" Depends)"
             case "$deb" in
               mod-pagespeed_*)
-                case "$dep" in *"pagespeed-optimizer (= ${PAIR_VERSION})"*) ;; *) echo "::error::$deb does not depend on pagespeed-optimizer (= ${PAIR_VERSION}): $dep"; exit 1 ;; esac ;;
+                case "$dep" in *"pagespeed-optimizer (= ${PAIR_VERSION})"*) ;; *) echo "::error::$deb does not depend on pagespeed-optimizer (= ${PAIR_VERSION}): $dep"; exit 1 ;; esac
+                # Takes over from Google's archived packages in one step, and
+                # keeps their LoadModule ... mod_pagespeed_ap24.so loading.
+                for f in Conflicts Replaces; do
+                  [ "$(dpkg-deb -f "$deb" "$f")" = "mod-pagespeed-stable, mod-pagespeed-beta" ] \
+                    || { echo "::error::$deb $f is '$(dpkg-deb -f "$deb" "$f")'"; exit 1; }
+                done
+                dpkg-deb -c "$deb" | grep -Eq '^l.* \./usr/lib/apache2/modules/mod_pagespeed_ap24\.so -> mod_pagespeed\.so$' \
+                  || { echo "::error::$deb lacks the mod_pagespeed_ap24.so -> mod_pagespeed.so link"; exit 1; } ;;
             esac
             echo "$deb: Version $v"
           done
@@ -2739,7 +2747,14 @@ jobs:
             case "$r" in
               mod-pagespeed-*|el10-mod-pagespeed-*)
                 rpm -qp --requires "$r" | grep -Eq "^pagespeed-optimizer = $(printf '%s' "${PAIR_VERSION}" | sed 's/\./\\./g')(-[0-9A-Za-z.]+)?$" \
-                  || { echo "::error::$r does not require pagespeed-optimizer = ${PAIR_VERSION}"; rpm -qp --requires "$r"; exit 1; } ;;
+                  || { echo "::error::$r does not require pagespeed-optimizer = ${PAIR_VERSION}"; rpm -qp --requires "$r"; exit 1; }
+                # Conflicts, never Obsoletes: the move from Google's package is
+                # an explicit dnf swap, not something dnf upgrade does unasked.
+                [ "$(rpm -qp --conflicts "$r" | sort | tr '\n' ' ')" = "mod-pagespeed-beta < 1.15 mod-pagespeed-stable < 1.15 " ] \
+                  || { echo "::error::$r conflicts are wrong"; rpm -qp --conflicts "$r"; exit 1; }
+                [ -z "$(rpm -qp --obsoletes "$r")" ] || { echo "::error::$r must not obsolete anything"; rpm -qp --obsoletes "$r"; exit 1; }
+                rpm -qp --qf '[%{FILENAMES} %{FILELINKTOS}\n]' "$r" | grep -Eq '^/usr/lib64/httpd/modules/mod_pagespeed_ap24\.so mod_pagespeed\.so$' \
+                  || { echo "::error::$r lacks the mod_pagespeed_ap24.so -> mod_pagespeed.so link"; exit 1; } ;;
             esac
             echo "$r: version $v"
           done
