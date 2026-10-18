@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cache keys in cache write-failure warnings are escaped.
 - JavaScript minification in XHTML pages no longer produces markup that breaks
   the page for some bracket patterns.
-- Apache: logging an empty message no longer reads outside the message buffer.
+- Apache: logging an empty message is handled correctly.
 - The IIS module no longer leaks memory on every gzip or deflate response it
   rewrites; destroying an unjoined background thread on Windows no longer ends the worker
   process.
