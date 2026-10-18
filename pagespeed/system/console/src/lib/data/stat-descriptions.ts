@@ -278,7 +278,7 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   cyclone_cache_deletes:
     "Keys removed from the disk cache. Deleting a key that was not there still counts as a success.",
   cyclone_cache_failures:
-    "Writes the disk cache engine rejected, including every write attempted while it is shut down or was never started. Any sustained non-zero value means an unwritable, unhealthy or absent cache.",
+    "Writes the disk cache engine rejected, including every write attempted while it is shut down or was never started. Any sustained non-zero value means an unwritable, unhealthy or absent cache. Writes skipped under momentary contention are not counted.",
   cyclone_cache_bytes_read:
     "Total bytes returned by successful disk cache reads. Use it with the hit count to see average entry size and read volume.",
   cyclone_cache_bytes_written:
