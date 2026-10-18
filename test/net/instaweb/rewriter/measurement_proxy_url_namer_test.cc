@@ -181,4 +181,24 @@ TEST_F(MeasurementProxyUrlNamerTest, IsProxyEncoded) {
   EXPECT_FALSE(namer_.IsProxyEncoded(bad_url));
 }
 
+// Only an exact password match authorizes the proxy encoding; near-misses
+// (prefix, longer, case change) must all be rejected.
+TEST_F(MeasurementProxyUrlNamerTest, PasswordMustMatchExactly) {
+  GoogleUrl prefix(
+      "https://www.example.com/h/c1/pw/modpagespeed.com/a/b/c.d?e");
+  EXPECT_FALSE(namer_.IsProxyEncoded(prefix));
+
+  GoogleUrl longer(
+      "https://www.example.com/h/c1/pwd2/modpagespeed.com/a/b/c.d?e");
+  EXPECT_FALSE(namer_.IsProxyEncoded(longer));
+
+  GoogleUrl case_change(
+      "https://www.example.com/h/c1/PWD/modpagespeed.com/a/b/c.d?e");
+  EXPECT_FALSE(namer_.IsProxyEncoded(case_change));
+
+  GoogleUrl exact(
+      "https://www.example.com/h/c1/pwd/modpagespeed.com/a/b/c.d?e");
+  EXPECT_TRUE(namer_.IsProxyEncoded(exact));
+}
+
 }  // namespace net_instaweb

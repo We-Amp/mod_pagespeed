@@ -122,7 +122,8 @@ bool MeasurementProxyUrlNamer::IsProxyEncoded(const GoogleUrl& url) const {
   if (DecodePathDetails(url, &config, &config_domain, &password, &decoded)) {
     // Looks like the right syntax, but check to see if it's actually on our
     // host and not elsewhere.
-    return (password == password_ && url.Origin() == top_origin_);
+    return (ConstantTimeCompare(password, password_) &&
+            url.Origin() == top_origin_);
   } else {
     return false;
   }
