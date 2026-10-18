@@ -95,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason and publishes cache-directory generation 3; this module is built for
   generation 3 and the packaged `pagespeed_daemon.conf` points
   `ModPagespeedDaemonVolumePath` at `/var/cache/pagespeed-optimizer/v3/cache`.
-  If you set that directive yourself, change `v2` to `v3`: a module and daemon
+  If you set `ModPagespeedDaemonVolumePath` (Apache) or `pagespeed
+  DaemonVolumePath` (nginx) yourself, change `v2` to `v3`: a module and daemon
   on different generations refuse to attach, loudly, and in-place
   optimization stays off until they agree. Install the module and the daemon
   as the matching pair the packages already require.
