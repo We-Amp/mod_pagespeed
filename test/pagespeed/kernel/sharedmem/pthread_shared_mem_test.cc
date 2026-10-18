@@ -25,10 +25,13 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <memory>
+#include <thread>
 #include <vector>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/null_message_handler.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/sharedmem/shared_circular_buffer_test_base.h"
 #include "test/pagespeed/kernel/sharedmem/shared_dynamic_string_map_test_base.h"
@@ -163,6 +166,44 @@ INSTANTIATE_TYPED_TEST_SUITE_P(PthreadThread, SharedMemStatisticsTestTemplate,
                                PthreadSharedMemThreadEnv);
 INSTANTIATE_TYPED_TEST_SUITE_P(PthreadThread, SharedMemTestTemplate,
                                PthreadSharedMemThreadEnv);
+
+// Runtimes created concurrently on several threads must still get distinct
+// segment namespaces: each one attaches back to its own segment.
+TEST(PthreadSharedMemInstanceTest, ConcurrentRuntimesDoNotShareSegments) {
+  const int kThreads = 8;
+  const int kPerThread = 64;
+  std::vector<std::unique_ptr<PthreadSharedMem>> runtimes(kThreads *
+                                                          kPerThread);
+  std::vector<std::thread> threads;
+  for (int t = 0; t < kThreads; ++t) {
+    threads.emplace_back([&runtimes, t]() {
+      for (int i = 0; i < kPerThread; ++i) {
+        runtimes[t * kPerThread + i] = std::make_unique<PthreadSharedMem>();
+      }
+    });
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+
+  NullMessageHandler handler;
+  std::vector<std::unique_ptr<AbstractSharedMemSegment>> segments;
+  for (size_t i = 0; i < runtimes.size(); ++i) {
+    segments.emplace_back(runtimes[i]->CreateSegment("seg", 1, &handler));
+    ASSERT_NE(nullptr, segments.back());
+    segments.back()->Base()[0] = static_cast<char>(i % 128);
+  }
+  for (size_t i = 0; i < runtimes.size(); ++i) {
+    std::unique_ptr<AbstractSharedMemSegment> attached(
+        runtimes[i]->AttachToSegment("seg", 1, &handler));
+    ASSERT_NE(nullptr, attached);
+    EXPECT_EQ(static_cast<char>(i % 128), attached->Base()[0]) << i;
+  }
+  segments.clear();
+  for (std::unique_ptr<PthreadSharedMem>& runtime : runtimes) {
+    runtime->DestroySegment("seg", &handler);
+  }
+}
 
 }  // namespace
 

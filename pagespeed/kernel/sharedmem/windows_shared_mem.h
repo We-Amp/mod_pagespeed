@@ -48,6 +48,7 @@
 
 #ifdef _WIN32
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -113,7 +114,7 @@ class WindowsSharedMem : public AbstractSharedMem {
   std::map<GoogleString, SegmentInfo*> segments_;
 
   // Instance counter for unique segment naming across multiple factories.
-  static size_t s_instance_count_;
+  static std::atomic<size_t> s_instance_count_;
   size_t instance_number_;
 
   // Counter for generating unique mutex IDs within this instance.

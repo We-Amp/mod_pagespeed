@@ -200,11 +200,12 @@ pthread_mutex_t segment_bases_lock = PTHREAD_MUTEX_INITIALIZER;
 
 }  // namespace
 
-size_t PthreadSharedMem::s_instance_count_ = 0;
+std::atomic<size_t> PthreadSharedMem::s_instance_count_{0};
 
 PthreadSharedMem::SegmentBaseMap* PthreadSharedMem::segment_bases_ = nullptr;
 
-PthreadSharedMem::PthreadSharedMem() { instance_number_ = ++s_instance_count_; }
+PthreadSharedMem::PthreadSharedMem()
+    : instance_number_(s_instance_count_.fetch_add(1) + 1) {}
 
 PthreadSharedMem::~PthreadSharedMem() {}
 

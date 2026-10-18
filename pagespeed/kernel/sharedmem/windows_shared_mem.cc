@@ -258,10 +258,10 @@ struct WindowsSharedMem::SegmentInfo {
   SegmentInfo() : file_mapping(nullptr), size(0) {}
 };
 
-size_t WindowsSharedMem::s_instance_count_ = 0;
+std::atomic<size_t> WindowsSharedMem::s_instance_count_{0};
 
 WindowsSharedMem::WindowsSharedMem() : next_mutex_id_(0) {
-  instance_number_ = ++s_instance_count_;
+  instance_number_ = s_instance_count_.fetch_add(1) + 1;
   instance_prefix_ = StrCat("ps", IntegerToString(instance_number_), "_");
 }
 
