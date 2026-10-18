@@ -265,14 +265,14 @@ TEST_F(AddInstrumentationFilterTest, Quoting) {
 // The configured beacon URL is spliced into a single-quoted JS literal, so it
 // must be JS-escaped exactly like the page URL next to it.
 TEST_F(AddInstrumentationFilterTest, BeaconUrlIsJsEscaped) {
-  options()->set_beacon_url("http://example.com/beacon?x=');alert(1);//");
+  options()->set_beacon_url("http://example.com/beacon?x=');y=1;//");
   RunInjection();
   GoogleString escaped;
   EscapeToJsStringLiteral(options()->beacon_url().http, false, &escaped);
   EXPECT_NE(GoogleString::npos,
             output_buffer_.find(StrCat("'", escaped, "',"))) << output_buffer_;
   // The unescaped splice would terminate the literal at the quote after x=.
-  EXPECT_EQ(GoogleString::npos, output_buffer_.find("x=');alert(1);//"))
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("x=');y=1;//"))
       << output_buffer_;
 }
 
