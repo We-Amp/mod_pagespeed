@@ -218,7 +218,14 @@ bool CachingHeaders::ComputeFreshnessLifetimeMillis(
     return true;
   }
 
-  // First, look for Cache-Control: max-age. The HTTP/1.1 RFC
+  // This is a shared cache, so Cache-Control: s-maxage sets the freshness
+  // lifetime when present and overrides max-age (RFC 7234 4.2.1).
+  if (s_max_age_seconds_.has_value()) {
+    *out_freshness_lifetime_ms = 1000LL * s_max_age_seconds_.value();
+    return true;
+  }
+
+  // Next look for Cache-Control: max-age. The HTTP/1.1 RFC
   // indicates that CC: max-age takes precedence to Expires.
   if (max_age_seconds_.has_value()) {
     *out_freshness_lifetime_ms = 1000LL * max_age_seconds_.value();
@@ -285,6 +292,15 @@ void CachingHeaders::ParseCacheControlIfNecessary() {
           no_cache_ = true;
         } else if (StringCaseEqual(value, "no-store")) {
           no_store_ = true;
+        } else if (StringCaseStartsWith(value, "s-maxage=")) {
+          int s_max_age_value = 0;
+          StringPiece s_max_age_piece =
+              value.substr(STATIC_STRLEN("s-maxage="));
+          if (StringToInt(s_max_age_piece, &s_max_age_value)) {
+            s_max_age_seconds_.set_value(s_max_age_value);
+          } else {
+            cache_control_parse_error_ = true;
+          }
         } else if (StringCaseStartsWith(value, "max-age=")) {
           int max_age_value = 0;
           StringPiece max_age_piece = value.substr(STATIC_STRLEN("max-age="));
@@ -318,7 +334,9 @@ bool CachingHeaders::ComputeHasExplicitNoCacheDirective() {
   ParseCacheControlIfNecessary();
 
   if (no_cache_ || no_store_ ||
-      (max_age_seconds_.has_value() && max_age_seconds_.value() <= 0)) {
+      (s_max_age_seconds_.has_value() && s_max_age_seconds_.value() <= 0) ||
+      (max_age_seconds_.has_value() && max_age_seconds_.value() <= 0 &&
+       !s_max_age_seconds_.has_value())) {
     return true;
   }
 

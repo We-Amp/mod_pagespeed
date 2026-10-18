@@ -231,4 +231,45 @@ TEST_F(CachingHeadersTest, CaseInsensitiveDirectives) {
   EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
 }
 
+TEST_F(CachingHeadersTest, SMaxAgeOverridesMaxAgeForSharedCaches) {
+  // This cache is shared, so s-maxage, not max-age, sets the freshness
+  // lifetime (RFC 7234 4.2.1). A response that forbids shared-cache storage
+  // via s-maxage=0 must not be held for max-age's full year.
+  SetCacheControl("max-age=31536000, s-maxage=0");
+  EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
+  EXPECT_FALSE(headers_->IsCacheable());
+  EXPECT_FALSE(headers_->IsExplicitlyCacheable());
+  int64 freshness_ms = -1;
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(0, freshness_ms);
+
+  // The reverse: a long s-maxage outranks max-age=0 for this cache.
+  SetCacheControl("s-maxage=31536000, max-age=0");
+  EXPECT_FALSE(headers_->HasExplicitNoCacheDirective());
+  EXPECT_TRUE(headers_->IsCacheable());
+  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+  freshness_ms = -1;
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(31536000000LL, freshness_ms);
+
+  // When both are positive, s-maxage wins on magnitude too.
+  SetCacheControl("max-age=60, s-maxage=30");
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(30000, freshness_ms);
+
+  // Directive names are case-insensitive.
+  SetCacheControl("MAX-AGE=60, S-MAXAGE=0");
+  EXPECT_TRUE(headers_->HasExplicitNoCacheDirective());
+}
+
+TEST_F(CachingHeadersTest, SMaxAgeAloneSetsFreshness) {
+  // s-maxage with no max-age: explicit freshness without Expires.
+  SetCacheControl("s-maxage=600");
+  EXPECT_TRUE(headers_->HasExplicitFreshnessLifetime());
+  EXPECT_TRUE(headers_->IsExplicitlyCacheable());
+  int64 freshness_ms = -1;
+  EXPECT_TRUE(headers_->GetFreshnessLifetimeMillis(&freshness_ms));
+  EXPECT_EQ(600000, freshness_ms);
+}
+
 }  // namespace net_instaweb
