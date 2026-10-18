@@ -9,27 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Image optimization: converting certain images to JPEG could make a
-  worker process exit (denial of service).** An image whose dimensions
-  exceed what libjpeg accepts crashed the worker when a conversion to
-  JPEG was attempted, for example an oversized PNG on a server with
-  JPEG conversion enabled. The conversion now fails cleanly and the
-  original image is kept. Affects the module and the optimizer worker
-  in releases up to and including 2.4.0. **Update recommended.**
-- **Image optimization: GIF images could expose uninitialized process
-  memory in decoded pixels.** A pixel index beyond the end of the
-  color map expanded to bytes from an uninitialized stack buffer. Such
-  pixels now decode to deterministic black. Affects the module and the
-  optimizer worker in releases up to and including 2.4.0 with image
-  optimization enabled. **Update recommended.**
-- **Image optimization: certain GIF images could make a worker process
-  exit (denial of service).** A GIF extension block carrying no data
-  crashed the image reader on three decode paths: the per-frame
-  graphics control extension, the animation loop-count block, and the
-  GIF-to-PNG conversion path. The reader now rejects such images.
-  Affects the module and the optimizer worker in releases up to and
-  including 2.4.0 with image optimization enabled. **Update
-  recommended.**
+- **Image optimization: specially crafted images could make a worker process exit or
+  consume unbounded memory (denial of service).** Malformed or oversized GIF, PNG,
+  WebP and JPEG inputs are now rejected before any work proportional to their
+  declared size is done, and a failed conversion keeps the original image.
+  Affects the module in releases up to and including 1.19.0 and the optimizer
+  worker up to and including 2.4.0 with image optimization enabled.
+  **Update recommended.**
+- **Image optimization: certain GIF images could expose uninitialized process memory
+  in optimized output.** Such pixels now decode deterministically. Same affected
+  releases. **Update recommended.**
+- **Memory-safety issues under concurrent load in background cache refresh, the
+  curl-based fetcher and cache shutdown.** Several lifetime and ordering defects
+  could corrupt memory or leak resources. Same affected releases.
+  **Update recommended.**
+- **Resource exhaustion from crafted inputs.** Parsing of certain JavaScript and
+  CSS no longer takes quadratic time; decompression of fetched resources and of
+  compressed cache entries, spooled request bodies in the nginx module, and the
+  image sprite canvas are now bounded. Same affected releases.
+  **Update recommended.**
+- **Cached-resource handling: crafted cache contents could cause out-of-bounds
+  reads or use out-of-range indexes into served responses.** Metadata-cache
+  entries with invalid slot indexes are rejected, and a corrupt cached value is
+  detected before any of it is served. Same affected releases.
+  **Update recommended.**
+- **nginx module: a truncated origin response could be cached as complete, and a
+  statistics logfile left behind by a crashed process could hang the admin
+  endpoint.** Both fixed. Same affected releases. **Update recommended.**
+- **IIS module and Windows shared memory: certain requests or configuration
+  values could abort the worker process, and several lifetime and cross-process
+  defects were fixed.** Same affected releases. **Update recommended.**
+- **ASP.NET Core sidecar: the generated configuration directory and file are now
+  created owner-only from the start, and the sidecar manager no longer raises
+  its state event while holding its lock.**
+- **Build scripts: the nginx build script now verifies the nginx download against
+  a pinned digest, and the container build script configures the LLVM apt
+  source instead of executing a downloaded installer.**
 
 ### Changed
 
@@ -37,44 +52,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package and ships the daemon configuration and SELinux policy; it was built
   without them.
 - A build from source now reports the module version (1.19.0) instead of 2.4.0.
+- Resources whose gzip-compressed body would decompress to more than
+  `MaxCacheableContentLength` (default 16 MB) are no longer optimized; they are
+  served unmodified. Compressed metadata-cache entries past the same size are
+  treated as cache misses.
+- An out-of-range `MessageBufferSize` is rejected as a configuration error.
+- Image spriting now honours `ImageResolutionLimitBytes`, like image rewriting.
+- The nginx module's native fetcher no longer accepts an origin body whose
+  length does not match the declared `Content-Length`.
+- The nginx module reads its local signed-agent key file once per change
+  instead of once per request.
 
 ### Fixed
 
-- A background cache refresh (proactive freshening or serve-stale-while-
-  revalidate) that waited for its fetch lock no longer reads memory freed when
-  the original request finished.
-- A dispatcher-backed task sequence no longer hangs on shutdown when its
-  dispatcher is already shutting down; tasks it can no longer run are
-  cancelled.
-- Shutting down a batched cache (memcached or Redis behind the lookup
-  batcher) while lookups were waiting for a free slot no longer aborts the
-  process; each waiting lookup is reported as a miss.
-- Shutting down the Cyclone cache while request threads are still reading or
-  writing it now waits for those operations instead of destroying the cache
-  under them.
-- Parallel resource fetches for one page no longer race on the per-request
-  list of origins authorized for fetching.
-- A proxied request rejected as unauthorized no longer leaks its property
-  cache lookup state when the lookup finishes after the rejection.
-- Image decoding now rejects PNG and WebP streams that declare dimensions
-  beyond the decode caps (16384 per side, 100 megapixels in total), instead
-  of allocating buffers proportional to the declared size. A tiny stream
-  could declare huge dimensions and exhaust worker memory.
-- A fetched resource whose gzip body inflates past the largest response the
-  server is configured to handle is no longer inflated in full; it is kept
-  compressed and treated like any other unusable content.
-- A compressed metadata-cache payload that inflates past the largest
-  cacheable response size is now reported as a corrupt entry (a cache miss)
-  instead of being inflated in full on the reading thread.
-- The shared message buffer (`MessageBufferSize`) now refuses a capacity
-  that is non-positive or too large for its size computation (over 1 GiB):
-  the buffer is left off instead of misbehaving in shared memory.
-- Image spriting now applies the same `ImageResolutionLimitBytes` budget as
-  image rewriting, so a candidate image whose declared dimensions exceed the
-  limit is skipped instead of being laid out into a canvas of that size.
-- The two-tier cache that routes values by size no longer truncates the
-  stored size to 32 bits, so a value past 2 GB is routed to the large-object
-  tier as intended instead of wrapping into the small-object tier.
+- Shutting down a memcached or Redis cache with lookups still queued no longer
+  aborts the process, and Cyclone cache shutdown waits for in-progress
+  operations.
+- Parallel resource fetches for one page no longer race on the per-request set
+  of authorized origins; a rejected proxied request no longer leaks its
+  property-cache lookup state.
+- Very large values in the two-tier cache are stored in the large-object tier.
+- The nginx module's automatic gzip setup survives configuration reloads.
+- Statistics logfile parsing tolerates truncated and malformed records.
+- Cache-Control and Pragma directives are matched case-insensitively, so a
+  response marked private or no-store in any letter case is no longer treated
+  as shareable.
+- A rewritten attribute value that needs quoting is always quoted.
+- A domain mapping that fails validation no longer leaves the target domain
+  authorized for fetching.
+- The key-directory fetch for signed-agent verification applies its documented
+  timeout and never follows redirects.
+- An in-place optimized response whose body exceeds the cacheable size is
+  passed through consistently instead of with a mismatched length.
 
 ## [2.4.0] - 2026-10-14
 
