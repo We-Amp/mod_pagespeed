@@ -64,8 +64,9 @@ class WinThreadImpl : public ThreadSystem::ThreadImpl {
       : thread_system_(thread_system), wrapper_(wrapper), flags_(flags) {}
 
   virtual ~WinThreadImpl() {
-    // If the thread was detached and is still joinable, detach it now.
-    if (thread_.joinable() && (flags_ & ThreadSystem::kJoinable) == 0) {
+    // thread_ only ever holds a joinable thread. If it was started but never
+    // joined, detach it: destroying a joinable std::thread ends the process.
+    if (thread_.joinable()) {
       thread_.detach();
     }
   }
