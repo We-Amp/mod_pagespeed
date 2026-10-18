@@ -41,11 +41,23 @@ pagespeed_cc_test(
             # Pthread tests don't build on Windows.
             "pthread_condvar_test.cc",
             "pthread_thread_system_test.cc",
+            # Windows-only; see win_thread_system_test below.
+            "win_thread_system_test.cc",
         ],
     ),
     deps = [
         ":thread_test_base",
         "//pagespeed/kernel/thread:event_dispatcher",
+    ],
+)
+
+pagespeed_cc_test(
+    name = "win_thread_system_test",
+    srcs = ["win_thread_system_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":thread_test_base",
+        "//pagespeed/kernel/thread:win_thread",
     ],
 )
 
