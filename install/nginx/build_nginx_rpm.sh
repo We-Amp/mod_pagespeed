@@ -90,7 +90,7 @@ COMPANY_FULLNAME="We-Amp"
 MAINTNAME="mod_pagespeed developers"
 MAINTMAIL="info@we-amp.com"
 PRODUCTURL="https://github.com/we-amp/mod_pagespeed/"
-SHORTDESC="nginx module to optimize web content (mod_pagespeed 1.15)."
+SHORTDESC="nginx module to optimize web content (mod_pagespeed ${VERSION})."
 FULLDESC="ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and their resources (CSS, JavaScript, images) to apply web performance best practices automatically. Pinned to the exact stock nginx version it was built against."
 
 # --- exact-version nginx pin (model (a')) -----------------------------------
@@ -146,7 +146,7 @@ install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.
 # modules/), NOT the --modules-path (/usr/lib64/nginx/modules/), so a relative
 # path dlopen-fails. nginx.org's own el9 module RPMs use the absolute path too.
 cat > "${STAGEDIR}${NGINX_LOADDIR}/mod-pagespeed.conf" <<SNIP
-# ngx_pagespeed dynamic module (We-Amp mod_pagespeed 1.15).
+# ngx_pagespeed dynamic module (We-Amp mod_pagespeed ${VERSION}).
 # Auto-included by stock el${DISTRO_MAJOR} nginx via the main-context
 # \`include /usr/share/nginx/modules/*.conf;\` (loads before http{}).
 load_module "${NGINX_MODULEDIR}/ngx_pagespeed_module.so";
