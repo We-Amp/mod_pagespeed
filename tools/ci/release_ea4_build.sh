@@ -160,6 +160,21 @@ run() {
     return 1
   fi
 
+  # The spec names the stock RPM it wraps through %global mps_version, so a
+  # spec still at the previous version cannot find its Source1 and rpmbuild
+  # fails late with a missing-file error. Say what is wrong before that.
+  local spec_version file_version
+  spec_version="$(sed -n 's/^%global mps_version //p' "$SPEC_DIR/ea-apache24-mod_pagespeed.spec" | head -n 1)"
+  file_version="$(sed -n 's/^MAJOR=//p' "$VERSION_FILE").$(sed -n 's/^MINOR=//p' "$VERSION_FILE").$(sed -n 's/^BUILD=//p' "$VERSION_FILE")"
+  if [ "$spec_version" != "$file_version" ]; then
+    if [ "$OS" = el10 ]; then
+      echo "::warning::%global mps_version $spec_version in the spec is not the release version $file_version; skipping the el10 cPanel package (additive)" >&2
+      emit false; return 0
+    fi
+    echo "::error::%global mps_version $spec_version in $SPEC_DIR/ea-apache24-mod_pagespeed.spec is not the release version $file_version. Bump it (and add a %changelog entry) with the module version." >&2
+    return 1
+  fi
+
   [ -n "$WORK" ] || WORK="$(mktemp -d)"
   rm -rf "$WORK"; mkdir -p "$WORK/spec" "$WORK/upstream" "$WORK/build-out"
   cp -a "$SPEC_DIR/." "$WORK/spec/"
@@ -210,6 +225,19 @@ self_test() {
   fi
   run --os el10 --upstream "$t/up" --version-file "$t/V3" --out "$t/out" 2>/dev/null | grep -qx 'built=false' \
     || { echo "FAIL: el10 mismatch should skip"; fail=1; }
+  # the spec's mps_version must be the release version (checked before docker)
+  mkdir -p "$t/up25"
+  : > "$t/up25/mod-pagespeed-2.5.0-1.x86_64.rpm"
+  printf 'MAJOR=2\nMINOR=5\nBUILD=0\nPRERELEASE=\nLASTCHANGE=1\n' > "$t/V25"
+  chk "expected name 2.5.0" "$(expected_name "$t/V25")" "mod-pagespeed-2.5.0-1.x86_64.rpm"
+  printf '%%global mps_version 1.19.0\n%%global mps_release 1\n' > "$t/spec-dir/ea-apache24-mod_pagespeed.spec"
+  if run --os el9 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" >"$t/err" 2>&1; then
+    echo "FAIL: spec mps_version 1.19.0 accepted for a 2.5.0 release"; fail=1
+  fi
+  grep -qF "::error::%global mps_version 1.19.0 in $t/spec-dir/ea-apache24-mod_pagespeed.spec is not the release version 2.5.0" "$t/err" \
+    || { echo "FAIL: spec mismatch error text: $(cat "$t/err")"; fail=1; }
+  run --os el10 --upstream "$t/up25" --version-file "$t/V25" --out "$t/out" --spec-dir "$t/spec-dir" 2>/dev/null | grep -qx 'built=false' \
+    || { echo "FAIL: el10 spec mismatch should skip"; fail=1; }
   : > "$t/up/mod-pagespeed-1.19.0-2.x86_64.rpm"
   if run --os el9 --upstream "$t/up" --version-file "$t/V" --out "$t/out" >/dev/null 2>&1; then
     echo "FAIL: two stock RPMs accepted"; fail=1
