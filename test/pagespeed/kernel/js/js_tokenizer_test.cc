@@ -37,6 +37,25 @@ namespace {
 
 const char kTestRootDir[] = "/test/pagespeed/kernel/js/testdata/third_party/";
 
+// Wall-clock ceiling for the linearity tests. A quadratic scan of their
+// inputs takes minutes; a linear one takes about a second, and a few times
+// that under a sanitizer, so the ceiling separates the two without tripping
+// on an instrumented build on a busy machine.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define JS_TOKENIZER_TEST_SANITIZED 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define JS_TOKENIZER_TEST_SANITIZED 1
+#endif
+#ifdef JS_TOKENIZER_TEST_SANITIZED
+constexpr std::chrono::seconds kLinearTimeCeiling(60);
+#else
+constexpr std::chrono::seconds kLinearTimeCeiling(10);
+#endif
+
 class JsTokenizerTest : public testing::Test {
  protected:
   void BeginTokenizing(StringPiece input) {
@@ -685,7 +704,7 @@ TEST_F(JsTokenizerTest, SpeculativeRegexManyBlockCommentOpenersIsLinear) {
   while (tokenizer.NextToken(&token) != JsKeywords::kEndOfInput) {
   }
   const auto elapsed = std::chrono::steady_clock::now() - start;
-  EXPECT_LT(elapsed, std::chrono::seconds(10));
+  EXPECT_LT(elapsed, kLinearTimeCeiling);
 }
 
 TEST_F(JsTokenizerTest, SpeculativeRegexBlockCommentEndReused) {
@@ -724,7 +743,7 @@ TEST_F(JsTokenizerTest, SpeculativeRegexManyLiteralsIsLinear) {
   }
   const auto elapsed = std::chrono::steady_clock::now() - start;
   EXPECT_FALSE(tokenizer.has_error());
-  EXPECT_LT(elapsed, std::chrono::seconds(10));
+  EXPECT_LT(elapsed, kLinearTimeCeiling);
 }
 
 TEST_F(JsTokenizerTest, SpeculativeOperatorBlockGuard) {
