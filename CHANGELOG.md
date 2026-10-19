@@ -147,6 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   served as `max-age=0, no-cache`.
 - ASP.NET Core: client-supplied `X-Original-For`, `X-Original-Proto` and
   `X-Original-Host` headers are no longer relayed to the origin hop.
+- Package descriptions and the render-only directive message no longer name the
+  1.15 line; they carry the build's version or say "mod_pagespeed".
 
 ### Fixed
 
