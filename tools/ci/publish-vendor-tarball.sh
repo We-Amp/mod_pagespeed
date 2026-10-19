@@ -97,11 +97,24 @@ if [ -n "$TMP" ]; then
   else
     # The temp file lives elsewhere (a runner-private path): stage a copy in
     # the shared directory under a unique name and prove it equals the source.
-    rm -f "$STAGE"
-    cp "$TMP" "$STAGE"
-    if [ "$(size_of "$STAGE")" != "$TMP_SIZE" ] || [ "$(hash_of "$STAGE")" != "$(hash_of "$TMP")" ]; then
+    # DrvFs can hand back stale or short bytes right after a copy: prove the
+    # copy with the same patience as every other step, and copy again a few
+    # times before calling it a bad copy.
+    TMP_HASH="$(hash_of "$TMP")"
+    copy_matches() {
+      [ "$(size_of "$STAGE")" = "$TMP_SIZE" ] && [ "$(hash_of "$STAGE")" = "$TMP_HASH" ]
+    }
+    copied=0
+    for i in 1 2 3; do
       rm -f "$STAGE"
-      echo "::error::copy of $(basename "$TMP") into $DIR differs from its source" >&2
+      cp "$TMP" "$STAGE"
+      flush "$STAGE"
+      if settle copy_matches; then copied=1; break; fi
+      log "copy of $(basename "$TMP") into $DIR differs from its source (attempt $i of 3)"
+    done
+    if [ "$copied" != 1 ]; then
+      rm -f "$STAGE"
+      echo "::error::copy of $(basename "$TMP") into $DIR differs from its source after 3 attempts" >&2
       exit 1
     fi
   fi
