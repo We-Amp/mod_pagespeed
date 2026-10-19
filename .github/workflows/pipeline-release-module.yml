@@ -2752,8 +2752,11 @@ jobs:
                 case "$dep" in *"pagespeed-optimizer (= ${PAIR_VERSION})"*) ;; *) echo "::error::$deb does not depend on pagespeed-optimizer (= ${PAIR_VERSION}): $dep"; exit 1 ;; esac
                 # Takes over from Google's archived packages in one step, and
                 # keeps their LoadModule ... mod_pagespeed_ap24.so loading.
+                # The packaging tools may reorder a relationship list, so the
+                # set of names is compared, not the string.
                 for f in Conflicts Replaces; do
-                  [ "$(dpkg-deb -f "$deb" "$f")" = "mod-pagespeed-stable, mod-pagespeed-beta" ] \
+                  got="$(dpkg-deb -f "$deb" "$f" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sort | paste -sd, -)"
+                  [ "$got" = "mod-pagespeed-beta,mod-pagespeed-stable" ] \
                     || { echo "::error::$deb $f is '$(dpkg-deb -f "$deb" "$f")'"; exit 1; }
                 done
                 dpkg-deb -c "$deb" | grep -Eq '^l.* \./usr/lib/apache2/modules/mod_pagespeed_ap24\.so -> mod_pagespeed\.so$' \
