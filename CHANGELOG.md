@@ -5,153 +5,153 @@ All notable changes to mod_pagespeed are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.5.0] - 2026-10-19
 
 ### Security
 
-- **Image optimization: specially crafted images could make a worker process exit or
-  consume unbounded memory (denial of service).** Malformed or oversized GIF, PNG,
-  WebP and JPEG inputs are now rejected before any work proportional to their
-  declared size is done, and a failed conversion keeps the original image.
-  Affects the module in releases up to and including 1.19.0 and the optimizer
-  worker up to and including 2.4.0 with image optimization enabled.
+- **Image optimization: specially crafted images could make a worker process
+  exit or consume unbounded memory (denial of service), and certain GIF
+  images could expose process memory in optimized output.** Malformed and
+  oversized GIF, PNG, WebP and JPEG inputs are now rejected up front, and a
+  failed conversion keeps the original image. Affects the module in releases
+  up to and including 1.19.0 with image optimization enabled, and, for the
+  crafted-image items, the optimizer worker up to and including 2.4.0.
   **Update recommended.**
-- **Image optimization: certain GIF images could expose uninitialized process memory
-  in optimized output.** Such pixels now decode deterministically. Same affected
-  releases. **Update recommended.**
-- **Memory-safety issues under concurrent load in background cache refresh, the
-  curl-based fetcher and cache shutdown.** Several lifetime and ordering defects
-  could corrupt memory or leak resources. Affects the module in releases up to
-  and including 1.19.0. **Update recommended.**
-- **Resource exhaustion from crafted inputs.** Parsing of certain JavaScript and
-  CSS no longer takes quadratic time; decompression of fetched resources and of
-  compressed cache entries, spooled request bodies in the nginx module, and the
-  image sprite canvas are now bounded. Affects the module in releases up to and
-  including 1.19.0 and, for the parsing and decompression items, the optimizer
-  worker up to and including 2.4.0. **Update recommended.**
-- **Cached-resource handling: crafted cache contents could cause out-of-bounds
-  reads or use out-of-range indexes into served responses.** Corrupt
-  metadata-cache entries are rejected, and a corrupt cached value is
-  detected before any of it is served. Affects the module in releases up to
-  and including 1.19.0. **Update recommended.**
-- **nginx module: a truncated origin response could be cached as complete.**
-  Fixed. Affects the module in releases up to and including 1.19.0.
+- **Resource exhaustion from crafted inputs.** The time spent parsing
+  JavaScript and CSS, the size of decompressed resources and of compressed
+  cache entries, spooled request bodies in the nginx module and the image
+  sprite canvas are now bounded. Affects the module in releases up to and
+  including 1.19.0 and, for JavaScript parsing, the optimizer worker up to
+  and including 2.4.0. **Update recommended.**
+- **Memory-safety defects under concurrent load in background cache
+  refresh, the fetcher and cache shutdown could corrupt memory or leak
+  resources.** Affects the module in releases up to and including 1.19.0.
   **Update recommended.**
-- **A truncated statistics logfile could hang the statistics admin page.** Fixed.
-  Affects the module in releases up to and including 1.19.0.
+- **Cached-resource handling: crafted cache contents could cause
+  out-of-bounds memory reads.** Corrupt cache entries are now rejected
+  before any of them is served. Affects the module in releases up to and
+  including 1.19.0. **Update recommended.**
+- **Disk cache: damaged or stale cache contents could be served, and a
+  damaged cache file could terminate the worker process.** Affects the
+  module in releases up to and including 1.19.0. **Update recommended.**
+- **nginx module: a truncated origin response could be cached as
+  complete.** Affects the module in releases up to and including 1.19.0.
+  **Update recommended.**
+- **Shared caching: certain origin responses could be stored or served
+  with a longer lifetime than the origin allowed, including responses
+  marked private.** Affects the module in releases up to and including
+  1.19.0. **Update recommended.**
+- **Signed resource URLs: the server log could contain information that
+  lets someone with log access construct valid signed URLs.** The log no
+  longer records it. Affects the module in releases up to and including
+  1.19.0 with URL signing enabled. **Update recommended.**
+- **Measurement proxy and beacons: the proxy password and beacon nonces
+  were weaker against guessing than intended.** Affects the module in
+  releases up to and including 1.19.0. **Update recommended.**
+- **Image spriting: crafted sprite input could corrupt memory.** Affects
+  the module in releases up to and including 1.19.0. **Update
+  recommended.**
+- **Statistics admin page: a damaged statistics log file could hang the
+  page.** Affects the module in releases up to and including 1.19.0.
   **Update recommended.**
 - **IIS module and Windows shared memory: certain requests or configuration
-  values could abort the worker process, and several lifetime and cross-process
-  defects were fixed.** Affects the module in releases up to and including
-  1.19.0. **Update recommended.**
-- **ASP.NET Core sidecar: the generated configuration could briefly be readable
-  by other local users.** The directory and file are now created owner-only and
-  replaced atomically. Affects WeAmp.PageSpeed up to and including 2.4.0.
-  **Update recommended.**
-- **Build scripts: the nginx build script now verifies the nginx download against
-  a pinned digest, and the container build script configures the LLVM apt
-  source instead of executing a downloaded installer.**
-- **Signed resource URLs: an invalid signed-resource URL could cause the expected
-  signature to be written to the server log, where anyone with log access could
-  use it.** The log now records only the URL and the value provided. Affects the module in releases up to and including
-  1.19.0 with URL signing enabled. **Update recommended.**
-- **Shared caching: certain origin responses could be stored or served with a
-  longer lifetime than the origin allowed, including responses marked
-  private.** Affects the module in releases up to and including 1.19.0.
-  **Update recommended.**
-- **IIS module: very large or chunked origin responses could be truncated or
-  mishandled, and memory pressure could crash the worker process.** The
-  connection is now reset in that last case, including for
-  in-place fetches that previously fell back to the original file. Affects the
-  module in releases up to and including 1.19.0. **Update recommended.**
-- **ASP.NET Core sidecar: the sidecar information endpoint now requires
-  authorization by default, and a remote address rewritten by forwarded-header
-  processing is no longer trusted as a loopback peer.** Affects WeAmp.PageSpeed
-  up to and including 2.4.0. **Update recommended.**
-- **Image spriting: out-of-range image offsets could corrupt memory.** Fixed.
-  Affects the module in releases up to and including 1.19.0.
-  **Update recommended.**
-- **Measurement proxy and beacons: the proxy password and beacon nonces were
-  exposed to guessing through response timing, and a failed read of random data
-  could produce an unsafe nonce.** Affects the module in releases up to and
-  including 1.19.0. **Update recommended.**
-- **Source builds: the Apache development install no longer stages
-  configuration in a fixed shared temporary path, and the CentOS toolchain
-  signing key is fetched over HTTPS.**
-- **Disk cache: damaged or stale cache contents could be served, and a damaged
-  cache file could terminate the worker process.** Affects the module in
-  releases up to and including 1.19.0. **Update recommended.**
+  values could abort the worker process, very large or chunked origin
+  responses could be truncated or mishandled, memory pressure could crash
+  the worker process, and several lifetime and cross-process defects were
+  fixed.** When memory runs out the connection is now reset, including for
+  in-place fetches that previously fell back to the original file. Affects
+  the module in releases up to and including 1.19.0. **Update
+  recommended.**
+- **ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`): the generated sidecar
+  configuration could briefly be readable by other local users, the sidecar
+  information endpoint did not require authorization, and a loopback-only
+  check could be satisfied by a remote client.** The configuration
+  directory and file are now created owner-only and replaced atomically,
+  `MapPageSpeedInfo` requires authorization by default, and loopback checks
+  use the connection's own address. Affects `WeAmp.PageSpeed.Sidecar` up to
+  and including 1.17.0; the fixes are in this source release and an updated
+  package follows separately. **Update recommended.**
 
 ### Changed
 
-- The bundled Cyclone cache library moves to a new on-disk format, so the disk
-  cache starts empty after upgrading (expect a one-time rise in origin
-  fetches). The previous cache file is left on disk and can be deleted once no
-  process of the previous version runs. During a rolling restart old and new
-  processes use separate cache files, so disk use temporarily doubles, and with
-  several worker processes the hit rate stays low until all of them run the new
+- **One version number.** The packages move from 1.19.0 to 2.5.0 and the
+  product from 2.4.0 to 2.5.0: from this release on the module packages,
+  the optimizer packages, the container images, the NuGet packages, the
+  Helm chart's application version and the version header all carry 2.5.0.
+  A package pin, image tag, NuGet version range or header match on `1.`
+  needs updating before the upgrade. The ABI, the configuration directives
+  and the module-to-worker handshake are unchanged.
+- **The disk cache moves to a new on-disk format, so the cache starts empty
+  after upgrading** (expect a one-time rise in origin fetches). The previous
+  cache file is left on disk and can be deleted once no process of the
+  previous version runs. During a rolling restart old and new processes use
+  separate cache files, so disk use temporarily doubles, and with several
+  worker processes the hit rate stays low until all of them run the new
   version. Rolling back finds the previous cache file intact. The optimizer
-  daemon moves its cache to `/var/cache/pagespeed-optimizer/v3` for the same
-  reason and publishes cache-directory generation 3; this module is built for
-  generation 3 and the packaged `pagespeed_daemon.conf` points
+  worker moves its cache to `/var/cache/pagespeed-optimizer/v3` for the same
+  reason and publishes cache-directory generation 3; this module is built
+  for generation 3 and the packaged `pagespeed_daemon.conf` points
   `ModPagespeedDaemonVolumePath` at `/var/cache/pagespeed-optimizer/v3/cache`.
   If you set `ModPagespeedDaemonVolumePath` (Apache) or `pagespeed
-  DaemonVolumePath` (nginx) yourself, change `v2` to `v3`: a module and daemon
-  on different generations refuse to attach, loudly, and in-place
-  optimization stays off until they agree. Install the module and the daemon
-  as the matching pair the packages already require.
-
-- The EL10 Apache package now requires the matching `pagespeed-optimizer`
-  package and ships the daemon configuration and SELinux policy; it was built
-  without them.
-- A build from source now reports the module version (1.19.0) instead of 2.4.0.
+  DaemonVolumePath` (nginx) yourself, change `v2` to `v3`: a module and
+  worker on different generations refuse to attach, loudly, and in-place
+  optimization stays off until they agree. Install the module and the
+  worker as the matching pair the packages already require.
+- The EL8 and EL10 Apache packages now require the matching
+  `pagespeed-optimizer` package and ship the worker configuration and
+  SELinux policy; they were built without them.
+- A build from source reports 2.5.0, the same version as the packages.
 - Resources whose gzip-compressed body would decompress to more than
-  `MaxCacheableContentLength` (default 16 MB) are no longer optimized; they are
-  served unmodified. Compressed metadata-cache entries that would
-  decompress past the larger of `MaxCacheableContentLength` and 16 MB are treated
-  as cache misses.
+  `MaxCacheableContentLength` (default 16 MB) are no longer optimized; they
+  are served unmodified. Compressed metadata-cache entries that would
+  decompress past the larger of `MaxCacheableContentLength` and 16 MB are
+  treated as cache misses.
 - A negative `MessageBufferSize`, or one above 1 GiB, is now a configuration
   error on all servers, IIS included.
-- Image spriting now honours `ImageResolutionLimitBytes`, like image rewriting.
-- The nginx module's native fetcher no longer accepts an origin body whose
-  length does not match the declared `Content-Length`.
+- Image spriting now honours `ImageResolutionLimitBytes`, like image
+  rewriting.
+- The nginx module's native fetcher rejects an incomplete origin response
+  instead of caching it.
 - The nginx module reads its local signed-agent key file once per change
   instead of once per request.
 - The nginx module rejects spooled request bodies over 128 KiB for its own
-  handlers, matching Apache, and answers an admin POST whose body could not be
-  loaded with 413.
-- `MapPageSpeedInfo` requires authorization by default; apps without
-  authentication pass `requireAuthorization: false`. With `UseForwardedHeaders()`
-  before `UsePageSpeed()`, raw-origin requests are rejected with 421; call
-  `UsePageSpeed()` first.
-- The Apache development install stages configuration in
-  `$TMPDIR/mod_pagespeed.install.<user>` (default `/tmp`, override with
-  `STAGING_DIR`) and refuses a missing or foreign-owned
-  staging directory.
-- `IproMaxResponseBytes 0` (unlimited) no longer stops in-place optimization of
-  responses that send a Content-Length; oversized responses are rejected as soon
-  as their headers arrive.
+  handlers, matching Apache, and answers an admin POST whose body could not
+  be loaded with 413.
+- ASP.NET Core sidecar: `MapPageSpeedInfo` requires authorization by
+  default; apps without authentication pass `requireAuthorization: false`.
+  With `UseForwardedHeaders()` before `UsePageSpeed()`, raw-origin requests
+  are rejected with 421; call `UsePageSpeed()` first. Client-supplied
+  `X-Original-For`, `X-Original-Proto` and `X-Original-Host` headers are no
+  longer relayed to the origin hop.
+- Source builds: the nginx build script verifies the nginx download against
+  a pinned digest, the container build script configures the LLVM package
+  source instead of running a downloaded installer, the Enterprise Linux
+  toolchain signing key is fetched over HTTPS, and the Apache development
+  install stages configuration in `$TMPDIR/mod_pagespeed.install.<user>`
+  (default `/tmp`, override with `STAGING_DIR`) and refuses a missing or
+  foreign-owned staging directory.
+- `IproMaxResponseBytes 0` (unlimited) no longer stops in-place optimization
+  of responses that send a Content-Length; oversized responses are rejected
+  as soon as their headers arrive.
 - JavaScript inlining declines scripts whose character set differs from the
   page's unless the content is plain ASCII.
 - The size-limit redirect script is not injected when the page's
   Content-Security-Policy forbids inline scripts.
 - Cookie names are matched case-sensitively when a cookie is removed.
-- Redis Cluster: invalid redirections and slot maps are rejected and the number
-  of cluster connections is capped.
+- Redis Cluster: invalid redirections and slot maps are rejected and the
+  number of cluster connections is capped.
 - `s-maxage` is honored for shared-cache freshness; it can only shorten the
   lifetime set by `max-age` or `Expires`, and `s-maxage=0` keeps a response
   out of the cache. Setting the in-place `s-maxage` window option to 0
-  therefore also stops in-place recording. Unoptimized in-place responses carry
-  the in-place `s-maxage` window (default 10 s) in their cached lifetime.
+  therefore also stops in-place recording. Unoptimized in-place responses
+  carry the in-place `s-maxage` window (default 10 s) in their cached
+  lifetime.
 - A response header line longer than 64 KiB is dropped and the response is
   served as `max-age=0, no-cache`.
-- ASP.NET Core: client-supplied `X-Original-For`, `X-Original-Proto` and
-  `X-Original-Host` headers are no longer relayed to the origin hop.
-- Package descriptions and the render-only directive message no longer name the
-  1.15 line; they carry the build's version or say "mod_pagespeed".
-
-- The admin console's description of the disk cache failures statistic now says
-  that writes skipped under momentary contention are not counted.
+- Package descriptions and the render-only directive message no longer name
+  the 1.15 line; they carry the build's version or say "mod_pagespeed".
+- The admin console's description of the disk cache failures statistic now
+  says that writes skipped under momentary contention are not counted.
 
 ### Fixed
 
@@ -161,75 +161,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apt-get install mod-pagespeed` removes the archived 1.13.35.2 package and
   takes over its files in the same run; before, apt stopped with "trying to
   overwrite '/etc/apache2/conf-available/pagespeed_libraries.conf'" and left
-  the package half-installed. The rpm declares `Conflicts` (below 1.15) on the
-  same names: on Enterprise Linux the move is
+  the package half-installed. The rpm declares `Conflicts` (below 1.15) on
+  the same names: on Enterprise Linux the move is
   `dnf swap mod-pagespeed-stable mod-pagespeed`, and a `dnf upgrade` never
   replaces Google's package unasked. Both packages also ship
   `mod_pagespeed_ap24.so` as a link to `mod_pagespeed.so`, so a kept, edited
   Google configuration that still loads the module under that name keeps
   working.
 - Disk cache: an unexpected internal failure in the cache library, such as
-  running out of memory, is now reported as a failed read or write instead of
-  being able to terminate the worker process.
-- Disk cache: a write skipped because of momentary contention (another writer
-  of the same entry, or another process holding the cache's locks) no longer
-  counts in `cyclone_cache_failures` or logs a warning, so that statistic again
-  means an unwritable or unhealthy cache. A read of a damaged entry, or one the
-  disk could not deliver, is still served as a miss and is now logged
-  (sampled, one in every 1024 such reads per cache).
-
-- Shutting down a memcached or Redis cache with lookups still queued no longer
-  aborts the process, Cyclone cache shutdown waits for in-progress operations,
-  and a task sequence no longer hangs at shutdown.
-- The ASP.NET Core sidecar manager no longer raises `StateChanged` while holding
-  its lock.
-- Parallel resource fetches for one page no longer race on the per-request set
-  of authorized origins; a rejected proxied request no longer leaks its
+  running out of memory, is now reported as a failed read or write instead
+  of being able to terminate the worker process.
+- Disk cache: a write skipped because of momentary contention (another
+  writer of the same entry, or another process holding the cache's locks)
+  no longer counts in `cyclone_cache_failures` or logs a warning, so that
+  statistic again means an unwritable or unhealthy cache. A read of a
+  damaged entry, or one the disk could not deliver, is still served as a
+  miss and is now logged (sampled, one in every 1024 such reads per cache).
+- Shutting down a memcached or Redis cache with lookups still queued no
+  longer aborts the process, disk cache shutdown waits for in-progress
+  operations, and a task sequence no longer hangs at shutdown.
+- ASP.NET Core sidecar: the sidecar manager no longer raises `StateChanged`
+  while holding its lock, a sidecar startup timeout is reported as a
+  timeout, and requests carrying client-supplied `X-Original-*` headers are
+  no longer wrongly rejected.
+- Parallel resource fetches for one page no longer race on the per-request
+  set of authorized origins; a rejected proxied request no longer leaks its
   property-cache lookup state.
-- Very large values in the two-tier cache are stored in the large-object tier.
+- Very large values in the two-tier cache are stored in the large-object
+  tier.
 - The nginx module's automatic gzip setup survives configuration reloads.
-- Cache-Control and Pragma directives are matched case-insensitively, so a
-  response marked private or no-store in any letter case is no longer treated
-  as shareable.
 - A rewritten attribute value that needs quoting is always quoted.
 - A domain mapping that fails validation no longer leaves the target domain
-  authorized for fetching.
-- Signed-agent verification accepts a key directory only from a successful (200)
-  response; a redirect or error response is rejected without being read.
+  authorized for fetching, and no longer applies its host header.
+- Signed-agent verification accepts a key directory only from a successful
+  (200) response; a redirect or error response is rejected without being
+  read. Key directories using `\uXXXX` escapes in key ids now match
+  correctly; malformed escapes reject the document.
 - An in-place optimized response whose body exceeds the cacheable size is
   passed through consistently instead of with a mismatched length.
 - The configured beacon URL is escaped correctly in the injected
   instrumentation script.
-- Key directories using `\uXXXX` escapes in key ids now match correctly;
-  malformed escapes reject the document.
 - Cache keys in cache write-failure warnings are escaped.
-- JavaScript minification in XHTML pages no longer produces markup that breaks
-  the page for some bracket patterns.
+- JavaScript minification in XHTML pages no longer produces markup that
+  breaks the page for some bracket patterns.
 - Apache: logging an empty message is handled correctly.
 - The IIS module no longer leaks memory on every gzip or deflate response it
-  rewrites; destroying an unjoined background thread on Windows no longer ends the worker
-  process.
-- Posting to the background event loop no longer blocks when the loop is busy;
-  proxied HTML with a zero flush buffer limit no longer exhausts memory;
-  shared-memory runtimes created at the same time no longer risk sharing segment
-  names; malformed GIF loop-count blocks are rejected.
-- nginx: fetcher shutdown and memory-pressure serve paths no longer crash the
-  worker.
-- A long-running worker watching frequently republished rule packs no longer
-  grows memory without limit.
+  rewrites; destroying an unjoined background thread on Windows no longer
+  ends the worker process.
+- Posting to the background event loop no longer blocks when the loop is
+  busy; proxied HTML with a zero flush buffer limit no longer exhausts
+  memory; shared-memory runtimes created at the same time no longer risk
+  sharing segment names.
+- nginx: fetcher shutdown and memory-pressure serve paths no longer crash
+  the worker.
+- A long-running worker watching frequently republished rule packs no
+  longer grows memory without limit.
 - In-place optimization: an origin that fails mid-response no longer leaks
   resources or leaves the client without a response.
-- Cache inspection output keeps multi-byte text intact; duplicated keys in a
-  memcached multi-get are all answered; directory walks for cache cleaning skip
-  files that disappear during the walk.
+- Cache inspection output keeps multi-byte text intact; duplicated keys in
+  a memcached multi-get are all answered; directory walks for cache
+  cleaning skip files that disappear during the walk.
 - Link header repair considers every `rel` parameter of a link-value.
 - End-to-end response headers are no longer wrongly removed from cached and
   forwarded responses.
-- A domain mapping that fails no longer applies its host header.
-- ASP.NET Core: requests carrying client-supplied `X-Original-*` headers are no
-  longer wrongly rejected.
-- A sidecar startup timeout is reported as a timeout; version comparison in the
-  install helper scripts detects "greater than".
+- Version comparison in the install helper scripts detects "greater than".
 
 ## [2.4.0] - 2026-10-14
 
