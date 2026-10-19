@@ -150,6 +150,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Package descriptions and the render-only directive message no longer name the
   1.15 line; they carry the build's version or say "mod_pagespeed".
 
+- The admin console's description of the disk cache failures statistic now says
+  that writes skipped under momentary contention are not counted.
+
 ### Fixed
 
 - **Moving from Google's archived package works in one step.** The
