@@ -124,6 +124,8 @@ jobs:
           python3 -I tools/ci/release_signature_check.py --self-test
           tools/ci/release_nginx.sh --self-test
           tools/ci/release_ea4_build.sh --self-test
+          python3 -I tools/ci/check_module_optimizer_version.py --self-test
+          tools/ci/test_cache_gen_for_version.sh
 
   # Aggregate gate: the one check branch protection needs besides the
   # per-job ones. A called workflow cannot read needs.*.result of its
