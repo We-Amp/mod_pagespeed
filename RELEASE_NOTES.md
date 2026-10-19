@@ -1,3 +1,105 @@
+# mod_pagespeed 2.5.0 Release Notes
+
+**Release date:** 2026-10-19
+**Status:** Stable
+**Packages:** `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS
+installer and the cPanel package, all 2.5.0, with `pagespeed-optimizer`
+2.5.0; the container images, the NuGet packages and the Helm chart's
+application version are 2.5.0 as well.
+
+## Highlights
+
+- **mod_pagespeed 2.5.0 is a security update for the module and the
+  optimizer worker, released together and installed as a matching pair.
+  Update recommended.** It fixes several classes of security defects:
+  crafted images, scripts, stylesheets or cache contents could make a worker
+  process exit, consume unbounded memory or read memory out of bounds;
+  certain GIF images could expose process memory in optimized output;
+  damaged or stale disk-cache contents could be served; the nginx module
+  could cache a truncated origin response as complete; some origin
+  responses could be cached longer than the origin allowed, including
+  private ones; a server log could contain information that lets someone
+  with log access construct valid signed resource URLs; and the IIS module
+  could abort or crash on certain requests, configuration values or large
+  responses. Memory-safety defects under concurrent load, in Windows shared
+  memory and in the ASP.NET Core sidecar are fixed as well. Affected: the
+  module in releases up to and including 1.19.0 (product 2.4.0); the
+  crafted-image and JavaScript-parsing items also affect the optimizer worker
+  and the `WeAmp.PageSpeed.NativeAssets.*` packages up to and including 2.4.0,
+  and each changelog entry says which products it covers.
+
+- **One version number from this release on.** The packages go from 1.19.0
+  to 2.5.0 and the product from 2.4.0 to 2.5.0, so the version apt, dnf,
+  the container registry and NuGet show is the product version.
+  2.5.0 relabels the version. The packages, the `X-Mod-Pagespeed` and
+  `X-Page-Speed` header value and the module and optimizer tags move from
+  1.19.0 to 2.5.0 in one step; until now a 2.N release carried package
+  version 1.(N+15). If you pin packages to `1.*` (apt pins or preferences,
+  dnf versionlock, Helm image tags, NuGet version ranges) or match the
+  header on `1.`, update the pin or the pattern before you upgrade. The
+  on-disk cache format changed generation, so the cache starts cold once
+  after the upgrade. The ABI and the configuration are unchanged: your
+  configuration carries over as it is.
+
+- **The disk cache starts empty once after the upgrade.** The cache library
+  moves to a new on-disk format. On the first start after the upgrade each
+  process opens a new cache file, so expect a one-time rise in origin
+  fetches and optimization work, and prefer an off-peak window. The previous
+  cache file stays on disk until you delete it; during a rolling restart the
+  old and new versions use separate files, so disk use temporarily doubles
+  and the hit rate stays low until every process runs the new version.
+  Rolling back finds the previous file intact.
+
+- **Moving from Google's archived mod_pagespeed package now works in one
+  step:** `apt-get install mod-pagespeed` on Debian and Ubuntu, `dnf swap
+  mod-pagespeed-stable mod-pagespeed` on Enterprise Linux. A kept Google
+  configuration that loads `mod_pagespeed_ap24.so` keeps working.
+
+- **nginx (container images and Helm chart):** responses that carry static
+  policy and resource headers (HTTP Strict Transport Security, the frame and
+  XSS protection headers, the reporting policy headers, `Link`, static CORS
+  headers, `Content-Language`, `Content-Disposition`, `Alt-Svc`, `Allow`,
+  `X-Powered-By`, `X-Robots-Tag`) are now cached and replayed on cache hits.
+  A `Link` header that carries a nonce is never cached.
+
+- **ASP.NET Core (`WeAmp.PageSpeed.AspNetCore`):** the web console and the
+  worker API proxy are reachable without authentication unless you configure
+  otherwise. Set `PageSpeed:Console:Enabled` to `false` in production, or
+  put your own authentication in front of the console and the `/v1/` paths
+  it proxies; the production guidance in the documentation has the details.
+
+- Also: `s-maxage` is honoured for shared-cache freshness (it can only
+  shorten the lifetime set by `max-age` or `Expires`, and `s-maxage=0` keeps
+  a response out of the cache); the EL8 and EL10 Apache packages now require
+  the matching optimizer package and ship the worker configuration and
+  SELinux policy; disk-cache writes skipped under momentary contention no
+  longer count as cache failures; and many smaller fixes listed in the
+  changelogs.
+
+## Action required when upgrading
+
+- Changed (all servers): the optimizer worker's cache directory moves from
+  `/var/cache/pagespeed-optimizer/v2` to `/var/cache/pagespeed-optimizer/v3`
+  and the packaged configuration follows. If you set
+  `ModPagespeedDaemonVolumePath` (Apache) or `pagespeed DaemonVolumePath`
+  (nginx) yourself, change `v2` to `v3` before you restart. A module and
+  worker that disagree refuse to attach and say so in the log, and in-place
+  optimization stays off until they agree. Upgrade the module and the worker
+  together, as the packages require.
+
+- Changed (version pins): see "One version number" above. Nothing else in
+  the configuration changes.
+
+- Changed (ASP.NET Core sidecar, `WeAmp.PageSpeed.Sidecar`): the sidecar
+  information endpoint requires authorization by default; an app without
+  authentication passes `requireAuthorization: false` to `MapPageSpeedInfo`.
+  With `UseForwardedHeaders()` before `UsePageSpeed()`, raw-origin requests
+  are rejected with 421; call `UsePageSpeed()` first (the fixes are in this
+  source release; an updated `WeAmp.PageSpeed.Sidecar` package follows
+  separately).
+
+---
+
 # mod_pagespeed 2.4.0 Release Notes
 
 **Release date:** 2026-10-14
