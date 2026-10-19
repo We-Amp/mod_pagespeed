@@ -147,8 +147,8 @@ install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.
 # nginx.conf auto-includes (`include /etc/nginx/modules-enabled/*.conf;`).
 # A high-numbered prefix keeps load ordering predictable relative to other
 # nginx-module-* packages (PageSpeed is an aux filter; load late).
-cat > "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf" <<'SNIP'
-# ngx_pagespeed dynamic module (We-Amp mod_pagespeed 1.15).
+cat > "${STAGEDIR}${NGINX_MODAVAIL}/mod-pagespeed.conf" <<SNIP
+# ngx_pagespeed dynamic module (We-Amp mod_pagespeed ${VERSION}).
 # Auto-included by stock noble nginx via /etc/nginx/modules-enabled/.
 load_module modules/ngx_pagespeed_module.so;
 SNIP
@@ -177,7 +177,7 @@ Depends: ${NGINX_DEP}
 Maintainer: ${MAINTNAME} <${MAINTMAIL}>
 Installed-Size: ${INSTSIZE}
 Homepage: ${PRODUCTURL}
-Description: nginx module to optimize web content (mod_pagespeed 1.15)
+Description: nginx module to optimize web content (mod_pagespeed ${VERSION})
  ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and
  their resources (CSS, JavaScript, images) to apply web performance best
  practices automatically. Pinned to the exact stock nginx version it was built

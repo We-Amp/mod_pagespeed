@@ -46,7 +46,7 @@ Name:    ea-apache24-mod_pagespeed
 Epoch:   2
 Version: %{mps_version}
 Release: %{mps_release}%{?dist}.cpanel
-Summary: mod_pagespeed 1.15 for cPanel EasyApache 4
+Summary: mod_pagespeed %{mps_version} for cPanel EasyApache 4
 License: Apache-2.0
 URL:     https://modpagespeed.com/
 
@@ -72,7 +72,7 @@ Conflicts:     ea-apache24-mod_ruid2
 %description
 mod_pagespeed is an Apache module that rewrites HTML, CSS, JS, and image
 assets at request time to reduce page load latency and bandwidth usage.
-This package repackages the upstream mod_pagespeed 1.15 binary for use with
+This package repackages the upstream mod_pagespeed %{mps_version} binary for use with
 cPanel's EasyApache 4 Apache build.
 
 ABI note: both targets share Apache 2.4 module magic number 20120211, so
