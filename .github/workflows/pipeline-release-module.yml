@@ -2947,7 +2947,22 @@ jobs:
             echo "::error::SHA256SUMS.asc does not verify against the published release key"
             exit 1
           }
-          SIGNER="$(printf '%s\n' "$STATUS" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print $NF}')"
+          # gpg exits 0 and prints VALIDSIG also for a signature by a revoked
+          # or expired key (REVKEYSIG / EXPKEYSIG): require exactly one good
+          # signature and none of the bad-key or bad-signature states.
+          count() { printf '%s\n' "$STATUS" | awk -v t="$1" '$1=="[GNUPG:]" && $2==t {n++} END {print n+0}'; }
+          for t in REVKEYSIG EXPKEYSIG EXPSIG KEYREVOKED ERRSIG BADSIG; do
+            if [ "$(count "$t")" != 0 ]; then
+              echo "::error::SHA256SUMS.asc verification reports $t; not a good signature by a valid release key"
+              exit 1
+            fi
+          done
+          if [ "$(count GOODSIG)" != 1 ] || [ "$(count VALIDSIG)" != 1 ]; then
+            echo "::error::SHA256SUMS.asc must carry exactly one good signature (GOODSIG $(count GOODSIG), VALIDSIG $(count VALIDSIG))"
+            exit 1
+          fi
+          # VALIDSIG field 10 (awk $12) is the primary-key fingerprint.
+          SIGNER="$(printf '%s\n' "$STATUS" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print $12}')"
           if [ "$SIGNER" != "$RELEASE_KEY_FPR" ]; then
             echo "::error::SHA256SUMS.asc VALIDSIG primary key is [${SIGNER//$'\n'/ }], expected exactly ${RELEASE_KEY_FPR}"
             exit 1
