@@ -8,7 +8,8 @@
 #
 # For a tag `module-v<version>` (for example module-v1.19.0, or
 # module-v1.19.0-rc.1 for a release candidate) this lane builds every module
-# package and the Windows installer, runs the package smokes, the security
+# package, the Windows installer and the native pair of the ASP.NET Core
+# sidecar (tested with the sidecar's suite), runs the package smokes, the security
 # gates, the unit tests, the system-test gate and the two release gates on the
 # fleet-hyperv class (installer upgrade, cPanel), validates the asset set and
 # ends in one run artifact, `release-assets`: the validated asset set with
@@ -1092,6 +1093,138 @@ jobs:
     timeout-minutes: 350
     env: *nginx-el10-env
     steps: *nginx-el10-steps
+
+  # ---------------------------------------------------------------------
+  # The native pair of the ASP.NET Core sidecar (WeAmp.PageSpeed.Sidecar):
+  # nginx, the module built against exactly that nginx, and the launch shim,
+  # per architecture (tools/ci/release_sidecar.sh). Built natively from the
+  # tree by the focal recipe in the pinned Ubuntu 20.04 image (glibc 2.31,
+  # the sidecar's compatibility floor), gated (symbols, glibc), smoked on
+  # Debian 11 and 12 before and after stripping, and tested: the sidecar's
+  # xunit suite under .NET 8 and .NET 10 with the live nginx tests against
+  # the stripped pair. Only then is the pair packaged and uploaded as a
+  # release file; a red test stops the job before the upload. `validate` adds
+  # sidecar-pair.json, the manifest the NuGet lane pins. One step list for
+  # the x64 job, its hosted twin and the arm64 job.
+  # ---------------------------------------------------------------------
+  sidecar-pair:
+    name: Sidecar Native Pair (x64)
+    needs: [version, vendor-ready]
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    timeout-minutes: 180
+    env: &sidecar-x64-env
+      ARCH: x64
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+    steps: &sidecar-steps
+      - *clear-workspace
+      - *tree-download
+      - *tree-extract
+
+      - name: Build the pair
+        run: |
+          bash tools/ci/release_sidecar.sh build --arch "$ARCH" \
+            --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/pair"
+
+      - name: Symbol and glibc gate
+        run: |
+          bash tools/ci/release_sidecar.sh hygiene --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
+
+      - name: Load, serve and optimize on Debian 11 and 12
+        run: |
+          bash tools/ci/release_sidecar.sh smoke --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
+
+      - name: Strip the pair
+        run: |
+          bash tools/ci/release_sidecar.sh strip --arch "$ARCH" \
+            --pair "${RUNNER_TEMP}/pair" --debug "${RUNNER_TEMP}/pair-debug"
+
+      - name: The stripped pair, on Debian 11 and 12
+        run: |
+          bash tools/ci/release_sidecar.sh smoke --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
+
+      # The pair that is tested is the pair that ships: the stripped one.
+      - name: Sidecar tests with the live nginx (.NET 8 and 10)
+        run: |
+          bash tools/ci/release_sidecar.sh test --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --results "${RUNNER_TEMP}/sidecar-results"
+
+      - name: Package the pair
+        run: |
+          bash tools/ci/release_sidecar.sh package --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --version "$RELEASE_VERSION" --source-sha "$RELEASE_SHA" \
+            --out "${RUNNER_TEMP}/sidecar-out"
+
+      - name: Upload the release file
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-out
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload the debug files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: debug-sidecar-${{ env.ARCH }}
+          path: ${{ runner.temp }}/pair-debug
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: testdata-sidecar-results-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - *reown
+
+  sidecar-pair-hosted:
+    name: Sidecar Native Pair (x64, hosted)
+    needs: [version, vendor-ready]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env: *sidecar-x64-env
+    steps: *sidecar-steps
+
+  sidecar-ready:
+    name: Sidecar pair ready
+    needs: [sidecar-pair, sidecar-pair-hosted]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: One of the two legs succeeded
+        env:
+          FLEET: ${{ needs.sidecar-pair.result }}
+          HOSTED: ${{ needs.sidecar-pair-hosted.result }}
+        run: |
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
+          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the sidecar pair (x64) did not succeed"; exit 1; }
+
+  sidecar-pair-arm64:
+    name: Sidecar Native Pair (arm64)
+    needs: [version, vendor-ready]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success'}}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 350
+    env:
+      ARCH: arm64
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+    steps: *sidecar-steps
 
   # ---------------------------------------------------------------------
   # Stock Apache rpms built natively on el8 and el10 (their own glibc and
@@ -2602,6 +2735,10 @@ jobs:
       - nginx-distro-build-arm64
       - nginx-distro-build-el10
       - nginx-distro-build-el10-hosted
+      - sidecar-pair
+      - sidecar-pair-hosted
+      - sidecar-ready
+      - sidecar-pair-arm64
       - el8-ready
       - el10-ready
       - windows-release-build
@@ -2654,6 +2791,7 @@ jobs:
           # name of the job, then the name of its hosted twin ("-" for none)
           PAIRS="
           nginx-distro-build-el10 nginx-distro-build-el10-hosted
+          sidecar-pair sidecar-pair-hosted
           windows-release-build windows-release-build-hosted
           unit-tests unit-tests-hosted
           package-smoke-deb package-smoke-deb-hosted
@@ -2718,6 +2856,19 @@ jobs:
         with:
           path: ${{ runner.temp }}/stage
           pattern: asset-*
+
+      # The manifest of the sidecar pair, from the two tarballs: one more
+      # release file, so SHA256SUMS (and its signature) covers it.
+      - name: Write the sidecar pair manifest
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/sidecar-pair" "${RUNNER_TEMP}/stage/asset-sidecar-manifest"
+          cp "${RUNNER_TEMP}"/stage/asset-sidecar-x64/*.tar.gz "${RUNNER_TEMP}"/stage/asset-sidecar-arm64/*.tar.gz \
+            "${RUNNER_TEMP}/sidecar-pair/"
+          python3 -I tools/ci/sidecar_pair_manifest.py build --dir "${RUNNER_TEMP}/sidecar-pair" \
+            --tag "$TAG" --version "$VERSION" --source-sha "$RELEASE_SHA" \
+            --out "${RUNNER_TEMP}/stage/asset-sidecar-manifest/sidecar-pair.json"
+          cat "${RUNNER_TEMP}/stage/asset-sidecar-manifest/sidecar-pair.json"
 
       - name: Assemble the asset set
         run: |
@@ -2798,6 +2949,8 @@ jobs:
           cd "${RUNNER_TEMP}/release-assets"
           sha256sum -c SHA256SUMS
           python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_manifest.py" verify .
+          python3 -I "${GITHUB_WORKSPACE}/tools/ci/sidecar_pair_manifest.py" verify \
+            --manifest sidecar-pair.json --dir . --tag "$TAG" --version "$VERSION" --source-sha "$RELEASE_SHA"
           {
             echo "### Release assets of ${TAG}"
             echo ""
@@ -2964,6 +3117,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -I tooling/tools/ci/release_manifest.py verify dist
+          python3 -I tooling/tools/ci/sidecar_pair_manifest.py verify \
+            --manifest dist/sidecar-pair.json --dir dist --tag "$TAG" --version "$VERSION" --source-sha "$RELEASE_SHA"
           (cd dist && sha256sum -c SHA256SUMS)
           [ "$(jq -r .tag dist/manifest.json)" = "$TAG" ] || { echo "::error::the manifest names another tag"; exit 1; }
           [ "$(jq -r .source_sha dist/manifest.json)" = "$RELEASE_SHA" ] || { echo "::error::the manifest names another commit"; exit 1; }
@@ -2996,6 +3151,7 @@ jobs:
               printf 'This is a release candidate. It is built and tested like a release but is not meant for production.\n\n'
             fi
             printf 'The module packages for Apache, nginx and IIS, released with the pagespeed-optimizer packages of %s. Install the optimizer and the module package of the same version together.\n\n' "$OPTIMIZER_TAG"
+            printf 'The native pair of the ASP.NET Core sidecar (nginx, the module built against it and the launch shim, per architecture) is in pagespeed-sidecar-native-%s-linux-*.tar.gz, described by sidecar-pair.json, and is for the WeAmp.PageSpeed.Sidecar NuGet packages.\n\n' "$VERSION"
             printf 'Source commit: %s\n\n' "$RELEASE_SHA"
             cat <<'NOTES'
           ### Verify a download
