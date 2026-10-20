@@ -188,8 +188,18 @@ build() {
   WS="$(abs_dir "$WS")"
   mkdir -p "$OUT"; OUT="$(abs_dir "$OUT")"
   [ -d "$WS/vendor" ] || die "build: $WS has no vendor/ (tools/vendor-deps.sh vendor)"
-  local ngxver uid gid logs attempt rc
+  local ngxver uid gid logs attempt rc mem_args=()
   ngxver="$(focal_nginx_version "$WS")"
+  # A build runner's slot budget (tools/ci/slot-budget.sh: CI_SLOT_CPUS,
+  # CI_SLOT_MEM_GB) caps the build's parallelism and the container's memory;
+  # unset (a hosted runner, a tree without the helper) leaves both uncapped.
+  if [ -f "$WS/tools/ci/slot-budget.sh" ]; then
+    # shellcheck disable=SC1091
+    source "$WS/tools/ci/slot-budget.sh"
+    slot_budget || die "build: invalid slot budget"
+    [ -z "${SLOT_CPUS:-}" ] || { BAZEL_CPUS="${BAZEL_CPUS:-$SLOT_CPUS}"; MAKE_JOBS="${MAKE_JOBS:-$SLOT_CPUS}"; }
+    [ -z "${SLOT_MEM:-}" ] || mem_args=(--memory="$SLOT_MEM" --memory-swap="$SLOT_MEM")
+  fi
   uid="$(id -u)"; gid="$(id -g)"
   logs="$(mktemp -d)"
   echo "sidecar pair: linux-${ARCH}, nginx ${ngxver}, module $(tree_version "$WS"), image ${FOCAL_IMAGE}"
@@ -201,7 +211,7 @@ build() {
     # nginx tree under the workspace is removed again, and the workspace (Bazel
     # adds to the repository cache under vendor/) and the outputs are handed
     # back to the runner user, so that a later checkout can clear them.
-    if docker run --rm --init --platform "$(platform_of "$ARCH")" \
+    if docker run --rm --init --platform "$(platform_of "$ARCH")" ${mem_args[@]+"${mem_args[@]}"} \
       -e HOME=/root \
       -e NGXVER="$ngxver" -e HOST_UID="$uid" -e HOST_GID="$gid" \
       -e BAZEL_CPUS="${BAZEL_CPUS:-}" -e MAKE_JOBS="${MAKE_JOBS:-}" \
