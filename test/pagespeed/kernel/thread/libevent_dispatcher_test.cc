@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/thread/libevent_dispatcher.h"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <thread>
 
@@ -298,29 +299,47 @@ TEST_F(LibeventDispatcherTest, PostDoesNotBlockWhileLoopIsBusy) {
   // Far more posts than a pipe buffer has bytes.
   const int kNumPosts = 1 << 20;
   std::atomic<int> counter(0);
+  std::atomic<int> posted(0);
   std::atomic<bool> posted_all(false);
   std::thread poster([&]() {
     for (int i = 0; i < kNumPosts; ++i) {
       dispatcher_->Post(new CountFunction(&counter));
+      posted.store(i + 1);
     }
     posted_all.store(true);
   });
 
-  start_us = timer_->NowUs();
-  while (!posted_all.load() &&
-         (timer_->NowUs() - start_us) < 20 * Timer::kSecondUs) {
-    timer_->SleepUs(Timer::kMsUs);
-  }
-  EXPECT_TRUE(posted_all.load());
+  // A Post that blocks on the full wakeup pipe never returns while the loop
+  // is busy, so it shows as `posted` standing still, not as slowness.  Wait
+  // on progress rather than a total deadline: a million posts take tens of
+  // seconds under TSan on a loaded host, while a blocked poster makes no
+  // progress at all.
+  const int64 kStallUs = 10 * Timer::kSecondUs;
+  auto wait_while_progressing = [&](const std::function<bool()>& done,
+                                    const std::atomic<int>& progress) {
+    int last = progress.load();
+    int64 last_change_us = timer_->NowUs();
+    while (!done()) {
+      int now = progress.load();
+      if (now != last) {
+        last = now;
+        last_change_us = timer_->NowUs();
+      } else if (timer_->NowUs() - last_change_us > kStallUs) {
+        return false;
+      }
+      timer_->SleepUs(Timer::kMsUs);
+    }
+    return true;
+  };
+  EXPECT_TRUE(wait_while_progressing(
+      [&posted_all] { return posted_all.load(); }, posted))
+      << "Post blocked after " << posted.load() << " of " << kNumPosts;
 
   // Let the loop drain the pipe so a blocked poster can finish.
   release.store(true);
   poster.join();
-  start_us = timer_->NowUs();
-  while (counter.load() < kNumPosts &&
-         (timer_->NowUs() - start_us) < 20 * Timer::kSecondUs) {
-    timer_->SleepUs(Timer::kMsUs);
-  }
+  EXPECT_TRUE(wait_while_progressing(
+      [&] { return counter.load() >= kNumPosts; }, counter));
   EXPECT_EQ(kNumPosts, counter.load());
 }
 
