@@ -15,6 +15,9 @@
 #   release_sidecar.sh strip   --arch ARCH --pair DIR --debug DIR
 #   release_sidecar.sh test    --arch ARCH --src DIR [--pair DIR] [--results DIR]
 #                              [--framework net8.0|net10.0]...
+#   release_sidecar.sh live-guard --src DIR [--results DIR]
+#   release_sidecar.sh check   --arch ARCH --workspace DIR --pair DIR --debug DIR
+#                              --results DIR
 #   release_sidecar.sh package --arch ARCH --src DIR --pair DIR --version V
 #                              --source-sha SHA --out DIR
 #   release_sidecar.sh --self-test
@@ -33,14 +36,24 @@
 #   smoke    load, serve and optimize in Debian 11 and Debian 12
 #            (test/package-test/check-sidecar-pair.sh): X-Page-Speed carries
 #            the version of the tree, and no X-PageSpeed-Warn appears.
-#   strip    debug files split off into --debug, then the smoke again on the
-#            stripped pair.
-#   test     the xunit suite of aspnetcore/ in the pinned .NET SDK images. With
-#            --pair the pair is placed where the sidecar finds it and the live
-#            nginx tests must run (PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1): a
-#            missing pair fails them instead of skipping them. Every test must
-#            pass, none may be skipped, and at least SIDECAR_MIN_TESTS (default
-#            201) must have run, per framework.
+#   strip    debug files split off into --debug, then hygiene and smoke
+#            again on the stripped pair.
+#   test     the xunit suite of aspnetcore/ in the pinned .NET SDK images, with
+#            a locked restore (the lock files of the test project). With --pair
+#            the pair is placed where the sidecar finds it and the live nginx
+#            tests must run (PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1): a missing
+#            pair fails them instead of skipping them. Every test must pass,
+#            none may be skipped, and at least SIDECAR_MIN_TESTS (default 201)
+#            must have run, per framework. With --pair, the results must also
+#            show every test of InverseModeIntegrationTests, at least
+#            SIDECAR_LIVE_TESTS (default 8), passed with the line
+#            `live-nginx: <path of the bundled nginx>` in its output: the proof
+#            that it ran against the pair rather than returned early.
+#   live-guard  the negative control of that proof: the live tests with
+#            PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1 and no pair must all fail.
+#
+# `check` runs the whole sequence on a fresh build: build, hygiene, smoke,
+# strip, hygiene, smoke, test (both frameworks, live nginx).
 #
 # `package` writes pagespeed-sidecar-native-<version>-linux-<arch>.tar.gz:
 # nginx, ngx_pagespeed_module.so, pagespeed-nginx-launch, build-info.json
@@ -181,11 +194,6 @@ build() {
   logs="$(mktemp -d)"
   echo "sidecar pair: linux-${ARCH}, nginx ${ngxver}, module $(tree_version "$WS"), image ${FOCAL_IMAGE}"
 
-  local extra_docker=()
-  if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
-    extra_docker+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
-  fi
-
   for attempt in 1 2 3; do
     rm -f "$OUT/nginx" "$OUT/ngx_pagespeed_module.so" "$OUT/pagespeed-nginx-launch"
     # Root inside the container: the recipe installs its toolchain with apt.
@@ -193,7 +201,7 @@ build() {
     # nginx tree under the workspace is removed again, and the workspace (Bazel
     # adds to the repository cache under vendor/) and the outputs are handed
     # back to the runner user, so that a later checkout can clear them.
-    if docker run --rm --init --platform "$(platform_of "$ARCH")" ${extra_docker[@]+"${extra_docker[@]}"} \
+    if docker run --rm --init --platform "$(platform_of "$ARCH")" \
       -e HOME=/root \
       -e NGXVER="$ngxver" -e HOST_UID="$uid" -e HOST_GID="$gid" \
       -e BAZEL_CPUS="${BAZEL_CPUS:-}" -e MAKE_JOBS="${MAKE_JOBS:-}" \
@@ -331,6 +339,105 @@ check_trx() {
   [ "$total" -ge "$min" ] || { echo "::error::only ${total} tests ran, expected at least ${min}"; return 1; }
 }
 
+# check_live FILE RID MIN: every InverseModeIntegrationTests result passed and
+# wrote the live marker naming the bundled nginx of RID, and there are at
+# least MIN of them.
+check_live() {
+  python3 -I - "$1" "$2" "$3" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+path, rid, minimum = sys.argv[1], sys.argv[2], int(sys.argv[3])
+want = "runtimes/%s/native/nginx" % rid
+live, other = [], []
+for r in ET.parse(path).getroot().iter():
+    if not r.tag.endswith("}UnitTestResult"):
+        continue
+    name = r.get("testName", "")
+    if ".InverseModeIntegrationTests." not in name:
+        continue
+    out = "".join(e.text or "" for e in r.iter() if e.tag.endswith("}StdOut"))
+    marked = any(l.strip().startswith("live-nginx: ") and l.strip().endswith(want) for l in out.splitlines())
+    (live if r.get("outcome") == "Passed" and marked else other).append(name.rsplit(".", 1)[-1])
+print("live nginx tests: %d ran against the bundled pair (%s)" % (len(live), ", ".join(sorted(live))))
+if other:
+    print("::error::live tests that did not run against the bundled pair: " + ", ".join(sorted(other)))
+    sys.exit(1)
+if len(live) < minimum:
+    print("::error::only %d live nginx tests ran, expected at least %d" % (len(live), minimum))
+    sys.exit(1)
+PY
+}
+
+# run_suite WORK IMAGE FW PROPS RID REQUIRE FILTER TRX: build and run the test
+# project of the aspnetcore copy in WORK in the SDK image, as the runner user.
+# Returns the status of dotnet test.
+run_suite() {
+  local work="$1" image="$2" fw="$3" props="$4" rid="$5" require="$6" filter="$7" trx="$8" platform=""
+  [ -z "$ARCH" ] || platform="$(platform_of "$ARCH")"
+  docker run --rm --init ${platform:+--platform "$platform"} \
+    -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+    -e FW="$fw" -e PROPS="$props" -e RID="$rid" -e REQUIRE="$require" -e FILTER="$filter" -e TRX="$trx" \
+    -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    -v "$work:/w" -v "$RESULTS:/results" -w /w \
+    "$image" bash -c '
+      set -euo pipefail
+      if [ -n "$RID" ]; then
+        # The bundled nginx links PCRE; a consumer host provides it.
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends libpcre3 >/dev/null
+      fi
+      # dotnet needs an account for the user it runs as.
+      getent group "$HOST_GID" >/dev/null || groupadd -o -g "$HOST_GID" sidecar
+      getent passwd "$HOST_UID" >/dev/null || useradd -o -M -u "$HOST_UID" -g "$HOST_GID" -d /tmp/home sidecar
+      mkdir -p /tmp/home
+      chown -R "$HOST_UID:$HOST_GID" /w /results /tmp/home
+      # The suite runs as the runner user, never as root: the sidecar is
+      # meant to run unprivileged and switches nginx to root otherwise.
+      exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
+        env HOME=/tmp/home FW="$FW" PROPS="$PROPS" RID="$RID" REQUIRE="$REQUIRE" FILTER="$FILTER" TRX="$TRX" bash -c "
+          set -euo pipefail
+          proj=WeAmp.PageSpeed.AspNetCore.Tests/WeAmp.PageSpeed.AspNetCore.Tests.csproj
+          # A package that differs from the lock file fails the restore.
+          dotnet build \$proj -c Release -f \$FW -p:RestoreLockedMode=true \$PROPS
+          if [ -n \"\$RID\" ]; then
+            dest=WeAmp.PageSpeed.AspNetCore.Tests/bin/Release/\$FW/runtimes/\$RID/native
+            mkdir -p \"\$dest\"
+            cp -a .pair/. \"\$dest/\"
+            ls -l \"\$dest\"
+          fi
+          if [ \"\$REQUIRE\" = 1 ]; then export PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1; fi
+          set -- --logger \"trx;LogFileName=\$TRX\" --logger \"console;verbosity=normal\" --results-directory /results
+          if [ -n \"\$FILTER\" ]; then set -- \"\$@\" --filter \"\$FILTER\"; fi
+          dotnet test \$proj -c Release -f \$FW --no-build \$PROPS \"\$@\"
+        "
+    '
+}
+
+# framework_setup FW: sets IMAGE and PROPS for a framework.
+framework_setup() {
+  case "$1" in
+    net8.0) IMAGE="$DOTNET_IMAGE_NET8"; PROPS="" ;;
+    # The projects target net8.0 unless IncludeNet10 adds net10.0.
+    net10.0) IMAGE="$DOTNET_IMAGE_NET10"; PROPS="-p:IncludeNet10=true" ;;
+    *) die "test: unknown framework '$1' (net8.0 or net10.0)" ;;
+  esac
+}
+
+# fresh_copy: a copy of aspnetcore/ (and of the pair, if any) to build in: no
+# build output of the tree or of another framework is reused, and the tree
+# itself is never written to.
+fresh_copy() {
+  local work
+  work="$(mktemp -d)"
+  cp -a "$SRC/aspnetcore/." "$work/"
+  rm -rf "$work"/*/bin "$work"/*/obj
+  if [ -n "$PAIR" ]; then
+    mkdir -p "$work/.pair"
+    cp -a "$PAIR/." "$work/.pair/"
+  fi
+  printf '%s\n' "$work"
+}
+
 run_tests() {
   parse_args "$@" || return $?
   need_src
@@ -340,74 +447,72 @@ run_tests() {
     need_native; need_pair
   fi
   [ "${#FRAMEWORKS[@]}" -gt 0 ] || FRAMEWORKS=(net8.0 net10.0)
-  local min="${SIDECAR_MIN_TESTS:-201}" rid="" platform="" work fw image props require=0 fail=0
-  [ -z "$ARCH" ] || { rid="$(rid_of "$ARCH")"; platform="$(platform_of "$ARCH")"; }
-  [ -z "$PAIR" ] || require=1
+  local min="${SIDECAR_MIN_TESTS:-201}" live_min="${SIDECAR_LIVE_TESTS:-8}" rid="" work fw require=0 fail=0
+  [ -z "$PAIR" ] || { rid="$(rid_of "$ARCH")"; require=1; }
   [ -n "$RESULTS" ] || RESULTS="$(mktemp -d)"
   mkdir -p "$RESULTS"; RESULTS="$(abs_dir "$RESULTS")"
 
   for fw in "${FRAMEWORKS[@]}"; do
-    case "$fw" in
-      net8.0) image="$DOTNET_IMAGE_NET8"; props="" ;;
-      # The projects target net8.0 unless told otherwise; one framework for
-      # every project of the graph, restore included.
-      net10.0) image="$DOTNET_IMAGE_NET10"; props="-p:TargetFramework=net10.0 -p:TargetFrameworks=net10.0" ;;
-      *) die "test: unknown framework '$fw' (net8.0 or net10.0)" ;;
-    esac
-    # A fresh copy per framework: no build output of the tree or of another
-    # framework is reused, and the tree itself is never written to.
-    work="$(mktemp -d)"
-    cp -a "$SRC/aspnetcore/." "$work/"
-    if [ -n "$PAIR" ]; then
-      mkdir -p "$work/.pair"
-      cp -a "$PAIR/." "$work/.pair/"
-    fi
-    echo "=== sidecar tests: ${fw}${rid:+, live nginx linux-${ARCH}} (${image%%@*}) ==="
-    if ! docker run --rm --init ${platform:+--platform "$platform"} \
-      -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-      -e FW="$fw" -e PROPS="$props" -e RID="$rid" -e REQUIRE="$require" \
-      -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
-      -v "$work:/w" -v "$RESULTS:/results" -w /w \
-      "$image" bash -c '
-        set -euo pipefail
-        if [ "$REQUIRE" = 1 ]; then
-          # The bundled nginx links PCRE; a consumer host provides it.
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends libpcre3 >/dev/null
-        fi
-        # dotnet needs an account for the user it runs as.
-        getent group "$HOST_GID" >/dev/null || groupadd -o -g "$HOST_GID" sidecar
-        getent passwd "$HOST_UID" >/dev/null || useradd -o -M -u "$HOST_UID" -g "$HOST_GID" -d /tmp/home sidecar
-        mkdir -p /tmp/home
-        chown -R "$HOST_UID:$HOST_GID" /w /results /tmp/home
-        # The suite runs as the runner user, never as root: the sidecar is
-        # meant to run unprivileged and switches nginx to root otherwise.
-        # shellcheck disable=SC2086
-        exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups \
-          env HOME=/tmp/home FW="$FW" PROPS="$PROPS" RID="$RID" REQUIRE="$REQUIRE" bash -c "
-            set -euo pipefail
-            dotnet build WeAmp.PageSpeed.AspNetCore.Tests/WeAmp.PageSpeed.AspNetCore.Tests.csproj -c Release \$PROPS
-            if [ \"\$REQUIRE\" = 1 ]; then
-              dest=WeAmp.PageSpeed.AspNetCore.Tests/bin/Release/\$FW/runtimes/\$RID/native
-              mkdir -p \"\$dest\"
-              cp -a .pair/. \"\$dest/\"
-              ls -l \"\$dest\"
-              export PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1
-            fi
-            dotnet test WeAmp.PageSpeed.AspNetCore.Tests/WeAmp.PageSpeed.AspNetCore.Tests.csproj -c Release --no-build \$PROPS \
-              --logger \"trx;LogFileName=sidecar-\$FW.trx\" --logger \"console;verbosity=normal\" \
-              --results-directory /results
-          "
-      '; then
+    framework_setup "$fw"
+    work="$(fresh_copy)"
+    echo "=== sidecar tests: ${fw}${rid:+, live nginx linux-${ARCH}} (${IMAGE%%@*}) ==="
+    if ! run_suite "$work" "$IMAGE" "$fw" "$PROPS" "$rid" "$require" "" "sidecar-${fw}.trx"; then
       echo "::error::the sidecar tests failed (${fw})"
       fail=1
     fi
     # The build ran as the runner user, so the copy can be removed.
     rm -rf "$work"
     check_trx "$RESULTS/sidecar-${fw}.trx" "$min" || fail=1
+    if [ -n "$rid" ] && [ -s "$RESULTS/sidecar-${fw}.trx" ]; then
+      check_live "$RESULTS/sidecar-${fw}.trx" "$rid" "$live_min" || fail=1
+    fi
   done
   [ "$fail" = 0 ] || die "test: the sidecar test suite did not pass"
   echo "release_sidecar: tests ok (${FRAMEWORKS[*]}${rid:+, live nginx linux-${ARCH}})"
+}
+
+# The negative control of check_live: with the live tier required and no pair,
+# every live test must fail. A run where they pass would mean a live test can
+# pass without nginx, and the marker count would prove nothing.
+live_guard() {
+  parse_args "$@" || return $?
+  need_src
+  [ -z "$PAIR" ] || die "live-guard: runs without a pair"
+  local live_min="${SIDECAR_LIVE_TESTS:-8}" work total passed failed rc=0
+  [ -n "$RESULTS" ] || RESULTS="$(mktemp -d)"
+  mkdir -p "$RESULTS"; RESULTS="$(abs_dir "$RESULTS")"
+  framework_setup net8.0
+  work="$(fresh_copy)"
+  echo "=== sidecar live-guard: the live tests, required, with no pair (expected to fail) ==="
+  run_suite "$work" "$IMAGE" net8.0 "$PROPS" "" 1 "FullyQualifiedName~InverseModeIntegrationTests" \
+    sidecar-live-guard.trx || rc=$?
+  rm -rf "$work"
+  local f="$RESULTS/sidecar-live-guard.trx"
+  [ -s "$f" ] || die "live-guard: no test results (the build failed?)"
+  total="$(trx_counter "$f" total)"; passed="$(trx_counter "$f" passed)"; failed="$(trx_counter "$f" failed)"
+  echo "live-guard: total=${total:-?} passed=${passed:-?} failed=${failed:-?} (dotnet test exit ${rc})"
+  [ "$rc" -ne 0 ] || die "live-guard: the live tests passed without a pair"
+  [ "${passed:-1}" = 0 ] && [ -n "$total" ] && [ "${failed:-0}" = "$total" ] && [ "$total" -ge "$live_min" ] \
+    || die "live-guard: expected all of at least ${live_min} live tests to fail"
+  echo "release_sidecar: live-guard ok (${failed} live tests fail without the pair)"
+}
+
+# check: the whole sequence on a fresh build, as the callers run it.
+check_all() {
+  parse_args "$@" || return $?
+  [ -n "$ARCH" ] && [ -n "$WS" ] && [ -n "$PAIR" ] && [ -n "$DEBUG_DIR" ] && [ -n "$RESULTS" ] \
+    || die "check: --arch, --workspace, --pair, --debug and --results are required"
+  local self a="$ARCH" w="$WS" p="$PAIR" d="$DEBUG_DIR" r="$RESULTS"
+  self="${BASH_SOURCE[0]}"
+  step() { echo "::group::$1"; shift; bash "$self" "$@" || { echo "::endgroup::"; die "check: $* failed"; }; echo "::endgroup::"; }
+  step "Build the pair" build --arch "$a" --workspace "$w" --out "$p"
+  step "Symbol and glibc gate" hygiene --arch "$a" --src "$w" --pair "$p"
+  step "Load, serve and optimize on Debian 11 and 12" smoke --arch "$a" --src "$w" --pair "$p"
+  step "Strip the pair" strip --arch "$a" --pair "$p" --debug "$d"
+  step "Symbol and glibc gate, stripped" hygiene --arch "$a" --src "$w" --pair "$p"
+  step "Load, serve and optimize on Debian 11 and 12, stripped" smoke --arch "$a" --src "$w" --pair "$p"
+  step "Sidecar tests with the live nginx (.NET 8 and 10)" test --arch "$a" --src "$w" --pair "$p" --results "$r"
+  echo "release_sidecar: check ok (linux-${a})"
 }
 
 # --- package -----------------------------------------------------------------
@@ -431,7 +536,8 @@ package() {
   cp -a "$PAIR/nginx" "$PAIR/ngx_pagespeed_module.so" "$PAIR/pagespeed-nginx-launch" "$stage/$name/"
   cp "$SRC/aspnetcore/LICENSE" "$SRC/aspnetcore/NOTICE" "$SRC/aspnetcore/THIRD-PARTY-NOTICES" "$stage/$name/"
   # The tarball is written in a container: GNU tar for a reproducible archive
-  # wherever the script runs. The commit time is the time of every entry.
+  # wherever the script runs. Every entry carries the time SOURCE_DATE_EPOCH
+  # (default 0, the epoch), so the archive depends on its contents only.
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" \
     -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$FOCAL_IMAGE" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
@@ -521,6 +627,27 @@ self_test() {
   printf '<TestRun/>\n' > "$t/empty.trx"
   check_trx "$t/empty.trx" 0 >/dev/null 2>&1 && { echo "FAIL: results without counters accepted"; fail=1; }
 
+  # the live proof: every live test passed and wrote the marker of the pair
+  mk_live() { # FILE OUTCOME2 MARKER2
+    {
+      printf '<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010"><Results>\n'
+      printf '<UnitTestResult testName="X.InverseModeIntegrationTests.A" outcome="Passed"><Output><StdOut>live-nginx: /w/bin/runtimes/linux-x64/native/nginx</StdOut></Output></UnitTestResult>\n'
+      printf '<UnitTestResult testName="X.InverseModeIntegrationTests.B" outcome="%s"><Output><StdOut>%s</StdOut></Output></UnitTestResult>\n' "$2" "$3"
+      printf '<UnitTestResult testName="X.OtherTests.C" outcome="Passed"></UnitTestResult>\n'
+      printf '</Results></TestRun>\n'
+    } > "$1"
+  }
+  mk_live "$t/live.trx" Passed "live-nginx: /w/bin/runtimes/linux-x64/native/nginx"
+  check_live "$t/live.trx" linux-x64 2 >/dev/null 2>&1 || { echo "FAIL: a live run refused"; fail=1; }
+  check_live "$t/live.trx" linux-x64 3 >/dev/null 2>&1 && { echo "FAIL: too few live tests accepted"; fail=1; }
+  check_live "$t/live.trx" linux-arm64 1 >/dev/null 2>&1 && { echo "FAIL: the pair of another arch accepted"; fail=1; }
+  mk_live "$t/nomark.trx" Passed ""
+  check_live "$t/nomark.trx" linux-x64 1 >/dev/null 2>&1 && { echo "FAIL: a live test without the marker accepted"; fail=1; }
+  mk_live "$t/host.trx" Passed "live-nginx: /usr/sbin/nginx"
+  check_live "$t/host.trx" linux-x64 1 >/dev/null 2>&1 && { echo "FAIL: a host nginx accepted as the pair"; fail=1; }
+  mk_live "$t/red-live.trx" Failed "live-nginx: /w/bin/runtimes/linux-x64/native/nginx"
+  check_live "$t/red-live.trx" linux-x64 1 >/dev/null 2>&1 && { echo "FAIL: a failed live test accepted"; fail=1; }
+
   # argument handling
   ( parse_args --arch sparc >/dev/null 2>&1 ) && { echo "FAIL: unknown arch accepted by the parser"; fail=1; }
   ( parse_args --bogus x >/dev/null 2>&1 ) && { echo "FAIL: unknown argument accepted"; fail=1; }
@@ -538,6 +665,8 @@ case "$cmd" in
   smoke) shift; smoke "$@" ;;
   strip) shift; strip_pair "$@" ;;
   test) shift; run_tests "$@" ;;
+  live-guard) shift; live_guard "$@" ;;
+  check) shift; check_all "$@" ;;
   package) shift; package "$@" ;;
-  *) echo "usage: $0 build|hygiene|smoke|strip|test|package ... | --self-test" >&2; exit 2 ;;
+  *) echo "usage: $0 build|hygiene|smoke|strip|test|live-guard|check|package ... | --self-test" >&2; exit 2 ;;
 esac

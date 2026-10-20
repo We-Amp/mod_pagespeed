@@ -14,7 +14,9 @@
 #   fleet-iis     iis-asan-systest, iis-appverif-matrix (a Windows host with
 #                 IIS; no hosted twin, so they are skipped without the fleet)
 #   hosted        nvd-scan, dep-scan-nightly (the home of the grype database
-#                 pin staleness check and of the image scan mode)
+#                 pin staleness check and of the image scan mode),
+#                 sidecar-weekly, sidecar-pair-weekly, sidecar-pair-weekly-arm64
+#                 (the ASP.NET Core sidecar's native pair, once a week)
 #
 # Nothing in this file writes to GitHub and nothing reads a secret: every job
 # holds contents: read only. Findings are reported by a red job, the job
@@ -2768,3 +2770,84 @@ jobs:
           path: sbom/scan/
           if-no-files-found: warn
           retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # The native pair of the ASP.NET Core sidecar, once a week (Sundays) and on
+  # every manual dispatch: the whole sequence of tools/ci/release_sidecar.sh
+  # check on hosted runners, the class the release builds the pair on. The
+  # pull request tier builds the pair only when its paths change; this run
+  # catches what changes outside them (the pinned images, the toolchain
+  # repositories of the recipe, nginx.org, the NuGet packages).
+  # ---------------------------------------------------------------------
+  sidecar-weekly:
+    name: Sidecar pair, weekly?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.day.outputs.run }}
+    steps:
+      - name: Sunday or a manual run
+        id: day
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          run=false
+          if [ "$EVENT" = workflow_dispatch ] || [ "$(date -u +%u)" = 7 ]; then run=true; fi
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          echo "sidecar pair this night: ${run}"
+
+  sidecar-pair-weekly:
+    name: Sidecar pair and live tests (x64, weekly)
+    needs: sidecar-weekly
+    if: ${{ needs.sidecar-weekly.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      ARCH: x64
+    steps: &sidecar-weekly-steps
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+
+      # Vendored fresh every week: the run is about what the network serves
+      # today. The rewrite sends the one ssh-style dependency address over
+      # https; no credential is needed.
+      - name: Vendor all dependencies
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash tools/vendor-deps.sh vendor
+
+      - name: Build, gate and test the pair
+        run: |
+          bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
+            --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --debug "${RUNNER_TEMP}/pair-debug" --results "${RUNNER_TEMP}/sidecar-results"
+
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nightly-sidecar-test-results-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  sidecar-pair-weekly-arm64:
+    name: Sidecar pair and live tests (arm64, weekly)
+    needs: sidecar-weekly
+    if: ${{ needs.sidecar-weekly.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    env:
+      ARCH: arm64
+    steps: *sidecar-weekly-steps
