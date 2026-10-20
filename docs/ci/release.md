@@ -185,7 +185,13 @@ the jobs of the environment read the environment's value.
 | `PACKAGE_SIGNING_KEY` | `sign-checksums` | the armored private key of the package signing key, base64 encoded, a single secret key |
 | `PACKAGE_SIGNING_PASSPHRASE` | `sign-checksums` | its passphrase |
 
-The package signing key is the one whose public half the consumer pins. The
+Despite its name, `PACKAGE_SIGNING_KEY` holds the release signing key, which
+signs `SHA256SUMS`; the apt and yum repositories are signed by a separate
+repository key. The release signing key is the one whose public half the
+consumer pins: fingerprint
+`411DEFDB571351D2B25AEFCC9C02B5BDCCE75313`, published as
+`RELEASE-SIGNING-KEY.asc` in the repository root (see `SECURITY.md`). A new
+key is a change to that file, `SECURITY.md` and every consumer's pin together. The
 release itself needs no secret: `create-release` uses the run's own token with
 `contents: write`, which the caller grants and no other job of the lane has.
 
@@ -492,7 +498,7 @@ the optimizer packages of `optimizer_tag` beside it).
 | `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 it passes with a notice; `--dry-run` (passed while the pin is not the paired tag) turns a mismatch into a warning and skips `-pre` tags (`--self-test`) |
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
-| `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification, used by the two signing jobs |
+| `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |
 
 The self-tests run in the `CI tooling self-tests` job of `ci.yml`.

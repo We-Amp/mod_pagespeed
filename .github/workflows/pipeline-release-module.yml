@@ -644,14 +644,16 @@ jobs:
   # commit: the package smokes below run the suite against a stock install,
   # whose configuration lacks the lane fixtures, so their pytest step is
   # informational. A completed run of the main workflow for the release
-  # commit must have passed both lanes. On a dry run the verdict is reported
-  # and the run continues.
+  # commit must have passed both lanes. While that run is still queued or in
+  # progress the gate waits for it (the tag may be pushed right after the
+  # merge), and transient API failures are retried. On a dry run the verdict
+  # is reported and the run continues. See tools/ci/systest_gate.sh.
   # ---------------------------------------------------------------------
   systest-gate:
     name: System-test gate (CI run of the release commit)
     needs: [ref-guard, version]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 75
     # Reads the workflow runs of this public repository with the default
     # read-only token; no extra permission is requested.
     env:
@@ -659,34 +661,15 @@ jobs:
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
     steps:
+      - name: Checkout master (gate script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
       - name: Require green Apache and Nginx system tests for this commit
-        run: |
-          set -uo pipefail
-          verdict() {
-            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&status=completed&per_page=50" --jq '.workflow_runs[].id')" || return 2
-            [ -n "$RUN_IDS" ] || { echo "no completed ci.yml run for ${RELEASE_SHA}"; return 1; }
-            for RUN in $RUN_IDS; do
-              JOBS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN}/jobs?per_page=100" --jq '.jobs[] | "\(.name)=\(.conclusion)"')" || return 2
-              echo "ci.yml run ${RUN}:"
-              echo "$JOBS" | grep -E '(^| / )(Apache|Nginx) System Tests=' || echo "  (no system-test jobs)"
-              if echo "$JOBS" | grep -Eq '(^|/ )Apache System Tests=success$' \
-                 && echo "$JOBS" | grep -Eq '(^|/ )Nginx System Tests=success$'; then
-                echo "System-test lanes passed in ci.yml run ${RUN}"
-                return 0
-              fi
-            done
-            echo "no ci.yml run of ${RELEASE_SHA} passed both Apache and Nginx System Tests"
-            return 1
-          }
-          rc=0
-          verdict || rc=$?
-          if [ "$rc" -eq 0 ]; then exit 0; fi
-          if [ "$DRY_RUN" = true ]; then
-            echo "::warning::dry run: the system-test gate would refuse a real run of this tag (see above)"
-            exit 0
-          fi
-          echo "::error::the system-test gate refuses this release (see above)"
-          exit 1
+        run: bash tools/ci/systest_gate.sh
 
   # ---------------------------------------------------------------------
   # Linux packages. One step list for three jobs: x64 on the build runners,
@@ -776,12 +759,20 @@ jobs:
       # package at the pair version, which is the module version.
       - name: Build the Apache module and its packages
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           set -euo pipefail
           echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
@@ -836,10 +827,18 @@ jobs:
       # jobs, inside containers of each distro.
       - name: Build the nginx module tarball
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           set -euo pipefail
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
@@ -947,7 +946,7 @@ jobs:
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     env: &nginx-x64-env
       ARCH: x64
     steps: &nginx-steps
@@ -1115,11 +1114,19 @@ jobs:
 
       - name: Build the module and the stock rpm in almalinux
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 80g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=80g
+          fi
           set -euo pipefail
           CACHE_ROOT="${HOME}/.cache/mps-release-${EL}"
           mkdir -p "${CACHE_ROOT}"
           docker run --rm --init \
-            --memory=80g --memory-swap=80g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${CACHE_ROOT}:/cache" \
             -w /workspace \
@@ -1247,11 +1254,19 @@ jobs:
 
       - name: Run the unit tests
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --network="${UNIT_NET}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
