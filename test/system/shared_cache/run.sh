@@ -39,6 +39,7 @@ case "$SERVER" in apache|nginx) ;; *) echo "usage: run.sh apache|nginx [module.s
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 READY_TIMEOUT_S=${READY_TIMEOUT_S:-180}
+STABLE_POLLS=${STABLE_POLLS:-10}
 # SHARED_CACHE_PREFIX names this run's containers and network; it must be
 # unique to the run (a CI job passes its own job-scoped name).
 PREFIX="${SHARED_CACHE_PREFIX:-shared-cache-$$-${RANDOM}}"
@@ -108,8 +109,10 @@ describe() {
 }
 
 # Readiness, per client: the response came from the optimizer's cache (Age)
-# as a selected variant (Vary), and its bytes held still for three polls in
-# a row, so a first fallback copy has been replaced by the client's own.
+# as a selected variant (Vary), and its bytes held still for STABLE_POLLS
+# polls a second apart.  A client whose own variant is not written yet is
+# first served another one (a fallback) while the worker writes it, which
+# takes seconds for a large image; the bytes change when it lands.
 for _ in $(seq 1 30); do
   in_origin curl -s -o /dev/null http://localhost/ && break
   sleep 1
@@ -122,7 +125,7 @@ for c in $CLIENTS; do
     if [ -n "$(header age)" ] && [ -n "$(header vary)" ]; then
       h=$(body_hash)
       if [ "$h" = "$last" ]; then same=$((same + 1)); else same=0; last=$h; fi
-      [ "$same" -ge 2 ] && break
+      [ "$same" -ge "$STABLE_POLLS" ] && break
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "FAIL: $c got no stable optimized variant within ${READY_TIMEOUT_S}s"
