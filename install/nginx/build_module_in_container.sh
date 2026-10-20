@@ -327,7 +327,10 @@ install_deps_focal() {
   # NOT emit the __isoc23_* GLIBC_2.38 redirects that the noble (glibc 2.39) base
   # bakes in — and combined with -static-libstdc++/-static-libgcc on the module
   # link (step 6, focal-only LD_OPT) the .so carries NO libstdc++ runtime dep, so
-  # it loads on Debian 11/12, Ubuntu 20.04+, RHEL/Alma 8/9, Amazon Linux 2023.
+  # it needs no newer glibc than 2.31. The matched nginx of the pair also links
+  # libpcre.so.3 (libpcre3), so the pair's hosts are Debian 11/12 and Ubuntu
+  # 20.04 to 24.04 (later releases dropped libpcre3; Enterprise Linux and Amazon
+  # Linux never had it under that name).
   # focal's stock toolchain is too old for the C++20/23 PSOL/Cyclone graph, so add
   # the LLVM apt repo (clang) + the toolchain PPA (g++-13 -> the libstdc++-13
   # headers/libs the clang-libstdcxx13 bazel config expects at /usr/{include/c++,
