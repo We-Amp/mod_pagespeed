@@ -93,7 +93,7 @@ jobs:
             if grep -qE "^(bazel/repositories\.bzl|tools/dependency/|test/tools/dependency/|tools/generate-sbom\.py|${wf})" "${changed}"; then
               cve=true
             fi
-            if grep -qE "^(install/upgrade_test/|${wf})" "${changed}"; then
+            if grep -qE "^(install/|${wf})" "${changed}"; then
               upgrade=true
             fi
             if grep -qE "^(third_party/css_parser/|pagespeed/kernel/html/|tools/html-parse-corpus/|pagespeed/kernel/packs/|tools/pack-loader-corpus/|tools/rule-pack-filter-corpus/|pagespeed/kernel/js/|tools/js-minify-corpus/|tools/ci/classify-js-fuzz-artifacts\.sh|${wf})" "${changed}"; then
