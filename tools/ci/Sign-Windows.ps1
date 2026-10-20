@@ -11,7 +11,8 @@
     (docs/ci/release.md), which hold the six environment variables below as
     secrets of the protected `release` environment. Signs every file given with
     signtool and the Trusted Signing client library, timestamps it, then asks
-    Windows for the signature status of each file and fails unless it is Valid.
+    Windows for the signature of each file and fails unless its status is Valid
+    and its signer certificate's subject is exactly $ExpectedSubject.
     Prints no secret and no endpoint.
 
     Environment (all required): AZURE_TENANT_ID, AZURE_CLIENT_ID,
@@ -30,6 +31,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# The signer every release file must carry: the We-Amp B.V. identity of the
+# Trusted Signing certificate profile (as Windows renders the subject). A
+# signature that Windows calls Valid but that names anyone else, for example
+# a misconfigured profile or another tenant's, fails the job.
+$ExpectedSubject = 'CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL'
 
 foreach ($n in @('AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
                  'TRUSTED_SIGNING_ENDPOINT', 'TRUSTED_SIGNING_ACCOUNT', 'TRUSTED_SIGNING_PROFILE')) {
@@ -92,12 +99,18 @@ try {
     Remove-Item -LiteralPath $metadataFile -Force -ErrorAction SilentlyContinue
 }
 
-# Consume what was signed: Windows must call every signature valid.
+# Consume what was signed: Windows must call every signature valid, and the
+# signer must be exactly the expected identity.
 foreach ($f in $Files) {
     $sig = Get-AuthenticodeSignature -LiteralPath $f
     if ($sig.Status -ne 'Valid') {
         Write-Host "::error::$f signature status: $($sig.Status)"
         exit 1
     }
-    Write-Host "$f signed by: $($sig.SignerCertificate.Subject)"
+    $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '<no signer certificate>' }
+    if ($subject -cne $ExpectedSubject) {
+        Write-Host "::error::$f is signed by '$subject', expected '$ExpectedSubject'"
+        exit 1
+    }
+    Write-Host "$f signed by: $subject"
 }
