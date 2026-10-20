@@ -52,7 +52,9 @@ tier.
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
-| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests and while `FLEET_ENABLED` is not `true`; carries the "only" guard below |
+| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`; carries the "only" guard below |
+| `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
+| `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, `FLEET_IIS_ENABLED` not `true`, a failed prerequisite) |
 
 Application Verifier and the other IIS lanes that run longer belong to the
 later tiers. `iis-sys-tests` clears stale verifier settings before the run and
@@ -154,21 +156,53 @@ hosted side and uses the "only" guard below.
 | `fleet-iis` | a Windows host with the IIS role, Application Verifier and the sanitizer runtime; runs the IIS system tests and the sanitizer and Application Verifier jobs, and can have more than one host |
 | `fleet-hyperv` | a Windows host with the Hyper-V role and the test guests with their clean checkpoints; runs the installer-upgrade and cPanel release gates |
 
-### The guard and the kill switch
+### The kill switch
 
-Every job routed by that expression also carries this guard, verbatim, as
-its `if:`:
+`FLEET_ENABLED` is a repository variable. Unset or `true` means the build
+runners are in use; `false` is the kill switch.
+
+The PR, full and nightly tiers use the switch routing expression, copied
+verbatim into every job that has a hosted twin. It sends the job to the hosted
+side for a fork or Dependabot pull request and also while the switch is off:
+
+```yaml
+runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+```
+
+Such a job carries no `if:` guard (it always runs, on one side or the other),
+except a path filter alone (`needs.changes.outputs.<name> == 'true'`). Jobs
+with no hosted twin keep the plain routing expression and a guard whose
+`FLEET_ENABLED` term is `!= 'false'`: they are skipped, not failed, while the
+switch is off, and a `fleet-off-notice` job in each tier says so in an
+annotation and the job summary.
+
+To flip it: Settings, Secrets and variables, Actions, Variables, set
+`FLEET_ENABLED` to `false` (or `gh variable set FLEET_ENABLED --body false
+-R We-Amp/<repo>`); set it to `true` or delete it to go back. It is read when
+a run starts, so re-run a run that began before the change. The hosted legs
+run without the hub and the remote cache and are slower; the IIS system
+tests, Application Verifier lanes and the privileged stress rigs are skipped,
+and the CI gate accepts those skips because the switch is off
+(`fleet-only-skip-check` fails any other skip of the IIS system tests).
+
+The release lane does not use the switch routing expression. It keeps the
+plain routing expression, the original guards (`FLEET_ENABLED == 'true'`) and
+its hosted twins, so an unset variable still sends a release to the hosted
+twins and never degrades silently; see "Hosted twins and joins".
+
+#### The plain guards
+
+A job routed by the plain expression (the release lane, and the jobs without a
+hosted twin) carries one of these guards, verbatim, as its `if:`:
 
 ```yaml
 if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
 ```
 
-`FLEET_ENABLED` is a repository variable. While it is unset (or anything but
-`true`), these jobs are skipped for same-repository events and still run on
-hosted runners for fork and Dependabot pull requests, which need no build
-runner. Setting it to `true` turns the build-runner legs on; clearing it is
-the kill switch that takes every such job off the build runners at once, with
-no workflow change.
+While the variable is unset (or anything but `true`), these jobs are skipped
+for same-repository events and still run on hosted runners for fork and
+Dependabot pull requests, which need no build runner. Clearing it is the kill
+switch for the release lane's build jobs, which then run their hosted twins.
 
 `FLEET_IIS_ENABLED` is a second repository variable for the jobs of the
 `fleet-iis` and `fleet-hyperv` classes, which have no hosted twin. Each of them also requires it to
@@ -199,6 +233,10 @@ requires it, and no other guard, on every job routed to that class.
 ```yaml
 if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
 ```
+
+The PR, full and nightly tiers use the **only** and **fleet-iis** guards with
+the first term written `vars.FLEET_ENABLED != 'false'` (unset means on); the
+gate accepts both spellings.
 
 A job that needs more conditions (for example a path filter) appends them
 together with a matching gate rule; the gate rejects any routed job whose
