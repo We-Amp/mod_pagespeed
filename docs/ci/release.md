@@ -235,7 +235,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
 | `linux-arm64-release-build` | hosted arm64 | the same for arm64 |
 | `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
-| `nginx-distro-build-arm64` | hosted arm64 | the same for arm64 |
+| `nginx-arm64-plan`, `nginx-distro-build-arm64`, `nginx-arm64-join` | hosted arm64 | the same for arm64, one matrix job per distro (the plan job lists them from the leg table); the join job runs the gates over the combined set and hands over `asset-nginx-arm64` |
 | `nginx-distro-build-el10` | fleet-heavy, pair | the el10 nginx module rpm, with the gates and a load check into the stock nginx |
 | `apache-el8-build` | fleet-heavy, pair | the stock Apache rpm built on el8 (glibc 2.28); input of the cPanel package only |
 | `apache-el10-build` | fleet-heavy, pair | the stock Apache rpm built natively on el10 |
