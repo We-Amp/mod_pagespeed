@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A read from the optimizer worker that timed out could be reported as a
+  dropped connection when the host's clock ran slow; it is now reported as a
+  timeout whenever the transfer itself timed out.
+
 ## [2.5.0] - 2026-10-19
 
 ### Security
