@@ -204,6 +204,8 @@ def required(pkg_version, prerelease, msi=False):
     for rid in ("linux-x64", "linux-arm64"):
         req.append(("sidecar native pair " + rid, "asset-sidecar-" + rid.split("-")[1],
                     r"^pagespeed-sidecar-native-%s-%s\.tar\.gz$" % (tag_version, rid)))
+        req.append(("sidecar debug files " + rid, "asset-sidecar-" + rid.split("-")[1],
+                    r"^pagespeed-sidecar-native-debug-%s-%s\.tar\.gz$" % (tag_version, rid)))
     req.append(("sidecar pair manifest", "asset-sidecar-manifest", r"^sidecar-pair\.json$"))
     req.append(("sbom", "asset-sbom", r"\.spdx\.json$"))
     req.append(("vex", "asset-sbom", r"\.vex\.json$"))
@@ -488,6 +490,7 @@ def self_test():
         mk(st8, "asset-sbom", "pagespeed-1.1-%s.vex.json" % v)
         for rid in ("linux-x64", "linux-arm64"):
             mk(st8, "asset-sidecar-" + rid.split("-")[1], "pagespeed-sidecar-native-%s-%s.tar.gz" % (v, rid))
+            mk(st8, "asset-sidecar-" + rid.split("-")[1], "pagespeed-sidecar-native-debug-%s-%s.tar.gz" % (v, rid))
         mk(st8, "asset-sidecar-manifest", "sidecar-pair.json", b"{}")
         out8 = os.path.join(tmp, "o8")
         build(ns(st8, out8, profile="part-a"))
@@ -497,6 +500,8 @@ def self_test():
         if sorted((f["asset"], f["kind"], f["channel"], f["arch"]) for f in sidecar) != [
                 ("pagespeed-sidecar-native-1.19.0-linux-arm64.tar.gz", "tarball", "none", "arm64"),
                 ("pagespeed-sidecar-native-1.19.0-linux-x64.tar.gz", "tarball", "none", "x64"),
+                ("pagespeed-sidecar-native-debug-1.19.0-linux-arm64.tar.gz", "tarball", "none", "arm64"),
+                ("pagespeed-sidecar-native-debug-1.19.0-linux-x64.tar.gz", "tarball", "none", "x64"),
                 ("sidecar-pair.json", "json", "none", "any")]:
             print("FAIL: sidecar entries: %r" % sidecar)
             fail = 1

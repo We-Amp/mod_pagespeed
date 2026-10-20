@@ -9,17 +9,22 @@
   sidecar_pair_manifest.py --self-test
 
 The module release carries the native pair of the ASP.NET Core sidecar, one
-tarball per runtime identifier (tools/ci/release_sidecar.sh package):
+tarball per runtime identifier, and its debug files, one tarball per runtime
+identifier (tools/ci/release_sidecar.sh package):
 
   pagespeed-sidecar-native-<version>-linux-x64.tar.gz
   pagespeed-sidecar-native-<version>-linux-arm64.tar.gz
+  pagespeed-sidecar-native-debug-<version>-linux-x64.tar.gz
+  pagespeed-sidecar-native-debug-<version>-linux-arm64.tar.gz
 
 `build` reads both tarballs from DIR, checks each against the build-info.json
 it carries and against the other, and writes sidecar-pair.json, which the NuGet
 lane pins and verifies before it packs the sidecar packages:
 
   {schema, tag, version, source_sha, nginx_version, glibc_floor, build_image,
-   rids: {<rid>: {asset, sha256, size, files: {<name>: <sha256>}}}}
+   rids: {<rid>: {asset, sha256, size, files: {<name>: <sha256>},
+                  clang_version, gcc_version,
+                  debug: {asset, sha256, size}}}}
 
 `files` names every regular file of the tarball (by its name inside the
 tarball's single top directory) with its sha256. `verify` checks a manifest
@@ -56,6 +61,28 @@ class Refused(Exception):
 
 def asset_name(version, rid):
     return "pagespeed-sidecar-native-%s-%s.tar.gz" % (version, rid)
+
+
+def debug_asset_name(version, rid):
+    return "pagespeed-sidecar-native-debug-%s-%s.tar.gz" % (version, rid)
+
+
+def read_debug_tarball(path, version, rid):
+    """Refuse a debug tarball that is not exactly the debug files of the three binaries."""
+    top = "pagespeed-sidecar-native-debug-%s-%s" % (version, rid)
+    want = set(b + ".debug" for b in BINARIES)
+    seen = set()
+    with tarfile.open(path, "r:gz") as tar:
+        for m in tar.getmembers():
+            name = m.name.rstrip("/")
+            if name == top and m.isdir():
+                continue
+            base = name[len(top) + 1:] if name.startswith(top + "/") else None
+            if base not in want or not m.isfile() or m.size == 0 or base in seen:
+                raise Refused("%s: unexpected member %s" % (os.path.basename(path), m.name))
+            seen.add(base)
+    if seen != want:
+        raise Refused("%s: missing %s" % (os.path.basename(path), ", ".join(sorted(want - seen))))
 
 
 def sha256_bytes(data):
@@ -118,7 +145,7 @@ def check_info(info, files, rid, version, source_sha):
     for name, field in INFO_SHA_FIELDS.items():
         if info.get(field) != files[name]:
             raise Refused("%s: %s does not match the %s in the tarball" % (where, field, name))
-    for key in ("nginx_version", "glibc_floor", "build_image"):
+    for key in ("nginx_version", "glibc_floor", "build_image", "clang_version", "gcc_version"):
         if not isinstance(info.get(key), str) or not info.get(key):
             raise Refused("%s: no %s" % (where, key))
 
@@ -142,11 +169,19 @@ def build_manifest(directory, tag, version, source_sha):
             common = mine
         elif mine != common:
             raise Refused("the architectures disagree: %r vs %r" % (common, mine))
+        dname = debug_asset_name(version, rid)
+        dpath = os.path.join(directory, dname)
+        if not os.path.isfile(dpath):
+            raise Refused("missing " + dname)
+        read_debug_tarball(dpath, version, rid)
         rids[rid] = {
             "asset": name,
             "sha256": sha256_file(path),
             "size": os.path.getsize(path),
             "files": dict(sorted(files.items())),
+            "clang_version": info["clang_version"],
+            "gcc_version": info["gcc_version"],
+            "debug": {"asset": dname, "sha256": sha256_file(dpath), "size": os.path.getsize(dpath)},
         }
     manifest = {"schema": 1, "tag": tag, "version": version, "source_sha": source_sha}
     manifest.update(common)
@@ -186,7 +221,7 @@ def self_test():
         content.update({"LICENSE": b"license", "NOTICE": b"notice", "THIRD-PARTY-NOTICES": b"third"})
         info = {"schema": 1, "package_version": version, "mod_pagespeed_version": version,
                 "rid": rid, "nginx_version": "1.30.5", "glibc_floor": "2.31", "build_image": image,
-                "source_sha": sha}
+                "clang_version": "clang version 18", "gcc_version": "gcc-13 13.1.0", "source_sha": sha}
         for n, f in INFO_SHA_FIELDS.items():
             info[f] = sha256_bytes(content[n])
         if info_mutate:
@@ -204,6 +239,14 @@ def self_test():
                 ti = tarfile.TarInfo(top + "/" + n)
                 ti.size = len(data)
                 ti.mode = 0o755 if n in EXECUTABLES else 0o644
+                tar.addfile(ti, io.BytesIO(data))
+        dtop = "pagespeed-sidecar-native-debug-%s-%s" % (version, rid)
+        with tarfile.open(os.path.join(directory, debug_asset_name(version, rid)), "w:gz") as tar:
+            for n in BINARIES:
+                data = ("debug %s" % n).encode()
+                ti = tarfile.TarInfo(dtop + "/" + n + ".debug")
+                ti.size = len(data)
+                ti.mode = 0o644
                 tar.addfile(ti, io.BytesIO(data))
         return path
 
@@ -230,6 +273,10 @@ def self_test():
                 or x64["sha256"] != sha256_file(os.path.join(good, x64["asset"])) \
                 or set(x64["files"]) != EXPECTED_FILES:
             print("FAIL: x64 entry: %r" % x64)
+            fail = 1
+        if x64["debug"]["asset"] != "pagespeed-sidecar-native-debug-2.5.1-linux-x64.tar.gz" \
+                or x64["clang_version"] != "clang version 18":
+            print("FAIL: x64 debug and toolchain: %r" % x64)
             fail = 1
         verify_manifest(m, good, tag="module-v2.5.1", version="2.5.1", source_sha=sha)
         out = os.path.join(tmp, "m.json")
@@ -264,6 +311,13 @@ def self_test():
         case("other version in build-info", info_mutate=lambda i: i.update({"package_version": "2.5.0"}))
         case("other commit in build-info", info_mutate=lambda i: i.update({"source_sha": "d" * 40}))
         case("wrong rid in build-info", info_mutate=lambda i: i.update({"rid": "linux-x64"}))
+        case("no compiler in build-info", info_mutate=lambda i: i.pop("gcc_version"))
+        nodebug = os.path.join(tmp, "nodebug")
+        os.makedirs(nodebug)
+        for rid in RIDS:
+            make(nodebug, "2.5.1", rid)
+        os.remove(os.path.join(nodebug, debug_asset_name("2.5.1", "linux-arm64")))
+        expect_refused("missing debug tarball", lambda: build_manifest(nodebug, "module-v2.5.1", "2.5.1", sha))
 
         # a link, and a binary that is not executable
         d = os.path.join(tmp, "link")

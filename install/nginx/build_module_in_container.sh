@@ -302,6 +302,38 @@ install_deps_noble() {
   install_bazelisk
 }
 
+# The signing keys of the two third-party apt repositories the recipe uses,
+# pinned by fingerprint: a key file that does not hold the pinned key stops
+# the build, and only the pinned key goes into the keyring the repository is
+# scoped to.
+#   apt.llvm.org: the fingerprint https://apt.llvm.org/ publishes. The key file
+#     there also carries a second key; it is not trusted.
+#   ppa:ubuntu-toolchain-r/test: the signing_key_fingerprint Launchpad reports
+#     for the archive (https://api.launchpad.net/1.0/~ubuntu-toolchain-r/+archive/ubuntu/test).
+#     Its Release files are also signed with the archive's older 1024-bit key,
+#     which is not trusted; apt verifies the signature of the pinned key.
+LLVM_APT_KEY_FPR="${LLVM_APT_KEY_FPR:-6084F3CF814B57C1CF12EFD515CF4D18AF4F7421}"
+TOOLCHAIN_PPA_KEY_FPR="${TOOLCHAIN_PPA_KEY_FPR:-C8EC952E2A0E1FBDC5090F6A2C277A0A352154E5}"
+
+# pinned_keyring URL FINGERPRINT OUT: fetch the key file at URL and write only
+# the key with FINGERPRINT, as a binary keyring, to OUT; fail when the file
+# does not hold that key.
+pinned_keyring() {
+  local url="$1" fpr="$2" out="$3" tmp
+  tmp="$(mktemp -d)"
+  wget -qO "${tmp}/key.asc" "${url}"
+  GNUPGHOME="${tmp}" gpg --batch --quiet --import "${tmp}/key.asc" 2>/dev/null || true
+  if ! GNUPGHOME="${tmp}" gpg --batch --with-colons --list-keys "${fpr}" 2>/dev/null \
+       | awk -F: '$1=="fpr" { print $10 }' | grep -qx "${fpr}"; then
+    echo "ERROR: ${url} does not hold the pinned key ${fpr}; refusing the repository" >&2
+    rm -rf "${tmp}"
+    return 1
+  fi
+  GNUPGHOME="${tmp}" gpg --batch --export "${fpr}" > "${out}"
+  rm -rf "${tmp}"
+  [ -s "${out}" ] || { echo "ERROR: could not export the pinned key ${fpr}" >&2; return 1; }
+}
+
 # add_llvm_apt_repo VERSION
 # Registers the apt.llvm.org repository for clang VERSION with an explicit,
 # key-scoped source entry (no remote installer script is downloaded or run).
@@ -315,9 +347,28 @@ add_llvm_apt_repo() {
     # shellcheck disable=SC1091
     codename="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
   fi
-  wget -qO "${keyring_dir}/llvm-snapshot.gpg.asc" https://apt.llvm.org/llvm-snapshot.gpg.key
-  echo "deb [signed-by=${keyring_dir}/llvm-snapshot.gpg.asc] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
+  pinned_keyring https://apt.llvm.org/llvm-snapshot.gpg.key "${LLVM_APT_KEY_FPR}" \
+    "${keyring_dir}/llvm-snapshot.gpg" || return 1
+  echo "deb [signed-by=${keyring_dir}/llvm-snapshot.gpg] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
     > "${sources_dir}/llvm-${ver}.list"
+  apt-get update -qq
+}
+
+# add_toolchain_ppa: the Ubuntu toolchain PPA (GCC 13 for focal and jammy),
+# key-scoped to its pinned key. Replaces add-apt-repository, which trusts
+# whatever key Launchpad serves at the time.
+add_toolchain_ppa() {
+  local keyring_dir="${LLVM_KEYRING_DIR:-/usr/share/keyrings}"
+  local sources_dir="${LLVM_SOURCES_DIR:-/etc/apt/sources.list.d}"
+  local codename="${LLVM_CODENAME:-}"
+  if [ -z "${codename}" ]; then
+    # shellcheck disable=SC1091
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+  fi
+  pinned_keyring "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${TOOLCHAIN_PPA_KEY_FPR}" \
+    "${TOOLCHAIN_PPA_KEY_FPR}" "${keyring_dir}/ubuntu-toolchain-r.gpg" || return 1
+  echo "deb [signed-by=${keyring_dir}/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu ${codename} main" \
+    > "${sources_dir}/ubuntu-toolchain-r.list"
   apt-get update -qq
 }
 
@@ -344,8 +395,7 @@ install_deps_focal() {
     python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
-  add-apt-repository -y ppa:ubuntu-toolchain-r/test >/dev/null
-  apt-get update -qq
+  add_toolchain_ppa
   apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
   # clang/lld/llvm from apt.llvm.org (focal's stock clang predates C++20/23 support).
   local CLANG_VER=18
@@ -649,11 +699,7 @@ install_deps_jammy() {
   # 2.35, not a newer libc), so install it natively (no trixie sideload needed).
   # Stock clang (14) is borderline for C++23, so use clang-18 from apt.llvm.org.
   install_deps_debian_common
-  # add-apt-repository lives in software-properties-common (not in the common
-  # baseline); install it before adding the toolchain PPA.
-  apt-get install -y --no-install-recommends software-properties-common >/dev/null
-  add-apt-repository -y ppa:ubuntu-toolchain-r/test >/dev/null
-  apt-get update -qq
+  add_toolchain_ppa
   apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
   install_llvm_clang 18
   install_bazelisk

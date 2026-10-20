@@ -19,7 +19,7 @@
 #   release_sidecar.sh check   --arch ARCH --workspace DIR --pair DIR --debug DIR
 #                              --results DIR
 #   release_sidecar.sh package --arch ARCH --src DIR --pair DIR --version V
-#                              --source-sha SHA --out DIR
+#                              --source-sha SHA --out DIR [--debug DIR]
 #   release_sidecar.sh --self-test
 #
 # `build` runs the focal recipe of install/nginx/build_module_in_container.sh
@@ -57,7 +57,10 @@
 #
 # `package` writes pagespeed-sidecar-native-<version>-linux-<arch>.tar.gz:
 # nginx, ngx_pagespeed_module.so, pagespeed-nginx-launch, build-info.json
-# (versions and the sha256 of each binary) and the license files.
+# (versions, the compilers that built the pair, and the sha256 of each binary)
+# and the license files; with --debug also
+# pagespeed-sidecar-native-debug-<version>-linux-<arch>.tar.gz, the debug files
+# of the same binaries.
 set -euo pipefail
 
 # The build image of the pair, pinned by digest: Ubuntu 20.04 (glibc 2.31), the
@@ -226,6 +229,12 @@ build() {
         gcc-13 -O2 -Wall -o /out/pagespeed-nginx-launch install/nginx/pagespeed-nginx-launch.c
         chmod 755 /out/pagespeed-nginx-launch
         chmod 644 /out/ngx_pagespeed_module.so
+        # The compilers of this build, for build-info.json.
+        {
+          echo "clang=$(clang --version | head -1)"
+          echo "gcc=$(gcc-13 --version | head -1)"
+        } > /out/toolchain.txt
+        cat /out/toolchain.txt
       ' 2>&1 | tee "$logs/build.log"; then
       break
     else
@@ -524,8 +533,13 @@ package() {
   need_src; need_pair
   printf '%s' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || die "package: --source-sha is not a commit id"
   printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die "package: bad --version '$VERSION'"
-  local rid ngxver tree name stage
+  local rid ngxver tree name stage clang gcc
   rid="$(rid_of "$ARCH")"
+  [ -s "$PAIR/toolchain.txt" ] || die "package: the pair has no toolchain.txt (built by an older build?)"
+  clang="$(sed -n 's/^clang=//p' "$PAIR/toolchain.txt")"
+  gcc="$(sed -n 's/^gcc=//p' "$PAIR/toolchain.txt")"
+  [ -n "$clang" ] && [ -n "$gcc" ] || die "package: toolchain.txt names no clang or gcc"
+  case "$clang$gcc" in *\"*|*\\*) die "package: unexpected characters in toolchain.txt" ;; esac
   ngxver="$(focal_nginx_version "$SRC")"
   tree="$(tree_version "$SRC")"
   [ "$tree" = "$VERSION" ] || die "package: the tree is stamped $tree, not $VERSION"
@@ -541,7 +555,7 @@ package() {
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" \
     -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$FOCAL_IMAGE" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
-    -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
+    -e CLANG="$clang" -e GCC="$gcc" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
     -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '
       set -euo pipefail
       trap "chown -R \"$HOST_UID:$HOST_GID\" /o /s" EXIT
@@ -555,6 +569,8 @@ package() {
         printf "  \"nginx_version\": \"%s\",\n" "$NGXVER"
         printf "  \"glibc_floor\": \"%s\",\n" "$GLIBC_FLOOR"
         printf "  \"build_image\": \"%s\",\n" "$IMAGE"
+        printf "  \"clang_version\": \"%s\",\n" "$CLANG"
+        printf "  \"gcc_version\": \"%s\",\n" "$GCC"
         printf "  \"source_sha\": \"%s\",\n" "$SOURCE_SHA"
         printf "  \"nginx_sha256\": \"%s\",\n" "$(sha nginx)"
         printf "  \"module_sha256\": \"%s\",\n" "$(sha ngx_pagespeed_module.so)"
@@ -568,8 +584,29 @@ package() {
       tar -tvzf "/o/${NAME}.tar.gz"
       cat "$NAME/build-info.json"
     '
-  rm -rf "$stage"
   ls -l "$OUT/${name}.tar.gz"
+  if [ -n "$DEBUG_DIR" ]; then
+    # The debug files of the same binaries, released beside them so that a
+    # crash of a released pair can be symbolized after the run is gone.
+    local dname="pagespeed-sidecar-native-debug-${VERSION}-${rid}" f
+    mkdir -p "$stage/$dname"
+    for f in "${PAIR_FILES[@]}"; do
+      [ -s "$DEBUG_DIR/$f.debug" ] || die "package: no debug file $DEBUG_DIR/$f.debug"
+      cp "$DEBUG_DIR/$f.debug" "$stage/$dname/"
+    done
+    docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+      -e NAME="$dname" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
+      -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '
+        set -euo pipefail
+        trap "chown -R \"$HOST_UID:$HOST_GID\" /o /s" EXIT
+        chmod 644 "$NAME"/*
+        tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${EPOCH}" \
+          -cf - "$NAME" | gzip -9n > "/o/${NAME}.tar.gz"
+        tar -tvzf "/o/${NAME}.tar.gz"
+      '
+    ls -l "$OUT/${dname}.tar.gz"
+  fi
+  rm -rf "$stage"
 }
 
 # --- self-test ---------------------------------------------------------------
