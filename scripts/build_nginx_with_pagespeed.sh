@@ -9,7 +9,7 @@
 #   ./scripts/build_nginx_with_pagespeed.sh [options]
 #
 # Options:
-#   --nginx-version=VERSION  NGINX version to download (default: 1.30.5)
+#   --nginx-version=VERSION  NGINX version to download (default: 1.30.6)
 #   --nginx-src=PATH         Use existing nginx source at PATH
 #   --prefix=PATH            Install prefix (default: /tmp/nginx-pagespeed)
 #   --build-dir=PATH         Build directory (default: /tmp/nginx-build)
@@ -60,7 +60,7 @@ show_help() {
 # Pinned SHA-256 digests of the nginx.org release tarballs.
 nginx_pinned_sha256() {
     case "$1" in
-        1.30.5) echo "6c20565aa2325cb82216ae804f4a4ff1875179014759a381c42ddc8e11c4906d" ;;
+        1.30.6) echo "3cf46f5ed7504d460125866b7bea99fb357f31d887e2e63b35503310e9b8b6c8" ;;
         1.26.3) echo "69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
         1.24.0) echo "77a2541637b92a621e3ee76776c8b7b40cf6d707e69ba53a940283e30ff2f55d" ;;
         1.20.1) echo "e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
@@ -93,7 +93,7 @@ verify_nginx_tarball() {
 }
 
 # Default values
-NGINX_VERSION="1.30.5"  # CVE-2026-90439: 1.30.4 -> 1.30.5 (1.30 stable)
+NGINX_VERSION="1.30.6"  # CVE-2026-15176, CVE-2026-93479: 1.30.5 -> 1.30.6 (1.30 stable)
 NGINX_SRC=""
 PREFIX="/tmp/nginx-pagespeed"
 BUILD_DIR="/tmp/nginx-build"

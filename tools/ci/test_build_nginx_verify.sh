@@ -48,17 +48,17 @@ if ! declare -F verify_nginx_tarball >/dev/null; then
 fi
 set +e
 
-(NGINX_SHA256="$BAD" verify_nginx_tarball 1.30.5 "$T/nginx.tar.gz") 2>/dev/null
+(NGINX_SHA256="$BAD" verify_nginx_tarball 1.30.6 "$T/nginx.tar.gz") 2>/dev/null
 check "wrong digest is rejected" 1 $?
-(NGINX_SHA256="$GOOD" verify_nginx_tarball 1.30.5 "$T/nginx.tar.gz") 2>/dev/null
+(NGINX_SHA256="$GOOD" verify_nginx_tarball 1.30.6 "$T/nginx.tar.gz") 2>/dev/null
 check "right digest is accepted" 0 $?
-(unset NGINX_SHA256; verify_nginx_tarball 1.30.5 "$T/nginx.tar.gz") 2>/dev/null
+(unset NGINX_SHA256; verify_nginx_tarball 1.30.6 "$T/nginx.tar.gz") 2>/dev/null
 check "pinned digest rejects a different file" 1 $?
 (unset NGINX_SHA256; verify_nginx_tarball 9.9.9 "$T/nginx.tar.gz") 2>/dev/null
 check "unknown version fails closed" 1 $?
 (NGINX_SHA256="$GOOD" verify_nginx_tarball 9.9.9 "$T/nginx.tar.gz") 2>/dev/null
 check "unknown version with explicit digest is accepted" 0 $?
-(unset NGINX_SHA256; nginx_pinned_sha256 1.30.5 >/dev/null)
+(unset NGINX_SHA256; nginx_pinned_sha256 1.30.6 >/dev/null)
 check "default version is pinned" 0 $?
 
 # Container build script: no remote installer execution.
