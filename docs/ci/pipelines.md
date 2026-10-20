@@ -47,8 +47,8 @@ tier.
 | `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
 | `linux-unit-tests` | `fleet-heavy` | `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
 | `lint` | `fleet-heavy` | `vendor` | clang-tidy (scoped to the pull request) and clang-format |
-| `js-minify-corpus` | `fleet-heavy` | `vendor` | JS minifier oracles and goldens freshness gate |
-| `html-parse-corpus` | `fleet-heavy` | `vendor` | HTML parse goldens freshness gate |
+| `js-minify-corpus` | `fleet-light` (`ubuntu-latest` for forks) | `vendor` | JS minifier oracles and goldens freshness gate |
+| `html-parse-corpus` | `fleet-light` (`ubuntu-latest` for forks) | `vendor` | HTML parse goldens freshness gate |
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
