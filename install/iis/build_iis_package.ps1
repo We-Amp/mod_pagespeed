@@ -130,9 +130,10 @@ Native IIS module for PageSpeed web optimization.
 
 ## Requirements
 
-- Windows Server 2019 or later
-- IIS 10+
-- Visual C++ Redistributable 2022
+- Windows Server 2016 or later
+- IIS 10
+- No Visual C++ Redistributable: the module, worker and library link the
+  runtime statically
 
 ## Known Limitations
 

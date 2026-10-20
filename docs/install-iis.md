@@ -4,15 +4,18 @@
 
 ## Requirements
 
-- Windows Server 2019 or later
-- IIS 10+
-- Visual C++ Redistributable 2022
+- Windows Server 2016 or later
+- IIS 10
+- No Visual C++ Redistributable: the module, worker and library link the
+  runtime statically
 
 ## Install
 
 Download the signed installer **`pagespeed-iis-<version>-win-x64.msi`** from the
-[downloads page](https://modpagespeed.com/1.1/docs/downloads/) and run it — it
-installs the native module (`pagespeed_iis.dll`) and registers it with IIS.
+[latest GitHub release](https://github.com/We-Amp/mod_pagespeed/releases/latest)
+and run it — it installs the native module (`pagespeed_iis.dll`) and registers
+it with IIS. Before running it, check it against the release's `SHA256SUMS`
+file and confirm its Authenticode signature names We-Amp B.V.
 
 > Building from source uses the public mod_pagespeed source tree and a Windows
 > build toolchain (see `DEVELOPER.md`); the signed MSI is the supported path for
