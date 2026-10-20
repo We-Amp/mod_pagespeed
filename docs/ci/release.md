@@ -185,7 +185,13 @@ the jobs of the environment read the environment's value.
 | `PACKAGE_SIGNING_KEY` | `sign-checksums` | the armored private key of the package signing key, base64 encoded, a single secret key |
 | `PACKAGE_SIGNING_PASSPHRASE` | `sign-checksums` | its passphrase |
 
-The package signing key is the one whose public half the consumer pins. The
+Despite its name, `PACKAGE_SIGNING_KEY` holds the release signing key, which
+signs `SHA256SUMS`; the apt and yum repositories are signed by a separate
+repository key. The release signing key is the one whose public half the
+consumer pins: fingerprint
+`411DEFDB571351D2B25AEFCC9C02B5BDCCE75313`, published as
+`RELEASE-SIGNING-KEY.asc` in the repository root (see `SECURITY.md`). A new
+key is a change to that file, `SECURITY.md` and every consumer's pin together. The
 release itself needs no secret: `create-release` uses the run's own token with
 `contents: write`, which the caller grants and no other job of the lane has.
 
