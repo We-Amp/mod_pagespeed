@@ -2859,12 +2859,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
+    env:
+      # The Release Signing Key, by full fingerprint. A new key changes this
+      # line, RELEASE-SIGNING-KEY.asc and SECURITY.md together.
+      RELEASE_KEY_FPR: 411DEFDB571351D2B25AEFCC9C02B5BDCCE75313
     steps:
       - name: Download the validated asset set
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-assets
           path: assets
+
+      # The published public key, from master (never from the tree being
+      # released), is what the signature is verified against below.
+      - name: Checkout master (published release key)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: trust
+          sparse-checkout: RELEASE-SIGNING-KEY.asc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       # SHA256SUMS lists manifest.json, so one signature covers the whole set.
       - name: Verify the set across the job boundary
@@ -2890,11 +2905,48 @@ jobs:
           [ "$(gpg --batch --list-secret-keys --with-colons | grep -c '^sec:')" = 1 ] \
             || { echo "::error::the signing secret must hold exactly one secret key"; exit 1; }
           FPR="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10; exit}')"
+          if [ "$FPR" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::the signing secret holds key ${FPR:-<none>}, not the release signing key ${RELEASE_KEY_FPR}; nothing was signed"
+            exit 1
+          fi
           mkdir -p signature
           printf '%s' "$PACKAGE_SIGNING_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --local-user "$FPR" --armor --detach-sign --output signature/SHA256SUMS.asc assets/SHA256SUMS
-          gpg --batch --verify signature/SHA256SUMS.asc assets/SHA256SUMS
           echo "Signed SHA256SUMS with key ${FPR}" | tee -a "$GITHUB_STEP_SUMMARY"
+          gpgconf --kill gpg-agent || true
+          rm -rf "$GNUPGHOME"
+
+      # Verified in a fresh keyring that holds only the published public key,
+      # never the keyring the secret was imported into: a release whose
+      # signature a user cannot check with RELEASE-SIGNING-KEY.asc fails here.
+      - name: Verify SHA256SUMS.asc against the published release key
+        run: |
+          set -euo pipefail
+          KEY=trust/RELEASE-SIGNING-KEY.asc
+          if [ ! -s "$KEY" ]; then
+            echo "::error::RELEASE-SIGNING-KEY.asc is missing on master; the signature cannot be checked against the published key"
+            exit 1
+          fi
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg-verify"
+          rm -rf "$GNUPGHOME"; mkdir -m 700 "$GNUPGHOME"
+          # The file must hold exactly one key, the release signing key.
+          KEYS="$(gpg --batch --with-colons --show-keys "$KEY" \
+            | awk -F: '$1=="pub"||$1=="sub" {want=($1=="pub")} $1=="fpr" && want {print $10; want=0}')"
+          if [ "$KEYS" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::RELEASE-SIGNING-KEY.asc holds [${KEYS//$'\n'/ }], expected exactly ${RELEASE_KEY_FPR}"
+            exit 1
+          fi
+          gpg --batch --quiet --import "$KEY"
+          STATUS="$(gpg --batch --status-fd 1 --verify signature/SHA256SUMS.asc assets/SHA256SUMS 2>/dev/null)" || {
+            echo "::error::SHA256SUMS.asc does not verify against the published release key"
+            exit 1
+          }
+          SIGNER="$(printf '%s\n' "$STATUS" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print $NF}')"
+          if [ "$SIGNER" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::SHA256SUMS.asc VALIDSIG primary key is [${SIGNER//$'\n'/ }], expected exactly ${RELEASE_KEY_FPR}"
+            exit 1
+          fi
+          echo "Verified SHA256SUMS.asc against RELEASE-SIGNING-KEY.asc (${RELEASE_KEY_FPR})" | tee -a "$GITHUB_STEP_SUMMARY"
           gpgconf --kill gpg-agent || true
           rm -rf "$GNUPGHOME"
 
