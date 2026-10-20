@@ -336,6 +336,22 @@ is_fleet_guard() {
   return 1
 }
 
+# A fleet-iis guard (either form) in parentheses, narrowed by a path filter:
+# `&& needs.changes.outputs.<name> == 'true'`.
+is_iis_narrowed() {
+  local v="$1" g name
+  for g in "${FLEET_IIS_GUARD}" "${FLEET_IIS_SWITCH_GUARD}"; do
+    g="${g#\$\{\{ }"; g="${g% \}\}}"
+    case "${v}" in
+      "\${{ (${g}) && needs.changes.outputs."*" == 'true' }}")
+        name="${v#"\${{ (${g}) && needs.changes.outputs."}"; name="${name% == \'true\' \}\}}"
+        printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 # A routing expression whose fleet class is fleet-iis or fleet-hyperv (both
 # have no hosted twin and carry the same guard).
 is_fleet_iis_route() {
@@ -396,7 +412,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
         if_val="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="if" {print $5}')"
         if is_fleet_iis_route "${val}"; then
           route_class="${val%\' \}\}}"; route_class="${route_class##*\'}"
-          if [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ]; then
+          if [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
             err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
           fi
         elif ! is_fleet_guard "${if_val}" \
