@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **IIS installer: a rebuilt installer of the same version now upgrades the
+  installed one.** Before, a second build of the same version (a reissued
+  installer) installed beside the first, leaving two entries in Programs and
+  Features. The installer now carries a build number as the fourth part of
+  its version (shown as the version in Programs and Features; the product
+  version, the file name and the `X-Page-Speed` header stay `2.5.0`), a build
+  of the same version replaces the installed one, keeping `pagespeed.config`,
+  the optimizer service's start type and its cache size, and an older build
+  or version is refused.
+
 ## [2.5.0] - 2026-10-19
 
 ### Security

@@ -9,7 +9,8 @@
 
   Build:
     wix build install\iis\Product.wxs ^
-        -d ProductVersion=1.15.0 -d DisplayVersion=1.15.0-beta.1 ^
+        -d ProductVersion=1.15.0.42 -d ShortVersion=1.15.0 -d Revision=42 ^
+        -d DisplayVersion=1.15.0-beta.1 ^
         -d UpgradeCode=77EA515C-A077-4D56-B92A-58E65D713423 ^
         -d BinDir=bazel-bin\pagespeed\iis -d SrcDir=. ^
         -arch x64 -o pagespeed-iis-1.15.0-beta.1-win-x64.msi
@@ -48,8 +49,22 @@
          leaves the old product intact; the user is left with neither installed.
          We accept this because the double-cycle caused IIS lockups on warm
          systems (beta.9 upgrade-over-running-IIS), which is far more common
-         in practice than mid-upgrade failures. -->
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+         in practice than mid-upgrade failures.
+
+         ProductVersion is MAJOR.MINOR.BUILD.REVISION, the revision a number
+         that grows with every build (build-msi.ps1 -Revision). Windows
+         Installer ignores the fourth field when it compares versions, so to it
+         every build of 2.5.0 is the same version, and without
+         AllowSameVersionUpgrades a rebuild (a new ProductCode, which WiX
+         generates for every build) would install beside the old one: two
+         entries in Programs and Features, both registering the module. With
+         it, a build of the same MAJOR.MINOR.BUILD replaces the installed one;
+         a lower MAJOR.MINOR.BUILD is still refused with the message below,
+         and a lower revision of the same one by the launch condition on
+         INSTALLEDREVISION further down. The UpgradeCode never changes, so
+         upgrades from every earlier release (1.15.0 on) keep working. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 
     <Media Id="1" Cabinet="pagespeed.cab" EmbedCab="yes" />
 
@@ -97,6 +112,27 @@
          (TARGETDIR). -->
     <SetProperty Id="WWWROOTDIR" Value="[IISWWWROOT]"
                  Before="CostFinalize" Sequence="both" />
+
+    <!-- The version and build revision of the installed product, which
+         InstalledVersionValue writes, read before an upgrade removes it.
+         Windows Installer cannot compare the fourth field, so the package
+         does: a build of the same MAJOR.MINOR.BUILD with a lower revision
+         than the installed one is a downgrade and is refused. Empty when the
+         installed product predates the value (it then upgrades as before);
+         no check in maintenance mode (repair, uninstall), where Installed
+         is set. -->
+    <Property Id="INSTALLEDSHORTVERSION">
+      <RegistrySearch Id="InstalledShortVersionSearch" Root="HKLM"
+                      Key="SOFTWARE\We-Amp\PageSpeed"
+                      Name="Version" Type="raw" />
+    </Property>
+    <Property Id="INSTALLEDREVISION">
+      <RegistrySearch Id="InstalledRevisionSearch" Root="HKLM"
+                      Key="SOFTWARE\We-Amp\PageSpeed"
+                      Name="Revision" Type="raw" />
+    </Property>
+    <Launch Condition='Installed OR NOT INSTALLEDREVISION OR INSTALLEDSHORTVERSION &lt;&gt; "$(var.ShortVersion)" OR INSTALLEDREVISION &lt;= $(var.Revision)'
+            Message="A newer build of [ProductName] (build [INSTALLEDREVISION]) is already installed; this package is build $(var.Revision). To go back to an older build, uninstall the installed one first." />
 
 <?ifdef OptimizerDir ?>
     <!-- The optimizer service's start type as the operator left it, read
@@ -244,6 +280,18 @@
                       Start="both"
                       Stop="both"
                       Wait="yes" />
+    </Component>
+
+    <!-- The installed version and build revision, for the revision
+         check of the next package (see INSTALLEDREVISION above). Removed
+         with the product. -->
+    <Component Id="InstalledVersionValue" Directory="INSTALLDIR" Guid="*">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\We-Amp\PageSpeed"
+                     Name="Version" Type="string"
+                     Value="$(var.ShortVersion)" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\We-Amp\PageSpeed"
+                     Name="Revision" Type="string"
+                     Value="$(var.Revision)" />
     </Component>
 
     <!-- Cache directory — IIS_IUSRS + NETWORK SERVICE get Modify via the
@@ -411,6 +459,7 @@
       <ComponentRef Id="LicenseFile" />
       <ComponentRef Id="NoticeFile" />
       <ComponentRef Id="IisServiceControl" />
+      <ComponentRef Id="InstalledVersionValue" />
       <ComponentRef Id="CacheDirComp" />
       <ComponentRef Id="LogDirComp" />
       <ComponentRef Id="PagespeedConfig" />
