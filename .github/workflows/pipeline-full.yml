@@ -291,6 +291,9 @@ jobs:
 
       - name: Build all targets
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
           # Remote cache only when the runner environment names a cache host:
           # --config=ci pulls build:remote-cache (pagespeed.bazelrc) and would
           # fail to resolve its alias otherwise. Degraded mode: the same
@@ -300,16 +303,16 @@ jobs:
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
-            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
             "${DOCKER_IMAGE}" \
@@ -438,23 +441,26 @@ jobs:
 
       - name: Run ASan + UBSan + LeakSan
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 50g || exit 1
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
-            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=50g --memory-swap=50g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --shm-size=512m \
             --network="${CI_NET}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
@@ -560,18 +566,21 @@ jobs:
 
       - name: Run TSan
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 50g || exit 1
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
-            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           # seccomp=unconfined is required: TSan uses personality() to disable
           # ASLR for its shadow memory layout. cap-drop=ALL limits the rest.
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=50g --memory-swap=50g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --shm-size=512m \
             --network="${CI_NET}" \
             --security-opt seccomp=unconfined \
@@ -581,7 +590,7 @@ jobs:
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -e TSAN_SYMBOLIZER_PATH=/opt/llvm/bin/llvm-symbolizer \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \

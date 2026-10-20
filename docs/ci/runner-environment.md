@@ -128,6 +128,24 @@ zstd support, `rsync` and `ssh` (hub only), and `bazel` or `npm` (the vendor
 job installs bazelisk through npm when `bazel` is missing). Hosted runners
 provide all of them.
 
+## Per-slot resource budget
+
+A host runs several heavy jobs at once, so each runner states its own share in
+its environment file:
+
+| Variable | Meaning | Used for |
+|---|---|---|
+| `CI_SLOT_CPUS` | positive integer | Bazel `--jobs`, `run-clang-tidy -j`, nginx release leg fan-out |
+| `CI_SLOT_MEM_GB` | positive integer (GiB) | container `--memory` and `--memory-swap` |
+
+Both are optional. Unset (hosted runners) keeps the previous behaviour: Bazel
+sizes itself from the host CPU count and each container keeps its historical
+cap (`CI_BUILD_RAM_BUDGET_GB` or 16 for the nightly lanes, 50g to 80g
+elsewhere, 32g for the lint container). A set but invalid value fails the job
+with a clear message. The logic lives in `tools/ci/slot-budget.sh` (self-test:
+`tools/ci/test_slot_budget.sh`). Size the values so that all slots of a host at
+full use fit in the memory available to the runner services.
+
 ## Adding a variable
 
 1. Give it a neutral name that says what it is, not where it lives.

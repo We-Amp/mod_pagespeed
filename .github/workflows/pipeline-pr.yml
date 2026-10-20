@@ -845,6 +845,9 @@ jobs:
 
       - name: Build all targets
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
           OUT="${GITHUB_WORKSPACE}/.ci-artifacts"
           rm -rf "${OUT}"
           mkdir -p "${OUT}" "${GITHUB_WORKSPACE}/.build-artifacts"
@@ -856,15 +859,15 @@ jobs:
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1052,6 +1055,9 @@ jobs:
 
       - name: Run unit tests
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
           rm -rf "${GITHUB_WORKSPACE}/_failed-testlogs"
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci"
@@ -1060,16 +1066,16 @@ jobs:
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --network="${TEST_NET}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${TEST_REDIS}" -e MEMCACHED_HOST="${TEST_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
@@ -1229,11 +1235,17 @@ jobs:
           # cache directory mounted at /cache (outside the checkout, which
           # Bazel's repository cache must be); USER is exported because the
           # runner uid has no passwd entry in the image.
+          # Per-slot budget: memory cap (32g when the runner sets none) and
+          # the shared parallelism for Bazel and run-clang-tidy.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 32g || exit 1
           docker run --rm --init \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
+            -e CI_SLOT_CPUS="${SLOT_CPUS}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk" \
+            -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e LINT_MODE="${LINT_MODE:-full}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
@@ -1284,7 +1296,11 @@ jobs:
                 CT_TARGETS=(pagespeed/ net/)
                 echo "lint scope: full tree."
               fi
+              # run-clang-tidy defaults to every host CPU; honour the slot.
+              CT_J=()
+              [ -z "${CI_SLOT_CPUS:-}" ] || CT_J=(-j "${CI_SLOT_CPUS}")
               run-clang-tidy-20 \
+                "${CT_J[@]}" \
                 -clang-tidy-binary=clang-tidy-20 \
                 -p /workspace \
                 -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
@@ -1386,21 +1402,25 @@ jobs:
       # correctness oracles; coverage stats are reported but never fail it.
       - name: Build the probe and run the synthetic corpus oracles
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1417,21 +1437,25 @@ jobs:
       # that does not carry its golden diff in the same PR goes red here.
       - name: Goldens freshness gate (manifest must match probe behavior)
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1535,21 +1559,25 @@ jobs:
       # its golden diff in the same PR goes red here.
       - name: Goldens freshness gate (manifest must match probe behavior)
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1634,21 +1662,25 @@ jobs:
       # its binaries onto the mounted workspace in the same container.
       - name: Build the replay binaries
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1685,21 +1717,25 @@ jobs:
       # burst on a pull request lane would only generate flakes.
       - name: Seed and corpus replays
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1736,21 +1772,25 @@ jobs:
 
       - name: 60s libFuzzer smoke runs (CSS and HTML)
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
