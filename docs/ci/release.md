@@ -148,7 +148,14 @@ It does everything a dry run does, and then, in this order:
    from them, `msi-sign` signs the installer. The two gates test the signed
    installer.
 2. `validate` checks the set, and that the Windows files carry a signature.
-3. `sign-checksums` signs `SHA256SUMS`.
+3. `sign-checksums` signs `SHA256SUMS`. It refuses to sign unless the
+   secret holds the release signing key, fingerprint
+   `411DEFDB571351D2B25AEFCC9C02B5BDCCE75313`, and then verifies
+   `SHA256SUMS.asc` in a fresh keyring holding only `RELEASE-SIGNING-KEY.asc`
+   from master: the signature's primary key must be exactly that fingerprint,
+   with exactly one good signature and no revoked or expired key. The pin is a
+   consistency check between the secret and the committed key, not an
+   independent trust root: whoever can change master can change both.
 4. `create-release` creates a draft release for the tag with every asset and
    `SHA256SUMS.asc`, downloads the draft's assets and checks them against
    `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
@@ -261,7 +268,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
 | `validate` | hosted | builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
-| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`) |
+| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
