@@ -20,6 +20,9 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # The merge queue's temporary branch: the same pipeline runs on the
+  # queued merge result, and `CI gate` reports on it.
+  merge_group:
   workflow_dispatch:
     inputs:
       full:
