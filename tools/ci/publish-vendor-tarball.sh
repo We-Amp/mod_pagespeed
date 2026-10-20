@@ -99,15 +99,19 @@ if [ -n "$TMP" ]; then
     # the shared directory under a unique name and prove it equals the source.
     # DrvFs can hand back stale or short bytes right after a copy: prove the
     # copy with the same patience as every other step, and copy again a few
-    # times before calling it a bad copy.
+    # times before calling it a bad copy. Each attempt stages under its own
+    # name (a just-removed name can misbehave on DrvFs), and a failed cp is
+    # a failed attempt, not the end of the script.
     TMP_HASH="$(hash_of "$TMP")"
     copy_matches() {
       [ "$(size_of "$STAGE")" = "$TMP_SIZE" ] && [ "$(hash_of "$STAGE")" = "$TMP_HASH" ]
     }
     copied=0
     for i in 1 2 3; do
-      rm -f "$STAGE"
-      cp "$TMP" "$STAGE"
+      rm -f "$STAGE" 2>/dev/null || true
+      STAGE="${FINAL}.${RUN_TAG}.${i}.tmp"
+      rm -f "$STAGE" 2>/dev/null || true
+      cp "$TMP" "$STAGE" || log "cp into $DIR failed (attempt $i of 3)"
       flush "$STAGE"
       if settle copy_matches; then copied=1; break; fi
       log "copy of $(basename "$TMP") into $DIR differs from its source (attempt $i of 3)"
