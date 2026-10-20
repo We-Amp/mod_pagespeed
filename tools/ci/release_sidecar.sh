@@ -190,8 +190,9 @@ build() {
     rm -f "$OUT/nginx" "$OUT/ngx_pagespeed_module.so" "$OUT/pagespeed-nginx-launch"
     # Root inside the container: the recipe installs its toolchain with apt.
     # HOME and the Bazel output root live inside the container; the recipe's
-    # nginx tree under the workspace is removed again, and the outputs are
-    # handed back to the runner user.
+    # nginx tree under the workspace is removed again, and the workspace (Bazel
+    # adds to the repository cache under vendor/) and the outputs are handed
+    # back to the runner user, so that a later checkout can clear them.
     if docker run --rm --init --platform "$(platform_of "$ARCH")" ${extra_docker[@]+"${extra_docker[@]}"} \
       -e HOME=/root \
       -e NGXVER="$ngxver" -e HOST_UID="$uid" -e HOST_GID="$gid" \
@@ -204,7 +205,7 @@ build() {
         cleanup() {
           rm -rf /workspace/.ngx-module-build
           find /workspace -maxdepth 1 -name "bazel-*" -type l -delete 2>/dev/null || true
-          chown -R "$HOST_UID:$HOST_GID" /out 2>/dev/null || true
+          chown -R "$HOST_UID:$HOST_GID" /workspace /out 2>/dev/null || true
         }
         trap cleanup EXIT
         echo "--- container arch: $(uname -m), glibc $(ldd --version | head -1 | grep -oE "[0-9]+\.[0-9]+$") ---"
