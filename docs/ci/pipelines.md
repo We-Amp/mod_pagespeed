@@ -105,7 +105,8 @@ the checkout's cleanup on a persistent runner.
 The `changes` job diffs a pull request against its base and publishes one
 boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`, `sidecar`). The jobs that only
 matter when their inputs change run when their filter is true, and are skipped
-otherwise; outside a pull request every filter is true. The aggregate gate
+otherwise; outside a pull request every filter is true, except `sidecar` on a
+push, which diffs the pushed range (see "The sidecar native pair"). The aggregate gate
 treats a skipped job as fine. A build runner job that depends on a filter
 narrows its guard as described under "The guard and the kill switch".
 
@@ -120,11 +121,13 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
 - **Build base and compatibility floor.** The pair is built by the focal recipe
   of `install/nginx/build_module_in_container.sh` in an Ubuntu 20.04 container
   pinned by digest (`FOCAL_IMAGE` in the script). Its glibc 2.31 is the
-  compatibility floor of the sidecar: the pair runs on Debian and Ubuntu hosts
-  with glibc 2.31 or newer (Debian 11 and later, Ubuntu 20.04 and later), with
-  libstdc++ linked statically. nginx links the Debian names of PCRE and libcrypt
-  (`libpcre.so.3`, `libcrypt.so.1`), which Enterprise Linux and Amazon Linux do
-  not provide under those names, so those are not hosts of the pair. Ubuntu 20.04 is past
+  compatibility floor of the sidecar, with libstdc++ linked statically. The
+  matched nginx also links `libpcre.so.3` (the `libpcre3` package), which is
+  what limits the hosts to Debian 11 and 12 and Ubuntu 20.04 to 24.04: Debian 13
+  and Ubuntu 26.04 no longer ship `libpcre3`, and Enterprise Linux and Amazon
+  Linux never had it under that name. (`libcrypt.so.1` is no obstacle: it is
+  `libcrypt1` on Debian and Ubuntu and `libxcrypt-compat` on EL9 and Amazon
+  Linux 2023.) Ubuntu 20.04 is past
   its standard support (May 2025); it is only the build base, and nothing of
   it ships beyond what the glibc 2.31 floor implies. Moving to a newer base
   raises the floor and drops the hosts below it, so it is a support decision,
@@ -135,22 +138,36 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   libstdc++ or a glibc above 2.31. The pair then loads, serves and optimizes in
   Debian 11 and Debian 12 containers (`test/package-test/check-sidecar-pair.sh`:
   `X-Page-Speed` carries the version of the tree, no `X-PageSpeed-Warn`), is
-  stripped (debug files kept apart) and smoked again.
+  stripped (debug files kept apart), and goes through the gate and the smoke
+  again.
 - **Tests.** The xunit suite of `aspnetcore/` runs under .NET 8 and .NET 10 in
-  pinned SDK containers, as the runner user. With the pair, the pair is placed
-  next to the test assembly and `PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1` makes
-  the live nginx tests (`InverseModeIntegrationTests`) fail instead of skip
-  when the pair is missing. Every test must pass, none may be skipped, and at
-  least `SIDECAR_MIN_TESTS` (201, the size of the suite) must run per
-  framework; raise it when tests are added.
-- **In the PR tier.** `sidecar-tests` (hosted, no pair) runs the suite on
-  every pull request that touches the `sidecar` filter: `aspnetcore/`, the
-  recipe, the launch shim, the symbol gates, the pair smoke and the script
-  itself. `sidecar-pair` and `sidecar-pair-arm64` build the pair on the same
-  filter and run the whole sequence. The build is cold by design (the recipe
-  uses no Bazel disk cache, so that every object of the module is
-  materialized), which is why it is path-filtered. With the fleet off only the
-  arm64 leg runs.
+  pinned SDK containers, as the runner user, with a locked restore (the test
+  project's `packages.lock.json` and `packages.net10.lock.json`). With the
+  pair, the pair is placed next to the test assembly and
+  `PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1` makes the live nginx tests
+  (`InverseModeIntegrationTests`) fail instead of skip when the pair is
+  missing. Every test must pass, none may be skipped, and at least
+  `SIDECAR_MIN_TESTS` (201, the size of the suite) must run per framework.
+  Because a live test without nginx returns early and passes, the pass count
+  alone cannot show the live tests ran: each live test writes
+  `live-nginx: <path>` to its output, and the script requires every
+  `InverseModeIntegrationTests` result, at least `SIDECAR_LIVE_TESTS` (8), to
+  have passed with the path of the bundled nginx. `live-guard` is the
+  negative control: required and without a pair, all of them must fail.
+  Raise the two numbers when tests are added.
+- **In the PR tier.** `sidecar-tests` (hosted, no pair) runs the suite and
+  `live-guard` on every pull request that touches the `sidecar` filter:
+  `aspnetcore/`, the recipe, the launch shim, the symbol gates, the pair smoke
+  and the script itself. `sidecar-pair` and `sidecar-pair-arm64` build the
+  pair on the same filter and run the whole sequence
+  (`release_sidecar.sh check`). The build is cold by design (the recipe uses
+  no Bazel disk cache, so that every object of the module is materialized),
+  which is why it is path-filtered, on a push to `master` as well: there the
+  filter compares the pushed range (`github.event.before` to the pushed
+  commit; a new branch or an unreachable `before` counts as everything
+  changed), while every other filter stays true on a push. With the fleet
+  off only the arm64 leg runs. The nightly tier builds the pair on hosted
+  runners once a week.
 
 ## The shape
 
@@ -325,6 +342,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `iis-appverif-matrix` | fleet-iis | the zero-copy merge gate, then the Application Verifier provider matrix (`arms` input) |
 | `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
 | `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
+| `sidecar-pair-weekly`, `sidecar-pair-weekly-arm64` | hosted | Sundays and on a manual dispatch (`sidecar-weekly` decides): vendor fresh and run `tools/ci/release_sidecar.sh check` for the ASP.NET Core sidecar's native pair, x64 and arm64, to catch drift the path-filtered pull request jobs cannot see (see "The sidecar native pair") |
 
 **Where the pin staleness check lives.** The blocking dependency gate of the
 pull request tier scans against the pinned grype database in

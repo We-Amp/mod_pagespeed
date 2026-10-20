@@ -69,6 +69,7 @@ jobs:
         id: diff
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
         run: |
           signing_key=true
           serf=true
@@ -105,6 +106,19 @@ jobs:
             # the gates that check the pair.
             if grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|${wf})" "${changed}"; then
               sidecar=true
+            fi
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            # A push runs every guard, except the sidecar pair: its cold build
+            # runs only when the push changed its paths (the weekly nightly run
+            # covers drift outside them). A new branch (an all-zero BEFORE) or
+            # a BEFORE the clone cannot reach counts as everything changed.
+            if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              changed="${RUNNER_TEMP}/changed-files.txt"
+              git diff --name-only "${BEFORE}" "${GITHUB_SHA}" > "${changed}"
+              if ! grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|\.github/workflows/pipeline-pr\.yml)" "${changed}"; then
+                sidecar=false
+              fi
             fi
           fi
           {
@@ -598,8 +612,9 @@ jobs:
           echo "rc=$rc distros=$json"
 
   # The xunit suite of the ASP.NET Core sidecar (aspnetcore/) under .NET 8 and
-  # .NET 10, in pinned SDK containers (tools/ci/release_sidecar.sh test). The
-  # live nginx tests need the native pair and run in the sidecar-pair jobs.
+  # .NET 10, in pinned SDK containers (tools/ci/release_sidecar.sh test), and
+  # the negative control of the live proof. The live nginx tests need the
+  # native pair and run in the sidecar-pair jobs.
   sidecar-tests:
     name: Sidecar tests (.NET 8 and 10)
     needs: changes
@@ -613,6 +628,13 @@ jobs:
       - name: Run the sidecar test suite
         run: |
           bash tools/ci/release_sidecar.sh test --src "${GITHUB_WORKSPACE}" \
+            --results "${RUNNER_TEMP}/sidecar-results"
+      # The negative control of the live proof the pair jobs apply: required
+      # and without a pair, every live test must fail.
+      - name: The live tests fail without the pair
+        if: ${{ !cancelled() }}
+        run: |
+          bash tools/ci/release_sidecar.sh live-guard --src "${GITHUB_WORKSPACE}" \
             --results "${RUNNER_TEMP}/sidecar-results"
       - name: Upload the test results
         if: always()
@@ -2723,36 +2745,15 @@ jobs:
           GIT_TERMINAL_PROMPT: "0"
         run: bash tools/vendor-deps.sh vendor
 
-      - name: Build the pair
+      # The whole sequence (tools/ci/release_sidecar.sh check): build, the
+      # symbol and glibc gate, the Debian 11 and 12 smoke, strip, gate and
+      # smoke again, and the test suite under .NET 8 and .NET 10 with the
+      # live nginx tests against the stripped pair, each in its own log group.
+      - name: Build, gate and test the pair
         run: |
-          bash tools/ci/release_sidecar.sh build --arch "$ARCH" \
-            --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/pair"
-
-      - name: Symbol and glibc gate
-        run: |
-          bash tools/ci/release_sidecar.sh hygiene --arch "$ARCH" \
-            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
-
-      - name: Load, serve and optimize on Debian 11 and 12
-        run: |
-          bash tools/ci/release_sidecar.sh smoke --arch "$ARCH" \
-            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
-
-      - name: Strip the pair
-        run: |
-          bash tools/ci/release_sidecar.sh strip --arch "$ARCH" \
-            --pair "${RUNNER_TEMP}/pair" --debug "${RUNNER_TEMP}/pair-debug"
-
-      - name: The stripped pair, on Debian 11 and 12
-        run: |
-          bash tools/ci/release_sidecar.sh smoke --arch "$ARCH" \
-            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
-
-      - name: Sidecar tests with the live nginx (.NET 8 and 10)
-        run: |
-          bash tools/ci/release_sidecar.sh test --arch "$ARCH" \
-            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
-            --results "${RUNNER_TEMP}/sidecar-results"
+          bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
+            --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --debug "${RUNNER_TEMP}/pair-debug" --results "${RUNNER_TEMP}/sidecar-results"
 
       - name: Upload the test results
         if: always()
