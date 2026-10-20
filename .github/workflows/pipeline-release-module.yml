@@ -1127,7 +1127,9 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.sha }}
           submodules: false
-          sparse-checkout: test/package-test
+          sparse-checkout: |
+            tools/ci
+            test/package-test
           persist-credentials: false
 
       # The gates' driver comes from master, like the plan and the legs.

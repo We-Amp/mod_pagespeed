@@ -363,7 +363,7 @@ check_set() {
     n=$((n + 1))
   done < <(legs_for "$ARCH" "$SET")
   total=0
-  for f in "$PKGDIR"/*; do total=$((total + 1)); done
+  for f in "$PKGDIR"/* "$PKGDIR"/.[!.]*; do [ -e "$f" ] && total=$((total + 1)); done
   if [ "$total" -ne "$n" ]; then
     echo "::error::expected ${n} packages in the set, found ${total}"
     bad=1
@@ -504,11 +504,14 @@ self_test() {
   check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 || { echo "FAIL: exact set rejected"; fail=1; }
   : > "$t/set/extra.txt"
   check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: extra file accepted"; fail=1; }
-  rm "$t/set/extra.txt" "$t/set/nginx-module-pagespeed_1.0-r1~jammy_arm64.deb"
-  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: missing leg accepted"; fail=1; }
-  : > "$t/set/nginx-module-pagespeed_1.0-r1~jammy_arm64.deb"; : > "$t/set/nginx-module-pagespeed_1.0-r2~jammy_arm64.deb"
-  rm "$t/set/nginx-module-pagespeed_1.0-r1~noble_arm64.deb"
+  rm "$t/set/extra.txt"
+  : > "$t/set/.hidden"
+  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: dotfile accepted"; fail=1; }
+  rm "$t/set/.hidden"
+  : > "$t/set/nginx-module-pagespeed_1.0-r2~jammy_arm64.deb"
   check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: duplicate leg accepted"; fail=1; }
+  rm "$t/set/nginx-module-pagespeed_1.0-r2~jammy_arm64.deb" "$t/set/nginx-module-pagespeed_1.0-r1~jammy_arm64.deb"
+  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: missing leg accepted"; fail=1; }
 
   # the budget arithmetic
   chk "plan big host" "$(plan 8 1.5 85 128 6)" "8 14 6"
