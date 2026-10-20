@@ -58,6 +58,7 @@ jobs:
       cve: ${{ steps.diff.outputs.cve }}
       upgrade: ${{ steps.diff.outputs.upgrade }}
       fuzz: ${{ steps.diff.outputs.fuzz }}
+      sidecar: ${{ steps.diff.outputs.sidecar }}
     steps:
       # fetch-depth: 0 so the diff can reach the pull request's base commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,12 +75,14 @@ jobs:
           cve=true
           upgrade=true
           fuzz=true
+          sidecar=true
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             signing_key=false
             serf=false
             cve=false
             upgrade=false
             fuzz=false
+            sidecar=false
             changed="${RUNNER_TEMP}/changed-files.txt"
             git diff --name-only "${BASE}...HEAD" > "${changed}"
             wf='\.github/workflows/pipeline-pr\.yml'
@@ -98,6 +101,11 @@ jobs:
             if grep -qE "^(third_party/css_parser/|pagespeed/kernel/html/|tools/html-parse-corpus/|pagespeed/kernel/packs/|tools/pack-loader-corpus/|tools/rule-pack-filter-corpus/|pagespeed/kernel/js/|tools/js-minify-corpus/|tools/ci/classify-js-fuzz-artifacts\.sh|${wf})" "${changed}"; then
               fuzz=true
             fi
+            # The ASP.NET Core sidecar, the focal recipe of its native pair and
+            # the gates that check the pair.
+            if grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|${wf})" "${changed}"; then
+              sidecar=true
+            fi
           fi
           {
             echo "signing_key=${signing_key}"
@@ -105,8 +113,9 @@ jobs:
             echo "cve=${cve}"
             echo "upgrade=${upgrade}"
             echo "fuzz=${fuzz}"
+            echo "sidecar=${sidecar}"
           } >> "$GITHUB_OUTPUT"
-          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz}"
+          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz} sidecar=${sidecar}"
 
   # One checkout serves every group. Each step runs even when an earlier one
   # failed (`!cancelled()`), so one red run lists every broken guard.
@@ -587,6 +596,33 @@ jobs:
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           echo "distros=$json" >> "$GITHUB_OUTPUT"
           echo "rc=$rc distros=$json"
+
+  # The xunit suite of the ASP.NET Core sidecar (aspnetcore/) under .NET 8 and
+  # .NET 10, in pinned SDK containers (tools/ci/release_sidecar.sh test). The
+  # live nginx tests need the native pair and run in the sidecar-pair jobs.
+  sidecar-tests:
+    name: Sidecar tests (.NET 8 and 10)
+    needs: changes
+    if: ${{ needs.changes.outputs.sidecar == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+      - name: Run the sidecar test suite
+        run: |
+          bash tools/ci/release_sidecar.sh test --src "${GITHUB_WORKSPACE}" \
+            --results "${RUNNER_TEMP}/sidecar-results"
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-test-results
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ---------------------------------------------------------------------
   # Build runner legs. Each runs on a runner class for same-repository events
@@ -2630,3 +2666,127 @@ jobs:
           path: ${{ runner.temp }}/upgrade-rehearsal-${{ matrix.distro }}/logs
           if-no-files-found: ignore
           retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # The native pair of the ASP.NET Core sidecar (tools/ci/release_sidecar.sh):
+  # the focal build of nginx, the module and the launch shim (Ubuntu 20.04,
+  # pinned by digest: the glibc 2.31 floor), the symbol and glibc gates, the
+  # Debian 11 and 12 smoke before and after stripping, and the xunit suite with
+  # the live nginx tests against that pair, which must run and pass. The same
+  # steps make the pair of the module release lane. Path-filtered: the build is
+  # cold by design (the recipe uses no disk cache), so it runs only when the
+  # sidecar, its recipe or its gates change. x64 on the build runners, arm64 on
+  # a hosted arm64 runner; each leg vendors for itself through actions/cache.
+  # ---------------------------------------------------------------------
+  sidecar-pair:
+    name: Sidecar pair and live tests (x64)
+    needs: changes
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && needs.changes.outputs.sidecar == 'true' }}
+    timeout-minutes: 150
+    env:
+      ARCH: x64
+    steps: &sidecar-pair-steps
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Restore vendored dependencies
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+
+      - name: Ensure bazel
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+
+      # The dependency sources are public and fetched over https. The vendor
+      # script names one of them with an ssh-style address, so the rewrite
+      # below (scoped to this step through the environment) sends it over
+      # https and no credential of any kind is needed.
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash tools/vendor-deps.sh vendor
+
+      - name: Build the pair
+        run: |
+          bash tools/ci/release_sidecar.sh build --arch "$ARCH" \
+            --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/pair"
+
+      - name: Symbol and glibc gate
+        run: |
+          bash tools/ci/release_sidecar.sh hygiene --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
+
+      - name: Load, serve and optimize on Debian 11 and 12
+        run: |
+          bash tools/ci/release_sidecar.sh smoke --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
+
+      - name: Strip the pair
+        run: |
+          bash tools/ci/release_sidecar.sh strip --arch "$ARCH" \
+            --pair "${RUNNER_TEMP}/pair" --debug "${RUNNER_TEMP}/pair-debug"
+
+      - name: The stripped pair, on Debian 11 and 12
+        run: |
+          bash tools/ci/release_sidecar.sh smoke --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair"
+
+      - name: Sidecar tests with the live nginx (.NET 8 and 10)
+        run: |
+          bash tools/ci/release_sidecar.sh test --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --results "${RUNNER_TEMP}/sidecar-results"
+
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-live-test-results-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the pair
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-pair-${{ env.ARCH }}
+          path: ${{ runner.temp }}/pair
+          retention-days: 3
+          if-no-files-found: error
+
+      # The build container runs as root; it removes what it leaves in the
+      # workspace, and this catches anything else before the next checkout.
+      - name: Re-own the files containers left behind
+        if: always()
+        run: |
+          docker run --rm -v "${GITHUB_WORKSPACE}:/w" -v "${RUNNER_TEMP}:/t" alpine:3.20 \
+            sh -c "chown -R $(id -u):$(id -g) /w /t" \
+            || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
+
+  sidecar-pair-arm64:
+    name: Sidecar pair and live tests (arm64)
+    needs: changes
+    if: ${{ needs.changes.outputs.sidecar == 'true' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    env:
+      ARCH: arm64
+    steps: *sidecar-pair-steps

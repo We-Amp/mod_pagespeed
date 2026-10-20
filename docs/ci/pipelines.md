@@ -42,6 +42,7 @@ tier.
 | `changes` | hosted | | path filters (see below) |
 | `guards`, `blocking-dep-scan`, `dep-scan`, `browser-js-tests`, `console-tests` | hosted | | the hosted checks |
 | `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
+| `sidecar-tests` | hosted | `changes` | the xunit suite of the ASP.NET Core sidecar (`aspnetcore/`) under .NET 8 and .NET 10 (path-filtered, see "The sidecar native pair") |
 | `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |
 | `vendor` | `fleet-heavy` | | vendors the dependencies; publishes the tarball (hub channel) or caches `vendor/` (cache channel) |
 | `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
@@ -52,6 +53,8 @@ tier.
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
+| `sidecar-pair` | `fleet-heavy` | `changes` | builds the sidecar's native pair for x64, gates it and runs the sidecar tests with the live nginx tests against it (path-filtered, see "The sidecar native pair") |
+| `sidecar-pair-arm64` | hosted arm64 | `changes` | the same for arm64 |
 | `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests and while `FLEET_ENABLED` is not `true`; carries the "only" guard below |
 
 Application Verifier and the other IIS lanes that run longer belong to the
@@ -100,11 +103,54 @@ the checkout's cleanup on a persistent runner.
 ### Path-filtered hosted guards
 
 The `changes` job diffs a pull request against its base and publishes one
-boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`). The jobs that only
+boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`, `sidecar`). The jobs that only
 matter when their inputs change run when their filter is true, and are skipped
 otherwise; outside a pull request every filter is true. The aggregate gate
 treats a skipped job as fine. A build runner job that depends on a filter
 narrows its guard as described under "The guard and the kill switch".
+
+### The sidecar native pair
+
+The ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`, source in `aspnetcore/`)
+ships a native pair per architecture: an nginx, the `ngx_pagespeed_module.so`
+built against exactly that nginx, and the `pagespeed-nginx-launch` shim.
+`tools/ci/release_sidecar.sh` builds and checks it, and the module release lane
+uses the same script for the pair it releases (`docs/ci/release.md`).
+
+- **Build base and compatibility floor.** The pair is built by the focal recipe
+  of `install/nginx/build_module_in_container.sh` in an Ubuntu 20.04 container
+  pinned by digest (`FOCAL_IMAGE` in the script). Its glibc 2.31 is the
+  compatibility floor of the sidecar: the pair runs on Debian and Ubuntu hosts
+  with glibc 2.31 or newer (Debian 11 and later, Ubuntu 20.04 and later), with
+  libstdc++ linked statically. nginx links the Debian names of PCRE and libcrypt
+  (`libpcre.so.3`, `libcrypt.so.1`), which Enterprise Linux and Amazon Linux do
+  not provide under those names, so those are not hosts of the pair. Ubuntu 20.04 is past
+  its standard support (May 2025); it is only the build base, and nothing of
+  it ships beyond what the glibc 2.31 floor implies. Moving to a newer base
+  raises the floor and drops the hosts below it, so it is a support decision,
+  not an image refresh. The image digest is updated deliberately, together
+  with this paragraph if the base changes.
+- **Gates.** The module exports only the nginx module symbols and links no
+  OpenSSL; nginx and the shim link no OpenSSL; none of the three needs
+  libstdc++ or a glibc above 2.31. The pair then loads, serves and optimizes in
+  Debian 11 and Debian 12 containers (`test/package-test/check-sidecar-pair.sh`:
+  `X-Page-Speed` carries the version of the tree, no `X-PageSpeed-Warn`), is
+  stripped (debug files kept apart) and smoked again.
+- **Tests.** The xunit suite of `aspnetcore/` runs under .NET 8 and .NET 10 in
+  pinned SDK containers, as the runner user. With the pair, the pair is placed
+  next to the test assembly and `PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1` makes
+  the live nginx tests (`InverseModeIntegrationTests`) fail instead of skip
+  when the pair is missing. Every test must pass, none may be skipped, and at
+  least `SIDECAR_MIN_TESTS` (201, the size of the suite) must run per
+  framework; raise it when tests are added.
+- **In the PR tier.** `sidecar-tests` (hosted, no pair) runs the suite on
+  every pull request that touches the `sidecar` filter: `aspnetcore/`, the
+  recipe, the launch shim, the symbol gates, the pair smoke and the script
+  itself. `sidecar-pair` and `sidecar-pair-arm64` build the pair on the same
+  filter and run the whole sequence. The build is cold by design (the recipe
+  uses no Bazel disk cache, so that every object of the module is
+  materialized), which is why it is path-filtered. With the fleet off only the
+  arm64 leg runs.
 
 ## The shape
 

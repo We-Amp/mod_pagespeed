@@ -17,20 +17,32 @@ using Xunit;
 namespace WeAmp.PageSpeed.AspNetCore.Tests;
 
 /// <summary>
-/// Tier 2 — LIVE nginx, Linux/docker only. Runs in sidecar-pair-build.yml's PW-2
-/// live-optimize gate, NOT the default unit pass. Every test is gated on
-/// Linux AND the bundled 1.15 nginx+module pair being resolvable; on a non-Linux
-/// dev box (macOS) every test no-ops via <see cref="SkipUnlessLiveNginx"/> so the
-/// default `dotnet test` run is green without a live nginx.
+/// Tier 2 — LIVE nginx, Linux only. CI runs these against the bundled pair
+/// (tools/ci/release_sidecar.sh test --pair, in the pull request tier and in the
+/// module release lane) with PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1: the pair is
+/// placed under runtimes/&lt;rid&gt;/native/ next to the test assembly, and a
+/// missing pair fails every test instead of skipping it.
 ///
-/// These are SKELETONS that wire the real Inverse host + a live nginx and assert
-/// the S0 gates. They are intentionally conservative: when the bundled pair is not
-/// present they return early rather than fail (the unit Tier-1 suite carries the
-/// security-critical proofs that run on every CI dim).
+/// Without that variable (a developer box, macOS) every test no-ops via
+/// <see cref="SkipUnlessLiveNginx"/> when no nginx can be found, so the default
+/// `dotnet test` run is green without a live nginx; the unit Tier-1 suite carries
+/// the security-critical proofs that run everywhere.
 /// </summary>
 [Trait("Category", "Integration")]
 public class InverseModeIntegrationTests
 {
+    /// <summary>Set to 1 by CI: the bundled pair must be present and is required.</summary>
+    internal const string RequireLiveNginxVariable = "PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX";
+
+    private static string BundledNginxPath()
+    {
+        var rid = ProcessSidecarManager.ResolveBundledRid(RuntimeInformation.ProcessArchitecture);
+        return Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", "nginx");
+    }
+
+    private static bool LiveNginxRequired() =>
+        Environment.GetEnvironmentVariable(RequireLiveNginxVariable) == "1";
+
     private static bool LiveNginxAvailable()
     {
         if (!OperatingSystem.IsLinux())
@@ -38,19 +50,34 @@ public class InverseModeIntegrationTests
             return false;
         }
         // Reuse the manager's RID-derive + well-known-locations probe shape.
-        var rid = ProcessSidecarManager.ResolveBundledRid(RuntimeInformation.ProcessArchitecture);
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "nginx"),
-            Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", "nginx"),
+            BundledNginxPath(),
             "/usr/local/bin/nginx",
             "/usr/sbin/nginx",
         };
         return candidates.Any(File.Exists);
     }
 
-    /// <summary>Returns true (skip) when a live nginx pair is not available.</summary>
-    private static bool SkipUnlessLiveNginx() => !LiveNginxAvailable();
+    /// <summary>
+    /// Returns true (skip) when a live nginx pair is not available. When CI requires
+    /// the live tier, the bundled pair itself must be there (a host nginx does not
+    /// count), and its absence throws instead of skipping.
+    /// </summary>
+    private static bool SkipUnlessLiveNginx()
+    {
+        if (LiveNginxRequired())
+        {
+            if (!OperatingSystem.IsLinux() || !File.Exists(BundledNginxPath()))
+            {
+                throw new InvalidOperationException(
+                    $"{RequireLiveNginxVariable}=1 but the bundled nginx is not at {BundledNginxPath()}");
+            }
+            return false;
+        }
+        return !LiveNginxAvailable();
+    }
 
     private static async Task<IHost> StartInverseHostAsync(int publicPort, Action<PageSpeedOptions>? configure = null)
     {
