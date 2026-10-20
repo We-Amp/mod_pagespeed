@@ -2358,6 +2358,12 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      # The installer's build revision, the 4th field of its ProductVersion
+      # (install/iis/build-msi.ps1). run_number belongs to the calling
+      # release.yml: it increases across tag runs, dispatches and dry runs,
+      # and a rerun keeps the same number (intended: the rebuild still
+      # upgrades, only a lower revision is refused). Never a date or a hash.
+      PAGESPEED_MSI_REVISION: ${{ github.run_number }}
     steps:
       - name: Checkout the tag (installer sources only)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
