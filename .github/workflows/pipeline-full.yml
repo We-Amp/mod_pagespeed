@@ -18,11 +18,12 @@
 #   hosted arm64   linux-arm64-build, linux-arm64-unit-tests,
 #                  linux-arm64-apache-sys-tests, linux-arm64-nginx-sys-tests
 #
-# Every routed job except win-appverif carries the general guard and also works
-# on a hosted runner in a degraded mode: no hub, no remote cache, no host
-# paths. win-appverif needs a Windows host with the IIS role, administrator
-# rights and Application Verifier, so it carries the fleet-only guard (a fork
-# or Dependabot pull request skips it).
+# Every routed job except win-appverif also works on a hosted runner in a
+# degraded mode: no hub, no remote cache, no host paths, and it moves there
+# while FLEET_ENABLED is 'false' (unset means on) or for a fork or Dependabot
+# pull request. win-appverif needs a Windows host with the IIS role,
+# administrator rights and Application Verifier, so it carries the fleet-iis
+# guard (a fork or Dependabot pull request, or the switch off, skips it).
 #
 # The hosted arm64 jobs are here and not in the PR tier because a cold hosted
 # arm64 build has no warm cache. They keep a Bazel disk cache in actions/cache.
@@ -45,8 +46,7 @@ jobs:
   # ---------------------------------------------------------------------
   vendor:
     name: Vendor Dependencies
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:
       short_sha: ${{ steps.stamp.outputs.short_sha }}
@@ -231,8 +231,7 @@ jobs:
   linux-build:
     name: Linux Build
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 90
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -291,6 +290,9 @@ jobs:
 
       - name: Build all targets
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
           # Remote cache only when the runner environment names a cache host:
           # --config=ci pulls build:remote-cache (pagespeed.bazelrc) and would
           # fail to resolve its alias otherwise. Degraded mode: the same
@@ -300,16 +302,16 @@ jobs:
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
-            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
             "${DOCKER_IMAGE}" \
@@ -362,8 +364,7 @@ jobs:
   linux-asan:
     name: Linux ASan + UBSan
     needs: [vendor, linux-build]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -438,23 +439,26 @@ jobs:
 
       - name: Run ASan + UBSan + LeakSan
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 50g || exit 1
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
-            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=50g --memory-swap=50g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --shm-size=512m \
             --network="${CI_NET}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
@@ -487,8 +491,7 @@ jobs:
   linux-tsan:
     name: Linux TSan
     needs: [vendor, linux-build]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 180
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -560,18 +563,21 @@ jobs:
 
       - name: Run TSan
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 50g || exit 1
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
-            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           # seccomp=unconfined is required: TSan uses personality() to disable
           # ASLR for its shadow memory layout. cap-drop=ALL limits the rest.
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=50g --memory-swap=50g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --shm-size=512m \
             --network="${CI_NET}" \
             --security-opt seccomp=unconfined \
@@ -581,7 +587,7 @@ jobs:
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -e TSAN_SYMBOLIZER_PATH=/opt/llvm/bin/llvm-symbolizer \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${CI_REDIS}" -e MEMCACHED_HOST="${CI_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
@@ -618,8 +624,7 @@ jobs:
   apache-sys-tests:
     name: Apache System Tests
     needs: linux-build
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-light' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
     timeout-minutes: 90
     env:
       # Names this job's diagnostics tarball (job, run and attempt), so only
@@ -725,8 +730,7 @@ jobs:
   nginx-sys-tests:
     name: Nginx System Tests
     needs: linux-build
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-light' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
     timeout-minutes: 90
     env:
       SYSTEST_DIAG_TAG: nginx-${{ github.run_id }}-${{ github.run_attempt }}
@@ -829,8 +833,7 @@ jobs:
   windows-build:
     name: Windows Build
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
     timeout-minutes: 90
     defaults:
       run:
@@ -1037,8 +1040,7 @@ jobs:
   win-asan:
     name: Windows ASan
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
     timeout-minutes: 90
     defaults:
       run:
@@ -1249,7 +1251,7 @@ jobs:
     name: Windows AppVerif
     needs: windows-build
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 90
     defaults:
       run:
@@ -1886,3 +1888,27 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
+
+
+  # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
+  # every build runner job here runs on its hosted twin, and the jobs that
+  # have no hosted twin (the IIS and Application Verifier lanes and the
+  # privileged stress rigs) are skipped. This job only says so, in an
+  # annotation and the job summary, so a skipped check is never a silent one.
+  fleet-off-notice:
+    name: Shared build runners are switched off
+    if: ${{ vars.FLEET_ENABLED == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Say what the switch changed
+        run: |
+          echo "::notice::FLEET_ENABLED is 'false': build runner jobs run on hosted runners; jobs that need a build runner host are skipped."
+          {
+            echo "### Shared build runners are switched off"
+            echo
+            echo "The repository variable FLEET_ENABLED is 'false'. Jobs that normally use the"
+            echo "build runners ran on GitHub-hosted runners, slower and without the shared caches."
+            echo "Jobs that need a host only the build runners provide were skipped."
+            echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -24,7 +24,9 @@
 #   CORES_PER_LEG    cores one leg may use (default 8 on x64, 6 on arm64,
 #                    never more than the host has)
 #   MEM_PER_CORE_GB  expected peak memory per core (default 1.5)
-#   RAM_BUDGET_GB    memory the legs may use together (default 90% of the host)
+#   RAM_BUDGET_GB    memory the legs may use together (default CI_SLOT_MEM_GB
+#                    when the runner sets it, else 90% of the host)
+#   CI_SLOT_CPUS     per-slot CPU share of the runner; bounds the core count
 # The number of concurrent legs is the smaller of what the memory budget and
 # the core count allow. On a small runner that is one leg at a time.
 #
@@ -112,7 +114,13 @@ build() {
   [ "$arch" = arm64 ] && default_cores=6
   local nproc_n budget p cores leg_mem conc
   nproc_n="$(nproc)"
-  budget="${RAM_BUDGET_GB:-}"
+  # Per-slot budget of the runner (CI_SLOT_CPUS / CI_SLOT_MEM_GB) bounds the
+  # fan-out; RAM_BUDGET_GB still wins when set explicitly.
+  # shellcheck source=slot-budget.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/slot-budget.sh"
+  slot_budget || return 1
+  if [ -n "$SLOT_CPUS" ] && [ "$SLOT_CPUS" -lt "$nproc_n" ]; then nproc_n="$SLOT_CPUS"; fi
+  budget="${RAM_BUDGET_GB:-${SLOT_MEM_GB:-}}"
   [ -n "$budget" ] || budget=$(( $(host_mem_gb) * 9 / 10 ))
   p="$(plan "${CORES_PER_LEG:-$default_cores}" "${MEM_PER_CORE_GB:-1.5}" "$budget" "$nproc_n" "${#legs[@]}")"
   read -r cores leg_mem conc <<<"$p"

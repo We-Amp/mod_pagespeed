@@ -13,44 +13,95 @@ using WeAmp.PageSpeed.AspNetCore.DependencyInjection;
 using WeAmp.PageSpeed.AspNetCore.Options;
 using WeAmp.PageSpeed.AspNetCore.Sidecar;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WeAmp.PageSpeed.AspNetCore.Tests;
 
 /// <summary>
-/// Tier 2 — LIVE nginx, Linux/docker only. Runs in sidecar-pair-build.yml's PW-2
-/// live-optimize gate, NOT the default unit pass. Every test is gated on
-/// Linux AND the bundled 1.15 nginx+module pair being resolvable; on a non-Linux
-/// dev box (macOS) every test no-ops via <see cref="SkipUnlessLiveNginx"/> so the
-/// default `dotnet test` run is green without a live nginx.
+/// Tier 2 — LIVE nginx, Linux only. CI runs these against the bundled pair
+/// (tools/ci/release_sidecar.sh test --pair, in the pull request tier and in the
+/// module release lane) with PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1: the pair is
+/// placed under runtimes/&lt;rid&gt;/native/ next to the test assembly, and a
+/// missing pair fails every test instead of skipping it.
 ///
-/// These are SKELETONS that wire the real Inverse host + a live nginx and assert
-/// the S0 gates. They are intentionally conservative: when the bundled pair is not
-/// present they return early rather than fail (the unit Tier-1 suite carries the
-/// security-critical proofs that run on every CI dim).
+/// Without that variable (a developer box, macOS) every test no-ops via
+/// <see cref="SkipUnlessLiveNginx"/> when no nginx can be found, so the default
+/// `dotnet test` run is green without a live nginx; the unit Tier-1 suite carries
+/// the security-critical proofs that run everywhere.
+///
+/// A test that goes on against a live nginx writes one line
+/// <c>live-nginx: &lt;path&gt;</c> to its test output, so CI can count from the test
+/// results that every live test really ran against the bundled pair (a skipped
+/// test returns early and passes, which the pass count alone cannot tell apart).
 /// </summary>
 [Trait("Category", "Integration")]
 public class InverseModeIntegrationTests
 {
-    private static bool LiveNginxAvailable()
+    /// <summary>Set to 1 by CI: the bundled pair must be present and is required.</summary>
+    internal const string RequireLiveNginxVariable = "PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX";
+
+    /// <summary>The prefix of the line a live test writes; tools/ci/release_sidecar.sh counts it.</summary>
+    internal const string LiveMarker = "live-nginx: ";
+
+    private readonly ITestOutputHelper _output;
+
+    public InverseModeIntegrationTests(ITestOutputHelper output) => _output = output;
+
+    private static string BundledNginxPath()
+    {
+        var rid = ProcessSidecarManager.ResolveBundledRid(RuntimeInformation.ProcessArchitecture);
+        return Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", "nginx");
+    }
+
+    private static bool LiveNginxRequired() =>
+        Environment.GetEnvironmentVariable(RequireLiveNginxVariable) == "1";
+
+    /// <summary>The nginx a live test would run against, or null when there is none.</summary>
+    private static string? LiveNginxPath()
     {
         if (!OperatingSystem.IsLinux())
         {
-            return false;
+            return null;
         }
         // Reuse the manager's RID-derive + well-known-locations probe shape.
-        var rid = ProcessSidecarManager.ResolveBundledRid(RuntimeInformation.ProcessArchitecture);
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "nginx"),
-            Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", "nginx"),
+            BundledNginxPath(),
             "/usr/local/bin/nginx",
             "/usr/sbin/nginx",
         };
-        return candidates.Any(File.Exists);
+        return candidates.FirstOrDefault(File.Exists);
     }
 
-    /// <summary>Returns true (skip) when a live nginx pair is not available.</summary>
-    private static bool SkipUnlessLiveNginx() => !LiveNginxAvailable();
+    /// <summary>
+    /// Returns true (skip) when a live nginx pair is not available. When CI requires
+    /// the live tier, the bundled pair itself must be there (a host nginx does not
+    /// count), and its absence throws instead of skipping.
+    /// </summary>
+    private bool SkipUnlessLiveNginx()
+    {
+        string? nginx;
+        if (LiveNginxRequired())
+        {
+            nginx = BundledNginxPath();
+            if (!OperatingSystem.IsLinux() || !File.Exists(nginx))
+            {
+                throw new InvalidOperationException(
+                    $"{RequireLiveNginxVariable}=1 but the bundled nginx is not at {nginx}");
+            }
+        }
+        else
+        {
+            nginx = LiveNginxPath();
+            if (nginx is null)
+            {
+                return true;
+            }
+        }
+        _output.WriteLine(LiveMarker + nginx);
+        return false;
+    }
 
     private static async Task<IHost> StartInverseHostAsync(int publicPort, Action<PageSpeedOptions>? configure = null)
     {
@@ -185,18 +236,31 @@ public class InverseModeIntegrationTests
         if (SkipUnlessLiveNginx()) return;
 
         var port = Internal.EphemeralLoopbackPort.Allocate();
-        using var host = await StartInverseHostAsync(port);
+        using var host = await StartInverseHostAsync(port, o =>
+        {
+            o.EnabledFilters = "rewrite_css";
+            o.DisabledFilters = "inline_css,prioritize_critical_css";
+        });
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
 
-        // Fetch the page, extract a .pagespeed. URL from the optimized HTML (if the
-        // filter rewrote a resource URL), then fetch it through the middleware.
-        var pageBody = await (await client.GetAsync("/")).Content.ReadAsStringAsync();
-        var m = System.Text.RegularExpressions.Regex.Match(pageBody, @"[^""']+\.pagespeed\.[^""']+");
-        if (m.Success)
+        // With CSS inlining off, rewrite_css gives the stylesheet a .pagespeed. URL
+        // once the optimizer has rewritten it (asynchronously: the first responses
+        // may still carry the original URL). That URL must then be served through
+        // the middleware, minified.
+        var pageBody = "";
+        System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Match.Empty;
+        for (var i = 0; i < 40 && !m.Success; i++)
         {
-            var resp = await client.GetAsync(m.Value);
-            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            if (i > 0) await Task.Delay(250);
+            pageBody = await (await client.GetAsync("/")).Content.ReadAsStringAsync();
+            m = System.Text.RegularExpressions.Regex.Match(pageBody, @"href=""([^""]+\.pagespeed\.[^""]+)""");
         }
+        m.Success.Should().BeTrue($"the optimized page must reference the rewritten stylesheet; last body: {pageBody}");
+
+        var resp = await client.GetAsync(m.Groups[1].Value);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await resp.Content.ReadAsStringAsync()).Should().Contain("body{color:#333}",
+            "the resource served through the middleware is the minified stylesheet");
 
         await host.StopAsync();
     }

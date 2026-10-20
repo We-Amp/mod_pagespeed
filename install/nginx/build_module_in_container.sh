@@ -82,9 +82,9 @@ case "${DISTRO}" in
   # focal is the SIDECAR portable path ONLY (not a distro-stock package
   # target). Its nginx is bumped to the 1.30 stable branch for GA (decided
   # 2026-06-03): newer branch, smaller CVE backlog than 1.24.0 (2023).
-  # sha256 captured from nginx.org/download/nginx-1.30.5.tar.gz 2026-10-10 (security bump 1.30.4 -> 1.30.5: CVE-2026-90439).
-  focal) DEF_NGINX_VER="1.30.5"
-         DEF_NGINX_SHA256="6c20565aa2325cb82216ae804f4a4ff1875179014759a381c42ddc8e11c4906d" ;;
+  # sha256 captured from nginx.org/download/nginx-1.30.6.tar.gz 2026-10-20, PGP-verified (security bump 1.30.5 -> 1.30.6: CVE-2026-15176, CVE-2026-93479).
+  focal) DEF_NGINX_VER="1.30.6"
+         DEF_NGINX_SHA256="3cf46f5ed7504d460125866b7bea99fb357f31d887e2e63b35503310e9b8b6c8" ;;
   el9)   DEF_NGINX_VER="1.20.1"
          DEF_NGINX_SHA256="e462e11533d5c30baa05df7652160ff5979591d291736cfa5edb9fd2edb48c49" ;;
   # el10 (AlmaLinux/RHEL/Rocky/CloudLinux 10): distro-source mode like
@@ -327,7 +327,10 @@ install_deps_focal() {
   # NOT emit the __isoc23_* GLIBC_2.38 redirects that the noble (glibc 2.39) base
   # bakes in — and combined with -static-libstdc++/-static-libgcc on the module
   # link (step 6, focal-only LD_OPT) the .so carries NO libstdc++ runtime dep, so
-  # it loads on Debian 11/12, Ubuntu 20.04+, RHEL/Alma 8/9, Amazon Linux 2023.
+  # it needs no newer glibc than 2.31. The matched nginx of the pair also links
+  # libpcre.so.3 (libpcre3), so the pair's hosts are Debian 11/12 and Ubuntu
+  # 20.04 to 24.04 (later releases dropped libpcre3; Enterprise Linux and Amazon
+  # Linux never had it under that name).
   # focal's stock toolchain is too old for the C++20/23 PSOL/Cyclone graph, so add
   # the LLVM apt repo (clang) + the toolchain PPA (g++-13 -> the libstdc++-13
   # headers/libs the clang-libstdcxx13 bazel config expects at /usr/{include/c++,
@@ -523,7 +526,10 @@ sideload_libstdcxx13_pinned() {
   url="https://snapshot.debian.org/file/${snaphash}"
   deb="/tmp/libstdc++-13-dev.deb"
   echo "    sideloading GCC-13 libstdc++ ${LIBSTDCXX13_SNAPSHOT_VER} (pre-isoc23, glibc-safe) from ${url}"
-  wget -qO "${deb}" "${url}"
+  # snapshot.debian.org has transient outages: bounded retries with backoff.
+  # The sha256 check below still gates the file.
+  wget -qO "${deb}" --tries=6 --waitretry=30 --retry-connrefused \
+    --retry-on-http-error=429,500,502,503,504 "${url}"
   echo "${snapsha}  ${deb}" | sha256sum -c - \
     || { echo "ERROR: pinned libstdc++-13 .deb sha256 mismatch (got $(sha256sum "${deb}" | awk '{print $1}'), expected ${snapsha})" >&2; exit 1; }
   # Extract into / — lands /usr/include/c++/13, /usr/include/<triplet>/c++/13,

@@ -9,12 +9,13 @@
 # tools/ci/check-workflow-shape.sh:
 #   * a pull request from a fork, or from Dependabot, runs on a
 #     GitHub-hosted runner;
+#   * so does every run while the repository variable FLEET_ENABLED is
+#     'false' (the kill switch; unset means on);
 #   * everything else runs on a runner class label;
-#   * the choice is made from the event payload here, never from inputs.
-# Build runner jobs run only when the repository variable FLEET_ENABLED is
-# 'true' (the cutover kill switch) or when the event needs no build runner
-# (fork or Dependabot pull request). No job here holds a secret or a write
-# token.
+#   * the choice is made from the event payload and the variable here, never
+#     from inputs.
+# Jobs with no hosted twin (the IIS system tests) are skipped while the switch
+# is off. No job here holds a secret or a write token.
 #
 # Every build runner job also works on the hosted side in a degraded mode: no
 # hub, no remote cache, no host paths. Anything host-specific is read from the
@@ -58,6 +59,7 @@ jobs:
       cve: ${{ steps.diff.outputs.cve }}
       upgrade: ${{ steps.diff.outputs.upgrade }}
       fuzz: ${{ steps.diff.outputs.fuzz }}
+      sidecar: ${{ steps.diff.outputs.sidecar }}
     steps:
       # fetch-depth: 0 so the diff can reach the pull request's base commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,19 +69,22 @@ jobs:
       - name: Diff against the base commit
         id: diff
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          BEFORE: ${{ github.event.before }}
         run: |
           signing_key=true
           serf=true
           cve=true
           upgrade=true
           fuzz=true
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+          sidecar=true
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             signing_key=false
             serf=false
             cve=false
             upgrade=false
             fuzz=false
+            sidecar=false
             changed="${RUNNER_TEMP}/changed-files.txt"
             git diff --name-only "${BASE}...HEAD" > "${changed}"
             wf='\.github/workflows/pipeline-pr\.yml'
@@ -92,11 +97,29 @@ jobs:
             if grep -qE "^(bazel/repositories\.bzl|tools/dependency/|test/tools/dependency/|tools/generate-sbom\.py|${wf})" "${changed}"; then
               cve=true
             fi
-            if grep -qE "^(install/upgrade_test/|${wf})" "${changed}"; then
+            if grep -qE "^(install/|${wf})" "${changed}"; then
               upgrade=true
             fi
             if grep -qE "^(third_party/css_parser/|pagespeed/kernel/html/|tools/html-parse-corpus/|pagespeed/kernel/packs/|tools/pack-loader-corpus/|tools/rule-pack-filter-corpus/|pagespeed/kernel/js/|tools/js-minify-corpus/|tools/ci/classify-js-fuzz-artifacts\.sh|${wf})" "${changed}"; then
               fuzz=true
+            fi
+            # The ASP.NET Core sidecar, the focal recipe of its native pair and
+            # the gates that check the pair.
+            if grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|${wf})" "${changed}"; then
+              sidecar=true
+            fi
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            # A push runs every guard, except the sidecar pair: its cold build
+            # runs only when the push changed its paths (the weekly nightly run
+            # covers drift outside them). A new branch (an all-zero BEFORE) or
+            # a BEFORE the clone cannot reach counts as everything changed.
+            if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              changed="${RUNNER_TEMP}/changed-files.txt"
+              git diff --name-only "${BEFORE}" "${GITHUB_SHA}" > "${changed}"
+              if ! grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|\.github/workflows/pipeline-pr\.yml)" "${changed}"; then
+                sidecar=false
+              fi
             fi
           fi
           {
@@ -105,8 +128,9 @@ jobs:
             echo "cve=${cve}"
             echo "upgrade=${upgrade}"
             echo "fuzz=${fuzz}"
+            echo "sidecar=${sidecar}"
           } >> "$GITHUB_OUTPUT"
-          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz}"
+          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz} sidecar=${sidecar}"
 
   # One checkout serves every group. Each step runs even when an earlier one
   # failed (`!cancelled()`), so one red run lists every broken guard.
@@ -605,16 +629,50 @@ jobs:
           echo "distros=$json" >> "$GITHUB_OUTPUT"
           echo "rc=$rc distros=$json"
 
+  # The xunit suite of the ASP.NET Core sidecar (aspnetcore/) under .NET 8 and
+  # .NET 10, in pinned SDK containers (tools/ci/release_sidecar.sh test), and
+  # the negative control of the live proof. The live nginx tests need the
+  # native pair and run in the sidecar-pair jobs.
+  sidecar-tests:
+    name: Sidecar tests (.NET 8 and 10)
+    needs: changes
+    if: ${{ needs.changes.outputs.sidecar == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+      - name: Run the sidecar test suite
+        run: |
+          bash tools/ci/release_sidecar.sh test --src "${GITHUB_WORKSPACE}" \
+            --results "${RUNNER_TEMP}/sidecar-results"
+      # The negative control of the live proof the pair jobs apply: required
+      # and without a pair, every live test must fail.
+      - name: The live tests fail without the pair
+        if: ${{ !cancelled() }}
+        run: |
+          bash tools/ci/release_sidecar.sh live-guard --src "${GITHUB_WORKSPACE}" \
+            --results "${RUNNER_TEMP}/sidecar-results"
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-test-results
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ---------------------------------------------------------------------
   # Build runner legs. Each runs on a runner class for same-repository events
   # and on a hosted runner for fork or Dependabot pull requests (see the
-  # header). Guarded by the FLEET_ENABLED repository variable until the
-  # cutover turns it on. No secret and no write token reaches any of them.
+  # header). While FLEET_ENABLED is 'false' they run hosted instead. No secret
+  # and no write token reaches any of them.
   # ---------------------------------------------------------------------
   vendor:
     name: Vendor Dependencies
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:
       short_sha: ${{ steps.stamp.outputs.short_sha }}
@@ -800,8 +858,7 @@ jobs:
   linux-build:
     name: Linux Build
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -862,6 +919,9 @@ jobs:
 
       - name: Build all targets
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
           OUT="${GITHUB_WORKSPACE}/.ci-artifacts"
           rm -rf "${OUT}"
           mkdir -p "${OUT}" "${GITHUB_WORKSPACE}/.build-artifacts"
@@ -873,15 +933,15 @@ jobs:
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -981,8 +1041,7 @@ jobs:
   linux-unit-tests:
     name: Linux Unit Tests
     needs: [vendor, linux-build]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1069,6 +1128,9 @@ jobs:
 
       - name: Run unit tests
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
           rm -rf "${GITHUB_WORKSPACE}/_failed-testlogs"
           EXTRA_DOCKER=()
           BAZEL_CONFIG="--config=ci"
@@ -1077,16 +1139,16 @@ jobs:
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --network="${TEST_NET}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/workspace -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${TEST_REDIS}" -e MEMCACHED_HOST="${TEST_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
@@ -1143,8 +1205,7 @@ jobs:
   lint:
     name: Lint (clang-tidy + clang-format)
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1216,7 +1277,7 @@ jobs:
       # scoped mode.
       - name: Compute lint scope
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           MODE=none
           CC_LIST="${GITHUB_WORKSPACE}/.lint-files.txt"
@@ -1225,7 +1286,7 @@ jobs:
           : > "$HDR_LIST"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             MODE=full
-          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             CHANGED="${RUNNER_TEMP}/lint-changed.txt"
             # Deleted files are not lintable.
             git diff --name-only --diff-filter=d "${BASE}...HEAD" > "${CHANGED}"
@@ -1246,11 +1307,20 @@ jobs:
           # cache directory mounted at /cache (outside the checkout, which
           # Bazel's repository cache must be); USER is exported because the
           # runner uid has no passwd entry in the image.
+          # Per-slot budget: memory cap only when the runner sets one (no
+          # default cap), and the shared parallelism for Bazel and
+          # run-clang-tidy.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
+          MEM_ARGS=()
+          [ -z "${SLOT_MEM}" ] || MEM_ARGS=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           docker run --rm --init \
+            "${MEM_ARGS[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
+            -e CI_SLOT_CPUS="${SLOT_CPUS}" -e CI_SLOT_MEM_GB="${SLOT_MEM_GB}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk" \
+            -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e LINT_MODE="${LINT_MODE:-full}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
@@ -1301,7 +1371,19 @@ jobs:
                 CT_TARGETS=(pagespeed/ net/)
                 echo "lint scope: full tree."
               fi
+              # run-clang-tidy defaults to every host CPU; honour the slot.
+              CT_J=()
+              # With a memory cap, also allow at most one process per 2 GiB.
+              if [ -n "${CI_SLOT_CPUS:-}" ]; then
+                ct_j="${CI_SLOT_CPUS}"
+                if [ -n "${CI_SLOT_MEM_GB:-}" ]; then
+                  mem_j=$(( CI_SLOT_MEM_GB / 2 )); [ "${mem_j}" -ge 1 ] || mem_j=1
+                  [ "${ct_j}" -le "${mem_j}" ] || ct_j="${mem_j}"
+                fi
+                CT_J=(-j "${ct_j}")
+              fi
               run-clang-tidy-20 \
+                "${CT_J[@]}" \
                 -clang-tidy-binary=clang-tidy-20 \
                 -p /workspace \
                 -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
@@ -1336,8 +1418,7 @@ jobs:
   js-minify-corpus:
     name: JS Minify Corpus
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 60
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1403,21 +1484,25 @@ jobs:
       # correctness oracles; coverage stats are reported but never fail it.
       - name: Build the probe and run the synthetic corpus oracles
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1434,21 +1519,25 @@ jobs:
       # that does not carry its golden diff in the same PR goes red here.
       - name: Goldens freshness gate (manifest must match probe behavior)
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1486,8 +1575,7 @@ jobs:
   html-parse-corpus:
     name: HTML Parse Corpus Goldens
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1552,21 +1640,25 @@ jobs:
       # its golden diff in the same PR goes red here.
       - name: Goldens freshness gate (manifest must match probe behavior)
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1585,8 +1677,8 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke (deterministic replay plus 60s libFuzzer)
     needs: [changes, vendor]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && needs.changes.outputs.fuzz == 'true' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ needs.changes.outputs.fuzz == 'true' }}
     timeout-minutes: 90
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1651,21 +1743,25 @@ jobs:
       # its binaries onto the mounted workspace in the same container.
       - name: Build the replay binaries
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1702,21 +1798,25 @@ jobs:
       # burst on a pull request lane would only generate flakes.
       - name: Seed and corpus replays
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1753,21 +1853,25 @@ jobs:
 
       - name: 60s libFuzzer smoke runs (CSS and HTML)
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           EXTRA_DOCKER=()
+          [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=HOST_CPUS*.75"
+            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/cache -e USER=dev \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-            -e BAZEL_CONFIG="${BAZEL_CONFIG}" \
+            -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -1827,8 +1931,7 @@ jobs:
   windows-build:
     name: Windows Build
     needs: vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
     timeout-minutes: 120
     defaults:
       run:
@@ -2116,8 +2219,7 @@ jobs:
   windows-unit-tests:
     name: Windows Unit Tests
     needs: [vendor, windows-build]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
     timeout-minutes: 120
     defaults:
       run:
@@ -2379,14 +2481,14 @@ jobs:
   # The IIS system tests run the module under a real IIS on a host the job
   # administers (sites, application pools, ports, the default web site). There
   # is no hosted twin, so a fork or Dependabot pull request skips the job (it
-  # is skipped, not failed), and so does any run while FLEET_ENABLED is not
-  # 'true'. The module under test comes from the windows-build bundle; nothing
+  # is skipped, not failed), and so does any run while FLEET_ENABLED is
+  # 'false' or FLEET_IIS_ENABLED is not 'true'. The module under test comes from the windows-build bundle; nothing
   # is built here. The job holds no secret and no write token.
   iis-sys-tests:
     name: IIS System Tests
     needs: [windows-build, windows-unit-tests]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 50
     defaults:
       run:
@@ -2647,3 +2749,165 @@ jobs:
           path: ${{ runner.temp }}/upgrade-rehearsal-${{ matrix.distro }}/logs
           if-no-files-found: ignore
           retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # The native pair of the ASP.NET Core sidecar (tools/ci/release_sidecar.sh):
+  # the focal build of nginx, the module and the launch shim (Ubuntu 20.04,
+  # pinned by digest: the glibc 2.31 floor), the symbol and glibc gates, the
+  # Debian 11 and 12 smoke before and after stripping, and the xunit suite with
+  # the live nginx tests against that pair, which must run and pass. The same
+  # steps make the pair of the module release lane. Path-filtered: the build is
+  # cold by design (the recipe uses no disk cache), so it runs only when the
+  # sidecar, its recipe or its gates change. x64 on the build runners (hosted
+  # while FLEET_ENABLED is 'false'; the build honours the slot budget), arm64
+  # on a hosted arm64 runner; each leg vendors for itself through actions/cache.
+  # ---------------------------------------------------------------------
+  sidecar-pair:
+    name: Sidecar pair and live tests (x64)
+    needs: changes
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ needs.changes.outputs.sidecar == 'true' }}
+    timeout-minutes: 150
+    env:
+      ARCH: x64
+    steps: &sidecar-pair-steps
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Restore vendored dependencies
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+
+      - name: Ensure bazel
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+
+      # The dependency sources are public and fetched over https. The vendor
+      # script names one of them with an ssh-style address, so the rewrite
+      # below (scoped to this step through the environment) sends it over
+      # https and no credential of any kind is needed.
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash tools/vendor-deps.sh vendor
+
+      # The whole sequence (tools/ci/release_sidecar.sh check): build, the
+      # symbol and glibc gate, the Debian 11 and 12 smoke, strip, gate and
+      # smoke again, and the test suite under .NET 8 and .NET 10 with the
+      # live nginx tests against the stripped pair, each in its own log group.
+      - name: Build, gate and test the pair
+        run: |
+          bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
+            --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --debug "${RUNNER_TEMP}/pair-debug" --results "${RUNNER_TEMP}/sidecar-results"
+
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-live-test-results-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload the pair
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sidecar-pair-${{ env.ARCH }}
+          path: ${{ runner.temp }}/pair
+          retention-days: 3
+          if-no-files-found: error
+
+      # The build container runs as root; it removes what it leaves in the
+      # workspace, and this catches anything else before the next checkout.
+      - name: Re-own the files containers left behind
+        if: always()
+        run: |
+          docker run --rm -v "${GITHUB_WORKSPACE}:/w" -v "${RUNNER_TEMP}:/t" alpine:3.20 \
+            sh -c "chown -R $(id -u):$(id -g) /w /t" \
+            || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
+
+  sidecar-pair-arm64:
+    name: Sidecar pair and live tests (arm64)
+    needs: changes
+    if: ${{ needs.changes.outputs.sidecar == 'true' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    env:
+      ARCH: arm64
+    steps: *sidecar-pair-steps
+
+  # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
+  # every build runner job here runs on its hosted twin, and the jobs that
+  # have no hosted twin (the IIS and Application Verifier lanes and the
+  # privileged stress rigs) are skipped. This job only says so, in an
+  # annotation and the job summary, so a skipped check is never a silent one.
+  fleet-off-notice:
+    name: Shared build runners are switched off
+    if: ${{ vars.FLEET_ENABLED == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Say what the switch changed
+        run: |
+          echo "::notice::FLEET_ENABLED is 'false': build runner jobs run on hosted runners; jobs that need a build runner host are skipped."
+          {
+            echo "### Shared build runners are switched off"
+            echo
+            echo "The repository variable FLEET_ENABLED is 'false'. Jobs that normally use the"
+            echo "build runners ran on GitHub-hosted runners, slower and without the shared caches."
+            echo "Jobs that need a host only the build runners provide were skipped."
+            echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The IIS system tests may be skipped for four reasons only: the switch is
+  # off, the event is a fork or Dependabot pull request, the class is not
+  # registered (FLEET_IIS_ENABLED is not 'true'), or a job they need failed.
+  # Any other skip is a routing mistake and fails here, so the CI gate never
+  # accepts it silently.
+  fleet-only-skip-check:
+    name: IIS system tests ran or were switched off
+    needs: [windows-build, windows-unit-tests, iis-sys-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      IIS_RESULT: ${{ needs.iis-sys-tests.result }}
+      BUILD_RESULT: ${{ needs.windows-build.result }}
+      UNIT_RESULT: ${{ needs.windows-unit-tests.result }}
+      FLEET: ${{ vars.FLEET_ENABLED }}
+      FLEET_IIS: ${{ vars.FLEET_IIS_ENABLED }}
+      FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
+    steps:
+      - name: Check the IIS system tests
+        run: |
+          echo "iis-sys-tests=${IIS_RESULT} windows-build=${BUILD_RESULT} windows-unit-tests=${UNIT_RESULT}"
+          [ "${IIS_RESULT}" = skipped ] || exit 0
+          [ "${BUILD_RESULT}" = success ] && [ "${UNIT_RESULT}" = success ] || exit 0
+          if [ "$(printf %s "${FLEET}" | tr A-Z a-z)" = false ]; then
+            echo "::notice::IIS system tests skipped: FLEET_ENABLED is 'false'"
+          elif [ "${FORK_OR_BOT}" = true ]; then
+            echo "::notice::IIS system tests skipped: fork or Dependabot pull request"
+          elif [ "${FLEET_IIS}" != true ]; then
+            echo "::notice::IIS system tests skipped: FLEET_IIS_ENABLED is not 'true'"
+          else
+            echo "::error::IIS system tests were skipped with the fleet on and the class enabled"
+            exit 1
+          fi
