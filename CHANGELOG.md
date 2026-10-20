@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or version is refused. After installing a rebuilt installer, do not re-run
   an older installer of the same version; uninstall first. (The 2.5.0
   installer published before this change cannot recognize a rebuild and
-  would install beside it.)
+  would install beside it.) If two entries appear after re-running an older
+  2.5.0 installer, uninstall both, then install the newer build again. A
+  later build also removes both entries when it upgrades.
 
 ## [2.5.0] - 2026-10-19
 

@@ -128,6 +128,11 @@ if (-not $currentWix) {
 # (GrantCacheAcl / GrantLogAcl) are the sole ACL mechanism.
 
 # --- Build MSI ---
+# ICE validation is not run (wix build does not validate). If it is ever turned
+# on (wix msi validate), suppress ICE61 explicitly (-sice ICE61): it warns
+# about the Upgrade row MajorUpgrade AllowSameVersionUpgrades writes, which
+# is deliberate here (a build of the same MAJOR.MINOR.BUILD replaces the
+# installed one; Product.wxs refuses a lower revision itself).
 $WxsPath = Join-Path $ScriptDir "Product.wxs"
 $MsiName = "pagespeed-iis-$DisplayVersion-win-x64.msi"
 $MsiPath = Join-Path $OutputDir $MsiName

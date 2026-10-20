@@ -151,8 +151,16 @@ jobs:
           SHA: ${{ needs.ref-guard.outputs.sha }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
+          # msi-build passes the run number as the installer's build revision,
+          # the 4th ProductVersion field, which cannot exceed 65535. Fail here,
+          # before any build, rather than in msi-build.
+          if [ "$RUN_NUMBER" -gt 65535 ]; then
+            echo "::error::run number $RUN_NUMBER exceeds 65535, the largest installer build revision (install/iis/build-msi.ps1)"
+            exit 1
+          fi
           # The guard also accepts the master branch; this lane releases a tag.
           case "$REF" in
             refs/tags/module-v*) ;;
@@ -2361,8 +2369,10 @@ jobs:
       # The installer's build revision, the 4th field of its ProductVersion
       # (install/iis/build-msi.ps1). run_number belongs to the calling
       # release.yml: it increases across tag runs, dispatches and dry runs,
-      # and a rerun keeps the same number (intended: the rebuild still
-      # upgrades, only a lower revision is refused). Never a date or a hash.
+      # and a rerun keeps the same number: two builds then share a revision
+      # and can replace each other (intended: only a lower revision is
+      # refused). Never a date or a hash. The version job refuses a run
+      # number above 65535.
       PAGESPEED_MSI_REVISION: ${{ github.run_number }}
     steps:
       - name: Checkout the tag (installer sources only)
