@@ -553,7 +553,7 @@
     {
       "SPDXID": "SPDXRef-Package-nginx",
       "name": "nginx",
-      "versionInfo": "1.30.5",
+      "versionInfo": "1.30.6",
       "supplier": "Organization: Nginx, Inc. / F5",
       "downloadLocation": "https://nginx.org/",
       "filesAnalyzed": false,
