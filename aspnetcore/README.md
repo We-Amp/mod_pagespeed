@@ -199,9 +199,14 @@ Two advanced cases use `Domains.AuthorizedDomains`:
 ## Container & runtime requirements
 
 The bundled nginx + module are glibc ELF binaries built for a glibc ≥ 2.31 floor, so they
-run on Debian 11/12, Ubuntu 20.04+, RHEL/Alma 9, and Amazon Linux 2023. `libstdc++` is
-statically linked and the build has no OpenSSL dependency, so there is no libstdc++ or
-libssl/libcrypto host requirement. The binaries link a small set of host shared libraries:
+run on Debian and Ubuntu hosts with glibc 2.31 or newer: Debian 11 and later, Ubuntu 20.04
+and later. Enterprise Linux (RHEL, AlmaLinux, Rocky) and Amazon Linux are not supported: the
+bundled nginx links the Debian library names `libpcre.so.3` and `libcrypt.so.1`, which those
+distributions do not provide. `libstdc++` is statically linked and the build has no OpenSSL
+dependency, so there is no libstdc++ or libssl/libcrypto host requirement. The binaries
+are built on Ubuntu 20.04, which sets the glibc 2.31 floor; Ubuntu 20.04 itself is past
+its standard support, and nothing of it ships beyond that floor. The binaries link a small
+set of host shared libraries:
 
 | Host library | Provided by | Notes |
 |---|---|---|
@@ -271,6 +276,14 @@ with authorization but no authentication scheme the challenge throws. Apps witho
 authentication pass `requireAuthorization: false`, and should then protect the route
 some other way.
 
+## Versions
+
+From 2.5 on the package version is the mod_pagespeed product version: the package carries
+the native pair of the module release of the same version (nginx, the module built against
+it and the launch shim, built and tested by that release). The fourth-digit packaging
+revisions of 1.15.0.x have ended. NuGet orders 2.5.x after 1.17.0; a reference pinned to
+`1.*` does not pick it up.
+
 ## License
 
 Apache License 2.0. See the bundled `LICENSE` file.
@@ -284,7 +297,7 @@ Apache License 2.0. See the bundled `LICENSE` file.
 | macOS / other | ❌ use [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore) (ModPageSpeed 2.0) |
 
 See [mod_pagespeed vs ModPageSpeed 2.0 — which fits](https://modpagespeed.com/pricing)
-and the [mod_pagespeed overview](https://modpagespeed.com/1.1/).
+and the [ASP.NET Core guide](https://modpagespeed.com/docs/aspnet-getting-started/).
 
 ---
 

@@ -96,7 +96,8 @@ application version are 2.5.0 as well.
   With `UseForwardedHeaders()` before `UsePageSpeed()`, raw-origin requests
   are rejected with 421; call `UsePageSpeed()` first (the fixes are in this
   source release; an updated `WeAmp.PageSpeed.Sidecar` package follows
-  separately).
+  separately, as 2.5.x on the product version, with the bundled nginx
+  1.30.5).
 
 ---
 
@@ -453,9 +454,11 @@ application version are 2.5.0 as well.
 - **Envoy.** The Envoy filter builds against Envoy 1.37.6.
   `RulePackTrustKey` is not available on Envoy.
 
-- **NuGet sidecar.** The bundled nginx is updated to 1.30.5 (CVE-2026-90439
-  in the HTTP/3 module; the bundled nginx is not built with HTTP/3 and was not
-  affected).
+- **NuGet sidecar.** The sidecar's build recipe moves the bundled nginx to
+  1.30.5 (CVE-2026-90439 in the HTTP/3 module; the bundled nginx is not built
+  with HTTP/3 and was not affected). Correction: no sidecar package was
+  published with this release; `WeAmp.PageSpeed.Sidecar` 1.17.0 bundles
+  nginx 1.30.4, and the next package (2.5.x) is the first with 1.30.5.
 
 ---
 
