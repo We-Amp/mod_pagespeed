@@ -856,6 +856,13 @@ class TestDaemonServing:
             tokens_304 = {t.strip().lower() for t in revalidated.header("Vary").split(",")}
             assert tokens_304 == tokens, (name, dict(revalidated.headers))
 
+            # A HEAD is answered with the headers its GET carries.
+            head = site.head(DAEMON_IMAGE_PATH, headers=headers)
+            assert head.status == 200, (name, head.status, dict(head.headers))
+            assert head.body == b"", (name, len(head.body))
+            tokens_head = {t.strip().lower() for t in head.header("Vary").split(",")}
+            assert tokens_head == tokens, (name, dict(head.headers))
+
 
 def _decision_lines_by_pack(host: str, path_prefix: str) -> Dict[str, List[dict]]:
     """The decision-log lines of `host` under `path_prefix`, by the name of the

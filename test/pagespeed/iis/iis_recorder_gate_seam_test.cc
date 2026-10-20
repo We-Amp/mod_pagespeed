@@ -226,4 +226,27 @@ TEST_F(IisRecorderGateSeamTest, TheIisPortDoesNotAskForLostCopies) {
   }
 }
 
+// Sec-CH-DPR feeds the image selection on both arms (ApplySecChDprHint), and
+// the response names it in Vary, so the port has to read it and hand it to
+// both.  The readers sit behind the IIS runtime headers, so the plumbing is
+// pinned as text: dropping any one link makes the Vary list name a header the
+// selection no longer reads.
+TEST_F(IisRecorderGateSeamTest, TheDensityHintReachesBothArms) {
+  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis");
+  GoogleString record, serve;
+  const GoogleString record_path = dir + "/iis_daemon_record.cc";
+  const GoogleString serve_path = dir + "/iis_daemon_serve.cc";
+  ASSERT_TRUE(file_system_.ReadFile(record_path.c_str(), &record, &handler_))
+      << record_path;
+  ASSERT_TRUE(file_system_.ReadFile(serve_path.c_str(), &serve, &handler_))
+      << serve_path;
+  EXPECT_NE(GoogleString::npos, record.find("GetHeader(\"Sec-CH-DPR\""))
+      << "IisCapabilityHeaders no longer reads Sec-CH-DPR";
+  EXPECT_NE(GoogleString::npos,
+            record.find("sec_ch_dpr.CopyToString(&request->sec_ch_dpr);"))
+      << "the record request no longer carries Sec-CH-DPR";
+  EXPECT_NE(GoogleString::npos, serve.find("&request->sec_ch_dpr);"))
+      << "the serve request no longer carries Sec-CH-DPR";
+}
+
 }  // namespace net_instaweb

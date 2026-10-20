@@ -1100,6 +1100,14 @@ TEST_F(NgxDaemonSeamTest, TheCapabilityHeadersAreReadJoinedNotSingle) {
   EXPECT_EQ(2,
             CountSubstring(cc, "LookupJoined(HttpAttributes::kAcceptEncoding)"))
       << "Accept-Encoding is not read joined in both arms";
+  // The density hint feeds the selection on both arms and is named in Vary:
+  // read joined in both builders, and handed to the serve request.
+  EXPECT_EQ(2, CountSubstring(cc, "request_headers.LookupJoined(\"Sec-CH-DPR\")"))
+      << "Sec-CH-DPR is not read in both arms";
+  EXPECT_NE(GoogleString::npos, cc.find("record_request.sec_ch_dpr="))
+      << "the record request no longer carries Sec-CH-DPR";
+  EXPECT_NE(GoogleString::npos, cc.find("out->sec_ch_dpr=strings->sec_ch_dpr;"))
+      << "the serve request no longer carries Sec-CH-DPR";
 
   // The serve request builder: every request-header read joined, with
   // Cache-Control and Pragma among them (the forced-reload pair).
