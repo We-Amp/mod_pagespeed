@@ -676,6 +676,16 @@ jobs:
           SHARED_CACHE_PREFIX="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-n" \
             bash test/system/shared_cache/run.sh nginx "${RUNNER_TEMP}/shared-cache/ngx_pagespeed_module.so"
 
+      - name: Remove what the checks left behind
+        if: always()
+        run: |
+          # run.sh removes its own containers, network and image on exit; a
+          # cancelled run may not get there. Only this job's prefix is touched.
+          P="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-"
+          docker ps -aq --filter "name=^${P}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+          docker network ls -q --filter "name=^${P}" | xargs -r docker network rm >/dev/null 2>&1 || true
+          docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${P}" | xargs -r docker image rm >/dev/null 2>&1 || true
+
       - name: Remove the nginx build tree
         if: always()
         run: |

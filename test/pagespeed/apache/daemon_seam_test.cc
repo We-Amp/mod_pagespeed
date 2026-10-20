@@ -32,6 +32,7 @@
 // regression, and it does not catch a call site that runs and does nothing.
 // The behavioural half is covered where the behaviour lives.
 
+#include <algorithm>
 #include <cctype>
 
 #include "pagespeed/apache/instaweb_handler.h"
@@ -171,7 +172,14 @@ TEST_F(DaemonSeamTest, BothArmsReadOneClientsHeadersThroughOneReader) {
   EXPECT_NE(GoogleString::npos,
             builders.find("sec_ch_dpr.CopyToString(&request->sec_ch_dpr);"))
       << "the record request no longer carries Sec-CH-DPR";
-  EXPECT_NE(GoogleString::npos, builders.find("&request->sec_ch_dpr);"))
+  // Scoped to the serve builder and spelled as its own call, whitespace
+  // stripped: the record builder's copy also ends in "&request->sec_ch_dpr);".
+  GoogleString serve_body = source.substr(serve, after_serve - serve);
+  serve_body.erase(std::remove_if(serve_body.begin(), serve_body.end(),
+                                  [](char c) { return isspace(c) != 0; }),
+                   serve_body.end());
+  EXPECT_NE(GoogleString::npos,
+            serve_body.find("&request->accept_encoding,&request->sec_ch_dpr);"))
       << "the serve request no longer carries Sec-CH-DPR";
 }
 

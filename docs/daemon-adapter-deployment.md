@@ -503,7 +503,7 @@ class the key names.
 
 | Cache | Default with these responses | Configuration needed |
 |---|---|---|
-| Cloudflare | Ignores `Vary` apart from `Accept-Encoding` (and `Accept` for images with Vary for Images enabled), and caches images: one device's variant goes to everyone. | A Cache Rule for image paths whose cache key includes the device type and the `Accept`, `Save-Data` and `Sec-CH-DPR` request headers. Request headers in the cache key need the Enterprise plan; without it, set the rule to bypass the cache for these images. Cloudflare's device type comes from its own `User-Agent` rules, which can differ from the ones above at the edges. |
+| Cloudflare | Ignores `Vary` apart from `Accept-Encoding` (and `Accept` for images with Vary for Images enabled), and caches images: one device's variant goes to everyone. | A Cache Rule for image paths whose cache key includes the device type and the `Accept`, `Save-Data` and `Sec-CH-DPR` request headers. Request headers in the cache key, and possibly the device type as well, may need the Enterprise plan: check what your plan offers, and without it set the rule to bypass the cache for these images. Cloudflare's device type comes from its own `User-Agent` rules, which can differ from the ones above at the edges. |
 | Amazon CloudFront | Caches on the cache policy's key only and ignores the origin's `Vary`; it does not forward `User-Agent` or `Accept` unless told to, so one copy goes to everyone and the origin selects for CloudFront's own `User-Agent`. | Add `CloudFront-Is-Mobile-Viewer`, `CloudFront-Is-Tablet-Viewer`, `Accept`, `Save-Data` and `Sec-CH-DPR` to the cache policy's headers, and forward `User-Agent` in the origin request policy. For an exact match with the rules above, set a class header with a CloudFront Function and key on that instead of the CloudFront-Is-* pair. |
 | Akamai | Treats a `Vary` other than `Accept-Encoding` as uncacheable: correct, but no hits for these images. | Leave it, or cache with a cache key that includes the device class, `Accept`, `Save-Data` and `Sec-CH-DPR`. Removing the `Vary` header without that key brings the cross-serving back. |
 | Fastly, Varnish | Honour `Vary`: correct, one copy per raw `User-Agent`. | Normalise `User-Agent` to the class in `vcl_recv` (below). |
@@ -561,7 +561,7 @@ map "$device_view$device_density" $device_class_ua {
 location ~* \.(jpe?g|png|gif|webp|avif)$ {
     proxy_pass http://origin;
     proxy_cache images;
-    proxy_cache_key "$request_uri|$http_accept|$http_save_data|$http_sec_ch_dpr|$device_class_ua";
+    proxy_cache_key "$scheme$host$request_uri|$http_accept|$http_save_data|$http_sec_ch_dpr|$device_class_ua";
     proxy_ignore_headers Vary;
     proxy_set_header User-Agent $device_class_ua;
 }

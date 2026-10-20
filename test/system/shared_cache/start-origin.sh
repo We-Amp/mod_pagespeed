@@ -27,7 +27,13 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 [ -f /var/www/html/big.jpg ] || convert -size 2400x1600 plasma:fractal -quality 95 /var/www/html/big.jpg
+# A lifetime longer than the run: the variants inherit the origin's
+# lifetime, and one that lapses mid-run turns a variant serve into an
+# original serve between the direct requests and the cached ones.
 if [ "$SERVER" = apache ]; then
+  a2enmod -q expires >/dev/null
+  printf 'ExpiresActive On\nExpiresByType image/jpeg "access plus 1 hour"\n' \
+    > /etc/apache2/conf-enabled/harness-expires.conf
   exec apache2ctl -D FOREGROUND
 fi
 cp /harness/site-nginx.conf /etc/nginx/sites-enabled/default

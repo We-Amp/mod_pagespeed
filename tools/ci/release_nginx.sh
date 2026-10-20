@@ -453,7 +453,8 @@ self_test() {
   chk "plan one leg" "$(plan 8 1.5 85 128 1)" "8 14 1"
 
   # the single-leg row
-  chk "leg-row noble" "$(leg_row --arch x64 --distro noble | cut -d'|' -f1-3)" "noble|ubuntu:24.04|1.24.0"
+  chk "leg-row noble" "$(leg_row --arch x64 --distro noble)" "$(legs_for x64 main | grep '^noble|')"
+  chk "leg-row el10" "$(leg_row --arch x64 --set el10 --distro el10)" "$(legs_for x64 el10)"
   leg_row --arch x64 --distro nosuch >/dev/null 2>&1 && { echo "FAIL: unknown leg accepted"; fail=1; }
 
   # the routing gate

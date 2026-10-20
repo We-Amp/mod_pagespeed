@@ -24,8 +24,9 @@
 # response's Vary does not name Accept, Save-Data, User-Agent and Sec-CH-DPR,
 # or when the 304 names a different set than its 200.
 #
-# Needs bash 4, python3 and docker.  Every container and the network carry a
-# prefix unique to this run and are removed on exit; nothing else is touched.
+# Needs bash 4, python3 and docker.  Every container, the network and the
+# origin image carry a prefix unique to this run and are removed on exit;
+# nothing else is touched.
 # A nginx module must be built for the packaged nginx (Ubuntu 24.04's
 # nginx 1.24.0), as the release lane builds it.
 if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
@@ -49,12 +50,13 @@ VARNISH="$PREFIX-varnish"
 NGINX_CLASS="$PREFIX-nginx-device-class"
 VARNISH_CLASS="$PREFIX-varnish-device-class"
 NET="$PREFIX-net"
-IMAGE=shared-cache-$SERVER
+IMAGE="$PREFIX-$SERVER"
 # shellcheck disable=SC2329  # invoked by the EXIT trap
 cleanup() {
   docker rm -f "$ORIGIN" "$NGINX_CACHE" "$VARNISH" "$NGINX_CLASS" "$VARNISH_CLASS" \
     >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+  docker image rm "$IMAGE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -98,7 +100,7 @@ client_args() {
 fetch() {
   local args=()
   mapfile -t args < <(client_args "$2")
-  in_origin curl -s -D /tmp/h -o /tmp/b -H 'Host: localhost' -H 'Accept: image/jpeg' "${args[@]}" "$1"
+  in_origin curl -s --max-time 30 -D /tmp/h -o /tmp/b -H 'Host: localhost' -H 'Accept: image/jpeg' "${args[@]}" "$1"
 }
 header() { in_origin sh -c "grep -i '^$1:' /tmp/h | cut -d' ' -f2- | tr -d '\r'"; }
 body_hash() { in_origin sha256sum /tmp/b | cut -c1-16; }
@@ -114,7 +116,7 @@ describe() {
 # first served another one (a fallback) while the worker writes it, which
 # takes seconds for a large image; the bytes change when it lands.
 for _ in $(seq 1 30); do
-  in_origin curl -s -o /dev/null http://localhost/ && break
+  in_origin curl -s --max-time 30 -o /dev/null http://localhost/ && break
   sleep 1
 done
 for c in $CLIENTS; do
@@ -152,7 +154,7 @@ for c in $CLIENTS; do
   done
 done
 mapfile -t args < <(client_args desktop)
-in_origin curl -s -D /tmp/h -o /dev/null -H 'Accept: image/jpeg' "${args[@]}" \
+in_origin curl -s --max-time 30 -D /tmp/h -o /dev/null -H 'Accept: image/jpeg' "${args[@]}" \
   -H "If-None-Match: $etag" http://localhost/big.jpg
 echo "== $SERVER: desktop revalidation: $(in_origin head -1 /tmp/h | tr -d '\r')  Vary: $(header vary)"
 if ! in_origin head -1 /tmp/h | grep -q ' 304'; then
