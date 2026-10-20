@@ -45,17 +45,17 @@ bazel build --config=gcc //...
 
 ```bash
 # Run all tests
-bazel test //test/...
+bazel test --config=clang-libstdcxx13 //test/...
 
 # Run specific test suites
-bazel test //test/pagespeed/kernel/...
-bazel test //test/net/instaweb/...
+bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/...
+bazel test --config=clang-libstdcxx13 //test/net/instaweb/...
 
 # Run a single test with verbose output
-bazel test --test_output=streamed //test/pagespeed/kernel/base:base_test
+bazel test --config=clang-libstdcxx13 --test_output=streamed //test/pagespeed/kernel/base:base_test
 
 # Run tests with cache backends (Redis/Memcached)
-bazel test --test_env=REDIS_PORT=6379 --test_env=MEMCACHED_PORT=11211 //test/...
+bazel test --config=clang-libstdcxx13 --test_env=REDIS_PORT=6379 --test_env=MEMCACHED_PORT=11211 //test/...
 ```
 
 ### Container Shell Aliases
@@ -121,8 +121,14 @@ Same as inside Docker container - see [Building](#building) section above.
 
 ## Project Structure
 
-There are two top-level source trees — see [Two Source Trees](CLAUDE.md#two-source-trees)
-in CLAUDE.md. Rewriter filters live under `net/instaweb/`, NOT `pagespeed/`.
+The engine spans two top-level source trees. `net/instaweb/` holds the ~57
+rewriter filters (`net/instaweb/rewriter/*_filter.cc`) with `RewriteDriver`
+and `RewriteOptions`, in the legacy `net_instaweb::` namespace: to add or edit
+a filter, work there. `pagespeed/` holds the modern subsystems: the server
+adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/` and
+`automatic/`. There is no `rewriter/` directory under `pagespeed/`.
+`net/instaweb/genfiles/` is generated; edit the source `.js` and run
+`tools/regenerate-rewriter-js.sh`.
 
 ```
 mod_pagespeed/
@@ -318,7 +324,7 @@ requirement and pull request expectations.
 
 ## Additional Resources
 
-- [CLAUDE.md](CLAUDE.md) - AI assistant guidance and architecture overview
+- [CLAUDE.md](CLAUDE.md) - guidance for AI coding agents (detailed architecture notes)
 - [Bazel Documentation](https://bazel.build/docs)
 - [Envoy Documentation](https://www.envoyproxy.io/docs)
 - [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html)

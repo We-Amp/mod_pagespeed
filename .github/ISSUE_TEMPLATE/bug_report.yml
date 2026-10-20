@@ -9,7 +9,7 @@ body:
     attributes:
       value: |
         Security vulnerabilities: do not file them here, see the security policy.
-        Bugs in the pagespeed-optimizer worker, the console or the ASP.NET Core middleware belong in [We-Amp/pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer/issues).
+        Bugs in the pagespeed-optimizer worker, the nginx module in the container images / Helm chart, the console or the ASP.NET Core middleware belong in [We-Amp/pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer/issues).
   - type: input
     id: version
     attributes:
@@ -24,9 +24,9 @@ body:
       label: Web server
       options:
         - Apache
-        - nginx
+        - nginx (nginx-module-pagespeed package or ngx_pagespeed tarball)
         - IIS
-        - Envoy
+        - Envoy (experimental, built from source)
         - Other / not server-specific
     validations:
       required: true
@@ -34,7 +34,7 @@ body:
     id: platform
     attributes:
       label: Platform
-      description: Web server version, OS / distribution and architecture, and how you installed (signed apt/dnf repository, cPanel EasyApache RPM, IIS MSI, release asset, built from source).
+      description: Web server version, OS / distribution and architecture, and how you installed (signed apt/dnf repository, cPanel EasyApache RPM, IIS MSI, GitHub release asset, built from source).
       placeholder: Apache 2.4.62 on Debian 12 amd64, apt from packages.modpagespeed.com
     validations:
       required: true

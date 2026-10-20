@@ -1,9 +1,12 @@
 # Contributing to mod_pagespeed
 
 Thanks for helping. This repository holds the mod_pagespeed web-server
-modules for Apache, nginx, IIS and Envoy. The optimization worker
-(`pagespeed-optimizer`) that the Apache module pairs with, the management
-console and the ASP.NET Core middleware live in
+modules for Apache, nginx (the packaged `nginx-module-pagespeed` and the
+`ngx_pagespeed` tarballs), IIS and Envoy (experimental, build from source).
+The optimization worker (`pagespeed-optimizer`) that the Apache and nginx
+modules pair with (nginx through `pagespeed DaemonSocketPath`), the nginx
+module in the container images and Helm chart, the management console and
+the ASP.NET Core middleware live in
 [We-Amp/pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer).
 
 ## Reporting bugs and requesting features
@@ -17,7 +20,8 @@ report names:
   version,
 - the platform: web server and its version, OS / distribution and
   architecture, and how you installed (signed apt/dnf repository, cPanel
-  EasyApache RPM, IIS MSI, release asset, or built from source),
+  EasyApache RPM, IIS MSI, GitHub release asset, or built from source; Envoy
+  is source-only),
 - the smallest configuration excerpt that reproduces it,
 - the `X-PageSpeed` header of an affected request and the relevant
   error-log lines.
@@ -39,19 +43,22 @@ docker compose exec dev bash
 # inside the container
 bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so                   # Apache
 bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so # nginx
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy (experimental)
 
 bazel test --config=clang-libstdcxx13 \
   --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \
   --test_env=MEMCACHED_PORT=11211 --test_env=MEMCACHED_HOST=memcached \
-  //test/pagespeed/... //test/net/...
+  //test/pagespeed/kernel/... //test/net/... \
+  //test/pagespeed/opt/... //test/pagespeed/system/... \
+  //test/pagespeed/apache/... //test/pagespeed/nginx/...
 
 # on the host, when done
 docker compose down
 ```
 
-`--config=clang-libstdcxx13` is needed: the Cyclone cache sources do not
-build under plain `--config=clang`.
+Use `--config=clang-libstdcxx13` (or `--config=gcc`): the Cyclone cache
+sources do not build under plain `--config=clang`. The test targets above are
+the ones CI runs.
 
 The IIS module builds on Windows with clang-cl:
 
@@ -76,11 +83,13 @@ System tests: `./test/system/run_system_tests.sh` (Apache),
 - Branch from `master` and keep each pull request to one change.
 - Add or update tests for behaviour changes.
 - **Release notes are required.** A pull request that touches `pagespeed/`,
-  `net/` or `install/` (outside tests, `BUILD` files and `*.md`) must also
+  `net/`, or a shipped `install/**/*.conf` / `*.template` file (outside tests,
+  `BUILD` files and `*.md`) must also
   add an entry to [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` or to
   the in-development section of [RELEASE_NOTES.md](RELEASE_NOTES.md). If the
   change is invisible to users, put `Release-Note: none - <why>` in a commit
-  message or the pull request description. Check it locally with
+  message or the pull request description (editing the description does not
+  re-run the check; re-run the job). Check it locally with
   `bash tools/ci/check_release_note.sh --base origin/master --head HEAD`.
 - Describe the problem, the change and how you verified it.
 
