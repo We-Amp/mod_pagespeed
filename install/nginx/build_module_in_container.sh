@@ -306,8 +306,9 @@ install_deps_noble() {
 # pinned by fingerprint: a key file that does not hold the pinned key stops
 # the build, and only the pinned key goes into the keyring the repository is
 # scoped to.
-#   apt.llvm.org: the fingerprint https://apt.llvm.org/ publishes. The key file
-#     there also carries a second key; it is not trusted.
+#   apt.llvm.org: the fingerprint https://apt.llvm.org/ publishes (the primary
+#     key; the file also holds its encryption subkey 56E1477F..., which the
+#     export of the primary key carries along).
 #   ppa:ubuntu-toolchain-r/test: the signing_key_fingerprint Launchpad reports
 #     for the archive (https://api.launchpad.net/1.0/~ubuntu-toolchain-r/+archive/ubuntu/test).
 #     Its Release files are also signed with the archive's older 1024-bit key,
@@ -397,7 +398,10 @@ install_deps_focal() {
   # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
   add_toolchain_ppa
   apt-get install -y --no-install-recommends g++-13 gcc-13 libstdc++-13-dev >/dev/null
-  # clang/lld/llvm from apt.llvm.org (focal's stock clang predates C++20/23 support).
+  # clang/lld/llvm 18. focal's stock clang predates C++20/23 support. apt.llvm.org
+  # is added for it, but on focal the candidate apt picks is Ubuntu's own
+  # focal-updates/focal-security build (1:18.1.8-11~20.04.2, priority 500 like
+  # apt.llvm.org's, newer version); build-info.json records what was used.
   local CLANG_VER=18
   add_llvm_apt_repo "${CLANG_VER}"
   apt-get install -y --no-install-recommends \
