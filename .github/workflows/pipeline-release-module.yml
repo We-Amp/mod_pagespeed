@@ -1034,14 +1034,17 @@ jobs:
     name: Nginx Distro Packages (arm64, plan)
     needs: [version, vendor-ready]
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       distros: ${{ steps.plan.outputs.distros }}
     steps:
+      # The leg table and the build driver come from master, like the other
+      # tooling of this lane, so a tag cut before a tooling change still
+      # builds with it; the packages are built from the tag's tree.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.version.outputs.sha }}
+          ref: master
           submodules: false
           sparse-checkout: tools/ci
           persist-credentials: false
@@ -1068,6 +1071,25 @@ jobs:
       ARCH: arm64
     steps:
       - *clear-workspace
+
+      # The build driver (and the leg table in it) comes from master, the same
+      # file the plan job listed the matrix from; it is kept outside the
+      # workspace, which is the tag's tree.
+      - name: Check out the build tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Keep the build tooling outside the tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tools"
+          cp lane-tools/tools/ci/release_nginx.sh "${RUNNER_TEMP}/lane-tools/"
+          rm -rf lane-tools
+
       - *tree-download
       - *tree-extract
 
@@ -1078,7 +1100,7 @@ jobs:
           set -euo pipefail
           CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
           mkdir -p "${CACHE_ROOT}"
-          CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
+          CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
             --arch "$ARCH" --set main --distro "$DISTRO" \
             --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/nginx-out"
 
@@ -1105,9 +1127,15 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.sha }}
           submodules: false
-          sparse-checkout: |
-            tools/ci
-            test/package-test
+          sparse-checkout: test/package-test
+          persist-credentials: false
+
+      # The gates' driver comes from master, like the plan and the legs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
           persist-credentials: false
 
       - name: Download the per-distro packages
@@ -1117,24 +1145,22 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/nginx-out
 
-      - name: Every leg delivered its package
+      - name: The set is exactly one package per leg
         run: |
-          set -euo pipefail
           ls -l "${RUNNER_TEMP}/nginx-out"
-          n="$(bash tools/ci/release_nginx.sh legs --arch "$ARCH" --set main | wc -l | tr -d ' ')"
-          have="$(find "${RUNNER_TEMP}/nginx-out" -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) | wc -l | tr -d ' ')"
-          [ "$have" -ge "$n" ] || { echo "::error::expected at least ${n} nginx packages, found ${have}"; exit 1; }
+          bash lane-tools/tools/ci/release_nginx.sh check-set --arch "$ARCH" \
+            --pkgdir "${RUNNER_TEMP}/nginx-out"
 
       - name: Symbol-leak gate
         run: |
-          bash tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
+          bash lane-tools/tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
             --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
 
       - name: Rpm routing gate
         run: |
           mkdir -p "${RUNNER_TEMP}/nginx-rpms"
           cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
-          bash tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
+          bash lane-tools/tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
 
       - name: Upload the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

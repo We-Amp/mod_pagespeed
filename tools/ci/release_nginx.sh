@@ -7,6 +7,7 @@
 #
 #   release_nginx.sh legs    --arch x64|arm64 --set main|el10 [--json]
 #   release_nginx.sh build   --arch x64|arm64 --set main|el10 --workspace DIR --out DIR [--distro NAME]
+#   release_nginx.sh check-set --arch ARCH --pkgdir DIR [--set main|el10]
 #   release_nginx.sh symbol-leak --arch ARCH --src DIR --pkgdir DIR
 #   release_nginx.sh routing     --arch ARCH --pkgdir DIR [--set main|el10]
 #   release_nginx.sh load-check  --arch ARCH --src DIR --pkgdir DIR [--set main|el10]
@@ -342,6 +343,35 @@ symbol_leak() {
   fi
 }
 
+# The packages in --pkgdir are exactly the leg table's: one package per leg
+# (the deb of that suite, the rpm of that dist), nothing else.
+check_set() {
+  gate_args "$@" || return $?
+  local row distro image v h kind pat n=0 bad=0 f total
+  shopt -s nullglob
+  while IFS='|' read -r distro image v h kind; do
+    if [ "$kind" = deb ]; then
+      pat="nginx-module-pagespeed_*[~.]${distro}_${DEB_ARCH}.deb"
+    else
+      pat="nginx-module-pagespeed-*.${distro}.${RPM_ARCH}.rpm"
+    fi
+    local m=("$PKGDIR"/$pat)
+    if [ "${#m[@]}" -ne 1 ]; then
+      echo "::error::leg '${distro}': expected exactly one package matching ${pat}, found ${#m[@]}"
+      bad=1
+    fi
+    n=$((n + 1))
+  done < <(legs_for "$ARCH" "$SET")
+  total=0
+  for f in "$PKGDIR"/*; do total=$((total + 1)); done
+  if [ "$total" -ne "$n" ]; then
+    echo "::error::expected ${n} packages in the set, found ${total}"
+    bad=1
+  fi
+  [ "$bad" -eq 0 ] && echo "OK: the ${ARCH} set is exactly the ${n} expected packages"
+  return "$bad"
+}
+
 # Every rpm must carry the dist tag of its yum tree in its name and none may
 # carry the cPanel prefix: the consumer routes by name.
 routing() {
@@ -467,6 +497,19 @@ self_test() {
   build --arch arm64 --set main --distro el10 --workspace "$t/ws" --out "$t/o" >/dev/null 2>&1 \
     && { echo "FAIL: a distro of another table accepted"; fail=1; }
 
+  # the exact-set gate
+  mkdir -p "$t/set"
+  for d in bookworm trixie jammy noble; do : > "$t/set/nginx-module-pagespeed_1.0-r1~${d}_arm64.deb"; done
+  : > "$t/set/nginx-module-pagespeed-1.0-1.el9.aarch64.rpm"
+  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 || { echo "FAIL: exact set rejected"; fail=1; }
+  : > "$t/set/extra.txt"
+  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: extra file accepted"; fail=1; }
+  rm "$t/set/extra.txt" "$t/set/nginx-module-pagespeed_1.0-r1~jammy_arm64.deb"
+  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: missing leg accepted"; fail=1; }
+  : > "$t/set/nginx-module-pagespeed_1.0-r1~jammy_arm64.deb"; : > "$t/set/nginx-module-pagespeed_1.0-r2~jammy_arm64.deb"
+  rm "$t/set/nginx-module-pagespeed_1.0-r1~noble_arm64.deb"
+  check_set --arch arm64 --pkgdir "$t/set" >/dev/null 2>&1 && { echo "FAIL: duplicate leg accepted"; fail=1; }
+
   # the budget arithmetic
   chk "plan big host" "$(plan 8 1.5 85 128 6)" "8 14 6"
   chk "plan small host" "$(plan 8 1.5 14 4 5)" "4 8 1"
@@ -496,9 +539,10 @@ case "$cmd" in
   --self-test) self_test ;;
   legs) shift; legs "$@" ;;
   build) shift; build "$@" ;;
+  check-set) shift; check_set "$@" ;;
   symbol-leak) shift; symbol_leak "$@" ;;
   routing) shift; routing "$@" ;;
   load-check) shift; load_check "$@" ;;
   suite) shift; suite "$@" ;;
-  *) echo "usage: $0 legs|build|symbol-leak|routing|load-check|suite ... | --self-test" >&2; exit 2 ;;
+  *) echo "usage: $0 legs|build|check-set|symbol-leak|routing|load-check|suite ... | --self-test" >&2; exit 2 ;;
 esac
