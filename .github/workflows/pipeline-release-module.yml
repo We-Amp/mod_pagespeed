@@ -776,12 +776,20 @@ jobs:
       # package at the pair version, which is the module version.
       - name: Build the Apache module and its packages
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           set -euo pipefail
           echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
@@ -836,10 +844,18 @@ jobs:
       # jobs, inside containers of each distro.
       - name: Build the nginx module tarball
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           set -euo pipefail
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
@@ -947,7 +963,7 @@ jobs:
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     env: &nginx-x64-env
       ARCH: x64
     steps: &nginx-steps
@@ -1115,11 +1131,19 @@ jobs:
 
       - name: Build the module and the stock rpm in almalinux
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 80g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=80g
+          fi
           set -euo pipefail
           CACHE_ROOT="${HOME}/.cache/mps-release-${EL}"
           mkdir -p "${CACHE_ROOT}"
           docker run --rm --init \
-            --memory=80g --memory-swap=80g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${CACHE_ROOT}:/cache" \
             -w /workspace \
@@ -1247,11 +1271,19 @@ jobs:
 
       - name: Run the unit tests
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --network="${UNIT_NET}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \

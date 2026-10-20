@@ -319,8 +319,12 @@ jobs:
           CTR="nightly-apache-asan-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -478,8 +482,12 @@ jobs:
           CTR="nightly-apache-daemon-lane-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=(--cap-add NET_BIND_SERVICE --sysctl net.ipv4.ip_unprivileged_port_start=0)
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -613,8 +621,12 @@ jobs:
           CTR="nightly-nginx-asan-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -775,8 +787,12 @@ jobs:
           CTR="nightly-nginx-protocol-matrix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -927,8 +943,12 @@ jobs:
           CTR="nightly-full-tree-lint-${LINT_SHARD}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -962,9 +982,9 @@ jobs:
       # generation and linting share this one exec.
       - name: clang-tidy (compilation database and full-tree lint)
         run: |
-          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS -e LINT_MEM_GIB "${CTR}" bash -s <<'EOS'
+          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS -e LINT_MEM_GIB -e CI_SLOT_CPUS "${CTR}" bash -s <<'EOS'
           set -euo pipefail
-          export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going"
+          export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going${CI_SLOT_CPUS:+ --jobs=${CI_SLOT_CPUS}}"
           rm -f compile_commands.json
           # Do not let the generator die unannotated: a bare failure leaves
           # nothing in the step log.
@@ -1019,6 +1039,8 @@ jobs:
           lint_jobs=$(( LINT_MEM_GIB / 2 ))
           [ "${lint_jobs}" -ge 4 ] || lint_jobs=4
           [ "${lint_jobs}" -le "$(nproc)" ] || lint_jobs="$(nproc)"
+          # The runner's per-slot CPU share (CI_SLOT_CPUS) caps it further.
+          [ -z "${CI_SLOT_CPUS:-}" ] || [ "${lint_jobs}" -le "${CI_SLOT_CPUS}" ] || lint_jobs="${CI_SLOT_CPUS}"
           echo "run-clang-tidy-20 -j ${lint_jobs} (memory limit ${LINT_MEM_GIB} GiB)"
           run-clang-tidy-20 \
             -j "${lint_jobs}" \
@@ -1119,8 +1141,12 @@ jobs:
           CTR="nightly-fuzz-css-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -1346,8 +1372,12 @@ jobs:
           CTR="nightly-fuzz-html-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -1570,8 +1600,12 @@ jobs:
           CTR="nightly-fuzz-packs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -1831,8 +1865,12 @@ jobs:
           CTR="nightly-fuzz-js-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -2163,8 +2201,11 @@ jobs:
         shell: bash
         timeout-minutes: 60
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           set -uo pipefail
-          FLAGS=(--config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl --config=win-asan "--jobs=${SLOT_JOBS}" --nostamp
                  "--workspace_status_command=cmd /c echo.")
           if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
@@ -2468,8 +2509,11 @@ jobs:
         shell: bash
         timeout-minutes: 60
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           set -uo pipefail
-          FLAGS=(--config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl "--jobs=${SLOT_JOBS}" --nostamp
                  "--workspace_status_command=cmd /c echo.")
           if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
