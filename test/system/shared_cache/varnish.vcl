@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
 vcl 4.1;
 # A shared cache with Varnish's built-in behaviour: one copy per URL and Host,
 # and per value of each request header the response's Vary names.

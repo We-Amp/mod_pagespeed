@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
 """Shared-cache key cardinality for one image URL under a weighted traffic mix.
 
 Classifies every User-Agent with the shipped classifier (ps_classify from the

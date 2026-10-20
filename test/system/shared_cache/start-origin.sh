@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
 # Container entry point: start the optimizer worker as its systemd unit would,
 # optionally swap in a locally built module (MODULE_SO), then run the web
 # server in the foreground.  usage: start-origin.sh apache|nginx
