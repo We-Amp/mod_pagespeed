@@ -139,9 +139,10 @@ its environment file:
 | `CI_SLOT_MEM_GB` | positive integer (GiB) | container `--memory` and `--memory-swap` |
 
 Both are optional. Unset (hosted runners) keeps the previous behaviour: Bazel
-sizes itself from the host CPU count and each container keeps its historical
-cap (`CI_BUILD_RAM_BUDGET_GB` or 16 for the nightly lanes, 50g to 80g
-elsewhere, 32g for the lint container). A set but invalid value fails the job
+sizes itself from the host CPU count and each container keeps its fixed cap
+(`CI_BUILD_RAM_BUDGET_GB` or 16 for the nightly lanes, 50g to 80g elsewhere;
+the lint container has none). With both set, `run-clang-tidy` is limited to one
+process per 2 GiB as well. A set but invalid value fails the job
 with a clear message. The logic lives in `tools/ci/slot-budget.sh` (self-test:
 `tools/ci/test_slot_budget.sh`). Size the values so that all slots of a host at
 full use fit in the memory available to the runner services.

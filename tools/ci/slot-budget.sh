@@ -24,6 +24,7 @@
 # LEGACY_MEM is the cap used when CI_SLOT_MEM_GB is unset (e.g. 55g); omit it
 # for a step that never had a cap. A set-but-invalid value is an error.
 
+# shellcheck disable=SC2034  # SLOT_MEM_GB is part of the interface for callers
 SLOT_LEGACY_JOBS='HOST_CPUS*.75'
 
 _slot_check() { # name value max
