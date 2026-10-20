@@ -465,20 +465,107 @@ header is not served from the optimizer's cache at all (see above), so the
 module never replaces a `Vary` the origin chose; the server merges its own
 `Accept-Encoding` into the same field. `Cache-Control` is unaffected.
 
-**Fewer copies per image.** `Vary: User-Agent` makes a cache keep one copy per
-distinct User-Agent string, although the module only distinguishes a few
-device classes. A cache that can compute its own key can do much better:
-key image responses on `Accept`, `Save-Data` and a device class derived from
-`User-Agent` with the same rules the module uses, and ignore `User-Agent`
-itself. The rules: a `User-Agent` containing `iPad` or `Tablet`, or `Android`
-without `Mobile`, is a tablet; one containing `Mobile`, `Android`, `iPhone`
-or `iPod` is a phone; anything else is a desktop. A `Sec-CH-DPR` number
-decides density (1.5 or more is high); without one, phones count as high
-density, as does any `User-Agent` containing `2x` or `Retina`. All matches
-ignore case except `2x` and `Retina`. On a weighted sample of real browser
-traffic, 100,000 requests carried 764 distinct `User-Agent` strings and 3
-device classes, so such a key holds up to about 250 times fewer copies of
-each image.
+**The recorded original carries no `Vary`.** Before the optimizer has written
+a variant for a URL, and whenever no variant fits the client, the module
+serves the origin's own bytes. Those bytes are the same for every client, so
+one stored copy is correct for all of them, and a cache that keys it on the
+URL alone cannot hand anyone the wrong variant. The cost is freshness of the
+optimization, not correctness: a cache keeps serving that original until its
+lifetime (the origin's `Cache-Control`) runs out, and only the response it
+fetches after that carries a variant and its `Vary`. Every response the module
+emits is the correct one for the request that produced it.
+
+**Hit rate.** A cache that honours `Vary` keeps one copy per combination of
+`Accept`, `Save-Data`, `User-Agent` and `Sec-CH-DPR` values. `User-Agent` is
+the expensive one: on a weighted sample of real browser traffic, 100,000
+requests carried 764 distinct `User-Agent` strings but only 3 device classes,
+so a cache keyed on the raw header holds up to about 250 times more copies of
+each image than one keyed on the device class. Expect lower hit rates on such
+a cache after this change, and use device-class keying (below) to win them
+back. `Accept` varies between browser families too; normalising it to the
+format it selects (AVIF, WebP or the original) is a further saving where the
+cache can do it.
+
+**Device-class keying.** The class rules, as the optimizer's classifier at the
+pinned release (`install/debian/optimizer-pin.json`, 2.5.0) applies them;
+check them again when that pin moves: a `User-Agent` containing `iPad` or
+`Tablet`, or `Android` without `Mobile`, is a tablet; one containing `Mobile`,
+`Android`, `iPhone` or `iPod` is a phone; anything else is a desktop. A
+`Sec-CH-DPR` number decides density (1.5 or more is high); without one, phones
+count as high density, as does any `User-Agent` containing `2x` or `Retina`.
+All matches ignore case except `2x` and `Retina`. A cache that keys on a
+coarser or different rule can still hand one client another's variant where
+the two rules disagree, so the configurations below send the origin one
+representative `User-Agent` per class: the origin then selects for exactly the
+class the key names.
+
+**What each cache does by default, and what it needs.**
+
+| Cache | Default with these responses | Configuration needed |
+|---|---|---|
+| Cloudflare | Ignores `Vary` apart from `Accept-Encoding` (and `Accept` for images with Vary for Images enabled), and caches images: one device's variant goes to everyone. | A Cache Rule for image paths whose cache key includes the device type and the `Accept`, `Save-Data` and `Sec-CH-DPR` request headers. Request headers in the cache key need the Enterprise plan; without it, set the rule to bypass the cache for these images. Cloudflare's device type comes from its own `User-Agent` rules, which can differ from the ones above at the edges. |
+| Amazon CloudFront | Caches on the cache policy's key only and ignores the origin's `Vary`; it does not forward `User-Agent` or `Accept` unless told to, so one copy goes to everyone and the origin selects for CloudFront's own `User-Agent`. | Add `CloudFront-Is-Mobile-Viewer`, `CloudFront-Is-Tablet-Viewer`, `Accept`, `Save-Data` and `Sec-CH-DPR` to the cache policy's headers, and forward `User-Agent` in the origin request policy. For an exact match with the rules above, set a class header with a CloudFront Function and key on that instead of the CloudFront-Is-* pair. |
+| Akamai | Treats a `Vary` other than `Accept-Encoding` as uncacheable: correct, but no hits for these images. | Leave it, or cache with a cache key that includes the device class, `Accept`, `Save-Data` and `Sec-CH-DPR`. Removing the `Vary` header without that key brings the cross-serving back. |
+| Fastly, Varnish | Honour `Vary`: correct, one copy per raw `User-Agent`. | Normalise `User-Agent` to the class in `vcl_recv` (below). |
+| nginx `proxy_cache` | Honours `Vary`: correct, one copy per raw `User-Agent`. | Put the class in `proxy_cache_key` (below). |
+
+Varnish or Fastly, in `vcl_recv` (as tested by
+`test/system/shared_cache/varnish-device-class.vcl`): the `User-Agent` of an
+image request becomes one string per class, so the response's
+`Vary: User-Agent` splits the cache into a handful of copies.
+
+```vcl
+if (req.url ~ "(?i)\.(jpe?g|png|gif|webp|avif)(\?|$)") {
+  if (req.http.User-Agent ~ "(?i)ipad|tablet" ||
+      (req.http.User-Agent ~ "(?i)android" && req.http.User-Agent !~ "(?i)mobile")) {
+    if (req.http.User-Agent ~ "2x|Retina") {
+      set req.http.User-Agent = "device-class tablet Retina";
+    } else {
+      set req.http.User-Agent = "device-class tablet";
+    }
+  } elsif (req.http.User-Agent ~ "(?i)mobile|android|iphone|ipod") {
+    set req.http.User-Agent = "device-class Mobile";
+  } elsif (req.http.User-Agent ~ "2x|Retina") {
+    set req.http.User-Agent = "device-class Retina";
+  } else {
+    set req.http.User-Agent = "device-class desktop";
+  }
+}
+```
+
+nginx `proxy_cache` (as tested by
+`test/system/shared_cache/nginx-device-class.conf`): the class goes into the
+key, the raw-`User-Agent` `Vary` is not used for the lookup, and the origin is
+sent the class's representative `User-Agent`.
+
+```nginx
+map $http_user_agent $device_view {
+    "~*ipad|tablet"                tablet;
+    "~*^(?!.*mobile).*android"     tablet;
+    "~*mobile|android|iphone|ipod" mobile;
+    default                        desktop;
+}
+map $http_user_agent $device_density {
+    "~2x|Retina" " Retina";
+    default      "";
+}
+map "$device_view$device_density" $device_class_ua {
+    "mobile"         "device-class Mobile";
+    "mobile Retina"  "device-class Mobile";
+    "tablet"         "device-class tablet";
+    "tablet Retina"  "device-class tablet Retina";
+    "desktop Retina" "device-class Retina";
+    default          "device-class desktop";
+}
+
+location ~* \.(jpe?g|png|gif|webp|avif)$ {
+    proxy_pass http://origin;
+    proxy_cache images;
+    proxy_cache_key "$request_uri|$http_accept|$http_save_data|$http_sec_ch_dpr|$device_class_ua";
+    proxy_ignore_headers Vary;
+    proxy_set_header User-Agent $device_class_ua;
+}
+```
 
 ## When the daemon is missing
 

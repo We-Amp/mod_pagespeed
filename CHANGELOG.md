@@ -18,8 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR` on Apache, nginx and IIS,
   on the 200 and on the 304, the same list the optimizer uses, and the pixel
   density follows a `Sec-CH-DPR` hint when the browser sends one, as it does
-  on the optimizer. Browser caches were not affected. **Update recommended for
-  sites behind a shared cache or CDN.**
+  on the optimizer. Browser caches were not affected. A cache that honours
+  `Vary` (Varnish, Fastly, nginx) now keeps more copies of each image, so its
+  hit rate for them drops; keying it on a device class wins that back. A
+  cache that ignores `Vary` by default (Cloudflare, Amazon CloudFront) still
+  hands one device's image to another until it is configured to key on the
+  device class, `Accept` and `Save-Data`, or to skip these images: see
+  [Behind a shared cache or CDN](docs/daemon-adapter-deployment.md#behind-a-shared-cache-or-cdn).
+  **Update recommended for sites behind a shared cache or CDN.**
 
 ### Documentation
 
