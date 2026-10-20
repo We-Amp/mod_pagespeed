@@ -89,8 +89,12 @@ cat > "${DOCDIR}/pagespeed_admin_restrict.conf.sample" << 'CONF'
 #   server {
 #     listen 80;
 #     ...
-#     include /etc/nginx/snippets/pagespeed_admin_restrict.conf;
+#     include /etc/nginx/snippets/pagespeed_admin_localhost.conf;
 #   }
+#
+# The nginx-module-pagespeed package installs this file as
+# /etc/nginx/snippets/pagespeed_admin_localhost.conf (a config file: your
+# edits survive upgrades).
 #
 # A handler path set in the http {} block is served by every server {}
 # block, and GlobalAdminPath and GlobalStatisticsPath can only be set there.
@@ -185,8 +189,13 @@ this file.
 ## Admin endpoints (restrict them to localhost)
 
 If you enable \`pagespeed AdminPath\` / \`GlobalAdminPath\`, restrict them at the
-web-server layer. Copy \`pagespeed_admin_restrict.conf.sample\` into
-\`/etc/nginx/snippets/pagespeed_admin_restrict.conf\` and \`include\` it from
+web-server layer. This package installs the restriction as
+\`/etc/nginx/snippets/pagespeed_admin_localhost.conf\` (a config file: your
+edits survive upgrades; the same text is in
+\`pagespeed_admin_restrict.conf.sample\` next to this README). If you copied
+the sample to \`/etc/nginx/snippets/pagespeed_admin_restrict.conf\` earlier,
+that copy stays as it is; include one of the two, not both. Nothing includes
+the snippet on its own: \`include\` it from
 **every** \`server {}\` block, including the default server: a handler path
 set in the \`http {}\` block is served by every \`server {}\` block, and
 \`GlobalAdminPath\` / \`GlobalStatisticsPath\` can only be set there. Only an

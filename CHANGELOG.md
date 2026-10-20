@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **nginx packages: the admin-page restriction is installed as a config
+  file.** `nginx-module-pagespeed` now installs
+  `/etc/nginx/snippets/pagespeed_admin_localhost.conf`, the `location`
+  blocks that limit `/pagespeed_admin` and `/pagespeed_global_admin` to
+  localhost. Before, the blocks shipped only as a sample under
+  `/usr/share/doc/`, which minimal images such as the Ubuntu container images
+  do not install. The file is not included anywhere on its own: add
+  `include /etc/nginx/snippets/pagespeed_admin_localhost.conf;` to each
+  `server {}` block that serves the admin pages. It is a conffile on Debian
+  and Ubuntu and `%config(noreplace)` on Enterprise Linux, so your edits
+  survive upgrades. A copy you made earlier at
+  `/etc/nginx/snippets/pagespeed_admin_restrict.conf` is left alone; include
+  one of the two.
+
 ## [2.5.0] - 2026-10-19
 
 ### Security
