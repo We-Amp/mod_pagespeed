@@ -11,23 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`,
   `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`): the packages move to the
-  product version.** The next sidecar packages are 2.5.x, versioned with
-  mod_pagespeed itself, and the fourth-digit packaging revisions (1.15.0.1 to
-  1.15.0.7) end: a sidecar fix now ships with a product release. NuGet
-  orders 2.5.x after 1.17.0; a reference pinned to `1.*` does not pick it
-  up. The native pair the package carries (nginx 1.30.5, the module built
+  product version.** The packages are versioned with mod_pagespeed itself,
+  and the fourth-digit packaging revisions (1.15.0.1 to 1.15.0.7) end: a
+  sidecar fix now ships with a product release. The first sidecar package on
+  the product version is 2.5.1, released with module 2.5.1: the module
+  release 2.5.0 carries no native pair, so there is no sidecar package 2.5.0.
+  NuGet orders 2.5.1 after 1.17.0; a reference pinned to `1.*` does not pick
+  it up. The native pair the package carries (nginx 1.30.6, the module built
   against it and the launch shim) is built and tested by the module release,
   live nginx tests included, and released with it.
 
 ### Documentation
 
-- **The sidecar's supported hosts are Debian and Ubuntu with glibc 2.31 or
-  newer (Debian 11 and later, Ubuntu 20.04 and later).** The bundled nginx
-  links `libpcre.so.3` and `libcrypt.so.1`, names that Enterprise Linux and
-  Amazon Linux do not provide, so the RHEL and AlmaLinux 9 and Amazon Linux
-  2023 hosts named earlier are not supported. The pair is built on Ubuntu
-  20.04, which is past its standard support; it is the build base that sets
-  the glibc 2.31 floor, and nothing of it ships beyond that.
+- **The sidecar's supported hosts are Debian 11 and 12 and Ubuntu 20.04 to
+  24.04.** The binaries need glibc 2.31 or newer, and the bundled nginx links
+  `libpcre.so.3`, which only the `libpcre3` package provides: Debian 13 and
+  Ubuntu 26.04 no longer ship it, and Enterprise Linux and Amazon Linux never
+  had it under that name, so the RHEL and AlmaLinux 9 and Amazon Linux 2023
+  hosts named earlier are not supported. (`libcrypt.so.1`, the other library
+  nginx links, is available on all of them, from `libxcrypt-compat` on EL9
+  and Amazon Linux 2023.) The pair is built on Ubuntu 20.04, which is past
+  its standard support; it is the build base that sets the glibc 2.31 floor,
+  and nothing of it ships beyond that.
 
 - **The shipped `pagespeed.conf` no longer says in-place optimization never
   varies by request header.** That holds only for the module's own in-place
@@ -107,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MapPageSpeedInfo` requires authorization by default, and loopback checks
   use the connection's own address. Affects `WeAmp.PageSpeed.Sidecar` up to
   and including 1.17.0; the fixes are in this source release and an updated
-  package follows separately, as `WeAmp.PageSpeed.Sidecar` 2.5.x (see
+  package follows separately, as `WeAmp.PageSpeed.Sidecar` 2.5.1 (see
   Unreleased). **Update recommended.**
 
 ### Changed
@@ -358,8 +363,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bundled nginx is not built with HTTP/3, so it was not affected; the update
   keeps vulnerability scans clean. Correction: no sidecar package was
   published with this release. The current `WeAmp.PageSpeed.Sidecar` 1.17.0
-  bundles nginx 1.30.4; the first package with 1.30.5 is the next one
-  (2.5.x).
+  bundles nginx 1.30.4. The next package, 2.5.1, bundles nginx 1.30.6,
+  which carries the 1.30.5 fix.
 
 ### Fixed
 
