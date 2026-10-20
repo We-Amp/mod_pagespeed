@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/We-Amp/mod_pagespeed/security/policy
+    about: Report vulnerabilities privately to security@modpagespeed.com, not in a public issue.
+  - name: pagespeed-optimizer worker, console or ASP.NET Core middleware
+    url: https://github.com/We-Amp/pagespeed-optimizer/issues
+    about: Those components are developed in We-Amp/pagespeed-optimizer.
+  - name: Commercial support and licensing questions
+    url: https://modpagespeed.com/contact/
+    about: SLA-backed support, migrations and consulting from We-Amp.

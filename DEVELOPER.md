@@ -313,10 +313,8 @@ bazel test --test_output=streamed //test/path:test_name  # Real-time output
 
 ## Contributing
 
-1. Create a feature branch from `master`
-2. Make changes following the code style guidelines
-3. Ensure all tests pass: `bazel test //test/...`
-4. Submit a pull request
+See [CONTRIBUTING.md](CONTRIBUTING.md) for bug reports, the release-note
+requirement and pull request expectations.
 
 ## Additional Resources
 

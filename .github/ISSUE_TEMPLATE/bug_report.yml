@@ -1,0 +1,62 @@
+name: Bug report
+description: The Apache, nginx, IIS or Envoy module does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security vulnerabilities: do not file them here, see the security policy.
+        Bugs in the pagespeed-optimizer worker, the console or the ASP.NET Core middleware belong in [We-Amp/pagespeed-optimizer](https://github.com/We-Amp/pagespeed-optimizer/issues).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `X-PageSpeed` response header value, or the installed package version.
+      placeholder: 2.5.0
+    validations:
+      required: true
+  - type: dropdown
+    id: server
+    attributes:
+      label: Web server
+      options:
+        - Apache
+        - nginx
+        - IIS
+        - Envoy
+        - Other / not server-specific
+    validations:
+      required: true
+  - type: textarea
+    id: platform
+    attributes:
+      label: Platform
+      description: Web server version, OS / distribution and architecture, and how you installed (signed apt/dnf repository, cPanel EasyApache RPM, IIS MSI, release asset, built from source).
+      placeholder: Apache 2.4.62 on Debian 12 amd64, apt from packages.modpagespeed.com
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce, the smaller the better.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration excerpt
+      description: The relevant `ModPagespeed...` / `pagespeed ...` directives or IIS settings. Remove secrets and hostnames you do not want public.
+      render: text
+  - type: textarea
+    id: headers
+    attributes:
+      label: X-PageSpeed response headers
+      description: From an affected request, e.g. `curl -s -o /dev/null -D - https://example.com/ | grep -i x-pagespeed`.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Web-server error log (and the pagespeed-optimizer log if the worker is involved).
+      render: text
