@@ -2,11 +2,12 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 # Apache with the published module and optimizer packages.
 FROM ubuntu:24.04
-ARG MODULE_VERSION=2.5.0-r1
-ARG OPTIMIZER_VERSION=2.5.0
+# The optimizer release the tree pins, and the module package of that pair
+# (whose library run.sh may replace with a fresh build).
+ARG PAIR_VERSION=2.5.0
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg apache2 imagemagick procps && \
     curl -fsSL https://packages.modpagespeed.com/install.sh | sh && \
     apt-get update && \
-    apt-get install -y mod-pagespeed=${MODULE_VERSION} pagespeed-optimizer=${OPTIMIZER_VERSION}
+    apt-get install -y "mod-pagespeed=${PAIR_VERSION}-*" "pagespeed-optimizer=${PAIR_VERSION}"
