@@ -2898,8 +2898,14 @@ jobs:
             echo "::error::the package signing key or its passphrase is not set in the release environment (docs/ci/release.md)"
             exit 1
           fi
-          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
-          rm -rf "$GNUPGHOME"; mkdir -m 700 "$GNUPGHOME"
+          # The private key must never outlive this step, also if the job is
+          # ever moved to a persistent (fleet) runner: a fresh mktemp keyring,
+          # removed by the EXIT trap on success and failure alike, and again
+          # by the always() step below if the shell itself is killed.
+          GNUPGHOME="$(mktemp -d "${RUNNER_TEMP}/gnupg.XXXXXX")"
+          export GNUPGHOME
+          chmod 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"' EXIT
           # The secret is the armored private key, base64 encoded.
           printf '%s' "$PACKAGE_SIGNING_KEY" | base64 -d | gpg --batch --quiet --import
           [ "$(gpg --batch --list-secret-keys --with-colons | grep -c '^sec:')" = 1 ] \
@@ -2913,8 +2919,6 @@ jobs:
           printf '%s' "$PACKAGE_SIGNING_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --local-user "$FPR" --armor --detach-sign --output signature/SHA256SUMS.asc assets/SHA256SUMS
           echo "Signed SHA256SUMS with key ${FPR}" | tee -a "$GITHUB_STEP_SUMMARY"
-          gpgconf --kill gpg-agent || true
-          rm -rf "$GNUPGHOME"
 
       # Verified in a fresh keyring that holds only the published public key,
       # never the keyring the secret was imported into: a release whose
@@ -2927,8 +2931,10 @@ jobs:
             echo "::error::RELEASE-SIGNING-KEY.asc is missing on master; the signature cannot be checked against the published key"
             exit 1
           fi
-          export GNUPGHOME="${RUNNER_TEMP}/gnupg-verify"
-          rm -rf "$GNUPGHOME"; mkdir -m 700 "$GNUPGHOME"
+          GNUPGHOME="$(mktemp -d "${RUNNER_TEMP}/gnupg.XXXXXX")"
+          export GNUPGHOME
+          chmod 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"' EXIT
           # The file must hold exactly one key, the release signing key.
           KEYS="$(gpg --batch --with-colons --show-keys "$KEY" \
             | awk -F: '$1=="pub"||$1=="sub" {want=($1=="pub")} $1=="fpr" && want {print $10; want=0}')"
@@ -2947,8 +2953,18 @@ jobs:
             exit 1
           fi
           echo "Verified SHA256SUMS.asc against RELEASE-SIGNING-KEY.asc (${RELEASE_KEY_FPR})" | tee -a "$GITHUB_STEP_SUMMARY"
-          gpgconf --kill gpg-agent || true
-          rm -rf "$GNUPGHOME"
+
+      # Belt and braces for the EXIT traps above: a cancelled or killed step
+      # skips its trap, and a leftover keyring on a persistent runner would
+      # keep the private key on disk.
+      - name: Remove the temporary keyrings
+        if: always()
+        run: |
+          for h in "${RUNNER_TEMP}"/gnupg.*; do
+            [ -d "$h" ] || continue
+            GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "$h"
+          done
 
       - name: Upload the signature
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
