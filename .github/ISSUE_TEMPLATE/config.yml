@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
 blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability

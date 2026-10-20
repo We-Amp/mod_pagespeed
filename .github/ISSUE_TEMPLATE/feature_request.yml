@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
 name: Feature request
 description: Suggest a new capability or a change to existing behaviour.
 labels: [enhancement]
