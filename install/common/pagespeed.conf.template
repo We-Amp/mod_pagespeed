@@ -182,17 +182,24 @@
     # format of an image depends on the request.
     #
     # With the optimizer daemon attached (ModPagespeedDaemonSocketPath and
-    # ModPagespeedDaemonVolumePath, which the package sets in
-    # pagespeed_daemon.conf), images at their original URLs are served from
-    # the daemon's cache in the format the request's Accept header selects:
-    # AVIF when it names image/avif; WebP when it names image/webp or
-    # contains image/* or */*, or when there is no Accept header at all (a
-    # wildcard means the client takes any image type, RFC 9110); otherwise
-    # the original format.  So curl and other clients sending Accept: */* get
-    # WebP for a .jpg URL; send Accept: image/jpeg to get the original
-    # format.  An optimized copy chosen this way carries Vary: Accept, so a
-    # cache or CDN in front of this server must honour Vary: Accept, or key
-    # on Accept, or not cache images.
+    # ModPagespeedDaemonVolumePath, set in pagespeed_daemon.conf by the
+    # packages built to depend on pagespeed-optimizer), images at their
+    # original URLs are served from the daemon's cache in the format the
+    # request's Accept header selects: AVIF when it names image/avif; WebP
+    # when it names image/webp or contains image/* or */*, or when there is
+    # no Accept header at all (a wildcard means the client takes any image
+    # type, RFC 9110); otherwise the original format.  When no copy in that
+    # format exists (not written yet, or declined by the quality check) the
+    # original format is served; a client naming image/avif never gets WebP
+    # instead.  So curl and other clients sending Accept: */* get WebP for a
+    # .jpg URL; send Accept: image/jpeg to get the original format.
+    #
+    # An optimized copy chosen this way carries Vary: Accept; the first,
+    # not yet optimized response for a URL carries none.  The copy is also
+    # chosen by device class and Save-Data, which Vary does not name yet
+    # (https://github.com/We-Amp/mod_pagespeed/issues/102), so a shared
+    # cache or CDN in front of this server should not cache images, or must
+    # key on Accept, a User-Agent device class and Save-Data.
     #
     # Without the daemon, the module's own in-place path optimizes an image
     # identically for every client and never varies its output by request
