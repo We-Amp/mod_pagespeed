@@ -105,6 +105,9 @@ LICENSE.*
 NOTICE
 THIRD-PARTY-NOTICES
 
+# The armored public release signing key: key material, no room for a header.
+RELEASE-SIGNING-KEY\.asc
+
 # Documentation, configuration, data and lock files: no code, no header.
 .*\.md
 .*\.txt

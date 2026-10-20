@@ -7,12 +7,28 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "docker"
     directories:
       - "/docker"
       - "/test/package-test"
     schedule:
       interval: "weekly"
+      day: "monday"
+    groups:
+      docker:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
       # Base images move to a new major release on purpose, never by a bump.
       - dependency-name: "*"

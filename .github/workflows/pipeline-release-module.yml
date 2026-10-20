@@ -652,14 +652,16 @@ jobs:
   # commit: the package smokes below run the suite against a stock install,
   # whose configuration lacks the lane fixtures, so their pytest step is
   # informational. A completed run of the main workflow for the release
-  # commit must have passed both lanes. On a dry run the verdict is reported
-  # and the run continues.
+  # commit must have passed both lanes. While that run is still queued or in
+  # progress the gate waits for it (the tag may be pushed right after the
+  # merge), and transient API failures are retried. On a dry run the verdict
+  # is reported and the run continues. See tools/ci/systest_gate.sh.
   # ---------------------------------------------------------------------
   systest-gate:
     name: System-test gate (CI run of the release commit)
     needs: [ref-guard, version]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 75
     # Reads the workflow runs of this public repository with the default
     # read-only token; no extra permission is requested.
     env:
@@ -667,34 +669,15 @@ jobs:
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
     steps:
+      - name: Checkout master (gate script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
       - name: Require green Apache and Nginx system tests for this commit
-        run: |
-          set -uo pipefail
-          verdict() {
-            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&status=completed&per_page=50" --jq '.workflow_runs[].id')" || return 2
-            [ -n "$RUN_IDS" ] || { echo "no completed ci.yml run for ${RELEASE_SHA}"; return 1; }
-            for RUN in $RUN_IDS; do
-              JOBS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN}/jobs?per_page=100" --jq '.jobs[] | "\(.name)=\(.conclusion)"')" || return 2
-              echo "ci.yml run ${RUN}:"
-              echo "$JOBS" | grep -E '(^| / )(Apache|Nginx) System Tests=' || echo "  (no system-test jobs)"
-              if echo "$JOBS" | grep -Eq '(^|/ )Apache System Tests=success$' \
-                 && echo "$JOBS" | grep -Eq '(^|/ )Nginx System Tests=success$'; then
-                echo "System-test lanes passed in ci.yml run ${RUN}"
-                return 0
-              fi
-            done
-            echo "no ci.yml run of ${RELEASE_SHA} passed both Apache and Nginx System Tests"
-            return 1
-          }
-          rc=0
-          verdict || rc=$?
-          if [ "$rc" -eq 0 ]; then exit 0; fi
-          if [ "$DRY_RUN" = true ]; then
-            echo "::warning::dry run: the system-test gate would refuse a real run of this tag (see above)"
-            exit 0
-          fi
-          echo "::error::the system-test gate refuses this release (see above)"
-          exit 1
+        run: bash tools/ci/systest_gate.sh
 
   # ---------------------------------------------------------------------
   # Linux packages. One step list for three jobs: x64 on the build runners,
@@ -784,12 +767,20 @@ jobs:
       # package at the pair version, which is the module version.
       - name: Build the Apache module and its packages
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           set -euo pipefail
           echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
@@ -844,10 +835,18 @@ jobs:
       # jobs, inside containers of each distro.
       - name: Build the nginx module tarball
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           set -euo pipefail
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
             -e HOME=/workspace -e USER=dev \
@@ -955,7 +954,7 @@ jobs:
     needs: [version, vendor-ready]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
-    timeout-minutes: 180
+    timeout-minutes: 240
     env: &nginx-x64-env
       ARCH: x64
     steps: &nginx-steps
@@ -1123,11 +1122,19 @@ jobs:
 
       - name: Build the module and the stock rpm in almalinux
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 80g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=80g
+          fi
           set -euo pipefail
           CACHE_ROOT="${HOME}/.cache/mps-release-${EL}"
           mkdir -p "${CACHE_ROOT}"
           docker run --rm --init \
-            --memory=80g --memory-swap=80g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${CACHE_ROOT}:/cache" \
             -w /workspace \
@@ -1255,11 +1262,19 @@ jobs:
 
       - name: Run the unit tests
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB). A tag cut before the helper
+          # existed has no such file: use the previous fixed values for it.
+          if [ -f "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh" ]; then
+            source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+            slot_budget 55g || exit 1
+          else
+            SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=55g
+          fi
           echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd" 2>/dev/null || true
           # shellcheck disable=SC2086
           docker run --rm --init ${DOCKER_CACHE_HOST_ARG} \
-            --memory=55g --memory-swap=55g \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --network="${UNIT_NET}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -2875,12 +2890,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
+    env:
+      # The Release Signing Key, by full fingerprint. A new key changes this
+      # line, RELEASE-SIGNING-KEY.asc and SECURITY.md together.
+      RELEASE_KEY_FPR: 411DEFDB571351D2B25AEFCC9C02B5BDCCE75313
     steps:
       - name: Download the validated asset set
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-assets
           path: assets
+
+      # The published public key, from master (never from the tree being
+      # released), is what the signature is verified against below.
+      - name: Checkout master (published release key)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: trust
+          sparse-checkout: RELEASE-SIGNING-KEY.asc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       # SHA256SUMS lists manifest.json, so one signature covers the whole set.
       - name: Verify the set across the job boundary
@@ -2899,20 +2929,88 @@ jobs:
             echo "::error::the package signing key or its passphrase is not set in the release environment (docs/ci/release.md)"
             exit 1
           fi
-          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
-          rm -rf "$GNUPGHOME"; mkdir -m 700 "$GNUPGHOME"
+          # The private key must never outlive this step, also if the job is
+          # ever moved to a persistent (fleet) runner: a fresh mktemp keyring,
+          # removed by the EXIT trap on success and failure alike, and again
+          # by the always() step below if the shell itself is killed.
+          GNUPGHOME="$(mktemp -d "${RUNNER_TEMP}/gnupg.XXXXXX")"
+          export GNUPGHOME
+          chmod 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"' EXIT
           # The secret is the armored private key, base64 encoded.
           printf '%s' "$PACKAGE_SIGNING_KEY" | base64 -d | gpg --batch --quiet --import
           [ "$(gpg --batch --list-secret-keys --with-colons | grep -c '^sec:')" = 1 ] \
             || { echo "::error::the signing secret must hold exactly one secret key"; exit 1; }
           FPR="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10; exit}')"
+          if [ "$FPR" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::the signing secret holds key ${FPR:-<none>}, not the release signing key ${RELEASE_KEY_FPR}; nothing was signed"
+            exit 1
+          fi
           mkdir -p signature
           printf '%s' "$PACKAGE_SIGNING_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --local-user "$FPR" --armor --detach-sign --output signature/SHA256SUMS.asc assets/SHA256SUMS
-          gpg --batch --verify signature/SHA256SUMS.asc assets/SHA256SUMS
           echo "Signed SHA256SUMS with key ${FPR}" | tee -a "$GITHUB_STEP_SUMMARY"
-          gpgconf --kill gpg-agent || true
-          rm -rf "$GNUPGHOME"
+
+      # Verified in a fresh keyring that holds only the published public key,
+      # never the keyring the secret was imported into: a release whose
+      # signature a user cannot check with RELEASE-SIGNING-KEY.asc fails here.
+      - name: Verify SHA256SUMS.asc against the published release key
+        run: |
+          set -euo pipefail
+          KEY=trust/RELEASE-SIGNING-KEY.asc
+          if [ ! -s "$KEY" ]; then
+            echo "::error::RELEASE-SIGNING-KEY.asc is missing on master; the signature cannot be checked against the published key"
+            exit 1
+          fi
+          GNUPGHOME="$(mktemp -d "${RUNNER_TEMP}/gnupg.XXXXXX")"
+          export GNUPGHOME
+          chmod 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"' EXIT
+          # The file must hold exactly one key, the release signing key.
+          KEYS="$(gpg --batch --with-colons --show-keys "$KEY" \
+            | awk -F: '$1=="pub"||$1=="sub" {want=($1=="pub")} $1=="fpr" && want {print $10; want=0}')"
+          if [ "$KEYS" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::RELEASE-SIGNING-KEY.asc holds [${KEYS//$'\n'/ }], expected exactly ${RELEASE_KEY_FPR}"
+            exit 1
+          fi
+          gpg --batch --quiet --import "$KEY"
+          STATUS="$(gpg --batch --status-fd 1 --verify signature/SHA256SUMS.asc assets/SHA256SUMS 2>/dev/null)" || {
+            echo "::error::SHA256SUMS.asc does not verify against the published release key"
+            exit 1
+          }
+          # gpg exits 0 and prints VALIDSIG also for a signature by a revoked
+          # or expired key (REVKEYSIG / EXPKEYSIG): require exactly one good
+          # signature and none of the bad-key or bad-signature states.
+          count() { printf '%s\n' "$STATUS" | awk -v t="$1" '$1=="[GNUPG:]" && $2==t {n++} END {print n+0}'; }
+          for t in REVKEYSIG EXPKEYSIG EXPSIG KEYREVOKED ERRSIG BADSIG; do
+            if [ "$(count "$t")" != 0 ]; then
+              echo "::error::SHA256SUMS.asc verification reports $t; not a good signature by a valid release key"
+              exit 1
+            fi
+          done
+          if [ "$(count GOODSIG)" != 1 ] || [ "$(count VALIDSIG)" != 1 ]; then
+            echo "::error::SHA256SUMS.asc must carry exactly one good signature (GOODSIG $(count GOODSIG), VALIDSIG $(count VALIDSIG))"
+            exit 1
+          fi
+          # VALIDSIG field 10 (awk $12) is the primary-key fingerprint.
+          SIGNER="$(printf '%s\n' "$STATUS" | awk '$1=="[GNUPG:]" && $2=="VALIDSIG" {print $12}')"
+          if [ "$SIGNER" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::SHA256SUMS.asc VALIDSIG primary key is [${SIGNER//$'\n'/ }], expected exactly ${RELEASE_KEY_FPR}"
+            exit 1
+          fi
+          echo "Verified SHA256SUMS.asc against RELEASE-SIGNING-KEY.asc (${RELEASE_KEY_FPR})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Belt and braces for the EXIT traps above: a cancelled or killed step
+      # skips its trap, and a leftover keyring on a persistent runner would
+      # keep the private key on disk.
+      - name: Remove the temporary keyrings
+        if: always()
+        run: |
+          for h in "${RUNNER_TEMP}"/gnupg.*; do
+            [ -d "$h" ] || continue
+            GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "$h"
+          done
 
       - name: Upload the signature
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

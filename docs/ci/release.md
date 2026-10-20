@@ -148,7 +148,14 @@ It does everything a dry run does, and then, in this order:
    from them, `msi-sign` signs the installer. The two gates test the signed
    installer.
 2. `validate` checks the set, and that the Windows files carry a signature.
-3. `sign-checksums` signs `SHA256SUMS`.
+3. `sign-checksums` signs `SHA256SUMS`. It refuses to sign unless the
+   secret holds the release signing key, fingerprint
+   `411DEFDB571351D2B25AEFCC9C02B5BDCCE75313`, and then verifies
+   `SHA256SUMS.asc` in a fresh keyring holding only `RELEASE-SIGNING-KEY.asc`
+   from master: the signature's primary key must be exactly that fingerprint,
+   with exactly one good signature and no revoked or expired key. The pin is a
+   consistency check between the secret and the committed key, not an
+   independent trust root: whoever can change master can change both.
 4. `create-release` creates a draft release for the tag with every asset and
    `SHA256SUMS.asc`, downloads the draft's assets and checks them against
    `SHA256SUMS`, then publishes it. A pre-release tag (`-rc.1`) produces a
@@ -185,7 +192,13 @@ the jobs of the environment read the environment's value.
 | `PACKAGE_SIGNING_KEY` | `sign-checksums` | the armored private key of the package signing key, base64 encoded, a single secret key |
 | `PACKAGE_SIGNING_PASSPHRASE` | `sign-checksums` | its passphrase |
 
-The package signing key is the one whose public half the consumer pins. The
+Despite its name, `PACKAGE_SIGNING_KEY` holds the release signing key, which
+signs `SHA256SUMS`; the apt and yum repositories are signed by a separate
+repository key. The release signing key is the one whose public half the
+consumer pins: fingerprint
+`411DEFDB571351D2B25AEFCC9C02B5BDCCE75313`, published as
+`RELEASE-SIGNING-KEY.asc` in the repository root (see `SECURITY.md`). A new
+key is a change to that file, `SECURITY.md` and every consumer's pin together. The
 release itself needs no secret: `create-release` uses the run's own token with
 `contents: write`, which the caller grants and no other job of the lane has.
 
@@ -255,7 +268,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
 | `validate` | hosted | builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
-| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`) |
+| `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
@@ -492,7 +505,7 @@ the optimizer packages of `optimizer_tag` beside it).
 | `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 it passes with a notice; `--dry-run` (passed while the pin is not the paired tag) turns a mismatch into a warning and skips `-pre` tags (`--self-test`) |
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
-| `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification, used by the two signing jobs |
+| `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |
 
 The self-tests run in the `CI tooling self-tests` job of `ci.yml`.

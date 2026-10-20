@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The bundled and required nginx is updated to 1.30.6, which fixes two
+  memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).** The nginx
+  module packages and the NuGet sidecar package now build against and depend on
+  nginx 1.30.6. **Update recommended.**
+
 ### Fixed
 
 - **IIS installer: a rebuilt installer of the same version now upgrades the
@@ -23,6 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would install beside it.) If two entries appear after re-running an older
   2.5.0 installer, uninstall both, then install the newer build again. A
   later build also removes both entries when it upgrades.
+
+### Documentation
+
+- **The shipped `pagespeed.conf` no longer says in-place optimization never
+  varies by request header.** That holds only for the module's own in-place
+  path. With the optimizer daemon attached, as the packages that depend on
+  pagespeed-optimizer configure it, images at their original URLs are served
+  in the format the request's `Accept` header selects, with `Vary: Accept`:
+  WebP for `*/*`, `image/*` or no `Accept` header, AVIF only when
+  `image/avif` is named, and the original format otherwise. The comment now
+  describes both paths. The help text of the retired `AllowVaryOn` and
+  `PrivateNotVaryForIE` directives (and of the `private_not_vary_for_ie`
+  flag) and the deprecation warning for the
+  `in_place_optimize_for_browser` filter made the same claim and are
+  corrected; this is a text change only, and behaviour is unchanged.
 
 ## [2.5.0] - 2026-10-19
 
