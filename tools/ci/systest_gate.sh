@@ -8,6 +8,8 @@
 #   * Every API call is retried on a transient failure (HTTP 5xx, timeouts,
 #     connection errors) with backoff 10/20/40/80 s; a 4xx is not retried.
 #     When the retries run out the gate refuses (fail closed).
+#   * Only push runs of ci.yml on master count (they are never cancelled by
+#     newer pushes).
 #   * When no run of ci.yml for the commit has passed yet but one is still
 #     queued or in progress, the gate polls until it finishes, up to
 #     MAX_WAIT_SECONDS. The tag can therefore be pushed right after the merge
@@ -20,7 +22,7 @@
 # Environment:
 #   GITHUB_REPOSITORY, RELEASE_SHA   required
 #   DRY_RUN                          "true" turns a refusal into a warning
-#   MAX_WAIT_SECONDS                 default 4200
+#   MAX_WAIT_SECONDS                 default 3600 (see the budget below)
 #   POLL_SECONDS                     default 60
 #   RETRY_BASE_SECONDS               default 10 (doubles per try, 5 tries)
 #   GH_TOKEN                         read-only token (set by the workflow)
@@ -30,21 +32,32 @@ set -uo pipefail
 
 : "${GITHUB_REPOSITORY:?}" "${RELEASE_SHA:?}"
 DRY_RUN="${DRY_RUN:-false}"
-MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-4200}"
+# Time budget against the 75 minute job timeout: polling stops after 60
+# minutes. A check that hits a transient failure gives up on its first
+# exhausted call (5 tries of at most 60 s each plus 150 s of backoff, 7.5
+# minutes), so the verdict is written by about 68 minutes, with the checkout
+# and setup well inside the remaining margin.
+MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-3600}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 RETRY_BASE_SECONDS="${RETRY_BASE_SECONDS:-10}"
+# Each API call is bounded to 60 s (exit 124 counts as transient).
+TIMEOUT=""
+command -v timeout >/dev/null 2>&1 && TIMEOUT="timeout 60"
 TRANSIENT_RE='HTTP 5[0-9][0-9]|Bad Gateway|Service Unavailable|Gateway Time-?out|timed? ?out|timeout|connection (reset|refused)|EOF|temporar'
 
 # gh_api <path> <jq>: prints the jq result; 0 on success, 2 after the retries.
 gh_api() {
-  local path="$1" jq="$2" try delay out err errf
+  local path="$1" jq="$2" try delay out err errf rc
   errf="$(mktemp)"
   delay="$RETRY_BASE_SECONDS"
   for try in 1 2 3 4 5; do
-    if out="$(gh api "$path" --jq "$jq" 2>"$errf")"; then
+    rc=0
+    out="$($TIMEOUT gh api "$path" --jq "$jq" 2>"$errf")" || rc=$?
+    if [ "$rc" -eq 0 ]; then
       rm -f "$errf"; printf '%s' "$out"; return 0
     fi
     err="$(cat "$errf")"
+    [ "$rc" -eq 124 ] && err="${err} timed out after 60s"
     if ! printf '%s' "$err" | grep -Eiq "$TRANSIENT_RE"; then
       echo "gh api ${path%%\?*} failed (not retried): ${err}" >&2
       rm -f "$errf"; return 2
@@ -59,7 +72,7 @@ gh_api() {
   rm -f "$errf"; return 2
 }
 
-RUNS_BASE="repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&per_page=50"
+RUNS_BASE="repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&per_page=50&event=push&branch=master"
 
 # check: 0 = passed, 1 = refuse, 2 = API failure (refuse), 3 = wait.
 check() {

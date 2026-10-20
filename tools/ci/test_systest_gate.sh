@@ -21,7 +21,7 @@ fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 
 cat > "${TMP}/bin/gh" <<'GH'
 #!/usr/bin/env bash
-# Fake gh api. SCENARIO: 502-then-ok | inflight-then-ok | red | none | 404
+# Fake gh api. SCENARIO: 502-then-ok | 502-always | inflight-then-red | inflight-then-ok | red | none | 404
 set -uo pipefail
 path="$2"
 echo "$path" >> "${FAKE_LOG}"
@@ -36,6 +36,9 @@ case "$path" in
       502-then-ok)
         if [ "$(bump completed)" -lt 2 ]; then echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; fi
         echo 11 ;;
+      502-always) echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1 ;;
+      inflight-then-red)
+        if [ "$(bump completed)" -lt 2 ]; then : ; else echo 12; fi ;;
       inflight-then-ok)
         if [ "$(bump completed)" -lt 2 ]; then : ; else echo 11; fi ;;
       red) echo 12 ;;
@@ -44,7 +47,7 @@ case "$path" in
     esac ;;
   */workflows/ci.yml/runs*status=in_progress*)
     case "$SCENARIO" in
-      inflight-then-ok) [ "$(bump inflight)" -lt 2 ] && echo 10 || true ;;
+      inflight-then-ok|inflight-then-red) [ "$(bump inflight)" -lt 2 ] && echo 10 || true ;;
     esac ;;
   */workflows/ci.yml/runs*status=*) : ;;
   */actions/runs/11/jobs*) echo "$green" ;;
@@ -93,6 +96,24 @@ run_gate 404
 if [ "$RC" -eq 1 ] && [ "$(wc -l < "${TMP}/log")" -eq 1 ]; then
   pass "a 404 is not retried and is refused"
 else fail "404 (rc=$RC)"; echo "$OUT"; fi
+
+run_gate 502-always
+if [ "$RC" -eq 1 ] && [ "$(wc -l < "${TMP}/log")" -eq 5 ] && grep -q 'failed after 5 tries' <<<"$OUT" && grep -q 'refuses this release' <<<"$OUT"; then
+  pass "five transient failures in a row are refused"
+else fail "502-always (rc=$RC)"; echo "$OUT"; fi
+
+run_gate inflight-then-red
+if [ "$RC" -eq 1 ] && grep -q 'still in flight' <<<"$OUT" && grep -q 'refuses this release' <<<"$OUT"; then
+  pass "a run that finishes red while waited for is refused"
+else fail "inflight-then-red (rc=$RC)"; echo "$OUT"; fi
+
+run_gate 502-always DRY_RUN=true
+if [ "$RC" -eq 0 ] && grep -q 'dry run' <<<"$OUT"; then
+  pass "an API failure on a dry run is a warning"
+else fail "502-always dry run (rc=$RC)"; echo "$OUT"; fi
+
+run_gate red
+if grep -q 'event=push&branch=master' "${TMP}/log"; then pass "only master push runs are queried"; else fail "runs query lacks event=push&branch=master"; fi
 
 [ "$FAILS" -eq 0 ] || { echo "$FAILS failure(s)"; exit 1; }
 echo "all ok"
