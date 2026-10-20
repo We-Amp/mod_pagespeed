@@ -67,14 +67,14 @@ jobs:
       - name: Diff against the base commit
         id: diff
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           signing_key=true
           serf=true
           cve=true
           upgrade=true
           fuzz=true
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             signing_key=false
             serf=false
             cve=false
@@ -1199,7 +1199,7 @@ jobs:
       # scoped mode.
       - name: Compute lint scope
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           MODE=none
           CC_LIST="${GITHUB_WORKSPACE}/.lint-files.txt"
@@ -1208,7 +1208,7 @@ jobs:
           : > "$HDR_LIST"
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             MODE=full
-          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+          elif [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             CHANGED="${RUNNER_TEMP}/lint-changed.txt"
             # Deleted files are not lintable.
             git diff --name-only --diff-filter=d "${BASE}...HEAD" > "${CHANGED}"
