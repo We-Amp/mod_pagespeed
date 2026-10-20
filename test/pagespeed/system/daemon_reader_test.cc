@@ -441,5 +441,44 @@ TEST_F(UdsDaemonReaderTest, TimeoutIsTimeout) {
   EXPECT_EQ(DaemonReadFailure::kTimeout, failure);
 }
 
+// A clock that runs at a tenth of real speed, like a guest whose monotonic
+// clock is slow: curl still times out after 5 real seconds, but the reader
+// measures only about half a second.
+class SlowTimer : public Timer {
+ public:
+  explicit SlowTimer(Timer* real) : real_(real), start_us_(real->NowUs()) {}
+  int64 NowUs() const override {
+    return start_us_ + (real_->NowUs() - start_us_) / 10;
+  }
+  void SleepUs(int64 us) override { real_->SleepUs(us); }
+
+ private:
+  Timer* real_;
+  int64 start_us_;
+};
+
+TEST_F(UdsDaemonReaderTest, CurlTimeoutIsTimeoutDespiteShortMeasuredTime) {
+  UdsTestServer server(SocketPath("slowclock"));
+  server.hang_ = true;
+  ASSERT_TRUE(server.Start());
+  SlowTimer slow_timer(timer_.get());
+  UdsDaemonReader reader(thread_system_.get(), &slow_timer,
+                         SocketPath("slowclock"), &message_handler_);
+  ReaderTestFetch fetch(
+      RequestContext::NewTestRequestContext(thread_system_.get()));
+  DaemonReadFailure failure = DaemonReadFailure::kNone;
+  int64 start_ms = slow_timer.NowMs();
+  reader.Get("/v1/stats", kMaxJsonResponseBytes, &fetch, &failure);
+  WaitForDone(fetch);
+  ASSERT_TRUE(fetch.done());
+  EXPECT_FALSE(fetch.success());
+  // The measured time is well under the timeout (and its classification
+  // slack), so only curl's own result can make this a timeout.
+  EXPECT_LT(slow_timer.NowMs() - start_ms,
+            UdsDaemonReader::kUpstreamTimeoutMs -
+                UdsDaemonReader::kTimeoutClassificationSlackMs);
+  EXPECT_EQ(DaemonReadFailure::kTimeout, failure);
+}
+
 }  // namespace
 }  // namespace net_instaweb

@@ -58,6 +58,11 @@ class CurlFetch : public PoolElement<CurlFetch> {
     path.CopyToString(&unix_socket_path_);
   }
 
+  // When set, Done() stores true here if curl ended the transfer with
+  // CURLE_OPERATION_TIMEDOUT, before completing the async fetch.  The flag
+  // must outlive the fetch's Done() call.  Must be called before InitCurl.
+  void set_timed_out_flag(bool* timed_out) { timed_out_flag_ = timed_out; }
+
   // Per-fetch overrides (must be called before InitCurl); the defaults
   // (0) keep the fetcher's configured timeout and the compile-time
   // response-body cap.
@@ -100,6 +105,7 @@ class CurlFetch : public PoolElement<CurlFetch> {
   int64 fetch_end_ms_;
   bool fetch_finished_;
   GoogleString unix_socket_path_;
+  bool* timed_out_flag_ = nullptr;
   int64 timeout_ms_ = 0;                     // 0: use the fetcher's timeout
   size_t max_response_body_bytes_ = 0;       // 0: use the compile-time cap
   char error_buffer_[CURL_ERROR_SIZE] = {};  // CURLOPT_ERRORBUFFER
