@@ -523,7 +523,10 @@ sideload_libstdcxx13_pinned() {
   url="https://snapshot.debian.org/file/${snaphash}"
   deb="/tmp/libstdc++-13-dev.deb"
   echo "    sideloading GCC-13 libstdc++ ${LIBSTDCXX13_SNAPSHOT_VER} (pre-isoc23, glibc-safe) from ${url}"
-  wget -qO "${deb}" "${url}"
+  # snapshot.debian.org has transient outages: bounded retries with backoff.
+  # The sha256 check below still gates the file.
+  wget -qO "${deb}" --tries=6 --waitretry=30 --retry-connrefused \
+    --retry-on-http-error=429,500,502,503,504 "${url}"
   echo "${snapsha}  ${deb}" | sha256sum -c - \
     || { echo "ERROR: pinned libstdc++-13 .deb sha256 mismatch (got $(sha256sum "${deb}" | awk '{print $1}'), expected ${snapsha})" >&2; exit 1; }
   # Extract into / — lands /usr/include/c++/13, /usr/include/<triplet>/c++/13,
