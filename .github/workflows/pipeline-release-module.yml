@@ -605,9 +605,12 @@ jobs:
             curl -fsSL --retry 5 --retry-all-errors -O "$url"
           done < ../optimizer-assets.txt
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
-          # The downloaded set must be exactly the set SHA256SUMS lists.
+          # The downloaded set must be exactly the set SHA256SUMS lists. A
+          # signed optimizer release also carries SHA256SUMS.asc; the pin above
+          # already fixes the bytes of SHA256SUMS, so the signature is not
+          # part of the set.
           diff <(awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS | LC_ALL=C sort) \
-               <(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort) \
+               <(find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name SHA256SUMS.asc -printf '%f\n' | LC_ALL=C sort) \
             || { echo "::error::the downloaded files differ from the files SHA256SUMS lists"; exit 1; }
           sha256sum -c SHA256SUMS
           ls -la
@@ -632,11 +635,12 @@ jobs:
           done
 
       # The optimizer's own SHA256SUMS was verified above; the release
-      # derives its own manifest over every file it ships.
+      # derives its own manifest over every file it ships and signs its own
+      # SHA256SUMS, so neither optimizer file travels on.
       - name: Keep the verified packages
         run: |
           set -euo pipefail
-          rm -f optimizer-dist/SHA256SUMS
+          rm -f optimizer-dist/SHA256SUMS optimizer-dist/SHA256SUMS.asc
           ls optimizer-dist
 
       - name: Upload the optimizer packages
