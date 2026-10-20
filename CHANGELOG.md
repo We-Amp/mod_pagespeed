@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version, the file name and the `X-Page-Speed` header stay `2.5.0`), a build
   of the same version replaces the installed one, keeping `pagespeed.config`,
   the optimizer service's start type and its cache size, and an older build
-  or version is refused.
+  or version is refused. After installing a rebuilt installer, do not re-run
+  an older installer of the same version; uninstall first. (The 2.5.0
+  installer published before this change cannot recognize a rebuild and
+  would install beside it.)
 
 ## [2.5.0] - 2026-10-19
 
