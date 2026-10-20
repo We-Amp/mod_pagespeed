@@ -59,14 +59,17 @@ async function runBeaconPage(browser, html) {
   await page.route('http://test/**', (route) => {
     const req = route.request();
     if (req.url().startsWith('http://test/beacon')) {
-      capturedBody = req.postData();
       return route.fulfill({ status: 204, body: '' });
     }
     return route.fulfill({ contentType: 'text/html', body: html });
   });
+  // Arm the wait before navigating: the beacon is sent from a zero-delay
+  // timer queued by the load handler, so on a slow machine it can leave the
+  // page before a wait armed after goto() resolves is listening.
+  const beaconRequest = page.waitForRequest(
+      (r) => r.url().startsWith('http://test/beacon'), { timeout: 15000 });
   await page.goto('http://test/');
-  await page.waitForRequest((r) => r.url().startsWith('http://test/beacon'),
-                            { timeout: 15000 });
+  capturedBody = (await beaconRequest).postData();
   // criticalCssBeaconData is the exported copy of the payload.
   const exported = await page.evaluate('pagespeed.criticalCssBeaconData');
   await page.close();

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The bundled and required nginx is updated to 1.30.6, which fixes two
+  memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).** The nginx
+  module packages and the NuGet sidecar package now build against and depend on
+  nginx 1.30.6. **Update recommended.**
+
 ### Added
 
 - **nginx packages: the admin-page restriction is installed as a config

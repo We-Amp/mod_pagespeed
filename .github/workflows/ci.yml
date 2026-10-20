@@ -105,6 +105,8 @@ jobs:
       # Hermetic: docker, ssh, rsync and gh are shims inside each test.
       - name: Release ref guard
         run: tools/ci/test_ref_guard.sh
+      - name: System-test gate
+        run: tools/ci/test_systest_gate.sh
       - name: Queued-run sweep
         run: tools/ci/test_sweep_queued_runs.sh
       - name: Artifact staging and bundle validation
@@ -116,6 +118,8 @@ jobs:
           tools/ci/test_publish_vendor_tarball.sh
           tools/ci/test_extract_vendor_tarball.sh
           tools/ci/test_prune_vendor_dir.sh
+      - name: Slot budget helper
+        run: tools/ci/test_slot_budget.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
       - name: Build script supply-chain checks

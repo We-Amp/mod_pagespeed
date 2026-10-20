@@ -76,8 +76,7 @@ jobs:
   # ---------------------------------------------------------------------
   nightly-vendor:
     name: Vendor Dependencies (nightly)
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:
       short_sha: ${{ steps.stamp.outputs.short_sha }}
@@ -257,7 +256,7 @@ jobs:
     name: Apache ASan graceful-restart stress
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 90
     env:
       DURATION: ${{ inputs.duration || '600' }}
@@ -320,8 +319,12 @@ jobs:
           CTR="nightly-apache-asan-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -432,8 +435,7 @@ jobs:
   apache-daemon-lane:
     name: Apache system tests (daemon lane)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 90
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -480,8 +482,12 @@ jobs:
           CTR="nightly-apache-daemon-lane-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=(--cap-add NET_BIND_SERVICE --sysctl net.ipv4.ip_unprivileged_port_start=0)
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -552,7 +558,7 @@ jobs:
     name: nginx ASan reload stress
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 90
     env:
       DURATION: ${{ inputs.duration || '600' }}
@@ -615,8 +621,12 @@ jobs:
           CTR="nightly-nginx-asan-stress-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -718,7 +728,7 @@ jobs:
     name: IPRO proxy race smoke (h1/h2)
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 45
     env:
       PROTOCOLS_INPUT: ${{ inputs.protocols }}
@@ -777,8 +787,12 @@ jobs:
           CTR="nightly-nginx-protocol-matrix-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -875,8 +889,7 @@ jobs:
   full-tree-lint:
     name: clang-tidy (full tree, shard ${{ matrix.shard }} of 3)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -930,8 +943,12 @@ jobs:
           CTR="nightly-full-tree-lint-${LINT_SHARD}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -965,9 +982,9 @@ jobs:
       # generation and linting share this one exec.
       - name: clang-tidy (compilation database and full-tree lint)
         run: |
-          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS -e LINT_MEM_GIB "${CTR}" bash -s <<'EOS'
+          docker exec -i -e BZL_FLAGS -e LINT_SHARD -e LINT_SHARDS -e LINT_MEM_GIB -e CI_SLOT_CPUS "${CTR}" bash -s <<'EOS'
           set -euo pipefail
-          export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going"
+          export BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going${CI_SLOT_CPUS:+ --jobs=${CI_SLOT_CPUS}}"
           rm -f compile_commands.json
           # Do not let the generator die unannotated: a bare failure leaves
           # nothing in the step log.
@@ -1022,6 +1039,8 @@ jobs:
           lint_jobs=$(( LINT_MEM_GIB / 2 ))
           [ "${lint_jobs}" -ge 4 ] || lint_jobs=4
           [ "${lint_jobs}" -le "$(nproc)" ] || lint_jobs="$(nproc)"
+          # The runner's per-slot CPU share (CI_SLOT_CPUS) caps it further.
+          [ -z "${CI_SLOT_CPUS:-}" ] || [ "${lint_jobs}" -le "${CI_SLOT_CPUS}" ] || lint_jobs="${CI_SLOT_CPUS}"
           echo "run-clang-tidy-20 -j ${lint_jobs} (memory limit ${LINT_MEM_GIB} GiB)"
           run-clang-tidy-20 \
             -j "${lint_jobs}" \
@@ -1063,8 +1082,7 @@ jobs:
   fuzz-css:
     name: CSS parser fuzz (corpus floor + libFuzzer)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 90
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -1123,8 +1141,12 @@ jobs:
           CTR="nightly-fuzz-css-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -1291,8 +1313,7 @@ jobs:
   fuzz-html:
     name: HTML parse fuzz (libFuzzer)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 90
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -1351,8 +1372,12 @@ jobs:
           CTR="nightly-fuzz-html-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -1516,8 +1541,7 @@ jobs:
   fuzz-packs:
     name: Pack loader + filter fuzz (libFuzzer)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 150
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -1576,8 +1600,12 @@ jobs:
           CTR="nightly-fuzz-packs-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -1778,8 +1806,7 @@ jobs:
   fuzz-js:
     name: JS minify fuzz (libFuzzer + classified findings)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 90
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -1838,8 +1865,12 @@ jobs:
           CTR="nightly-fuzz-js-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
           case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
           EXTRA=()
-          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=HOST_CPUS*.75"
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
             BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
@@ -2060,7 +2091,7 @@ jobs:
     name: IIS ASan recycle stress
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 120
     env:
       DURATION: ${{ inputs.duration || '600' }}
@@ -2170,8 +2201,11 @@ jobs:
         shell: bash
         timeout-minutes: 60
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           set -uo pipefail
-          FLAGS=(--config=windows --config=clang-cl --config=win-asan "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl --config=win-asan "--jobs=${SLOT_JOBS}" --nostamp
                  "--workspace_status_command=cmd /c echo.")
           if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
@@ -2369,7 +2403,7 @@ jobs:
     name: IIS AppVerif provider matrix
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 240
     env:
       ARMS: ${{ inputs.arms }}
@@ -2475,8 +2509,11 @@ jobs:
         shell: bash
         timeout-minutes: 60
         run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
           set -uo pipefail
-          FLAGS=(--config=windows --config=clang-cl "--jobs=HOST_CPUS*.75" --nostamp
+          FLAGS=(--config=windows --config=clang-cl "--jobs=${SLOT_JOBS}" --nostamp
                  "--workspace_status_command=cmd /c echo.")
           if [ -d vendor ]; then FLAGS+=(--config=vendored); fi
           if [ -n "${BAZEL_REMOTE_CACHE_URL:-}" ]; then
@@ -2768,3 +2805,27 @@ jobs:
           path: sbom/scan/
           if-no-files-found: warn
           retention-days: 3
+
+
+  # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
+  # every build runner job here runs on its hosted twin, and the jobs that
+  # have no hosted twin (the IIS and Application Verifier lanes and the
+  # privileged stress rigs) are skipped. This job only says so, in an
+  # annotation and the job summary, so a skipped check is never a silent one.
+  fleet-off-notice:
+    name: Shared build runners are switched off
+    if: ${{ vars.FLEET_ENABLED == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Say what the switch changed
+        run: |
+          echo "::notice::FLEET_ENABLED is 'false': build runner jobs run on hosted runners; jobs that need a build runner host are skipped."
+          {
+            echo "### Shared build runners are switched off"
+            echo
+            echo "The repository variable FLEET_ENABLED is 'false'. Jobs that normally use the"
+            echo "build runners ran on GitHub-hosted runners, slower and without the shared caches."
+            echo "Jobs that need a host only the build runners provide were skipped."
+            echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
+          } >> "$GITHUB_STEP_SUMMARY"
