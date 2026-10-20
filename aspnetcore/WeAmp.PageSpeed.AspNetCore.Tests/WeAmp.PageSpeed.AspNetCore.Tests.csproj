@@ -1,7 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- net8.0 by default; -p:IncludeNet10=true adds net10.0, as for the package. -->
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IncludeNet10)' == 'true'">net8.0;net10.0</TargetFrameworks>
+    <!-- Locked restore: CI restores with -p:RestoreLockedMode=true, so a package
+         version or content hash that differs from the lock file fails the build. The
+         two framework sets have a lock file each. After changing a package
+         reference, regenerate both: `dotnet restore` and
+         `dotnet restore -p:IncludeNet10=true` (with a .NET 10 SDK). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath Condition="'$(IncludeNet10)' == 'true'">packages.net10.lock.json</NuGetLockFilePath>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
