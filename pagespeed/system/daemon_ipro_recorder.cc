@@ -233,6 +233,7 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
   input->user_agent = request_.user_agent;
   input->save_data = request_.save_data;
   input->accept_encoding = request_.accept_encoding;
+  input->sec_ch_dpr = request_.sec_ch_dpr;
   input->option_context = request_.option_context;
   input->option_signature = request_.option_signature;
 }

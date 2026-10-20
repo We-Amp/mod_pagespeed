@@ -56,6 +56,7 @@ struct DaemonRecordRequest {
   GoogleString user_agent;
   GoogleString save_data;
   GoogleString accept_encoding;
+  GoogleString sec_ch_dpr;
 
   // The canonical options context for this request and its signature, or both
   // empty when it could not be rendered.  Both or neither.

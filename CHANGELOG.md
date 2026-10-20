@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A shared cache or CDN in front of the server could hand one device's
+  optimized image to another.** With the optimizer daemon attached, an image
+  served at its original URL is chosen by the device class and Save-Data as
+  well as by `Accept`, but the response named only `Accept` in `Vary`, so a
+  cache could give a phone-sized image to desktop browsers, a full-size one
+  to phones, or the Save-Data copy to every client. These responses now carry
+  `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR` on Apache, nginx and IIS,
+  on the 200 and on the 304, the same list the optimizer uses, and the pixel
+  density follows a `Sec-CH-DPR` hint when the browser sends one, as it does
+  on the optimizer. Browser caches were not affected. **Update recommended for
+  sites behind a shared cache or CDN.**
+
 ### Documentation
 
 - **The shipped `pagespeed.conf` no longer says in-place optimization never

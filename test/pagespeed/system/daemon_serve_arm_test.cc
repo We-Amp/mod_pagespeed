@@ -394,6 +394,63 @@ TEST_F(DaemonServeArmTest, BothLegsVaryIsEmptyWhenNeitherAxisApplies) {
   EXPECT_EQ("", ServeVaryFieldValueOnBothLegs(decision, false));
 }
 
+// The selection tokens, per flag combination: an image selection names the
+// peer's whole image-selection list, which already starts with `Accept`.
+TEST_F(DaemonServeArmTest, SelectionTokensNameEveryHeaderTheSelectionRead) {
+  DaemonServeDecision decision;
+  EXPECT_EQ("", ServeVarySelectionTokens(decision));
+  decision.emit_vary_accept = true;
+  EXPECT_EQ("Accept", ServeVarySelectionTokens(decision));
+  decision.vary_image_selection = true;
+  EXPECT_EQ(kPsImageSelectionVary, ServeVarySelectionTokens(decision));
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            ServeVarySelectionTokens(decision));
+}
+
+// The density hint, by the peer's rule: 1.5 and up is 2x, any other number is
+// 1x, and anything unparseable leaves the classifier's answer alone.
+TEST_F(DaemonServeArmTest, TheDensityHintFollowsThePeersRule) {
+  const uint32_t k1x = 0x09;  // webp, desktop, 1x
+  const uint32_t k2x = 0x19;  // webp, desktop, 2x
+  for (const char* high : {"2", "1.5", "3.0", " 2 ", "1.75", "10"}) {
+    EXPECT_EQ(k2x, ApplySecChDprHint(k1x, high)) << high;
+  }
+  for (const char* low : {"1", "1.0", "1.25", "0.5", ".9", "1."}) {
+    EXPECT_EQ(k1x, ApplySecChDprHint(k2x, low)) << low;
+  }
+  for (const char* none : {"", "  ", "2x", "auto", "1,5", "-2", "."}) {
+    EXPECT_EQ(k1x, ApplySecChDprHint(k1x, none)) << none;
+    EXPECT_EQ(k2x, ApplySecChDprHint(k2x, none)) << none;
+  }
+  // No other field moves.
+  EXPECT_EQ(0xEFu | 0x10u, ApplySecChDprHint(0xEF, "2"));
+  EXPECT_EQ(0xEFu, ApplySecChDprHint(0xFF, "1"));
+}
+
+TEST_F(DaemonServeArmTest, BothCompositionsCarryTheDeviceAxesOnBothLegs) {
+  DaemonServeDecision decision;
+  decision.emit_vary_accept = true;
+  decision.vary_image_selection = true;
+  decision.body = "0123456789";
+  for (bool not_modified : {false, true}) {
+    decision.not_modified = not_modified;
+    EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+              ServeVaryFieldValue(decision, false))
+        << not_modified;
+    EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+              ServeVaryFieldValueOnBothLegs(decision, false))
+        << not_modified;
+    EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR, Accept-Encoding",
+              ServeVaryFieldValueOnBothLegs(decision, true))
+        << not_modified;
+  }
+  // A stored coded copy states the encoding axis too, after the device axes.
+  decision.not_modified = false;
+  decision.content_encoding = "br";
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR, Accept-Encoding",
+            ServeVaryFieldValue(decision, false));
+}
+
 TEST_F(DaemonServeArmTest, MaskHelpersMatchThePeersLayout) {
   EXPECT_EQ(kPsImageFormatAvif, ServeImageFormat(kMaskAvifDesktop));
   EXPECT_EQ(kPsImageFormatOriginal, ServeImageFormat(kMaskOriginalDesktop));
@@ -1001,6 +1058,61 @@ TEST_F(DaemonServeArmTest, VaryAccentIsEmittedForEitherReasonAndKeptDistinct) {
   EXPECT_EQ(DaemonServeVerdict::kServeOptimized, css.verdict);
   EXPECT_FALSE(css.emit_vary_accept);
   EXPECT_FALSE(css.vary_accept_origin_declared);
+}
+
+TEST_F(DaemonServeArmTest, ANegotiatedImageServeOwesTheDeviceAxes) {
+  // The bytes of a negotiated image serve depend on the device class and
+  // Save-Data the classifier read from `User-Agent` and `Save-Data`, so a
+  // shared cache keyed on `Accept` alone hands one client's variant to
+  // another.  Owed on the exact match, on a FALLBACK hit (a variant written
+  // for another class, served under the same URL), and on the 304.
+  SetAlternates("09:00:1,0c:00:0");
+  const DaemonServeDecision exact = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, exact.verdict);
+  EXPECT_FALSE(exact.fallback_hit);
+  EXPECT_TRUE(exact.vary_image_selection);
+
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = exact.etag;
+  const DaemonServeDecision revalidated = Serve(conditional);
+  ASSERT_TRUE(revalidated.not_modified);
+  EXPECT_TRUE(revalidated.vary_image_selection);
+
+  SetAlternates("29:00:1,0c:00:0");
+  const DaemonServeDecision fallback = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, fallback.verdict);
+  ASSERT_TRUE(fallback.fallback_hit);
+  EXPECT_TRUE(fallback.vary_image_selection);
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            ServeVaryFieldValue(fallback, false));
+
+  // Not owed where nothing was selected by device: the durable original,
+  // even when the origin itself negotiates on Accept, and a stylesheet
+  // variant, which is stored at one device class.
+  SetAlternates("0c:04:0");
+  const DaemonServeDecision original = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  EXPECT_FALSE(original.vary_image_selection);
+  EXPECT_EQ("Accept", ServeVaryFieldValue(original, false));
+
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // css
+  SetAlternates("08:00:1,0c:00:0");
+  const DaemonServeDecision css = Serve(Request("text/css,*/*"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, css.verdict);
+  EXPECT_FALSE(css.vary_image_selection);
+}
+
+TEST_F(DaemonServeArmTest, TheSelectionTakesTheDensityHint) {
+  // A desktop browser on a high-density display that says so in Sec-CH-DPR
+  // selects the 2x variant, as the peer's own front end would.
+  SetAlternates("09:00:1,19:00:1,0c:00:0");
+  DaemonServeRequest request = Request("image/webp");
+  EXPECT_EQ(0x09, Serve(request).alternate_id);
+  request.sec_ch_dpr = "2";
+  const DaemonServeDecision hinted = Serve(request);
+  EXPECT_EQ(0x19u, hinted.client_mask);
+  EXPECT_EQ(0x19, hinted.alternate_id);
+  EXPECT_FALSE(hinted.fallback_hit);
 }
 
 TEST_F(DaemonServeArmTest, ClauseTwoSurvivesServingAnOptimizedVariant) {

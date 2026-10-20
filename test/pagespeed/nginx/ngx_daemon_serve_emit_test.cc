@@ -51,6 +51,23 @@ DaemonServeDecision HitDecision(const char* content_type, bool not_modified,
   return decision;
 }
 
+TEST_F(NgxDaemonServeEmitTest, ANegotiatedImageVariesOnTheDeviceAxes) {
+  // An image variant chosen by device class and Save-Data names the headers
+  // those came from, identically on the 200 and the 304.
+  for (bool not_modified : {false, true}) {
+    DaemonServeDecision decision = HitDecision("image/webp", not_modified, 10);
+    decision.vary_image_selection = true;
+    ResponseHeaders headers;
+    const PsDaemonServeEmit emit =
+        PsComposeDaemonServeHeaders(decision, "", 10, false, &headers);
+    EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR", emit.vary)
+        << not_modified;
+    EXPECT_STREQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+                 headers.LookupJoined(HttpAttributes::kVary).c_str())
+        << not_modified;
+  }
+}
+
 TEST_F(NgxDaemonServeEmitTest, TheTwoLegsCarryTheSameVaryTokenSet) {
   // The durable statement of the contract: the arm's own Vary line is
   // IDENTICAL on the 200 and the 304 of one entry, so the legs agree by

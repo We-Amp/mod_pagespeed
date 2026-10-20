@@ -323,8 +323,12 @@ Reproduced, and therefore served from the cache:
 - `Cache-Control` — rebuilt from the origin's lifetime and its cache
   directives. Directives outside that set, such as `immutable`,
   `stale-while-revalidate` and `stale-if-error`, are not carried.
-- `Vary: Accept` for a negotiated image. When this module serves an optimized
-  image it chose from the request's `Accept` header, it says so: AVIF when the
+- `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR` for a negotiated image.
+  When this module serves an optimized image it chose from the request's
+  headers, it names each one the choice read: the format comes from
+  `Accept`, the size from the device class in `User-Agent`, the pixel density
+  from `Sec-CH-DPR` when the browser sends it (else from `User-Agent`), and
+  the lighter copy from `Save-Data`. The format is AVIF when the
   header names `image/avif`; WebP when it names `image/webp` or contains
   `image/*` or `*/*`, or when there is no `Accept` header at all (RFC 9110
   reads a wildcard and an absent header as "any type"); the original format
@@ -334,10 +338,9 @@ Reproduced, and therefore served from the cache:
   `Accept: */*` receives WebP for a `.jpg` URL; a client that needs the
   original format sends `Accept: image/jpeg` (or whichever format it wants,
   with no wildcard). A response carrying the recorded original, rather than an
-  optimized copy, is not negotiated and carries no `Vary: Accept` for this
-  reason. The selection also uses the device class and Save-Data, which this
-  `Vary` does not yet name
-  ([#102](https://github.com/We-Amp/mod_pagespeed/issues/102)).
+  optimized copy, is not negotiated and carries none of these for this
+  reason. For a cache or CDN in front of this server, see "Behind a shared
+  cache or CDN" below.
 - `Vary: Accept-Encoding`, and `Vary: Accept` for an origin that negotiates on
   `Accept`. The second is reproduced from the fact recorded with the resource
   that the origin negotiates on `Accept`, and is emitted with whichever copy
@@ -432,6 +435,50 @@ line) stops it writing them. Leave them at their defaults on any optimizer
 that serves a server with this directive on, or there is nothing to serve.
 Raising a level from `0` again does not add copies to resources that are
 already optimized: they gain them only when they are next optimized.
+
+## Behind a shared cache or CDN
+
+The same rule holds on Apache, nginx and IIS: every request header the variant
+selection reads is named in `Vary`, on the 200 and on the 304, and no other.
+
+| Response served from the optimizer's cache | Request headers that choose the bytes | `Vary` |
+|---|---|---|
+| An optimized image | `Accept` (format), `User-Agent` (device class: phone, tablet or desktop, and pixel density), `Sec-CH-DPR` (pixel density, when sent), `Save-Data` | `Accept, Save-Data, User-Agent, Sec-CH-DPR` |
+| A stored compressed copy (any type) | `Accept-Encoding` in addition | the above plus `Accept-Encoding` |
+| The recorded original of an image, a stylesheet, a script | nothing (one copy for every client) | none, or `Accept-Encoding` where the server compresses it |
+| Any of these, when the origin itself sends `Vary: Accept` | the origin's `Accept` negotiation | `Accept` is added |
+
+This list is the optimizer's own, so a cache keys a response the same way
+whether the module or the optimizer's front end served it. The one client
+hint read is `Sec-CH-DPR`: a value of 1.5 or more selects the high-density
+copy, any other number the standard one. Browsers send it only to a site that
+asks for it with `Accept-CH: Sec-CH-DPR`. The module does not add that header
+(nor `Critical-CH`, which would cost a retried request): without the hint,
+density comes from `User-Agent`, as before, and a site that wants the hint
+can send `Accept-CH` itself. Other hints (`Sec-CH-UA-Mobile`,
+`Viewport-Width`, `DPR`) are not read, so they are not named. They could not
+replace `User-Agent` either: browsers that send no client hints still need a
+device class, and in the traffic sample below they made up about 44% of
+requests. HTML is never served from the optimizer's cache, so its
+`Vary` is unchanged. A response whose origin sends a `Vary` on any other
+header is not served from the optimizer's cache at all (see above), so the
+module never replaces a `Vary` the origin chose; the server merges its own
+`Accept-Encoding` into the same field. `Cache-Control` is unaffected.
+
+**Fewer copies per image.** `Vary: User-Agent` makes a cache keep one copy per
+distinct User-Agent string, although the module only distinguishes a few
+device classes. A cache that can compute its own key can do much better:
+key image responses on `Accept`, `Save-Data` and a device class derived from
+`User-Agent` with the same rules the module uses, and ignore `User-Agent`
+itself. The rules: a `User-Agent` containing `iPad` or `Tablet`, or `Android`
+without `Mobile`, is a tablet; one containing `Mobile`, `Android`, `iPhone`
+or `iPod` is a phone; anything else is a desktop. A `Sec-CH-DPR` number
+decides density (1.5 or more is high); without one, phones count as high
+density, as does any `User-Agent` containing `2x` or `Retina`. All matches
+ignore case except `2x` and `Retina`. On a weighted sample of real browser
+traffic, 100,000 requests carried 764 distinct `User-Agent` strings and 3
+device classes, so such a key holds up to about 250 times fewer copies of
+each image.
 
 ## When the daemon is missing
 

@@ -180,6 +180,23 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 tools/ci/check_optimizer_pin_pair.py --self-test
 
+      # A selected image variant names every request header the selection
+      # read in Vary. The module mirrors the optimizer's list; this compares
+      # it with the list in the pinned optimizer's source.
+      - name: Image-selection Vary matches the optimizer - self-test
+        if: ${{ !cancelled() }}
+        run: python3 tools/ci/check_image_selection_vary.py --self-test
+      - name: Image-selection Vary matches the optimizer
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          COMMIT=$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['optimizer_commit'])")
+          BASE="https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/${COMMIT}"
+          curl -fsSL --retry 5 --retry-all-errors "${BASE}/lib/classify/capability_mask.h" -o "${RUNNER_TEMP}/capability_mask.h"
+          curl -fsSL --retry 5 --retry-all-errors "${BASE}/lib/cache/vary_emission.cc" -o "${RUNNER_TEMP}/vary_emission.cc"
+          python3 tools/ci/check_image_selection_vary.py pagespeed/system/daemon_abi.h \
+            "${RUNNER_TEMP}/capability_mask.h" "${RUNNER_TEMP}/vary_emission.cc"
+
       - name: Legacy-docs guard - self-test
         if: ${{ !cancelled() }}
         run: sh tools/ci/check_legacy_docs.sh --self-test

@@ -125,7 +125,8 @@ IisAuthFacts ReadIisAuthFacts(IHttpContext* http_context) {
 
 void IisCapabilityHeaders(IHttpContext* http_context, StringPiece* accept,
                           StringPiece* user_agent, StringPiece* save_data,
-                          StringPiece* accept_encoding) {
+                          StringPiece* accept_encoding,
+                          StringPiece* sec_ch_dpr) {
   USHORT length = 0;
   PCSTR value =
       http_context->GetRequest()->GetHeader(HttpAttributes::kAccept, &length);
@@ -142,6 +143,9 @@ void IisCapabilityHeaders(IHttpContext* http_context, StringPiece* accept,
                                                 &length);
   *accept_encoding =
       StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+  value = http_context->GetRequest()->GetHeader("Sec-CH-DPR", &length);
+  *sec_ch_dpr =
+      StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
 }
 
 void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
@@ -155,13 +159,14 @@ void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
   url.Host().CopyToString(&request->hostname);
   url.Scheme().CopyToString(&request->scheme);
 
-  StringPiece accept, user_agent, save_data, accept_encoding;
+  StringPiece accept, user_agent, save_data, accept_encoding, sec_ch_dpr;
   IisCapabilityHeaders(http_context, &accept, &user_agent, &save_data,
-                       &accept_encoding);
+                       &accept_encoding, &sec_ch_dpr);
   accept.CopyToString(&request->accept);
   user_agent.CopyToString(&request->user_agent);
   save_data.CopyToString(&request->save_data);
   accept_encoding.CopyToString(&request->accept_encoding);
+  sec_ch_dpr.CopyToString(&request->sec_ch_dpr);
 
   // The resolved configuration for THIS request, stated as a value.  Both
   // halves or neither: a payload with no signature has no name, and a
@@ -193,7 +198,7 @@ IisAuthFacts ReadIisAuthFacts(IHttpContext*) {
 }
 
 void IisCapabilityHeaders(IHttpContext*, StringPiece*, StringPiece*,
-                          StringPiece*, StringPiece*) {}
+                          StringPiece*, StringPiece*, StringPiece*) {}
 
 void BuildDaemonRecordRequest(IHttpContext*, const GoogleUrl&,
                               const RewriteOptions*, DaemonRecordRequest*) {}

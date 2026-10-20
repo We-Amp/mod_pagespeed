@@ -86,6 +86,14 @@ If a site does not engage, the module says why: see the
 `X-Pagespeed-Init-Status` values and the event-log entry described in
 [IIS limitations](iis-limitations.md).
 
+### Behind a shared cache or CDN
+
+An optimized image is chosen by `Accept`, the device class in `User-Agent` and
+`Save-Data`, and its response says so in `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR`
+(on the 304 as well). See "Behind a shared cache or CDN" in
+[daemon-adapter-deployment.md](daemon-adapter-deployment.md) for how a cache
+can key on a device class instead.
+
 ### Compressed copies
 
 The optimizer also stores a gzip and a brotli copy of each optimized

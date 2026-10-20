@@ -1,0 +1,10 @@
+# The distribution's nginx with the published module and optimizer packages.
+FROM ubuntu:24.04
+ARG MODULE_VERSION=2.5.0-r1~noble
+ARG OPTIMIZER_VERSION=2.5.0
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl gnupg nginx imagemagick procps && \
+    curl -fsSL https://packages.modpagespeed.com/install.sh | sh && \
+    apt-get update && \
+    apt-get install -y nginx-module-pagespeed=${MODULE_VERSION} pagespeed-optimizer=${OPTIMIZER_VERSION}

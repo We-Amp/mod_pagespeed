@@ -424,11 +424,14 @@ DaemonRecordDecision EvaluateDaemonRecordGate(const DaemonAbi& abi,
   // shipped front stage does and what a per-request negotiated surface
   // requires.
   GoogleString accept, user_agent, save_data, accept_encoding;
-  decision.notify_mask =
+  // With the density hint applied exactly as the serve arm applies it, so
+  // the variant asked for is the one this client's requests select.
+  decision.notify_mask = ApplySecChDprHint(
       abi.Classify(CStrOrNull(input.accept, &accept),
                    CStrOrNull(input.user_agent, &user_agent),
                    CStrOrNull(input.save_data, &save_data),
-                   CStrOrNull(input.accept_encoding, &accept_encoding));
+                   CStrOrNull(input.accept_encoding, &accept_encoding)),
+      input.sec_ch_dpr);
 
   // ---- store-but-never-notify ----------------------------------------
   // no-transform is a statement about what may be done to the bytes, not

@@ -2474,6 +2474,7 @@ struct PsDaemonServeRequestStrings {
   GoogleString user_agent;
   GoogleString save_data;
   GoogleString accept_encoding;
+  GoogleString sec_ch_dpr;
   GoogleString if_none_match;
   GoogleString if_modified_since;
 };
@@ -2481,7 +2482,7 @@ struct PsDaemonServeRequestStrings {
 // Fills the daemon serve request the way the record arm fills its own: the
 // URL the rest of the module already agreed on (PageSpeed parameters
 // stripped, X-Forwarded-Proto honoured -- the SAME source the record key
-// uses), the four capability headers verbatim with absent meaning empty,
+// uses), the five capability headers verbatim with absent meaning empty,
 // the client's conditionals verbatim, and the forced-reload test Apache
 // applies (a case-insensitive "no-cache" in Cache-Control or Pragma).
 //
@@ -2509,6 +2510,7 @@ void BuildDaemonServeRequest(const RequestHeaders& request_headers,
   strings->save_data = request_headers.LookupJoined("Save-Data");
   strings->accept_encoding =
       request_headers.LookupJoined(HttpAttributes::kAcceptEncoding);
+  strings->sec_ch_dpr = request_headers.LookupJoined("Sec-CH-DPR");
   strings->if_none_match =
       request_headers.LookupJoined(HttpAttributes::kIfNoneMatch);
   strings->if_modified_since =
@@ -2521,6 +2523,7 @@ void BuildDaemonServeRequest(const RequestHeaders& request_headers,
   out->user_agent = strings->user_agent;
   out->save_data = strings->save_data;
   out->accept_encoding = strings->accept_encoding;
+  out->sec_ch_dpr = strings->sec_ch_dpr;
   out->if_none_match = strings->if_none_match;
   out->if_modified_since = strings->if_modified_since;
 
@@ -3717,6 +3720,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
       record_request.save_data = request_headers.LookupJoined("Save-Data");
       record_request.accept_encoding =
           request_headers.LookupJoined(HttpAttributes::kAcceptEncoding);
+      record_request.sec_ch_dpr = request_headers.LookupJoined("Sec-CH-DPR");
 
       // The resolved configuration, stated as a value.  This port renders it
       // from the server-global options rather than from a per-request

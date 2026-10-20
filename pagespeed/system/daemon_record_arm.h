@@ -134,6 +134,7 @@ struct DaemonRecordInput {
   StringPiece user_agent;
   StringPiece save_data;
   StringPiece accept_encoding;
+  StringPiece sec_ch_dpr;  // Applied by ApplySecChDprHint.
 
   // The canonical options context this request resolved to and its signature,
   // or both empty when the caller could not produce one.  Both or neither:

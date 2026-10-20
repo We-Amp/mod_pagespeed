@@ -74,18 +74,17 @@ RequestHeaders::Properties IisBeginRequestProperties(bool has_cookie,
 IisAuthFacts ReadIisAuthFacts(IHttpContext* http_context);
 
 // The four request fields the peer's classifier derives a capability mask
-// from.  ONE READER for both arms, and that is the point: the mask a request
+// from, and the density hint applied on top (ApplySecChDprHint).  ONE READER for both arms, and that is the point: the mask a request
 // SELECTS with has to be the mask a recording of that same request would
 // NOTIFY at; two independent readings of one client's headers would let the
 // arms disagree about what the client can decode, and the disagreement would
 // be invisible.  The cache key uses the pre-URL-rewrite URL both arms read
 // (the request context's gurl()); nobody re-reads the raw request for the
 // other arm.
-void IisCapabilityHeaders(IHttpContext* http_context,
-                          StringPiece* accept,
-                          StringPiece* user_agent,
-                          StringPiece* save_data,
-                          StringPiece* accept_encoding);
+void IisCapabilityHeaders(IHttpContext* http_context, StringPiece* accept,
+                          StringPiece* user_agent, StringPiece* save_data,
+                          StringPiece* accept_encoding,
+                          StringPiece* sec_ch_dpr);
 
 // Fills the daemon record request from the request context's URL (the
 // pre-URL-rewrite one), the raw request's headers, and the resolved

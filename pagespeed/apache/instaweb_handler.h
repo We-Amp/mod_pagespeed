@@ -198,10 +198,11 @@ class InstawebHandler {
       DaemonRecordRequest* request);
 
   // The four request fields the peer's classifier derives a capability mask
-  // from.  ONE reader for both arms; see the definition.
+  // from, and the density hint applied on top.  ONE reader for both arms; see
+  // the definition.
   void CapabilityHeaders(StringPiece* accept, StringPiece* user_agent,
-                         StringPiece* save_data,
-                         StringPiece* accept_encoding) const;
+                         StringPiece* save_data, StringPiece* accept_encoding,
+                         StringPiece* sec_ch_dpr) const;
 
   // Gathers what the daemon-side SERVE arm needs about the request.
   void BuildDaemonServeRequest(DaemonServeRequest* request);
