@@ -2645,7 +2645,7 @@ jobs:
             echo "The repository variable FLEET_ENABLED is 'false'. Jobs that normally use the"
             echo "build runners ran on GitHub-hosted runners, slower and without the shared caches."
             echo "Jobs that need a host only the build runners provide were skipped."
-            echo "Set FLEET_ENABLED back to 'true' (or delete it) to use the build runners again."
+            echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The IIS system tests may be skipped for four reasons only: the switch is
@@ -2672,7 +2672,7 @@ jobs:
           echo "iis-sys-tests=${IIS_RESULT} windows-build=${BUILD_RESULT} windows-unit-tests=${UNIT_RESULT}"
           [ "${IIS_RESULT}" = skipped ] || exit 0
           [ "${BUILD_RESULT}" = success ] && [ "${UNIT_RESULT}" = success ] || exit 0
-          if [ "${FLEET}" = false ]; then
+          if [ "$(printf %s "${FLEET}" | tr A-Z a-z)" = false ]; then
             echo "::notice::IIS system tests skipped: FLEET_ENABLED is 'false'"
           elif [ "${FORK_OR_BOT}" = true ]; then
             echo "::notice::IIS system tests skipped: fork or Dependabot pull request"

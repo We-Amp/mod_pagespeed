@@ -178,7 +178,7 @@ annotation and the job summary.
 
 To flip it: Settings, Secrets and variables, Actions, Variables, set
 `FLEET_ENABLED` to `false` (or `gh variable set FLEET_ENABLED --body false
--R We-Amp/<repo>`); set it to `true` or delete it to go back. It is read when
+-R We-Amp/<repo>`); set it back to `true` to go back (do not delete it: the release lanes and the IIS gates still test for `true`). It is read when
 a run starts, so re-run a run that began before the change. The hosted legs
 run without the hub and the remote cache and are slower; the IIS system
 tests, Application Verifier lanes and the privileged stress rigs are skipped,

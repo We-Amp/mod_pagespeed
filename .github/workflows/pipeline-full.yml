@@ -1901,5 +1901,5 @@ jobs:
             echo "The repository variable FLEET_ENABLED is 'false'. Jobs that normally use the"
             echo "build runners ran on GitHub-hosted runners, slower and without the shared caches."
             echo "Jobs that need a host only the build runners provide were skipped."
-            echo "Set FLEET_ENABLED back to 'true' (or delete it) to use the build runners again."
+            echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
           } >> "$GITHUB_STEP_SUMMARY"
