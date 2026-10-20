@@ -1360,6 +1360,11 @@ jobs:
             exit 1
           }
 
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
       - name: Ensure the dev image
         run: |
           # Content-hashed tag and a per-host flock around the build
@@ -1509,6 +1514,11 @@ jobs:
             echo "::error::[vendor-tarball-unavailable] stale or missing GIT_COMMIT stamp in the extracted workspace; re-run the full workflow, not only the failed jobs"
             exit 1
           }
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
 
       - name: Ensure the dev image
         run: |
