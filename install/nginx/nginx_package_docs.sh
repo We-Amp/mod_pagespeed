@@ -233,12 +233,13 @@ https://modpagespeed.com/docs/admin-console/#url-path-acls-are-brittle
 for the threat model (URL-path-string ACLs in WAFs are bypassable; enforce at the
 web server's normalized \`location\` match).
 
-Upgrades: the shipped text of \`pagespeed_admin_localhost.conf\` is kept
-stable on purpose. If a later release does change it and you have edited your
+Upgrades: the shipped text of \`pagespeed_admin_localhost.conf\` is never
+changed in place; a changed snippet would ship under a new file name, named in
+the CHANGELOG. Should a release ever change it anyway and you have edited your
 copy, Debian/Ubuntu ask which version to keep (a noninteractive upgrade then
 needs \`-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold\`
 to keep yours), and AlmaLinux/RHEL/Rocky keep yours and write the new one next
-to it as \`.rpmnew\`. The CHANGELOG says so whenever it happens.
+to it as \`.rpmnew\`.
 
 Removal: before \`apt-get purge nginx-module-pagespeed\` (Debian/Ubuntu) or
 \`dnf remove nginx-module-pagespeed\` (AlmaLinux/RHEL/Rocky), delete the

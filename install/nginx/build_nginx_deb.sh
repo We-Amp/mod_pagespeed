@@ -184,8 +184,14 @@ ln -s "../../../usr/share/nginx/modules-available/mod-pagespeed.conf" \
 # half-configured) and write .rpmnew on EL. The long explanation lives in the
 # .sample and the README, which are free to change. The text is written here,
 # identically, in build_nginx_deb.sh and build_nginx_rpm.sh, and pinned by
-# sha256 below: change it only on purpose, in both scripts, with a CHANGELOG
-# entry saying operators will be prompted, then update both pins.
+# sha256 below.
+#
+# RULE: never edit this text in place. A changed snippet ships under a NEW
+# file name (pagespeed_admin_localhost.conf stays as it is; add the new file
+# beside it and say in the CHANGELOG which one to include). A deb upgrade over
+# a locally edited conffile whose shipped text changed exits 100 at the
+# conffile prompt and would break unattended upgrades. The pin exists to stop
+# an accidental in-place edit; updating it is never the fix.
 ADMIN_SNIPPET="${STAGEDIR}${NGINX_SNIPPETDIR}/pagespeed_admin_localhost.conf"
 ADMIN_SNIPPET_SHA256="36b91a589a654d9f705e93169a7015dd7a9cb9ca580103bc495c9415bef07efd"
 cat > "${ADMIN_SNIPPET}" <<'SNIP'
@@ -200,9 +206,9 @@ SNIP
 chmod 644 "${ADMIN_SNIPPET}"
 if [ "$(sha256sum "${ADMIN_SNIPPET}" | cut -d' ' -f1)" != "${ADMIN_SNIPPET_SHA256}" ]; then
   echo "ERROR: the shipped admin snippet text changed (sha256 pin mismatch)." >&2
-  echo "Every operator who edited it will get a conffile prompt (deb) or .rpmnew (rpm)" >&2
-  echo "on upgrade. If that is intended, change it identically in build_nginx_deb.sh" >&2
-  echo "and build_nginx_rpm.sh, add a CHANGELOG entry, and update both pins." >&2
+  echo "Every operator who edited it would hit a conffile prompt (deb: apt exits 100)" >&2
+  echo "or get .rpmnew (rpm) on upgrade. Do not edit it in place: ship a changed" >&2
+  echo "snippet under a new file name instead (see the RULE comment above)." >&2
   exit 1
 fi
 

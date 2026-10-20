@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Ubuntu and `%config(noreplace)` on Enterprise Linux, so your edits
   survive upgrades. A copy you made earlier at
   `/etc/nginx/snippets/pagespeed_admin_restrict.conf` is left alone; include
-  one of the two. The file's text is kept stable on purpose; if a later
-  release changes it and you edited your copy, Debian/Ubuntu ask which
+  one of the two. The file's text is never changed in place (a changed
+  snippet would ship under a new file name); should it ever change and you
+  edited your copy, Debian/Ubuntu ask which
   version to keep (or follow `--force-confdef`/`--force-confold`) and EL
   writes the new one as `.rpmnew`. Remove the `include` lines before purging
   (deb) or removing (rpm) the package, or `nginx -t` fails.
