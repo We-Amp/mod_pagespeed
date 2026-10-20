@@ -178,18 +178,38 @@
     # ModPagespeedImagePreserveURLs on
     # ModPagespeedCssPreserveURLs on
 
-    # In-place optimization optimizes an image identically for every client
-    # and never varies its output by request header, so in-place optimized
-    # resources are plain, publicly cacheable responses with no Vary: header
-    # and no Cache-Control: private.  They need no special reverse-proxy or
-    # CDN configuration.  An image may still be converted to a format every
-    # client can display (a photographic PNG becomes a JPEG when
-    # convert_png_to_jpeg is enabled), but never to a format chosen per
-    # requester.
+    # In-place optimization has two paths, and they differ in whether the
+    # format of an image depends on the request.
     #
-    # Conversion to webp and avif happens only on rewritten URLs, where the
-    # chosen format is part of the URL itself.  If you have turned PreserveURLs
-    # on, you have turned format conversion off with it.
+    # With the optimizer daemon attached (ModPagespeedDaemonSocketPath and
+    # ModPagespeedDaemonVolumePath, set in pagespeed_daemon.conf by the
+    # packages built to depend on pagespeed-optimizer), images at their
+    # original URLs are served from the daemon's cache in the format the
+    # request's Accept header selects: AVIF when it names image/avif; WebP
+    # when it names image/webp or contains image/* or */*, or when there is
+    # no Accept header at all (a wildcard means the client takes any image
+    # type, RFC 9110); otherwise the original format.  When no copy in that
+    # format exists (not written yet, or declined by the quality check) the
+    # original format is served; a client naming image/avif never gets WebP
+    # instead.  So curl and other clients sending Accept: */* get WebP for a
+    # .jpg URL; send Accept: image/jpeg to get the original format.
+    #
+    # An optimized copy chosen this way carries Vary: Accept; the first,
+    # not yet optimized response for a URL carries none.  The copy is also
+    # chosen by device class and Save-Data, which Vary does not name yet
+    # (https://github.com/We-Amp/mod_pagespeed/issues/102), so a shared
+    # cache or CDN in front of this server should not cache images, or must
+    # key on Accept, a User-Agent device class and Save-Data.
+    #
+    # Without the daemon, the module's own in-place path optimizes an image
+    # identically for every client and never varies its output by request
+    # header: those responses carry no Vary: header and no Cache-Control:
+    # private.  An image may still be converted to a format every client can
+    # display (a photographic PNG becomes a JPEG when convert_png_to_jpeg is
+    # enabled), but never to a format chosen per requester.  On that path,
+    # conversion to webp and avif happens only on rewritten URLs, where the
+    # chosen format is part of the URL itself.  If you have turned
+    # PreserveURLs on, you have turned that conversion off with it.
     #
     # The in_place_optimize_for_browser filter, the AllowVaryOn directive and
     # the PrivateNotVaryForIE directive are retired.  They are still accepted so
