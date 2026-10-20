@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# One pull request per ecosystem per week for minor and patch updates; a major
-# update still arrives as its own pull request.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -31,3 +29,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Base images move to a new major release on purpose, never by a bump.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # Ubuntu tags are year.month, so an interim release looks like a minor bump.
+      - dependency-name: "ubuntu"
+        update-types: ["version-update:semver-minor"]
