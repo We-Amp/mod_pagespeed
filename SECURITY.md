@@ -42,8 +42,13 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
+On macOS, use `shasum -a 256 --check --ignore-missing SHA256SUMS` for the
+last step. gpg warns that the key "is not certified with a trusted
+signature"; that is expected, and comparing the fingerprint is the trust step.
+
 The Windows installer and binaries are also Authenticode signed by
-We-Amp B.V. The source tags `v2.*` are signed with the same key.
+We-Amp B.V. From v2.5.0 on, the source tags `v2.*` are signed with the same
+key. The apt and yum repositories are signed by a separate repository key.
 
 ## Disclosure Policy
 
