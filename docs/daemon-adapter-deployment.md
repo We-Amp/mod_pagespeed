@@ -323,9 +323,18 @@ Reproduced, and therefore served from the cache:
 - `Cache-Control` — rebuilt from the origin's lifetime and its cache
   directives. Directives outside that set, such as `immutable`,
   `stale-while-revalidate` and `stale-if-error`, are not carried.
-- `Vary: Accept-Encoding` and `Vary: Accept`. The second is reproduced from the
-  fact recorded with the resource that the origin negotiates on `Accept`, and is
-  emitted with whichever copy is sent — the origin's own bytes, or an optimized
+- `Vary: Accept-Encoding` and `Vary: Accept`. `Vary: Accept` is sent for two
+  reasons. First, whenever this module serves an optimized image it chose from
+  the request's `Accept` header: AVIF when the header names `image/avif`, WebP
+  when it names `image/webp` or contains `image/*` or `*/*`, or when there is
+  no `Accept` header at all (RFC 9110 reads a wildcard and an absent header as
+  "any type"), and the original format otherwise. So `curl` with its default
+  `Accept: */*` receives WebP for a `.jpg` URL; a client that needs the
+  original format sends `Accept: image/jpeg` (or whichever format it wants,
+  with no wildcard). A response carrying the recorded original, rather than an
+  optimized copy, is not negotiated and carries no `Vary: Accept` for this
+  reason. Second, it is reproduced from the fact recorded with the resource
+  that the origin negotiates on `Accept`, and is emitted with whichever copy is sent — the origin's own bytes, or an optimized
   one where such a copy exists — so a cache in front of this server is still
   told not to hand one client's representation to another. What is reproduced
   is that fact; this server does not go back to the origin for a second
