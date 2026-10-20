@@ -83,8 +83,9 @@ IIS builds require Windows with clang-cl:
 bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
 ```
 
-See [CLAUDE.md](CLAUDE.md) for detailed build configuration options and
-architecture documentation.
+See [DEVELOPER.md](DEVELOPER.md) for build configurations, native builds,
+debugging and common problems, and [CONTRIBUTING.md](CONTRIBUTING.md) for
+how to report bugs and send pull requests.
 
 ## System Tests
 
@@ -99,7 +100,8 @@ architecture documentation.
 
 - [CHANGELOG.md](CHANGELOG.md) -- Release history
 - [RELEASE_NOTES.md](RELEASE_NOTES.md) -- Current release details
-- [CLAUDE.md](CLAUDE.md) -- Build system, architecture, and development guide
+- [DEVELOPER.md](DEVELOPER.md) -- Developer guide: build, test, debugging
+- [CONTRIBUTING.md](CONTRIBUTING.md) -- Reporting bugs and sending pull requests
 - [docs/](docs/) -- Installation guides, platform limitations, test catalog
 
 ## License

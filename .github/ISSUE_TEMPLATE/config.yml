@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/We-Amp/mod_pagespeed/security/policy
+    about: Report vulnerabilities privately to security@modpagespeed.com, not in a public issue.
+  - name: pagespeed-optimizer worker, nginx module in the container images / Helm chart, console or ASP.NET Core middleware
+    url: https://github.com/We-Amp/pagespeed-optimizer/issues
+    about: Those components are developed in We-Amp/pagespeed-optimizer.
+  - name: Support subscriptions and IISpeed license transfers
+    url: https://modpagespeed.com/contact/
+    about: Support subscriptions with first-response targets, migrations and consulting from We-Amp.
