@@ -117,13 +117,18 @@ Lower priority or out of scope:
 ## How to exercise it
 
 The checkout is built at `/src`. `/src/user.bazelrc` carries the settings of
-this image (in-image output base, the project's clang toolchain config, debug
-info and frame pointers, no remote cache), so plain `bazel` commands reuse the
-build without network access:
-
-```
-bazel test //test/pagespeed/kernel/... //test/net/...
-```
+this image (in-image output base, the project's clang toolchain config,
+line-table debug info and frame pointers, no remote cache), so plain `bazel`
+commands reuse the build without network access, for example
+`bazel test //test/pagespeed/kernel/base/...`. Stay in `/src` and in its
+output base: a different `--output_base`, or a copy of the checkout (the
+output base is keyed on the workspace path), refetches the git dependencies
+`@cyclone` and `@aom_src`, which is impossible offline. Backtraces carry file
+and line. For variables in gdb, add full debug info to the files you are
+looking at only, for example
+`--per_file_copt=pagespeed/kernel/html/.*@-g`; a global `--copt=-g` would
+recompile everything and replace the cached build, including the prebuilt
+module the system tests load.
 
 Bazel runs as the unprivileged `dev` user (the hermetic Python toolchain
 refuses root and the output base belongs to `dev`); the `bazel` on PATH is a
@@ -132,10 +137,12 @@ wrapper that re-executes as `dev` when called from a root shell, so plain
 directly.
 
 - Unit tests live under `test/pagespeed/...` and `test/net/...`, one tree per
-  engine component. The image has built and run the `kernel/base` and
-  `kernel/html` suites; the engine objects every other suite links against are
-  in the cache, so the first `bazel test` of another target compiles its test
-  sources and links offline. Test one target at a time
+  engine component. The image has not built any of them; the engine objects
+  every suite links against are in the cache, so `bazel test` of a target
+  compiles its test sources and links offline. Start with
+  `//test/pagespeed/kernel/base/...` and `//test/pagespeed/kernel/html/...`;
+  the first of them also compiles googletest, which nothing prebuilt in the
+  image needed. Test one target at a time
   (`bazel test //test/pagespeed/kernel/image/...`), not the whole tree:
   compiling test sources takes a long time on a small machine, and
   `//test/net/instaweb/rewriter:rewriter` is one binary of 119 test files,
