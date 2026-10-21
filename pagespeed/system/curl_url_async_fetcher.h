@@ -85,10 +85,12 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   // timeout and the compile-time response-body cap for this fetch.
   // Any configured proxy is explicitly suppressed: socket connections never
   // leave the host, on any libcurl version.
+  // If `timed_out` is non-null it is set to true, before async_fetch->Done(),
+  // when curl ended the transfer with its own timeout result.
   void FetchOverUnixSocket(const GoogleString& url, StringPiece socket_path,
                            int64 timeout_ms, size_t max_response_body_bytes,
                            MessageHandler* message_handler,
-                           AsyncFetch* async_fetch);
+                           AsyncFetch* async_fetch, bool* timed_out = nullptr);
 
   // SSL/TLS Configuration
   void SetSslCertificatesDir(StringPiece dir);
@@ -189,7 +191,8 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
   // `max_response_body_bytes` <= 0 keep the fetcher's defaults.
   void StartFetch(const GoogleString& url, StringPiece socket_path,
                   int64 timeout_ms, size_t max_response_body_bytes,
-                  MessageHandler* message_handler, AsyncFetch* async_fetch);
+                  MessageHandler* message_handler, AsyncFetch* async_fetch,
+                  bool* timed_out);
 
   // Frees every fetch that has finished. Called by the poll thread, and by
   // ShutDown() once that thread has been joined.

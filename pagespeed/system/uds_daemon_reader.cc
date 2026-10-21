@@ -46,6 +46,9 @@ class CapEnforcingFetch : public SharedAsyncFetch {
         start_ms_(timer->NowMs()),
         failure_(failure) {}
 
+  // Set by the transport, before Done, when curl itself timed out.
+  bool* curl_timed_out_flag() { return &curl_timed_out_; }
+
   // Route mapped writes through the counting HandleWrite as well.
   bool WriteMapped(const StringPiece& content,
                    const MappedSharedString& keepalive,
@@ -73,6 +76,9 @@ class CapEnforcingFetch : public SharedAsyncFetch {
   void HandleDone(bool success) override {
     if (over_cap_) {
       *failure_ = DaemonReadFailure::kTooLarge;
+    } else if (!success && curl_timed_out_) {
+      // curl's own timeout result is authoritative, whatever our clock says.
+      *failure_ = DaemonReadFailure::kTimeout;
     } else if (!success) {
       const int64 elapsed_ms = timer_->NowMs() - start_ms_;
       *failure_ = elapsed_ms + UdsDaemonReader::kTimeoutClassificationSlackMs >=
@@ -93,6 +99,7 @@ class CapEnforcingFetch : public SharedAsyncFetch {
   DaemonReadFailure* failure_;
   size_t received_ = 0;
   bool over_cap_ = false;
+  bool curl_timed_out_ = false;
 };
 
 }  // namespace
@@ -133,10 +140,12 @@ void UdsDaemonReader::Get(StringPiece daemon_path, size_t max_response_bytes,
   // The URL's host is ignored for routing over a unix socket; the path is
   // the caller's allow-listed daemon API path.  The caller's cap is
   // enforced by the wrapper; the transport's own cap sits above it.
+  CapEnforcingFetch* capped =
+      new CapEnforcingFetch(fetch, max_response_bytes, timer_, failure);
   fetcher->FetchOverUnixSocket(
       StrCat("http://localhost", daemon_path), socket_path_, kUpstreamTimeoutMs,
-      max_response_bytes + kTransportCapSlackBytes, message_handler_,
-      new CapEnforcingFetch(fetch, max_response_bytes, timer_, failure));
+      max_response_bytes + kTransportCapSlackBytes, message_handler_, capped,
+      capped->curl_timed_out_flag());
 }
 
 CurlUrlAsyncFetcher* UdsDaemonReader::GetOrCreateFetcher() {

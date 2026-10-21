@@ -323,6 +323,9 @@ void CurlFetch::Done(CURLcode result) {
                               curl_easy_strerror(result), url_.c_str());
   } else if (result == CURLE_OPERATION_TIMEDOUT) {
     completion_result = CurlFetchCompletionResult::kTimeout;
+    if (timed_out_flag_ != nullptr) {
+      *timed_out_flag_ = true;
+    }
     if (!headers_complete_) {
       async_fetch_->response_headers()->set_status_code(HttpStatus::kNotFound);
       headers_complete_ = true;
