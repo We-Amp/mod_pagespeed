@@ -281,9 +281,9 @@ some other way.
 From 2.5 on the package version is the mod_pagespeed product version: the package carries
 the native pair of the module release of the same version (nginx, the module built against
 it and the launch shim, built and tested by that release). The fourth-digit packaging
-revisions of 1.15.0.x have ended. The first package on the product version is 2.5.1
+revisions of 1.15.0.x have ended. The first package on the product version is 2.5.2
 (module release 2.5.0 carries no native pair, so there is no 2.5.0 of this package). NuGet
-orders 2.5.1 after 1.17.0; a reference pinned to
+orders 2.5.2 after 1.17.0; a reference pinned to
 `1.*` does not pick it up.
 
 ## License
