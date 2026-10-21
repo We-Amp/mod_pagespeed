@@ -3,24 +3,11 @@ exports_files([
     "js_utils.js",
 ])
 
-cc_library(
-    name = "data2c_lib",
-    srcs = [
-        "data_to_c.cc",
-    ],
-    hdrs = [
-        "public/js_minify.h",
-    ],
-    deps = [
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/util:util", # XXx just gflags
-    ],
-)
-
+# Host tool for the data2c genrules (bazel/data2c.bzl). It runs in the exec
+# configuration, so every dependency added here is compiled a second time for
+# the host. Keep it to the C++ standard library.
 cc_binary(
     name = "data2c",
-    deps = [
-        ":data2c_lib",
-    ],
+    srcs = ["data_to_c.cc"],
     visibility = ["//visibility:public"],
 )
