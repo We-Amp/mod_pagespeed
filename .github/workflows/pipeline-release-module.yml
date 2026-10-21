@@ -8,7 +8,8 @@
 #
 # For a tag `module-v<version>` (for example module-v1.19.0, or
 # module-v1.19.0-rc.1 for a release candidate) this lane builds every module
-# package and the Windows installer, runs the package smokes, the security
+# package, the Windows installer and the native pair of the ASP.NET Core
+# sidecar (tested with the sidecar's suite), runs the package smokes, the security
 # gates, the unit tests, the system-test gate and the two release gates on the
 # fleet-hyperv class (installer upgrade, cPanel), validates the asset set and
 # ends in one run artifact, `release-assets`: the validated asset set with
@@ -206,21 +207,24 @@ jobs:
         run: |
           [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
 
-      - name: Checkout the tag
+      - &v-checkout
+        name: Checkout the tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_REF }}
           submodules: false
           persist-credentials: false
 
-      - name: Verify the checkout is the release commit
+      - &v-verify
+        name: Verify the checkout is the release commit
         run: |
           [ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ] || { echo "::error::checked-out HEAD $(git rev-parse HEAD) != release commit $RELEASE_SHA"; exit 1; }
 
       # The tree carries the module version; the packages carry the version
       # of the tag, stamped here. Every later job builds from this stamped
       # copy.
-      - name: Stamp the module version
+      - &v-stamp
+        name: Stamp the module version
         run: |
           bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
           cat net/instaweb/public/VERSION
@@ -242,11 +246,13 @@ jobs:
             echo "dry run: the packages depend on the pinned optimizer ${pair}"
           fi
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - &v-node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: pagespeed/system/console/.nvmrc
 
-      - name: Ensure bazel
+      - &v-bazel
+        name: Ensure bazel
         run: |
           if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
           if command -v npm >/dev/null 2>&1; then
@@ -262,7 +268,8 @@ jobs:
       # script names one of them with an ssh-style address, so the rewrite
       # below (scoped to this step through the environment) sends it over
       # https and no credential of any kind is needed.
-      - name: Vendor all dependencies
+      - &v-vendor
+        name: Vendor all dependencies
         env:
           GIT_CONFIG_COUNT: "1"
           GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
@@ -279,7 +286,8 @@ jobs:
       # canonical file of the optimizer repository and fails closed in CI
       # when that file cannot be read. The clone lives under RUNNER_TEMP so
       # the tree tarball does not pick it up.
-      - name: Materialize canonical product facts
+      - &v-facts
+        name: Materialize canonical product facts
         run: |
           set -euo pipefail
           FACTS_DIR="${RUNNER_TEMP}/product-facts"
@@ -292,7 +300,8 @@ jobs:
 
       # The admin console shows the release version, so it is rebuilt with
       # it rather than carrying the stamp of whoever last committed the file.
-      - name: Rebuild the admin console with the release version
+      - &v-console
+        name: Rebuild the admin console with the release version
         env:
           VITE_APP_VERSION: ${{ needs.version.outputs.release_tag }}
         run: |
@@ -306,7 +315,8 @@ jobs:
           grep -qF "$VITE_APP_VERSION" "$html" || { echo "::error::admin_console.html does not contain $VITE_APP_VERSION"; exit 1; }
           echo "console stamped with ${VITE_APP_VERSION}"
 
-      - name: Stamp GIT_COMMIT
+      - &v-gitcommit
+        name: Stamp GIT_COMMIT
         run: echo -n "$RELEASE_SHA" > GIT_COMMIT
 
       # The source tarball of the release: the committed files, the stamped
@@ -333,7 +343,8 @@ jobs:
           rm -rf "$STAGE"
           ls -lh "$OUT"
 
-      - name: Create the tree tarball
+      - &v-tree
+        name: Create the tree tarball
         run: |
           set -euo pipefail
           OUT="${RUNNER_TEMP}/tree-out"
@@ -1241,6 +1252,126 @@ jobs:
     timeout-minutes: 350
     env: *nginx-el10-env
     steps: *nginx-el10-steps
+
+  # ---------------------------------------------------------------------
+  # The native pair of the ASP.NET Core sidecar (WeAmp.PageSpeed.Sidecar):
+  # nginx, the module built against exactly that nginx, and the launch shim,
+  # per architecture (tools/ci/release_sidecar.sh). Every byte of these
+  # release files comes from hosted runners: vendor-sidecar prepares its own
+  # tree on a hosted runner with the steps of the vendor job (checkout of the
+  # tag, the stamped version, vendor/, the admin console rebuilt with the
+  # release version), and the two pair jobs build from that tree on hosted
+  # x64 and arm64 runners, whatever FLEET_ENABLED says. The build runner
+  # class plays no part here (it builds the pair only in the path-filtered
+  # pull request tier). Each pair job runs `check` (the focal build in the
+  # pinned Ubuntu 20.04 image, glibc 2.31 being the sidecar's compatibility
+  # floor; the symbol and glibc gate and the Debian 11 and 12 smoke before
+  # and after stripping; the sidecar's xunit suite under .NET 8 and .NET 10
+  # with the live nginx tests against the stripped pair, proven to have run)
+  # and only then packages the pair and its debug files as release files; a
+  # red, skipped or missing live test stops the job before the upload.
+  # `validate` adds sidecar-pair.json, the manifest the NuGet lane pins.
+  # ---------------------------------------------------------------------
+  vendor-sidecar:
+    name: Vendor Dependencies (sidecar, hosted)
+    needs: [ref-guard, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_REF: ${{ needs.version.outputs.ref }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+    steps:
+      - *v-checkout
+      - *v-verify
+      - *v-stamp
+      - *v-node
+      - *v-bazel
+      - *v-vendor
+      - *v-facts
+      - *v-console
+      - *v-gitcommit
+      - *v-tree
+
+      # Already compressed: no second pass.
+      - name: Upload the tree
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: tree-sidecar
+          path: ${{ runner.temp }}/tree-out/module-tree.tar.zst
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+
+  sidecar-pair:
+    name: Sidecar Native Pair (x64, hosted)
+    needs: [version, vendor-sidecar]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      ARCH: x64
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+    steps: &sidecar-steps
+      - name: Download the sidecar's release tree
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tree-sidecar
+          path: ${{ runner.temp }}/tree
+
+      - *tree-extract
+
+      # The whole sequence, each part in its own log group: build, the symbol
+      # and glibc gate, the Debian 11 and 12 smoke, strip, gate and smoke
+      # again, and the test suite under .NET 8 and .NET 10 with the live nginx
+      # tests against the stripped pair, the pair that ships.
+      - name: Build, gate and test the pair
+        run: |
+          bash tools/ci/release_sidecar.sh check --arch "$ARCH" \
+            --workspace "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --debug "${RUNNER_TEMP}/pair-debug" --results "${RUNNER_TEMP}/sidecar-results"
+
+      - name: Package the pair and its debug files
+        run: |
+          bash tools/ci/release_sidecar.sh package --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pair "${RUNNER_TEMP}/pair" \
+            --debug "${RUNNER_TEMP}/pair-debug" \
+            --version "$RELEASE_VERSION" --source-sha "$RELEASE_SHA" \
+            --out "${RUNNER_TEMP}/sidecar-out"
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-out
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload the test results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: testdata-sidecar-results-${{ env.ARCH }}
+          path: ${{ runner.temp }}/sidecar-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  sidecar-pair-arm64:
+    name: Sidecar Native Pair (arm64, hosted)
+    needs: [version, vendor-sidecar]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 350
+    env:
+      ARCH: arm64
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+    steps: *sidecar-steps
 
   # ---------------------------------------------------------------------
   # Stock Apache rpms built natively on el8 and el10 (their own glibc and
@@ -2777,6 +2908,9 @@ jobs:
       - nginx-arm64-join
       - nginx-distro-build-el10
       - nginx-distro-build-el10-hosted
+      - vendor-sidecar
+      - sidecar-pair
+      - sidecar-pair-arm64
       - el8-ready
       - el10-ready
       - windows-release-build
@@ -2894,6 +3028,19 @@ jobs:
           path: ${{ runner.temp }}/stage
           pattern: asset-*
 
+      # The manifest of the sidecar pair, from the two tarballs: one more
+      # release file, so SHA256SUMS (and its signature) covers it.
+      - name: Write the sidecar pair manifest
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/sidecar-pair" "${RUNNER_TEMP}/stage/asset-sidecar-manifest"
+          cp "${RUNNER_TEMP}"/stage/asset-sidecar-x64/*.tar.gz "${RUNNER_TEMP}"/stage/asset-sidecar-arm64/*.tar.gz \
+            "${RUNNER_TEMP}/sidecar-pair/"
+          python3 -I tools/ci/sidecar_pair_manifest.py build --dir "${RUNNER_TEMP}/sidecar-pair" \
+            --tag "$TAG" --version "$VERSION" --source-sha "$RELEASE_SHA" \
+            --out "${RUNNER_TEMP}/stage/asset-sidecar-manifest/sidecar-pair.json"
+          cat "${RUNNER_TEMP}/stage/asset-sidecar-manifest/sidecar-pair.json"
+
       - name: Assemble the asset set
         run: |
           set -euo pipefail
@@ -2973,6 +3120,8 @@ jobs:
           cd "${RUNNER_TEMP}/release-assets"
           sha256sum -c SHA256SUMS
           python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_manifest.py" verify .
+          python3 -I "${GITHUB_WORKSPACE}/tools/ci/sidecar_pair_manifest.py" verify \
+            --manifest sidecar-pair.json --dir . --tag "$TAG" --version "$VERSION" --source-sha "$RELEASE_SHA"
           {
             echo "### Release assets of ${TAG}"
             echo ""
@@ -3222,6 +3371,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -I tooling/tools/ci/release_manifest.py verify dist
+          python3 -I tooling/tools/ci/sidecar_pair_manifest.py verify \
+            --manifest dist/sidecar-pair.json --dir dist --tag "$TAG" --version "$VERSION" --source-sha "$RELEASE_SHA"
           (cd dist && sha256sum -c SHA256SUMS)
           [ "$(jq -r .tag dist/manifest.json)" = "$TAG" ] || { echo "::error::the manifest names another tag"; exit 1; }
           [ "$(jq -r .source_sha dist/manifest.json)" = "$RELEASE_SHA" ] || { echo "::error::the manifest names another commit"; exit 1; }
@@ -3254,6 +3405,7 @@ jobs:
               printf 'This is a release candidate. It is built and tested like a release but is not meant for production.\n\n'
             fi
             printf 'The module packages for Apache, nginx and IIS, released with the pagespeed-optimizer packages of %s. Install the optimizer and the module package of the same version together.\n\n' "$OPTIMIZER_TAG"
+            printf 'The native pair of the ASP.NET Core sidecar (nginx, the module built against it and the launch shim, per architecture) is in pagespeed-sidecar-native-%s-linux-*.tar.gz, described by sidecar-pair.json, and is for the WeAmp.PageSpeed.Sidecar NuGet packages.\n\n' "$VERSION"
             printf 'Source commit: %s\n\n' "$RELEASE_SHA"
             cat <<'NOTES'
           ### Verify a download

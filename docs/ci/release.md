@@ -4,7 +4,8 @@
 # Module release lane
 
 The release of the module packages (Apache, nginx and IIS modules, with the
-optimizer packages they are released with) runs as one reusable workflow,
+optimizer packages they are released with, and the native pair of the ASP.NET
+Core sidecar) runs as one reusable workflow,
 `pipeline-release-module.yml`, called by `release.yml`. This page describes
 the lane, how to try it without releasing anything (a dry run), and the
 contract of the files it produces. How the lane fits the other pipelines is in
@@ -13,8 +14,9 @@ contract of the files it produces. How the lane fits the other pipelines is in
 
 The lane has two halves in one workflow.
 
-- **Build and validate** (every run, a dry run included): build every package
-  and the Windows installer, run the package smokes, the security gates, the
+- **Build and validate** (every run, a dry run included): build every package,
+  the Windows installer and the sidecar pair (tested with the sidecar's suite,
+  live nginx included), run the package smokes, the security gates, the
   unit tests, the system-test gate and the two release gates on the Hyper-V
   class (installer upgrade, cPanel), and end in one run artifact with the asset
   set, `SHA256SUMS` and `manifest.json`. A dry run signs nothing, creates
@@ -250,6 +252,9 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
 | `nginx-arm64-plan`, `nginx-distro-build-arm64`, `nginx-arm64-join` | hosted arm64 | the same for arm64, one matrix job per distro (the plan job lists them from the leg table); the join job runs the gates over the combined set and hands over `asset-nginx-arm64` |
 | `nginx-distro-build-el10` | fleet-heavy, pair | the el10 nginx module rpm, with the gates and a load check into the stock nginx |
+| `vendor-sidecar` | hosted | the release tree of the sidecar pair, prepared on a hosted runner with the steps of `vendor` (hands over `tree-sidecar`) |
+| `sidecar-pair` | hosted, always | x64: from `tree-sidecar`, the native pair of the ASP.NET Core sidecar, its gates, the Debian 11 and 12 smoke before and after stripping, the sidecar's test suite with the live nginx tests, then the release tarballs of the pair and of its debug files (see "The sidecar native pair") |
+| `sidecar-pair-arm64` | hosted arm64 | the same for arm64 |
 | `apache-el8-build` | fleet-heavy, pair | the stock Apache rpm built on el8 (glibc 2.28); input of the cPanel package only |
 | `apache-el10-build` | fleet-heavy, pair | the stock Apache rpm built natively on el10 |
 | `windows-release-build` | fleet-windows, pair | the IIS module built optimized with debug symbols, plus the pinned optimizer worker, all unsigned; hands over `unsigned-windows` |
@@ -267,7 +272,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `package-smoke-nginx-packaged` | fleet-heavy, pair | installs each x64 package into its stock nginx and runs the nginx test suite |
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
-| `validate` | hosted | builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
+| `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
@@ -301,7 +306,18 @@ All of it is public and read only, and needs no credential:
 - the dependency sources named in the Bazel files;
 - container images from Docker Hub, by tag and not by digest (the base images of
   the dev image, of the distro builds and of the smokes: Ubuntu, Debian,
-  AlmaLinux, Rocky Linux, Alpine, redis and memcached);
+  AlmaLinux, Rocky Linux, Alpine, redis and memcached). The images of the
+  sidecar pair are the exception: the Ubuntu 20.04 build image, the Debian 11
+  and 12 smoke images and the .NET 8 and .NET 10 SDK images (from
+  mcr.microsoft.com) are pinned by digest in `tools/ci/release_sidecar.sh`;
+- for the sidecar pair, the focal recipe's toolchain inside the build image
+  (the Ubuntu toolchain PPA for GCC 13 and apt.llvm.org for clang 18, each
+  trusted only with its signing key pinned by fingerprint in
+  `install/nginx/build_module_in_container.sh`; the package versions they
+  served are recorded in `build-info.json`), the nginx source tarball
+  (sha256-pinned in the same script), and the NuGet packages the sidecar's
+  test suite restores from nuget.org (versions and content hashes locked by
+  the test project's lock files);
 - packages from the distro mirrors inside those containers (apt and dnf), pip
   packages (pytest and pytest-timeout, pinned), npm packages (the console
   build, bazelisk) and, on Windows, Chocolatey packages (NASM, LLVM; pinned
@@ -376,6 +392,9 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `stock-el8` | the stock Apache rpm built on el8 | no |
 | `testdata-oldpkgs-x64` | synthetic old-version packages for the upgrade smoke | no |
 | `debug-linux-x64`, `debug-linux-arm64` | unstripped module and debug symbols | no |
+| `tree-sidecar` | the release tree of the sidecar pair, prepared on a hosted runner | no |
+| `asset-sidecar-x64`, `asset-sidecar-arm64` | `pagespeed-sidecar-native-<version>-linux-<arch>.tar.gz`, the tested native pair of the ASP.NET Core sidecar, and `pagespeed-sidecar-native-debug-<version>-linux-<arch>.tar.gz`, its debug files | yes |
+| `testdata-sidecar-results-x64`, `testdata-sidecar-results-arm64` | the sidecar's test results (trx), per framework | no |
 | `unsigned-windows` | the unsigned IIS module, its symbols and the optimizer worker | no |
 | `signed-windows` | the same, signed (real run) | no |
 | `msi-unsigned` | the installer before signing (real run) | no |
@@ -387,7 +406,8 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 it does not know, an empty file, a signature file or a name outside
 `[A-Za-z0-9._+-]` stops it, and so does a missing or ambiguous file of the
 required set (every package kind, suite and architecture above, the Windows installer
-named for the version, the optimizer pair, the source tarball, the SBOM and the
+named for the version, the sidecar pair and its debug files for both
+architectures and `sidecar-pair.json`, the optimizer pair, the source tarball, the SBOM and the
 VEX file; the cPanel packages of el9
 and el8 on a release, none on a pre-release).
 
@@ -458,7 +478,7 @@ every file through the sums. `SHA256SUMS.asc` is the one release asset that
 | `asset` | the uploaded name; what `SHA256SUMS` lists |
 | `name` | the original name, with any `~` kept; the name to give the file when it is put in a repository tree |
 | `kind` | `deb`, `rpm`, `tarball`, `so`, `zip`, `msi` or `json` |
-| `component` | `module`, `optimizer`, `source` or `sbom` |
+| `component` | `module`, `optimizer`, `source`, `sbom` or `sidecar` |
 | `channel` | the routing hint for repository publication: `apt`, `rpm-el9`, `rpm-el10`, `rpm-ea4`, or `none` (a direct download only) |
 | `channel_also` | further channels the same file belongs to: the optimizer rpms are also in `rpm-el10` |
 | `distro` | a deb suite (`noble`, `bookworm`, `trixie`, `jammy`), an rpm family (`el8`, `el9`, `el10`) or `any` |
@@ -470,7 +490,7 @@ optimizer rpms) are `rpm-el9`. The stock Apache rpm of el10 (dist-tagless) and
 the nginx rpm of el10 are `rpm-el10` and belong in a tree of their own; the
 optimizer rpms are `rpm-el9` with `rpm-el10` in `channel_also`. The cPanel
 rpms of all families are `rpm-ea4`. The `.so` files, tarballs, the Windows zip,
-the Windows installer and the SBOM and VEX files are `none`.
+the Windows installer, the SBOM and VEX files and the sidecar files are `none`.
 
 A consumer should: check the tag grammar and `prerelease`; check that the
 release is not a draft and that its commit is on `master`; download every
@@ -479,6 +499,95 @@ against a pinned key; compare the set of package assets with the
 manifest and refuse extra or missing files; rename each file from `asset` to
 `name` as it builds its trees; and check the pair (every module package needs
 the optimizer packages of `optimizer_tag` beside it).
+
+### The sidecar native pair
+
+The release carries the native pair of the ASP.NET Core sidecar
+(`WeAmp.PageSpeed.Sidecar`), one tarball per architecture, its debug files and
+its manifest:
+
+| Asset | Content |
+|---|---|
+| `pagespeed-sidecar-native-<version>-linux-x64.tar.gz`, `...-linux-arm64.tar.gz` | one directory `pagespeed-sidecar-native-<version>-linux-<arch>/` with `nginx`, `ngx_pagespeed_module.so` (built against exactly that nginx), `pagespeed-nginx-launch`, `build-info.json`, `LICENSE`, `NOTICE`, `THIRD-PARTY-NOTICES` |
+| `pagespeed-sidecar-native-debug-<version>-linux-x64.tar.gz`, `...-linux-arm64.tar.gz` | `nginx.debug`, `ngx_pagespeed_module.so.debug`, `pagespeed-nginx-launch.debug`, the debug files the stripped binaries name in their debug link, so a crash of a released pair can be symbolized |
+| `sidecar-pair.json` | the manifest below |
+
+`<version>` is the version of the tag (`2.6.0-rc.1` for a candidate). Every
+sidecar file comes from hosted runners only: `vendor-sidecar` prepares its
+own release tree, and `sidecar-pair` and `sidecar-pair-arm64` build on
+hosted runners whether or not the build runners are enabled. The pair is
+built by `tools/ci/release_sidecar.sh check` from that stamped tree, natively
+per architecture, in an Ubuntu 20.04 image pinned by digest: glibc 2.31 is the
+sidecar's compatibility floor (`docs/ci/pipelines.md`, "The sidecar native
+pair"). Before it is packaged, the job checks the symbols and the glibc
+floor, smokes the pair on Debian 11 and 12 before and after stripping, and
+runs the sidecar's xunit suite under .NET 8 and .NET 10 with the live nginx
+tests against the stripped pair; a failing or skipped test, fewer tests than
+the suite holds, or a live test that did not run against the pair stops the
+job before the upload. `build-info.json` names the versions
+(`package_version`, `mod_pagespeed_version`, and `nginx_version`, read from
+the focal row of the recipe), the `glibc_floor`, the `build_image`, the
+compilers (`clang_version`, `gcc_version`), the `source_sha` and the sha256
+of each binary.
+
+`validate` writes `sidecar-pair.json` from the four tarballs
+(`tools/ci/sidecar_pair_manifest.py`), after checking each pair tarball
+against its `build-info.json`, the two against each other, and each debug
+tarball for exactly the three debug files:
+
+```json
+{
+  "schema": 1,
+  "tag": "module-v2.5.1",
+  "version": "2.5.1",
+  "source_sha": "<40 hex digits>",
+  "nginx_version": "<the focal row of the recipe>",
+  "glibc_floor": "2.31",
+  "build_image": "ubuntu:20.04@sha256:<64 hex digits>",
+  "rids": {
+    "linux-x64": {
+      "asset": "pagespeed-sidecar-native-2.5.1-linux-x64.tar.gz",
+      "sha256": "<64 hex digits>",
+      "size": 123456,
+      "files": {"nginx": "<sha256>", "ngx_pagespeed_module.so": "<sha256>", "...": "..."},
+      "clang_version": "<clang --version>",
+      "gcc_version": "<gcc-13 --version>",
+      "debug": {"asset": "pagespeed-sidecar-native-debug-2.5.1-linux-x64.tar.gz", "sha256": "<64 hex digits>", "size": 123456}
+    },
+    "linux-arm64": {}
+  }
+}
+```
+
+All five files are listed in `SHA256SUMS`, so the release signature covers
+them. `validate` and `create-release` run the tooling of `master` (as they do
+for `release_manifest.py`), so the `sidecar_pair_manifest.py` that writes and
+checks the manifest is the one on `master` when the tag is released, which
+may be newer than the tag's; a consumer verifies with the script of the
+tagged tree (below).
+
+**The pin contract of a consumer** (the NuGet lane of the optimizer
+repository, which packs the pair into
+`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`). The consumer:
+
+- pins one module release by its exact tag, never "latest" and never a tag
+  pattern, together with the sha256 of that release's `SHA256SUMS` and of its
+  `sidecar-pair.json`, in a file committed to its own repository;
+- refuses a draft or a pre-release, downloads `SHA256SUMS`,
+  `SHA256SUMS.asc`, `sidecar-pair.json` and the tarballs it packs, checks the
+  two pinned hashes, and verifies `SHA256SUMS.asc` with gpg against the
+  release signing key whose fingerprint it has committed (the package
+  signing key above, published with the repository's security policy),
+  refusing any other signer;
+- checks every downloaded file with `sha256sum -c` against the rows of
+  `SHA256SUMS` for exactly those files: every row it needs must be present,
+  and no `--ignore-missing`;
+- runs `sidecar_pair_manifest.py verify --tag <tag> --version <version>
+  --source-sha <source_sha>` taken from the tagged tree at `source_sha` (the
+  `mod_pagespeed-<version>.tar.gz` source tarball of the same release, or a
+  checkout of that commit), not from a later branch;
+- packs only the binaries and `build-info.json` of each pair tarball into
+  `runtimes/<rid>/native/`.
 
 ## Reading a failed run
 
@@ -501,6 +610,8 @@ the optimizer packages of `optimizer_tag` beside it).
 | `tools/ci/release_version.sh` | tag grammar, derived versions, VERSION stamping (`--self-test`) |
 | `tools/ci/release_manifest.py` | asset set, `SHA256SUMS`, `manifest.json`, verification (`--self-test`) |
 | `tools/ci/release_nginx.sh` | the nginx distro legs and their gates (`--self-test`) |
+| `tools/ci/release_sidecar.sh` | the sidecar native pair: build, gates, smoke, strip, tests, the release tarballs (`--self-test`) |
+| `tools/ci/sidecar_pair_manifest.py` | `sidecar-pair.json`, and its verification against the tarballs (`--self-test`) |
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |
 | `tools/ci/check_module_optimizer_version.py` | from 2.5.0 on, the module version must equal the pinned optimizer's `VERSION.txt` at `optimizer_commit`; below 2.5.0 it passes with a notice; `--dry-run` (passed while the pin is not the paired tag) turns a mismatch into a warning and skips `-pre` tags (`--self-test`) |
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
