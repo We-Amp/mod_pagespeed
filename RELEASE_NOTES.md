@@ -1,3 +1,62 @@
+# mod_pagespeed 2.5.1 Release Notes
+
+**Release date:** 2026-10-21
+**Status:** Stable
+**Packages:** `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS
+installer and the cPanel package, all 2.5.1, with `pagespeed-optimizer`
+2.5.1. The ASP.NET Core sidecar packages (`WeAmp.PageSpeed.Sidecar`,
+`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) move to the product version
+with this release, as 2.5.1.
+
+## Highlights
+
+- **Security: the bundled and required nginx is updated to 1.30.6, which
+  fixes two memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).**
+  The nginx module packages and the sidecar package build against and depend
+  on nginx 1.30.6. **Update recommended.**
+
+- **Behind a shared cache or CDN, images chosen by the optimizer daemon now
+  carry the full `Vary` list.** An image served at its original URL is chosen
+  by the device class and Save-Data as well as by `Accept`; the response now
+  names `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR` on Apache, nginx
+  and IIS, so a shared cache no longer hands one device's image to another.
+  A cache that ignores `Vary` by default (Cloudflare, Amazon CloudFront) still
+  needs to be configured to key on the device class, `Accept` and
+  `Save-Data`, or to skip these images; the changelog links the guidance.
+  **Update recommended for sites behind a shared cache or CDN.**
+
+- **nginx packages install the admin-page restriction as a config file,**
+  `/etc/nginx/snippets/pagespeed_admin_localhost.conf`. Include it in each
+  `server {}` block that serves the admin pages.
+
+- **The ASP.NET Core sidecar packages are versioned with mod_pagespeed.**
+  The first sidecar package on the product version is 2.5.1; NuGet orders it
+  after 1.17.0, so a reference pinned to `1.*` does not pick it up.
+
+- **IIS: a rebuilt installer of the same version now upgrades the installed
+  one** instead of installing beside it, keeping `pagespeed.config` and the
+  optimizer service's settings.
+
+- Also: a timed-out read from the optimizer worker is reported as a timeout
+  rather than a dropped connection; the sidecar's supported hosts are
+  documented (Debian 11 and 12, Ubuntu 20.04 to 24.04); and the shipped
+  `pagespeed.conf` comment on in-place optimization and `Vary` is corrected.
+
+## Action required when upgrading
+
+- Changed (nginx admin pages): the new snippet is not included anywhere on
+  its own. Add `include /etc/nginx/snippets/pagespeed_admin_localhost.conf;`
+  where you want the restriction, and remove the `include` lines before
+  purging or removing the package.
+
+- Changed (sidecar version pins): update a NuGet reference pinned to `1.*`
+  to pick up 2.5.1.
+
+- Nothing else in the configuration changes, and the cache format is the one
+  2.5.0 introduced, so the cache stays warm across this upgrade.
+
+---
+
 # mod_pagespeed 2.5.0 Release Notes
 
 **Release date:** 2026-10-19

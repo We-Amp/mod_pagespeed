@@ -5,7 +5,7 @@ All notable changes to mod_pagespeed are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.5.1] - 2026-10-21
 
 ### Security
 
@@ -76,17 +76,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **IIS installer: a rebuilt installer of the same version now upgrades the
   installed one.** Before, a second build of the same version (a reissued
   installer) installed beside the first, leaving two entries in Programs and
-  Features. The installer now carries a build number as the fourth part of
-  its version (shown as the version in Programs and Features; the product
-  version, the file name and the `X-Page-Speed` header stay `2.5.0`), a build
-  of the same version replaces the installed one, keeping `pagespeed.config`,
-  the optimizer service's start type and its cache size, and an older build
-  or version is refused. After installing a rebuilt installer, do not re-run
-  an older installer of the same version; uninstall first. (The 2.5.0
-  installer published before this change cannot recognize a rebuild and
-  would install beside it.) If two entries appear after re-running an older
-  2.5.0 installer, uninstall both, then install the newer build again. A
-  later build also removes both entries when it upgrades.
+  Features. The installer now carries a build number as the fourth part of its
+  version (shown as the version in Programs and Features; a rebuild leaves the
+  product version, the file name and the `X-Page-Speed` header unchanged), a
+  build of the same version replaces the installed one, keeping
+  `pagespeed.config`, the optimizer service's start type and its cache size,
+  and an older build or version is refused. After installing a rebuilt
+  installer, do not re-run an older installer of the same version; uninstall
+  first. (The 2.5.0 installer published before this change cannot recognize a
+  rebuild and would install beside it.) If two entries appear after re-running
+  an older 2.5.0 installer, uninstall both, then install the newer build
+  again. A later build also removes both entries when it upgrades.
 
 ### Documentation
 
