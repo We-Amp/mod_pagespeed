@@ -122,7 +122,9 @@ if [ -n "$TMP" ]; then
       exit 1
     fi
   fi
-  if ! zstd_ok "$STAGE"; then
+  # A stage that matched its source can still read short for a moment on
+  # DrvFs under load: the frame check gets the same patience.
+  if ! settle zstd_ok "$STAGE"; then
     rm -f "$STAGE"
     echo "::error::temp tarball is not a complete zstd frame: $TMP" >&2
     exit 1
