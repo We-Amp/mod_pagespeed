@@ -59,6 +59,7 @@ jobs:
       cve: ${{ steps.diff.outputs.cve }}
       upgrade: ${{ steps.diff.outputs.upgrade }}
       fuzz: ${{ steps.diff.outputs.fuzz }}
+      iis: ${{ steps.diff.outputs.iis }}
       sidecar: ${{ steps.diff.outputs.sidecar }}
     steps:
       # fetch-depth: 0 so the diff can reach the pull request's base commit.
@@ -77,6 +78,7 @@ jobs:
           cve=true
           upgrade=true
           fuzz=true
+          iis=true
           sidecar=true
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             signing_key=false
@@ -84,6 +86,7 @@ jobs:
             cve=false
             upgrade=false
             fuzz=false
+            iis=false
             sidecar=false
             changed="${RUNNER_TEMP}/changed-files.txt"
             git diff --name-only "${BASE}...HEAD" > "${changed}"
@@ -102,6 +105,12 @@ jobs:
             fi
             if grep -qE "^(third_party/css_parser/|pagespeed/kernel/html/|tools/html-parse-corpus/|pagespeed/kernel/packs/|tools/pack-loader-corpus/|tools/rule-pack-filter-corpus/|pagespeed/kernel/js/|tools/js-minify-corpus/|tools/ci/classify-js-fuzz-artifacts\.sh|${wf})" "${changed}"; then
               fuzz=true
+            fi
+            # Anything the IIS module compiles or the IIS system tests run:
+            # the module and its shared engine sources, the build definitions,
+            # the IIS install and test trees, the CI scripts and the workflows.
+            if grep -qE "^(pagespeed/(iis|windows|kernel|system|automatic|opt)/|net/|third_party/|bazel/|install/iis/|test/system/|test/pagespeed/iis/|tools/ci/[^/]*\.ps1\$|tools/ci/(fetch-build-artifacts|invalidate-stale-artifacts)\.|WORKSPACE|MODULE\.bazel|pagespeed\.bazelrc|\.bazelrc|extensions_build_config\.bzl|BUILD(\.bazel)?\$|\.github/actions/|\.github/workflows/ci\.yml|${wf})" "${changed}"; then
+              iis=true
             fi
             # The ASP.NET Core sidecar, the focal recipe of its native pair and
             # the gates that check the pair.
@@ -128,9 +137,10 @@ jobs:
             echo "cve=${cve}"
             echo "upgrade=${upgrade}"
             echo "fuzz=${fuzz}"
+            echo "iis=${iis}"
             echo "sidecar=${sidecar}"
           } >> "$GITHUB_OUTPUT"
-          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz} sidecar=${sidecar}"
+          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz} iis=${iis} sidecar=${sidecar}"
 
   # One checkout serves every group. Each step runs even when an earlier one
   # failed (`!cancelled()`), so one red run lists every broken guard.
@@ -2482,13 +2492,15 @@ jobs:
   # administers (sites, application pools, ports, the default web site). There
   # is no hosted twin, so a fork or Dependabot pull request skips the job (it
   # is skipped, not failed), and so does any run while FLEET_ENABLED is
-  # 'false' or FLEET_IIS_ENABLED is not 'true'. The module under test comes from the windows-build bundle; nothing
+  # 'false' or FLEET_IIS_ENABLED is not 'true', and a pull request or merge
+  # group whose changed files cannot affect IIS (the iis path filter of the
+  # changes job). The module under test comes from the windows-build bundle; nothing
   # is built here. The job holds no secret and no write token.
   iis-sys-tests:
     name: IIS System Tests
-    needs: [windows-build, windows-unit-tests]
+    needs: [changes, windows-build, windows-unit-tests]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
-    if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && needs.changes.outputs.iis == 'true' }}
     timeout-minutes: 50
     defaults:
       run:
@@ -2877,14 +2889,15 @@ jobs:
             echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The IIS system tests may be skipped for four reasons only: the switch is
+  # The IIS system tests may be skipped for five reasons only: the switch is
   # off, the event is a fork or Dependabot pull request, the class is not
-  # registered (FLEET_IIS_ENABLED is not 'true'), or a job they need failed.
+  # registered (FLEET_IIS_ENABLED is not 'true'), the path filter found no
+  # IIS-relevant change, or a job they need failed.
   # Any other skip is a routing mistake and fails here, so the CI gate never
   # accepts it silently.
   fleet-only-skip-check:
     name: IIS system tests ran or were switched off
-    needs: [windows-build, windows-unit-tests, iis-sys-tests]
+    needs: [changes, windows-build, windows-unit-tests, iis-sys-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2894,6 +2907,7 @@ jobs:
       UNIT_RESULT: ${{ needs.windows-unit-tests.result }}
       FLEET: ${{ vars.FLEET_ENABLED }}
       FLEET_IIS: ${{ vars.FLEET_IIS_ENABLED }}
+      IIS_FILTER: ${{ needs.changes.outputs.iis }}
       FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
     steps:
       - name: Check the IIS system tests
@@ -2907,6 +2921,8 @@ jobs:
             echo "::notice::IIS system tests skipped: fork or Dependabot pull request"
           elif [ "${FLEET_IIS}" != true ]; then
             echo "::notice::IIS system tests skipped: FLEET_IIS_ENABLED is not 'true'"
+          elif [ "${IIS_FILTER}" = false ]; then
+            echo "::notice::IIS system tests skipped: no IIS-relevant change"
           else
             echo "::error::IIS system tests were skipped with the fleet on and the class enabled"
             exit 1

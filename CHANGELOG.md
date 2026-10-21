@@ -14,6 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module packages and the NuGet sidecar package now build against and depend on
   nginx 1.30.6. **Update recommended.**
 
+### Added
+
+- **nginx packages: the admin-page restriction is installed as a config
+  file.** `nginx-module-pagespeed` now installs
+  `/etc/nginx/snippets/pagespeed_admin_localhost.conf`, the `location`
+  blocks that limit `/pagespeed_admin` and `/pagespeed_global_admin` to
+  localhost. Before, the blocks shipped only as a sample under
+  `/usr/share/doc/`, which minimal images such as the Ubuntu container images
+  do not install. The file is not included anywhere on its own: add
+  `include /etc/nginx/snippets/pagespeed_admin_localhost.conf;` to each
+  `server {}` block that serves the admin pages. It is a conffile on Debian
+  and Ubuntu and `%config(noreplace)` on Enterprise Linux, so your edits
+  survive upgrades. A copy you made earlier at
+  `/etc/nginx/snippets/pagespeed_admin_restrict.conf` is left alone; include
+  one of the two. The file's text is never changed in place (a changed
+  snippet would ship under a new file name); should it ever change and you
+  edited your copy, Debian/Ubuntu ask which
+  version to keep (or follow `--force-confdef`/`--force-confold`) and EL
+  writes the new one as `.rpmnew`. Remove the `include` lines before purging
+  (deb) or removing (rpm) the package, or `nginx -t` fails.
+
 ### Changed
 
 - **ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`,
@@ -47,6 +68,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device class, `Accept` and `Save-Data`, or to skip these images: see
   [Behind a shared cache or CDN](docs/daemon-adapter-deployment.md#behind-a-shared-cache-or-cdn).
   **Update recommended for sites behind a shared cache or CDN.**
+
+- **IIS installer: a rebuilt installer of the same version now upgrades the
+  installed one.** Before, a second build of the same version (a reissued
+  installer) installed beside the first, leaving two entries in Programs and
+  Features. The installer now carries a build number as the fourth part of
+  its version (shown as the version in Programs and Features; the product
+  version, the file name and the `X-Page-Speed` header stay `2.5.0`), a build
+  of the same version replaces the installed one, keeping `pagespeed.config`,
+  the optimizer service's start type and its cache size, and an older build
+  or version is refused. After installing a rebuilt installer, do not re-run
+  an older installer of the same version; uninstall first. (The 2.5.0
+  installer published before this change cannot recognize a rebuild and
+  would install beside it.) If two entries appear after re-running an older
+  2.5.0 installer, uninstall both, then install the newer build again. A
+  later build also removes both entries when it upgrades.
 
 ### Documentation
 

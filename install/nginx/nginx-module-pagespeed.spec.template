@@ -53,8 +53,8 @@ if [ -z "@@STAGEDIR@@" -o ! -d "@@STAGEDIR@@" ] ; then
 fi
 
 install -m 755 -d "$RPM_BUILD_ROOT/usr"
-# Copy each top-level staged dir that exists (el9 nginx layout is entirely
-# under /usr/: module .so, load snippet, docs — no /etc/ tree).
+# Copy each top-level staged dir that exists (module .so, load snippet and
+# docs under /usr/; the admin-restrict snippet under /etc/nginx/snippets/).
 for d in etc usr var; do
   [ -d "@@STAGEDIR@@/$d" ] && cp -a "@@STAGEDIR@@/$d/" "$RPM_BUILD_ROOT/"
 done
@@ -66,6 +66,11 @@ rm -rf "$RPM_BUILD_ROOT"
 %defattr(-,root,root)
 @@NGINX_MODULEDIR@@/ngx_pagespeed_module.so
 %config(noreplace) @@NGINX_LOADDIR@@/mod-pagespeed.conf
+# Stock el9/el10 nginx has no snippets/ directory; this package owns it. The
+# snippet is never auto-included, and an edited copy survives upgrades
+# (noreplace: the new one lands beside it as .rpmnew).
+%dir @@NGINX_SNIPPETDIR@@
+%config(noreplace) @@NGINX_SNIPPETDIR@@/pagespeed_admin_localhost.conf
 %dir @@NGINX_DOCDIR@@
 %license @@NGINX_DOCDIR@@/LICENSE
 %doc @@NGINX_DOCDIR@@/NOTICE

@@ -151,8 +151,16 @@ jobs:
           SHA: ${{ needs.ref-guard.outputs.sha }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
+          # msi-build passes the run number as the installer's build revision,
+          # the 4th ProductVersion field, which cannot exceed 65535. Fail here,
+          # before any build, rather than in msi-build.
+          if [ "$RUN_NUMBER" -gt 65535 ]; then
+            echo "::error::run number $RUN_NUMBER exceeds 65535, the largest installer build revision (install/iis/build-msi.ps1)"
+            exit 1
+          fi
           # The guard also accepts the master branch; this lane releases a tag.
           case "$REF" in
             refs/tags/module-v*) ;;
@@ -597,9 +605,12 @@ jobs:
             curl -fsSL --retry 5 --retry-all-errors -O "$url"
           done < ../optimizer-assets.txt
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
-          # The downloaded set must be exactly the set SHA256SUMS lists.
+          # The downloaded set must be exactly the set SHA256SUMS lists. A
+          # signed optimizer release also carries SHA256SUMS.asc; the pin above
+          # already fixes the bytes of SHA256SUMS, so the signature is not
+          # part of the set.
           diff <(awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS | LC_ALL=C sort) \
-               <(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | LC_ALL=C sort) \
+               <(find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name SHA256SUMS.asc -printf '%f\n' | LC_ALL=C sort) \
             || { echo "::error::the downloaded files differ from the files SHA256SUMS lists"; exit 1; }
           sha256sum -c SHA256SUMS
           ls -la
@@ -624,11 +635,12 @@ jobs:
           done
 
       # The optimizer's own SHA256SUMS was verified above; the release
-      # derives its own manifest over every file it ships.
+      # derives its own manifest over every file it ships and signs its own
+      # SHA256SUMS, so neither optimizer file travels on.
       - name: Keep the verified packages
         run: |
           set -euo pipefail
-          rm -f optimizer-dist/SHA256SUMS
+          rm -f optimizer-dist/SHA256SUMS optimizer-dist/SHA256SUMS.asc
           ls optimizer-dist
 
       - name: Upload the optimizer packages
@@ -939,7 +951,7 @@ jobs:
   # target distro against that distro's stock nginx version, wrapped into a
   # deb or rpm, and checked for leaked symbols and, for an rpm, for its name
   # routing. The legs run concurrently within the job (tools/ci/release_nginx.sh).
-  # One step list for the x64 job, its hosted twin and the arm64 job.
+  # One step list for the x64 job and its hosted twin.
   # ---------------------------------------------------------------------
   nginx-distro-build:
     name: Nginx Distro Packages (x64)
@@ -1023,15 +1035,153 @@ jobs:
           echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
           [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the nginx x64 packages did not build"; exit 1; }
 
-  nginx-distro-build-arm64:
-    name: Nginx Distro Packages (arm64)
+  # arm64: one job per distro, so the legs run side by side on separate hosted
+  # runners instead of one after another on one small runner. The plan job
+  # reads the distro names from the leg table of the release tree, so the
+  # matrix cannot drift from it; the join job runs the gates over the combined
+  # set and hands over `asset-nginx-arm64`, the one artifact the asset set
+  # expects. The per-leg artifacts have no `asset-` prefix on purpose.
+  nginx-arm64-plan:
+    name: Nginx Distro Packages (arm64, plan)
     needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success'}}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      distros: ${{ steps.plan.outputs.distros }}
+    steps:
+      # The leg table and the build driver come from master, like the other
+      # tooling of this lane, so a tag cut before a tooling change still
+      # builds with it; the packages are built from the tag's tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          submodules: false
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: List the distro legs
+        id: plan
+        run: |
+          set -euo pipefail
+          D="$(bash tools/ci/release_nginx.sh legs --arch arm64 --set main --json)"
+          echo "legs: ${D}"
+          echo "distros=${D}" >> "$GITHUB_OUTPUT"
+
+  nginx-distro-build-arm64:
+    name: Nginx Distro Packages (arm64, ${{ matrix.distro }})
+    needs: [version, vendor-ready, nginx-arm64-plan]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-arm64-plan.result == 'success' }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 350
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-arm64-plan.outputs.distros || '["none"]') }}
     env:
       ARCH: arm64
-    steps: *nginx-steps
+    steps:
+      - *clear-workspace
+
+      # The build driver (and the leg table in it) comes from master, the same
+      # file the plan job listed the matrix from; it is kept outside the
+      # workspace, which is the tag's tree.
+      - name: Check out the build tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Keep the build tooling outside the tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tools"
+          cp lane-tools/tools/ci/release_nginx.sh "${RUNNER_TEMP}/lane-tools/"
+          rm -rf lane-tools
+
+      - *tree-download
+      - *tree-extract
+
+      - name: Build the distro package
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          set -euo pipefail
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
+          mkdir -p "${CACHE_ROOT}"
+          CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
+            --arch "$ARCH" --set main --distro "$DISTRO" \
+            --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/nginx-out"
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nginx-arm64-${{ matrix.distro }}
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
+
+      - *reown
+
+  nginx-arm64-join:
+    name: Nginx Distro Packages (arm64)
+    needs: [version, nginx-distro-build-arm64]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      ARCH: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          submodules: false
+          sparse-checkout: |
+            tools/ci
+            test/package-test
+          persist-credentials: false
+
+      # The gates' driver comes from master, like the plan and the legs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Download the per-distro packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: nginx-arm64-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/nginx-out
+
+      - name: The set is exactly one package per leg
+        run: |
+          ls -l "${RUNNER_TEMP}/nginx-out"
+          bash lane-tools/tools/ci/release_nginx.sh check-set --arch "$ARCH" \
+            --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Symbol-leak gate
+        run: |
+          bash lane-tools/tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Rpm routing gate
+        run: |
+          mkdir -p "${RUNNER_TEMP}/nginx-rpms"
+          cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
+          bash lane-tools/tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-arm64
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
 
   # The el10 module builds with a much newer toolchain than the other legs and
   # is a leg of its own so that its long build cannot hold up the others.
@@ -1835,8 +1985,8 @@ jobs:
 
   package-load-check-nginx-arm64:
     name: Packaged-Nginx Load Check (arm64)
-    needs: [version, nginx-distro-build-arm64]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success'}}
+    needs: [version, nginx-arm64-join]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-arm64-join.result == 'success' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     env:
@@ -2373,6 +2523,14 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      # The installer's build revision, the 4th field of its ProductVersion
+      # (install/iis/build-msi.ps1). run_number belongs to the calling
+      # release.yml: it increases across tag runs, dispatches and dry runs,
+      # and a rerun keeps the same number: two builds then share a revision
+      # and can replace each other (intended: only a lower revision is
+      # refused). Never a date or a hash. The version job refuses a run
+      # number above 65535.
+      PAGESPEED_MSI_REVISION: ${{ github.run_number }}
     steps:
       - name: Checkout the tag (installer sources only)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2614,7 +2772,9 @@ jobs:
       - linux-ready
       - linux-arm64-release-build
       - nginx-ready
+      - nginx-arm64-plan
       - nginx-distro-build-arm64
+      - nginx-arm64-join
       - nginx-distro-build-el10
       - nginx-distro-build-el10-hosted
       - el8-ready

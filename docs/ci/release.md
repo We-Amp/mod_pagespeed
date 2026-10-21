@@ -248,14 +248,14 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
 | `linux-arm64-release-build` | hosted arm64 | the same for arm64 |
 | `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
-| `nginx-distro-build-arm64` | hosted arm64 | the same for arm64 |
+| `nginx-arm64-plan`, `nginx-distro-build-arm64`, `nginx-arm64-join` | hosted arm64 | the same for arm64, one matrix job per distro (the plan job lists them from the leg table); the join job runs the gates over the combined set and hands over `asset-nginx-arm64` |
 | `nginx-distro-build-el10` | fleet-heavy, pair | the el10 nginx module rpm, with the gates and a load check into the stock nginx |
 | `apache-el8-build` | fleet-heavy, pair | the stock Apache rpm built on el8 (glibc 2.28); input of the cPanel package only |
 | `apache-el10-build` | fleet-heavy, pair | the stock Apache rpm built natively on el10 |
 | `windows-release-build` | fleet-windows, pair | the IIS module built optimized with debug symbols, plus the pinned optimizer worker, all unsigned; hands over `unsigned-windows` |
 | `windows-ready`, `ea4-ready` | hosted | join the Windows legs and the cPanel legs |
 | `windows-sign` | hosted Windows, environment `release`, real run only | signs the IIS module and the optimizer worker and library from `unsigned-windows` with Trusted Signing, has Windows verify each signature, hands over `signed-windows` |
-| `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
+| `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), its ProductVersion `MAJOR.MINOR.BUILD.<release.yml run number>` so a rebuild of the same version upgrades the installed one, and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
 | `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows` |
 | `gate-iis-msi-upgrade` | fleet-hyperv (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
 | `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
