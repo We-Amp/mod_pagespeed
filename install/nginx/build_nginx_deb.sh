@@ -131,13 +131,15 @@ NGINX_MODULEDIR="/usr/lib/nginx/modules"
 NGINX_MODAVAIL="/usr/share/nginx/modules-available"
 NGINX_MODENABLED="/etc/nginx/modules-enabled"
 NGINX_DOCDIR="/usr/share/doc/${PACKAGE}"
+NGINX_SNIPPETDIR="/etc/nginx/snippets"
 
 install -m 755 -d \
   "${STAGEDIR}/DEBIAN" \
   "${STAGEDIR}${NGINX_MODULEDIR}" \
   "${STAGEDIR}${NGINX_MODAVAIL}" \
   "${STAGEDIR}${NGINX_MODENABLED}" \
-  "${STAGEDIR}${NGINX_DOCDIR}"
+  "${STAGEDIR}${NGINX_DOCDIR}" \
+  "${STAGEDIR}${NGINX_SNIPPETDIR}"
 
 # The module .so.
 install -m 644 "${SO_PATH}" "${STAGEDIR}${NGINX_MODULEDIR}/ngx_pagespeed_module.so"
@@ -165,6 +167,51 @@ ln -s "../../../usr/share/nginx/modules-available/mod-pagespeed.conf" \
 "${SCRIPTDIR}/nginx_package_docs.sh" "${STAGEDIR}${NGINX_DOCDIR}" "${VERSION}" "deb" \
   "${NGINX_UPSTREAM_VERSION}"
 
+# The admin-restrict snippet, a conffile at
+# /etc/nginx/snippets/pagespeed_admin_localhost.conf. Shipped as config (not
+# only as the doc sample) because minimal images -- Ubuntu's container images
+# among them -- exclude /usr/share/doc/* via dpkg path-exclude, which left
+# operators with nothing to include. Never auto-included: it takes effect only
+# where a server {} block includes it. Named pagespeed_admin_localhost.conf,
+# not after the sample: earlier READMEs told operators to copy the sample to
+# snippets/pagespeed_admin_restrict.conf, and a conffile landing on that
+# operator-made file would stop the upgrade at a dpkg conffile prompt.
+#
+# KEEP THIS TEXT STABLE. Operators are told to edit this file (to widen the
+# allow list). Once they have, ANY byte change here -- a comment included --
+# makes the next upgrade prompt on Debian/Ubuntu (a noninteractive apt-get then
+# fails with "end of file on stdin at conffile prompt" and leaves the package
+# half-configured) and write .rpmnew on EL. The long explanation lives in the
+# .sample and the README, which are free to change. The text is written here,
+# identically, in build_nginx_deb.sh and build_nginx_rpm.sh, and pinned by
+# sha256 below.
+#
+# RULE: never edit this text in place. A changed snippet ships under a NEW
+# file name (pagespeed_admin_localhost.conf stays as it is; add the new file
+# beside it and say in the CHANGELOG which one to include). A deb upgrade over
+# a locally edited conffile whose shipped text changed exits 100 at the
+# conffile prompt and would break unattended upgrades. The pin exists to stop
+# an accidental in-place edit; updating it is never the fix.
+ADMIN_SNIPPET="${STAGEDIR}${NGINX_SNIPPETDIR}/pagespeed_admin_localhost.conf"
+ADMIN_SNIPPET_SHA256="36b91a589a654d9f705e93169a7015dd7a9cb9ca580103bc495c9415bef07efd"
+cat > "${ADMIN_SNIPPET}" <<'SNIP'
+# PageSpeed admin pages, localhost only: include in every server {} block that
+# serves them; edit the allow lines to widen. Details: README.md and the .sample
+# in /usr/share/doc/nginx-module-pagespeed/.
+location =  /pagespeed_admin         { allow 127.0.0.1; allow ::1; deny all; }
+location ^~ /pagespeed_admin/        { allow 127.0.0.1; allow ::1; deny all; }
+location =  /pagespeed_global_admin  { allow 127.0.0.1; allow ::1; deny all; }
+location ^~ /pagespeed_global_admin/ { allow 127.0.0.1; allow ::1; deny all; }
+SNIP
+chmod 644 "${ADMIN_SNIPPET}"
+if [ "$(sha256sum "${ADMIN_SNIPPET}" | cut -d' ' -f1)" != "${ADMIN_SNIPPET_SHA256}" ]; then
+  echo "ERROR: the shipped admin snippet text changed (sha256 pin mismatch)." >&2
+  echo "Every operator who edited it would hit a conffile prompt (deb: apt exits 100)" >&2
+  echo "or get .rpmnew (rpm) on upgrade. Do not edit it in place: ship a changed" >&2
+  echo "snippet under a new file name instead (see the RULE comment above)." >&2
+  exit 1
+fi
+
 # --- DEBIAN control ---------------------------------------------------------
 INSTSIZE=$(du -k -s "${STAGEDIR}" | cut -f1)
 cat > "${STAGEDIR}/DEBIAN/control" <<EOF
@@ -188,9 +235,12 @@ Description: nginx module to optimize web content (mod_pagespeed ${VERSION})
 EOF
 chmod 644 "${STAGEDIR}/DEBIAN/control"
 
-# conffiles: the load snippet is operator-editable config.
+# conffiles: the load snippet and the admin-restrict snippet are
+# operator-editable config. dpkg keeps an edited one across upgrades (and asks,
+# or follows --force-confold/--force-confnew, when the shipped one changed too).
 cat > "${STAGEDIR}/DEBIAN/conffiles" <<EOF
 ${NGINX_MODAVAIL}/mod-pagespeed.conf
+${NGINX_SNIPPETDIR}/pagespeed_admin_localhost.conf
 EOF
 
 # postinst/postrm: keep nginx -t clean across install/remove, and join the

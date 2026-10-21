@@ -1337,8 +1337,9 @@ void RewriteOptions::AddProperties() {
   AddBaseProperty(
       "", &RewriteOptions::allow_vary_on_deprecated_, "avo", kAllowVaryOn,
       kDirectoryScope,
-      "Deprecated and ignored: in-place optimization no longer varies its "
-      "output by request header.",
+      "Deprecated and ignored: it no longer affects in-place optimization. "
+      "With the optimizer daemon attached, in-place images are served in the "
+      "format the request's Accept header selects, with Vary: Accept.",
       true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -1353,8 +1354,9 @@ void RewriteOptions::AddProperties() {
       true, &RewriteOptions::private_not_vary_for_ie_, "pnvie",
       kPrivateNotVaryForIE, kDirectoryScope,
       "Deprecated and ignored: in-place optimized resources are no longer "
-      "browser-dependent, so they are never served as Cache-Control: private "
-      "and never carry a Vary header.",
+      "downgraded to Cache-Control: private for Internet Explorer. With the "
+      "optimizer daemon attached, in-place images vary by the request's "
+      "Accept header and carry Vary: Accept.",
       true);
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
@@ -2126,8 +2128,8 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
              "the flush-early flow it fed was removed."},
             {kInPlaceOptimizeForBrowser,
              "Filter 'in_place_optimize_for_browser' is deprecated and has "
-             "no effect; in-place optimization no longer varies its output "
-             "by request header."},
+             "no effect; image format negotiation at the original URL is "
+             "controlled by the optimizer daemon, not this filter."},
             {kMobilizePrecomputeDeprecated,
              "Filter 'mobilize_precompute' is deprecated and has no "
              "effect."},

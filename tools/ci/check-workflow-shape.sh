@@ -26,13 +26,20 @@
 #       (ubuntu-latest, ubuntu-24.04, ubuntu-24.04-arm, windows-2022,
 #       macos-15, macos-latest) or exactly the fork/Dependabot routing
 #       expression with a fleet class (fleet-heavy, fleet-light,
-#       fleet-windows, fleet-iis, fleet-hyperv); a job routed by that expression must
-#       carry one of the four fleet guards of docs/ci/pipelines.md (the
-#       FLEET_ENABLED kill switch in its general, fleet-only or
-#       dispatch-only form, or the fleet-iis form that adds
+#       fleet-windows, fleet-iis, fleet-hyperv), or the switch routing
+#       expression, which also sends the job to the hosted side while the
+#       FLEET_ENABLED variable is 'false'. A job routed by the plain
+#       expression must carry one of the four fleet guards of
+#       docs/ci/pipelines.md (the FLEET_ENABLED kill switch in its general,
+#       fleet-only or dispatch-only form, or the fleet-iis form that adds
 #       FLEET_IIS_ENABLED; a job routed to fleet-iis or fleet-hyperv must carry the last) verbatim as its if:, the general form optionally
 #       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
-#       prefixed by `!cancelled() && needs.<job>.result == 'success' && `;
+#       prefixed by `!cancelled() && needs.<job>.result == 'success' && `.
+#       The fleet-only and fleet-iis guards also have a switch form that
+#       tests `!= 'false'` (unset means on). A job routed by the switch
+#       expression carries no guard: it always runs, hosted or on the fleet;
+#       its if: is empty or just `needs.changes.outputs.<name> == 'true'`.
+#       The release lane keeps the plain expression and the original guards;
 #   (f) in a workflow_call workflow: a top-level `permissions:` block is
 #       required and must grant no write access; write access to GitHub (a
 #       `: write` permission, plain or quoted, or write-all) is allowed only
@@ -94,6 +101,11 @@ FLEET_IIS_GUARD="\${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 
 # Dispatch-only fleet jobs (manual lanes): a workflow_dispatch is never a
 # fork pull request.
 FLEET_DISPATCH_GUARD="\${{ github.event_name == 'workflow_dispatch' && vars.FLEET_ENABLED == 'true' }}"
+
+# The same guards for the tiers that move to the hosted side while the
+# FLEET_ENABLED variable is 'false' (unset means on).
+FLEET_ONLY_SWITCH_GUARD="\${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}"
+FLEET_IIS_SWITCH_GUARD="\${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}"
 
 status=0
 err() { echo "::error::$*" >&2; status=1; }
@@ -269,6 +281,33 @@ is_fleet_route() {
   return 1
 }
 
+# The switch routing expression: the hosted side is chosen when the kill
+# switch is off as well as for a fork or Dependabot pull request, so the job
+# needs no guard. Not for the classes that have no hosted twin.
+is_fleet_switch_route() {
+  local v="$1" h f want
+  for h in ${HOSTED_LABELS}; do
+    for f in fleet-heavy fleet-light fleet-windows; do
+      want="\${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && '${h}' || '${f}' }}"
+      [ "${v}" = "${want}" ] && return 0
+    done
+  done
+  return 1
+}
+
+# The only if: a switch-routed job may carry: none, or the path filter alone.
+is_switch_if() {
+  local v="$1" name
+  [ -z "${v}" ] && return 0
+  case "${v}" in
+    "\${{ needs.changes.outputs."*" == 'true' }}")
+      name="${v#\$\{\{ needs.changes.outputs.}"; name="${name% == \'true\' \}\}}"
+      printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+      ;;
+  esac
+  return 1
+}
+
 # The fleet guard exactly, or the guard narrowed by a path filter: the guard
 # in parentheses, then `&& needs.changes.outputs.<name> == 'true'`, where the
 # `changes` job is the hosted job that diffs the pull request's files.
@@ -294,6 +333,22 @@ is_fleet_guard() {
       printf '%s' "${mid}" | grep -qE "^(needs\.[a-z0-9-]+\.result == 'success' && )+\$" && return 0
       ;;
   esac
+  return 1
+}
+
+# A fleet-iis guard (either form) in parentheses, narrowed by a path filter:
+# `&& needs.changes.outputs.<name> == 'true'`.
+is_iis_narrowed() {
+  local v="$1" g name
+  for g in "${FLEET_IIS_GUARD}" "${FLEET_IIS_SWITCH_GUARD}"; do
+    g="${g#\$\{\{ }"; g="${g% \}\}}"
+    case "${v}" in
+      "\${{ (${g}) && needs.changes.outputs."*" == 'true' }}")
+        name="${v#"\${{ (${g}) && needs.changes.outputs."}"; name="${name% == \'true\' \}\}}"
+        printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+        ;;
+    esac
+  done
   return 1
 }
 
@@ -344,19 +399,25 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
       { [ "${kind}" = "KEY" ] && [ "${key}" = "runs-on" ]; } || continue
       if [ -z "${val}" ]; then
         err "${wf}:${lineno}: multi-line runs-on is not supported by this gate (job '${job}')"
-      elif ! is_hosted_label "${val}" && ! is_fleet_route "${val}"; then
+      elif ! is_hosted_label "${val}" && ! is_fleet_route "${val}" && ! is_fleet_switch_route "${val}"; then
         err "${wf}:${lineno}: runs-on '${val}' is neither a hosted label nor the routing expression with a fleet class (rule d)"
+      elif is_fleet_switch_route "${val}"; then
+        if_val="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="if" {print $5}')"
+        if ! is_switch_if "${if_val}"; then
+          err "${wf}:${lineno}: switch-routed job '${job}' may carry no if: or only a needs.changes.outputs.<name> == 'true' path filter (rule d)"
+        fi
       elif is_fleet_route "${val}"; then
         # A fleet job carries the fleet guard verbatim as its if: (the
         # FLEET_ENABLED kill switch, docs/ci/pipelines.md).
         if_val="$(printf '%s\n' "${records}" | awk -F"${TAB}" -v j="${job}" '$1=="KEY" && $2==j && $3=="if" {print $5}')"
         if is_fleet_iis_route "${val}"; then
           route_class="${val%\' \}\}}"; route_class="${route_class##*\'}"
-          if [ "${if_val}" != "${FLEET_IIS_GUARD}" ]; then
+          if [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
             err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
           fi
         elif ! is_fleet_guard "${if_val}" \
            && [ "${if_val}" != "${FLEET_ONLY_GUARD}" ] \
+           && [ "${if_val}" != "${FLEET_ONLY_SWITCH_GUARD}" ] \
            && [ "${if_val}" != "${FLEET_DISPATCH_GUARD}" ]; then
           err "${wf}:${lineno}: fleet job '${job}' does not carry a fleet guard verbatim as its if: (rule d)"
         fi

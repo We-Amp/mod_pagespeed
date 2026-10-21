@@ -66,6 +66,40 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     steps:
       - run: echo after the pair
+  switch-vendor:
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    steps:
+      - run: echo switch
+  switch-corpus:
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
+    steps:
+      - run: echo switch light
+  switch-win:
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
+    steps:
+      - run: echo switch windows
+  switch-smoke:
+    needs: changes
+    if: ${{ needs.changes.outputs.css == 'true' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    steps:
+      - run: echo switch smoke
+  switch-rig:
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    steps:
+      - run: echo switch rig
+  switch-iis-rig:
+    if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    steps:
+      - run: echo switch iis
+  filtered-iis-rig:
+    needs: changes
+    if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && needs.changes.outputs.iis == 'true' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
+    steps:
+      - run: echo filtered iis
   sign:
     runs-on: windows-2022
     environment: release

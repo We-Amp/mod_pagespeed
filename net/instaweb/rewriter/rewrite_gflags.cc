@@ -160,9 +160,9 @@ DEFINE_bool(in_place_preemptive_rewrite_javascript, true,
             "when configured to use IPRO. If --js_preserve_urls is not set, "
             "this flag has no effect.");
 DEFINE_bool(private_not_vary_for_ie, true,
-            "Deprecated and ignored: in-place optimized resources never "
-            "carry a Vary header and are never served as Cache-Control: "
-            "private, so there is nothing left for this flag to control.");
+            "Deprecated and ignored: in-place optimized resources are no "
+            "longer downgraded to Cache-Control: private for Internet "
+            "Explorer, so there is nothing left for this flag to control.");
 DEFINE_bool(image_preserve_urls, false,
             "Boolean to indicate whether image"
             "URLs should be preserved.");

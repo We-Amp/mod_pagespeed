@@ -323,17 +323,32 @@ Reproduced, and therefore served from the cache:
 - `Cache-Control` — rebuilt from the origin's lifetime and its cache
   directives. Directives outside that set, such as `immutable`,
   `stale-while-revalidate` and `stale-if-error`, are not carried.
-- `Vary: Accept-Encoding` and `Vary: Accept`. The second is reproduced from the
-  fact recorded with the resource that the origin negotiates on `Accept`, and is
-  emitted with whichever copy is sent — the origin's own bytes, or an optimized
-  one where such a copy exists — so a cache in front of this server is still
-  told not to hand one client's representation to another. What is reproduced
-  is that fact; this server does not go back to the origin for a second
-  representation. Worth knowing for capacity planning rather than correctness:
-  such a resource is served as the origin's own bytes today, because the
-  optimizer deliberately derives no optimized copies for one — they would all
-  descend from whichever representation the first requester happened to
-  elicit.
+- `Vary: Accept` for a negotiated image. When this module serves an optimized
+  image it chose from the request's `Accept` header, it says so: AVIF when the
+  header names `image/avif`; WebP when it names `image/webp` or contains
+  `image/*` or `*/*`, or when there is no `Accept` header at all (RFC 9110
+  reads a wildcard and an absent header as "any type"); the original format
+  otherwise. When no copy in that format exists (not written yet, or declined
+  by the optimizer's quality check), the original format is served; a client
+  naming `image/avif` never gets WebP instead. So `curl` with its default
+  `Accept: */*` receives WebP for a `.jpg` URL; a client that needs the
+  original format sends `Accept: image/jpeg` (or whichever format it wants,
+  with no wildcard). A response carrying the recorded original, rather than an
+  optimized copy, is not negotiated and carries no `Vary: Accept` for this
+  reason. The selection also uses the device class and Save-Data, which this
+  `Vary` does not yet name
+  ([#102](https://github.com/We-Amp/mod_pagespeed/issues/102)).
+- `Vary: Accept-Encoding`, and `Vary: Accept` for an origin that negotiates on
+  `Accept`. The second is reproduced from the fact recorded with the resource
+  that the origin negotiates on `Accept`, and is emitted with whichever copy
+  is sent — the origin's own bytes, or an optimized one where such a copy
+  exists — so a cache in front of this server is still told not to hand one
+  client's representation to another. What is reproduced is that fact; this
+  server does not go back to the origin for a second representation. Worth
+  knowing for capacity planning rather than correctness: such a resource is
+  served as the origin's own bytes today, because the optimizer deliberately
+  derives no optimized copies for one — they would all descend from whichever
+  representation the first requester happened to elicit.
 - `Content-Encoding` — never the origin's (a response whose origin sends one is
   marked, as below), but the module's own: with
   `ModPagespeedDaemonServeStoredEncodings on` it is emitted for a stored

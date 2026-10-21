@@ -22,6 +22,14 @@ tree root passed to `tools/ci/check-workflow-shape.sh`:
 - `bad-guard-iis-only-term/` and `bad-guard-iis-no-fork/` break the fleet-iis
   guard; `bad-guard-iis-class/` routes to fleet-iis with the plain fleet-only
   guard; `bad-guard-hyperv-class/` does the same for fleet-hyperv.
+- `good/` also has jobs on the switch routing expression (no guard, or the
+  path filter alone) and the `!= 'false'` forms of the fleet-only and fleet-iis
+  guards; `bad-switch-guard/` (a guard on a switch-routed job),
+  `bad-switch-drift/`, `bad-switch-iis-class/` (the switch expression on a
+  class with no hosted twin), `bad-switch-path-drift/` and
+  `bad-guard-only-switch-drift/` (the switch form without the fork term) break them.
+  `good/` also has a fleet-iis job whose guard is narrowed by a path filter;
+  `bad-guard-iis-path-drift/` (the narrowing without the full guard) breaks it.
 - `bad-*/` must each fail (exit 1) and name the rule in the message.
 
 The bad trees violate the gate on purpose; the token scan excludes this

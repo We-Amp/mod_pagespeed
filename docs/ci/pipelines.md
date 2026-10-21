@@ -42,6 +42,7 @@ tier.
 | `changes` | hosted | | path filters (see below) |
 | `guards`, `blocking-dep-scan`, `dep-scan`, `browser-js-tests`, `console-tests` | hosted | | the hosted checks |
 | `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
+| `sidecar-tests` | hosted | `changes` | the xunit suite of the ASP.NET Core sidecar (`aspnetcore/`) under .NET 8 and .NET 10 (path-filtered, see "The sidecar native pair") |
 | `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |
 | `vendor` | `fleet-heavy` | | vendors the dependencies; publishes the tarball (hub channel) or caches `vendor/` (cache channel) |
 | `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
@@ -52,7 +53,11 @@ tier.
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
-| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests and while `FLEET_ENABLED` is not `true`; carries the "only" guard below |
+| `sidecar-pair` | `fleet-heavy` | `changes` | builds the sidecar's native pair for x64, gates it and runs the sidecar tests with the live nginx tests against it (path-filtered, see "The sidecar native pair") |
+| `sidecar-pair-arm64` | hosted arm64 | `changes` | the same for arm64 |
+| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
+| `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
+| `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
 
 Application Verifier and the other IIS lanes that run longer belong to the
 later tiers. `iis-sys-tests` clears stale verifier settings before the run and
@@ -100,11 +105,73 @@ the checkout's cleanup on a persistent runner.
 ### Path-filtered hosted guards
 
 The `changes` job diffs a pull request against its base and publishes one
-boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`). The jobs that only
+boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`, `sidecar`). The jobs that only
 matter when their inputs change run when their filter is true, and are skipped
-otherwise; outside a pull request every filter is true. The aggregate gate
+otherwise; outside a pull request every filter is true, except `sidecar` on a
+push, which diffs the pushed range (see "The sidecar native pair"). The aggregate gate
 treats a skipped job as fine. A build runner job that depends on a filter
 narrows its guard as described under "The guard and the kill switch".
+
+### The sidecar native pair
+
+The ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`, source in `aspnetcore/`)
+ships a native pair per architecture: an nginx, the `ngx_pagespeed_module.so`
+built against exactly that nginx, and the `pagespeed-nginx-launch` shim.
+`tools/ci/release_sidecar.sh` builds and checks it, and the module release lane
+uses the same script for the pair it releases (`docs/ci/release.md`).
+
+- **Build base and compatibility floor.** The pair is built by the focal recipe
+  of `install/nginx/build_module_in_container.sh` in an Ubuntu 20.04 container
+  pinned by digest (`FOCAL_IMAGE` in the script). Its glibc 2.31 is the
+  compatibility floor of the sidecar, with libstdc++ linked statically. The
+  matched nginx also links `libpcre.so.3` (the `libpcre3` package), which is
+  what limits the hosts to Debian 11 and 12 and Ubuntu 20.04 to 24.04: Debian 13
+  and Ubuntu 26.04 no longer ship `libpcre3`, and Enterprise Linux and Amazon
+  Linux never had it under that name. (`libcrypt.so.1` is no obstacle: it is
+  `libcrypt1` on Debian and Ubuntu and `libxcrypt-compat` on EL9 and Amazon
+  Linux 2023.) Ubuntu 20.04 is past
+  its standard support (May 2025); it is only the build base, and nothing of
+  it ships beyond what the glibc 2.31 floor implies. Moving to a newer base
+  raises the floor and drops the hosts below it, so it is a support decision,
+  not an image refresh. The image digest is updated deliberately, together
+  with this paragraph if the base changes.
+- **Gates.** The module exports only the nginx module symbols and links no
+  OpenSSL; nginx and the shim link no OpenSSL; none of the three needs
+  libstdc++ or a glibc above 2.31. The pair then loads, serves and optimizes in
+  Debian 11 and Debian 12 containers (`test/package-test/check-sidecar-pair.sh`:
+  `X-Page-Speed` carries the version of the tree, no `X-PageSpeed-Warn`), is
+  stripped (debug files kept apart), and goes through the gate and the smoke
+  again.
+- **Tests.** The xunit suite of `aspnetcore/` runs under .NET 8 and .NET 10 in
+  pinned SDK containers, as the runner user, with a locked restore (the test
+  project's `packages.lock.json` and `packages.net10.lock.json`). With the
+  pair, the pair is placed next to the test assembly and
+  `PAGESPEED_SIDECAR_REQUIRE_LIVE_NGINX=1` makes the live nginx tests
+  (`InverseModeIntegrationTests`) fail instead of skip when the pair is
+  missing. Every test must pass, none may be skipped, and at least
+  `SIDECAR_MIN_TESTS` (201, the size of the suite) must run per framework.
+  Because a live test without nginx returns early and passes, the pass count
+  alone cannot show the live tests ran: each live test writes
+  `live-nginx: <path>` to its output, and the script requires every
+  `InverseModeIntegrationTests` result, at least `SIDECAR_LIVE_TESTS` (8), to
+  have passed with the path of the bundled nginx. `live-guard` is the
+  negative control: required and without a pair, all of them must fail.
+  Raise the two numbers when tests are added.
+- **In the PR tier.** `sidecar-tests` (hosted, no pair) runs the suite and
+  `live-guard` on every pull request that touches the `sidecar` filter:
+  `aspnetcore/`, the recipe, the launch shim, the symbol gates, the pair smoke
+  and the script itself. `sidecar-pair` and `sidecar-pair-arm64` build the
+  pair on the same filter and run the whole sequence
+  (`release_sidecar.sh check`). The build is cold by design (the recipe uses
+  no Bazel disk cache, so that every object of the module is materialized),
+  which is why it is path-filtered, on a push to `master` as well: there the
+  filter compares the pushed range (`github.event.before` to the pushed
+  commit; a new branch or an unreachable `before` counts as everything
+  changed), while every other filter stays true on a push. With
+  `FLEET_ENABLED` `false` the x64 leg runs on a hosted runner, and on a build
+  runner it keeps to the slot's CPU and memory budget (`CI_SLOT_CPUS`,
+  `CI_SLOT_MEM_GB`). The nightly tier builds the pair on hosted
+  runners once a week.
 
 ## The shape
 
@@ -154,21 +221,53 @@ hosted side and uses the "only" guard below.
 | `fleet-iis` | a Windows host with the IIS role, Application Verifier and the sanitizer runtime; runs the IIS system tests and the sanitizer and Application Verifier jobs, and can have more than one host |
 | `fleet-hyperv` | a Windows host with the Hyper-V role and the test guests with their clean checkpoints; runs the installer-upgrade and cPanel release gates |
 
-### The guard and the kill switch
+### The kill switch
 
-Every job routed by that expression also carries this guard, verbatim, as
-its `if:`:
+`FLEET_ENABLED` is a repository variable. Unset or `true` means the build
+runners are in use; `false` is the kill switch.
+
+The PR, full and nightly tiers use the switch routing expression, copied
+verbatim into every job that has a hosted twin. It sends the job to the hosted
+side for a fork or Dependabot pull request and also while the switch is off:
+
+```yaml
+runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+```
+
+Such a job carries no `if:` guard (it always runs, on one side or the other),
+except a path filter alone (`needs.changes.outputs.<name> == 'true'`). Jobs
+with no hosted twin keep the plain routing expression and a guard whose
+`FLEET_ENABLED` term is `!= 'false'`: they are skipped, not failed, while the
+switch is off, and a `fleet-off-notice` job in each tier says so in an
+annotation and the job summary.
+
+To flip it: Settings, Secrets and variables, Actions, Variables, set
+`FLEET_ENABLED` to `false` (or `gh variable set FLEET_ENABLED --body false
+-R We-Amp/<repo>`); set it back to `true` to go back (do not delete it: the release lanes and the IIS gates still test for `true`). It is read when
+a run starts, so re-run a run that began before the change. The hosted legs
+run without the hub and the remote cache and are slower; the IIS system
+tests, Application Verifier lanes and the privileged stress rigs are skipped,
+and the CI gate accepts those skips because the switch is off
+(`fleet-only-skip-check` fails any other skip of the IIS system tests).
+
+The release lane does not use the switch routing expression. It keeps the
+plain routing expression, the original guards (`FLEET_ENABLED == 'true'`) and
+its hosted twins, so an unset variable still sends a release to the hosted
+twins and never degrades silently; see "Hosted twins and joins".
+
+#### The plain guards
+
+A job routed by the plain expression (the release lane, and the jobs without a
+hosted twin) carries one of these guards, verbatim, as its `if:`:
 
 ```yaml
 if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
 ```
 
-`FLEET_ENABLED` is a repository variable. While it is unset (or anything but
-`true`), these jobs are skipped for same-repository events and still run on
-hosted runners for fork and Dependabot pull requests, which need no build
-runner. Setting it to `true` turns the build-runner legs on; clearing it is
-the kill switch that takes every such job off the build runners at once, with
-no workflow change.
+While the variable is unset (or anything but `true`), these jobs are skipped
+for same-repository events and still run on hosted runners for fork and
+Dependabot pull requests, which need no build runner. Clearing it is the kill
+switch for the release lane's build jobs, which then run their hosted twins.
 
 `FLEET_IIS_ENABLED` is a second repository variable for the jobs of the
 `fleet-iis` and `fleet-hyperv` classes, which have no hosted twin. Each of them also requires it to
@@ -199,6 +298,10 @@ requires it, and no other guard, on every job routed to that class.
 ```yaml
 if: ${{ vars.FLEET_ENABLED == 'true' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
 ```
+
+The PR, full and nightly tiers use the **only** and **fleet-iis** guards with
+the first term written `vars.FLEET_ENABLED != 'false'` (unset means on); the
+gate accepts both spellings.
 
 A job that needs more conditions (for example a path filter) appends them
 together with a matching gate rule; the gate rejects any routed job whose
@@ -279,6 +382,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `iis-appverif-matrix` | fleet-iis | the zero-copy merge gate, then the Application Verifier provider matrix (`arms` input) |
 | `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
 | `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
+| `sidecar-pair-weekly`, `sidecar-pair-weekly-arm64` | hosted | Sundays and on a manual dispatch (`sidecar-weekly` decides): vendor fresh and run `tools/ci/release_sidecar.sh check` for the ASP.NET Core sidecar's native pair, x64 and arm64, to catch drift the path-filtered pull request jobs cannot see (see "The sidecar native pair") |
 
 **Where the pin staleness check lives.** The blocking dependency gate of the
 pull request tier scans against the pinned grype database in

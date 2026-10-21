@@ -7,11 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The bundled and required nginx is updated to 1.30.6, which fixes two
+  memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).** The nginx
+  module packages and the NuGet sidecar package now build against and depend on
+  nginx 1.30.6. **Update recommended.**
+
+### Added
+
+- **nginx packages: the admin-page restriction is installed as a config
+  file.** `nginx-module-pagespeed` now installs
+  `/etc/nginx/snippets/pagespeed_admin_localhost.conf`, the `location`
+  blocks that limit `/pagespeed_admin` and `/pagespeed_global_admin` to
+  localhost. Before, the blocks shipped only as a sample under
+  `/usr/share/doc/`, which minimal images such as the Ubuntu container images
+  do not install. The file is not included anywhere on its own: add
+  `include /etc/nginx/snippets/pagespeed_admin_localhost.conf;` to each
+  `server {}` block that serves the admin pages. It is a conffile on Debian
+  and Ubuntu and `%config(noreplace)` on Enterprise Linux, so your edits
+  survive upgrades. A copy you made earlier at
+  `/etc/nginx/snippets/pagespeed_admin_restrict.conf` is left alone; include
+  one of the two. The file's text is never changed in place (a changed
+  snippet would ship under a new file name); should it ever change and you
+  edited your copy, Debian/Ubuntu ask which
+  version to keep (or follow `--force-confdef`/`--force-confold`) and EL
+  writes the new one as `.rpmnew`. Remove the `include` lines before purging
+  (deb) or removing (rpm) the package, or `nginx -t` fails.
+
+### Changed
+
+- **ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`,
+  `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`): the packages move to the
+  product version.** The packages are versioned with mod_pagespeed itself,
+  and the fourth-digit packaging revisions (1.15.0.1 to 1.15.0.7) end: a
+  sidecar fix now ships with a product release. The first sidecar package on
+  the product version is 2.5.1, released with module 2.5.1: the module
+  release 2.5.0 carries no native pair, so there is no sidecar package 2.5.0.
+  NuGet orders 2.5.1 after 1.17.0; a reference pinned to `1.*` does not pick
+  it up. The native pair the package carries (nginx 1.30.6, the module built
+  against it and the launch shim) is built and tested by the module release,
+  live nginx tests included, and released with it.
+
 ### Fixed
 
 - A read from the optimizer worker that timed out could be reported as a
   dropped connection when the host's clock ran slow; it is now reported as a
   timeout whenever the transfer itself timed out.
+
+- **IIS installer: a rebuilt installer of the same version now upgrades the
+  installed one.** Before, a second build of the same version (a reissued
+  installer) installed beside the first, leaving two entries in Programs and
+  Features. The installer now carries a build number as the fourth part of
+  its version (shown as the version in Programs and Features; the product
+  version, the file name and the `X-Page-Speed` header stay `2.5.0`), a build
+  of the same version replaces the installed one, keeping `pagespeed.config`,
+  the optimizer service's start type and its cache size, and an older build
+  or version is refused. After installing a rebuilt installer, do not re-run
+  an older installer of the same version; uninstall first. (The 2.5.0
+  installer published before this change cannot recognize a rebuild and
+  would install beside it.) If two entries appear after re-running an older
+  2.5.0 installer, uninstall both, then install the newer build again. A
+  later build also removes both entries when it upgrades.
+
+### Documentation
+
+- **The sidecar's supported hosts are Debian 11 and 12 and Ubuntu 20.04 to
+  24.04.** The binaries need glibc 2.31 or newer, and the bundled nginx links
+  `libpcre.so.3`, which only the `libpcre3` package provides: Debian 13 and
+  Ubuntu 26.04 no longer ship it, and Enterprise Linux and Amazon Linux never
+  had it under that name, so the RHEL and AlmaLinux 9 and Amazon Linux 2023
+  hosts named earlier are not supported. (`libcrypt.so.1`, the other library
+  nginx links, is available on all of them, from `libxcrypt-compat` on EL9
+  and Amazon Linux 2023.) The pair is built on Ubuntu 20.04, which is past
+  its standard support; it is the build base that sets the glibc 2.31 floor,
+  and nothing of it ships beyond that.
+
+- **The shipped `pagespeed.conf` no longer says in-place optimization never
+  varies by request header.** That holds only for the module's own in-place
+  path. With the optimizer daemon attached, as the packages that depend on
+  pagespeed-optimizer configure it, images at their original URLs are served
+  in the format the request's `Accept` header selects, with `Vary: Accept`:
+  WebP for `*/*`, `image/*` or no `Accept` header, AVIF only when
+  `image/avif` is named, and the original format otherwise. The comment now
+  describes both paths. The help text of the retired `AllowVaryOn` and
+  `PrivateNotVaryForIE` directives (and of the `private_not_vary_for_ie`
+  flag) and the deprecation warning for the
+  `in_place_optimize_for_browser` filter made the same claim and are
+  corrected; this is a text change only, and behaviour is unchanged.
 
 ## [2.5.0] - 2026-10-19
 
@@ -78,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MapPageSpeedInfo` requires authorization by default, and loopback checks
   use the connection's own address. Affects `WeAmp.PageSpeed.Sidecar` up to
   and including 1.17.0; the fixes are in this source release and an updated
-  package follows separately. **Update recommended.**
+  package follows separately, as `WeAmp.PageSpeed.Sidecar` 2.5.1 (see
+  Unreleased). **Update recommended.**
 
 ### Changed
 
@@ -323,10 +407,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   security advisories published on 2026-08-26. Releases up to and including
   1.17.0 build the Envoy filter against Envoy 1.37.5 or older, which lack
   these fixes. **Update recommended.**
-- **The nginx bundled with the NuGet sidecar package is updated to 1.30.5.**
-  It carries the upstream fix for CVE-2026-90439 in nginx's HTTP/3 module.
-  The bundled nginx is not built with HTTP/3, so it was not affected; the
-  update keeps vulnerability scans clean.
+- **The sidecar's build recipe moves the bundled nginx to 1.30.5.** It
+  carries the upstream fix for CVE-2026-90439 in nginx's HTTP/3 module. The
+  bundled nginx is not built with HTTP/3, so it was not affected; the update
+  keeps vulnerability scans clean. Correction: no sidecar package was
+  published with this release. The current `WeAmp.PageSpeed.Sidecar` 1.17.0
+  bundles nginx 1.30.4. The next package, 2.5.1, bundles nginx 1.30.6,
+  which carries the 1.30.5 fix.
 
 ### Fixed
 
