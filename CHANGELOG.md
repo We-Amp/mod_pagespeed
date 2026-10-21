@@ -83,12 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pagespeed.config`, the optimizer service's start type and its cache size,
   and an older build or version is refused. After installing a rebuilt
   installer, do not re-run an older installer of the same version; uninstall
-  first. (The 2.5.0 installer published before this change cannot recognize a
-  rebuild and would install beside it.) If two entries appear after re-running
-  an older 2.5.0 installer, uninstall both, then install the newer build
-  again. A later build also removes both entries when it upgrades.
+  first. Installers up to and including 2.5.0 cannot recognize a rebuild and
+  install beside it; if two entries appear after running one, uninstall both,
+  then install 2.5.1 again. A later build also removes both entries when it
+  upgrades.
 
 ### Documentation
+
+- **How to verify a release is documented in `SECURITY.md`:** check
+  `SHA256SUMS.asc` against `RELEASE-SIGNING-KEY.asc` (fingerprint
+  `411D EFDB 5713 51D2 B25A EFCC 9C02 B5BD CCE7 5313`), then the files against
+  `SHA256SUMS`.
 
 - **The sidecar's supported hosts are Debian 11 and 12 and Ubuntu 20.04 to
   24.04.** The binaries need glibc 2.31 or newer, and the bundled nginx links

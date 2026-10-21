@@ -4,7 +4,9 @@
 **Status:** Stable
 **Packages:** `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS
 installer and the cPanel package, all 2.5.1, with `pagespeed-optimizer`
-2.5.1. The ASP.NET Core sidecar packages (`WeAmp.PageSpeed.Sidecar`,
+2.5.1; the container images, the NuGet packages and the Helm chart's
+application version (chart 0.3.11) are 2.5.1 as well. The ASP.NET Core
+sidecar packages (`WeAmp.PageSpeed.Sidecar`,
 `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) move to the product version
 with this release, as 2.5.1.
 
@@ -52,8 +54,15 @@ with this release, as 2.5.1.
 - Changed (sidecar version pins): update a NuGet reference pinned to `1.*`
   to pick up 2.5.1.
 
-- Nothing else in the configuration changes, and the cache format is the one
-  2.5.0 introduced, so the cache stays warm across this upgrade.
+- Purge the cache once after upgrading the module and `pagespeed-optimizer`
+  together: in the console use purge everything, or send
+  `POST /v1/cache/purge` with `{"scope": "all"}` to the management API. Image
+  variants stored by 2.5.0 are otherwise served until they are refreshed, and
+  the optimizer rebuilds them as images are requested again. The cache format
+  is the one 2.5.0 introduced, so nothing else is cleared and no other
+  configuration changes. Behind a shared cache or CDN, also purge the images
+  it holds once, since copies cached before the upgrade still carry
+  `Vary: Accept` alone.
 
 ---
 
