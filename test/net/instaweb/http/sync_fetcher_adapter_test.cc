@@ -87,7 +87,8 @@ class DelayedFetcher : public UrlAsyncFetcher {
         sim_success_(sim_success),
         fetch_pending_(false),
         fetch_(nullptr),
-        sync_(nullptr) {}
+        sync_(nullptr),
+        release_(nullptr) {}
 
   void Fetch(const GoogleString& url, MessageHandler* handler,
              AsyncFetch* fetch) override {
@@ -106,6 +107,10 @@ class DelayedFetcher : public UrlAsyncFetcher {
 
   void set_sync(WorkerTestBase::SyncPoint* sync) { sync_ = sync; }
 
+  // If set, the delayed result is held back until `release` is notified, so a
+  // test can make the caller give up first however slow the host is.
+  void set_release(WorkerTestBase::SyncPoint* release) { release_ = release; }
+
  private:
   ~DelayedFetcher() override {}
 
@@ -116,6 +121,9 @@ class DelayedFetcher : public UrlAsyncFetcher {
           parent_(parent) {}
 
     void Run() override {
+      if (parent_->release_ != nullptr) {
+        parent_->release_->Wait();
+      }
       parent_->timer_->SleepMs(parent_->delay_ms_);
       parent_->ReportResult();
       delete this;
@@ -155,6 +163,9 @@ class DelayedFetcher : public UrlAsyncFetcher {
 
   // If non-NULL, will be used to wake up an owner when done.
   WorkerTestBase::SyncPoint* sync_;
+
+  // If non-NULL, the delayed result waits for this before it is reported.
+  WorkerTestBase::SyncPoint* release_;
 };
 
 }  // namespace
@@ -215,7 +226,10 @@ class SyncFetcherAdapterTest : public testing::Test {
     callback->Release();
   }
 
-  void TestFailedFetch(UrlAsyncFetcher* async_fetcher, int64 timeout_ms) {
+  // If `release` is non-NULL it is notified once the callback is released,
+  // so a fetcher waiting on it can only answer after the caller gave up.
+  void TestFailedFetch(UrlAsyncFetcher* async_fetcher, int64 timeout_ms,
+                       WorkerTestBase::SyncPoint* release = nullptr) {
     TrapWriter writer;
     RequestContextPtr ctx(
         RequestContext::NewTestRequestContext(thread_system_.get()));
@@ -226,6 +240,9 @@ class SyncFetcherAdapterTest : public testing::Test {
     Wait(callback, timeout_ms);
     EXPECT_FALSE(callback->success());
     callback->Release();
+    if (release != nullptr) {
+      release->Notify();
+    }
   }
 
   void TestTimeoutFetch(DelayedFetcher* async_fetcher) {
@@ -235,8 +252,15 @@ class SyncFetcherAdapterTest : public testing::Test {
     // fixture owns the timer and we need that to be alive from the callbacks.
     async_fetcher->set_sync(&sync);
 
+    // Hold the delayed answer until the caller has timed out and released the
+    // callback. A wall-clock race between the 1 ms wait and the fetcher's
+    // delay lets a slow host answer first and fails the test.
+    WorkerTestBase::SyncPoint release(thread_system_.get());
+    async_fetcher->set_release(&release);
+
     // First let the sync fetcher timeout, and return failure.
-    TestFailedFetch(async_fetcher, 1 /* one millisecond timeout here */);
+    TestFailedFetch(async_fetcher, 1 /* one millisecond timeout here */,
+                    &release);
     sync.Wait();
   }
 
