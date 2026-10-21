@@ -304,6 +304,7 @@ jobs:
         name: Rebuild the admin console with the release version
         env:
           VITE_APP_VERSION: ${{ needs.version.outputs.release_tag }}
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
         run: |
           set -euo pipefail
           # A hosted runner has node but no pnpm; corepack provides the
