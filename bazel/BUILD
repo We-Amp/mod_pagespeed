@@ -40,6 +40,14 @@ config_setting(
 
 # =============================================================================
 # AVIF codec stack — see bazel/libaom.bzl and bazel/libavif.bzl.
+# Prebuilt protoc, used only by --config=prebuilt-protoc (pagespeed.bazelrc).
+# Without it protoc and its language generators are compiled from source in
+# the exec configuration on every cold build.
+sh_binary(
+    name = "prebuilt_protoc",
+    srcs = ["@protoc_prebuilt_linux_x86_64//:bin/protoc"],
+)
+
 # =============================================================================
 
 # The AV1 codecs are built by cmake through rules_foreign_cc, so they do NOT

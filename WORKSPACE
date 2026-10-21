@@ -85,6 +85,18 @@ load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies")
 
 rules_proto_dependencies()
 
+# Prebuilt protoc for the opt-in `--config=prebuilt-protoc` (pagespeed.bazelrc).
+# Linux x86-64 only. Must be the same release as PROTOBUF_COMMIT in
+# bazel/repositories.bzl: generated code refuses to compile against a runtime
+# of another version. Nothing references this repository in the default build,
+# so it is never fetched unless that config is used.
+http_archive(
+    name = "protoc_prebuilt_linux_x86_64",
+    build_file_content = 'exports_files(["bin/protoc"])\n',
+    sha256 = "96553041f1a91ea0efee963cb16f462f5985b4d65365f3907414c360044d8065",
+    url = "https://github.com/protocolbuffers/protobuf/releases/download/v31.1/protoc-31.1-linux-x86_64.zip",
+)
+
 # rules_foreign_cc - for building cmake/autoconf projects (curl, libmemcached)
 http_archive(
     name = "rules_foreign_cc",

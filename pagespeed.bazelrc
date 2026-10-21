@@ -142,6 +142,15 @@ build:vendored --override_repository=cyclone=vendor/cyclone
 build:vendored --override_repository=aom_src=vendor/aom
 
 # =============================================================================
+# Prebuilt protoc (opt-in, Linux x86-64 only)
+# =============================================================================
+# A cold build otherwise compiles protoc, its language generators and their
+# abseil dependencies from source for the exec configuration. This points the
+# proto rules at the matching released protoc binary instead. The generated
+# code is the same; the default build is unchanged.
+build:prebuilt-protoc --proto_compiler=//bazel:prebuilt_protoc
+
+# =============================================================================
 # Windows performance tuning for high-core-count machines
 # =============================================================================
 # The JVM may not detect all processor groups, causing Bazel to undercount
