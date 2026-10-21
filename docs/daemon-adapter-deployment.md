@@ -323,8 +323,12 @@ Reproduced, and therefore served from the cache:
 - `Cache-Control` — rebuilt from the origin's lifetime and its cache
   directives. Directives outside that set, such as `immutable`,
   `stale-while-revalidate` and `stale-if-error`, are not carried.
-- `Vary: Accept` for a negotiated image. When this module serves an optimized
-  image it chose from the request's `Accept` header, it says so: AVIF when the
+- `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR` for a negotiated image.
+  When this module serves an optimized image it chose from the request's
+  headers, it names each one the choice read: the format comes from
+  `Accept`, the size from the device class in `User-Agent`, the pixel density
+  from `Sec-CH-DPR` when the browser sends it (else from `User-Agent`), and
+  the lighter copy from `Save-Data`. The format is AVIF when the
   header names `image/avif`; WebP when it names `image/webp` or contains
   `image/*` or `*/*`, or when there is no `Accept` header at all (RFC 9110
   reads a wildcard and an absent header as "any type"); the original format
@@ -334,10 +338,9 @@ Reproduced, and therefore served from the cache:
   `Accept: */*` receives WebP for a `.jpg` URL; a client that needs the
   original format sends `Accept: image/jpeg` (or whichever format it wants,
   with no wildcard). A response carrying the recorded original, rather than an
-  optimized copy, is not negotiated and carries no `Vary: Accept` for this
-  reason. The selection also uses the device class and Save-Data, which this
-  `Vary` does not yet name
-  ([#102](https://github.com/We-Amp/mod_pagespeed/issues/102)).
+  optimized copy, is not negotiated and carries none of these for this
+  reason. For a cache or CDN in front of this server, see "Behind a shared
+  cache or CDN" below.
 - `Vary: Accept-Encoding`, and `Vary: Accept` for an origin that negotiates on
   `Accept`. The second is reproduced from the fact recorded with the resource
   that the origin negotiates on `Accept`, and is emitted with whichever copy
@@ -432,6 +435,137 @@ line) stops it writing them. Leave them at their defaults on any optimizer
 that serves a server with this directive on, or there is nothing to serve.
 Raising a level from `0` again does not add copies to resources that are
 already optimized: they gain them only when they are next optimized.
+
+## Behind a shared cache or CDN
+
+The same rule holds on Apache, nginx and IIS: every request header the variant
+selection reads is named in `Vary`, on the 200 and on the 304, and no other.
+
+| Response served from the optimizer's cache | Request headers that choose the bytes | `Vary` |
+|---|---|---|
+| An optimized image | `Accept` (format), `User-Agent` (device class: phone, tablet or desktop, and pixel density), `Sec-CH-DPR` (pixel density, when sent), `Save-Data` | `Accept, Save-Data, User-Agent, Sec-CH-DPR` |
+| A stored compressed copy (any type) | `Accept-Encoding` in addition | the above plus `Accept-Encoding` |
+| The recorded original of an image, a stylesheet, a script | nothing (one copy for every client) | none, or `Accept-Encoding` where the server compresses it |
+| Any of these, when the origin itself sends `Vary: Accept` | the origin's `Accept` negotiation | `Accept` is added |
+
+This list is the optimizer's own, so a cache keys a response the same way
+whether the module or the optimizer's front end served it. The one client
+hint read is `Sec-CH-DPR`: a value of 1.5 or more selects the high-density
+copy, any other number the standard one. Browsers send it only to a site that
+asks for it with `Accept-CH: Sec-CH-DPR`. The module does not add that header
+(nor `Critical-CH`, which would cost a retried request): without the hint,
+density comes from `User-Agent`, as before, and a site that wants the hint
+can send `Accept-CH` itself. Other hints (`Sec-CH-UA-Mobile`,
+`Viewport-Width`, `DPR`) are not read, so they are not named. They could not
+replace `User-Agent` either: browsers that send no client hints still need a
+device class, and in the traffic sample below they made up about 44% of
+requests. HTML is never served from the optimizer's cache, so its
+`Vary` is unchanged. A response whose origin sends a `Vary` on any other
+header is not served from the optimizer's cache at all (see above), so the
+module never replaces a `Vary` the origin chose; the server merges its own
+`Accept-Encoding` into the same field. `Cache-Control` is unaffected.
+
+**The recorded original carries no `Vary`.** Before the optimizer has written
+a variant for a URL, and whenever no variant fits the client, the module
+serves the origin's own bytes. Those bytes are the same for every client, so
+one stored copy is correct for all of them, and a cache that keys it on the
+URL alone cannot hand anyone the wrong variant. The cost is freshness of the
+optimization, not correctness: a cache keeps serving that original until its
+lifetime (the origin's `Cache-Control`) runs out, and only the response it
+fetches after that carries a variant and its `Vary`. Every response the module
+emits is the correct one for the request that produced it.
+
+**Hit rate.** A cache that honours `Vary` keeps one copy per combination of
+`Accept`, `Save-Data`, `User-Agent` and `Sec-CH-DPR` values. `User-Agent` is
+the expensive one: on a weighted sample of real browser traffic, 100,000
+requests carried 764 distinct `User-Agent` strings but only 3 device classes,
+so a cache keyed on the raw header holds up to about 250 times more copies of
+each image than one keyed on the device class. Expect lower hit rates on such
+a cache after this change, and use device-class keying (below) to win them
+back. `Accept` varies between browser families too; normalising it to the
+format it selects (AVIF, WebP or the original) is a further saving where the
+cache can do it.
+
+**Device-class keying.** The class rules, as the optimizer's classifier at the
+pinned release (`install/debian/optimizer-pin.json`, 2.5.0) applies them;
+check them again when that pin moves: a `User-Agent` containing `iPad` or
+`Tablet`, or `Android` without `Mobile`, is a tablet; one containing `Mobile`,
+`Android`, `iPhone` or `iPod` is a phone; anything else is a desktop. A
+`Sec-CH-DPR` number decides density (1.5 or more is high); without one, phones
+count as high density, as does any `User-Agent` containing `2x` or `Retina`.
+All matches ignore case except `2x` and `Retina`. A cache that keys on a
+coarser or different rule can still hand one client another's variant where
+the two rules disagree, so the configurations below send the origin one
+representative `User-Agent` per class: the origin then selects for exactly the
+class the key names.
+
+**What each cache does by default, and what it needs.**
+
+| Cache | Default with these responses | Configuration needed |
+|---|---|---|
+| Cloudflare | Ignores `Vary` apart from `Accept-Encoding` (and `Accept` for images with Vary for Images enabled), and caches images: one device's variant goes to everyone. | A Cache Rule for image paths whose cache key includes the device type and the `Accept`, `Save-Data` and `Sec-CH-DPR` request headers. Request headers in the cache key, and possibly the device type as well, may need the Enterprise plan: check what your plan offers, and without it set the rule to bypass the cache for these images. Cloudflare's device type comes from its own `User-Agent` rules, which can differ from the ones above at the edges. |
+| Amazon CloudFront | Caches on the cache policy's key only and ignores the origin's `Vary`; it does not forward `User-Agent` or `Accept` unless told to, so one copy goes to everyone and the origin selects for CloudFront's own `User-Agent`. | Add `CloudFront-Is-Mobile-Viewer`, `CloudFront-Is-Tablet-Viewer`, `Accept`, `Save-Data` and `Sec-CH-DPR` to the cache policy's headers, and forward `User-Agent` in the origin request policy. For an exact match with the rules above, set a class header with a CloudFront Function and key on that instead of the CloudFront-Is-* pair. |
+| Akamai | Treats a `Vary` other than `Accept-Encoding` as uncacheable: correct, but no hits for these images. | Leave it, or cache with a cache key that includes the device class, `Accept`, `Save-Data` and `Sec-CH-DPR`. Removing the `Vary` header without that key brings the cross-serving back. |
+| Fastly, Varnish | Honour `Vary`: correct, one copy per raw `User-Agent`. | Normalise `User-Agent` to the class in `vcl_recv` (below). |
+| nginx `proxy_cache` | Honours `Vary`: correct, one copy per raw `User-Agent`. | Put the class in `proxy_cache_key` (below). |
+
+Varnish or Fastly, in `vcl_recv` (as tested by
+`test/system/shared_cache/varnish-device-class.vcl`): the `User-Agent` of an
+image request becomes one string per class, so the response's
+`Vary: User-Agent` splits the cache into a handful of copies.
+
+```vcl
+if (req.url ~ "(?i)\.(jpe?g|png|gif|webp|avif)(\?|$)") {
+  if (req.http.User-Agent ~ "(?i)ipad|tablet" ||
+      (req.http.User-Agent ~ "(?i)android" && req.http.User-Agent !~ "(?i)mobile")) {
+    if (req.http.User-Agent ~ "2x|Retina") {
+      set req.http.User-Agent = "device-class tablet Retina";
+    } else {
+      set req.http.User-Agent = "device-class tablet";
+    }
+  } elsif (req.http.User-Agent ~ "(?i)mobile|android|iphone|ipod") {
+    set req.http.User-Agent = "device-class Mobile";
+  } elsif (req.http.User-Agent ~ "2x|Retina") {
+    set req.http.User-Agent = "device-class Retina";
+  } else {
+    set req.http.User-Agent = "device-class desktop";
+  }
+}
+```
+
+nginx `proxy_cache` (as tested by
+`test/system/shared_cache/nginx-device-class.conf`): the class goes into the
+key, the raw-`User-Agent` `Vary` is not used for the lookup, and the origin is
+sent the class's representative `User-Agent`.
+
+```nginx
+map $http_user_agent $device_view {
+    "~*ipad|tablet"                tablet;
+    "~*^(?!.*mobile).*android"     tablet;
+    "~*mobile|android|iphone|ipod" mobile;
+    default                        desktop;
+}
+map $http_user_agent $device_density {
+    "~2x|Retina" " Retina";
+    default      "";
+}
+map "$device_view$device_density" $device_class_ua {
+    "mobile"         "device-class Mobile";
+    "mobile Retina"  "device-class Mobile";
+    "tablet"         "device-class tablet";
+    "tablet Retina"  "device-class tablet Retina";
+    "desktop Retina" "device-class Retina";
+    default          "device-class desktop";
+}
+
+location ~* \.(jpe?g|png|gif|webp|avif)$ {
+    proxy_pass http://origin;
+    proxy_cache images;
+    proxy_cache_key "$scheme$host$request_uri|$http_accept|$http_save_data|$http_sec_ch_dpr|$device_class_ua";
+    proxy_ignore_headers Vary;
+    proxy_set_header User-Agent $device_class_ua;
+}
+```
 
 ## When the daemon is missing
 

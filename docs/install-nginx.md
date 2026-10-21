@@ -214,6 +214,10 @@ the separate `DaemonApiSocketPath` directive.
   headers the origin sent. On a server that sets such a header site-wide,
   little or nothing is optimized in place and `ipro_daemon_served` does not
   rise.
+- An optimized image is chosen by `Accept`, the device class in `User-Agent`,
+  `Sec-CH-DPR` when sent, and `Save-Data`, and says so in `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR`. For
+  a cache or CDN in front of nginx, see "Behind a shared cache or CDN" in
+  `docs/daemon-adapter-deployment.md`.
 - A request that nginx redirects internally (`rewrite`, a `try_files`
   fallback, `index`, `error_page`) is not optimized in place.
 - The module serves the uncompressed optimized copy by default; see the next

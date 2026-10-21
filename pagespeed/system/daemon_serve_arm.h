@@ -132,8 +132,9 @@ inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
 // Everything the arm reads about the request.  Every StringPiece is borrowed
 // for the duration of the call.
 //
-// THE FOUR CAPABILITY FIELDS ARE REQUEST HEADERS AND NOTHING ELSE.  They are
-// the exact four the peer's classifier takes, they are read off the client's
+// THE FIVE CAPABILITY FIELDS ARE REQUEST HEADERS AND NOTHING ELSE.  They are
+// the four the peer's classifier takes and the client hint its front end
+// applies on top (ApplySecChDprHint), they are read off the client's
 // request, and no configuration value reaches them -- see the invariant
 // pinned in daemon_serve_arm_test.cc.  A capability mask that a
 // RewriteOptions value could move would make the entry this arm selects a
@@ -148,6 +149,9 @@ struct DaemonServeRequest {
   StringPiece user_agent;
   StringPiece save_data;
   StringPiece accept_encoding;
+  // The `Sec-CH-DPR` client hint, applied to the classifier's answer by
+  // ApplySecChDprHint.
+  StringPiece sec_ch_dpr;
 
   // The client's conditionals, verbatim.
   //
@@ -324,6 +328,22 @@ struct DaemonServeDecision {
   bool vary_accept_negotiated = false;
   bool vary_accept_origin_declared = false;
   bool emit_vary_accept = false;
+
+  // EVERY REQUEST HEADER THE IMAGE SELECTION READ: THIS ARM chose an image
+  // variant by the whole capability mask, whose format comes from `Accept`,
+  // viewport and density from `User-Agent`, density from `Sec-CH-DPR` when
+  // sent, and Save-Data from `Save-Data` -- kPsImageSelectionVary.  Set on
+  // the same negotiated image serves as `vary_accept_negotiated`, the 304
+  // included, and on nothing else: a stylesheet or script variant is stored
+  // at one device class, and a durable-original serve selected nothing.
+  //
+  // WHY THE HEADERS AND NOT A NORMALIZED DEVICE-CLASS KEY.  `User-Agent` is
+  // a wide key for a shared cache, but the class is computed here, after
+  // any cache in front of this server has already looked its key up; a
+  // response field naming a header this server derives would key on
+  // something no client sends.  A cache that wants the narrower key has to
+  // compute the class itself, at its own edge, and key on that.
+  bool vary_image_selection = false;
 
   // The derived, WEAK validator for the bytes being served, and whether one
   // of the client's conditionals matched.  Empty when nothing is served.
@@ -770,6 +790,25 @@ const char* ServeCompressorMediaType(const DaemonServeDecision& decision,
 // does.
 GoogleString ServeVaryFieldValue(const DaemonServeDecision& decision,
                                  bool handed_to_compressor);
+
+// The request-header tokens of the `Vary` field that the SELECTION owes,
+// without the encoding axis: kPsImageSelectionVary when
+// `vary_image_selection`, else "Accept" when `emit_vary_accept`, else empty.  Every port's composition starts from this (Apache
+// through ServeVaryFieldValue, nginx through ServeVaryFieldValueOnBothLegs,
+// IIS in ComposeIisServeResponse), so the set the response names is the set
+// the classifier read on every port.
+//
+// THE RULE, stated once.  An image variant is selected by exactly the
+// headers kPsImageSelectionVary names -- the four the peer's classifier
+// (DaemonAbi::Classify) reads less `Accept-Encoding`, which never moves an
+// image selection because image variants are stored uncoded, plus
+// `Sec-CH-DPR` (ApplySecChDprHint) -- and a negotiated image serve names
+// exactly those.  The encoding token is the per-leg compositions' business.
+// A non-image serve and a durable original name none of them, unless the
+// origin itself declared `Accept`.  The list is the peer's, so a cache in
+// front of this server keys a response as it would one from the peer's own
+// front end; tools/ci/check_image_selection_vary.py fails when they drift.
+GoogleString ServeVarySelectionTokens(const DaemonServeDecision& decision);
 
 // The `Vary` field value for a port whose compressor's eligibility cannot be
 // read from the arm, composed ONCE and stated on BOTH legs of the response.

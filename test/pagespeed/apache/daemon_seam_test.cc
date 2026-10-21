@@ -32,6 +32,7 @@
 // regression, and it does not catch a call site that runs and does nothing.
 // The behavioural half is covered where the behaviour lives.
 
+#include <algorithm>
 #include <cctype>
 
 #include "pagespeed/apache/instaweb_handler.h"
@@ -156,6 +157,30 @@ TEST_F(DaemonSeamTest, BothArmsReadOneClientsHeadersThroughOneReader) {
             builders.find("RequestHeader(HttpAttributes::kAcceptEncoding)"))
       << "a builder reads a capability header directly again; the two arms "
          "can now disagree about one client's capabilities";
+
+  // The density hint is one of those headers: the reader takes it, and both
+  // builders hand it on.  Drop any link and the response's Vary names a
+  // header the selection no longer reads.
+  const size_t reader = source.find("void InstawebHandler::CapabilityHeaders(");
+  ASSERT_NE(GoogleString::npos, reader);
+  const size_t reader_end = source.find("\n}", reader);
+  ASSERT_NE(GoogleString::npos, reader_end);
+  EXPECT_NE(GoogleString::npos,
+            source.substr(reader, reader_end - reader)
+                .find("*sec_ch_dpr = RequestHeader(\"Sec-CH-DPR\");"))
+      << "the shared reader no longer reads Sec-CH-DPR";
+  EXPECT_NE(GoogleString::npos,
+            builders.find("sec_ch_dpr.CopyToString(&request->sec_ch_dpr);"))
+      << "the record request no longer carries Sec-CH-DPR";
+  // Scoped to the serve builder and spelled as its own call, whitespace
+  // stripped: the record builder's copy also ends in "&request->sec_ch_dpr);".
+  GoogleString serve_body = source.substr(serve, after_serve - serve);
+  serve_body.erase(std::remove_if(serve_body.begin(), serve_body.end(),
+                                  [](char c) { return isspace(c) != 0; }),
+                   serve_body.end());
+  EXPECT_NE(GoogleString::npos,
+            serve_body.find("&request->accept_encoding,&request->sec_ch_dpr);"))
+      << "the serve request no longer carries Sec-CH-DPR";
 }
 
 TEST_F(DaemonSeamTest, TheDaemonSubstrateServesBeforeItRecords) {

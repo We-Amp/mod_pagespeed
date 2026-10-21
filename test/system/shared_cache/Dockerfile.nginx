@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+# The distribution's nginx with the published module and optimizer packages.
+FROM ubuntu:24.04
+# The optimizer release the tree pins, and the module package of that pair
+# (whose library run.sh may replace with a fresh build).
+ARG PAIR_VERSION=2.5.0
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl gnupg nginx imagemagick procps && \
+    curl -fsSL https://packages.modpagespeed.com/install.sh | sh && \
+    apt-get update && \
+    apt-get install -y "nginx-module-pagespeed=${PAIR_VERSION}-*" "pagespeed-optimizer=${PAIR_VERSION}"

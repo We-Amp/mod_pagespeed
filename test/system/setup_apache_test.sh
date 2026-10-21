@@ -2416,6 +2416,10 @@ write_daemon_content() {
     # comment is removed only by the module's own HTML rewriting.
     printf '<!doctype html>\n<html><head><title>lane</title></head>\n<body>\n<!-- lane-comment -->\n<p>daemon lane page</p>\n</body></html>\n' \
         | sudo tee /var/www/html/daemon_lane/lane.html > /dev/null
+    # The photo the image cases fetch: wider than a phone, so the worker has
+    # a device class to size it for, and small enough to optimize quickly.
+    sudo cp "$PROJECT_ROOT/install/mod_pagespeed_example/images/Puzzle.jpg" \
+        /var/www/html/daemon_lane/lane.jpg
     sudo chmod -R a+rX /var/www/html/daemon_lane
 }
 

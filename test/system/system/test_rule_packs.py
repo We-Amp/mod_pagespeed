@@ -51,12 +51,23 @@ PACK_DIR = "/mod_pagespeed_test/rule_packs"
 DAEMON_CSS_PATH = "/daemon_lane/lane.css"
 # How long the optimizer worker gets to optimize a stylesheet after it was recorded.
 WORKER_DEADLINE_S = 60.0
+# An image takes longer: the worker searches for the smallest acceptable encoding.
+IMAGE_WORKER_DEADLINE_S = 180.0
 ENFORCE_HOST = "rulepacks.example.com"
 REPORT_HOST = "rulepacks-report.example.com"
 UNLISTED_HOST = "rulepacks-unlisted.example.com"
 # A plain virtual host (no rule packs) with in-place daemon serving on.
 DAEMON_HOST = "daemon.example.com"
 DAEMON_HTML_PATH = "/daemon_lane/lane.html"
+DAEMON_IMAGE_PATH = "/daemon_lane/lane.jpg"
+DESKTOP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+)
+MOBILE_UA = (
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36"
+)
 SIGNED_HOST = "rulepacks-signed.example.com"
 REQUIRE_HOST = "rulepacks-require.example.com"
 MULTI_HOST = "rulepacks-multi.example.com"
@@ -797,6 +808,60 @@ class TestDaemonServing:
         assert not response.header("X-Mod-Pagespeed") and not response.header("X-Page-Speed"), dict(
             response.headers
         )
+        # A stylesheet is stored at one device class: no device axes in Vary.
+        tokens = {t.strip().lower() for t in response.header("Vary").split(",") if t.strip()}
+        assert not tokens & {"user-agent", "save-data"}, dict(response.headers)
+
+    def test_an_image_variant_names_every_header_it_was_chosen_by(self, pack_site):
+        """The image variant is chosen by the format in Accept, the device
+        class in User-Agent, the density hint in Sec-CH-DPR and Save-Data, so
+        a shared cache must key on all of them: each client gets a Vary that
+        names them, on the 200 and the 304.
+        """
+        site = pack_site(DAEMON_HOST)
+        # WebP: a converted copy is always worth keeping for this photo,
+        # while a re-encoded JPEG may be declined by the quality check.
+        accept = "image/webp,*/*"
+        clients = {
+            "desktop": {"Accept": accept, "User-Agent": DESKTOP_UA},
+            "mobile": {"Accept": accept, "User-Agent": MOBILE_UA},
+            "save-data": {"Accept": accept, "User-Agent": DESKTOP_UA, "Save-Data": "on"},
+            "dpr": {"Accept": accept, "User-Agent": DESKTOP_UA, "Sec-CH-DPR": "2"},
+        }
+        for name, headers in clients.items():
+            # The first responses come from the module, then the durable
+            # original; a negotiated variant carries Vary once one exists.
+            deadline = time.time() + IMAGE_WORKER_DEADLINE_S
+            while True:
+                response = site.get(DAEMON_IMAGE_PATH, headers=headers)
+                require_status_ok(response, f"{DAEMON_HOST}{DAEMON_IMAGE_PATH}")
+                if response.header("Age") and response.header("Vary"):
+                    break
+                if time.time() >= deadline:
+                    pytest.fail(
+                        f"{name}: no negotiated image variant within {IMAGE_WORKER_DEADLINE_S}s; "
+                        f"last response {response.status} {dict(response.headers)}"
+                    )
+                time.sleep(1.0)
+            tokens = {t.strip().lower() for t in response.header("Vary").split(",")}
+            assert {"accept", "save-data", "user-agent", "sec-ch-dpr"} <= tokens, (
+                name,
+                dict(response.headers),
+            )
+
+            etag = response.header("ETag")
+            assert etag, (name, dict(response.headers))
+            revalidated = site.get(DAEMON_IMAGE_PATH, headers={**headers, "If-None-Match": etag})
+            assert revalidated.status == 304, (name, revalidated.status, dict(revalidated.headers))
+            tokens_304 = {t.strip().lower() for t in revalidated.header("Vary").split(",")}
+            assert tokens_304 == tokens, (name, dict(revalidated.headers))
+
+            # A HEAD is answered with the headers its GET carries.
+            head = site.head(DAEMON_IMAGE_PATH, headers=headers)
+            assert head.status == 200, (name, head.status, dict(head.headers))
+            assert head.body == b"", (name, len(head.body))
+            tokens_head = {t.strip().lower() for t in head.header("Vary").split(",")}
+            assert tokens_head == tokens, (name, dict(head.headers))
 
 
 def _decision_lines_by_pack(host: str, path_prefix: str) -> Dict[str, List[dict]]:

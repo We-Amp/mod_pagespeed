@@ -522,11 +522,13 @@ StringPiece InstawebHandler::RequestHeader(const char* name) const {
 void InstawebHandler::CapabilityHeaders(StringPiece* accept,
                                         StringPiece* user_agent,
                                         StringPiece* save_data,
-                                        StringPiece* accept_encoding) const {
+                                        StringPiece* accept_encoding,
+                                        StringPiece* sec_ch_dpr) const {
   *accept = RequestHeader(HttpAttributes::kAccept);
   *user_agent = RequestHeader(HttpAttributes::kUserAgent);
   *save_data = RequestHeader("Save-Data");
   *accept_encoding = RequestHeader(HttpAttributes::kAcceptEncoding);
+  *sec_ch_dpr = RequestHeader("Sec-CH-DPR");
 }
 
 void InstawebHandler::BuildDaemonRecordRequest(
@@ -537,12 +539,14 @@ void InstawebHandler::BuildDaemonRecordRequest(
   stripped_gurl_.Host().CopyToString(&request->hostname);
   stripped_gurl_.Scheme().CopyToString(&request->scheme);
 
-  StringPiece accept, user_agent, save_data, accept_encoding;
-  CapabilityHeaders(&accept, &user_agent, &save_data, &accept_encoding);
+  StringPiece accept, user_agent, save_data, accept_encoding, sec_ch_dpr;
+  CapabilityHeaders(&accept, &user_agent, &save_data, &accept_encoding,
+                    &sec_ch_dpr);
   accept.CopyToString(&request->accept);
   user_agent.CopyToString(&request->user_agent);
   save_data.CopyToString(&request->save_data);
   accept_encoding.CopyToString(&request->accept_encoding);
+  sec_ch_dpr.CopyToString(&request->sec_ch_dpr);
 
   // The resolved configuration for THIS request, stated as a value.
   //
@@ -562,8 +566,8 @@ void InstawebHandler::BuildDaemonRecordRequest(
 
 // Gathers everything the daemon-side serve arm needs about the REQUEST.
 //
-// The four capability fields come from CapabilityHeaders, which is also what
-// the record side uses -- the same four values, from one reader, for the
+// The five capability fields come from CapabilityHeaders, which is also what
+// the record side uses -- the same five values, from one reader, for the
 // reason stated there.
 void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   stripped_gurl_.PathAndLeaf().CopyToString(&daemon_serve_url_);
@@ -574,7 +578,7 @@ void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   request->scheme = daemon_serve_scheme_;
 
   CapabilityHeaders(&request->accept, &request->user_agent, &request->save_data,
-                    &request->accept_encoding);
+                    &request->accept_encoding, &request->sec_ch_dpr);
   request->if_none_match = RequestHeader(HttpAttributes::kIfNoneMatch);
   request->if_modified_since = RequestHeader(HttpAttributes::kIfModifiedSince);
 

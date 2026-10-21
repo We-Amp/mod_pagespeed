@@ -350,6 +350,33 @@ inline constexpr uint32_t kPsMaskViewportBits = 0x03;
 // space, not its capability-vector space.
 inline constexpr uint32_t kPsViewportSentinel = 3;
 
+// The pixel-density field of a capability mask: bit 4, 0 for 1x and 1 for 2x
+// and above.  Mirrored like the fields above, for ApplySecChDprHint.
+inline constexpr uint32_t kPsMaskPixelDensityShift = 4;
+inline constexpr uint32_t kPsMaskPixelDensityBits = 0x01;
+
+// THE REQUEST HEADERS AN IMAGE VARIANT IS SELECTED BY, as the `Vary` field
+// value a response served from a selected image variant carries.  MIRRORED
+// from the peer's kImageSelectionVary (lib/classify/capability_mask.h), byte
+// for byte, and checked against the pinned peer's source by
+// tools/ci/check_image_selection_vary.py: the module selects by the same
+// inputs the peer's selector reads, so a downstream cache keys a response the
+// same way whichever front end served it.  `Accept` sets the format,
+// `User-Agent` the viewport and the density, `Sec-CH-DPR` the density when
+// the client sends it, `Save-Data` the Save-Data field.
+inline constexpr char kPsImageSelectionVary[] =
+    "Accept, Save-Data, User-Agent, Sec-CH-DPR";
+
+// The capability mask with the `Sec-CH-DPR` client hint applied, the peer's
+// rule mirrored.  The peer's classifier entry point (Classify below) takes no
+// hint, while the peer's own front end reads one: an explicit hint of 1.5 or
+// more sets the density field to 2x, any other parseable value ("1", "1.25")
+// sets it to 1x, and an absent or unparseable value ("", "2x", "auto") leaves
+// the classifier's User-Agent answer alone.  Applied by BOTH arms right after
+// Classify, so the mask a request selects at is the mask its recording
+// notifies at, and both match what the peer's front end would select.
+uint32_t ApplySecChDprHint(uint32_t mask, StringPiece sec_ch_dpr);
+
 // The origin-refreshed sentinel, mirrored from the peer's
 // kOriginRefreshedSentinel: the notification MASK that tells the worker "the
 // origin was re-fetched fresh for this URL while stale optimized variants

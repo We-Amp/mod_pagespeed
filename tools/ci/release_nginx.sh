@@ -12,6 +12,7 @@
 #   release_nginx.sh routing     --arch ARCH --pkgdir DIR [--set main|el10]
 #   release_nginx.sh load-check  --arch ARCH --src DIR --pkgdir DIR [--set main|el10]
 #   release_nginx.sh suite       --arch x64  --src DIR --pkgdir DIR
+#   release_nginx.sh leg-row     --arch ARCH --distro NAME [--set main|el10]
 #   release_nginx.sh --self-test
 #
 # `build` compiles the nginx module once per target distro INSIDE a container
@@ -281,6 +282,30 @@ build() {
   ls -lh "$out"
 }
 
+# leg_row: print the one leg row (name|image|nginx version|sha256|pkg) for a
+# distro, so a lane that builds a single leg (the nightly shared-cache check)
+# takes the same nginx version and source hash as the release.
+leg_row() {
+  local arch="" set="main" distro="" row
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --arch) arch="$2"; shift 2 ;;
+      --set) set="$2"; shift 2 ;;
+      --distro) distro="$2"; shift 2 ;;
+      *) echo "release_nginx leg-row: unknown argument $1" >&2; return 2 ;;
+    esac
+  done
+  [ -n "$arch" ] && [ -n "$distro" ] || { echo "release_nginx leg-row: --arch and --distro are required" >&2; return 2; }
+  while IFS= read -r row; do
+    if [ "${row%%|*}" = "$distro" ]; then
+      echo "$row"
+      return 0
+    fi
+  done < <(legs_for "$arch" "$set")
+  echo "release_nginx leg-row: no '$distro' leg for $arch ($set)" >&2
+  return 1
+}
+
 # --- gates -------------------------------------------------------------------
 
 gate_args() {
@@ -527,6 +552,11 @@ self_test() {
   chk "plan tiny host" "$(plan 8 1.5 2 1 5)" "1 3 1"
   chk "plan one leg" "$(plan 8 1.5 85 128 1)" "8 14 1"
 
+  # the single-leg row
+  chk "leg-row noble" "$(leg_row --arch x64 --distro noble)" "$(legs_for x64 main | grep '^noble|')"
+  chk "leg-row el10" "$(leg_row --arch x64 --set el10 --distro el10)" "$(legs_for x64 el10)"
+  leg_row --arch x64 --distro nosuch >/dev/null 2>&1 && { echo "FAIL: unknown leg accepted"; fail=1; }
+
   # the routing gate
   mkdir -p "$t/ok" "$t/bad" "$t/ea" "$t/e10"
   : > "$t/ok/nginx-module-pagespeed-1.19.0-1.el9.x86_64.rpm"
@@ -550,10 +580,11 @@ case "$cmd" in
   --self-test) self_test ;;
   legs) shift; legs "$@" ;;
   build) shift; build "$@" ;;
+  leg-row) shift; leg_row "$@" ;;
   check-set) shift; check_set "$@" ;;
   symbol-leak) shift; symbol_leak "$@" ;;
   routing) shift; routing "$@" ;;
   load-check) shift; load_check "$@" ;;
   suite) shift; suite "$@" ;;
-  *) echo "usage: $0 legs|build|check-set|symbol-leak|routing|load-check|suite ... | --self-test" >&2; exit 2 ;;
+  *) echo "usage: $0 legs|build|leg-row|check-set|symbol-leak|routing|load-check|suite ... | --self-test" >&2; exit 2 ;;
 esac

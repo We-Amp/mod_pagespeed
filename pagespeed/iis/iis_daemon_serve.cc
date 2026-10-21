@@ -95,10 +95,7 @@ void ComposeIisServeResponse(const DaemonServeDecision& decision,
   // axis its 200 does not.  A cache updates what it stored from the 304
   // (RFC 9111 s4.3.4), so the second case widens the key it had -- the safe
   // direction, and the reason this is not mirrored per leg.
-  GoogleString vary;
-  if (decision.emit_vary_accept) {
-    vary.assign(HttpAttributes::kAccept);
-  }
+  GoogleString vary = ServeVarySelectionTokens(decision);
   if (decision.not_modified && compressible_media_type) {
     if (!vary.empty()) {
       StrAppend(&vary, ", ");
@@ -154,7 +151,8 @@ void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
   request->hostname = url.Host();
   request->scheme = url.Scheme();
   IisCapabilityHeaders(http_context, &request->accept, &request->user_agent,
-                       &request->save_data, &request->accept_encoding);
+                       &request->save_data, &request->accept_encoding,
+                       &request->sec_ch_dpr);
 
   USHORT length = 0;
   PCSTR value = http_context->GetRequest()->GetHeader(

@@ -8,7 +8,8 @@
 #
 # Jobs by class:
 #   fleet-heavy   nightly-vendor (the vendored tree for every Linux job),
-#                 apache-asan-stress, apache-daemon-lane, nginx-asan-stress,
+#                 apache-asan-stress, apache-daemon-lane, shared-cache-vary,
+#                 nginx-asan-stress,
 #                 nginx-protocol-matrix, full-tree-lint (3 shards), fuzz-css, fuzz-html,
 #                 fuzz-packs, fuzz-js
 #   fleet-iis     iis-asan-systest, iis-appverif-matrix (a Windows host with
@@ -554,6 +555,164 @@ jobs:
             # the runner's cleanup can delete them.
             docker exec "${CTR}" bash -c 'sudo chown -R "$(id -u):$(id -g)" /workspace "${RUNNER_TEMP}" 2>/dev/null' >/dev/null 2>&1 || true
             docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          fi
+
+  # ---------------------------------------------------------------------
+  # Shared-cache check for daemon-served images: the module built from this
+  # tree, swapped into the packaged install of the pinned optimizer pair, run
+  # behind real shared caches (nginx proxy_cache and Varnish, stock and with
+  # the device-class configurations the deployment docs give). Fails when a
+  # cache hands one client another client's image variant, when a response
+  # does not name every header the selection read, or when the caches stop
+  # storing these responses. test/system/shared_cache/run.sh is the check.
+  # The Apache module is built in the dev image, as the release builds it;
+  # the nginx module is built for the packaged nginx (Ubuntu 24.04's 1.24.0)
+  # in that distribution's container, as the release lane's noble leg does.
+  # Unlike the jobs around it this one needs the network after the vendor
+  # step: the packaged install comes from the public package repository and
+  # the caches from public container images.
+  # ---------------------------------------------------------------------
+  shared-cache-vary:
+    name: Shared-cache check (Apache, nginx)
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 150
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Build the Apache module
+        run: |
+          set -euo pipefail
+          CTR="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-apache"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          mkdir -p "${RUNNER_TEMP}/shared-cache"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run --rm --init --name "${CTR}" "${EXTRA[@]}" \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp/ci-home -e USER=dev -e BZL_FLAGS \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}/shared-cache:/out" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+              mkdir -p "$HOME"
+              # BZL_FLAGS is an intentional flag list: word splitting.
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out build ${BZL_FLAGS} //:libmod_pagespeed.so
+              cp -L bazel-bin/libmod_pagespeed.so /out/mod_pagespeed.so
+            '
+
+      - name: Build the nginx module for Ubuntu 24.04's nginx
+        run: |
+          set -euo pipefail
+          IFS='|' read -r _ image ngxver ngxsha _ < <(bash tools/ci/release_nginx.sh leg-row --arch x64 --distro noble)
+          CTR="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-nginx"
+          LEG="${RUNNER_TEMP}/shared-cache-noble"
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the leg's
+          # own sizing.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 24g || exit 1
+          CPUS="${SLOT_CPUS:-16}"
+          MEM="${SLOT_MEM:-24g}"
+          EXTRA=()
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+          fi
+          # Its own copy of the tree: the distribution container builds as
+          # root and must not leave root-owned output in the workspace.
+          rm -rf "${LEG}"
+          cp -a "${GITHUB_WORKSPACE}" "${LEG}"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run --rm --init --name "${CTR}" "${EXTRA[@]}" \
+            --cpus="${CPUS}" --memory="${MEM}" --memory-swap="${MEM}" \
+            -e BAZEL_CPUS="${CPUS}" -e MAKE_JOBS="${CPUS}" -e HOME=/workspace \
+            -e NGINX_SRC_VERSION="${ngxver}" -e NGINX_SRC_SHA256="${ngxsha}" \
+            -v "${LEG}:/workspace" \
+            -v "${RUNNER_TEMP}/shared-cache:/out" \
+            -w /workspace \
+            "${image}" \
+            bash -c "set -e
+              ./install/nginx/build_module_in_container.sh noble -o /out/ngx_pagespeed_module.so
+              chown $(id -u):$(id -g) /out/ngx_pagespeed_module.so"
+
+      - name: Shared-cache check, Apache
+        run: |
+          SHARED_CACHE_PREFIX="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-a" \
+            bash test/system/shared_cache/run.sh apache "${RUNNER_TEMP}/shared-cache/mod_pagespeed.so"
+
+      - name: Shared-cache check, nginx
+        if: ${{ !cancelled() }}
+        run: |
+          SHARED_CACHE_PREFIX="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-n" \
+            bash test/system/shared_cache/run.sh nginx "${RUNNER_TEMP}/shared-cache/ngx_pagespeed_module.so"
+
+      - name: Remove what the checks left behind
+        if: always()
+        run: |
+          # run.sh removes its own containers, network and image on exit; a
+          # cancelled run may not get there. Only this job's prefix is touched.
+          P="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-"
+          docker ps -aq --filter "name=^${P}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+          docker network ls -q --filter "name=^${P}" | xargs -r docker network rm >/dev/null 2>&1 || true
+          docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${P}" | xargs -r docker image rm >/dev/null 2>&1 || true
+
+      - name: Remove the nginx build tree
+        if: always()
+        run: |
+          LEG="${RUNNER_TEMP}/shared-cache-noble"
+          if [ -d "${LEG}" ]; then
+            # The distribution container built as root: clear its output
+            # through a throwaway container of the same image.
+            docker run --rm -v "${LEG}:/w" alpine:3.20 sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null; true' >/dev/null 2>&1 || true
+            rm -rf "${LEG}" 2>/dev/null || true
           fi
 
   nginx-asan-stress:

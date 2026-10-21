@@ -132,6 +132,25 @@ TEST(IisDaemonServeTest, ANegotiatedEntryVariesOnAcceptOnBothLegs) {
             Field(three_oh_four, HttpAttributes::kVary));
 }
 
+TEST(IisDaemonServeTest, ANegotiatedImageVariesOnTheDeviceAxesOnBothLegs) {
+  // An image variant chosen by device class and Save-Data names the headers
+  // those came from, on the 200 and the 304 alike.
+  DaemonServeDecision decision = OptimizedHit();
+  decision.content_type = "image/webp";
+  decision.emit_vary_accept = true;
+  decision.vary_image_selection = true;
+  IisServeResponse two_hundred;
+  ComposeIisServeResponse(decision, false, false, &two_hundred);
+  decision.not_modified = true;
+  IisServeResponse three_oh_four;
+  ComposeIisServeResponse(decision, false, false, &three_oh_four);
+
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            Field(two_hundred, HttpAttributes::kVary));
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            Field(three_oh_four, HttpAttributes::kVary));
+}
+
 TEST(IisDaemonServeTest, AnIncompressibleTypeDoesNotVaryOnTheEncoding) {
   DaemonServeDecision decision = OptimizedHit();
   decision.content_type = "image/jpeg";

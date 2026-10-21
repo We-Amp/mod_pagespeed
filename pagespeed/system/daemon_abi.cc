@@ -901,4 +901,47 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
 #endif
 }
 
+uint32_t ApplySecChDprHint(uint32_t mask, StringPiece sec_ch_dpr) {
+  // The peer's DprHintIsHighDensity: optional blanks, then
+  // <digits> [ '.' <digits> ], at least one digit; anything else is no hint.
+  while (!sec_ch_dpr.empty() &&
+         (sec_ch_dpr[0] == ' ' || sec_ch_dpr[0] == '\t')) {
+    sec_ch_dpr.remove_prefix(1);
+  }
+  while (!sec_ch_dpr.empty() && (sec_ch_dpr[sec_ch_dpr.size() - 1] == ' ' ||
+                                 sec_ch_dpr[sec_ch_dpr.size() - 1] == '\t')) {
+    sec_ch_dpr.remove_suffix(1);
+  }
+  size_t i = 0;
+  uint32_t int_part = 0;
+  bool has_int = false;
+  while (i < sec_ch_dpr.size() && sec_ch_dpr[i] >= '0' &&
+         sec_ch_dpr[i] <= '9') {
+    if (int_part < 1000) {
+      int_part = int_part * 10 + (sec_ch_dpr[i] - '0');
+    }
+    has_int = true;
+    ++i;
+  }
+  uint32_t first_frac = 0;
+  bool has_frac = false;
+  if (i < sec_ch_dpr.size() && sec_ch_dpr[i] == '.') {
+    ++i;
+    while (i < sec_ch_dpr.size() && sec_ch_dpr[i] >= '0' &&
+           sec_ch_dpr[i] <= '9') {
+      if (!has_frac) {
+        first_frac = sec_ch_dpr[i] - '0';
+      }
+      has_frac = true;
+      ++i;
+    }
+  }
+  if (i != sec_ch_dpr.size() || (!has_int && !has_frac)) {
+    return mask;
+  }
+  const bool high = int_part >= 2 || (int_part == 1 && first_frac >= 5);
+  const uint32_t field = kPsMaskPixelDensityBits << kPsMaskPixelDensityShift;
+  return (mask & ~field) | (high ? field : 0);
+}
+
 }  // namespace net_instaweb

@@ -768,6 +768,29 @@ TEST_F(DaemonRecordArmTest, AUrlThisModuleCannotKeyIsRefused) {
 
 // --- rule: the notify mask is derived from the request ---------------------
 
+TEST_F(DaemonRecordArmTest, TheNotifyMaskTakesTheDensityHint) {
+  // The density hint is applied here exactly as the serve arm applies it, so
+  // the variant asked for is the one this client's requests then select.
+  DaemonRecordInput input = EligibleInput();
+  input.accept = "image/webp,*/*";
+  input.user_agent = "Mozilla/5.0";
+  input.save_data = StringPiece();
+  input.accept_encoding = StringPiece();
+  const uint32_t plain =
+      abi_->Classify(input.accept.data(), "Mozilla/5.0", nullptr, nullptr);
+  input.sec_ch_dpr = "2";
+  const DaemonRecordDecision high =
+      EvaluateDaemonRecordGate(*abi_, input, 1000);
+  ASSERT_EQ(DaemonRecordVerdict::kStoreAndNotify, high.verdict);
+  EXPECT_EQ(ApplySecChDprHint(plain, "2"), high.notify_mask);
+  EXPECT_NE(0u, high.notify_mask &
+                    (kPsMaskPixelDensityBits << kPsMaskPixelDensityShift));
+  input.sec_ch_dpr = "1";
+  const DaemonRecordDecision low = EvaluateDaemonRecordGate(*abi_, input, 1000);
+  EXPECT_EQ(0u, low.notify_mask &
+                    (kPsMaskPixelDensityBits << kPsMaskPixelDensityShift));
+}
+
 TEST_F(DaemonRecordArmTest, TheNotifyMaskTracksTheRequest) {
   struct Row {
     const char* accept;

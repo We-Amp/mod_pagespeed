@@ -373,12 +373,17 @@ const char* ServeCompressorMediaType(const DaemonServeDecision& decision,
                                        : decision.content_type.c_str();
 }
 
+GoogleString ServeVarySelectionTokens(const DaemonServeDecision& decision) {
+  if (decision.vary_image_selection) {
+    return kPsImageSelectionVary;
+  }
+  return decision.emit_vary_accept ? GoogleString(HttpAttributes::kAccept)
+                                   : GoogleString();
+}
+
 GoogleString ServeVaryFieldValue(const DaemonServeDecision& decision,
                                  bool handed_to_compressor) {
-  GoogleString value;
-  if (decision.emit_vary_accept) {
-    value.assign(HttpAttributes::kAccept);
-  }
+  GoogleString value = ServeVarySelectionTokens(decision);
   // A STORED CODED COPY: no compressor ever sees its body, so this arm is
   // the only emitter of the encoding axis, on the 200 and the 304 alike and
   // whatever the length.
@@ -400,10 +405,7 @@ GoogleString ServeVaryFieldValue(const DaemonServeDecision& decision,
 
 GoogleString ServeVaryFieldValueOnBothLegs(const DaemonServeDecision& decision,
                                            bool compressible_media_type) {
-  GoogleString value;
-  if (decision.emit_vary_accept) {
-    value.assign(HttpAttributes::kAccept);
-  }
+  GoogleString value = ServeVarySelectionTokens(decision);
   // BOTH LEGS, and no size floor: identical input on the 200 and the 304,
   // so the two can never disagree on the wire in either direction.  A
   // stored coded copy states it too, whatever its media type: its body
@@ -859,6 +861,9 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   // make this clause dead code and the 1.7 stamping obligation pointless.
   decision->vary_accept_negotiated =
       negotiated && content_type == kPsContentImage;
+  // The same selection read every header of kPsImageSelectionVary; see the
+  // field.
+  decision->vary_image_selection = decision->vary_accept_negotiated;
   // OFF THE DURABLE ORIGINAL'S BYTE, NOT THE SERVED ENTRY'S.  This is the
   // origin's statement about the URL, and it lives only on the entry the
   // writer stamped: an optimizer-produced variant carries a clear flags byte
@@ -931,16 +936,18 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
   }
 
   // THE CAPABILITY MASK IS THE PEER'S ANSWER OVER THIS REQUEST'S HEADERS.
-  // Four request fields in, one mask out, and nothing else reaches it -- no
+  // Five request fields in (the fifth, the density hint, applied by the
+  // peer's rule on top of its classifier), one mask out, and nothing else reaches it -- no
   // configuration value, no options signature, no server state.  That is
   // what makes the entry this arm selects a function of the request alone,
   // which is the only thing the shared cache's key can express.
   GoogleString accept, user_agent, save_data, accept_encoding;
-  decision.client_mask =
+  decision.client_mask = ApplySecChDprHint(
       abi_->Classify(CStrOrNull(request.accept, &accept),
                      CStrOrNull(request.user_agent, &user_agent),
                      CStrOrNull(request.save_data, &save_data),
-                     CStrOrNull(request.accept_encoding, &accept_encoding));
+                     CStrOrNull(request.accept_encoding, &accept_encoding)),
+      request.sec_ch_dpr);
 
   // THE MASK THE READ IS TAKEN AT.  With this reader's switch off -- the
   // default, and every port's behaviour until its operator turns the
