@@ -26,12 +26,15 @@
 #
 # Concurrent builds of one tag on one host (two runner instances share the
 # Docker daemon) are serialised by flock(1) on a lock file in
-# ${CI_DEV_IMAGE_LOCK_DIR:-/tmp}. The kernel drops the lock when the holder
-# dies, so a cancelled (SIGKILLed) build never strands a waiter; the wait is
-# bounded anyway, and on timeout this builds unlocked, since a duplicate
-# build of one tag is wasted minutes, not a correctness problem. A host
-# without flock builds unlocked. A derived image (--derived: the
-# lint image) shares the dev image's tag hash and takes its own lock file,
+# ${CI_DEV_IMAGE_LOCK_DIR:-/tmp}, created (mode 1777) when missing. The
+# kernel drops the lock when the holder dies, so a cancelled (SIGKILLed)
+# build never strands a waiter; the wait is bounded anyway, and on timeout
+# this builds unlocked, since a duplicate build of one tag is wasted
+# minutes, not a correctness problem. A host without flock builds
+# unlocked. A build that fails while the image exists afterwards counts as
+# success: a concurrent unlocked build of the same content-hashed tag won
+# the race. A derived image (--derived: the lint image) shares the dev
+# image's tag hash and takes its own lock file,
 # ${CI_DEV_IMAGE_LOCK_DIR:-/tmp}/<repo>-build-<arch>-<hash>.lock, through the
 # same code.
 #
@@ -148,7 +151,19 @@ build_if_missing() {
     log "image cache hit: ${image}"
   else
     log "building ${image}"
-    docker build -t "$image" "$@" >&2
+    local rc=0
+    docker build -t "$image" "$@" >&2 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # A build of the same tag that ran unlocked (no flock, an unusable
+      # lock file, or a timed-out wait) can lose the race to another job
+      # on this daemon ("already exists"). The tag is content-hashed, so
+      # an image present now is the image this build would have made.
+      if image_exists "$image"; then
+        log "docker build of ${image} failed, but the image exists now (a concurrent build won); using it"
+      else
+        return "$rc"
+      fi
+    fi
   fi
 }
 
@@ -166,6 +181,12 @@ ensure_image() {
     log "flock not available; building ${image} without the per-host lock"
     build_if_missing "$@"
     return 0
+  fi
+  # The lock directory may not exist yet (a cleared /tmp). Create it best
+  # effort and, when this call made it, open it to every runner user: it
+  # holds only empty lock files.
+  if [ ! -d "$LOCK_DIR" ] && mkdir -p "$LOCK_DIR" 2>/dev/null; then
+    chmod 1777 "$LOCK_DIR" 2>/dev/null || true
   fi
   # Read-write if we can, read-only if another user created the file:
   # flock(2) needs an open descriptor, not write access.
