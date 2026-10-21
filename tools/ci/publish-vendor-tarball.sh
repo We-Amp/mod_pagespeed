@@ -48,7 +48,11 @@ log() { echo "publish-vendor-tarball: $*" >&2; }
 [ $# -ge 1 ] && [ $# -le 2 ] || { usage; exit 2; }
 FINAL="$1"
 TMP="${2:-}"
-RUN_TAG="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-$$}"
+# Temp names must be unique per publishing process, not per workflow run:
+# one run can hold several jobs that publish the same tarball into the same
+# shared dir at once, and with a run-only tag each would remove or overwrite
+# the other's stage and sidecar temp files mid-check.
+RUN_TAG="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$-${RANDOM}"
 EXPECT="${VENDOR_EXPECT_SHA256:-}"
 VERIFY_ZSTD="${VENDOR_VERIFY_ZSTD:-0}"
 DIR="$(dirname "$FINAL")"

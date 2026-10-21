@@ -212,7 +212,7 @@ jobs:
           TARBALL="${{ steps.tarball.outputs.tarball }}"
           SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o LogLevel=ERROR"
           F="$(basename "$TARBALL")"
-          TMP_DEST="${CI_HUB_VENDOR_DIR}/${F}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tmp"
+          TMP_DEST="${CI_HUB_VENDOR_DIR}/${F}.${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RUNNER_NAME//[^A-Za-z0-9_.-]/_}.tmp"
           # The digest of the local tarball (the publish step above wrote its
           # sidecar): the hub side checks the transferred bytes against it.
           DIGEST="$(cut -d' ' -f1 "${TARBALL}.sha256")"
