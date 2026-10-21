@@ -3,6 +3,7 @@ licenses(["notice"])  # Apache 2
 package(default_visibility = ["//visibility:public"])
 
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+load("//bazel:foreign_cc.bzl", "cmake_build_args")
 
 exports_files([
     "gflags_cstring.patch",
@@ -77,6 +78,7 @@ config_setting(
 cmake(
     name = "curl",
     lib_source = "@curl_src//:all_srcs",
+    build_args = cmake_build_args(),
     out_static_libs = select({
         "@platforms//os:windows": ["libcurl.lib"],
         "//conditions:default": ["libcurl.a"],
@@ -185,6 +187,7 @@ cmake(
 cmake(
     name = "libevent",
     lib_source = "@com_github_libevent_libevent//:all_srcs",
+    build_args = cmake_build_args(),
     out_static_libs = select({
         "@platforms//os:macos": [
             "libevent.a",
@@ -219,6 +222,7 @@ cmake(
 cmake(
     name = "libmemcached",
     lib_source = "@libmemcached_src//:all_srcs",
+    build_args = cmake_build_args(),
     out_static_libs = select({
         "@platforms//os:windows": [
             "libmemcached.lib",

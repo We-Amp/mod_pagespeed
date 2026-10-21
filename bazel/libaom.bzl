@@ -17,6 +17,7 @@
 # target CPU.
 
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+load("//bazel:foreign_cc.bzl", "cmake_build_args")
 
 def _simd_assert(arch_macro, cpu):
     """Post-build assertion that aom configured for the SIMD arch we expect.
@@ -68,6 +69,7 @@ def libaom_from_source():
     cmake(
         name = "aom",
         lib_source = "@aom_src//:all_srcs",
+        build_args = cmake_build_args(),
         # MSVC/clang-cl installs the archive as `aom.lib` (no `lib` prefix, per
         # MSVC convention — clang-cl sets MSVC=1 in cmake); every other leg gets
         # `libaom.a`. rules_foreign_cc validates the declared outputs after

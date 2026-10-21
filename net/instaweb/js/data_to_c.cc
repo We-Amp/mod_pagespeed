@@ -1,18 +1,19 @@
-#include <algorithm>
+// data2c: turns a data file (JavaScript, CSS, HTML) into a C++ source file
+// that defines the file's contents as a string constant.
+//
+// The tool runs as a build-time host tool for genrules, so it deliberately
+// depends on nothing but the C++ standard library: anything it links is
+// compiled a second time for the exec configuration.
+
+#include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <string>
 
-#include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/stdio_file_system.h"
-#include "pagespeed/kernel/base/string.h"
-#include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/timer.h"
-#include "pagespeed/kernel/util/gflags.h"
+namespace {
 
-DEFINE_string(data_file, "/tmp/a.js", "Input data file");
-DEFINE_string(c_file, "/tmp/a.c", "Output C file");
-DEFINE_string(varname, "str", "Variable name.");
-
-const char kOutputTemplate[] =
+const char kOutputPrefix[] =
     "/*\n"
     " * Licensed to the Apache Software Foundation (ASF) under one\n"
     " * or more contributor license agreements.  See the NOTICE file\n"
@@ -30,45 +31,133 @@ const char kOutputTemplate[] =
     " * specific language governing permissions and limitations\n"
     " * under the License.\n"
     " */\n"
-    "// Automatically generated from %s\n"
-    "\n"
-    "namespace net_instaweb {\n"
-    "\n"
-    "const char* %s =%s;\n"
-    "\n"
-    "}  // namespace net_instaweb\n";
+    "// Automatically generated from ";
 
-namespace net_instaweb {
+// Number of input bytes per string-literal line in the output.
+const size_t kChunkSize = 60;
 
-bool DataToC(int argc, char* argv[]) {
-  ParseGflags(argv[0], &argc, &argv);
-  NullMessageHandler handler;
-  StdioFileSystem file_system;
-
-  GoogleString input;
-  file_system.ReadFile(FLAGS_data_file.c_str(), &input, &handler);
-
-  // Transform input file contents into escaped C string.
-  GoogleString joined = "";
-  for (size_t i = 0; i < input.size(); i += 60) {
-    // substr says if length exceeds it takes chars till end of string.
-    GoogleString part = input.substr(i, 60);
-    StrAppend(&joined, "\n    \"", CEscape(part), "\"");
+// Escapes `src` for use inside a C string literal. Matches the escaping of
+// net_instaweb::CEscape so the generated files do not change.
+void AppendCEscaped(const std::string& src, size_t pos, size_t len,
+                    std::string* out) {
+  for (size_t i = pos; i < pos + len; ++i) {
+    unsigned char ch = static_cast<unsigned char>(src[i]);
+    switch (ch) {
+      case '\n':
+        *out += "\\n";
+        break;
+      case '\r':
+        *out += "\\r";
+        break;
+      case '\t':
+        *out += "\\t";
+        break;
+      case '\"':
+        *out += "\\\"";
+        break;
+      case '\'':
+        *out += "\\\'";
+        break;
+      case '\\':
+        *out += "\\\\";
+        break;
+      default:
+        if (ch < 32 || ch >= 127) {
+          char buf[5];
+          std::snprintf(buf, sizeof(buf), "\\%03o", ch);
+          *out += buf;
+        } else {
+          *out += static_cast<char>(ch);
+        }
+        break;
+    }
   }
-  GoogleString output =
-      absl::StrFormat(kOutputTemplate, FLAGS_data_file.c_str(),
-                      FLAGS_varname.c_str(), joined.c_str());
-
-  file_system.RemoveFile(FLAGS_c_file.c_str(), &handler);
-  return file_system.WriteFileAtomic(FLAGS_c_file, output, &handler);
 }
 
-}  // namespace net_instaweb
+// Accepts --name=value, -name=value, --name value and -name value.
+bool ParseFlags(int argc, char* argv[], std::string* data_file,
+                std::string* c_file, std::string* varname) {
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    if (arg.size() < 2 || arg[0] != '-') {
+      std::fprintf(stderr, "data2c: unexpected argument '%s'\n", argv[i]);
+      return false;
+    }
+    arg.erase(0, arg[1] == '-' ? 2 : 1);
+    std::string name = arg;
+    std::string value;
+    size_t eq = arg.find('=');
+    if (eq != std::string::npos) {
+      name = arg.substr(0, eq);
+      value = arg.substr(eq + 1);
+    } else if (i + 1 < argc) {
+      value = argv[++i];
+    } else {
+      std::fprintf(stderr, "data2c: missing value for '%s'\n", argv[i]);
+      return false;
+    }
+    if (name == "data_file") {
+      *data_file = value;
+    } else if (name == "c_file") {
+      *c_file = value;
+    } else if (name == "varname") {
+      *varname = value;
+    } else {
+      std::fprintf(stderr, "data2c: unknown flag '%s'\n", name.c_str());
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
 
 int main(int argc, char* argv[]) {
-  if (net_instaweb::DataToC(argc, argv)) {
-    return EXIT_SUCCESS;
-  } else {
+  std::string data_file = "/tmp/a.js";
+  std::string c_file = "/tmp/a.c";
+  std::string varname = "str";
+  if (!ParseFlags(argc, argv, &data_file, &c_file, &varname)) {
+    std::fprintf(stderr,
+                 "usage: data2c --data_file=<in> --c_file=<out> "
+                 "--varname=<name>\n");
     return EXIT_FAILURE;
   }
+
+  std::ifstream in(data_file, std::ios::in | std::ios::binary);
+  if (!in) {
+    std::fprintf(stderr, "data2c: cannot read '%s'\n", data_file.c_str());
+    return EXIT_FAILURE;
+  }
+  std::string input((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+  if (in.bad()) {
+    std::fprintf(stderr, "data2c: error reading '%s'\n", data_file.c_str());
+    return EXIT_FAILURE;
+  }
+
+  std::string output = kOutputPrefix;
+  output += data_file;
+  output += "\n\nnamespace net_instaweb {\n\nconst char* ";
+  output += varname;
+  output += " =";
+  for (size_t i = 0; i < input.size(); i += kChunkSize) {
+    size_t len = input.size() - i < kChunkSize ? input.size() - i : kChunkSize;
+    output += "\n    \"";
+    AppendCEscaped(input, i, len, &output);
+    output += "\"";
+  }
+  output += ";\n\n}  // namespace net_instaweb\n";
+
+  std::ofstream out(c_file, std::ios::out | std::ios::binary | std::ios::trunc);
+  if (!out) {
+    std::fprintf(stderr, "data2c: cannot write '%s'\n", c_file.c_str());
+    return EXIT_FAILURE;
+  }
+  out.write(output.data(), static_cast<std::streamsize>(output.size()));
+  out.close();
+  if (!out) {
+    std::fprintf(stderr, "data2c: error writing '%s'\n", c_file.c_str());
+    return EXIT_FAILURE;
+  }
+  return EXIT_SUCCESS;
 }

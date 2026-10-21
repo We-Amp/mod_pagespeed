@@ -21,6 +21,7 @@
 #                                 libdav1d.bzl).
 
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+load("//bazel:foreign_cc.bzl", "cmake_build_args")
 
 def libavif_from_source(with_dav1d = False):
     """cmake build target for libavif, codecs threaded as deps.
@@ -109,6 +110,7 @@ def libavif_from_source(with_dav1d = False):
     cmake(
         name = "avif_lib",
         lib_source = "@libavif_src//:all_srcs",
+        build_args = cmake_build_args(),
         # Static libavif installs the MERGED archive target `avif_static`, whose
         # OUTPUT_NAME is set to `avif` -- so MSVC/clang-cl yields `avif.lib` and
         # every other leg `libavif.a`.
