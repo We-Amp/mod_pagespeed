@@ -69,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Behind a shared cache or CDN](docs/daemon-adapter-deployment.md#behind-a-shared-cache-or-cdn).
   **Update recommended for sites behind a shared cache or CDN.**
 
+- A read from the optimizer worker that timed out could be reported as a
+  dropped connection when the host's clock ran slow; it is now reported as a
+  timeout whenever the transfer itself timed out.
+
 - **IIS installer: a rebuilt installer of the same version now upgrades the
   installed one.** Before, a second build of the same version (a reissued
   installer) installed beside the first, leaving two entries in Programs and

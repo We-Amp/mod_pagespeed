@@ -30,7 +30,7 @@ manifest.json (schema 1):
   asset         the uploaded name (what SHA256SUMS lists)
   name          the original name (what the packaging produced, '~' kept)
   kind          deb | rpm | tarball | so | zip | msi | json
-  component     module | optimizer | source | sbom
+  component     module | optimizer | source | sbom | sidecar
   channel       routing hint for the consumer: apt | rpm-el9 | rpm-el10 |
                 rpm-ea4 | none (a direct download only)
   channel_also  further channels the same file belongs to (the optimizer
@@ -69,6 +69,11 @@ ARTIFACTS = {
     "asset-optimizer": ("optimizer", None, "any", ()),
     "asset-sbom": ("sbom", "none", "any", ()),
     "asset-windows": ("module", "none", "any", ()),
+    # The native pair of the ASP.NET Core sidecar, per architecture, and its
+    # manifest (tools/ci/release_sidecar.sh, tools/ci/sidecar_pair_manifest.py).
+    "asset-sidecar-x64": ("sidecar", "none", "any", ()),
+    "asset-sidecar-arm64": ("sidecar", "none", "any", ()),
+    "asset-sidecar-manifest": ("sidecar", "none", "any", ()),
 }
 
 # The stock Apache RPM of el10 has no dist tag in its name, so it has the same
@@ -193,6 +198,15 @@ def required(pkg_version, prerelease, msi=False):
     req.append(("optimizer rpm x86_64", "asset-optimizer", r"^pagespeed-optimizer-.*\.x86_64\.rpm$"))
     req.append(("optimizer rpm aarch64", "asset-optimizer", r"^pagespeed-optimizer-.*\.aarch64\.rpm$"))
     req.append(("source tarball", "asset-source", r"^mod_pagespeed-.*\.tar\.gz$"))
+    # The sidecar pair is named with the version as the tag spells it (a
+    # hyphen before a pre-release, where dpkg has a '~').
+    tag_version = re.escape(pkg_version.replace("~", "-"))
+    for rid in ("linux-x64", "linux-arm64"):
+        req.append(("sidecar native pair " + rid, "asset-sidecar-" + rid.split("-")[1],
+                    r"^pagespeed-sidecar-native-%s-%s\.tar\.gz$" % (tag_version, rid)))
+        req.append(("sidecar debug files " + rid, "asset-sidecar-" + rid.split("-")[1],
+                    r"^pagespeed-sidecar-native-debug-%s-%s\.tar\.gz$" % (tag_version, rid)))
+    req.append(("sidecar pair manifest", "asset-sidecar-manifest", r"^sidecar-pair\.json$"))
     req.append(("sbom", "asset-sbom", r"\.spdx\.json$"))
     req.append(("vex", "asset-sbom", r"\.vex\.json$"))
     if msi:
@@ -474,9 +488,31 @@ def self_test():
         mk(st8, "asset-source", "mod_pagespeed-%s.tar.gz" % v)
         mk(st8, "asset-sbom", "pagespeed-1.1-%s.spdx.json" % v)
         mk(st8, "asset-sbom", "pagespeed-1.1-%s.vex.json" % v)
+        for rid in ("linux-x64", "linux-arm64"):
+            mk(st8, "asset-sidecar-" + rid.split("-")[1], "pagespeed-sidecar-native-%s-%s.tar.gz" % (v, rid))
+            mk(st8, "asset-sidecar-" + rid.split("-")[1], "pagespeed-sidecar-native-debug-%s-%s.tar.gz" % (v, rid))
+        mk(st8, "asset-sidecar-manifest", "sidecar-pair.json", b"{}")
         out8 = os.path.join(tmp, "o8")
         build(ns(st8, out8, profile="part-a"))
         # a pre-release tag needs no cPanel packages
+        with open(os.path.join(out8, "manifest.json")) as fh:
+            sidecar = [f for f in json.load(fh)["files"] if f["component"] == "sidecar"]
+        if sorted((f["asset"], f["kind"], f["channel"], f["arch"]) for f in sidecar) != [
+                ("pagespeed-sidecar-native-1.19.0-linux-arm64.tar.gz", "tarball", "none", "arm64"),
+                ("pagespeed-sidecar-native-1.19.0-linux-x64.tar.gz", "tarball", "none", "x64"),
+                ("pagespeed-sidecar-native-debug-1.19.0-linux-arm64.tar.gz", "tarball", "none", "arm64"),
+                ("pagespeed-sidecar-native-debug-1.19.0-linux-x64.tar.gz", "tarball", "none", "x64"),
+                ("sidecar-pair.json", "json", "none", "any")]:
+            print("FAIL: sidecar entries: %r" % sidecar)
+            fail = 1
+        # the sidecar pair is part of a complete set
+        os.rename(os.path.join(st8, "asset-sidecar-arm64"), os.path.join(tmp, "sidecar-arm64-aside"))
+        expect_exit("missing sidecar arm64", lambda: build(ns(st8, os.path.join(tmp, "o8b"), profile="part-a")))
+        os.rename(os.path.join(tmp, "sidecar-arm64-aside"), os.path.join(st8, "asset-sidecar-arm64"))
+        # a sidecar pair of another version is refused
+        mk(st8, "asset-sidecar-x64", "pagespeed-sidecar-native-1.18.0-linux-x64.tar.gz")
+        expect_exit("sidecar of another version", lambda: build(ns(st8, os.path.join(tmp, "o8c"), profile="part-a")))
+        os.remove(os.path.join(st8, "asset-sidecar-x64", "pagespeed-sidecar-native-1.18.0-linux-x64.tar.gz"))
         shutil.rmtree(os.path.join(st8, "asset-ea4-el9"))
         shutil.rmtree(os.path.join(st8, "asset-ea4-el8"))
         build(ns(st8, os.path.join(tmp, "o9"), profile="part-a", pre="true"))

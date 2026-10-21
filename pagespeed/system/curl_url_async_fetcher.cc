@@ -201,24 +201,23 @@ void CurlUrlAsyncFetcher::Fetch(const GoogleString& url,
                                 MessageHandler* message_handler,
                                 AsyncFetch* async_fetch) {
   StartFetch(url, "" /* socket_path */, 0 /* timeout_ms */,
-             0 /* max_response_body_bytes */, message_handler, async_fetch);
+             0 /* max_response_body_bytes */, message_handler, async_fetch,
+             nullptr /* timed_out */);
 }
 
-void CurlUrlAsyncFetcher::FetchOverUnixSocket(const GoogleString& url,
-                                              StringPiece socket_path,
-                                              int64 timeout_ms,
-                                              size_t max_response_body_bytes,
-                                              MessageHandler* message_handler,
-                                              AsyncFetch* async_fetch) {
+void CurlUrlAsyncFetcher::FetchOverUnixSocket(
+    const GoogleString& url, StringPiece socket_path, int64 timeout_ms,
+    size_t max_response_body_bytes, MessageHandler* message_handler,
+    AsyncFetch* async_fetch, bool* timed_out) {
   StartFetch(url, socket_path, timeout_ms, max_response_body_bytes,
-             message_handler, async_fetch);
+             message_handler, async_fetch, timed_out);
 }
 
 void CurlUrlAsyncFetcher::StartFetch(const GoogleString& url,
                                      StringPiece socket_path, int64 timeout_ms,
                                      size_t max_response_body_bytes,
                                      MessageHandler* message_handler,
-                                     AsyncFetch* async_fetch) {
+                                     AsyncFetch* async_fetch, bool* timed_out) {
   if (shutdown_) {
     message_handler->Message(
         kWarning, "CurlUrlAsyncFetcher is shut down, cannot fetch: %s",
@@ -250,6 +249,7 @@ void CurlUrlAsyncFetcher::StartFetch(const GoogleString& url,
   if (!socket_path.empty()) {
     curl_fetch->set_unix_socket_path(socket_path);
   }
+  curl_fetch->set_timed_out_flag(timed_out);
   if (timeout_ms > 0) {
     curl_fetch->set_timeout_ms(timeout_ms);
   }

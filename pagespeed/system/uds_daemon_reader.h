@@ -49,8 +49,8 @@ class UdsDaemonReader : public DaemonReader {
   // delivers bytes past the cap to the reader's counter before the
   // transport stops it: "too large" is observed, not inferred.
   static constexpr size_t kTransportCapSlackBytes = 64 * 1024;
-  // A failed read that ran this close to kUpstreamTimeoutMs is reported as
-  // a timeout (curl's result code does not reach the fetch).
+  // Fallback for a failed read that curl did not report as timed out: one
+  // that ran this close to kUpstreamTimeoutMs is still reported as a timeout.
   static constexpr int64 kTimeoutClassificationSlackMs = 250;
 
   // An empty `socket_path` disables the reader: every Get() then fails its
