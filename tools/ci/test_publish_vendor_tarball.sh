@@ -32,6 +32,10 @@
 #                     the source is removed.
 #  12. atomic-rename  a reader polling the final name while a large tarball is
 #                     published never sees a short file.
+#  13. same-run-sibling two jobs of one workflow run (same run id and
+#                     attempt) publish into one shared dir: this job's stage
+#                     and sidecar temp names differ from the sibling's, so it
+#                     never removes or overwrites the sibling's files.
 #
 # Run: tools/ci/test_publish_vendor_tarball.sh
 
@@ -231,6 +235,22 @@ if [ "$(cat "$T/reader.out")" = 0 ] && [ "$(wc -c < "$A" | tr -d ' ')" = "$BIG" 
 else
   fail "a reader saw a short file while publishing"
 fi
+
+# 13. same-run-sibling
+B="$T/shared/vendor-5555555.tar.zst"
+printf 'sibling-stage\n' > "$B.777-1.1.tmp"
+printf 'sibling-sidecar\n' > "$B.sha256.777-1.tmp"
+head -c 200000 /dev/urandom > "$T/private/sib.tmp"
+want="$(digest "$T/private/sib.tmp")"
+GITHUB_RUN_ID=777 GITHUB_RUN_ATTEMPT=1 bash "$PUBLISH" "$B" "$T/private/sib.tmp" 2>/dev/null
+if [ "$(digest "$B")" = "$want" ] && sidecar_matches "$B" \
+   && [ "$(cat "$B.777-1.1.tmp" 2>/dev/null)" = "sibling-stage" ] \
+   && [ "$(cat "$B.sha256.777-1.tmp" 2>/dev/null)" = "sibling-sidecar" ]; then
+  pass "a same-run sibling's stage and sidecar temp files are left alone"
+else
+  fail "same-run sibling: stage='$(cat "$B.777-1.1.tmp" 2>/dev/null)' sidecar-tmp='$(cat "$B.sha256.777-1.tmp" 2>/dev/null)'"
+fi
+rm -f "$B.777-1.1.tmp" "$B.sha256.777-1.tmp"
 
 if [ "$FAILS" -ne 0 ]; then
   echo "$FAILS case(s) failed"
