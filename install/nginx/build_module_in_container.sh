@@ -370,12 +370,13 @@ add_toolchain_ppa() {
     "${TOOLCHAIN_PPA_KEY_FPR}" "${keyring_dir}/ubuntu-toolchain-r.gpg" || return 1
   echo "deb [signed-by=${keyring_dir}/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu ${codename} main" \
     > "${sources_dir}/ubuntu-toolchain-r.list"
-  # The PPA's mirror can answer 503 for minutes at a time. apt-get update only
-  # warns about an index it could not fetch and goes on without it, so the
-  # gcc-13 install that follows fails. Retry until the PPA's packages show.
+  # The PPA's mirror can answer 503 for minutes at a time. Depending on which
+  # file failed, apt-get update either fails outright or only warns and goes on
+  # without the index, after which the gcc-13 install fails. Retry until the
+  # PPA's packages show; the gcc-13 check, not update's status, is the gate.
   local attempt
   for attempt in 1 2 3 4 5 6; do
-    apt-get update -qq -o Acquire::Retries=3
+    apt-get update -qq -o Acquire::Retries=3 || true
     if apt-cache show gcc-13 >/dev/null 2>&1; then
       return 0
     fi
