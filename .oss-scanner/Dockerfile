@@ -116,15 +116,21 @@ WORKDIR /src
 # settings there means a plain `bazel build` or `bazel test` inside the image
 # reuses this build: the in-image output base, the project's preferred
 # toolchain config, a pinned action PATH (so a shell with a different PATH
-# does not invalidate the cache), debug info and frame pointers, no remote
-# cache, and no Redis or Memcached ports (the project's bazelrc points the
-# cache tests at local services; with the ports empty those tests skip).
+# does not invalidate the cache), line-table debug info and frame pointers
+# (file:line backtraces at a fraction of the compile, link and disk cost of
+# full -g), the exec configuration at -O0 (the code generators and protoc are
+# built once and run a handful of times; compiling them at -O2 is the slowest
+# part of a cold build on a small machine), no remote cache, and no Redis or
+# Memcached ports (the project's bazelrc points the cache tests at local
+# services; with the ports empty those tests skip).
 RUN printf '%s\n' \
       'startup --output_user_root=/bazel-cache/out' \
       'build --config=clang-libstdcxx13' \
       'build --action_env=CC=clang --action_env=CXX=clang++' \
       'build --action_env=PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
-      'build --copt=-g --copt=-fno-omit-frame-pointer --strip=never' \
+      'build --host_action_env=PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
+      'build --copt=-gline-tables-only --copt=-fno-omit-frame-pointer --strip=never' \
+      'build --host_compilation_mode=fastbuild' \
       'build --remote_cache=' \
       'test --test_output=errors' \
       'test --test_env=REDIS_PORT= --test_env=MEMCACHED_PORT=' \
@@ -134,21 +140,19 @@ RUN printf '%s\n' \
 USER dev
 ENV HOME=/home/dev
 
-# Build the two Linux modules, the smoke slice of the unit tests and the fuzz
-# harnesses, run the smoke tests (a failing test does not abort the build) and
-# drop Bazel's sandbox, all in one layer: a later layer cannot shrink an earlier
-# one. The compile cache stays, so the rest of the unit suite
-# (test/pagespeed/..., test/net/...), the sanitizer configs and the server-based
-# system tests build offline from the cached engine objects; threat_model.md
-# says how. A failing build fails the image and primary_contact gets the log.
+# Build the two Linux modules and the fuzz harnesses, then drop Bazel's
+# sandbox, all in one layer: a later layer cannot shrink an earlier one. The
+# unit tests are not built here (the scanner's build budget is 45 minutes on
+# 16 cores, and compiling the test sources would spend a third of it); the
+# compile cache stays, so any unit test (test/pagespeed/..., test/net/...), the
+# sanitizer configs and the server-based system tests build offline from the
+# cached engine objects; threat_model.md says how. A failing build fails the
+# image and primary_contact gets the log.
 RUN bazel build -- \
       //:libmod_pagespeed.so \
       //pagespeed/nginx:ngx_pagespeed_module.so \
-      //test/pagespeed/kernel/base/... //test/pagespeed/kernel/html/... \
       //pagespeed/kernel/html:html_fuzz //pagespeed/kernel/js:js_minify_fuzz \
       //pagespeed/kernel/packs:pack_loader_fuzz //third_party/css_parser:parser_fuzz \
-    && { bazel test -- //test/pagespeed/kernel/base/... //test/pagespeed/kernel/html/... \
-          || echo "WARNING: bazel test reported failures; see /src/bazel-testlogs"; } \
     && { bazel shutdown || true; } \
     && rm -rf /bazel-cache/out/*/sandbox /bazel-cache/out/*/java.log* \
     && du -sh /bazel-cache
