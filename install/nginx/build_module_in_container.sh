@@ -370,7 +370,20 @@ add_toolchain_ppa() {
     "${TOOLCHAIN_PPA_KEY_FPR}" "${keyring_dir}/ubuntu-toolchain-r.gpg" || return 1
   echo "deb [signed-by=${keyring_dir}/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu ${codename} main" \
     > "${sources_dir}/ubuntu-toolchain-r.list"
-  apt-get update -qq
+  # The PPA's mirror can answer 503 for minutes at a time. apt-get update only
+  # warns about an index it could not fetch and goes on without it, so the
+  # gcc-13 install that follows fails. Retry until the PPA's packages show.
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    apt-get update -qq -o Acquire::Retries=3
+    if apt-cache show gcc-13 >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "toolchain PPA index not available (attempt ${attempt} of 6); retrying in $((attempt * 20))s" >&2
+    sleep $((attempt * 20))
+  done
+  echo "ERROR: the toolchain PPA index stayed unavailable after 6 attempts" >&2
+  return 1
 }
 
 install_deps_focal() {
