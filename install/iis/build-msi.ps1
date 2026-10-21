@@ -6,6 +6,17 @@
 # Usage:
 #   .\install\iis\build-msi.ps1 [-OutputDir C:\output] [-BinDir bazel-bin\pagespeed\iis]
 #       [-OptimizerDir <dir with factory_worker.exe + pagespeed.dll>]
+#       [-Revision <0..65535>]
+#
+# -Revision is the build revision, the fourth field of the MSI ProductVersion
+# (MAJOR.MINOR.BUILD.REVISION). It must grow from one build to the next (a
+# release run number, never a date or a hash). Default: the PAGESPEED_MSI_REVISION
+# environment variable, else 0. The version the product shows (the package
+# name, the file name, the X-Page-Speed header) stays MAJOR.MINOR.BUILD; the
+# revision appears only as the version in Programs and Features. Windows
+# Installer ignores the fourth field when it compares versions, so Product.wxs
+# lets a build of the same MAJOR.MINOR.BUILD upgrade the installed one and
+# refuses one with a lower revision itself.
 #
 # With -OptimizerDir the package also installs the optimizer worker as a
 # disabled Windows service and the client library the module loads for the
@@ -22,7 +33,8 @@ param(
     [string]$OutputDir = (Get-Location).Path,
     [string]$BinDir = "",
     [string]$SrcDir = "",
-    [string]$OptimizerDir = ""
+    [string]$OptimizerDir = "",
+    [string]$Revision = $env:PAGESPEED_MSI_REVISION
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,7 +59,14 @@ if (-not $MAJOR -or -not $MINOR) {
     exit 1
 }
 
-$ProductVersion = "$MAJOR.$MINOR.$BUILD"
+if (-not $Revision) { $Revision = "0" }
+if ($Revision -notmatch '^\d{1,5}$' -or [int]$Revision -gt 65535) {
+    Write-Error "Revision must be an integer from 0 to 65535 (the fourth field of an MSI ProductVersion), got '$Revision'"
+    exit 1
+}
+$Revision = [string][int]$Revision
+
+$ProductVersion = "$MAJOR.$MINOR.$BUILD.$Revision"
 if ($PRERELEASE) {
     $DisplayVersion = "$MAJOR.$MINOR.$BUILD-$PRERELEASE"
 } else {
@@ -109,6 +128,11 @@ if (-not $currentWix) {
 # (GrantCacheAcl / GrantLogAcl) are the sole ACL mechanism.
 
 # --- Build MSI ---
+# ICE validation is not run (wix build does not validate). If it is ever turned
+# on (wix msi validate), suppress ICE61 explicitly (-sice ICE61): it warns
+# about the Upgrade row MajorUpgrade AllowSameVersionUpgrades writes, which
+# is deliberate here (a build of the same MAJOR.MINOR.BUILD replaces the
+# installed one; Product.wxs refuses a lower revision itself).
 $WxsPath = Join-Path $ScriptDir "Product.wxs"
 $MsiName = "pagespeed-iis-$DisplayVersion-win-x64.msi"
 $MsiPath = Join-Path $OutputDir $MsiName
@@ -123,6 +147,8 @@ Write-Host "  OptimizerDir:   $(if ($OptimizerDir) { $OptimizerDir } else { '(no
 
 wix build $WxsPath `
     -d "ProductVersion=$ProductVersion" `
+    -d "ShortVersion=$MAJOR.$MINOR.$BUILD" `
+    -d "Revision=$Revision" `
     -d "DisplayVersion=$DisplayVersion" `
     -d "UpgradeCode=$UpgradeCode" `
     -d "BinDir=$BinDir" `

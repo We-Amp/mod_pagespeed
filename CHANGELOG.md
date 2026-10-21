@@ -28,6 +28,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against it and the launch shim) is built and tested by the module release,
   live nginx tests included, and released with it.
 
+### Fixed
+
+- **IIS installer: a rebuilt installer of the same version now upgrades the
+  installed one.** Before, a second build of the same version (a reissued
+  installer) installed beside the first, leaving two entries in Programs and
+  Features. The installer now carries a build number as the fourth part of
+  its version (shown as the version in Programs and Features; the product
+  version, the file name and the `X-Page-Speed` header stay `2.5.0`), a build
+  of the same version replaces the installed one, keeping `pagespeed.config`,
+  the optimizer service's start type and its cache size, and an older build
+  or version is refused. After installing a rebuilt installer, do not re-run
+  an older installer of the same version; uninstall first. (The 2.5.0
+  installer published before this change cannot recognize a rebuild and
+  would install beside it.) If two entries appear after re-running an older
+  2.5.0 installer, uninstall both, then install the newer build again. A
+  later build also removes both entries when it upgrades.
+
 ### Documentation
 
 - **The sidecar's supported hosts are Debian 11 and 12 and Ubuntu 20.04 to
