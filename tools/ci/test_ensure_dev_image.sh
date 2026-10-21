@@ -27,6 +27,11 @@
 #                        docker-build-*.lock dirs past the age guard, and
 #                        leaves fresh ones, non-empty ones, other names, and
 #                        everything on a --name-only call.
+#  10. lock-dir-create   (flock only) a missing CI_DEV_IMAGE_LOCK_DIR is
+#                        created (mode 1777) and the lock file in it is used.
+#  11. build-race-won    docker build fails but the image exists afterwards
+#                        (a concurrent build won): success, image printed.
+#  12. build-fail        docker build fails and no image exists: failure.
 #
 # Run: tools/ci/test_ensure_dev_image.sh
 
@@ -55,8 +60,10 @@ mk_tree() {
 }
 
 # docker shim: `image inspect X` succeeds iff $T/images/<X> exists; `build -t
-# X` creates it (after SHIM_BUILD_DELAY seconds); `tag A B` creates B. Every
-# call is appended to $T/docker.log.
+# X` creates it (after SHIM_BUILD_DELAY seconds), or fails with
+# SHIM_BUILD_FAIL=present (creating X first, as a concurrent builder would)
+# or SHIM_BUILD_FAIL=absent; `tag A B` creates B. Every call is appended to
+# $T/docker.log.
 mkdir -p "$T/bin" "$T/images" "$T/lock"
 cat > "$T/bin/docker" <<'SHIM'
 #!/usr/bin/env bash
@@ -65,6 +72,13 @@ key() { printf '%s' "$1" | tr '/:' '__'; }
 case "$1 $2" in
   "image inspect") [ -e "$SHIM_ROOT/images/$(key "$3")" ] ;;
   "build -t"*) sleep "${SHIM_BUILD_DELAY:-0}"; echo "building $3"
+               case "${SHIM_BUILD_FAIL:-}" in
+                 # Another builder created the tag first.
+                 present) touch "$SHIM_ROOT/images/$(key "$3")"
+                          echo "ERROR: image \"$3\": already exists" >&2
+                          exit 1 ;;
+                 absent) echo "ERROR: build failed" >&2; exit 1 ;;
+               esac
                touch "$SHIM_ROOT/images/$(key "$3")" ;;
   "tag "*) touch "$SHIM_ROOT/images/$(key "$3")" ;;
   *) exit 0 ;;
@@ -262,6 +276,47 @@ if [ ! -e "$OLD/docker-build-x64-aaaaaaaaaaaa.lock" ] \
   pass "old-lock sweep: aged empty dir removed; fresh, non-empty and other dirs kept"
 else
   fail "old-lock sweep misbehaved: $(ls "$OLD") / $ERR"
+fi
+
+# 10. lock-dir-create
+if command -v flock >/dev/null 2>&1; then
+  mk_tree "$T/i/docker"; printf 'i\n' > "$T/i/docker/i.txt"
+  NEWLOCK="$T/cleared/locks"
+  ERR=$(CI_DEV_IMAGE_LOCK_DIR="$NEWLOCK" bash "$ENSURE" x64 "$T/i/docker" 2>&1 >/dev/null)
+  I=$(bash "$ENSURE" --name-only x64 "$T/i/docker")
+  MODE=$(stat -c %a "$NEWLOCK" 2>/dev/null || stat -f %Lp "$NEWLOCK")
+  if [ -d "$NEWLOCK" ] && [ "$MODE" = 1777 ] \
+     && [ -f "$NEWLOCK/pagespeed1.1-dev-build-x64-${I##*-}.lock" ] \
+     && ! printf '%s' "$ERR" | grep -q 'without the per-host lock' \
+     && [ -e "$T/images/$(printf '%s' "$I" | tr '/:' '__')" ]; then
+    pass "missing lock dir created (mode $MODE) and its lock used"
+  else
+    fail "lock dir not created or lock not used (mode '$MODE'): $ERR"
+  fi
+else
+  echo "SKIP: flock not installed (case 10)"
+fi
+
+# 11. build-race-won
+mk_tree "$T/j/docker"; printf 'j\n' > "$T/j/docker/j.txt"
+J=$(bash "$ENSURE" --name-only x64 "$T/j/docker")
+RC=0
+OUT=$(SHIM_BUILD_FAIL=present bash "$ENSURE" x64 "$T/j/docker" 2>"$T/err11") || RC=$?
+if [ "$RC" -eq 0 ] && [ "$OUT" = "$J" ] \
+   && grep -q 'a concurrent build won' "$T/err11"; then
+  pass "failed build with the image present afterwards succeeds"
+else
+  fail "race-won build: rc=$RC out='$OUT' err=$(cat "$T/err11")"
+fi
+
+# 12. build-fail
+mk_tree "$T/k/docker"; printf 'k\n' > "$T/k/docker/k.txt"
+RC=0
+SHIM_BUILD_FAIL=absent bash "$ENSURE" x64 "$T/k/docker" >/dev/null 2>&1 || RC=$?
+if [ "$RC" -ne 0 ]; then
+  pass "failed build with no image still fails (rc=$RC)"
+else
+  fail "failed build with no image returned success"
 fi
 
 if [ "$FAILS" -ne 0 ]; then
