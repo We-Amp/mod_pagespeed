@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.5.2] - 2026-10-22
 
+There is no module release 2.5.1; the module moves from 2.5.0 to 2.5.2 to
+pair with pagespeed-optimizer 2.5.2.
+
 ### Security
 
 - **The bundled and required nginx is updated to 1.30.6, which fixes two
