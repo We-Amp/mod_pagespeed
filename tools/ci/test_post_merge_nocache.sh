@@ -17,10 +17,8 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 files=(pipeline-full.yml pipeline-nightly.yml pipeline-release-module.yml)
 fail=0
 total=0
-for f in "${files[@]}"; do
-  path="$ROOT/.github/workflows/$f"
-  if [ ! -f "$path" ]; then echo "FAIL: $f missing"; fail=1; continue; fi
-  out="$(awk -v F=".github/workflows/$f" '
+scan() { # scan <path> <label>: prints FAIL lines and a COUNT line
+  awk -v F="$2" '
     function flush() {
       if (cmd != "") {
         n++
@@ -31,9 +29,9 @@ for f in "${files[@]}"; do
     {
       line = $0
       if (cmd == "") {
-        if (line ~ /bazel[[:space:]]+test[[:space:]]/ ||
-            line ~ /^[[:space:]]*test[[:space:]]+(\$\{|--|@)/ ||
-            line ~ /[[:space:]]test[[:space:]]+@common([[:space:]]|$)/) {
+        low = tolower(line)
+        if (low ~ /bazel[a-z_]*"?\}?([[:space:]]+("[^"]*"|[-@][^[:space:]]*))*[[:space:]]+test([[:space:]]|$)/ ||
+            low ~ /^[[:space:]]*test[[:space:]]+(\$[A-Za-z_{]|"\$\{|@|--|\/\/)/) {
           start = NR; cmd = line
         } else next
       } else {
@@ -43,7 +41,35 @@ for f in "${files[@]}"; do
       flush()
     }
     END { flush(); print "COUNT " n+0 " " miss+0 }
-  ' "$path")"
+  ' "$1"
+}
+
+if [ "${1:-}" = "--selftest" ]; then
+  # Negative fixture: invocations lacking the flag must be reported, other
+  # bazel commands and flagged invocations must not.
+  fx="$(mktemp)"; trap 'rm -f "$fx"' EXIT
+  cat > "$fx" <<'FIX'
+run: |
+  "$BAZEL_BIN" --output_user_root=/x test //a:b
+  & $bazel test //a:c
+  bazelisk test //a:d
+  bazel --output_user_root=/y \
+    test "${FLAGS[@]}" //a:e
+  bazel build //a:f
+  bazel info output_base
+  bazel --output_user_root=/z test --nocache_test_results //a:ok
+FIX
+  out="$(scan "$fx" fixture)"
+  printf '%s\n' "$out"
+  want="$(printf 'FAIL: fixture:2\nFAIL: fixture:3\nFAIL: fixture:4\nFAIL: fixture:6\nCOUNT 5 4')"
+  if [ "$out" = "$want" ]; then echo "ok   negative fixture reported as expected"; exit 0; fi
+  echo "FAIL: negative fixture not reported as expected"; exit 1
+fi
+
+for f in "${files[@]}"; do
+  path="$ROOT/.github/workflows/$f"
+  if [ ! -f "$path" ]; then echo "FAIL: $f missing"; fail=1; continue; fi
+  out="$(scan "$path" ".github/workflows/$f")"
   printf '%s\n' "$out" | grep '^FAIL' && fail=1
   c="$(printf '%s\n' "$out" | awk '/^COUNT/{print $2}')"
   echo "$f: $c test invocation(s) found"
