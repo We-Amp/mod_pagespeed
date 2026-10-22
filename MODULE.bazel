@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-###############################################################################
-# Bazel now uses Bzlmod by default to manage external dependencies.
-# Please consider migrating your external dependencies from WORKSPACE to MODULE.bazel.
-#
-# For more details, please check https://github.com/bazelbuild/bazel/issues/18958
-###############################################################################
+# Bzlmod is enabled, but no dependency has moved here yet: everything is still
+# declared in WORKSPACE (hybrid mode). Keep the module name so
+# @mod_pagespeed//... labels used by patches keep resolving.
+module(name = "mod_pagespeed")

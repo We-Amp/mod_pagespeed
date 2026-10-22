@@ -126,7 +126,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
 
       # tools/vendor-deps.sh clones the git-only dependencies and fills the
       # Bazel repository cache; it needs python3, git and a git identity that
@@ -290,7 +290,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -453,7 +453,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -591,7 +591,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -750,7 +750,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -916,7 +916,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -1072,7 +1072,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -1270,7 +1270,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -1501,7 +1501,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -1729,7 +1729,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -1994,7 +1994,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -2278,7 +2278,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       # A vendor tarball on the runner makes the dependency fetch local; without
@@ -2586,7 +2586,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', '.bazelversion') }}
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
           fail-on-cache-miss: true
 
       # A vendor tarball on the runner makes the dependency fetch local; without
