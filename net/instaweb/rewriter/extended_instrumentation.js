@@ -21,11 +21,10 @@
  * @author satyanarayana@google.com (Satyanarayana Manyam)
  */
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry point is a property of window.pagespeed: the
+// add_instrumentation beacon calls pagespeed.getResourceTimingData by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 /**
  * Iterates over the resource timing data and computes various metrics.
@@ -126,6 +125,3 @@ pagespeed.getResourceTimingData = function() {
 
   return '';
 };
-
-pagespeed['getResourceTimingData'] = pagespeed.getResourceTimingData;
-

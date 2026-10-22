@@ -56,6 +56,7 @@ ESBUILD_FILES=(
     dedup_inlined_images.js
     defer_iframe.js
     delay_images_inline.js
+    extended_instrumentation.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -267,7 +268,6 @@ done
 WITHOUT_DEP_FILES=(
     add_instrumentation.js
     deterministic.js
-    extended_instrumentation.js
 )
 WITH_DEP_FILES=(
     critical_css_beacon.js
