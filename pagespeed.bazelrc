@@ -146,6 +146,20 @@ build:vendored --override_repository=+non_bcr_deps+aom_src=vendor/aom
 build:windows --local_resources=cpu=HOST_CPUS
 
 # =============================================================================
+# Windows runfiles: manifests only, no runfiles link trees ahead of time
+# =============================================================================
+# Bazel 8 on Windows builds a runfiles tree in-process. When an entry's target
+# is an output that is not materialised yet (a disk or remote cache hit), it
+# creates a directory junction instead of a file link, and the tree is only
+# rebuilt when its manifest changes. rules_foreign_cc copies each build tool
+# with its runfiles (pkg-config, cmake) into <target>.ext_build_deps/bin, and a
+# junction to a file arrives there as a directory it cannot overwrite, so the
+# aom/avif/curl/libmemcached builds fail whenever they run while their tools
+# came from the cache. Without link trees the tools and tests use their
+# runfiles manifests; test and run still get a runfiles tree when they need it.
+build:windows --nobuild_runfile_links
+
+# =============================================================================
 # Remote cache via a shared bazel-remote (one central cache for CI)
 # =============================================================================
 # Shared L2 cache across all CI runners and runs. Used alongside --disk_cache (L1).
