@@ -67,6 +67,7 @@ ESBUILD_FILES=(
     critical_css_beacon.js
     dedup_inlined_images.js
     defer_iframe.js
+    delay_images.js
     delay_images_inline.js
     deterministic.js
     extended_instrumentation.js
@@ -311,7 +312,6 @@ WITHOUT_DEP_FILES=(
 )
 WITH_DEP_FILES=(
     lazyload_images.js
-    delay_images.js
     js_defer.js
     local_storage_cache.js
 )
