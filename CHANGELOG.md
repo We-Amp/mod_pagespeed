@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The unbuilt `css_minify_main` and `js_minify_main` command-line sources are
+  gone from the source tree; they have had no build target since the Bazel
+  build.
+
 ## [2.5.2] - 2026-10-22
 
 Corrected after release (2026-10-22): the sidecar NuGet packages and the
