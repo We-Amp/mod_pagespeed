@@ -10,3 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo hi
+  vendor:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo vendor

@@ -634,11 +634,15 @@ and fails the build when the shape breaks:
 - **(f)** a reusable workflow has a top-level `permissions:` block with no
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
-- **(queue-guard-reads-default-branch)** the `changes` job holds the
-  merge-queue guard step with fixed keys, `if:` and `run:` block (the
-  classifier is read from `origin/${DEFAULT_BRANCH}` with `git show`), and no
-  other workflow line reads `tools/ci/queue_fork_guard.sh` (see "Merge-queue
-  runs");
+- **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`
+  job holds the merge-queue guard step as the first step after the checkout
+  step (which sets no `env:`), with fixed keys (compared unquoted), `if:`,
+  `run:` block (the classifier is read from `origin/${DEFAULT_BRANCH}` with
+  `git show`) and only the guard's own env keys; no other line names the
+  script in any spelling, and the job has no glob, `find`, `source` or
+  `GITHUB_ENV` write under `tools/ci/`; `BASH_ENV`, `PATH` and `GIT_*` are not
+  set at workflow level or in that job; `vendor` has `needs: changes` and no
+  `if:` (see "Merge-queue runs");
 - **(e)** `.github/` and `tools/ci/` carry no LAN address literals, no
   `.home` names, no `:9090`, no `self-hosted` and none of the retired runner
   label words (the bare word `pool` is only checked under `.github/`, because

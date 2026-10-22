@@ -12,6 +12,9 @@ jobs:
       contents: read
       pull-requests: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Refuse fork and Dependabot PRs in the merge queue
         if: github.event_name == 'merge_group'
         env:
@@ -25,3 +28,8 @@ jobs:
           git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
             git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
           git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash || echo ignored
+  vendor:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo vendor

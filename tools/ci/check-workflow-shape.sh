@@ -521,14 +521,23 @@ done
 # The merge-queue guard (docs/ci/pipelines.md, "Merge-queue runs") must read
 # its classifier from the default branch, never from the queued tree. In
 # pipeline-pr.yml (and any workflow that names the classifier):
-#   - the `changes` job holds exactly one step named QG_STEP;
-#   - that step has only the keys name, if, env and run, with the exact if:
-#     `github.event_name == 'merge_group'`, and its run: block is exactly one
-#     of the two allowed bodies below (no other command, comment or wrapper);
-#   - no other non-comment line of the file names tools/ci/queue_fork_guard.sh.
+#   - the `changes` job holds exactly one step named QG_STEP, and it is the
+#     first step after the actions/checkout step, which carries no env:;
+#   - that step has only the keys name, if, env and run (keys compared after
+#     unquoting), the exact if: `github.event_name == 'merge_group'`, a run:
+#     block that is exactly one of the two allowed bodies below, and env keys
+#     from the allowed set only; the `changes` job defines no other env keys;
+#   - outside that step, no non-comment line names `queue_fork_gua...` (the
+#     test script excepted), and the `changes` job has no glob or brace
+#     expansion under tools/ci/ (path-filter grep patterns excepted), no
+#     find/xargs/source/dot-invocation and no GITHUB_ENV/GITHUB_PATH write;
+#   - BASH_ENV, PATH and GIT_DIR/GIT_WORK_TREE/GIT_CONFIG* are not set at
+#     workflow level or in the `changes` job;
+#   - the `vendor` job has `needs:` containing `changes` and no `if:`.
 QG_STEP="Refuse fork and Dependabot PRs in the merge queue"
 QG_IF="        if: github.event_name == 'merge_group'"
 QG_PAT='(^|[^_A-Za-z0-9])queue_fork_guard\.sh'
+QG_ENV_ALLOWED=" GH_TOKEN BASE HEAD_SHA HEAD_REF DEFAULT_BRANCH GITHUB_REPOSITORY "
 # shellcheck disable=SC2016  # the text to match carries literal ${...}
 QG_SET='set -euo pipefail'
 # shellcheck disable=SC2016
@@ -541,13 +550,29 @@ QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "$
 QG_BODY_MIN="$(printf '%s\n%s' "${QG_SET}" "${QG_SHOW}")"
 qg_err() { err "${wf}: $1 (queue-guard-reads-default-branch)"; }
 
+# job_block <file> <job>: the lines of one top-level job.
+job_block() {
+  awk -v j="  $2:" '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($0 == j) } inj { print }' "$1"
+}
+# env_keys <indent>: the keys of an `env:` block at that indent (stdin).
+env_keys() {
+  awk -v ind="$1" '
+    $0 == ind "env:" { e = 1; next }
+    e {
+      if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) next
+      if (substr($0, 1, length(ind) + 2) == ind "  ") {
+        k = $0; sub(/^ +/, "", k); sub(/:.*/, "", k); gsub(/["\047]/, "", k); print k
+      } else e = 0
+    }'
+}
+
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue
   mentions="$(grep -E "${QG_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   if [ "$(basename "${wf}")" != "pipeline-pr.yml" ] && [ "${mentions}" = "0" ]; then
     continue
   fi
-  job="$(awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "changes:") } inj { print }' "${wf}")"
+  job="$(job_block "${wf}" changes)"
   n_steps="$(printf '%s\n' "${job}" | grep -cxF "      - name: ${QG_STEP}" || true)"
   if [ "${n_steps}" != "1" ]; then
     qg_err "the changes job must hold exactly one step named '${QG_STEP}' (found ${n_steps})"
@@ -556,7 +581,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   step="$(printf '%s\n' "${job}" | awk -v n="      - name: ${QG_STEP}" '
     /^      - / { instep = ($0 == n) }
     instep { print }')"
-  keys="$(printf '%s\n' "${step}" | grep -E '^        [A-Za-z_-]+:' | sed -E 's/^ +([A-Za-z_-]+):.*/\1/' | sort | tr '\n' ' ')"
+  keys="$(printf '%s\n' "${step}" | grep -E '^        ["'\'']?[A-Za-z_-]+["'\'']?:' | sed -E 's/^ +["'\'']?([A-Za-z_-]+)["'\'']?:.*/\1/' | sort | tr '\n' ' ')"
   if [ "${keys}" != "env if run " ]; then
     qg_err "the guard step must have exactly the keys name, if, env and run (found: name ${keys})"
   fi
@@ -569,8 +594,55 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   if [ "${body}" != "${QG_BODY_FULL}" ] && [ "${body}" != "${QG_BODY_MIN}" ]; then
     qg_err "the guard step's run: block must be only: ${QG_SET}, the optional default-branch fetch, and ${QG_SHOW}"
   fi
-  if [ "${mentions}" != "1" ]; then
-    qg_err "queue_fork_guard.sh must be named exactly once, in the guard step (found ${mentions} reads); never read the queued tree's copy"
+
+  # Position: the first step after actions/checkout, which has no env:.
+  after_checkout="$(printf '%s\n' "${job}" | grep -E '^      - ' | awk '/^      - uses: actions\/checkout@/ { f = 1; next } f { print; exit }')"
+  if [ "${after_checkout}" != "      - name: ${QG_STEP}" ]; then
+    qg_err "the guard step must be the first step after the actions/checkout step of the changes job"
+  fi
+  if printf '%s\n' "${job}" | awk '/^      - / { c = ($0 ~ /^      - uses: actions\/checkout@/) } c { print }' | grep -qE '^        ["'\'']?env["'\'']?:'; then
+    qg_err "the actions/checkout step of the changes job must not set env:"
+  fi
+
+  # env: only the spec's keys on the job and on the guard step.
+  for k in $(printf '%s\n' "${job}" | env_keys "    ") $(printf '%s\n' "${step}" | env_keys "        "); do
+    case "${QG_ENV_ALLOWED}" in *" ${k} "*) ;; *) qg_err "env key '${k}' is not one of the guard's inputs (changes job or guard step)" ;; esac
+  done
+  top="$(awk '/^jobs:/ { exit } { print }' "${wf}")"
+  if printf '%s\n%s\n' "${top}" "${job}" | grep -qE '^[[:space:]]*["'\'']?(BASH_ENV|PATH|GIT_DIR|GIT_WORK_TREE|GIT_CONFIG[A-Za-z_]*)["'\'']?[[:space:]]*:'; then
+    qg_err "BASH_ENV, PATH and GIT_DIR/GIT_WORK_TREE/GIT_CONFIG* must not be set at workflow level or in the changes job"
+  fi
+
+  # No other read of the script, in any spelling, outside the guard step.
+  rest="$(awk -v n="      - name: ${QG_STEP}" '
+    $0 == n { skip = 1; next }
+    skip && (/^      - / || /^  [A-Za-z0-9_-]+:/ || /^[A-Za-z]/) { skip = 0 }
+    !skip { print }' "${wf}" | grep -vE '^[[:space:]]*#')"
+  if printf '%s\n' "${rest}" | sed 's/test_queue_fork_guard\.sh//g' | grep -q 'queue_fork_gua'; then
+    qg_err "queue_fork_gua... is named outside the guard step; never read the queued tree's copy"
+  fi
+  cjob="$(printf '%s\n' "${rest}" | awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($0 == "  changes:") } inj { print }')"
+  if printf '%s\n' "${cjob}" | grep -vE 'grep -q?E ' | grep -qE 'tools/ci/[^[:space:]]*([*?{[]|\$[{(])'; then
+    qg_err "a glob, brace or interpolated path under tools/ci/ in the changes job"
+  fi
+  if printf '%s\n' "${cjob}" | grep -qE '(^|[^A-Za-z0-9_./-])(find|xargs|source)([[:space:]]|$)|(^|[[:space:];&|(]|run:[[:space:]]*)\.[[:space:]]+[^[:space:]]|GITHUB_ENV|GITHUB_PATH'; then
+    qg_err "find, xargs, source, a dot-invocation or a GITHUB_ENV/GITHUB_PATH write in the changes job"
+  fi
+
+  # vendor waits for changes, with no if: that could skip it.
+  if [ "$(basename "${wf}")" = "pipeline-pr.yml" ]; then
+    vjob="$(job_block "${wf}" vendor)"
+    if [ -z "${vjob}" ]; then
+      qg_err "no vendor job"
+    else
+      if ! printf '%s\n' "${vjob}" | grep -qE '^    needs:[[:space:]]*(changes|\[.*\bchanges\b.*\])[[:space:]]*$' &&
+        ! { printf '%s\n' "${vjob}" | grep -qE '^    needs:[[:space:]]*$' && printf '%s\n' "${vjob}" | grep -qxE '      - changes'; }; then
+        qg_err "the vendor job must have needs: changes"
+      fi
+      if printf '%s\n' "${vjob}" | grep -qE '^    ["'\'']?if["'\'']?:'; then
+        qg_err "the vendor job must not have an if:"
+      fi
+    fi
   fi
 done
 
