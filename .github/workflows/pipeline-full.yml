@@ -67,6 +67,10 @@ jobs:
           if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
           if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
           echo "event ${EVENT} on ${REF} accepted"
+
+  # ---------------------------------------------------------------------
+  # Shared inputs: the vendored tree and the Linux x64 build bundle.
+  # ---------------------------------------------------------------------
   vendor:
     name: Vendor Dependencies
     needs: event-guard

@@ -695,7 +695,7 @@ done
 # made with a workflow token and a pull request from a fork or another
 # repository. ALLOWED and ALLOWED_REFS are fixed per pipeline (eg_allowed_for,
 # eg_refs_for); a file not named there may list only push, schedule and
-# workflow_dispatch events and refs/heads, refs/tags and refs/pull refs.
+# workflow_dispatch events and exact refs/heads refs, refs/tags/* and refs/pull/*/merge.
 # pipeline-full.yml also allows pull_request (the caller runs it for the
 # ci:full label).
 #   - "Reaches" means a path of needs edges to event-guard along which no job
@@ -706,7 +706,11 @@ done
 #     !cancelled()) and the job needs event-guard. A job whose if: has
 #     !cancelled() needs a `needs.<job>.result == 'success'` term for a
 #     reaching job. A job with continue-on-error other than false does not
-#     pass the guard on to its dependents. A multi-line if: is joined first.
+#     pass the guard on to its dependents. Before matching, every job's
+#     key is unquoted and its if: is normalised: quotes stripped, all lines
+#     (folded, literal or plain multi-line) joined, lowercased, whitespace
+#     collapsed. The scan covers every workflow file with a fleet runs-on, not
+#     a fixed list.
 EG_DEFAULT_BRANCH="master"
 eg_allowed_for() { # workflow file base name
   case "$1" in
@@ -772,16 +776,16 @@ eg_unreached() {
     injobs && /^  [^[:space:]]/ {
       job = $1; sub(/:$/, "", job); order[++nj] = job; inneeds = 0; next
     }
-    injobs && /^    needs:/ {
-      v = $0; sub(/^    needs:[[:space:]]*/, "", v); gsub(/[\[\],]/, " ", v)
+    injobs && /^    ["\047]?needs["\047]?:/ {
+      v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v); gsub(/[\[\],]/, " ", v)
       needs[job] = v; inneeds = (v ~ /^[[:space:]]*$/); next
     }
     injobs && inneeds && /^      - / { v = $0; sub(/^      - /, "", v); needs[job] = needs[job] " " v; next }
-    injobs && /^    [A-Za-z_-]+:/ {
+    injobs && /^    ["\047]?[A-Za-z_-]+["\047]?:/ {
       inneeds = 0
-      k = $1; sub(/:$/, "", k); v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v)
-      if (k == "if") { iff[job] = v; if (v ~ /^[>|][-+]?[[:space:]]*$/) { iff[job] = ""; inif = 1 } }
-      else if (k == "continue-on-error") coe[job] = v
+      k = $1; sub(/:$/, "", k); gsub(/["\047]/, "", k); v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v)
+      if (k == "if") { iff[job] = v; if (v ~ /^[>|][-+]?[[:space:]]*$/) iff[job] = ""; inif = 1 }
+      else if (k == "continue-on-error") { gsub(/["\047]/, "", v); coe[job] = tolower(v) }
       else if (k == "runs-on") ro[job] = v
     }
     END {
@@ -792,7 +796,8 @@ eg_unreached() {
         for (i = 1; i <= nj; i++) {
           j = order[i]
           if (reach[j]) continue
-          t = iff[j]
+          t = tolower(iff[j]); gsub(/[[:space:]]+/, " ", t); sub(/^ /, "", t); sub(/ $/, "", t)
+          if (t ~ /^".*"$/ || t ~ /^\047.*\047$/) t = substr(t, 2, length(t) - 2)
           m = split(needs[j], nd, " "); ok = 0
           hasg = 0
           for (x = 1; x <= m; x++) if (nd[x] == "event-guard") hasg = 1
@@ -805,7 +810,7 @@ eg_unreached() {
               d = nd[x]
               if (d != "event-guard" && (!(d in reach) || !reach[d])) continue
               if (coe[d] != "" && coe[d] != "false") continue
-              if (t ~ /cancelled\(\)/ && index(t, "needs." d ".result == \047success\047") == 0) continue
+              if (t ~ /cancelled\(\)/ && index(t, tolower("needs." d ".result == \047success\047")) == 0) continue
               ok = 1; break
             }
           }
@@ -839,6 +844,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   eg_refs="$(eg_refs_for "${base}")"
   eg_val="$(printf '%s\n' "${eg_block}" | sed -n 's/^          ALLOWED: "\([^"]*\)"$/\1/p')"
   eg_rval="$(printf '%s\n' "${eg_block}" | sed -n 's/^          ALLOWED_REFS: "\([^"]*\)"$/\1/p')"
+  set -f
   if [ -n "${eg_allowed}" ]; then
     [ "${eg_val}" = "${eg_allowed}" ] || err "${wf}: the event-guard ALLOWED list must be exactly '${eg_allowed}' (event-guard)"
     [ "${eg_rval}" = "${eg_refs}" ] || err "${wf}: the event-guard ALLOWED_REFS list must be exactly '${eg_refs}' (event-guard)"
@@ -847,9 +853,10 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
       case "${t}" in push|schedule|workflow_dispatch) ;; *) err "${wf}: event '${t}' may not be allowed by the event-guard (event-guard)" ;; esac
     done
     for t in ${eg_rval}; do
-      case "${t}" in refs/heads/gh-readonly-queue/*) err "${wf}: ref '${t}' may not be allowed by the event-guard (event-guard)" ;; refs/heads/*|refs/tags/*|refs/pull/*) ;; *) err "${wf}: ref '${t}' may not be allowed by the event-guard (event-guard)" ;; esac
+      case "${t}" in refs/heads/gh-readonly-queue/*|refs/heads/*[*?[]*) err "${wf}: ref '${t}' may not be allowed by the event-guard (event-guard)" ;; refs/heads/*|"refs/tags/*"|"refs/pull/*/merge") ;; *) err "${wf}: ref '${t}' may not be allowed by the event-guard (event-guard)" ;; esac
     done
   fi
+  set +f
   if [ -z "${eg_val}" ] || [ -z "${eg_rval}" ] || [ "${eg_block}" != "$(eg_expected "${eg_val}" "${eg_rval}")" ]; then
     err "${wf}: the event-guard job must match the spec form exactly: no other key, step or command (event-guard)"
   fi

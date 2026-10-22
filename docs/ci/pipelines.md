@@ -536,9 +536,7 @@ workflow). Every one of those pipelines therefore opens with a hosted job
 token); and a pull request from a fork or from another repository. The allowed
 events and refs are `pipeline-full.yml` (events `push`, `workflow_dispatch`, `pull_request`; refs `refs/heads/master`, `refs/heads/ci-dev`, `refs/pull/*/merge`: the caller runs it for a push to `master`, a dispatch with `full: true` and the `ci:full` label), `pipeline-nightly.yml` (`schedule`, `workflow_dispatch`; `refs/heads/master`), `pipeline-tidy-sweep.yml` (`workflow_dispatch`; `refs/heads/master`), and `pipeline-release-module.yml` plus the two gate workflows it calls (`push`, `workflow_dispatch`; `refs/tags/*` and `refs/heads/master` for dry runs). Every fleet job reaches `event-guard` through `needs`,
 so a refusal skips the whole fleet. The workflow-shape gate (`event-guard`)
-pins the job text, the per-pipeline lists and the edges, and rejects a job
-between the guard and a fleet job that can still run after the guard failed
-(`always()`, `failure()`, a `||`, or a multi-line `if:` that does).
+pins the job text, the per-pipeline lists and the edges, scans every workflow file that has a fleet `runs-on` (not a fixed list), and rejects a job between the guard and a fleet job that can still run after the guard failed: each job's `if:` is normalised first (key unquoted, folded, literal and multi-line forms joined, lowercased, whitespace collapsed), and a hosted job whose normalised `if:` contains `always(`, `failure(` or `||`, or `cancelled(` without a `needs.<job>.result == 'success'` term for a job that reaches the guard, is not a path to the guard unless it opens with `needs.event-guard.result == 'success' &&`. A fleet job's own `if:` is pinned by the routing-guard rule.
 
 The `changes` job of `pipeline-pr.yml` refuses the same two cases for itself,
 because a queued tree's caller can also reach that pipeline with a `push` on the

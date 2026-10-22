@@ -96,6 +96,15 @@ jobs:
           if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
           if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
           echo "event ${EVENT} on ${REF} accepted"
+
+  # ---------------------------------------------------------------------
+  # The vendored tree. Every Linux and Windows job below builds from it
+  # (build:vendored in pagespeed.bazelrc): the git-only dependencies are
+  # cloned once, here, with whatever git identity the runner host holds, and
+  # the rest of the nightly runs offline. The tree reaches the consumer jobs
+  # through a runner-local or hub tarball when the runner environment offers
+  # one, and through actions/cache otherwise.
+  # ---------------------------------------------------------------------
   nightly-vendor:
     name: Vendor Dependencies (nightly)
     needs: event-guard
