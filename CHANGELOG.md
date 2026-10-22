@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Package descriptions name the product mod_pagespeed.** The
+  `mod-pagespeed` and `nginx-module-pagespeed` packages now describe
+  themselves as "mod_pagespeed web page optimization module for Apache
+  httpd" and "... for nginx" in `apt show` and `dnf info`, instead of
+  "Apache 2 module to optimize web content" and a summary that repeated
+  the package version.
+
+### Removed
+
+- The unbuilt `css_minify_main` and `js_minify_main` command-line sources are
+  gone from the source tree; they have had no build target since the Bazel
+  build.
+- The Debian and RPM package build scripts now stop with an error when
+  `pagespeed_libraries.conf` is missing, instead of silently producing a
+  package without it.
+
 ## [2.5.2] - 2026-10-22
 
 Corrected after release (2026-10-22): the sidecar NuGet packages and the
