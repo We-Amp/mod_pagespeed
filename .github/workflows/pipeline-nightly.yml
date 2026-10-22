@@ -108,7 +108,7 @@ jobs:
 
       - name: Ensure bazel
         run: |
-          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
           if command -v npm >/dev/null 2>&1; then
             npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
           fi
@@ -117,6 +117,7 @@ jobs:
             exit 1
           }
           bazel --version
+          bash tools/ci/check-bazel-version.sh
 
       # Cache channel (hosted, or a build runner without hub configuration):
       # vendor/ rides actions/cache between jobs, keyed on the dependency
@@ -2357,6 +2358,7 @@ jobs:
             npm install -g @bazel/bazelisk@1.28.1
             echo "BAZEL_BIN=bazelisk" >> "$GITHUB_ENV"
           fi
+          bash tools/ci/check-bazel-version.sh "$(command -v bazelisk >/dev/null 2>&1 && echo bazelisk || echo bazel)"
 
 
       - name: Build the IIS module with ASan
@@ -2665,6 +2667,7 @@ jobs:
             npm install -g @bazel/bazelisk@1.28.1
             echo "BAZEL_BIN=bazelisk" >> "$GITHUB_ENV"
           fi
+          bash tools/ci/check-bazel-version.sh "$(command -v bazelisk >/dev/null 2>&1 && echo bazelisk || echo bazel)"
 
 
       - name: Build the IIS module
@@ -3009,9 +3012,10 @@ jobs:
 
       - name: Ensure bazel
         run: |
-          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
           npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
           bazel --version
+          bash tools/ci/check-bazel-version.sh
 
       # Vendored fresh every week: the run is about what the network serves
       # today. The rewrite sends the one ssh-style dependency address over

@@ -128,10 +128,15 @@ zstd support, `rsync` and `ssh` (hub only), and `bazel` or `npm` (the vendor
 job installs bazelisk through npm when `bazel` is missing). Hosted runners
 provide all of them.
 
-A `bazel` on `PATH` that is not bazelisk (Linux or Windows, including one
-provided through `CI_WIN_TOOLS_DIR`) must be the exact version in
-`.bazelversion`, currently 8.8.1. A plain Bazel 7 binary no longer builds
-the lean workspace.
+A `bazel` or `bazelisk` launcher on `PATH` (Linux or Windows, including one
+provided through `CI_WIN_TOOLS_DIR`) must run the version in
+`.bazelversion`, currently 8.8.1. Bazelisk must be 1.19.0 or newer: older
+releases find `.bazelversion` only through a WORKSPACE file and, without
+one, silently run the latest Bazel instead. A plain Bazel
+binary must be exactly that version. Every job that uses the host's launcher
+checks this first (`tools/ci/check-bazel-version.sh`,
+`tools/ci/Check-BazelVersion.ps1`) and fails naming the runner. The dev
+images install their own Bazelisk (`docker/Dockerfile`).
 
 ## Per-slot resource budget
 

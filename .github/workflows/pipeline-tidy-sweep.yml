@@ -66,12 +66,13 @@ jobs:
 
       - name: Ensure bazel
         run: |
-          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
           if command -v npm >/dev/null 2>&1; then
             npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
           fi
           command -v bazel >/dev/null 2>&1 || { echo "::error::bazel is not on PATH"; exit 1; }
           bazel --version
+          bash tools/ci/check-bazel-version.sh
 
       # Same cache key as the pipeline-pr vendor job. On the fleet that job
       # uses the hub channel and saves no cache entry, and PR-ref caches are not

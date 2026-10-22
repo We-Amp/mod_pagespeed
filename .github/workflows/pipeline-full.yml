@@ -76,7 +76,7 @@ jobs:
 
       - name: Ensure bazel
         run: |
-          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
           if command -v npm >/dev/null 2>&1; then
             npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
           fi
@@ -85,6 +85,7 @@ jobs:
             exit 1
           }
           bazel --version
+          bash tools/ci/check-bazel-version.sh
 
       # Cache channel (hosted, or a fleet runner without hub configuration):
       # vendor/ rides actions/cache between jobs, keyed on the dependency
@@ -879,6 +880,7 @@ jobs:
             exit 1
           }
           Set-JobEnv 'BAZEL_CMD' $bazel
+          & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Check-BazelVersion.ps1') -Launcher $bazel -Root $env:GITHUB_WORKSPACE
           # Bazel's shell: BAZEL_SH when the runner sets it, else MSYS2 bash,
           # else Git for Windows' bash.
           $bashCandidates = @()
@@ -1100,6 +1102,7 @@ jobs:
             exit 1
           }
           Set-JobEnv 'BAZEL_CMD' $bazel
+          & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Check-BazelVersion.ps1') -Launcher $bazel -Root $env:GITHUB_WORKSPACE
           $bashCandidates = @()
           if ($env:BAZEL_SH) { $bashCandidates += $env:BAZEL_SH }
           foreach ($d in $toolDirs) { $bashCandidates += (Join-Path $d 'bash.exe') }
@@ -1532,9 +1535,10 @@ jobs:
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'
         run: |
-          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
           npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
           bazel --version
+          bash tools/ci/check-bazel-version.sh
 
       - name: Vendor all dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'
