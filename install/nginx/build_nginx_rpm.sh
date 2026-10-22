@@ -90,7 +90,7 @@ COMPANY_FULLNAME="We-Amp"
 MAINTNAME="mod_pagespeed developers"
 MAINTMAIL="info@we-amp.com"
 PRODUCTURL="https://github.com/we-amp/mod_pagespeed/"
-SHORTDESC="nginx module to optimize web content (mod_pagespeed ${VERSION})."
+SHORTDESC="mod_pagespeed web page optimization module for nginx"
 FULLDESC="ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and their resources (CSS, JavaScript, images) to apply web performance best practices automatically. Pinned to the exact stock nginx version it was built against."
 
 # --- exact-version nginx pin (model (a')) -----------------------------------

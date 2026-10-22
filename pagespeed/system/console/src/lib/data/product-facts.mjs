@@ -37,9 +37,9 @@ export const VENDOR_URL = 'https://we-amp.com/';
 // from these two constants, so a product identity change is an edit HERE and
 // nowhere else. PRODUCT_NAME is the lowercase engine name as it appears in
 // directives and prose. Ruling (2026-08-31): the display form is lowercase
-// everywhere — titles read "… — mod_pagespeed 2.1"; the camel "ModPageSpeed"
-// survives only in historical references to the frozen 2.0 line, as a literal,
-// never via these constants.
+// everywhere, and titles carry the plain product name with no version; the
+// camel "ModPageSpeed" survives only in historical references to the frozen
+// 2.0 line, as a literal, never via these constants.
 export const PRODUCT_NAME = 'mod_pagespeed';
 export const PRODUCT_DISPLAY_NAME = 'mod_pagespeed';
 
@@ -54,7 +54,7 @@ export const SUPPORT_URL = `${WEBSITE}/pricing/`;
 // --- Open-source posture and support ---------------------------------------
 // The one sentence a product surface says about how the software is licensed.
 // Render it verbatim; do not paraphrase it.
-export const PRODUCT_STATEMENT = 'mod_pagespeed 2.1 is open source (Apache-2.0).';
+export const PRODUCT_STATEMENT = 'mod_pagespeed is open source (Apache-2.0).';
 // Where the support subscriptions and their terms are described. The trailing
 // slash is canonical.
 export const SUPPORT_TERMS_URL = 'https://we-amp.com/licensing/';
