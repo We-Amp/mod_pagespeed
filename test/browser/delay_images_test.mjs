@@ -4,9 +4,9 @@
 // Browser integration tests for the delay_images and delay_images_inline
 // client JS.
 //
-// Drives the SHIPPED assets — the closure-compiled bytes embedded in
+// Drives the SHIPPED assets, the closure-compiled bytes embedded in
 // net/instaweb/rewriter/generated/delay_images_inline_opt.cc and
-// delay_images_opt.cc — in headless Chromium against markup shaped like
+// delay_images_opt.cc, in headless Chromium against markup shaped like
 // DelayImagesFilter's output: src renamed to data-pagespeed-high-res-src,
 // the combined asset script with delayImagesInlineInit()/delayImagesInit(),
 // per-image addLowResImages(url, data) + replaceWithLowRes() snippets, and
@@ -177,7 +177,7 @@ const srcs = (page) => page.evaluate(() => ['a', 'b', 'c', 'd', 's'].map(
   try {
     await page.waitForFunction(
         (hi) => document.getElementById('p').getAttribute('src') === hi,
-        HI_A, { timeout: 3000 });
+        HI_A, { timeout: 15000 });
   } catch {}
   const r = await page.evaluate(() => {
     const e = document.getElementById('p');

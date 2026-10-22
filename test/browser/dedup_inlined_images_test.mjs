@@ -3,8 +3,8 @@
 
 // Browser integration tests for the dedup_inlined_images client JS.
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
-// net/instaweb/rewriter/generated/dedup_inlined_images_opt.cc — in headless
+// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// net/instaweb/rewriter/generated/dedup_inlined_images_opt.cc, in headless
 // Chromium against markup shaped like DedupInlinedImagesFilter's output:
 // the asset plus pagespeed.dedupInlinedImagesInit() before the first
 // duplicate, the duplicate <img> stripped of its src, and an

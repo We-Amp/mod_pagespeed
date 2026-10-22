@@ -3,8 +3,8 @@
 
 // Browser integration tests for the js_defer (defer_javascript) client JS.
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
-// net/instaweb/rewriter/generated/js_defer_opt.cc — in headless Chromium
+// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// net/instaweb/rewriter/generated/js_defer_opt.cc, in headless Chromium
 // against markup shaped like JsDisableFilter + JsDeferDisabledFilter output:
 // every deferrable script re-typed to text/psajs (or text/prioritypsajs)
 // with data-pagespeed-orig-type/-orig-index, element onload handlers moved

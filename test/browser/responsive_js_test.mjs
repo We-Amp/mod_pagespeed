@@ -3,8 +3,8 @@
 
 // Browser integration tests for the responsive_images zoom client JS.
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
-// net/instaweb/rewriter/generated/responsive_js_opt.cc — in headless
+// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// net/instaweb/rewriter/generated/responsive_js_opt.cc, in headless
 // Chromium. ResponsiveImageSecondFilter adds x-descriptor srcsets
 // ("url 1.5x,url 2x") and, with responsive_images_zoom, a
 // <script src=".../responsive.js"> at the end of body; the script
@@ -56,7 +56,7 @@ function check(ok, label) {
 
 const browser = await chromium.launch();
 
-async function openPage(deviceScaleFactor) {
+async function openPage(deviceScaleFactor, expected) {
   const page = await browser.newPage({
     viewport: { width: 800, height: 600 }, deviceScaleFactor,
   });
@@ -73,8 +73,26 @@ async function openPage(deviceScaleFactor) {
   });
   await page.goto('http://test/');
   await page.waitForLoadState('load');
-  await page.waitForTimeout(200);  // preload Image() onload -> src swap
+  await waitSrcs(page, expected);
   return page;
+}
+
+// Waits (condition based) until the given img id -> src pairs hold. With no
+// expectation (negative checks) a short fixed settle is used instead; a slow
+// machine can only make such a check weaker, never red.
+async function waitSrcs(page, expected) {
+  if (!expected) {
+    await page.waitForTimeout(200);
+    return;
+  }
+  try {
+    await page.waitForFunction(
+        (exp) => Object.entries(exp).every(
+            ([id, src]) => document.getElementById(id).getAttribute('src') === src),
+        expected, { timeout: 15000 });
+  } catch (e) {
+    // Fall through: the following check() reports the actual values.
+  }
 }
 
 const srcs = (page) => page.evaluate(() => Object.fromEntries(
@@ -92,7 +110,7 @@ const srcs = (page) => page.evaluate(() => Object.fromEntries(
 
 // --- 1-2. DPR 2 upgrades to the 2x candidate -----------------------------
 {
-  const page = await openPage(2);
+  const page = await openPage(2, { std: I('a2'), unordered: I('b2') });
   const s = await srcs(page);
   check(s.std === I('a2'), `DPR 2: upgraded to 2x candidate (got ${s.std})`);
   check(s.unordered === I('b2'),
@@ -103,7 +121,7 @@ const srcs = (page) => page.evaluate(() => Object.fromEntries(
 
 // --- 2. Fractional ratio picks the smallest sufficient candidate ---------
 {
-  const page = await openPage(1.25);
+  const page = await openPage(1.25, { std: I('a15') });
   const s = await srcs(page);
   check(s.std === I('a15'), `DPR 1.25: picks 1.5x candidate (got ${s.std})`);
   await page.close();
@@ -117,7 +135,7 @@ const srcs = (page) => page.evaluate(() => Object.fromEntries(
     width: 800, height: 600, deviceScaleFactor: 3, mobile: false,
   });
   await page.evaluate(() => window.dispatchEvent(new Event('resize')));
-  await page.waitForTimeout(200);
+  await waitSrcs(page, { std: I('a4'), unordered: I('b3') });
   const s = await srcs(page);
   check(s.std === I('a4'), `ratio 1 -> 3: upgraded to 4x candidate (got ${s.std})`);
   check(s.unordered === I('b3'),

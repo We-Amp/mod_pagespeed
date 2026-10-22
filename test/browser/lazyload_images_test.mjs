@@ -3,8 +3,8 @@
 
 // Browser integration tests for the lazyload_images client JS.
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
-// net/instaweb/rewriter/generated/lazyload_images_opt.cc — in headless
+// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// net/instaweb/rewriter/generated/lazyload_images_opt.cc, in headless
 // Chromium against markup shaped like LazyloadImagesFilter's output: the
 // asset followed by pagespeed.lazyLoadInit(<after_onload>, <blank url>),
 // and <img> elements whose src was renamed to data-pagespeed-lazy-src (and
@@ -93,7 +93,7 @@ async function openPage(html) {
   return { page, requested };
 }
 
-async function waitFor(page, fn, arg, timeout = 3000) {
+async function waitFor(page, fn, arg, timeout = 15000) {
   try {
     await page.waitForFunction(fn, arg, { timeout });
     return true;
