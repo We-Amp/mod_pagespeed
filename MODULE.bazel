@@ -31,3 +31,20 @@ python.toolchain(
     is_default = True,
     python_version = "3.12",
 )
+
+# ---- C++ libraries from the BCR ----
+# repo_names keep the apparent names our BUILD files and the WORKSPACE
+# protobuf's repo_mapping use. Version constants are mirrored in
+# bazel/repositories.bzl for the SBOM/notices/CVE tooling.
+bazel_dep(name = "abseil-cpp", version = "20260107.1", repo_name = "com_google_absl")
+single_version_override(
+    module_name = "abseil-cpp",
+    patch_strip = 1,
+    patches = [
+        "//bazel:abseil.patch",
+        "//bazel:abseil_nullability.patch",
+    ],
+    version = "20260107.1",
+)
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
+bazel_dep(name = "re2", version = "2025-11-05", repo_name = "com_googlesource_code_re2")

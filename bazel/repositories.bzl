@@ -52,7 +52,7 @@ PROTOBUF_COMMIT = "74211c0dfc2777318ab53c2cd2c317a2ef9012de"  # v31.1
 PROTOBUF_SHA = "d0e3a75876a81e1536028bb9cf9181382b198da4cc6fa6aef86879ef629ac807"
 
 # Standalone googletest — previously only an Envoy transitive dep.
-GOOGLETEST_VERSION = "1.17.0"
+GOOGLETEST_VERSION = "1.17.0"  # mirrored in MODULE.bazel (1.17.0.bcr.2)
 GOOGLETEST_SHA = "65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c"
 
 # Standalone fmt + spdlog — previously only Envoy transitive deps.
@@ -613,30 +613,15 @@ cc_library(
 )
 """
 
-_ABSEIL_VERSION = "20260107.1"
+# abseil-cpp, googletest and re2 are bazel_deps in MODULE.bazel. Their version
+# and sha constants stay here, mirrored from MODULE.bazel, because the SBOM,
+# notices, CVE and vendoring tools read them from this file.
+_ABSEIL_VERSION = "20260107.1"  # mirrored in MODULE.bazel
 _ABSEIL_SHA = "4314e2a7cbac89cac25a2f2322870f343d81579756ceff7f431803c2c9090195"
-_ABSEIL_PATCHES = [
-    "//bazel:abseil.patch",
-    "//bazel:abseil_nullability.patch",
-]
+_RE2_VERSION = "2025-11-05"  # mirrored in MODULE.bazel
+_RE2_SHA = "87f6029d2f6de8aa023654240a03ada90e876ce9a4676e258dd01ea4c26ffd67"
 
 def mod_pagespeed_dependencies():
-    # Declare abseil under both names used in the dependency graph:
-    # - "com_google_absl": PageSpeed BUILD files
-    # - "abseil-cpp": protobuf transitive deps
-    # Both must exist with identical content to satisfy Bazel's strict
-    # include checking on Windows (headers from either external/ dir
-    # must be matched by a declared dep).
-    for abseil_name in ["com_google_absl", "abseil-cpp"]:
-        http_archive(
-            name = abseil_name,
-            urls = ["https://github.com/abseil/abseil-cpp/archive/%s.tar.gz" % _ABSEIL_VERSION],
-            sha256 = _ABSEIL_SHA,
-            strip_prefix = "abseil-cpp-%s" % _ABSEIL_VERSION,
-            patches = _ABSEIL_PATCHES,
-            patch_args = ["-p1"],
-        )
-
     # Phase 0: Standalone zlib-ng
     http_archive(
         name = "zlib_ng",
@@ -672,19 +657,15 @@ def mod_pagespeed_dependencies():
         patch_args = ["-p1"],
     )
 
-    # Protocol Buffers. Its @abseil-cpp refs resolve directly against the
-    # abseil archive declared above (both abseil names exist).
+    # Protocol Buffers. Its @abseil-cpp refs are mapped onto @com_google_absl,
+    # the abseil-cpp module (repo_name in MODULE.bazel).
     http_archive(
         name = "com_google_protobuf",
         strip_prefix = "protobuf-%s" % PROTOBUF_COMMIT,
         url = "https://github.com/protocolbuffers/protobuf/archive/%s.tar.gz" % PROTOBUF_COMMIT,
         sha256 = PROTOBUF_SHA,
-        # Redirect protobuf's internal @abseil-cpp refs to the canonical
-        # @com_google_absl repo (same wiring gRPC's grpc_deps() declaration
-        # used). Without this, protobuf's absl deps resolve to the duplicate
-        # "abseil-cpp" archive, and Windows strict-include validation flags
-        # every absl header a protobuf header pulls in (e.g. absl/log/*) as an
-        # undeclared inclusion in dependents.
+        # Redirect protobuf's internal @abseil-cpp refs to @com_google_absl,
+        # the single abseil in the build.
         repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
@@ -711,34 +692,6 @@ filegroup(
 )
 """,
     )
-
-    # Standalone googletest — previously only an Envoy transitive dep.
-    http_archive(
-        name = "googletest",
-        strip_prefix = "googletest-%s" % GOOGLETEST_VERSION,
-        url = "https://github.com/google/googletest/releases/download/v%s/googletest-%s.tar.gz" % (GOOGLETEST_VERSION, GOOGLETEST_VERSION),
-        sha256 = GOOGLETEST_SHA,
-        # Redirect googletest's @abseil-cpp refs (activated by --define absl=1
-        # in .bazelrc) to our canonical repo. Without this, googletest adds
-        # external/abseil-cpp/ to include paths on Windows.
-        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
-    )
-
-    # re2 is used directly by pagespeed (pagespeed/kernel/util/re2.h, via
-    # @com_googlesource_code_re2) and by googletest (which references @re2
-    # when built with absl). Both names must resolve to the same version.
-    # Bumped May 2026 from 2022-04-01 (~4 years of upstream drift); parity
-    # with MPS 2.0 which already runs this version. The Windows strict-deps
-    # fallout from this bump is fixed independently in test/pagespeed/kernel/util/BUILD.
-    _RE2_VERSION = "2025-11-05"
-    _RE2_SHA = "87f6029d2f6de8aa023654240a03ada90e876ce9a4676e258dd01ea4c26ffd67"
-    for re2_name in ["com_googlesource_code_re2", "re2"]:
-        http_archive(
-            name = re2_name,
-            strip_prefix = "re2-%s" % _RE2_VERSION,
-            urls = ["https://github.com/google/re2/archive/%s.tar.gz" % _RE2_VERSION],
-            sha256 = _RE2_SHA,
-        )
 
     # Standalone fmt — header-only formatting library, dep of spdlog.
     http_archive(
