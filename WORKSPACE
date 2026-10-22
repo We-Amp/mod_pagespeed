@@ -21,36 +21,6 @@ nginx_dependencies()
 # the THIRD-PARTY-NOTICES drift gate cover it — a WORKSPACE-only declaration
 # was invisible to both, which let it ship unattributed.
 
-# Protocol Buffers C++ runtime + codegen is declared in
-# bazel/repositories.bzl (com_google_protobuf, pinned to the v31.1 release
-# commit gRPC 1.78.1's grpc_deps() used to provide before the gRPC dependency
-# was removed along with the experimental central controller).
-
-# rules_proto for proto_library (moves to MODULE.bazel with protobuf).
-http_archive(
-    name = "rules_proto",
-    sha256 = "0e5c64a2599a6e26c6a03d6162242d231ecc0de219534c38cb4402171def21e8",
-    strip_prefix = "rules_proto-7.0.2",
-    urls = [
-        "https://github.com/bazelbuild/rules_proto/archive/refs/tags/7.0.2.tar.gz",
-    ],
-)
-
-# Protobuf's transitive deps (bazel_features, proto_bazel_features,
-# system_python, ...), still needed by the WORKSPACE @com_google_protobuf.
-# Skips abseil-cpp/zlib/jsoncpp, already declared in
-# mod_pagespeed_dependencies(). The rulesets it would add (rules_cc,
-# rules_java, rules_python, rules_shell, bazel_skylib, apple_support, ...) are
-# bazel_deps; in hybrid mode they shadow the copies declared here. Goes with
-# protobuf's move to MODULE.bazel.
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-
-protobuf_deps()
-
-load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies")
-
-rules_proto_dependencies()
-
 # bazel_compdb — generates compile_commands.json for clang-tidy.
 # Used by tools/gen_compilation_database.py via the compilation_database_aspect.
 # NOTE: sha updated 2026-07-20 — GitHub re-rolled the 0.5.2 archive (same

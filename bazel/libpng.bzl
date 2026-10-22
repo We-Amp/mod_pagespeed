@@ -42,7 +42,7 @@ cc_library(
             ":copy_prebuild_header",
     ],
     includes = ["."],
-    deps = ["@zlib_ng//:zlib_ng"],
+    deps = ["@zlib_ng//:zlib-ng"],
     defines = [
               # We end up including setjmp.h directly, but libpng
               # doesn't like that. This define tells libpng to not
