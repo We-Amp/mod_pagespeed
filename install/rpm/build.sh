@@ -90,16 +90,14 @@ stage_install_rpm() {
     install -D -m 644 "${SELINUX_BUILD}/pagespeed-optimizer.pp" \
       "${STAGEDIR}/usr/share/selinux/targeted/pagespeed-optimizer.pp"
   fi
-  # Install pagespeed_libraries.conf if available
-  # Try Bazel output path first, then legacy GYP path
+  # Install pagespeed_libraries.conf; it is a required packaging input.
   local LIBRARIES_CONF="${BUILDDIR}/install/common/pagespeed_libraries.conf"
   if [ ! -f "${LIBRARIES_CONF}" ]; then
-    LIBRARIES_CONF="${BUILDDIR}/../../install/common/pagespeed_libraries.conf"
+    echo "ERROR: ${LIBRARIES_CONF} not found; cannot package pagespeed_libraries.conf" >&2
+    exit 1
   fi
-  if [ -f "${LIBRARIES_CONF}" ]; then
-    install -m 644 "${LIBRARIES_CONF}" \
-      "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_libraries.conf"
-  fi
+  install -m 644 "${LIBRARIES_CONF}" \
+    "${STAGEDIR}${APACHE_CONFDIR}/${PAGESPEED_CONF_PREFIX}pagespeed_libraries.conf"
 }
 
 # Actually generate the package file.

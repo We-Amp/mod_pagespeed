@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The unbuilt `css_minify_main` and `js_minify_main` command-line sources are
   gone from the source tree; they have had no build target since the Bazel
   build.
+- The Debian and RPM package build scripts now stop with an error when
+  `pagespeed_libraries.conf` is missing, instead of silently producing a
+  package without it.
 
 ## [2.5.2] - 2026-10-22
 
