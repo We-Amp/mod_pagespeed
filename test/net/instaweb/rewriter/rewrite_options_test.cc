@@ -2115,9 +2115,8 @@ TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
                                                 "UA-111111-1", &msg, &handler));
   EXPECT_EQ("UA-111111-1", options_.ga_id());
   ASSERT_EQ(1U, handler.messages().size());
-  EXPECT_NE(
-      GoogleString::npos,
-      handler.messages()[0].find("'AnalyticsID' is deprecated and ignored"))
+  EXPECT_NE(GoogleString::npos, handler.messages()[0].find(
+                                    "'AnalyticsID' is deprecated and ignored"))
       << handler.messages()[0];
 }
 
@@ -2135,9 +2134,8 @@ TEST_F(RewriteOptionsTest, InsertGAOnlyOptionsWarn) {
   for (const auto& c : kCases) {
     TestMessageHandler handler;
     GoogleString msg;
-    EXPECT_EQ(RewriteOptions::kOptionOk,
-              options_.ParseAndSetOptionFromName1(c.name, c.value, &msg,
-                                                  &handler))
+    EXPECT_EQ(RewriteOptions::kOptionOk, options_.ParseAndSetOptionFromName1(
+                                             c.name, c.value, &msg, &handler))
         << c.name;
     ASSERT_EQ(1U, handler.messages().size()) << c.name;
     EXPECT_NE(GoogleString::npos,
@@ -2155,9 +2153,9 @@ TEST_F(RewriteOptionsTest, UseAnalyticsJsWarns) {
             options_.ParseAndSetOptionFromName1(RewriteOptions::kUseAnalyticsJs,
                                                 "false", &msg, &handler));
   ASSERT_EQ(1U, handler.messages().size());
-  EXPECT_NE(GoogleString::npos,
-            handler.messages()[0].find(
-                "'UseAnalyticsJs' is deprecated and ignored"))
+  EXPECT_NE(
+      GoogleString::npos,
+      handler.messages()[0].find("'UseAnalyticsJs' is deprecated and ignored"))
       << handler.messages()[0];
 }
 
