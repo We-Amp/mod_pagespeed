@@ -3,20 +3,26 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
 # The release's system-test gate: a run of ci.yml for the release commit must
-# have passed both the Apache and the Nginx System Tests.
+# have passed both the Apache and the Nginx System Tests. This script checks
+# those two lanes only; it does not assert the full tier (that is checked by
+# the /release-readiness R2 step against the full=true dispatch run).
 #
 #   * Every API call is retried on a transient failure (HTTP 5xx, timeouts,
 #     connection errors) with backoff 10/20/40/80 s; a 4xx is not retried.
 #     When the retries run out the gate refuses (fail closed).
-#   * Only push runs of ci.yml on master count (they are never cancelled by
-#     newer pushes).
+#   * Push runs and workflow_dispatch runs of ci.yml on master count (a push
+#     run can be cancelled while pending; the release-candidate dispatch with
+#     full=true is a run of its own).
 #   * When no run of ci.yml for the commit has passed yet but one is still
 #     queued or in progress, the gate polls until it finishes, up to
 #     MAX_WAIT_SECONDS. The tag can therefore be pushed right after the merge
 #     and the release builds overlap the CI run of the same commit.
 #   * A completed run that lacks green Apache and Nginx System Tests, with no
-#     run left in flight, is refused at once. With no run at all the gate
-#     keeps polling (the run may not exist yet) and refuses at the deadline.
+#     run left in flight, is refused only when two consecutive checks agree
+#     (one extra POLL_SECONDS before a red refusal, so a flaky empty page
+#     cannot cause one). A pass always needs a run actually seen green. With
+#     no run at all the gate keeps polling (the run may not exist yet) and
+#     refuses at the deadline.
 #   * On a dry run a refusal is reported as a warning and the exit is 0.
 #
 # Environment:
@@ -72,35 +78,57 @@ gh_api() {
   rm -f "$errf"; return 2
 }
 
-RUNS_BASE="repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&per_page=50&event=push&branch=master"
+RUNS_PATH="repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs"
+RUNS_Q="head_sha=${RELEASE_SHA}&per_page=50"
+# Both events count: push runs, and the release-candidate dispatch (full=true).
+EVENTS="push workflow_dispatch"
+
+# Consecutive checks that found completed runs, none passing, nothing in flight.
+REFUSE_STREAK=0
+
+# runs_url <event> <status>
+runs_url() { echo "${RUNS_PATH}?${RUNS_Q}&event=$1&branch=master&status=$2"; }
 
 # check: 0 = passed, 1 = refuse, 2 = API failure (refuse), 3 = wait.
 check() {
-  local ids run jobs inflight status
-  ids="$(gh_api "${RUNS_BASE}&status=completed" '.workflow_runs[].id')" || return 2
-  for run in $ids; do
+  local ids="" runs run entry jobs inflight status ev
+  for ev in $EVENTS; do
+    runs="$(gh_api "$(runs_url "$ev" completed)" '.workflow_runs[].id')" || return 2
+    for run in $runs; do ids="${ids} ${run}:${ev}"; done
+  done
+  for entry in $ids; do
+    run="${entry%%:*}"; ev="${entry#*:}"
     jobs="$(gh_api "repos/${GITHUB_REPOSITORY}/actions/runs/${run}/jobs?per_page=100" '.jobs[] | "\(.name)=\(.conclusion)"')" || return 2
     echo "ci.yml run ${run}:"
     echo "$jobs" | grep -E '(^| / )(Apache|Nginx) System Tests=' || echo "  (no system-test jobs)"
     if echo "$jobs" | grep -Eq '(^|/ )Apache System Tests=success$' \
        && echo "$jobs" | grep -Eq '(^|/ )Nginx System Tests=success$'; then
-      echo "System-test lanes passed in ci.yml run ${run}"
+      echo "System-test lanes passed in ci.yml run ${run} (${ev})"
       return 0
     fi
   done
   inflight=""
-  for status in queued in_progress waiting pending requested; do
-    run="$(gh_api "${RUNS_BASE}&status=${status}" '.workflow_runs[].id')" || return 2
-    inflight="${inflight}${run:+ ${run//$'\n'/ }}"
+  for ev in $EVENTS; do
+    for status in queued in_progress waiting pending requested; do
+      run="$(gh_api "$(runs_url "$ev" "$status")" '.workflow_runs[].id')" || return 2
+      inflight="${inflight}${run:+ ${run//$'\n'/ }}"
+    done
   done
   if [ -n "$inflight" ]; then
+    REFUSE_STREAK=0
     echo "ci.yml run(s) of ${RELEASE_SHA} still in flight:${inflight}"
     return 3
   fi
   if [ -n "$ids" ]; then
+    REFUSE_STREAK=$((REFUSE_STREAK + 1))
     echo "no ci.yml run of ${RELEASE_SHA} passed both Apache and Nginx System Tests"
-    return 1
+    if [ "$REFUSE_STREAK" -ge 2 ]; then
+      return 1
+    fi
+    echo "one more check before refusing"
+    return 3
   fi
+  REFUSE_STREAK=0
   echo "no ci.yml run for ${RELEASE_SHA} yet"
   return 3
 }

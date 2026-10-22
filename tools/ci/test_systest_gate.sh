@@ -22,6 +22,8 @@ fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 cat > "${TMP}/bin/gh" <<'GH'
 #!/usr/bin/env bash
 # Fake gh api. SCENARIO: 502-then-ok | 502-always | inflight-then-red | inflight-then-ok | red | none | 404
+#   | dispatch-only | push-red-dispatch-green | flaky-empty-then-green | both-red
+# The event= and status= parts of the query select what is served.
 set -uo pipefail
 path="$2"
 echo "$path" >> "${FAKE_LOG}"
@@ -30,24 +32,33 @@ green='Apache System Tests=success
 Nginx System Tests=success'
 red='Apache System Tests=success
 Nginx System Tests=failure'
+ev=push
+case "$path" in *event=workflow_dispatch*) ev=dispatch ;; esac
 case "$path" in
   */workflows/ci.yml/runs*status=completed*)
-    case "$SCENARIO" in
-      502-then-ok)
+    case "$SCENARIO:$ev" in
+      502-then-ok:push)
         if [ "$(bump completed)" -lt 2 ]; then echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; fi
         echo 11 ;;
-      502-always) echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1 ;;
-      inflight-then-red)
+      502-always:*) echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1 ;;
+      inflight-then-red:push)
         if [ "$(bump completed)" -lt 2 ]; then : ; else echo 12; fi ;;
-      inflight-then-ok)
+      inflight-then-ok:push)
         if [ "$(bump completed)" -lt 2 ]; then : ; else echo 11; fi ;;
-      red) echo 12 ;;
-      404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
-      none) : ;;
+      red:push) echo 12 ;;
+      404:*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+      dispatch-only:dispatch) echo 11 ;;
+      push-red-dispatch-green:push) echo 12 ;;
+      push-red-dispatch-green:dispatch) echo 11 ;;
+      flaky-empty-then-green:push) echo 12 ;;
+      flaky-empty-then-green:dispatch)
+        if [ "$(bump completed)" -lt 1 ]; then : ; else echo 11; fi ;;
+      both-red:*) echo 12 ;;
+      *) : ;;
     esac ;;
   */workflows/ci.yml/runs*status=in_progress*)
-    case "$SCENARIO" in
-      inflight-then-ok|inflight-then-red) [ "$(bump inflight)" -lt 2 ] && echo 10 || true ;;
+    case "$SCENARIO:$ev" in
+      inflight-then-ok:push|inflight-then-red:push) [ "$(bump inflight)" -lt 2 ] && echo 10 || true ;;
     esac ;;
   */workflows/ci.yml/runs*status=*) : ;;
   */actions/runs/11/jobs*) echo "$green" ;;
@@ -78,8 +89,8 @@ if [ "$RC" -eq 0 ] && grep -q 'still in flight' <<<"$OUT" && grep -q 'waiting' <
 else fail "in-progress-then-success (rc=$RC)"; echo "$OUT"; fi
 
 run_gate red
-if [ "$RC" -eq 1 ] && grep -q 'refuses this release' <<<"$OUT" && ! grep -q 'waiting' <<<"$OUT"; then
-  pass "a completed red run is refused at once"
+if [ "$RC" -eq 1 ] && grep -q 'refuses this release' <<<"$OUT" && [ "$(grep -c 'waiting' <<<"$OUT")" -eq 1 ]; then
+  pass "a completed red run is refused after two consecutive checks"
 else fail "completed-red (rc=$RC)"; echo "$OUT"; fi
 
 run_gate red DRY_RUN=true
@@ -114,6 +125,36 @@ else fail "502-always dry run (rc=$RC)"; echo "$OUT"; fi
 
 run_gate red
 if grep -q 'event=push&branch=master' "${TMP}/log"; then pass "only master push runs are queried"; else fail "runs query lacks event=push&branch=master"; fi
+
+run_gate dispatch-only
+if [ "$RC" -eq 0 ] && grep -q 'passed in ci.yml run 11' <<<"$OUT" && grep -q '(workflow_dispatch)' <<<"$OUT"; then
+  pass "a green workflow_dispatch run counts"
+else fail "dispatch-only (rc=$RC)"; echo "$OUT"; fi
+
+dq_ok=1; dq_n=0
+while IFS= read -r line; do
+  case "$line" in *event=workflow_dispatch*)
+    dq_n=$((dq_n + 1))
+    case "$line" in *branch=master*) : ;; *) dq_ok=0 ;; esac
+    case "$line" in */workflows/ci.yml/runs*) : ;; *) dq_ok=0 ;; esac ;;
+  esac
+done < "${TMP}/log"
+if [ "$dq_ok" -eq 1 ] && [ "$dq_n" -gt 0 ]; then pass "dispatch queries are pinned to ci.yml and master"; else fail "dispatch query not pinned (n=$dq_n)"; cat "${TMP}/log"; fi
+
+run_gate push-red-dispatch-green
+if [ "$RC" -eq 0 ] && grep -q 'passed in ci.yml run 11' <<<"$OUT"; then
+  pass "a red push run does not hide a green dispatch run"
+else fail "push-red-dispatch-green (rc=$RC)"; echo "$OUT"; fi
+
+run_gate flaky-empty-then-green
+if [ "$RC" -eq 0 ] && grep -q 'waiting' <<<"$OUT" && grep -q 'passed in ci.yml run 11' <<<"$OUT"; then
+  pass "an empty dispatch page with a red push run gets one more poll"
+else fail "flaky-empty-then-green (rc=$RC)"; echo "$OUT"; fi
+
+run_gate both-red
+if [ "$RC" -eq 1 ] && grep -q 'refuses this release' <<<"$OUT"; then
+  pass "red push and red dispatch runs on two consecutive checks are refused"
+else fail "both-red (rc=$RC)"; echo "$OUT"; fi
 
 [ "$FAILS" -eq 0 ] || { echo "$FAILS failure(s)"; exit 1; }
 echo "all ok"
