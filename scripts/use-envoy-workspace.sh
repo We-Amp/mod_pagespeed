@@ -48,6 +48,11 @@ else
         echo "ERROR: WORKSPACE.envoy not found." >&2
         exit 1
     fi
+    if [[ -f WORKSPACE.lean.bak ]]; then
+        echo "ERROR: Envoy workspace already active (WORKSPACE.lean.bak exists)." >&2
+        echo "Run '$0 --lean' first; refusing to overwrite the lean backups." >&2
+        exit 1
+    fi
     cp WORKSPACE WORKSPACE.lean.bak
     cp WORKSPACE.envoy WORKSPACE
     if [[ -f .bazelignore ]]; then

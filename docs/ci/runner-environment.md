@@ -128,6 +128,11 @@ zstd support, `rsync` and `ssh` (hub only), and `bazel` or `npm` (the vendor
 job installs bazelisk through npm when `bazel` is missing). Hosted runners
 provide all of them.
 
+A `bazel` on `PATH` that is not bazelisk (Linux or Windows, including one
+provided through `CI_WIN_TOOLS_DIR`) must be the exact version in
+`.bazelversion`, currently 8.8.1. A plain Bazel 7 binary no longer builds
+the lean workspace.
+
 ## Per-slot resource budget
 
 A host runs several heavy jobs at once, so each runner states its own share in

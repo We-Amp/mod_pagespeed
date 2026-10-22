@@ -66,7 +66,7 @@ pagespeed_cc_test(
     name = "base_test",
     srcs = glob(
         ["*_test.cc"],
-        exclude = glob(["*speed_test.cc"]) + [
+        exclude = glob(["*speed_test.cc"], allow_empty = True) + [
             # Own binary: it tears down spdlog + sets the sticky
             # logging-shutdown flag, poisoning any test after it.
             "logging_shutdown_tsan_race_test.cc",
