@@ -81,6 +81,14 @@ test --test_verbose_timeout_warnings
 # Allow tags to influence execution requirements
 common --experimental_allow_tags_propagation
 
+# rules_foreign_cc's make and m4 toolchains default to building the BCR make
+# and m4 modules for the exec configuration. Built with the image's default
+# gcc (the lint compdb build), m4's gnulib sources fail to compile and make
+# leaves SIGCHLD blocked in its children, which hangs cmake's link step.
+# Linux hosts and build images ship both tools, so use the preinstalled ones.
+build:linux --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build:linux --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
+
 # Enable position independent code (this is the default on macOS and Windows)
 # (Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/421)
 build:linux --copt=-fPIC
@@ -158,6 +166,14 @@ build:sanitizer --test_tag_filters=-no_san
 # :hardening config (FORTIFY=2) can never compose badly with a sanitizer build.
 # This is the ONLY place FORTIFY is disabled; shipped builds get FORTIFY=2.
 build:sanitizer --copt=-D_FORTIFY_SOURCE=0
+# rules_foreign_cc passes the toolchain's compile flags, -no-canonical-prefixes
+# included, to its CMake builds, and CMake repeats them on its link lines. With
+# that flag a symlinked clang (the dev image's /opt/llvm/bin/clang) looks for
+# its sanitizer runtimes next to the symlink instead of in its real resource
+# directory, so the CMake compiler checks fail to link. A later
+# -canonical-prefixes on the link line wins. Bazel's own links do not pass
+# -no-canonical-prefixes, so it changes nothing for them.
+build:sanitizer --linkopt=-canonical-prefixes
 
 # Common flags for Clang
 build:clang --action_env=BAZEL_COMPILER=clang
@@ -506,9 +522,6 @@ build:zig-windows --define=enable_memcached=false
 # the lean workspace already pins system_icu=0 globally.
 build:envoy-filter --config=clang-libstdcxx13
 build:envoy-filter --@googleurl//build_config:system_icu=0
-# Selects the EXT_BUILD_DEPS spelling the Envoy rules_foreign_cc pin accepts
-# (//bazel:rules_foreign_cc_envoy_pin config_setting).
-build:envoy-filter --define=rules_foreign_cc_pin=envoy
 
 try-import %workspace%/clang.bazelrc
 try-import %workspace%/local_tsan.bazelrc

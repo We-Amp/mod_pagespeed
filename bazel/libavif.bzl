@@ -42,16 +42,19 @@ def libavif_from_source(with_dav1d = False):
         "AVIF_CODEC_AOM": "SYSTEM",  # encode + decode
         # Codec discovery fix (Stream 0 spike, VERIFIED under Bazel):
         # libavif's Findaom/Finddav1d try pkg-config first -- but
-        # rules_foreign_cc 0.11.1 does NOT thread PKG_CONFIG_PATH -- then fall
+        # rules_foreign_cc 0.11.1 did NOT thread PKG_CONFIG_PATH -- then fall
         # back to find_library/find_path. Pre-seed the result cache vars (see
         # AOM_LIBRARY / AOM_INCLUDE_DIR below) so the search short-circuits with
         # no pkg-config. rules_foreign_cc stages each foreign_cc dep under its
-        # OWN named subdir of ${EXT_BUILD_DEPS} (aom/, dav1d/), NOT the flat
+        # OWN named subdir of $EXT_BUILD_DEPS (aom/, dav1d/), NOT the flat
         # include/lib a cc_library dep gets -- so the paths are per-dep. Without
         # this, libavif builds codec-less and every encode/decode returns
         # AVIF_RESULT_NO_CODEC_AVAILABLE -- a failure a green build and a clean
         # link both miss, so it must be checked at runtime.
-        "AOM_INCLUDE_DIR": "${EXT_BUILD_DEPS}/aom/include",
+        # rules_foreign_cc >= 0.12 runs Bazel make-variable expansion on
+        # cache_entries, so the shell variable is spelled $$EXT_BUILD_DEPS
+        # (a ${...} or bare $X spelling fails analysis).
+        "AOM_INCLUDE_DIR": "$$EXT_BUILD_DEPS/aom/include",
         "AVIF_LIBYUV": "OFF",  # avoid a second image-scaling dep in the spike
         "AVIF_LIBSHARPYUV": "OFF",
         "AVIF_BUILD_APPS": "OFF",
@@ -66,10 +69,10 @@ def libavif_from_source(with_dav1d = False):
     # find_library falls through and libavif silently configures with no codec.
     # MSVC/clang-cl installs aom as `aom.lib`; everywhere else `libaom.a`.
     windows_entries = {
-        "AOM_LIBRARY": "${EXT_BUILD_DEPS}/aom/lib/aom.lib",
+        "AOM_LIBRARY": "$$EXT_BUILD_DEPS/aom/lib/aom.lib",
     }
     default_entries = {
-        "AOM_LIBRARY": "${EXT_BUILD_DEPS}/aom/lib/libaom.a",
+        "AOM_LIBRARY": "$$EXT_BUILD_DEPS/aom/lib/libaom.a",
     }
 
     # Static CRT ONLY when the rest of the build is using one, consistent with
@@ -87,7 +90,7 @@ def libavif_from_source(with_dav1d = False):
     if with_dav1d:
         codec_deps = [":aom", ":dav1d"]
         cache_entries["AVIF_CODEC_DAV1D"] = "SYSTEM"
-        cache_entries["DAV1D_INCLUDE_DIR"] = "${EXT_BUILD_DEPS}/dav1d/include"
+        cache_entries["DAV1D_INCLUDE_DIR"] = "$$EXT_BUILD_DEPS/dav1d/include"
 
         # NOTE: the Windows dav1d archive name is UNVERIFIED -- the dav1d Meson
         # build is not wired for Windows yet, so this branch is unreachable
@@ -101,8 +104,8 @@ def libavif_from_source(with_dav1d = False):
         # not a declared output of this rule. Whoever enables this must verify
         # at runtime (avifCodecName / a decode timing) that dav1d is present,
         # not just that the build went green.
-        windows_entries["DAV1D_LIBRARY"] = "${EXT_BUILD_DEPS}/dav1d/lib/dav1d.lib"
-        default_entries["DAV1D_LIBRARY"] = "${EXT_BUILD_DEPS}/dav1d/lib/libdav1d.a"
+        windows_entries["DAV1D_LIBRARY"] = "$$EXT_BUILD_DEPS/dav1d/lib/dav1d.lib"
+        default_entries["DAV1D_LIBRARY"] = "$$EXT_BUILD_DEPS/dav1d/lib/libdav1d.a"
 
     # Named "avif_lib" so the codec cc_library in
     # pagespeed/kernel/image/BUILD can take the natural ":avif" name

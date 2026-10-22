@@ -9,9 +9,8 @@
 # round-trip. dav1d (see libdav1d.bzl) is a decode-speed *optimization*
 # layered on top, not a correctness prerequisite.
 #
-# BUILD REQUIREMENT: nasm on host for x86_64 SIMD (.asm). This repo's WORKSPACE
-# calls rules_foreign_cc_dependencies() with no arguments, and rules_foreign_cc
-# 0.11.1 registers no nasm toolchain of its own, so nasm is a host build-tool
+# BUILD REQUIREMENT: nasm on host for x86_64 SIMD (.asm). The rules_foreign_cc
+# module registers no nasm toolchain of its own, so nasm is a host build-tool
 # dependency on every leg (CI docker image, darwin, MSVC). Without nasm, aom
 # drops to slower C paths (still correct) on any leg that resolves to an x86
 # target CPU.
@@ -34,7 +33,9 @@ def _simd_assert(arch_macro, cpu):
     rules_foreign_cc runs this fragment as bash on EVERY platform (the Windows
     toolchain shells out to MSYS bash -- see windows_commands.bzl, "Windows
     uses Bash"), under `set -euo pipefail`, with the cwd already at
-    $BUILD_TMPDIR. `$$VAR$$` is the framework's portable variable spelling.
+    $BUILD_TMPDIR (an exported shell variable). rules_foreign_cc >= 0.12 runs
+    Bazel make-variable expansion on postfix_script, so the fragment is written
+    as plain bash and every `$` is doubled on the way out.
 
     Args:
       arch_macro: the AOM_ARCH_* macro that must be 1 in the generated config.
@@ -45,7 +46,7 @@ def _simd_assert(arch_macro, cpu):
     """
     return """
 # Fail loudly rather than shipping a silently scalar AV1 encoder.
-aom_cfg="$$BUILD_TMPDIR$$/config/aom_config.h"
+aom_cfg="$BUILD_TMPDIR/config/aom_config.h"
 if [ ! -f "$aom_cfg" ]; then
   echo "libaom SIMD assertion: expected generated config at $aom_cfg, not found." >&2
   echo "The aom build layout changed; update bazel/libaom.bzl." >&2
@@ -62,7 +63,7 @@ if ! grep -Eq '^#define {macro}[[:space:]]+1$' "$aom_cfg"; then
   exit 1
 fi
 echo "libaom SIMD assertion: {macro}=1 ({cpu})"
-""".format(macro = arch_macro, cpu = cpu)
+""".format(macro = arch_macro, cpu = cpu).replace("$", "$$")
 
 def libaom_from_source():
     """Creates the cmake build target for libaom (static, encoder+decoder)."""
