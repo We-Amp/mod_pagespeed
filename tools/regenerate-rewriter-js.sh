@@ -57,6 +57,7 @@ ESBUILD_FILES=(
     dedup_inlined_images.js
     defer_iframe.js
     delay_images_inline.js
+    deterministic.js
     extended_instrumentation.js
 )
 
@@ -267,7 +268,6 @@ done
 
 # --- closure_compiler_without_dependency_mode files ---
 WITHOUT_DEP_FILES=(
-    deterministic.js
 )
 WITH_DEP_FILES=(
     critical_css_beacon.js

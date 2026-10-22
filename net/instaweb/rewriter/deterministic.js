@@ -37,7 +37,9 @@ Math.random = function() {
   }
   return (random_seed % 1);
 };
-Date = function() {
+// Replaces the global constructor explicitly, so this does not depend on
+// sloppy-mode assignment to an undeclared name.
+window.Date = function() {
   if (this instanceof Date) {
     date_count++;
     if (date_count > date_count_threshold) {
