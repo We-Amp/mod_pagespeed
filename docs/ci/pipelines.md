@@ -619,6 +619,7 @@ We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/ci-dev
 We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-nightly.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/master
+We-Amp/mod_pagespeed/.github/workflows/pipeline-tidy-sweep.yml@refs/heads/master
 ```
 
 The release lane has no `ci-dev` entry: it only runs from `master`.

@@ -51,6 +51,10 @@ jobs:
             echo "::error::check must be a single clang-tidy check name (got '${CHECK}')"; exit 1; }
           [[ "${PATHS}" =~ ^[A-Za-z0-9_./\ -]*$ ]] || {
             echo "::error::paths may only contain [A-Za-z0-9_./ -]"; exit 1; }
+          for tok in ${PATHS}; do
+            [[ "${tok}" != -* ]] || {
+              echo "::error::paths entries must not start with '-' (got '${tok}')"; exit 1; }
+          done
 
       - name: Unlock a previous run's vendored toolchain files
         run: |
@@ -69,7 +73,9 @@ jobs:
           command -v bazel >/dev/null 2>&1 || { echo "::error::bazel is not on PATH"; exit 1; }
           bazel --version
 
-      # Same key as the pipeline-pr vendor job, so a recent PR run's cache hits.
+      # Same cache key as the pipeline-pr vendor job. On the fleet that job
+      # uses the hub channel and saves no cache entry, and PR-ref caches are not
+      # readable from a master dispatch, so expect a cold vendor step here.
       - name: Restore vendored dependencies
         id: vendor-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -128,6 +134,8 @@ jobs:
               rm -f compile_commands.json
               python3 tools/gen_compilation_database.py -- //pagespeed/... //net/... || {
                 echo "::error::compile_commands.json generation failed"; exit 1; }
+              grep -q pagespeed/nginx/ngx_pagespeed.cc compile_commands.json || {
+                echo "::error::compile_commands.json lost the nginx sources"; exit 1; }
               # Drop TUs that must never be rewritten by a sweep.
               python3 - <<"PY"
           import json
@@ -225,12 +233,15 @@ jobs:
           # Unique diagnostics (a header diagnostic repeats per including TU).
           grep -E "\[${CHECK}(,[^]]*)?\]$" "${LOG}" | grep -E ': (warning|error):' | sort -u > "${RUNNER_TEMP}/hits.txt" || true
           HITS="$(wc -l < "${RUNNER_TEMP}/hits.txt" | tr -d ' ')"
+          # Parse failures and crashes make the hit count untrustworthy.
+          DIAG_ERRORS="$(grep -cE '\[clang-diagnostic-error\]' "${LOG}" || true)"
           FILES="$(git diff --name-only -- . ':!compile_commands.json' | wc -l | tr -d ' ')"
           {
             echo "## tidy-sweep: \`${CHECK}\`"
             echo
             echo "- run-clang-tidy exit code: ${RC}"
             echo "- unique diagnostics: ${HITS}"
+            echo "- clang-diagnostic-error lines: ${DIAG_ERRORS}"
             echo "- files changed by the patch: ${FILES} (patch: $(wc -l < "${PATCH}" | tr -d ' ') lines)"
             echo
             echo "### Diagnostics per directory"
@@ -241,11 +252,24 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
           echo "patch=${PATCH}" >> "$GITHUB_OUTPUT"
           cp "${LOG}" "${RUNNER_TEMP}/tidy-sweep.log" 2>/dev/null || true
-          if [ "${FIX}" != "true" ] && [ "${HITS}" != "0" ]; then
-            echo "::error::gate mode: ${HITS} ${CHECK} diagnostic(s) remain"
+          [ "${RC}" != "missing" ] || { echo "::error::clang-tidy did not run"; exit 1; }
+          if [ "${DIAG_ERRORS}" != "0" ]; then
+            echo "::error::${DIAG_ERRORS} clang-diagnostic-error line(s): the hit count cannot be trusted"
             exit 1
           fi
-          [ "${RC}" != "missing" ] || { echo "::error::clang-tidy did not run"; exit 1; }
+          if [ "${FIX}" != "true" ]; then
+            if [ "${HITS}" != "0" ]; then
+              echo "::error::gate mode: ${HITS} ${CHECK} diagnostic(s) remain"
+              exit 1
+            fi
+            # A zero hit count only passes when clang-tidy itself succeeded.
+            if [ "${RC}" != "0" ]; then
+              echo "::error::gate mode: run-clang-tidy exited ${RC} with no countable diagnostics"
+              exit 1
+            fi
+          elif [ "${RC}" != "0" ]; then
+            echo "::warning::run-clang-tidy exited ${RC} in fix mode (expected when diagnostics were found); review the log"
+          fi
 
       - name: Upload patch and log
         if: always()
