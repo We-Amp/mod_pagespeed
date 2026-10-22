@@ -20,11 +20,10 @@ That's the whole setup — no domain list and no separate front-proxy to configu
 the default **Inverse** topology (see
 [Sidecar modes](#sidecar-modes) for the classic front-proxy alternative).
 
-> **Linux only** (`linux-x64`, `linux-arm64`). Not sure which edition fits? See
-> [mod_pagespeed vs ModPageSpeed 2.0](https://modpagespeed.com/pricing). On Windows,
+> **Linux only** (`linux-x64`, `linux-arm64`). On Windows,
 > use the IIS module; on macOS or in containers where bundling nginx isn't wanted, use
 > [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore)
-> (ModPageSpeed 2.0). The bundled nginx module includes the opt-in AVIF filters. Enable
+> (the ASP.NET Core middleware). The bundled nginx module includes the opt-in AVIF filters. Enable
 > `convert_jpeg_to_avif` for photographic JPEGs; `convert_to_avif_lossless`,
 > `convert_to_avif_animated` and `recompress_avif` cover flat-palette, animated and
 > already-AVIF sources.
@@ -296,10 +295,9 @@ Apache License 2.0. See the bundled `LICENSE` file.
 |---|---|
 | `linux-x64`, `linux-arm64` | ✅ this package |
 | Windows | ❌ use the IIS module |
-| macOS / other | ❌ use [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore) (ModPageSpeed 2.0) |
+| macOS / other | ❌ use [`WeAmp.PageSpeed.AspNetCore`](https://www.nuget.org/packages/WeAmp.PageSpeed.AspNetCore) (the ASP.NET Core middleware) |
 
-See [mod_pagespeed vs ModPageSpeed 2.0 — which fits](https://modpagespeed.com/pricing)
-and the [ASP.NET Core guide](https://modpagespeed.com/docs/aspnet-getting-started/).
+See the [ASP.NET Core guide](https://modpagespeed.com/docs/aspnet-getting-started/).
 
 ---
 
