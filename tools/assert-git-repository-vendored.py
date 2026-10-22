@@ -29,7 +29,7 @@ Design notes (fail closed, like the sibling bazelrc guard):
     name only: an override spelled with the apparent name is silently ignored
     and the build git-clones the dep. Only the canonical spelling counts here.
   * SCAN THE WHOLE MACRO TREE. `git_repository` calls are discovered across
-    every `bazel/*.bzl` — the files the WORKSPACE loads its deps from — not just
+    every `bazel/*.bzl` (the files the non_bcr_deps extension loads its deps from), not just
     repositories.bzl, so a dep added in a new .bzl is covered automatically.
   * A `git_repository(` whose `name` this guard cannot parse is a FAILURE, not
     a silent skip: an unparsable dep is precisely the one that would slip an
@@ -53,8 +53,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-# The macro directory the WORKSPACE loads dependency definitions from
-# (`load("//bazel:repositories.bzl", ...)` etc.). Scanning the whole directory
+# The macro directory the non_bcr_deps extension loads dependency definitions
+# from (`load("//bazel:repositories.bzl", ...)` etc.). Scanning the whole directory
 # rather than a hard-coded file list means a git_repository added to a new
 # bazel/*.bzl is covered without editing this guard. Spike/example WORKSPACEs
 # under docs/ are deliberately NOT part of the real build graph and excluded.

@@ -115,7 +115,7 @@ jobs:
             if grep -qE "^(install/common/apt\.include|install/common/rpm\.include|tools/assert-repo-signing-key\.sh|${wf})\$" "${changed}"; then
               signing_key=true
             fi
-            if grep -qE "(\.lds\$)|^(WORKSPACE|MODULE\.bazel|tools/assert-serf-removed\.sh|third_party/|${wf})" "${changed}"; then
+            if grep -qE "(\.lds\$)|^(MODULE\.bazel|bazel/repositories\.bzl|bazel/extensions\.bzl|tools/assert-serf-removed\.sh|third_party/|${wf})" "${changed}"; then
               serf=true
             fi
             if grep -qE "^(bazel/repositories\.bzl|tools/dependency/|test/tools/dependency/|tools/generate-sbom\.py|${wf})" "${changed}"; then
@@ -130,7 +130,7 @@ jobs:
             # Anything the IIS module compiles or the IIS system tests run:
             # the module and its shared engine sources, the build definitions,
             # the IIS install and test trees, the CI scripts and the workflows.
-            if grep -qE "^(pagespeed/(iis|windows|kernel|system|automatic|opt)/|net/|third_party/|bazel/|install/iis/|test/system/|test/pagespeed/iis/|tools/ci/[^/]*\.ps1\$|tools/ci/(fetch-build-artifacts|invalidate-stale-artifacts)\.|WORKSPACE|MODULE\.bazel|pagespeed\.bazelrc|\.bazelrc|extensions_build_config\.bzl|BUILD(\.bazel)?\$|\.github/actions/|\.github/workflows/ci\.yml|${wf})" "${changed}"; then
+            if grep -qE "^(pagespeed/(iis|windows|kernel|system|automatic|opt)/|net/|third_party/|bazel/|install/iis/|test/system/|test/pagespeed/iis/|tools/ci/[^/]*\.ps1\$|tools/ci/(fetch-build-artifacts|invalidate-stale-artifacts)\.|MODULE\.bazel|pagespeed\.bazelrc|\.bazelrc|extensions_build_config\.bzl|BUILD(\.bazel)?\$|\.github/actions/|\.github/workflows/ci\.yml|${wf})" "${changed}"; then
               iis=true
             fi
             # The ASP.NET Core sidecar, the focal recipe of its native pair and
@@ -825,7 +825,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       # The dependency sources are public and fetched over https. The vendor
       # script names one of them with an ssh-style address, so the rewrite
@@ -977,7 +977,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1160,7 +1160,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1326,7 +1326,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1537,7 +1537,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1694,7 +1694,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1797,7 +1797,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -2893,7 +2893,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'

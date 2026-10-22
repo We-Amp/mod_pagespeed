@@ -33,7 +33,9 @@ mod_pagespeed is a web performance optimization middleware originally created by
 
 ## Build System
 
-**Bazel 8.x** with WORKSPACE-based dependencies (`--enable_workspace`, bzlmod disabled via `.bazelrc`).
+**Bazel 8.x** with bzlmod only: every dependency is declared in `MODULE.bazel` (BCR modules plus the
+`non_bcr_deps` extension in `bazel/extensions.bzl`); WORKSPACE support is off (`--noenable_workspace`).
+`MODULE.bazel.lock` is committed; CI checks that it is current.
 
 ### Docker Development (Required)
 
@@ -95,7 +97,7 @@ bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
 # Nginx module
 bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
 
-# Envoy filter
+# Envoy filter (not buildable at the moment, see below)
 bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed      # Standalone binary (~212MB)
 bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # Shared library (~113MB)
 
@@ -103,17 +105,10 @@ bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # 
 bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
 ```
 
-Building the Envoy targets requires the Envoy WORKSPACE — see [WORKSPACE Swap](#workspace-swap) below.
-
-### WORKSPACE Swap
-
-`WORKSPACE` is swapped in place. The default (lean) `WORKSPACE` supports Apache,
-nginx, and IIS. For Envoy, run `scripts/use-envoy-workspace.sh` to activate the
-Envoy dependency graph, and `scripts/use-envoy-workspace.sh --lean` to restore.
-
-The canonical Envoy dependency graph lives in `WORKSPACE.envoy` — edit THAT for
-Envoy deps, not the active `WORKSPACE` (the script overwrites it on swap).
-`WORKSPACE.lean.bak` is the backup the script writes when activating Envoy.
+The Envoy targets cannot be built at the moment: the Envoy dependency graph is
+not declared in `MODULE.bazel` yet (it returns with the move to Envoy 1.40, as
+Envoy modules). `pagespeed/envoy` and `test/pagespeed/envoy` stay in
+`.bazelignore` until then.
 
 ## Two Source Trees
 

@@ -84,7 +84,7 @@ function Build-Module {
     Write-Status "Building PageSpeed IIS module..."
 
     # Check if source exists
-    if (-not (Test-Path "$SourceRoot\WORKSPACE")) {
+    if (-not (Test-Path "$SourceRoot\MODULE.bazel")) {
         throw "Source root not found at $SourceRoot. Make sure the source is mounted."
     }
 

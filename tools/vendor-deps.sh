@@ -137,8 +137,12 @@ OVERRIDE_FLAGS=(
 
 # Fetch deps for the Apache module: boringssl, abseil, protobuf and the bulk
 # of the extension repos, plus the module resolution itself.
+# --repo_contents_cache= : the repository cache is inside the source tree, and
+# Bazel 9 would otherwise put its repo contents cache under it (it refuses a
+# contents cache inside the main repo). A no-op on 8.8.1.
 bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     --repository_cache="$REPO_CACHE" \
+    --repo_contents_cache= \
     "${OVERRIDE_FLAGS[@]}" \
     //:libmod_pagespeed.so
 
@@ -146,6 +150,7 @@ bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
 # but all external repos are still cached during loading).
 bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     --repository_cache="$REPO_CACHE" \
+    --repo_contents_cache= \
     "${OVERRIDE_FLAGS[@]}" \
     //pagespeed/iis:pagespeed_iis.dll \
     || true

@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# Hybrid mode while the bzlmod migration is in progress: dependencies move from
-# WORKSPACE to here commit by commit, and WORKSPACE is deleted at the end. A
-# bazel_dep shadows a same-named WORKSPACE repo for the main repository. Keep
-# the module name so @mod_pagespeed//... labels used by patches keep resolving.
+# Every dependency is declared here: BCR modules below, everything else through
+# the non_bcr_deps extension (bazel/extensions.bzl). Keep the module name so
+# @mod_pagespeed//... labels used by patches keep resolving.
 module(name = "mod_pagespeed")
 
 # ---- toolchain rulesets (each registers its own toolchains) ----
@@ -33,8 +32,7 @@ python.toolchain(
 )
 
 # ---- C++ libraries from the BCR ----
-# repo_names keep the apparent names our BUILD files and the WORKSPACE
-# protobuf's repo_mapping use. Version constants are mirrored in
+# repo_names keep the apparent names our BUILD files have always used. Version constants are mirrored in
 # bazel/repositories.bzl for the SBOM/notices/CVE tooling.
 bazel_dep(name = "abseil-cpp", version = "20260107.1", repo_name = "com_google_absl")
 single_version_override(
@@ -73,7 +71,7 @@ single_version_override(
 # zlib-ng is built in ZLIB_COMPAT mode, so it exports the zlib API. Every module
 # that asks for zlib (protobuf, ...) gets the alias module instead of madler
 # zlib, so a single deflate is linked (the two-deflate ODR hazard that
-# bazel/zlib_compat.bzl used to close in WORKSPACE).
+# bazel/zlib_compat.bzl used to close).
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2", repo_name = "zlib_ng")
 bazel_dep(name = "zlib", version = "1.3.2.bcr.2")
 local_path_override(

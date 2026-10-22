@@ -14,26 +14,13 @@
 #
 # Setup:
 #   1. Install zig (>= 0.11) on the build host.
-#   2. Add hermetic_cc_toolchain to WORKSPACE (see below).
-#   3. Register the toolchain in WORKSPACE.
+#   2. Add hermetic_cc_toolchain to MODULE.bazel (see below).
 #
-# WORKSPACE setup:
+# MODULE.bazel setup (hermetic_cc_toolchain is in the BCR):
 #
-#   load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-#
-#   HERMETIC_CC_TOOLCHAIN_VERSION = "v4.0.0"
-#   http_archive(
-#       name = "hermetic_cc_toolchain",
-#       sha256 = "<sha256>",
-#       urls = [
-#           "https://github.com/nicholasgasior/hermetic_cc_toolchain/"
-#           "releases/download/{v}/hermetic_cc_toolchain-{v}.tar.gz".format(
-#               v = HERMETIC_CC_TOOLCHAIN_VERSION),
-#       ],
-#   )
-#
-#   load("@hermetic_cc_toolchain//toolchain:defs.bzl", zig_toolchains = "toolchains")
-#   zig_toolchains()
+#   bazel_dep(name = "hermetic_cc_toolchain", version = "4.3.0")
+#   zig_toolchains = use_extension("@hermetic_cc_toolchain//toolchain:ext.bzl", "toolchains")
+#   use_repo(zig_toolchains, "zig_sdk")
 #
 # Then in .bazelrc:
 #   build:zig-windows --platforms=@zig_sdk//platform:windows_amd64
@@ -45,8 +32,8 @@
 #     so the DLL can still be consumed by MSVC-compiled IIS modules.
 #   - For production, use --config=msvc-cl on a native Windows build.
 
-# Placeholder — actual toolchain registration happens in WORKSPACE via
-# hermetic_cc_toolchain.  This file exists for documentation.
+# Placeholder: the toolchain comes from the hermetic_cc_toolchain module once
+# it is added to MODULE.bazel. This file exists for documentation.
 def zig_toolchain_setup():
-    """No-op; see WORKSPACE setup instructions in this file."""
+    """No-op; see the MODULE.bazel setup instructions in this file."""
     pass

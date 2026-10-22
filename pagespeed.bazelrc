@@ -126,6 +126,11 @@ build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/15
 #   Windows: bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll
 # =============================================================================
 build:vendored --repository_cache=vendor/repo-cache
+# Bazel 9 turns the repo contents cache on by default, under
+# --repository_cache. Here that is vendor/repo-cache, inside the source tree,
+# which Bazel refuses. Keep it off for the vendored build (a no-op on 8.8.1,
+# where it is off by default).
+build:vendored --repo_contents_cache=
 # The git_repository deps live in the non_bcr_deps module extension, and Bazel
 # applies --override_repository by canonical repo name only (an apparent name
 # such as `cyclone` is silently ignored and the build would git-clone).

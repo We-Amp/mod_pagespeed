@@ -19,21 +19,19 @@ build:macos --copt -UDEBUG                                                      
 # Startup options cannot be selected via config.
 startup --host_jvm_args=-Xmx3g
 
-# Bzlmod on (the Bazel 8 default; stated for clarity). Hybrid mode while the
-# migration is in progress: deps move from WORKSPACE to MODULE.bazel commit by
-# commit, and WORKSPACE is deleted at the end.
+# Bzlmod only (the Bazel 8 default; stated for clarity). Every dependency comes
+# from MODULE.bazel: BCR modules plus the non_bcr_deps extension in
+# bazel/extensions.bzl. WORKSPACE support is off.
 common --enable_bzlmod
 # CI (Linux) asserts MODULE.bazel.lock is current. Extension results are
 # per-platform in the lock, so Windows/macOS stay in the default update mode.
 common:ci_lock --lockfile_mode=error
-# Bazel 8 disables WORKSPACE by default; keep it on until the bzlmod migration
-# lands.
-common --enable_workspace
+common --noenable_workspace
 # Bazel 8 flipped --incompatible_disallow_empty_glob to true. Keep the Bazel 7
 # behavior so glob()s in our BUILD files and generated third-party build files
 # that match nothing on some platforms don't become errors.
-# TODO: migration crutch; remove at the bzlmod step. Third-party BUILD files
-# generated in bazel/*.bzl still have empty globs.
+# TODO: remove once the third-party BUILD files generated in bazel/*.bzl no
+# longer have empty globs.
 common --noincompatible_disallow_empty_glob
 
 run --color=yes
@@ -302,7 +300,7 @@ build:coverage --test_timeout=390,750,1500,5700
 build:coverage --define=dynamic_link_tests=true
 build:coverage --define=ENVOY_CONFIG_COVERAGE=1
 build:coverage --cxxopt="-DENVOY_CONFIG_COVERAGE=1"
-# Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
+# Envoy-only: needs the @envoy repository (not declared until the Envoy 1.40 step)
 # build:coverage --coverage_support=@envoy//bazel/coverage:coverage_support
 # build:coverage --test_env=CC_CODE_COVERAGE_SCRIPT=external/envoy/bazel/coverage/collect_cc_coverage.sh
 build:coverage --test_env=HEAPCHECK=
@@ -316,7 +314,7 @@ build:coverage --instrumentation_filter="//source(?!/common/quic/platform)[/:],/
 build:test-coverage --test_arg="-l trace"
 build:test-coverage --test_arg="--log-path /dev/null"
 build:fuzz-coverage --config=plain-fuzzer
-# Envoy-only: requires WORKSPACE.envoy (see scripts/use-envoy-workspace.sh)
+# Envoy-only: needs the @envoy repository (not declared until the Envoy 1.40 step)
 # build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
 
 # CI configurations
@@ -470,7 +468,7 @@ build:win-analyze --copt=/analyze
 build:win-analyze --copt=/analyze:external-
 
 # Zig cross-compilation from Linux to Windows (MinGW ABI).
-# Requires hermetic_cc_toolchain in WORKSPACE — see bazel/zig_toolchain.bzl.
+# Requires hermetic_cc_toolchain as a bazel_dep; see bazel/zig_toolchain.bzl.
 # Usage: bazel build --config=zig-windows //pagespeed/windows:pagespeed_c_api
 #
 # NOTE: Does NOT inherit from build:windows because that uses MSVC-style flags
@@ -511,9 +509,9 @@ build:zig-windows --copt=-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0
 # Disable POSIX-only memcached backend
 build:zig-windows --define=enable_memcached=false
 
-# Envoy-workspace filter builds (WORKSPACE.envoy; scripts/use-envoy-workspace.sh).
-# googleurl's ICU IDNA variant needs system ICU headers the dev images lack;
-# the lean workspace already pins system_icu=0 globally.
+# Envoy filter builds (pagespeed/envoy; not buildable until the Envoy 1.40 step
+# declares the Envoy repositories). googleurl's ICU IDNA variant needs system
+# ICU headers the dev images lack.
 build:envoy-filter --config=clang-libstdcxx13
 build:envoy-filter --@googleurl//build_config:system_icu=0
 

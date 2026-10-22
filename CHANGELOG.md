@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logs a warning that it has no effect. `AnalyticsID` and `UseAnalyticsJs`
   are likewise accepted and ignored with a warning, as is the `ga=` component
   of an experiment spec. Use your own analytics snippet.
+- **Building from source: the Bazel build is bzlmod only.** Every
+  dependency is declared in `MODULE.bazel` (Bazel Central Registry modules
+  plus a module extension for the rest), with a committed
+  `MODULE.bazel.lock`. The `WORKSPACE` files and
+  `scripts/use-envoy-workspace.sh` are removed. The Envoy filter cannot be
+  built from source at this revision. The packages and images are
+  unchanged.
 
 ### Removed
 

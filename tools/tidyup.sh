@@ -10,9 +10,9 @@
 # clang-tidy-20 is available.
 #
 # pagespeed/envoy is excluded via --deleted_packages: its BUILD file loads
-# @@envoy_repo and @@envoy_build_config (Bzlmod-style) which are not defined
-# in WORKSPACE-mode Bazel 7. The envoy source files are still linted via
-# the header-filter, but only when included by other translation units.
+# Envoy repositories that are not declared until the Envoy 1.40 step. The
+# envoy source files are still linted via the header-filter, but only when
+# included by other translation units.
 #
 # Options:
 #   --fix    Apply auto-fixes in-place

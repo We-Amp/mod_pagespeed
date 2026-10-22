@@ -57,7 +57,7 @@ Full product documentation lives on modpagespeed.com:
 
 ### Build from Source
 
-All builds run inside a Docker container (provides Clang, GCC 13, Bazel 7.x):
+All builds run inside a Docker container (provides Clang, GCC 13, Bazel 8.x):
 
 ```bash
 # Start development environment (includes Redis and Memcached)
@@ -67,7 +67,7 @@ docker compose exec dev bash
 # Build for your target platform
 bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so                   # Apache
 bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so # Nginx
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy
+bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy (not buildable at this revision)
 
 # Run C++ unit tests
 bazel test --config=clang-libstdcxx13 \

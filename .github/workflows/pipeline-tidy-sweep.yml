@@ -11,10 +11,8 @@
 #
 # The compilation database is built the same way as the PR lint job
 # (pipeline-pr.yml `lint`): tools/gen_compilation_database.py inside the dev
-# image, with the WORKSPACE-mode flags --config=vendored and
+# image, with the flags --config=vendored and
 # --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows.
-# NOTE: this assumes WORKSPACE-mode Bazel; after the bzlmod migration (#147)
-# the BAZEL_BUILD_OPTIONS below and the vendor cache key may need a follow-up.
 
 name: pipeline-tidy-sweep
 
@@ -82,7 +80,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       - name: Vendor all dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'

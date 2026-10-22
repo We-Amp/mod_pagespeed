@@ -39,21 +39,22 @@ virtual host overrides, circuit breaker, and admin authentication.
 
 ## Build Notes
 
-Activate the Envoy workspace with `./scripts/use-envoy-workspace.sh` — it
-swaps `WORKSPACE.envoy` over `WORKSPACE` AND empties `.bazelignore` (the
-lean build ignores `pagespeed/envoy`, which otherwise makes these packages
-"deleted" in the Envoy workspace too). Restore with `--lean`. Build with
-`--config=envoy-filter` (clang + libstdc++, googleurl without system ICU):
+The filter is not buildable at the moment. The build is bzlmod only and the
+Envoy repositories are not declared in `MODULE.bazel` yet; they return with
+the move to Envoy 1.40, consumed as Envoy modules. Until then `pagespeed/envoy`
+and `test/pagespeed/envoy` stay in `.bazelignore`. Once the Envoy modules are
+declared, build with `--config=envoy-filter` (clang + libstdc++, googleurl
+without system ICU):
 
 ```
 bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed      # standalone binary
 bazel build --config=envoy-filter //pagespeed/envoy:pagespeed_filter.so  # shared library
 ```
 
-`WORKSPACE.envoy` pre-defines `com_github_libevent_libevent` with Envoy's
-patched snapshot (`event2/watch.h`); the lean workspace's vanilla libevent
-registration is `maybe()`-wrapped so it defers. Keep that pin in sync when
-bumping `ENVOY_COMMIT`.
+Envoy needs its patched libevent snapshot (`event2/watch.h`). Our
+`com_github_libevent_libevent` (from the `non_bcr_deps` extension) is vanilla
+2.1.12, so the Envoy step replaces it, and `com_googlesource_googleurl`, `fmt`
+and `spdlog`, with Envoy's modules to avoid linking two copies into the filter.
 
 ## Testing
 
