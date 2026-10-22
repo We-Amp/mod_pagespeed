@@ -20,18 +20,18 @@
 namespace net_instaweb {
 
 const char* JS_defer_iframe =
-    "(function(){window.pagespeed = window.pagespeed || {};\nvar p"
-    "agespeed = window.pagespeed;\npagespeed.DeferIframe = functio"
-    "n() {\n};\npagespeed.DeferIframe.prototype.convertToIframe = f"
-    "unction() {\n  var a = document.getElementsByTagName(\"pagespe"
-    "ed_iframe\");\n  if (a.length > 0) {\n    a = a[0];\n    for (va"
-    "r d = document.createElement(\"iframe\"), b = 0, c = a.attribu"
-    "tes, e = c.length; b < e; ++b) {\n      d.setAttribute(c[b].n"
-    "ame, c[b].value);\n    }\n    a.parentNode.replaceChild(d, a);"
-    "\n  }\n};\npagespeed.DeferIframe.prototype.convertToIframe = pa"
-    "gespeed.DeferIframe.prototype.convertToIframe;\npagespeed.def"
-    "erIframeInit = function() {\n  var a = new pagespeed.DeferIfr"
-    "ame();\n  pagespeed.deferIframe = a;\n};\npagespeed.deferIframe"
-    "Init = pagespeed.deferIframeInit;\n})();\n";
+    "(() => {\n  window.pagespeed = window.pagespeed || {};\n  var "
+    "pagespeed = window.pagespeed;\n  pagespeed.DeferIframe = func"
+    "tion() {\n  };\n  pagespeed.DeferIframe.prototype.convertToIfr"
+    "ame = function() {\n    var nodes = document.getElementsByTag"
+    "Name(\"pagespeed_iframe\");\n    if (nodes.length > 0) {\n      "
+    "var oldElement = nodes[0];\n      var newElement = document.c"
+    "reateElement(\"iframe\");\n      for (var i = 0, a = oldElement"
+    ".attributes, n = a.length; i < n; ++i) {\n        newElement."
+    "setAttribute(a[i].name, a[i].value);\n      }\n      oldElemen"
+    "t.parentNode.replaceChild(newElement, oldElement);\n    }\n  }"
+    ";\n  pagespeed.deferIframeInit = function() {\n    var deferIf"
+    "rame = new pagespeed.DeferIframe();\n    pagespeed.deferIfram"
+    "e = deferIframe;\n  };\n})();\n";
 
 }  // namespace net_instaweb
