@@ -398,14 +398,15 @@ fi
 
 # Guard for --esbuild-only: .source-hash covers every input, but this mode
 # rebuilds only the esbuild assets. Installing a new hash after a
-# Closure-side input changed (a Closure-compiled source, js_utils.js or
-# externs.js) would mark the stale Closure outputs as fresh and defeat the
+# Closure-side input changed (a Closure-compiled source, js_utils.js,
+# externs.js or this script, which drives the Closure Compiler and derives
+# the Closure copy of js_utils.js) would mark the stale Closure outputs as fresh and defeat the
 # verify_generated_js genrule and --check-hash. So the new hash is only
 # installed when those inputs are unchanged since the commit that last
 # wrote .source-hash; otherwise the full regeneration is required.
 if [[ "$ESBUILD_ONLY" == true ]] && \
    ! diff -q "$TMPDIR/.source-hash" "$GEN_DIR/.source-hash" >/dev/null 2>&1; then
-    closure_inputs=("$JS_UTILS" "$EXTERNS")
+    closure_inputs=("$JS_UTILS" "$EXTERNS" "$SCRIPT_DIR/regenerate-rewriter-js.sh")
     for name in "${SOURCE_NAMES[@]}"; do
         is_esbuild_file "$name.js" || closure_inputs+=("$REWRITER_DIR/$name.js")
     done
