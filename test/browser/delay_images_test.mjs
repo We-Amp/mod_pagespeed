@@ -130,6 +130,9 @@ const srcs = (page) => page.evaluate(() => ['a', 'b', 'c', 'd', 's'].map(
   check(hi[0] === HI_A && hi[1] === HI_B && hi[2] === HI_C,
         `replaceWithHighRes: all elements on high-res src (got ${hi.join(' ')})`);
   check(hi[4] === HI_A, 'replaceWithHighRes: srcset image gets its high-res src');
+  // KNOWN-QUIRK: this pins existing behaviour, not a contract. The
+  // Closure-removal rewrite may fix it (restore srcset) and should then
+  // update this assertion deliberately.
   // Current behaviour: delay_images.js restores only src, never
   // data-pagespeed-high-res-srcset (the in-place onload snippet does).
   const srcset = await page.evaluate(
