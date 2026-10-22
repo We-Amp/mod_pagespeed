@@ -3530,31 +3530,16 @@ TEST_F(ProxyInterfaceTest, WebpImageReconstruction) {
 
 class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
  protected:
+  // Reports whether the driver was handed a per-origin property page.
   class PerOriginPageReaderFilter : public EmptyHtmlFilter {
    public:
     explicit PerOriginPageReaderFilter(RewriteDriver* driver)
         : driver_(driver) {}
 
     void StartDocument() override {
-      // This keeps a little per-site visits counter in per-origin pcache
-      // and dumps it into a comment.
-      PropertyPage* sitewide_page = driver_->origin_property_page();
-      const PropertyCache::Cohort* dom_cohort =
-          driver_->server_context()->dom_cohort();
-      const char kVisits[] = "visits";
-      PropertyValue* val = sitewide_page->GetProperty(dom_cohort, kVisits);
-
-      int count = 0;
-      if (val->has_value()) {
-        EXPECT_TRUE(StringToInt(val->value(), &count));
-      }
-
-      driver_->InsertComment(StrCat("Site visit:", IntegerToString(count)));
-
-      // Update counter.
-      sitewide_page->UpdateValue(dom_cohort, kVisits,
-                                 IntegerToString(count + 1));
-      sitewide_page->WriteCohort(dom_cohort);
+      driver_->InsertComment(driver_->origin_property_page() == nullptr
+                                 ? "origin page:none"
+                                 : "origin page:set");
     }
 
     void StartElement(HtmlElement* element) override {}
@@ -3584,32 +3569,25 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
 
   void SetUp() override {
     RewriteOptions* options = server_context()->global_options();
-    // mobilizer turns on the per-domain page.
+    // The mobilize filter is a no-op; it must not turn on the per-origin
+    // property cache page it used to request.
     options->ClearSignatureForTesting();
     options->EnableFilter(RewriteOptions::kMobilize);
     ProxyInterfaceTest::SetUp();
   }
 };
 
-TEST_F(ProxyInterfaceOriginPropertyPageTest, Basic) {
+TEST_F(ProxyInterfaceOriginPropertyPageTest, MobilizeLoadsNoOriginPage) {
   PerOriginPageReaderFilterCreator filter_creator;
   factory()->AddCreateFilterCallback(&filter_creator);
 
   ResponseHeaders headers;
   GoogleString body;
   FetchFromProxy(kPageUrl, true, &body, &headers);
-  EXPECT_TRUE(strings::StartsWith(body, "<!--Site visit:0-->")) << body;
+  EXPECT_TRUE(strings::StartsWith(body, "<!--origin page:none-->")) << body;
 
   FetchFromProxy(kPageUrl, true, &body, &headers);
-  EXPECT_TRUE(strings::StartsWith(body, "<!--Site visit:1-->")) << body;
-
-  // Count increases on a different page, too.
-  GoogleString other_page = StrCat("totally/different/from/", kPageUrl);
-  SetResponseWithDefaultHeaders(other_page, kContentTypeHtml,
-                                "<div><p></p></div>", 0);
-
-  FetchFromProxy(other_page, true, &body, &headers);
-  EXPECT_TRUE(strings::StartsWith(body, "<!--Site visit:2-->")) << body;
+  EXPECT_TRUE(strings::StartsWith(body, "<!--origin page:none-->")) << body;
 }
 
 TEST_F(ProxyInterfaceOriginPropertyPageTest, PostWithDelayCache) {

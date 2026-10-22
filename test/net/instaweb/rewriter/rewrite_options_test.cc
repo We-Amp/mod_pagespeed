@@ -2105,6 +2105,38 @@ TEST_F(RewriteOptionsTest, DeprecatedAnalyticsFiltersWarn) {
   EXPECT_EQ(2U, handler.messages().size());
 }
 
+TEST_F(RewriteOptionsTest, MobilizeIsADeprecatedNoOp) {
+  // The mobilize filter name still parses (config compatibility) and warns
+  // when enabled, and enabling it changes nothing else.
+  TestMessageHandler handler;
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList("mobilize", &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "Filter 'mobilize' is deprecated and has no effect"))
+      << handler.messages()[0];
+  EXPECT_FALSE(options_.RequiresAddHead());
+
+  // Disabling or forbidding it is silent.
+  EXPECT_TRUE(
+      options_.DisableFiltersByCommaSeparatedList("mobilize", &handler));
+  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList("mobilize", &handler));
+  EXPECT_EQ(1U, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, LogMobilizationSamplesWarns) {
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(
+                RewriteOptions::kLogMobilizationSamples, "on", &msg, &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "'LogMobilizationSamples' is deprecated and ignored"))
+      << handler.messages()[0];
+}
+
 TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
   // Setting AnalyticsID succeeds (config compatibility), is ignored, and
   // warns.

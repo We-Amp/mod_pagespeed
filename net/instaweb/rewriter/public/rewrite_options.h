@@ -179,8 +179,7 @@ class RewriteOptions {
     kLocalStorageCache,
     kMakeGoogleAnalyticsAsyncDeprecated,
     kMakeShowAdsAsync,
-    // Load-bearing bit: gates UsePerOriginPropertyCachePage(), membership in
-    // kAddHeadFilters, and the MobilizeFilters level head. Do not deprecate.
+    // Accepted-but-inert; the name still parses for config compatibility.
     kMobilize,
     // Accepted-but-inert; never had a consumer.
     kMobilizePrecomputeDeprecated,
@@ -1443,10 +1442,6 @@ class RewriteOptions {
   // Determines whether any filter is enabled that requires a 'head'
   // element to work.
   bool RequiresAddHead() const;
-
-  // Returns true if any filter benefits from per-origin property cache
-  // information.
-  bool UsePerOriginPropertyCachePage() const;
 
   // Adds pairs of (option, value) to the option set. The option names and
   // values are not checked for validity, just stored. If the string piece
