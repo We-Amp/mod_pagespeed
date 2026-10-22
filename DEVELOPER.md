@@ -127,8 +127,9 @@ and `RewriteOptions`, in the legacy `net_instaweb::` namespace: to add or edit
 a filter, work there. `pagespeed/` holds the modern subsystems: the server
 adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/` and
 `automatic/`. There is no `rewriter/` directory under `pagespeed/`.
-`net/instaweb/genfiles/` is generated; edit the source `.js` and run
-`tools/regenerate-rewriter-js.sh`.
+`net/instaweb/rewriter/generated/` is generated; edit the source `.js` and run
+`tools/regenerate-rewriter-js.sh` (`net/instaweb/genfiles/` is a stale
+pre-Bazel copy that nothing builds from).
 
 ```
 mod_pagespeed/
@@ -137,7 +138,7 @@ mod_pagespeed/
 │   ├── htmlparse/          # Legacy HTML-parse support
 │   ├── http/               # Legacy HTTP support
 │   ├── util/               # Legacy util support
-│   └── genfiles/           # Generated gperf/Closure outputs (do NOT hand-edit)
+│   └── rewriter/generated/ # Generated Closure JS outputs (do NOT hand-edit)
 ├── pagespeed/              # Modern subsystems
 │   ├── kernel/             # Core utilities and abstractions
 │   │   ├── base/           # Strings, threading, statistics
