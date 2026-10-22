@@ -22,8 +22,8 @@ fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 cat > "${TMP}/bin/gh" <<'GH'
 #!/usr/bin/env bash
 # Fake gh api. SCENARIO: 502-then-ok | 502-always | inflight-then-red | inflight-then-ok | red | none | 404
-#   | dispatch-only | push-red-dispatch-green | flaky-empty-then-green | both-red
-# The event= and status= parts of the query select what is served.
+#   | dispatch-only | push-red-dispatch-green | flaky-empty-then-green | both-red | dispatch-inflight
+# The event= part of the query selects what is served; one unfiltered list per event.
 set -uo pipefail
 path="$2"
 echo "$path" >> "${FAKE_LOG}"
@@ -35,32 +35,30 @@ Nginx System Tests=failure'
 ev=push
 case "$path" in *event=workflow_dispatch*) ev=dispatch ;; esac
 case "$path" in
-  */workflows/ci.yml/runs*status=completed*)
+  */workflows/ci.yml/runs*)
+    n=$(bump "q_${ev}")
     case "$SCENARIO:$ev" in
       502-then-ok:push)
-        if [ "$(bump completed)" -lt 2 ]; then echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; fi
-        echo 11 ;;
+        if [ "$n" -lt 2 ]; then echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; fi
+        echo "11 completed success" ;;
       502-always:*) echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1 ;;
       inflight-then-red:push)
-        if [ "$(bump completed)" -lt 2 ]; then : ; else echo 12; fi ;;
+        if [ "$n" -lt 2 ]; then echo "10 in_progress null"; else echo "12 completed failure"; fi ;;
       inflight-then-ok:push)
-        if [ "$(bump completed)" -lt 2 ]; then : ; else echo 11; fi ;;
-      red:push) echo 12 ;;
+        if [ "$n" -lt 2 ]; then echo "10 in_progress null"; else echo "11 completed success"; fi ;;
+      red:push) echo "12 completed failure" ;;
       404:*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
-      dispatch-only:dispatch) echo 11 ;;
-      push-red-dispatch-green:push) echo 12 ;;
-      push-red-dispatch-green:dispatch) echo 11 ;;
-      flaky-empty-then-green:push) echo 12 ;;
+      dispatch-only:dispatch) echo "11 completed success" ;;
+      push-red-dispatch-green:push) echo "12 completed failure" ;;
+      push-red-dispatch-green:dispatch) echo "11 completed success" ;;
+      flaky-empty-then-green:push) echo "12 completed failure" ;;
       flaky-empty-then-green:dispatch)
-        if [ "$(bump completed)" -lt 1 ]; then : ; else echo 11; fi ;;
-      both-red:*) echo 12 ;;
+        if [ "$n" -lt 1 ]; then : ; else echo "11 completed success"; fi ;;
+      both-red:*) echo "12 completed failure" ;;
+      dispatch-inflight:dispatch)
+        if [ "$n" -lt 2 ]; then echo "13 in_progress null"; else echo "11 completed success"; fi ;;
       *) : ;;
     esac ;;
-  */workflows/ci.yml/runs*status=in_progress*)
-    case "$SCENARIO:$ev" in
-      inflight-then-ok:push|inflight-then-red:push) [ "$(bump inflight)" -lt 2 ] && echo 10 || true ;;
-    esac ;;
-  */workflows/ci.yml/runs*status=*) : ;;
   */actions/runs/11/jobs*) echo "$green" ;;
   */actions/runs/12/jobs*) echo "$red" ;;
   *) echo "fake gh: unexpected call: $path" >&2; exit 9 ;;
@@ -152,9 +150,14 @@ if [ "$RC" -eq 0 ] && grep -q 'waiting' <<<"$OUT" && grep -q 'passed in ci.yml r
 else fail "flaky-empty-then-green (rc=$RC)"; echo "$OUT"; fi
 
 run_gate both-red
-if [ "$RC" -eq 1 ] && grep -q 'refuses this release' <<<"$OUT"; then
+if [ "$RC" -eq 1 ] && grep -q 'refuses this release' <<<"$OUT" && [ "$(grep -c 'waiting' <<<"$OUT")" -eq 1 ]; then
   pass "red push and red dispatch runs on two consecutive checks are refused"
 else fail "both-red (rc=$RC)"; echo "$OUT"; fi
+
+run_gate dispatch-inflight
+if [ "$RC" -eq 0 ] && grep -q 'still in flight' <<<"$OUT" && [ "$(grep -c 'waiting' <<<"$OUT")" -ge 1 ] && grep -q 'passed in ci.yml run 11 (workflow_dispatch)' <<<"$OUT"; then
+  pass "a dispatch run in flight is waited for, then the gate passes"
+else fail "dispatch-inflight (rc=$RC)"; echo "$OUT"; fi
 
 [ "$FAILS" -eq 0 ] || { echo "$FAILS failure(s)"; exit 1; }
 echo "all ok"

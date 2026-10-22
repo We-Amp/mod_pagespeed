@@ -86,15 +86,21 @@ EVENTS="push workflow_dispatch"
 # Consecutive checks that found completed runs, none passing, nothing in flight.
 REFUSE_STREAK=0
 
-# runs_url <event> <status>
-runs_url() { echo "${RUNS_PATH}?${RUNS_Q}&event=$1&branch=master&status=$2"; }
+# runs_url <event>: one unfiltered query per event (no status filter), so a
+# check costs two list calls plus the job queries of the completed runs. This
+# keeps the polling well inside the 1000 requests/hour limit of github.token
+# (a rate-limit 403 is not retried and would refuse the release).
+runs_url() { echo "${RUNS_PATH}?${RUNS_Q}&event=$1&branch=master"; }
 
 # check: 0 = passed, 1 = refuse, 2 = API failure (refuse), 3 = wait.
 check() {
-  local ids="" runs run entry jobs inflight status ev
+  local ids="" inflight="" runs rid st concl entry run ev jobs
   for ev in $EVENTS; do
-    runs="$(gh_api "$(runs_url "$ev" completed)" '.workflow_runs[].id')" || return 2
-    for run in $runs; do ids="${ids} ${run}:${ev}"; done
+    runs="$(gh_api "$(runs_url "$ev")" '.workflow_runs[] | "\(.id) \(.status) \(.conclusion)"')" || return 2
+    while read -r rid st concl; do
+      [ -n "$rid" ] || continue
+      if [ "$st" = completed ]; then ids="${ids} ${rid}:${ev}"; else inflight="${inflight} ${rid}"; fi
+    done <<<"$runs"
   done
   for entry in $ids; do
     run="${entry%%:*}"; ev="${entry#*:}"
@@ -106,13 +112,6 @@ check() {
       echo "System-test lanes passed in ci.yml run ${run} (${ev})"
       return 0
     fi
-  done
-  inflight=""
-  for ev in $EVENTS; do
-    for status in queued in_progress waiting pending requested; do
-      run="$(gh_api "$(runs_url "$ev" "$status")" '.workflow_runs[].id')" || return 2
-      inflight="${inflight}${run:+ ${run//$'\n'/ }}"
-    done
   done
   if [ -n "$inflight" ]; then
     REFUSE_STREAK=0

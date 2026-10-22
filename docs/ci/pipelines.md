@@ -509,7 +509,8 @@ The full tier's jobs are named `full / <job name>` (for example
 `ci.yml` runs in the concurrency group `ci-<ref>-run` for every event except
 `workflow_dispatch`, which runs in `ci-<ref>-dispatch`. A candidate dispatch
 therefore never replaces, and is never replaced by, the push run of the same
-ref; only a pull request run is cancelled by a newer one.
+ref. A running run is cancelled only for a pull request, but a newer pending run in
+the same group still replaces an older pending one.
 
 Not listed individually: `pr / Dependency Scan (report-only)` (it never fails
 the build) and the path-filtered jobs (`pr / Repo signing key embedded`,
