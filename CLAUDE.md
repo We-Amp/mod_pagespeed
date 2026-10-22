@@ -6,7 +6,7 @@ This file provides context and guidance for contributors (human and AI-assisted)
 
 This repo is part of the We-Amp B.V. product family. Cross-repo context:
 
-- **ModPageSpeed 2.0** (`We-Amp/pagespeed-optimizer`) — modern successor, shares Ed25519 licensing tokens
+- **pagespeed-optimizer** (`We-Amp/pagespeed-optimizer`): the optimizer worker; together with this module it ships as mod_pagespeed
   - Customer-facing 1.1 docs live there at `website/src/content/docs-1.1/` (published to modpagespeed.com/1.1/docs/), NOT in this repo. `docs/*.md` here is internal/developer-facing.
 - **Cyclone Cache** (`We-Amp/cyclone-cache`) — shared cache library, vendored at `vendor/cyclone/`
 
