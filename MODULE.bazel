@@ -50,9 +50,24 @@ bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 bazel_dep(name = "re2", version = "2025-11-05", repo_name = "com_googlesource_code_re2")
 bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
 bazel_dep(name = "rules_proto", version = "7.0.2")
-# Hybrid mode only (drop when boringssl becomes a bazel_dep): the WORKSPACE
-# boringssl loads @rules_license, which protobuf_deps() used to declare.
-bazel_dep(name = "rules_license", version = "1.0.0")
+
+# BoringSSL with our two patches. single_version_override pins the exact
+# version, so no other module in the graph can float it.
+bazel_dep(name = "boringssl", version = "0.20260508.0")
+single_version_override(
+    module_name = "boringssl",
+    patch_strip = 1,
+    patches = [
+        # Add CRYPTO_thread_local_cleanup() so pagespeed_iis.dll can release
+        # the BoringSSL TLS slot on DLL unload.
+        "//bazel:boringssl_dll_unload_tls_cleanup.patch",
+        # Make the allocator-override hooks null by construction instead of
+        # weak external references: a module loaded into a server process
+        # must not leave crypto symbols for that process to satisfy.
+        "//bazel:boringssl_no_weak_alloc_hooks.patch",
+    ],
+    version = "0.20260508.0",
+)
 
 # ---- one deflate: module "zlib" is a local alias onto zlib-ng ----
 # zlib-ng is built in ZLIB_COMPAT mode, so it exports the zlib API. Every module

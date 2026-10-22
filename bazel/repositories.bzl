@@ -44,7 +44,9 @@ ZLIB_NG_SHA = "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
 
 # Standalone BoringSSL — previously only an Envoy transitive dep.
 # Bumped May 2026: ~12 months of upstream drift (post-quantum + hardening rolls).
-BORINGSSL_VERSION = "0.20260508.0"
+# A bazel_dep with our patches in MODULE.bazel; mirrored here for the tools.
+BORINGSSL_VERSION = "0.20260508.0"  # mirrored in MODULE.bazel
+# sha256 of the release tarball the BCR source.json fetches (same bytes).
 BORINGSSL_SHA = "de3371d3fe085afd34778a4c988fb7840b9c92cb21504e674f33ebefd98edc00"
 
 # Protocol Buffers C++ runtime + codegen. Same v31.1 release commit that
@@ -626,25 +628,7 @@ _RE2_VERSION = "2025-11-05"  # mirrored in MODULE.bazel
 _RE2_SHA = "c7b1a7a7c68d2d7cf8d343dc56655c1b5a8c8aadedc017db453d4c1d8913b844"
 
 def mod_pagespeed_dependencies():
-    # Phase 1: Standalone BoringSSL
-    http_archive(
-        name = "boringssl",
-        strip_prefix = "boringssl-%s" % BORINGSSL_VERSION,
-        url = "https://github.com/google/boringssl/archive/%s.tar.gz" % BORINGSSL_VERSION,
-        sha256 = BORINGSSL_SHA,
-        # Add CRYPTO_thread_local_cleanup() so pagespeed_iis.dll can release
-        # the BoringSSL TLS slot on DLL unload.
-        # Make the allocator-override hooks null by construction instead of
-        # weak external references: a module loaded into a server process must
-        # not leave crypto symbols for that process to satisfy.
-        patches = [
-            "@mod_pagespeed//bazel:boringssl_dll_unload_tls_cleanup.patch",
-            "@mod_pagespeed//bazel:boringssl_no_weak_alloc_hooks.patch",
-        ],
-        patch_args = ["-p1"],
-    )
-
-    # Phase 2: Standalone libevent.
+    # Standalone libevent.
     # maybe(): WORKSPACE.envoy pre-defines this repo with Envoy's patched
     # snapshot (event2/watch.h) before calling mod_pagespeed_dependencies();
     # the lean WORKSPACE does not, so it gets this vanilla release.
