@@ -70,6 +70,18 @@ permissions:
   contents: read
 
 jobs:
+  event-guard:
+    name: Event guard (refuses merge_group and unexpected events)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse events this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          ALLOWED: "schedule workflow_dispatch"
+        run: |
+          set -euo pipefail
+          case " ${ALLOWED} " in *" ${EVENT} "*) echo "event ${EVENT} accepted";; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+
   # ---------------------------------------------------------------------
   # The vendored tree. Every Linux and Windows job below builds from it
   # (build:vendored in pagespeed.bazelrc): the git-only dependencies are
@@ -80,6 +92,7 @@ jobs:
   # ---------------------------------------------------------------------
   nightly-vendor:
     name: Vendor Dependencies (nightly)
+    needs: event-guard
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:

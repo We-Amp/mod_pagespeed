@@ -91,12 +91,25 @@ permissions:
   contents: read
 
 jobs:
+  event-guard:
+    name: Event guard (refuses merge_group and unexpected events)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse events this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          ALLOWED: "push workflow_dispatch"
+        run: |
+          set -euo pipefail
+          case " ${ALLOWED} " in *" ${EVENT} "*) echo "event ${EVENT} accepted";; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+
   # ---------------------------------------------------------------------
   # Control: the ref guard and the version, both hosted. The guard code is
   # checked out from master, never from the tree being released.
   # ---------------------------------------------------------------------
   ref-guard:
     name: Ref guard
+    needs: event-guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

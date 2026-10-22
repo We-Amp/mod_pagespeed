@@ -524,12 +524,22 @@ commit per pull request, its subject ending in `(#N)`. A different method
 (merge commits or rebase) must change the classifier first; a group without
 that shape is refused.
 
-**Scope.** The guard protects runs that go through `pipeline-pr.yml`. A queued
-tree can still change the caller `ci.yml` to call another allow-listed fleet
-pipeline (the full, nightly, tidy-sweep, release and gate workflows, and the
-`@ci-dev` refs), and those carry no guard. Closing that is a separate change.
-Until it lands, no fork or Dependabot pull request is added to the merge queue
-(policy).
+**Event guard.** A queued tree can change the caller `ci.yml` to call any
+other allow-listed fleet pipeline, so every one of them opens with a hosted job
+`event-guard` that fails on an event outside its allowed list: `push`,
+`workflow_dispatch` and `pull_request` for `pipeline-full.yml` (the caller
+runs it for a push to `master`, a dispatch with `full: true` and the `ci:full`
+label), `schedule` and `workflow_dispatch` for `pipeline-nightly.yml`,
+`workflow_dispatch` for `pipeline-tidy-sweep.yml`, and `push` and
+`workflow_dispatch` for `pipeline-release-module.yml` and the two gate
+workflows it calls (a called workflow sees the caller's event). `merge_group`
+is allowed nowhere but `pipeline-pr.yml`. Every fleet job reaches `event-guard`
+through `needs` (the root job of the pipeline needs it), so a refusal skips
+the whole fleet. The workflow-shape gate (`event-guard`) requires the job in
+that exact form in every workflow with a fleet `runs-on`, requires each fleet
+job to reach it, and rejects a fleet job that could still run after it
+failed. The `@ci-dev` allow-list entries stay, with one rule: push `ci-dev`
+only from a `master`-based branch that carries the guard.
 
 ## Required checks
 

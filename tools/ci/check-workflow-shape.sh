@@ -646,6 +646,135 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   fi
 done
 
+# --- event-guard --------------------------------------------------------------
+# Every workflow other than pipeline-pr.yml that has a fleet runs-on (any
+# runs-on that is not a plain hosted label) must carry the hosted job
+# `event-guard`, in exactly the form below, and every fleet job must reach it
+# through `needs`. A merge_group run takes its caller workflow from the queued
+# tree, so a queued tree can call any fleet pipeline; the guard makes those
+# pipelines refuse the events they must never run on. The ALLOWED list is fixed
+# per pipeline (eg_allowed_for); a file not named there may list only push,
+# schedule and workflow_dispatch. pipeline-full.yml also allows pull_request:
+# the caller runs it for the ci:full label.
+#   - "Reaches" means a path of needs edges to event-guard along which no job
+#     can run after a failed guard: a job without a status-check function in
+#     its if: needs any reaching job; a job whose if: has !cancelled() needs a
+#     `needs.<job>.result == 'success'` term for a reaching job; a job with
+#     always() in its if: never reaches; a job with continue-on-error other
+#     than false does not pass the guard on to its dependents.
+eg_allowed_for() { # workflow file base name
+  case "$1" in
+    pipeline-full.yml) printf '%s' "push workflow_dispatch pull_request" ;;
+    pipeline-nightly.yml) printf '%s' "schedule workflow_dispatch" ;;
+    pipeline-tidy-sweep.yml) printf '%s' "workflow_dispatch" ;;
+    gate-*.yml) printf '%s' "push workflow_dispatch" ;;
+    pipeline-release-*.yml) printf '%s' "push workflow_dispatch" ;;
+    *) printf '%s' "" ;;
+  esac
+}
+
+# Expected text of the event-guard job for an ALLOWED value.
+eg_expected() {
+  # shellcheck disable=SC2016  # the text to match carries literal ${{ ... }}
+  printf '%s\n' \
+    '  event-guard:' \
+    '    name: Event guard (refuses merge_group and unexpected events)' \
+    '    runs-on: ubuntu-latest' \
+    '    steps:' \
+    '      - name: Refuse events this pipeline must never run on' \
+    '        env:' \
+    '          EVENT: ${{ github.event_name }}' \
+    "          ALLOWED: \"$1\"" \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          case " ${ALLOWED} " in *" ${EVENT} "*) echo "event ${EVENT} accepted";; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac'
+}
+
+# Fleet jobs that do not reach event-guard, one per line (see the rules above).
+eg_unreached() {
+  awk -v hosted="${HOSTED_LABELS}" '
+    BEGIN { n = split(hosted, h, " "); for (i = 1; i <= n; i++) ishosted[h[i]] = 1 }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs = 1; next }
+    injobs && /^[^[:space:]#]/ { injobs = 0 }
+    injobs && /^  [^[:space:]]/ {
+      job = $1; sub(/:$/, "", job); order[++nj] = job; inneeds = 0; next
+    }
+    injobs && /^    needs:/ {
+      v = $0; sub(/^    needs:[[:space:]]*/, "", v); gsub(/[\[\],]/, " ", v)
+      needs[job] = v; inneeds = (v ~ /^[[:space:]]*$/); next
+    }
+    injobs && inneeds && /^      - / { v = $0; sub(/^      - /, "", v); needs[job] = needs[job] " " v; next }
+    injobs && /^    [A-Za-z_-]+:/ {
+      inneeds = 0
+      k = $1; sub(/:$/, "", k); v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v)
+      if (k == "if") iff[job] = v
+      else if (k == "continue-on-error") coe[job] = v
+      else if (k == "runs-on") ro[job] = v
+    }
+    END {
+      for (i = 1; i <= nj; i++) reach[order[i]] = 0
+      changed = 1
+      while (changed) {
+        changed = 0
+        for (i = 1; i <= nj; i++) {
+          j = order[i]
+          if (reach[j]) continue
+          if (iff[j] ~ /always\(\)/) continue
+          m = split(needs[j], nd, " "); ok = 0
+          for (x = 1; x <= m; x++) {
+            d = nd[x]
+            if (d != "event-guard" && (!(d in reach) || !reach[d])) continue
+            if (coe[d] != "" && coe[d] != "false") continue
+            if (iff[j] ~ /!cancelled\(\)/ && index(iff[j], "needs." d ".result == \047success\047") == 0) continue
+            ok = 1; break
+          }
+          if (ok) { reach[j] = 1; changed = 1 }
+        }
+      }
+      for (i = 1; i <= nj; i++) {
+        j = order[i]
+        if (j == "event-guard" || ro[j] == "" || (ro[j] in ishosted)) continue
+        if (!reach[j]) print j
+      }
+    }
+  ' "$1"
+}
+
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  base="$(basename "${wf}")"
+  [ "${base}" != "pipeline-pr.yml" ] || continue
+  # Any runs-on that is not a plain hosted label is a fleet job.
+  fleet_jobs="$(job_records "${wf}" | awk -F"${TAB}" '$1=="KEY" && $3=="runs-on" {print $2 "\t" $5}' | while IFS="${TAB}" read -r j v; do
+    if [ -n "${v}" ] && ! is_hosted_label "${v}"; then printf '%s\n' "${j}"; fi
+  done)"
+  [ -n "${fleet_jobs}" ] || continue
+  eg_block="$(awk '/^[[:space:]]*#/ { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
+  if [ -z "${eg_block}" ]; then
+    err "${wf}: a fleet pipeline needs the hosted job 'event-guard' (event-guard)"
+    continue
+  fi
+  eg_allowed="$(eg_allowed_for "${base}")"
+  eg_val="$(printf '%s\n' "${eg_block}" | sed -n 's/^          ALLOWED: "\([^"]*\)"$/\1/p')"
+  if [ -n "${eg_allowed}" ]; then
+    [ "${eg_val}" = "${eg_allowed}" ] || err "${wf}: the event-guard ALLOWED list must be exactly '${eg_allowed}' (event-guard)"
+  else
+    for t in ${eg_val}; do
+      case "${t}" in push|schedule|workflow_dispatch) ;; *) err "${wf}: event '${t}' may not be allowed by the event-guard (event-guard)" ;; esac
+    done
+  fi
+  if [ -z "${eg_val}" ] || [ "${eg_block}" != "$(eg_expected "${eg_val}")" ]; then
+    err "${wf}: the event-guard job must match the spec form exactly: no other key, step or command (event-guard)"
+  fi
+  while IFS= read -r uj; do
+    [ -n "${uj}" ] || continue
+    err "${wf}: fleet job '${uj}' does not reach event-guard through needs, or could run after it failed (event-guard)"
+  done <<EOT
+$(eg_unreached "${wf}")
+EOT
+done
+
 # --- (e) topology token scan --------------------------------------------------
 SCAN_DIRS=()
 [ -d .github ] && SCAN_DIRS+=(.github)
