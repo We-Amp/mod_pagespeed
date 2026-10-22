@@ -21,6 +21,15 @@ startup --host_jvm_args=-Xmx3g
 
 # Disable bzlmod to use WORKSPACE dependencies only
 common --noenable_bzlmod
+# Bazel 8 disables WORKSPACE by default; keep it on until the bzlmod migration
+# lands.
+common --enable_workspace
+# Bazel 8 flipped --incompatible_disallow_empty_glob to true. Keep the Bazel 7
+# behavior so glob()s in our BUILD files and generated third-party build files
+# that match nothing on some platforms don't become errors.
+# TODO: migration crutch; remove at the bzlmod step. Third-party BUILD files
+# generated in bazel/*.bzl still have empty globs.
+common --noincompatible_disallow_empty_glob
 
 run --color=yes
 

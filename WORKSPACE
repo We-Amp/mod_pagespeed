@@ -45,6 +45,15 @@ http_archive(
 # commit gRPC 1.78.1's grpc_deps() used to provide before the gRPC dependency
 # was removed along with the experimental central controller).
 
+# rules_shell, declared explicitly (same 0.2.0 pin protobuf_deps() would
+# otherwise add implicitly). Bazel 8 routes sh_* rules here.
+http_archive(
+    name = "rules_shell",
+    sha256 = "410e8ff32e018b9efd2743507e7595c26e2628567c42224411ff533b57d27c28",
+    strip_prefix = "rules_shell-0.2.0",
+    url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.2.0/rules_shell-v0.2.0.tar.gz",
+)
+
 # rules_cc and rules_proto for cc_library/cc_proto_library and proto_library.
 # Same pins gRPC 1.78.1's grpc_deps() used; declared before protobuf_deps()
 # below so its maybe()-style guards keep these versions.
@@ -55,6 +64,12 @@ http_archive(
     urls = [
         "https://github.com/bazelbuild/rules_cc/releases/download/0.0.17/rules_cc-0.0.17.tar.gz",
     ],
+    # Bazel 8 configures @local_config_cc from rules_cc instead of its builtin
+    # copy. rules_cc's clang-cl branch never sets DUMPBIN, so the Windows
+    # clang-cl autoconfigure fails ("key DUMPBIN not found"). Fixed on rules_cc
+    # main, not yet released; this backports the fix.
+    patches = ["//bazel:rules_cc_clang_cl_dumpbin.patch"],
+    patch_args = ["-p1"],
 )
 
 http_archive(
@@ -72,6 +87,17 @@ http_archive(
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
+
+# rules_shell (declared above). Bazel 8 removed the native
+# sh_* rules, so sh_binary/sh_test (ours and rules_foreign_cc's) now use
+# rules_shell's Starlark implementation, which needs its own sh toolchain
+# (detected from BAZEL_SH / PATH). Without it, Windows analysis fails with
+# "No suitable shell toolchain found".
+load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")
+
+rules_shell_dependencies()
+
+rules_shell_toolchains()
 
 load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
 

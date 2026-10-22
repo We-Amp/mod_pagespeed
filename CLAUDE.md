@@ -33,7 +33,7 @@ mod_pagespeed is a web performance optimization middleware originally created by
 
 ## Build System
 
-**Bazel 7.x** with WORKSPACE-based dependencies (bzlmod disabled via `.bazelrc`).
+**Bazel 8.x** with WORKSPACE-based dependencies (`--enable_workspace`, bzlmod disabled via `.bazelrc`).
 
 ### Docker Development (Required)
 
