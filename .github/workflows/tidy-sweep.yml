@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# tidy-sweep caller: manual dispatch of ONE clang-tidy check over the tree
+# (-fix, patch artifact; fix=false is a gate that fails on any hit). The job
+# lives in pipeline-tidy-sweep.yml, pinned to master. See docs/ci/pipelines.md.
+
+name: tidy-sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "A single clang-tidy check name, e.g. modernize-use-using"
+        required: true
+        type: string
+      paths:
+        description: "Optional space-separated path regexes for run-clang-tidy (default: pagespeed/ net/)"
+        required: false
+        type: string
+        default: ""
+      fix:
+        description: "Apply fixes and upload a patch (false = gate mode, fail on hits)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidy-sweep-${{ github.ref }}-${{ inputs.check }}
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    permissions:
+      contents: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-tidy-sweep.yml@master
+    with:
+      check: ${{ inputs.check }}
+      paths: ${{ inputs.paths }}
+      fix: ${{ inputs.fix }}

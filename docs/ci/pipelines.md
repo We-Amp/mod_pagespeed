@@ -24,6 +24,7 @@ jobs exist today.
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane: build, package, smoke, the Windows installer, the release gates and validation, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`; a real run also signs and creates the release, in hosted jobs of the `release` environment. A dry run signs nothing and uses no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
+| Tidy sweep | `pipeline-tidy-sweep.yml`, called by `tidy-sweep.yml` | on dispatch | one clang-tidy check full-tree with `-fix`; uploads the patch as an artifact |
 
 The license audit (Apache RAT), the public-tree hygiene gate, the workflow-shape
 gate and the CI tooling self-tests run inline in `ci.yml`, on hosted runners.
@@ -618,6 +619,7 @@ We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@refs/heads/ci-dev
 We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-nightly.yml@refs/heads/master
 We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@refs/heads/master
+We-Amp/mod_pagespeed/.github/workflows/pipeline-tidy-sweep.yml@refs/heads/master
 ```
 
 The release lane has no `ci-dev` entry: it only runs from `master`.

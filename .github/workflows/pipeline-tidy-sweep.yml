@@ -1,0 +1,283 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# pipeline-tidy-sweep.yml -- reusable single-check clang-tidy sweep, called
+# by tidy-sweep.yml (workflow_dispatch) pinned to master.
+#
+# Runs ONE clang-tidy check over the tree with -fix, clang-formats the touched
+# files and uploads the resulting `git diff` as a patch artifact, with hit
+# counts in the job summary. With fix=false it is a gate: the check runs
+# full-tree as an error and the job fails on any hit.
+#
+# The compilation database is built the same way as the PR lint job
+# (pipeline-pr.yml `lint`): tools/gen_compilation_database.py inside the dev
+# image, with the WORKSPACE-mode flags --config=vendored and
+# --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows.
+# NOTE: this assumes WORKSPACE-mode Bazel; after the bzlmod migration (#147)
+# the BAZEL_BUILD_OPTIONS below and the vendor cache key may need a follow-up.
+
+name: pipeline-tidy-sweep
+
+on:
+  workflow_call:
+    inputs:
+      check:
+        required: true
+        type: string
+      paths:
+        required: false
+        type: string
+        default: ""
+      fix:
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: clang-tidy sweep (${{ inputs.check }})
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    timeout-minutes: 240
+    steps:
+      - name: Validate inputs
+        env:
+          CHECK: ${{ inputs.check }}
+          PATHS: ${{ inputs.paths }}
+        run: |
+          [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.]+)+$ ]] || {
+            echo "::error::check must be a single clang-tidy check name (got '${CHECK}')"; exit 1; }
+          [[ "${PATHS}" =~ ^[A-Za-z0-9_./\ -]*$ ]] || {
+            echo "::error::paths may only contain [A-Za-z0-9_./ -]"; exit 1; }
+          for tok in ${PATHS}; do
+            [[ "${tok}" != -* ]] || {
+              echo "::error::paths entries must not start with '-' (got '${tok}')"; exit 1; }
+          done
+
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Ensure bazel
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v npm >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          command -v bazel >/dev/null 2>&1 || { echo "::error::bazel is not on PATH"; exit 1; }
+          bazel --version
+
+      # Same cache key as the pipeline-pr vendor job. On the fleet that job
+      # uses the hub channel and saves no cache entry, and PR-ref caches are not
+      # readable from a master dispatch, so expect a cold vendor step here.
+      - name: Restore vendored dependencies
+        id: vendor-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash tools/vendor-deps.sh vendor
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh --tag-latest x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Prepare the per-runner Bazel cache directory
+        run: |
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
+          mkdir -p "${CACHE_ROOT}"
+          echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
+
+      - name: clang-tidy single check (compdb + tidy in one container)
+        env:
+          CHECK: ${{ inputs.check }}
+          PATHS: ${{ inputs.paths }}
+          FIX: ${{ inputs.fix }}
+        run: |
+          # compdb and clang-tidy must share a container: the compdb holds
+          # absolute execroot paths that exist only in the container.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget || exit 1
+          MEM_ARGS=()
+          [ -z "${SLOT_MEM}" ] || MEM_ARGS=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          set +e
+          docker run --rm --init \
+            "${MEM_ARGS[@]}" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/cache -e USER=dev \
+            -e CI_SLOT_CPUS="${SLOT_CPUS}" -e CI_SLOT_MEM_GB="${SLOT_MEM_GB}" \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
+            -e CHECK -e PATHS -e FIX \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${BAZEL_CACHE_DIR}:/cache" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -e
+              rm -f compile_commands.json
+              python3 tools/gen_compilation_database.py -- //pagespeed/... //net/... || {
+                echo "::error::compile_commands.json generation failed"; exit 1; }
+              grep -q pagespeed/nginx/ngx_pagespeed.cc compile_commands.json || {
+                echo "::error::compile_commands.json lost the nginx sources"; exit 1; }
+              # Drop TUs that must never be rewritten by a sweep.
+              python3 - <<"PY"
+          import json
+          db = json.load(open("compile_commands.json"))
+          bad = ("net/instaweb/rewriter/generated/", "pagespeed/iis/", "/external/", "/third_party/", "bazel-out/")
+          keep = [e for e in db if not any(b in e["file"] for b in bad)]
+          print(f"compdb: {len(db)} entries, {len(keep)} after exclusions")
+          json.dump(keep, open("compile_commands.json", "w"))
+          PY
+              read -r -a CT_TARGETS <<< "${PATHS:-pagespeed/ net/}"
+              CT_J=()
+              if [ -n "${CI_SLOT_CPUS:-}" ]; then
+                ct_j="${CI_SLOT_CPUS}"
+                if [ -n "${CI_SLOT_MEM_GB:-}" ]; then
+                  mem_j=$(( CI_SLOT_MEM_GB / 2 )); [ "${mem_j}" -ge 1 ] || mem_j=1
+                  [ "${ct_j}" -le "${mem_j}" ] || ct_j="${mem_j}"
+                fi
+                CT_J=(-j "${ct_j}")
+              fi
+              # run-clang-tidy -fix needs clang-apply-replacements, which the
+              # dev image may lack. Then: diagnose in parallel, and fix the
+              # TUs with hits serially (header fixes would race in parallel).
+              FIX_ARGS=()
+              SERIAL_FIX=0
+              if [ "${FIX}" = "true" ]; then
+                CAR="$(command -v clang-apply-replacements-20 || command -v clang-apply-replacements || true)"
+                if [ -n "${CAR}" ]; then
+                  FIX_ARGS=(-fix -clang-apply-replacements-binary="${CAR}")
+                else
+                  echo "::warning::clang-apply-replacements not found; fixing TUs with hits serially"
+                  SERIAL_FIX=1
+                fi
+              fi
+              set +e
+              run-clang-tidy-20 "${CT_J[@]}" "${FIX_ARGS[@]}" \
+                -clang-tidy-binary=clang-tidy-20 \
+                -p /workspace \
+                -checks="-*,${CHECK}" \
+                -warnings-as-errors="${CHECK}" \
+                -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+                "${CT_TARGETS[@]}" > /workspace/.tidy-sweep.log 2>&1
+              echo $? > /workspace/.tidy-sweep.rc
+              if [ "${SERIAL_FIX}" = 1 ]; then
+                # Fix targets: every .cc with a diagnostic, plus for each
+                # header with a diagnostic one compdb TU that reaches it (one
+                # fix per header is enough; later TUs then see it fixed).
+                grep -oE "^[^ :]+\.(cc|cpp|h|hpp):[0-9]+:[0-9]+: (warning|error): .*\[${CHECK}" /workspace/.tidy-sweep.log \
+                  | cut -d: -f1 | sed -E "s#^/workspace/##; s#^.*/execroot/[^/]+/##" | sort -u > /workspace/.tidy-hit-files.txt || true
+                grep -E "\.(cc|cpp)$" /workspace/.tidy-hit-files.txt > /workspace/.tidy-fix-tus.txt || true
+                python3 -c "import json;print(\"\\n\".join(sorted({e[\"file\"] for e in json.load(open(\"compile_commands.json\"))})))" > /workspace/.tidy-compdb-files.txt
+                : > /workspace/.tidy-empty.txt
+                grep -E "\.(h|hpp)$" /workspace/.tidy-hit-files.txt | while read -r hdr; do
+                  printf "%s\n" "${hdr}" > /workspace/.tidy-one-hdr.txt
+                  bash tools/ci/lint-scope-expand.sh /workspace/.tidy-empty.txt /workspace/.tidy-one-hdr.txt \
+                    | grep -xF -f /workspace/.tidy-compdb-files.txt | head -1
+                done >> /workspace/.tidy-fix-tus.txt
+                sort -u /workspace/.tidy-fix-tus.txt -o /workspace/.tidy-fix-tus.txt
+                echo "serial fix over $(wc -l < /workspace/.tidy-fix-tus.txt) TU(s)"
+                while read -r tu; do
+                  clang-tidy-20 -p /workspace -checks="-*,${CHECK}" -fix \
+                    -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+                    "${tu}" > /dev/null 2>&1 || true
+                done < /workspace/.tidy-fix-tus.txt
+              fi
+              tail -50 /workspace/.tidy-sweep.log
+              exit 0
+            '
+          echo "container rc=$?"
+
+      - name: clang-format touched files
+        if: inputs.fix
+        run: |
+          # Revert anything a fix wrote outside the sweep scope.
+          git diff --name-only -- third_party external 'net/instaweb/rewriter/generated' pagespeed/iis \
+            | xargs -r git checkout --
+          git diff --name-only -- '*.cc' '*.h' '*.hpp' '*.cpp' > "${RUNNER_TEMP}/touched.txt" || true
+          echo "touched files: $(wc -l < "${RUNNER_TEMP}/touched.txt")"
+          [ -s "${RUNNER_TEMP}/touched.txt" ] || exit 0
+          docker run --rm --init --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" -v "${RUNNER_TEMP}:/rt" -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c 'xargs -r -a /rt/touched.txt grep -L "DO NOT EDIT BY HAND" | xargs -r clang-format-20 -i'
+
+      - name: Summarize and write patch
+        id: summary
+        env:
+          CHECK: ${{ inputs.check }}
+          FIX: ${{ inputs.fix }}
+        run: |
+          LOG=.tidy-sweep.log
+          RC="$(cat .tidy-sweep.rc 2>/dev/null || echo missing)"
+          PATCH="${RUNNER_TEMP}/tidy-sweep-${CHECK}.patch"
+          git diff -- . ':!compile_commands.json' > "${PATCH}"
+          # Unique diagnostics (a header diagnostic repeats per including TU).
+          grep -E "\[${CHECK}(,[^]]*)?\]$" "${LOG}" | grep -E ': (warning|error):' | sort -u > "${RUNNER_TEMP}/hits.txt" || true
+          HITS="$(wc -l < "${RUNNER_TEMP}/hits.txt" | tr -d ' ')"
+          # Parse failures and crashes make the hit count untrustworthy.
+          DIAG_ERRORS="$(grep -cE '\[clang-diagnostic-error\]' "${LOG}" || true)"
+          FILES="$(git diff --name-only -- . ':!compile_commands.json' | wc -l | tr -d ' ')"
+          {
+            echo "## tidy-sweep: \`${CHECK}\`"
+            echo
+            echo "- run-clang-tidy exit code: ${RC}"
+            echo "- unique diagnostics: ${HITS}"
+            echo "- clang-diagnostic-error lines: ${DIAG_ERRORS}"
+            echo "- files changed by the patch: ${FILES} (patch: $(wc -l < "${PATCH}" | tr -d ' ') lines)"
+            echo
+            echo "### Diagnostics per directory"
+            echo '```'
+            sed -E 's#^/workspace/##; s#^.*/execroot/[^/]+/##' "${RUNNER_TEMP}/hits.txt" | cut -d: -f1 \
+              | awk -F/ '{ print ($2 != "" ? $1 "/" $2 : $1) }' | sort | uniq -c | sort -rn
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "patch=${PATCH}" >> "$GITHUB_OUTPUT"
+          cp "${LOG}" "${RUNNER_TEMP}/tidy-sweep.log" 2>/dev/null || true
+          [ "${RC}" != "missing" ] || { echo "::error::clang-tidy did not run"; exit 1; }
+          if [ "${DIAG_ERRORS}" != "0" ]; then
+            echo "::error::${DIAG_ERRORS} clang-diagnostic-error line(s): the hit count cannot be trusted"
+            exit 1
+          fi
+          if [ "${FIX}" != "true" ]; then
+            if [ "${HITS}" != "0" ]; then
+              echo "::error::gate mode: ${HITS} ${CHECK} diagnostic(s) remain"
+              exit 1
+            fi
+            # A zero hit count only passes when clang-tidy itself succeeded.
+            if [ "${RC}" != "0" ]; then
+              echo "::error::gate mode: run-clang-tidy exited ${RC} with no countable diagnostics"
+              exit 1
+            fi
+          elif [ "${RC}" != "0" ]; then
+            echo "::warning::run-clang-tidy exited ${RC} in fix mode (expected when diagnostics were found); review the log"
+          fi
+
+      - name: Upload patch and log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tidy-sweep-${{ inputs.check }}
+          path: |
+            ${{ runner.temp }}/tidy-sweep-*.patch
+            ${{ runner.temp }}/tidy-sweep.log
+            ${{ runner.temp }}/hits.txt
+          if-no-files-found: warn
