@@ -5,17 +5,23 @@
 **Packages:** `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS
 installer and the cPanel package, all 2.5.2, with `pagespeed-optimizer`
 2.5.2; the container images, the NuGet packages and the Helm chart's
-application version (chart 0.3.11) are 2.5.2 as well. The ASP.NET Core
-sidecar packages (`WeAmp.PageSpeed.Sidecar`,
-`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) move to the product version
-with this release, as 2.5.2.
+application version (chart 0.3.11) are 2.5.2 as well. No ASP.NET Core
+sidecar package (`WeAmp.PageSpeed.Sidecar`,
+`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) is published with this
+release; 1.17.0 remains the latest.
+
+Corrected after release (2026-10-22): the sidecar NuGet packages and the
+scope of the nginx 1.30.6 update.
 
 ## Highlights
 
-- **Security: the bundled and required nginx is updated to 1.30.6, which
-  fixes two memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).**
-  The nginx module packages and the sidecar package build against and depend
-  on nginx 1.30.6. **Update recommended.**
+- **Security: the nginx we bundle is updated to 1.30.6, which fixes two
+  memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).** This
+  covers the container images and the sidecar native pair; the portable
+  `ngx_pagespeed` module tarballs are built against nginx 1.30.6. **Update
+  recommended.** The per-distribution `nginx-module-pagespeed` packages
+  build against the distribution's own nginx, which the distribution's
+  security updates cover.
 
 - **Security: `pagespeed-optimizer` 2.5.2 updates its bundled libpng to
   1.6.58, which fixes memory-safety issues in PNG decoding, one of them
@@ -37,9 +43,10 @@ with this release, as 2.5.2.
   `/etc/nginx/snippets/pagespeed_admin_localhost.conf`. Include it in each
   `server {}` block that serves the admin pages.
 
-- **The ASP.NET Core sidecar packages are versioned with mod_pagespeed.**
-  The first sidecar package on the product version is 2.5.2; NuGet orders it
-  after 1.17.0, so a reference pinned to `1.*` does not pick it up.
+- **The ASP.NET Core sidecar packages will be versioned with mod_pagespeed.**
+  2.5.2 releases the native pair they will carry, tested with live nginx
+  tests, as module release assets. The sidecar NuGet packages follow in a
+  later release; until then 1.17.0 remains the latest sidecar package.
 
 - **IIS: a rebuilt installer of the same version now upgrades the installed
   one** instead of installing beside it, keeping `pagespeed.config` and the
@@ -56,9 +63,6 @@ with this release, as 2.5.2.
   its own. Add `include /etc/nginx/snippets/pagespeed_admin_localhost.conf;`
   where you want the restriction, and remove the `include` lines before
   purging or removing the package.
-
-- Changed (sidecar version pins): update a NuGet reference pinned to `1.*`
-  to pick up 2.5.2.
 
 - Purge the cache once after upgrading the module and `pagespeed-optimizer`
   together: in the console use purge everything, or send

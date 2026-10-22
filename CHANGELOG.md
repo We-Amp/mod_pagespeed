@@ -7,15 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.5.2] - 2026-10-22
 
+Corrected after release (2026-10-22): the sidecar NuGet packages and the
+scope of the nginx 1.30.6 update.
+
 There is no module release 2.5.1; the module moves from 2.5.0 to 2.5.2 to
 pair with pagespeed-optimizer 2.5.2.
 
 ### Security
 
-- **The bundled and required nginx is updated to 1.30.6, which fixes two
-  memory-safety issues in nginx (CVE-2026-15176, CVE-2026-93479).** The nginx
-  module packages and the NuGet sidecar package now build against and depend on
-  nginx 1.30.6. **Update recommended.**
+- **The nginx we bundle is updated to 1.30.6, which fixes two memory-safety
+  issues in nginx (CVE-2026-15176, CVE-2026-93479).** This covers the
+  container images and the sidecar native pair; the portable
+  `ngx_pagespeed` module tarballs are built against nginx 1.30.6.
+  **Update recommended.** The per-distribution `nginx-module-pagespeed`
+  packages build against the distribution's own nginx, which the
+  distribution's security updates cover.
 - **The packages pair with `pagespeed-optimizer` 2.5.2, whose bundled libpng
   is updated to 1.6.58 to fix memory-safety issues in PNG decoding, one of
   them reachable on arm64 when an origin PNG with a palette is optimized
@@ -46,16 +52,14 @@ pair with pagespeed-optimizer 2.5.2.
 ### Changed
 
 - **ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`,
-  `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`): the packages move to the
-  product version.** The packages are versioned with mod_pagespeed itself,
+  `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`): the packages will move to
+  the product version.** They will be versioned with mod_pagespeed itself,
   and the fourth-digit packaging revisions (1.15.0.1 to 1.15.0.7) end: a
-  sidecar fix now ships with a product release. The first sidecar package on
-  the product version is 2.5.2, released with module 2.5.2: the module
-  release 2.5.0 carries no native pair, so there is no sidecar package 2.5.0.
-  NuGet orders 2.5.2 after 1.17.0; a reference pinned to `1.*` does not pick
-  it up. The native pair the package carries (nginx 1.30.6, the module built
-  against it and the launch shim) is built and tested by the module release,
-  live nginx tests included, and released with it.
+  sidecar fix will ship with a product release. 2.5.2 releases the native
+  pair the packages will carry (nginx 1.30.6, the module built against it
+  and the launch shim), built and tested with live nginx tests, as module
+  release assets. The sidecar NuGet packages themselves follow in a later
+  release; until then 1.17.0 remains the latest sidecar package.
 
 ### Fixed
 
