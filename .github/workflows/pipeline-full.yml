@@ -95,7 +95,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE*', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       # tools/vendor-deps.sh clones the source-only dependencies over ssh;
       # the repositories are public, so rewrite that to anonymous https for
@@ -246,7 +246,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE*', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout (same
@@ -379,7 +379,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE*', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -506,7 +506,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE*', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       - name: Extract the vendored workspace (hub channel)
@@ -1527,7 +1527,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE*', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'
@@ -1634,7 +1634,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'WORKSPACE', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE*', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       - name: Restore the Bazel disk cache

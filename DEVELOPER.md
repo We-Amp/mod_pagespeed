@@ -99,8 +99,13 @@ sudo apt-get install -y \
     libmemcached-dev \
     redis-tools \
     gperf \
-    uuid-dev
+    uuid-dev \
+    make \
+    m4
 ```
+
+`make` and `m4` are used from the host by the rules_foreign_cc builds
+(curl, libaom, libavif, libmemcached, libevent) on Linux.
 
 ### Cache Services
 

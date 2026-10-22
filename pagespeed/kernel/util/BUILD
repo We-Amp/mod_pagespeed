@@ -59,6 +59,6 @@ cc_library(
         "//pagespeed/kernel/http",
         "//pagespeed/kernel/thread",
         "@com_github_gflags_gflags//:gflags",
-        "@zlib_ng//:zlib_ng",
+        "@zlib_ng//:zlib-ng",
     ],
 )
