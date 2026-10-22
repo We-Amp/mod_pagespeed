@@ -90,9 +90,12 @@ http_archive(
     ],
 )
 
-# Protobuf's transitive deps (bazel_skylib, rules_java, rules_python, etc.).
+# Protobuf's transitive deps (bazel_features, proto_bazel_features,
+# system_python, ...), still needed by the WORKSPACE @com_google_protobuf.
 # Skips abseil-cpp/zlib/jsoncpp/rules_cc, already declared above or in
-# mod_pagespeed_dependencies().
+# mod_pagespeed_dependencies(). rules_java and rules_python are bazel_deps; in
+# hybrid mode they shadow the copies declared here. Goes with protobuf's move
+# to MODULE.bazel.
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
@@ -107,14 +110,6 @@ load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_
 rules_shell_dependencies()
 
 rules_shell_toolchains()
-
-load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
-
-rules_java_dependencies()
-
-load("@rules_python//python:repositories.bzl", "py_repositories")
-
-py_repositories()
 
 load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies")
 

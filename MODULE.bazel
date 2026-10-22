@@ -1,7 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# Bzlmod is enabled, but no dependency has moved here yet: everything is still
-# declared in WORKSPACE (hybrid mode). Keep the module name so
-# @mod_pagespeed//... labels used by patches keep resolving.
+# Hybrid mode while the bzlmod migration is in progress: dependencies move from
+# WORKSPACE to here commit by commit, and WORKSPACE is deleted at the end. A
+# bazel_dep shadows a same-named WORKSPACE repo for the main repository. Keep
+# the module name so @mod_pagespeed//... labels used by patches keep resolving.
 module(name = "mod_pagespeed")
+
+# Only remotejdk_11 is used (--java_runtime_version in .bazelrc).
+bazel_dep(name = "rules_java", version = "8.6.1")
+bazel_dep(name = "rules_python", version = "1.9.0")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.12",
+)

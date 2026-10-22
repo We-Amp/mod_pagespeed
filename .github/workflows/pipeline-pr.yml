@@ -711,6 +711,22 @@ jobs:
         run: |
           bazel mod graph --depth=1
           bazel mod explain rules_cc abseil-cpp protobuf zlib apple_support || true
+      # Hybrid-mode only (drop when abseil and protobuf become bazel_deps):
+      # rulesets pull their own abseil-cpp/protobuf modules, and nothing of
+      # ours may link those copies next to the WORKSPACE ones. query (not
+      # cquery) so every select() branch counts; --keep_going because
+      # loading-only failures (an unset NGINX_PATH) must not hide the result.
+      - name: No module abseil-cpp/protobuf copy in our graph
+        run: |
+          bazel query --keep_going --noimplicit_deps --output=label \
+            'deps(//pagespeed/... + //net/... + //:libmod_pagespeed.so)' \
+            > "${RUNNER_TEMP}/deps.txt" || true
+          wc -l < "${RUNNER_TEMP}/deps.txt"
+          test -s "${RUNNER_TEMP}/deps.txt"
+          if grep -E '^@@?(abseil-cpp|protobuf)[+~]' "${RUNNER_TEMP}/deps.txt"; then
+            echo "::error::a module copy of abseil-cpp/protobuf is linked next to the WORKSPACE one"
+            exit 1
+          fi
       - name: Lockfile unchanged
         id: diff
         run: git diff --stat --exit-code MODULE.bazel.lock
