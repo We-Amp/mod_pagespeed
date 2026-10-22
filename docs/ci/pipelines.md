@@ -41,7 +41,7 @@ tier.
 | Job | Class | Needs | What it does |
 |---|---|---|---|
 | `changes` | hosted | | path filters (see below) |
-| `guards`, `blocking-dep-scan`, `dep-scan`, `browser-js-tests`, `console-tests` | hosted | | the hosted checks |
+| `guards`, `blocking-dep-scan`, `dep-scan`, `browser-js-tests`, `regen-js-diff`, `console-tests` | hosted | | the hosted checks |
 | `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
 | `sidecar-tests` | hosted | `changes` | the xunit suite of the ASP.NET Core sidecar (`aspnetcore/`) under .NET 8 and .NET 10 (path-filtered, see "The sidecar native pair") |
 | `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |

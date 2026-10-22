@@ -50,6 +50,16 @@ for arg in "$@"; do
     esac
 done
 
+# Every rewriter source, by base name (the same set compute_source_hash
+# reads).
+SOURCE_NAMES=(
+    add_instrumentation client_domain_rewriter critical_css_beacon
+    critical_css_loader critical_images_beacon dedup_inlined_images
+    defer_iframe delay_images delay_images_inline deterministic
+    extended_instrumentation js_defer lazyload_images local_storage_cache
+    responsive_js
+)
+
 # Sources compiled with esbuild instead of the Closure Compiler.
 ESBUILD_FILES=(
     add_instrumentation.js
@@ -309,13 +319,7 @@ fi  # ESBUILD_ONLY
 # --------------------------------------------------------------------------
 # Stage 2: data2c — compiled JS → C++ string constants
 # --------------------------------------------------------------------------
-ALL_NAMES=(
-    add_instrumentation client_domain_rewriter critical_css_beacon
-    critical_css_loader critical_images_beacon dedup_inlined_images
-    defer_iframe delay_images delay_images_inline deterministic
-    extended_instrumentation js_defer lazyload_images local_storage_cache
-    responsive_js
-)
+ALL_NAMES=("${SOURCE_NAMES[@]}")
 if [[ "$ESBUILD_ONLY" == true ]]; then
     if [[ ${#ESBUILD_NAMES[@]} -eq 0 ]]; then
         echo "==> No esbuild assets configured; nothing to do."
@@ -361,6 +365,32 @@ fi
 if [[ "$CHECK_ONLY" == true ]]; then
     echo "==> Generated files are out of date. Run without --check to update."
     exit 1
+fi
+
+# Guard for --esbuild-only: .source-hash covers every input, but this mode
+# rebuilds only the esbuild assets. Installing a new hash after a
+# Closure-side input changed (a Closure-compiled source, js_utils.js or
+# externs.js) would mark the stale Closure outputs as fresh and defeat the
+# verify_generated_js genrule and --check-hash. So the new hash is only
+# installed when those inputs are unchanged since the commit that last
+# wrote .source-hash; otherwise the full regeneration is required.
+if [[ "$ESBUILD_ONLY" == true ]] && \
+   ! diff -q "$TMPDIR/.source-hash" "$GEN_DIR/.source-hash" >/dev/null 2>&1; then
+    closure_inputs=("$JS_UTILS" "$EXTERNS")
+    for name in "${SOURCE_NAMES[@]}"; do
+        is_esbuild_file "$name.js" || closure_inputs+=("$REWRITER_DIR/$name.js")
+    done
+    hash_commit="$(git -C "$REPO_ROOT" log -1 --format=%H -- \
+        "$GEN_DIR/.source-hash" 2>/dev/null || true)"
+    if [[ -z "$hash_commit" ]] || \
+       ! git -C "$REPO_ROOT" diff --quiet "$hash_commit" -- \
+           "${closure_inputs[@]}"; then
+        echo "ERROR: a Closure-compiled input changed since .source-hash was" >&2
+        echo "  last written (or that could not be checked with git)." >&2
+        echo "  --esbuild-only cannot refresh those outputs; run the full" >&2
+        echo "  regeneration: tools/regenerate-rewriter-js.sh" >&2
+        exit 1
+    fi
 fi
 
 echo "==> Installing updated files..."

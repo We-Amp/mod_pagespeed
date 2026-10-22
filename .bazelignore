@@ -1,2 +1,4 @@
 pagespeed/envoy
 test/pagespeed/envoy
+test/browser/node_modules
+tools/js/node_modules
