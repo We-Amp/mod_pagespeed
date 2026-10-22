@@ -2398,6 +2398,14 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
             "'UseAnalyticsJs' is deprecated and ignored: it only configured "
             "the insert_ga filter, which no longer has any effect. Remove "
             "the directive.");
+      } else if (StringCaseEqual(name, kContentExperimentID) ||
+                 StringCaseEqual(name, kContentExperimentVariantID) ||
+                 StringCaseEqual(name, kIncreaseSpeedTracking)) {
+        handler->Message(
+            kWarning,
+            StrCat("'", name, "' is deprecated and ignored: it only "
+                   "configured the insert_ga filter, which no longer has any "
+                   "effect. Remove the directive.").c_str());
       } else if (StringCaseEqual(name, kUseExperimentalJsMinifier)) {
         // Either value warns: with the legacy minifier gone, 'on' is as
         // meaningless as 'off'.
@@ -2456,6 +2464,13 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
       result = RewriteOptions::kOptionValueInvalid;
     } else {
       set_experiment_ga_slot(slot);
+      if (handler != nullptr) {
+        handler->Message(
+            kWarning,
+            "'ExperimentVariable' is deprecated and ignored: it only "
+            "configured the insert_ga filter, which no longer has any "
+            "effect. Remove the directive.");
+      }
     }
   } else if (StringCaseEqual(name, kExperimentSpec)) {
     ExperimentSpec* spec = AddExperimentSpec(arg, handler);
