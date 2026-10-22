@@ -269,7 +269,7 @@ do_install "${MODPAGESPEED_FILE_USER}" "${MODPAGESPEED_FILE_GROUP}" "-m 644" \
   "${TMP_LOAD}" \
   "${MODPAGESPEED_CONFDIR}/${MODPAGESPEED_CONF_NAME}" &&
 do_install "${MODPAGESPEED_FILE_USER}" "${MODPAGESPEED_FILE_GROUP}" "-m 644" \
-  "${SRC_ROOT}/net/instaweb/genfiles/conf/pagespeed_libraries.conf" \
+  "${SRC_ROOT}/install/common/pagespeed_libraries.conf" \
   "${MODPAGESPEED_CONFDIR}/${LIBRARIES_CONF_NAME}" &&
 do_install "${APACHE_USER}" "${APACHE_GROUP}" "-m 755 -d" \
   "${MOD_PAGESPEED_CACHE}" &&
