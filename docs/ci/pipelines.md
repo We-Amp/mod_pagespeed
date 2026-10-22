@@ -540,6 +540,16 @@ pins the job text, the per-pipeline lists and the edges, and rejects a job
 between the guard and a fleet job that can still run after the guard failed
 (`always()`, `failure()`, a `||`, or a multi-line `if:` that does).
 
+The `changes` job of `pipeline-pr.yml` refuses the same two cases for itself,
+because a queued tree's caller can also reach that pipeline with a `push` on the
+queue's temporary branch: before the fork guard step, `Refuse pushes that are
+not on the default branch` accepts a push only on `refs/heads/<default>` or
+`refs/heads/ci-dev`, and `Refuse dispatches made with a workflow token` refuses
+a dispatch made by `github-actions[bot]`. The shape gate
+(`queue-guard-reads-default-branch`) requires these two steps and the fork guard
+step, in this order, as the first steps after the checkout, each in exactly
+this text.
+
 This narrows the merge-queue boundary; it does not close it. The policy stays:
 no fork or Dependabot pull request is added to the merge queue. The `@ci-dev`
 allow-list entries stay, but the `ci-dev` copies of `pipeline-pr.yml` and

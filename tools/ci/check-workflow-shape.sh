@@ -521,8 +521,12 @@ done
 # The merge-queue guard (docs/ci/pipelines.md, "Merge-queue runs") must read
 # its classifier from the default branch, never from the queued tree. In
 # pipeline-pr.yml (and any workflow that names the classifier):
-#   - the `changes` job holds exactly one step named QG_STEP, and it is the
-#     first step after the actions/checkout step, which carries no env:;
+#   - the `changes` job holds exactly one step named QG_STEP; the first three
+#     steps after the actions/checkout step (which carries no env:) are the
+#     push-ref step (QG_PUSH_STEP: a push is accepted only on the default
+#     branch or ci-dev), the dispatch-actor step (QG_DISP_STEP: a dispatch made
+#     by github-actions[bot] is refused) and QG_STEP, in this order, each in
+#     its exact spec form (qg_push_expected, qg_disp_expected);
 #   - that step has only the keys name, if, env and run (keys compared after
 #     unquoting), the exact if: `github.event_name == 'merge_group'`, a run:
 #     block that is exactly one of the two allowed bodies below, and env keys
@@ -548,6 +552,32 @@ QG_FETCH='  git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:
 QG_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash'
 QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "${QG_SHOW}")"
 QG_BODY_MIN="$(printf '%s\n%s' "${QG_SET}" "${QG_SHOW}")"
+QG_PUSH_STEP="Refuse pushes that are not on the default branch"
+QG_DISP_STEP="Refuse dispatches made with a workflow token"
+# Expected text of the push-ref step and of the dispatch-actor step.
+qg_push_expected() {
+  # shellcheck disable=SC2016  # the text to match carries literal ${...}
+  printf '%s\n' \
+    "      - name: ${QG_PUSH_STEP}" \
+    "        if: github.event_name == 'push'" \
+    '        env:' \
+    '          REF: ${{ github.ref }}' \
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          case "${REF}" in "refs/heads/${DEFAULT_BRANCH}"|refs/heads/ci-dev) ;; *) echo "::error::push on ${REF} is not allowed in this pipeline"; exit 1;; esac'
+}
+qg_disp_expected() {
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    "      - name: ${QG_DISP_STEP}" \
+    "        if: github.event_name == 'workflow_dispatch'" \
+    '        env:' \
+    '          ACTOR: ${{ github.actor }}' \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          [ "${ACTOR}" != "github-actions[bot]" ] || { echo "::error::dispatches made with a workflow token are not allowed"; exit 1; }'
+}
 qg_err() { err "${wf}: $1 (queue-guard-reads-default-branch)"; }
 
 # job_block <file> <job>: the lines of one top-level job.
@@ -595,11 +625,19 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     qg_err "the guard step's run: block must be only: ${QG_SET}, the optional default-branch fetch, and ${QG_SHOW}"
   fi
 
-  # Position: the first step after actions/checkout, which has no env:.
-  after_checkout="$(printf '%s\n' "${job}" | grep -E '^      - ' | awk '/^      - uses: actions\/checkout@/ { f = 1; next } f { print; exit }')"
-  if [ "${after_checkout}" != "      - name: ${QG_STEP}" ]; then
-    qg_err "the guard step must be the first step after the actions/checkout step of the changes job"
+  # Position: right after actions/checkout come the push-ref step, the
+  # dispatch-actor step and the guard step, in this order, in the spec form.
+  after_checkout="$(printf '%s\n' "${job}" | grep -E '^      - ' | awk '/^      - uses: actions\/checkout@/ { f = 1; next } f { print; if (++n == 3) exit }' | tr '\n' '|')"
+  if [ "${after_checkout}" != "      - name: ${QG_PUSH_STEP}|      - name: ${QG_DISP_STEP}|      - name: ${QG_STEP}|" ]; then
+    qg_err "the first steps after the actions/checkout step of the changes job must be '${QG_PUSH_STEP}', '${QG_DISP_STEP}' and '${QG_STEP}', in this order"
   fi
+  for spec in push disp; do
+    if [ "${spec}" = push ]; then sname="${QG_PUSH_STEP}"; sexp="$(qg_push_expected)"; else sname="${QG_DISP_STEP}"; sexp="$(qg_disp_expected)"; fi
+    sblk="$(printf '%s\n' "${job}" | awk -v n="      - name: ${sname}" '/^      - / { instep = ($0 == n) } instep { print }' | grep -vE '^[[:space:]]*(#|$)' || true)"
+    if [ "${sblk}" != "${sexp}" ]; then
+      qg_err "the step '${sname}' must be present in the changes job in exactly the spec form (no other key or command)"
+    fi
+  done
   if printf '%s\n' "${job}" | awk '/^      - / { c = ($0 ~ /^      - uses: actions\/checkout@/) } c { print }' | grep -qE '^        ["'\'']?env["'\'']?:'; then
     qg_err "the actions/checkout step of the changes job must not set env:"
   fi

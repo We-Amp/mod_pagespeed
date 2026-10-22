@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: pipeline
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - run: echo unlock
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # A push reaches this pipeline from the caller's own workflow, and the
+      # merge queue pushes a temporary branch: only the default branch (and
+      # ci-dev, for the pipeline development lane) may run it.
+      - name: Refuse pushes that are not on the default branch
+        if: github.event_name == 'push'
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          case "${REF}" in "refs/heads/${DEFAULT_BRANCH}"|refs/heads/*) ;; *) echo "::error::push on ${REF} is not allowed in this pipeline"; exit 1;; esac
+
+      - name: Refuse dispatches made with a workflow token
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          [ "${ACTOR}" != "github-actions[bot]" ] || { echo "::error::dispatches made with a workflow token are not allowed"; exit 1; }
+
+      - name: Refuse fork and Dependabot PRs in the merge queue
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+            git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
+      - run: echo diff
+  vendor:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo vendor
+  other:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash tools/ci/test_queue_fork_guard.sh
