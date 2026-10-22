@@ -1,7 +1,8 @@
-load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
 load("//bazel:libaom.bzl", "libaom_from_source")
 load("//bazel:libavif.bzl", "libavif_from_source")
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 # load("//bazel:libdav1d.bzl", "libdav1d_from_source")  # Stream A: enable for accelerated decode
 

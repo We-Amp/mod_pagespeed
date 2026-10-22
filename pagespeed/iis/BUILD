@@ -182,7 +182,7 @@ cc_library(
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:system_windows",
         "@com_googlesource_code_re2//:re2",
-        "@zlib_ng//:zlib_ng",
+        "@zlib_ng//:zlib-ng",
     ],
     linkopts = select({
         "@platforms//os:windows": [

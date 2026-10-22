@@ -53,6 +53,9 @@ jobs:
     name: Detect changed paths
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       signing_key: ${{ steps.diff.outputs.signing_key }}
       serf: ${{ steps.diff.outputs.serf }}
@@ -66,6 +69,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # A merge group is built on the fleet, so a fork or Dependabot pull
+      # request in it is refused here, on a hosted runner, before any fleet job
+      # starts: `vendor` needs this job, and every fleet job needs `vendor`.
+      - name: Refuse fork and Dependabot PRs in the merge queue
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # The guard is read from the default branch, never from the queued tree.
+        run: |
+          set -euo pipefail
+          git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+            git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
 
       - name: Diff against the base commit
         id: diff
@@ -711,8 +732,79 @@ jobs:
   # header). While FLEET_ENABLED is 'false' they run hosted instead. No secret
   # and no write token reaches any of them.
   # ---------------------------------------------------------------------
+  lock-check:
+    name: Bzlmod lockfile is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # contents: write only to push a regenerated MODULE.bazel.lock back to a
+    # same-repository pull request branch (see the last step).
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+          # The PR head commit from the head repository, not the merge commit
+          # and not a branch name resolved in this repository: a fork PR has
+          # no such branch here, and a same-named one would check the wrong
+          # tree. The push step below only runs for same-repository PRs.
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Ensure bazel
+        run: |
+          if ! command -v bazel >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          bazel --version
+      # Resolve the module graph in update mode, then fail if that changed the
+      # committed lock. The regenerated lock is uploaded so it can be committed
+      # without a local Bazel.
+      - name: Regenerate MODULE.bazel.lock
+        run: bazel mod deps --lockfile_mode=update
+      - name: Print the resolved module graph
+        if: ${{ !cancelled() }}
+        run: |
+          bazel mod graph --depth=1
+          bazel mod explain rules_cc abseil-cpp protobuf zlib apple_support || true
+      - name: Lockfile unchanged
+        id: diff
+        run: git diff --stat --exit-code MODULE.bazel.lock
+      - name: Upload regenerated lock
+        if: ${{ failure() && steps.diff.conclusion == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: MODULE.bazel.lock
+          path: MODULE.bazel.lock
+      # Same-repository PRs only (a fork's token cannot push), plus a manual
+      # dispatch on a branch of this repository (ci-dev), and never on top of a
+      # lock commit this job made itself (loop guard). The run still fails: a
+      # push made with GITHUB_TOKEN does not start a new run, so the branch
+      # stays red until the next push or a re-run checks the new lock.
+      - name: Commit regenerated lock to the branch
+        if: >-
+          failure() && steps.diff.conclusion == 'failure' &&
+          ((github.event_name == 'pull_request' &&
+            github.event.pull_request.head.repo.full_name == github.repository) ||
+           (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'))
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          last_author="$(git log -1 --format=%an)"
+          if [ "${last_author}" = "github-actions[bot]" ]; then
+            echo "::error::the last commit already regenerated the lock and it is still stale; regenerate it locally"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add MODULE.bazel.lock
+          git commit -m "Build: regenerate MODULE.bazel.lock"
+          git push origin "HEAD:refs/heads/${HEAD_REF}"
+          echo "::error::MODULE.bazel.lock was stale; pushed a regenerated lock to ${HEAD_REF}. Re-run CI on the new commit."
+          exit 1
+
   vendor:
     name: Vendor Dependencies
+    needs: changes
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:
@@ -762,7 +854,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       # The dependency sources are public and fetched over https. The vendor
       # script names one of them with an ssh-style address, so the rewrite
@@ -914,7 +1006,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -968,13 +1060,13 @@ jobs:
           mkdir -p "${OUT}" "${GITHUB_WORKSPACE}/.build-artifacts"
           BUILD_LOG="${OUT}/build-all.log"
           EXTRA_DOCKER=()
-          BAZEL_CONFIG="--config=ci"
+          BAZEL_CONFIG="--config=ci --config=ci_lock"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
+            BAZEL_CONFIG="--config=ci --config=ci_lock --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
@@ -1097,7 +1189,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1174,13 +1266,13 @@ jobs:
           slot_budget 55g || exit 1
           rm -rf "${GITHUB_WORKSPACE}/_failed-testlogs"
           EXTRA_DOCKER=()
-          BAZEL_CONFIG="--config=ci"
+          BAZEL_CONFIG="--config=ci --config=ci_lock"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
+            BAZEL_CONFIG="--config=ci --config=ci_lock --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
@@ -1263,7 +1355,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1474,7 +1566,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1631,7 +1723,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1734,7 +1826,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -2828,7 +2920,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE*', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'

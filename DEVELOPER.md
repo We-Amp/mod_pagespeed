@@ -99,8 +99,13 @@ sudo apt-get install -y \
     libmemcached-dev \
     redis-tools \
     gperf \
-    uuid-dev
+    uuid-dev \
+    make \
+    m4
 ```
+
+`make` and `m4` are used from the host by the rules_foreign_cc builds
+(curl, libaom, libavif, libmemcached, libevent) on Linux.
 
 ### Cache Services
 
@@ -128,8 +133,7 @@ a filter, work there. `pagespeed/` holds the modern subsystems: the server
 adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/` and
 `automatic/`. There is no `rewriter/` directory under `pagespeed/`.
 `net/instaweb/rewriter/generated/` is generated; edit the source `.js` and run
-`tools/regenerate-rewriter-js.sh` (`net/instaweb/genfiles/` is a stale
-pre-Bazel copy that nothing builds from).
+`tools/regenerate-rewriter-js.sh`.
 
 ```
 mod_pagespeed/

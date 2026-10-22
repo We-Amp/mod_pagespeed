@@ -32,7 +32,7 @@ on:
 
 # Cancel superseded pull request runs only; a push to master always finishes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'dispatch' || 'run' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -41,9 +41,11 @@ permissions:
 jobs:
   pr:
     # The called pipeline requests pull-requests: read for the release-note
-    # gate; a called workflow cannot exceed what its caller grants.
+    # gate, and contents: write for its lock-check job (pushes a regenerated
+    # MODULE.bazel.lock to a same-repository PR branch); a called workflow
+    # cannot exceed what its caller grants.
     permissions:
-      contents: read
+      contents: write
       pull-requests: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@master
 
@@ -109,6 +111,8 @@ jobs:
         run: tools/ci/test_systest_gate.sh
       - name: Queued-run sweep
         run: tools/ci/test_sweep_queued_runs.sh
+      - name: Merge-queue fork guard
+        run: tools/ci/test_queue_fork_guard.sh
       - name: Artifact staging and bundle validation
         run: |
           tools/ci/test_stage_artifacts.sh
@@ -120,6 +124,8 @@ jobs:
           tools/ci/test_prune_vendor_dir.sh
       - name: Slot budget helper
         run: tools/ci/test_slot_budget.sh
+      - name: Nightly schedule
+        run: tools/ci/test_nightly_schedule.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
       - name: Build script supply-chain checks

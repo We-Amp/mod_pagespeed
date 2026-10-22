@@ -24,6 +24,15 @@ else
   fail "good tree rejected: $out"
 fi
 
+expect_good() { # <fixture-dir>
+  local dir="$1" out
+  if out=$(bash "$CHECK" "${FIX}/${dir}" 2>&1); then
+    pass "${dir} passes"
+  else
+    fail "${dir} rejected: $out"
+  fi
+}
+
 expect_bad() { # <fixture-dir> <message substring>
   local dir="$1" want="$2" out
   if out=$(bash "$CHECK" "${FIX}/${dir}" 2>&1); then
@@ -40,6 +49,7 @@ expect_bad bad-caller-steps 'rule b'
 expect_bad bad-caller-fleet 'rule b'
 expect_bad bad-caller-expression 'rule b'
 expect_bad bad-caller-foreign-uses 'rule b'
+expect_bad bad-caller-full-ref 'rule b'
 expect_bad bad-local-uses 'rule c'
 expect_bad bad-fleet-literal 'rule d'
 expect_bad bad-routing-drift 'rule d'
@@ -74,10 +84,44 @@ expect_bad bad-secret-index 'rule g'
 expect_bad bad-secret-tojson 'rule g'
 expect_bad bad-secret-inherit 'rule g'
 expect_bad bad-secret-uses-job 'rule g'
+expect_good good-queue-guard
+expect_bad bad-queue-guard-from-tree 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-extra-command 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-trailing-text 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-trailing-comment 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-interpolated 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-other-read 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-truncated-name 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-glob-read 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-brace-read 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-find-read 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-dot-source 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-github-env 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-absent 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-renamed 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-wrong-job 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-continue-on-error 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-quoted-key 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-quoted-shell 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-wrong-if 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-not-after-checkout 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-checkout-env 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-job-env 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-step-env-extra 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-path-env 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-bash-env-top 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-git-config-job 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-vendor-no-needs 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-vendor-if 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-vendor-missing 'queue-guard-reads-default-branch'
 expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'
 expect_bad bad-port 'rule e'
+
+# ci-dev-full-input: the good tree's ci-dev caller has a full job that uses
+# pipeline-full.yml@ci-dev (accepted by the good-tree case above); the same
+# call at a feature ref is rejected (bad-caller-full-ref above).
 
 # The repository itself passes (self-test).
 REPO_ROOT="$(cd "${HERE}/../.." && pwd)"

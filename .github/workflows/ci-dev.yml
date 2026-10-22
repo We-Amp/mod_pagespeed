@@ -9,10 +9,15 @@ name: CI (ci-dev)
 
 on:
   workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the full tier (pipeline-full.yml@ci-dev)
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-dev
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -20,8 +25,16 @@ permissions:
 jobs:
   pr:
     # The called pipeline requests pull-requests: read for the release-note
-    # gate; a called workflow cannot exceed what its caller grants.
+    # gate, and contents: write for its lock-check job (pushes a regenerated
+    # MODULE.bazel.lock to a same-repository PR branch); a called workflow
+    # cannot exceed what its caller grants.
     permissions:
-      contents: read
+      contents: write
       pull-requests: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@ci-dev
+
+  # Dispatch with full=true to exercise pipeline-full.yml from the ci-dev
+  # branch; the called workflow takes its permissions from the top level.
+  full:
+    if: ${{ inputs.full }}
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev

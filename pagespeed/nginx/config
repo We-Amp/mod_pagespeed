@@ -114,11 +114,13 @@ if command -v bazel >/dev/null 2>&1; then
 fi
 if [ -z "$BAZEL_EXECROOT" ] || [ ! -d "$BAZEL_EXECROOT" ]; then
     # Fall back to the bazel-<workspace> convenience symlink.
+    BAZEL_EXECROOT=""
     for _cand in "$MOD_PAGESPEED_DIR"/bazel-*; do
-        if [ -d "$_cand/external/abseil-cpp" ]; then
-            BAZEL_EXECROOT=$(cd "$_cand" && pwd -P)
-            break
-        fi
+        # abseil-cpp+ under bzlmod (canonical name), abseil-cpp before.
+        for _absl in "$_cand"/external/abseil-cpp*; do
+            [ -d "$_absl" ] && BAZEL_EXECROOT=$(cd "$_cand" && pwd -P)
+        done
+        [ -n "$BAZEL_EXECROOT" ] && break
     done
 fi
 
