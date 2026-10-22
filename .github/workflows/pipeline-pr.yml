@@ -692,9 +692,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: false
-          # The PR head, not the merge commit, so a regenerated lock can be
-          # pushed back onto the branch.
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          # The PR head commit from the head repository, not the merge commit
+          # and not a branch name resolved in this repository: a fork PR has
+          # no such branch here, and a same-named one would check the wrong
+          # tree. The push step below only runs for same-repository PRs.
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Ensure bazel
         run: |
           if ! command -v bazel >/dev/null 2>&1; then
