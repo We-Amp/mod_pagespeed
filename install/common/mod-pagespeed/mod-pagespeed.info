@@ -9,10 +9,10 @@
 PACKAGE="mod-pagespeed"
 
 # Brief package description.
-SHORTDESC="Apache 2 module to optimize web content."
+SHORTDESC="mod_pagespeed web page optimization module for Apache httpd"
 
 # Detailed package description.
-FULLDESC="mod_pagespeed is an Apache module that aims to speed up load time of pages by applying web performance best practices automatically."
+FULLDESC="mod_pagespeed is an Apache httpd module that rewrites web pages and their resources (CSS, JavaScript, images) to apply web performance best practices automatically."
 
 # Package maintainer information.
 MAINTNAME="mod_pagespeed developers"
