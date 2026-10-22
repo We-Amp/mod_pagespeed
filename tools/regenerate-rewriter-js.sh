@@ -169,6 +169,31 @@ closure_compile() {
     strip_closure_license "$output"
 }
 
+# js_utils.js is an ES module, imported by the esbuild assets. The files
+# still compiled with the Closure Compiler goog.require('pagespeedutils'), so
+# they get a derived copy instead: goog.provide('pagespeedutils') first, each
+# `export const name = ` turned into `pagespeedutils.name = `, and each bare
+# use of an exported name inside the file qualified as pagespeedutils.name.
+# That is the form the file had before it became a module, so the Closure
+# outputs stay the same. Fails if the module uses any other export form.
+closure_js_utils() {
+    local out="$1"
+    if grep -n '^[[:space:]]*export' "$JS_UTILS" | \
+       grep -v '^[0-9]*:export const [A-Za-z_][A-Za-z0-9_]* = ' >&2; then
+        echo "ERROR: $JS_UTILS: use only 'export const name = ...;'" \
+             "exports (see closure_js_utils)." >&2
+        exit 1
+    fi
+    perl -0777 -ne '
+        my @names = /^export const (\w+) = /mg;
+        s/^export const (\w+) = /pagespeedutils.$1 = /mg;
+        for my $n (@names) {
+            s/(?<![\w.\$])\Q$n\E(?![\w\$])/pagespeedutils.$n/g;
+        }
+        print "goog.provide(\x27pagespeedutils\x27);\n\n", $_;
+    ' "$JS_UTILS" > "$out"
+}
+
 # The pinned library's sources carry an @license header the compiler
 # preserves into the output. Shipped assets must stay comment-free
 # (StaticAssetManagerTest asserts this); attribution is retained in the
@@ -215,6 +240,10 @@ if [[ "$ESBUILD_ONLY" != true ]]; then
 # --------------------------------------------------------------------------
 echo "==> Compiling JS with Closure Compiler..."
 
+CLOSURE_JS_UTILS="$TMPDIR/closure/js_utils.js"
+mkdir -p "$TMPDIR/closure"
+closure_js_utils "$CLOSURE_JS_UTILS"
+
 # Files that need dependency mode + the Closure Library.
 #
 # The library is pinned to the final upstream release (upstream is archived,
@@ -240,8 +269,8 @@ fi
 
 # --- closure_compiler_gen files (with dependency mode, use closure library) ---
 for entry in \
-    "critical_css_loader.js:goog:pagespeed.CriticalCssLoader:$JS_UTILS" \
-    "critical_images_beacon.js:goog:pagespeed.CriticalImages:$JS_UTILS" \
+    "critical_css_loader.js:goog:pagespeed.CriticalCssLoader:$CLOSURE_JS_UTILS" \
+    "critical_images_beacon.js:goog:pagespeed.CriticalImages:$CLOSURE_JS_UTILS" \
     "responsive_js.js:goog:pagespeed.Responsive:"; do
 
     IFS=':' read -r src_file entry_ns entry_point includes <<< "$entry"
@@ -310,9 +339,9 @@ for src_file in "${WITH_DEP_FILES[@]}"; do
     src="$REWRITER_DIR/$src_file"
     echo "  $base (dbg + opt, with includes)"
     closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
-        --js "$JS_UTILS" --externs "$EXTERNS"
+        --js "$CLOSURE_JS_UTILS" --externs "$EXTERNS"
     closure_compile "$src" "$TMPDIR/${base}_opt.js" ADVANCED \
-        --js "$JS_UTILS" --externs "$EXTERNS"
+        --js "$CLOSURE_JS_UTILS" --externs "$EXTERNS"
 done
 fi  # ESBUILD_ONLY
 
