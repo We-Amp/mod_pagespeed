@@ -21,7 +21,7 @@ jobs exist today.
 |---|---|---|---|
 | PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. |
 | Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners. See "The full tier" |
-| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 03:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
+| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 21:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane: build, package, smoke, the Windows installer, the release gates and validation, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`; a real run also signs and creates the release, in hosted jobs of the `release` environment. A dry run signs nothing and uses no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 | Tidy sweep | `pipeline-tidy-sweep.yml`, called by `tidy-sweep.yml` | on dispatch | one clang-tidy check full-tree with `-fix`; uploads the patch as an artifact |
@@ -352,7 +352,7 @@ later jobs (`docs/ci/release.md`).
 
 ## The nightly tier
 
-`nightly.yml` holds the schedule (03:30 UTC) and `workflow_dispatch`, takes
+`nightly.yml` holds the schedule (21:30 UTC, two cron entries: Monday to Saturday and Sunday) and `workflow_dispatch`, takes
 the run-wide `nightly` concurrency group (one nightly at a time, never
 cancelled) and calls `pipeline-nightly.yml@master`. Its inputs reach the
 jobs as strings and every one is validated before use: `fuzz_seconds` and
@@ -384,7 +384,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `iis-appverif-matrix` | fleet-iis | the zero-copy merge gate, then the Application Verifier provider matrix (`arms` input) |
 | `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
 | `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
-| `sidecar-pair-weekly`, `sidecar-pair-weekly-arm64` | hosted | Sundays and on a manual dispatch (`sidecar-weekly` decides): vendor fresh and run `tools/ci/release_sidecar.sh check` for the ASP.NET Core sidecar's native pair, x64 and arm64, to catch drift the path-filtered pull request jobs cannot see (see "The sidecar native pair") |
+| `sidecar-pair-weekly`, `sidecar-pair-weekly-arm64` | hosted | the Sunday 21:30 UTC run (the `30 21 * * 0` schedule string, compared in `sidecar-weekly` against `github.event.schedule` so the choice does not depend on when the run starts) and on a manual dispatch: vendor fresh and run `tools/ci/release_sidecar.sh check` for the ASP.NET Core sidecar's native pair, x64 and arm64, to catch drift the path-filtered pull request jobs cannot see (see "The sidecar native pair") |
 
 **Where the pin staleness check lives.** The blocking dependency gate of the
 pull request tier scans against the pinned grype database in

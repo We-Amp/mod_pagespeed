@@ -2986,9 +2986,10 @@ jobs:
         id: day
         env:
           EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
           run=false
-          if [ "$EVENT" = workflow_dispatch ] || [ "$(date -u +%u)" = 7 ]; then run=true; fi
+          if [ "$EVENT" = workflow_dispatch ] || [ "$SCHEDULE" = '30 21 * * 0' ]; then run=true; fi
           echo "run=${run}" >> "$GITHUB_OUTPUT"
           echo "sidecar pair this night: ${run}"
 
