@@ -45,6 +45,15 @@ http_archive(
 # commit gRPC 1.78.1's grpc_deps() used to provide before the gRPC dependency
 # was removed along with the experimental central controller).
 
+# rules_shell, declared explicitly (same 0.2.0 pin protobuf_deps() would
+# otherwise add implicitly). Bazel 8 routes sh_* rules here.
+http_archive(
+    name = "rules_shell",
+    sha256 = "410e8ff32e018b9efd2743507e7595c26e2628567c42224411ff533b57d27c28",
+    strip_prefix = "rules_shell-0.2.0",
+    url = "https://github.com/bazelbuild/rules_shell/releases/download/v0.2.0/rules_shell-v0.2.0.tar.gz",
+)
+
 # rules_cc and rules_proto for cc_library/cc_proto_library and proto_library.
 # Same pins gRPC 1.78.1's grpc_deps() used; declared before protobuf_deps()
 # below so its maybe()-style guards keep these versions.
@@ -79,7 +88,7 @@ load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
 
-# rules_shell (0.2.0, declared by protobuf_deps()). Bazel 8 removed the native
+# rules_shell (declared above). Bazel 8 removed the native
 # sh_* rules, so sh_binary/sh_test (ours and rules_foreign_cc's) now use
 # rules_shell's Starlark implementation, which needs its own sh toolchain
 # (detected from BAZEL_SH / PATH). Without it, Windows analysis fails with

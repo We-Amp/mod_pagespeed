@@ -27,6 +27,8 @@ common --enable_workspace
 # Bazel 8 flipped --incompatible_disallow_empty_glob to true. Keep the Bazel 7
 # behavior so glob()s in our BUILD files and generated third-party build files
 # that match nothing on some platforms don't become errors.
+# TODO: migration crutch; remove at the bzlmod step. Third-party BUILD files
+# generated in bazel/*.bzl still have empty globs.
 common --noincompatible_disallow_empty_glob
 
 run --color=yes

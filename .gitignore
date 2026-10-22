@@ -65,3 +65,6 @@ test/browser/node_modules/
 
 # Apache RAT report written by tools/ci/rat.sh
 rat-report.txt
+
+# Backups made by scripts/use-envoy-workspace.sh
+*.lean.bak
