@@ -25,7 +25,6 @@ cc_library(
         "timer.cc",
         "thread_system.cc",
         "writer.cc",
-        #'mem_debug.cc',
         "null_message_handler.cc",
         "null_mutex.cc",
         "null_rw_lock.cc",

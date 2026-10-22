@@ -11,7 +11,7 @@ fixes: failures are minimized and reported, the tokenizer is not modified.
 - `js_minify_probe.cc` + `BUILD` — single-file probe binary exposing the raw
   minifier contract: exit 0 = minified, exit 1 = "unmodelable" (the
   byte-preserving pass-through case), signals = crashes. Mode: `tokenizer`.
-  Unlike `net/instaweb/rewriter/js_minify_main.cc`
+  Unlike the former `js_minify_main.cc` CLI (since removed)
   it does not mask failures with a trimmed-input fallback, so the harness can
   observe exactly what the library returns.
 - `js_keywords_dump.cc` — one-shot equivalence dump for the JsKeywords table

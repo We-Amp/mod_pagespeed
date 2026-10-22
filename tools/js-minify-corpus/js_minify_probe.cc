@@ -4,7 +4,7 @@
 // js_minify_probe: single-file front-end for the JS minifiers, built for
 // corpus stress runs (see tools/js-minify-corpus/README.md).
 //
-// Unlike net/instaweb/rewriter/js_minify_main.cc (a user-facing CLI that
+// Unlike the former js_minify_main.cc (a since-removed user-facing CLI that
 // replaces failed minifications with a trimmed copy of the input), this probe
 // exposes the raw library contract so a harness can observe it:
 //   * exit 0: minifier returned true, output is the minified bytes.

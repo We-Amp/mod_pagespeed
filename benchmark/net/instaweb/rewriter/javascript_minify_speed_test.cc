@@ -42,14 +42,14 @@
 
 namespace net_instaweb {
 
-extern const char* JS_console_js;
+extern const char* JS_js_defer;
 
 namespace {
 
 void TestMinifyJavascript(benchmark::State& state) {
   GoogleString in_text;
-  for (int i = 0; i < state.iterations(); i += strlen(JS_console_js)) {
-    in_text += JS_console_js;
+  for (int i = 0; i < state.iterations(); i += strlen(JS_js_defer)) {
+    in_text += JS_js_defer;
   }
   in_text.resize(state.iterations());
 
