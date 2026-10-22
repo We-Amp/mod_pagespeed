@@ -55,6 +55,9 @@
 #       lane; the fleet-hyperv gates get none). `secrets: inherit`, `secrets[` and
 #       `toJSON(secrets`, and a secret in an expression outside the jobs (a
 #       workflow-level env: block), are refused;
+#   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
+#       on a job or on a job-level key other than steps: and env:, and no
+#       `<<:` merge key: the gate reads the text and cannot resolve them;
 #   (e) topology token scan of .github/ and tools/ci/: no LAN (RFC1918) IP
 #       literals, no ".home" names, no ":9090", no "self-hosted", and none
 #       of the retired runner-label words as standalone tokens (the bare
@@ -147,13 +150,13 @@ job_records() {
     /^jobs:[[:space:]]*$/ { injobs=1; next }
     injobs && /^[^[:space:]#]/ { injobs=0 }
     injobs && /^  [^[:space:]]/ {
-      job=$1; sub(/:$/, "", job)
+      job=$0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job)
       printf "JOB%s%s%s%d\n", tab, job, tab, NR
       next
     }
-    injobs && /^    [A-Za-z_-]+:/ {
+    injobs && /^    ["\047]?[A-Za-z_-]+["\047]?[ \t]*:/ {
       line=$0
-      key=$1; sub(/:$/, "", key)
+      key=$0; sub(/^    /, "", key); sub(/[ \t]*:.*$/, "", key); gsub(/["\047]/, "", key)
       sub(/^[[:space:]]*[^:]+:[[:space:]]*/, "", line)
       printf "KEY%s%s%s%s%s%d%s%s\n", tab, job, tab, key, tab, NR, tab, line
     }
@@ -359,6 +362,29 @@ is_fleet_iis_route() {
   return 1
 }
 
+# YAML anchors, aliases and merge keys the gate cannot resolve, one line number
+# per hit, in the jobs: section: on a job (its key or value), on any job-level
+# key other than steps: and env: (their value or its continuation lines), and
+# every `<<:` merge key. Anchored step lists and env maps stay allowed.
+yaml_alias_lines() {
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs = 1; next }
+    injobs && /^[^[:space:]#]/ { injobs = 0 }
+    !injobs { next }
+    /^[[:space:]-]*["\047]?<<["\047]?[[:space:]]*:/ { print NR; next }
+    /^  [^[:space:]]/ { key = ""; if ($0 ~ /^  [&*]/ || $0 ~ /:[[:space:]]*[&*]/) print NR; next }
+    /^    [^[:space:]]/ {
+      key = $0; sub(/^    /, "", key); sub(/[ \t]*:.*$/, "", key); gsub(/["\047]/, "", key)
+      if (key ~ /^[&*-]/) { print NR; next }
+      v = $0; sub(/^    [^:]*:/, "", v)
+      if (key != "steps" && key != "env" && v ~ /(^|[[:space:],\[{])[&*][A-Za-z0-9_-]/) print NR
+      next
+    }
+    /^     / && key != "" && key != "steps" && key != "env" && $0 ~ /^[[:space:]]*(- )?[&*][A-Za-z0-9_-]|:[[:space:]]*[&*][A-Za-z0-9_-]/ { print NR }
+  ' "$1"
+}
+
 # --- workflow scan ------------------------------------------------------------
 shopt -s nullglob
 WORKFLOWS=( "${WF_DIR}"/*.yml "${WF_DIR}"/*.yaml "${WF_DIR}"/*.yml.example )
@@ -376,9 +402,17 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   fi
 
   # (c) no local-path workflow reuse.
-  if grep -nE 'uses:[[:space:]]*\./\.github/workflows/' "${wf}" >/dev/null 2>&1; then
-    err "${wf}: local-path reusable workflow reference is forbidden (rule c): $(grep -nE 'uses:[[:space:]]*\./\.github/workflows/' "${wf}" | head -1)"
+  if grep -nE 'uses["'\'']?[[:space:]]*:[[:space:]]*["'\'']?\./\.github/workflows/' "${wf}" >/dev/null 2>&1; then
+    err "${wf}: local-path reusable workflow reference is forbidden (rule c): $(grep -nE 'uses["'\'']?[[:space:]]*:[[:space:]]*["'\'']?\./\.github/workflows/' "${wf}" | head -1)"
   fi
+
+  # (yaml-alias) anchors, aliases and merge keys the gate cannot resolve.
+  while IFS= read -r al; do
+    [ -n "${al}" ] || continue
+    err "${wf}:${al}: YAML anchor, alias or merge key on a job or on a job key other than steps/env; the gate cannot resolve it (yaml-alias)"
+  done <<EOT
+$(yaml_alias_lines "${wf}")
+EOT
 
   triggers="$(on_triggers "${wf}")"
   if printf '%s\n' "${triggers}" | grep -qx 'INLINE'; then
@@ -699,20 +733,26 @@ done
 # pipeline-full.yml also allows pull_request (the caller runs it for the
 # ci:full label).
 #   - "Reaches" means a path of needs edges to event-guard along which no job
-#     can run after a failed guard. Before matching, every job's key is
-#     unquoted and its if: is normalised: quotes stripped, all lines (folded,
-#     literal or plain multi-line) joined, lowercased, whitespace collapsed,
-#     and the space between a function name and its ( removed.
+#     can run after a failed guard. Job keys (if, needs, runs-on,
+#     continue-on-error, uses) match quoted or with space before the colon.
+#     Before matching, each if: is normalised: quotes stripped, all lines
+#     joined (a plain value continues on every line indented more than its
+#     key; a #-led line in a block scalar is content), lowercased,
+#     whitespace collapsed, and the space between a function name and its (
+#     removed.
 #   - Relay rule: for every job on a needs path between event-guard and a
 #     fleet job (and the fleet jobs themselves, unless rule d pins their if:,
 #     that is in a workflow_call file), an if: that contains always(,
-#     failure(, cancelled(, ||, ! (a negation anywhere, != included) or
-#     == false must be exactly
+#     failure(, cancelled(, ||, ! (a negation anywhere, != included),
+#     == false, or success( (unless the whole if: is a bare success()) must
+#     be exactly
 #       needs.event-guard.result == 'success' && (<inner>)
 #     (optionally inside ${{ }}), the parentheses around <inner> one balanced
 #     group (string literals ignored) and <inner> free of event-guard, and
-#     the job must need event-guard. Otherwise the job is rejected by name.
-#     Any other if: is success()-implied and passes the guard on as before.
+#     the job must need event-guard, and a block scalar holding it must strip
+#     its final newline (|- or >-). Otherwise the job is rejected by name.
+#     Any other if: is accepted as before (GitHub adds success() implicitly
+#     unless the expression names a status function).
 #   - A pinned fleet job whose if: has always( or failure( does not reach; one
 #     whose if: has !cancelled() needs a `needs.<job>.result == 'success'`
 #     term for a reaching job. A job with continue-on-error other than false
@@ -794,25 +834,28 @@ eg_unreached() { # workflow file, 1 if it is a workflow_call file (rule d pins i
       }
       return d == 0
     }
+    # An if: value continues on every following line indented more than its
+    # key (column 4), a #-led line included (block scalar content).
+    injobs && inif {
+      if ($0 ~ /^     / || $0 ~ /^[[:space:]]*$/) { v = $0; gsub(/^[[:space:]]+/, "", v); iff[job] = iff[job] " " v; next }
+      inif = 0
+    }
     /^[[:space:]]*#/ { next }
     /^jobs:[[:space:]]*$/ { injobs = 1; next }
     injobs && /^[^[:space:]#]/ { injobs = 0 }
-    injobs && inif {
-      if ($0 ~ /^      / || $0 ~ /^[[:space:]]*$/) { v = $0; gsub(/^[[:space:]]+/, "", v); iff[job] = iff[job] " " v; next }
-      inif = 0
-    }
     injobs && /^  [^[:space:]]/ {
-      job = $1; sub(/:$/, "", job); order[++nj] = job; inneeds = 0; next
+      job = $0; sub(/^  /, "", job); sub(/[ \t]*:.*$/, "", job); gsub(/["\047]/, "", job)
+      order[++nj] = job; inneeds = 0; next
     }
-    injobs && /^    ["\047]?needs["\047]?:/ {
+    injobs && /^    ["\047]?needs["\047]?[ \t]*:/ {
       v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v); gsub(/[\[\],]/, " ", v)
       needs[job] = v; inneeds = (v ~ /^[[:space:]]*$/); next
     }
     injobs && inneeds && /^      - / { v = $0; sub(/^      - /, "", v); needs[job] = needs[job] " " v; next }
-    injobs && /^    ["\047]?[A-Za-z_-]+["\047]?:/ {
+    injobs && /^    ["\047]?[A-Za-z_-]+["\047]?[ \t]*:/ {
       inneeds = 0
-      k = $1; sub(/:$/, "", k); gsub(/["\047]/, "", k); v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v)
-      if (k == "if") { iff[job] = v; if (v ~ /^[>|][-+]?[[:space:]]*$/) iff[job] = ""; inif = 1 }
+      k = $0; sub(/^    /, "", k); sub(/[ \t]*:.*$/, "", k); gsub(/["\047]/, "", k); v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v)
+      if (k == "if") { iff[job] = v; blk[job] = ""; if (v ~ /^[>|][-+0-9]*[[:space:]]*$/) { iff[job] = ""; blk[job] = v }; inif = 1 }
       else if (k == "continue-on-error") { gsub(/["\047]/, "", v); coe[job] = tolower(v) }
       else if (k == "runs-on") ro[job] = v
     }
@@ -828,13 +871,19 @@ eg_unreached() { # workflow file, 1 if it is a workflow_call file (rule d pins i
           if (t ~ /^".*"$/ || t ~ /^\047.*\047$/) t = substr(t, 2, length(t) - 2)
           while (match(t, /[a-z0-9_] \(/)) t = substr(t, 1, RSTART) substr(t, RSTART + 2)
           u = t; gsub(/ /, "", u)
-          risky = (u ~ /always\(|failure\(|cancelled\(|\|\||!|==false/)
+          # An explicit success() turns off the implicit one as well; only a
+          # bare success() equals the default.
+          w = u; sub(/^\$\{\{/, "", w); sub(/\}\}$/, "", w)
+          risky = (u ~ /always\(|failure\(|cancelled\(|\|\||!|==false/ || (u ~ /success\(/ && w != "success()"))
           m = split(needs[j], nd, " "); ok = 0
           hasg = 0
           for (x = 1; x <= m; x++) if (nd[x] == "event-guard") hasg = 1
           fleet = (ro[j] != "" && !(ro[j] in ishosted))
           pinned = (fleet && wcall == 1)
-          if (!pinned && risky) { ok = (hasg && guardform(t)); if (!ok) badform[j] = 1 }
+          # A block scalar without strip chomping (|, >, |+, >+) keeps a final
+          # newline: text around ${{ }}, which GitHub reads as a non-empty string.
+          kept = (blk[j] != "" && blk[j] !~ /-/ && index(t, "${{"))
+          if (!pinned && risky) { ok = (hasg && !kept && guardform(t)); if (!ok) badform[j] = 1 }
           else if (t ~ /always\(|failure\(/) ok = 0
           else {
             for (x = 1; x <= m; x++) {

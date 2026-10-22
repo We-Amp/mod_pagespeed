@@ -151,6 +151,18 @@ expect_bad bad-event-guard-relay-always-space "job 'relay' has an if:"
 expect_bad bad-event-guard-relay-not-equal "job 'relay' has an if:"
 expect_bad bad-event-guard-relay-quoted-paren "job 'relay' has an if:"
 expect_good good-event-guard-relay-paren
+expect_bad bad-event-guard-relay-success-eq-zero "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-success-lt "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-success-format "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-key-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-quoted-key-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-five-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-literal-hash "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-block-clip "job 'relay' has an if:"
+expect_bad bad-yaml-alias 'yaml-alias'
+expect_bad bad-yaml-anchor 'yaml-alias'
+expect_bad bad-yaml-merge-key 'yaml-alias'
+expect_good good-event-guard-relay-bare-success
 expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'
