@@ -55,6 +55,7 @@ ESBUILD_FILES=(
     client_domain_rewriter.js
     dedup_inlined_images.js
     defer_iframe.js
+    delay_images_inline.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -265,7 +266,6 @@ done
 # --- closure_compiler_without_dependency_mode files ---
 WITHOUT_DEP_FILES=(
     add_instrumentation.js
-    delay_images_inline.js
     deterministic.js
     extended_instrumentation.js
 )
