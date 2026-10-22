@@ -492,6 +492,28 @@ number of minutes) to override the 30 minute default. The logic is tested
 against a fake `gh` by `tools/ci/test_sweep_queued_runs.sh`, which the sweep
 job runs first.
 
+## Merge-queue runs
+
+A `merge_group` run is routed to the fleet unconditionally, so a fork or
+Dependabot pull request in a merge group would build its code on a fleet
+runner. The `changes` job (hosted) therefore starts with the step `Refuse fork
+and Dependabot PRs in the merge queue`, which runs only on `merge_group`. It
+resolves every pull request in the group, taking the last `(#N)` of each
+commit subject in `base_sha..head_sha` plus the number in the group's
+`head_ref`, and looks each one up with `gh api` (5 tries, 2, 4, 8 and 16 s
+apart). It refuses (the job fails) when a pull request comes from a fork, is
+authored by `dependabot[bot]`, has lost its head repository, when the range is
+empty, when a commit subject has no `(#N)`, or when a lookup still fails after
+the last try. `vendor` needs `changes`, and every other fleet job needs
+`vendor` or `changes`, so a refusal skips the whole fleet and `CI gate` goes
+red.
+
+The classifier is `tools/ci/queue_fork_guard.sh`. The step reads it from
+`origin/master` and pipes it to `bash`; it never runs the copy in the
+queued tree, which could be the very change the guard is meant to judge. The
+workflow-shape gate enforces that form (`queue-guard-reads-default-branch`).
+`tools/ci/test_queue_fork_guard.sh` covers the classifier against a fake `gh`.
+
 ## Required checks
 
 A check from a called workflow is named `<caller job> / <job name>`, so after
@@ -596,6 +618,9 @@ and fails the build when the shape breaks:
 - **(f)** a reusable workflow has a top-level `permissions:` block with no
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
+- **(queue-guard-reads-default-branch)** the merge-queue guard step runs the
+  classifier from `origin/${DEFAULT_BRANCH}` (`git show`), never from the queued
+  tree (see "Merge-queue runs");
 - **(e)** `.github/` and `tools/ci/` carry no LAN address literals, no
   `.home` names, no `:9090`, no `self-hosted` and none of the retired runner
   label words (the bare word `pool` is only checked under `.github/`, because

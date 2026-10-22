@@ -517,6 +517,25 @@ EOF
   fi
 done
 
+# --- queue-guard-reads-default-branch ----------------------------------------
+# The merge-queue guard step must read the classifier from the default branch
+# (`git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh"`), never
+# run the copy in the queued tree.
+QUEUE_GUARD_STEP="Refuse fork and Dependabot PRs in the merge queue"
+# shellcheck disable=SC2016  # the text to find carries a literal ${...}
+QUEUE_GUARD_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh"'
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  grep -qF "name: ${QUEUE_GUARD_STEP}" "${wf}" || continue
+  # The lines of that step (up to the next step).
+  step_run="$(awk -v n="name: ${QUEUE_GUARD_STEP}" '
+    /^ *- / { instep = (index($0, n) > 0) }
+    instep { print }' "${wf}")"
+  if ! printf '%s\n' "${step_run}" | grep -v '^ *#' | grep -qF "${QUEUE_GUARD_SHOW}"; then
+    err "${wf}: step '${QUEUE_GUARD_STEP}' must run ${QUEUE_GUARD_SHOW}, not the queued tree's copy (queue-guard-reads-default-branch)"
+  fi
+done
+
 # --- (e) topology token scan --------------------------------------------------
 SCAN_DIRS=()
 [ -d .github ] && SCAN_DIRS+=(.github)

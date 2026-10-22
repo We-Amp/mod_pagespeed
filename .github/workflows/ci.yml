@@ -109,6 +109,8 @@ jobs:
         run: tools/ci/test_systest_gate.sh
       - name: Queued-run sweep
         run: tools/ci/test_sweep_queued_runs.sh
+      - name: Merge-queue fork guard
+        run: tools/ci/test_queue_fork_guard.sh
       - name: Artifact staging and bundle validation
         run: |
           tools/ci/test_stage_artifacts.sh

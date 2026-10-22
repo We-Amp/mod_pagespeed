@@ -34,3 +34,4 @@ tree root passed to `tools/ci/check-workflow-shape.sh`:
 
 The bad trees violate the gate on purpose; the token scan excludes this
 directory (see the exclusion list in `check-workflow-shape.sh`).
+- `good/` also carries the merge-queue guard step in its `changes` job (the spec form: the classifier is read with `git show "origin/${DEFAULT_BRANCH}:..."`); `bad-queue-guard-from-tree/` runs the queued tree's copy instead (`queue-guard-reads-default-branch`).
