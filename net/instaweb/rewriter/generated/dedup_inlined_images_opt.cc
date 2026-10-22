@@ -20,12 +20,13 @@
 namespace net_instaweb {
 
 const char* JS_dedup_inlined_images_opt =
-    "(function(){window.pagespeed=window.pagespeed||{};var a=wind"
-    "ow.pagespeed;function b(){}b.prototype.h=function(d,e,c){if("
-    "d=document.getElementById(d))if(e=document.getElementById(e)"
-    ")if(c=document.getElementById(c))e.src=d.getAttribute(\"src\")"
-    ",c.parentNode.removeChild(c)};b.prototype.inlineImg=b.protot"
-    "ype.h;a.g=function(){a.dedupInlinedImages=new b};a.dedupInli"
-    "nedImagesInit=a.g;})();\n";
+    "(()=>{window.pagespeed=window.pagespeed||{};var e=window.pag"
+    "espeed;e.DedupInlinedImages=function(){};e.DedupInlinedImage"
+    "s.prototype.inlineImg=function(n,r,p){var t=document.getElem"
+    "entById(n);if(t){var i=document.getElementById(r);if(i){var "
+    "d=document.getElementById(p);d&&(i.src=t.getAttribute(\"src\")"
+    ",d.parentNode.removeChild(d))}}};e.dedupInlinedImagesInit=fu"
+    "nction(){var n=new e.DedupInlinedImages;e.dedupInlinedImages"
+    "=n};})();\n";
 
 }  // namespace net_instaweb

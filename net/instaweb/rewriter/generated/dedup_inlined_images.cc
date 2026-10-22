@@ -20,18 +20,19 @@
 namespace net_instaweb {
 
 const char* JS_dedup_inlined_images =
-    "(function(){window.pagespeed = window.pagespeed || {};\nvar p"
-    "agespeed = window.pagespeed;\npagespeed.DedupInlinedImages = "
-    "function() {\n};\npagespeed.DedupInlinedImages.prototype.inlin"
-    "eImg = function(a, c, b) {\n  if (a = document.getElementById"
-    "(a)) {\n    if (c = document.getElementById(c)) {\n      if (b"
-    " = document.getElementById(b)) {\n        c.src = a.getAttrib"
-    "ute(\"src\"), b.parentNode.removeChild(b);\n      }\n    }\n  }\n}"
-    ";\npagespeed.DedupInlinedImages.prototype.inlineImg = pagespe"
-    "ed.DedupInlinedImages.prototype.inlineImg;\npagespeed.dedupIn"
-    "linedImagesInit = function() {\n  var a = new pagespeed.Dedup"
-    "InlinedImages();\n  pagespeed.dedupInlinedImages = a;\n};\npage"
-    "speed.dedupInlinedImagesInit = pagespeed.dedupInlinedImagesI"
-    "nit;\n})();\n";
+    "(() => {\n  window.pagespeed = window.pagespeed || {};\n  var "
+    "pagespeed = window.pagespeed;\n  pagespeed.DedupInlinedImages"
+    " = function() {\n  };\n  pagespeed.DedupInlinedImages.prototyp"
+    "e.inlineImg = function(from_img_id, to_img_id, script_id) {\n"
+    "    var srcNode = document.getElementById(from_img_id);\n    "
+    "if (!srcNode) {\n      return;\n    }\n    var dstNode = docume"
+    "nt.getElementById(to_img_id);\n    if (!dstNode) {\n      retu"
+    "rn;\n    }\n    var scriptNode = document.getElementById(scrip"
+    "t_id);\n    if (!scriptNode) {\n      return;\n    }\n    dstNod"
+    "e.src = srcNode.getAttribute(\"src\");\n    scriptNode.parentNo"
+    "de.removeChild(scriptNode);\n  };\n  pagespeed.dedupInlinedIma"
+    "gesInit = function() {\n    var dedupInlinedImages = new page"
+    "speed.DedupInlinedImages();\n    pagespeed.dedupInlinedImages"
+    " = dedupInlinedImages;\n  };\n})();\n";
 
 }  // namespace net_instaweb
