@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `mobilize` filter is now a no-op. It had no rewriting behaviour of its
   own. Existing configurations keep loading: `mobilize` can still be named
   and now logs a warning that it has no effect, and `LogMobilizationSamples`
-  is accepted and ignored with a warning. Enabling `mobilize` no longer makes
-  the server look up a per-origin property cache page for each request.
+  is accepted and ignored with a warning. Enabling `mobilize` no longer adds
+  a `head` element to pages that lack one, and no longer makes the server look
+  up a per-origin property cache page for each request.
 - The `insert_ga` filter is now a no-op. It injected a Universal Analytics
   tracker, and Universal Analytics was discontinued in July 2023. Existing
   configurations keep loading: `insert_ga` can still be named, and it now
