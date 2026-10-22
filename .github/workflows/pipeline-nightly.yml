@@ -3,8 +3,9 @@
 #
 # pipeline-nightly.yml -- the nightly tier, as a reusable workflow, called by
 # nightly.yml (schedule 21:30 UTC Monday to Saturday plus the Sunday run, and
-# workflow_dispatch). See docs/ci/pipelines.md. The caller serializes nightlies (one group, never
-# cancelled); this file carries no concurrency block.
+# workflow_dispatch). See docs/ci/pipelines.md. The caller serializes
+# nightlies (one group, never cancelled); this file carries no concurrency
+# block.
 #
 # Jobs by class:
 #   fleet-heavy   nightly-vendor (the vendored tree for every Linux job),
