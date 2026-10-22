@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `insert_ga` filter is now a no-op. It injected a Universal Analytics
+  tracker, and Universal Analytics was discontinued in July 2023. Existing
+  configurations keep loading: `insert_ga` can still be named, and it now
+  logs a warning that it has no effect. `AnalyticsID` and `UseAnalyticsJs`
+  are likewise accepted and ignored with a warning, as is the `ga=` component
+  of an experiment spec. Use your own analytics snippet.
+
 ### Removed
 
 - The unbuilt `css_minify_main` and `js_minify_main` command-line sources are
