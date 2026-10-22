@@ -342,12 +342,24 @@ the pull request tier, once the tree's `VERSION` and the committed SBOM agree.
 
 ### The system-test gate
 
-The gate looks for a completed run of `ci.yml` for the release commit in which
-the jobs named `Apache System Tests` and `Nginx System Tests` (under any caller
-prefix) finished with `success`. A release commit that never ran those lanes
-cannot be released: run the CI on it first. Until the pipelines of this
-repository contain both lanes the gate cannot pass, so a real run refuses and
-a dry run reports it.
+The gate looks for a completed run of `ci.yml` on `master` for the release
+commit in which the jobs named `Apache System Tests` and `Nginx System Tests`
+(under any caller prefix) finished with `success`. Both a `push` run and a
+`workflow_dispatch` run count (the dispatch with `full=true` is the release
+candidate run the runbook requires), and the log line names the event of the
+run that passed. A release commit that never ran those lanes cannot be
+released: run the CI on it first. Until the pipelines of this repository
+contain both lanes the gate cannot pass, so a real run refuses and a dry run
+reports it.
+
+The gate checks the system-test lanes only. It does not assert the full tier:
+that every fleet job of the `full=true` dispatch at the candidate commit is
+`success` and none `skipped` is checked by the `/release-readiness` R2 step.
+
+A completed run without green system-test lanes, with nothing in flight, is
+refused only after two consecutive checks agree, so a flaky empty API page
+costs one extra poll instead of a false refusal. A pass always needs a run
+that was actually seen green. Every API failure and the deadline still refuse.
 
 ### Runners
 

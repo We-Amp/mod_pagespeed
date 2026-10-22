@@ -3,8 +3,15 @@
 name: CI pipeline development
 on:
   workflow_dispatch:
+    inputs:
+      full:
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   pr:
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline.yml@ci-dev
+  full:
+    if: ${{ inputs.full }}
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev

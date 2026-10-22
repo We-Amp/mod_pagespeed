@@ -32,7 +32,7 @@ on:
 
 # Cancel superseded pull request runs only; a push to master always finishes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'dispatch' || 'run' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -109,6 +109,8 @@ jobs:
         run: tools/ci/test_systest_gate.sh
       - name: Queued-run sweep
         run: tools/ci/test_sweep_queued_runs.sh
+      - name: Merge-queue fork guard
+        run: tools/ci/test_queue_fork_guard.sh
       - name: Post-merge tests never reuse cached results
         run: tools/ci/test_post_merge_nocache.sh --selftest && tools/ci/test_post_merge_nocache.sh
       - name: Artifact staging and bundle validation
@@ -122,6 +124,8 @@ jobs:
           tools/ci/test_prune_vendor_dir.sh
       - name: Slot budget helper
         run: tools/ci/test_slot_budget.sh
+      - name: Nightly schedule
+        run: tools/ci/test_nightly_schedule.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
       - name: Build script supply-chain checks
