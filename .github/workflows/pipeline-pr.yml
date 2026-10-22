@@ -53,6 +53,9 @@ jobs:
     name: Detect changed paths
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       signing_key: ${{ steps.diff.outputs.signing_key }}
       serf: ${{ steps.diff.outputs.serf }}
@@ -66,6 +69,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # A merge group is built on the fleet, so a fork or Dependabot pull
+      # request in it is refused here, on a hosted runner, before any fleet job
+      # starts: `vendor` needs this job, and every fleet job needs `vendor`.
+      - name: Refuse fork and Dependabot PRs in the merge queue
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # The guard is read from the default branch, never from the queued tree.
+        run: |
+          set -euo pipefail
+          git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+            git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
 
       - name: Diff against the base commit
         id: diff
@@ -682,6 +703,7 @@ jobs:
   # ---------------------------------------------------------------------
   vendor:
     name: Vendor Dependencies
+    needs: changes
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:

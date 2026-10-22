@@ -493,6 +493,44 @@ number of minutes) to override the 30 minute default. The logic is tested
 against a fake `gh` by `tools/ci/test_sweep_queued_runs.sh`, which the sweep
 job runs first.
 
+## Merge-queue runs
+
+A `merge_group` run is routed to the fleet unconditionally, so a fork or
+Dependabot pull request in a merge group would build its code on a fleet
+runner. The `changes` job (hosted) therefore starts with the step `Refuse fork
+and Dependabot PRs in the merge queue`, which runs only on `merge_group`. It
+resolves every pull request in the group, taking the last `(#N)` of each
+commit subject in `base_sha..head_sha` plus the number in the group's
+`head_ref`, and looks each one up with `gh api` (5 tries, 2, 4, 8 and 16 s
+apart). It refuses (the job fails) when a pull request comes from a fork, is
+authored by `dependabot[bot]`, has lost its head repository, or has a head
+repository other than this one (compared case-insensitively); when the range
+is empty, a commit subject has no `(#N)` or the `head_ref` cannot be parsed;
+or when a lookup still fails after the last try. `vendor` needs `changes`, and
+every other fleet job needs `vendor` or `changes`, so a refusal skips the
+whole fleet and `CI gate` goes red.
+
+The classifier is `tools/ci/queue_fork_guard.sh`. The step reads it from
+`origin/master` and pipes it to `bash`; it never runs the copy in the
+queued tree, and a script missing on the default branch fails the step. The
+workflow-shape gate (`queue-guard-reads-default-branch`) requires the step in
+the `changes` job, restricts its `run:` block to that read (plus `set -euo
+pipefail` and the default-branch fetch) and rejects any other read of the
+script in a workflow file.
+`tools/ci/test_queue_fork_guard.sh` covers the classifier against a fake `gh`.
+
+The PR-number rule depends on the queue's **squash** merge method: one squash
+commit per pull request, its subject ending in `(#N)`. A different method
+(merge commits or rebase) must change the classifier first; a group without
+that shape is refused.
+
+**Scope.** The guard protects runs that go through `pipeline-pr.yml`. A queued
+tree can still change the caller `ci.yml` to call another allow-listed fleet
+pipeline (the full, nightly, tidy-sweep, release and gate workflows, and the
+`@ci-dev` refs), and those carry no guard. Closing that is a separate change.
+Until it lands, no fork or Dependabot pull request is added to the merge queue
+(policy).
+
 ## Required checks
 
 A check from a called workflow is named `<caller job> / <job name>`, so after
@@ -602,6 +640,15 @@ and fails the build when the shape breaks:
 - **(f)** a reusable workflow has a top-level `permissions:` block with no
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
+- **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`
+  job holds the merge-queue guard step as the first step after the checkout
+  step (which sets no `env:`), with fixed keys (compared unquoted), `if:`,
+  `run:` block (the classifier is read from `origin/${DEFAULT_BRANCH}` with
+  `git show`) and only the guard's own env keys; no other line names the
+  script in any spelling, and the job has no glob, `find`, `source` or
+  `GITHUB_ENV` write under `tools/ci/`; `BASH_ENV`, `PATH`, `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CONFIG*` are not
+  set at workflow level or in that job; `vendor` has `needs: changes` and no
+  `if:` (see "Merge-queue runs");
 - **(e)** `.github/` and `tools/ci/` carry no LAN address literals, no
   `.home` names, no `:9090`, no `self-hosted` and none of the retired runner
   label words (the bare word `pool` is only checked under `.github/`, because
