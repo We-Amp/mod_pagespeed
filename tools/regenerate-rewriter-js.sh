@@ -71,6 +71,7 @@ ESBUILD_FILES=(
     delay_images_inline.js
     deterministic.js
     extended_instrumentation.js
+    lazyload_images.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -311,7 +312,6 @@ done
 WITHOUT_DEP_FILES=(
 )
 WITH_DEP_FILES=(
-    lazyload_images.js
     js_defer.js
     local_storage_cache.js
 )
