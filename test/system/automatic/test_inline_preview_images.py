@@ -117,16 +117,16 @@ class TestInlinePreviewImagesDebug:
             user_agent=IPHONE_USER_AGENT,
         )
 
-        # Note: The original bash test used "grep -c" which counts LINES (3 lines),
-        # but Python's regex.findall counts total MATCHES (4 occurrences).
-        # The pattern appears on 3 lines, but one line has it twice:
-        #   Line 1: "pagespeed.delayImagesInit = function()"
-        #   Line 2: "pagespeed.delayImagesInit = pagespeed.delayImagesInit"  (2 matches)
-        #   Line 3: "pagespeed.delayImagesInit()"
+        # fetch_until_count counts regex matches, not lines. In debug mode the
+        # page carries the delay_images asset, which defines the function
+        # once ("pagespeed.delayImagesInit = function()"), and the call the
+        # filter appends ("pagespeed.delayImagesInit()"). The Closure-built
+        # asset also had a quoted-property re-export line with two more
+        # matches; the esbuild build has none.
         response = mobile_client.fetch_until_count(
             url,
             pattern=r"pagespeed\.delayImagesInit",
-            expected_count=4,  # Total matches (bash grep -c counted 3 lines)
+            expected_count=2,
             timeout=30.0,
         )
         assert_http_status(response, 200)
