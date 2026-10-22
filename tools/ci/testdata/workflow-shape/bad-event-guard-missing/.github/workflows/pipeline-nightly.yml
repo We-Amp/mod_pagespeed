@@ -6,7 +6,13 @@ on:
 permissions:
   contents: read
 jobs:
+  relay:
+    if: ${{ !cancelled() && needs.event-guard.result == 'success' && true }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo relay
   vendor:
+    needs: relay
     if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     steps:

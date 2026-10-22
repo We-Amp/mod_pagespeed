@@ -525,21 +525,27 @@ commit per pull request, its subject ending in `(#N)`. A different method
 that shape is refused.
 
 **Event guard.** A queued tree can change the caller `ci.yml` to call any
-other allow-listed fleet pipeline, so every one of them opens with a hosted job
-`event-guard` that fails on an event outside its allowed list: `push`,
-`workflow_dispatch` and `pull_request` for `pipeline-full.yml` (the caller
-runs it for a push to `master`, a dispatch with `full: true` and the `ci:full`
-label), `schedule` and `workflow_dispatch` for `pipeline-nightly.yml`,
-`workflow_dispatch` for `pipeline-tidy-sweep.yml`, and `push` and
-`workflow_dispatch` for `pipeline-release-module.yml` and the two gate
-workflows it calls (a called workflow sees the caller's event). `merge_group`
-is allowed nowhere but `pipeline-pr.yml`. Every fleet job reaches `event-guard`
-through `needs` (the root job of the pipeline needs it), so a refusal skips
-the whole fleet. The workflow-shape gate (`event-guard`) requires the job in
-that exact form in every workflow with a fleet `runs-on`, requires each fleet
-job to reach it, and rejects a fleet job that could still run after it
-failed. The `@ci-dev` allow-list entries stay, with one rule: push `ci-dev`
-only from a `master`-based branch that carries the guard.
+other allow-listed fleet pipeline, and it can also produce `push` and
+`workflow_dispatch` events of its own (the queue pushes a temporary
+`gh-readonly-queue/` branch; a queued job with a write token can dispatch a
+workflow). Every one of those pipelines therefore opens with a hosted job
+`event-guard` that refuses: any event outside the pipeline's allowed list
+(`merge_group` is allowed nowhere but `pipeline-pr.yml`); a ref under
+`refs/heads/gh-readonly-queue/` or outside the pipeline's allowed refs; a
+`workflow_dispatch` made by `github-actions[bot]` (a dispatch with a workflow
+token); and a pull request from a fork or from another repository. The allowed
+events and refs are `pipeline-full.yml` (events `push`, `workflow_dispatch`, `pull_request`; refs `refs/heads/master`, `refs/heads/ci-dev`, `refs/pull/*/merge`: the caller runs it for a push to `master`, a dispatch with `full: true` and the `ci:full` label), `pipeline-nightly.yml` (`schedule`, `workflow_dispatch`; `refs/heads/master`), `pipeline-tidy-sweep.yml` (`workflow_dispatch`; `refs/heads/master`), and `pipeline-release-module.yml` plus the two gate workflows it calls (`push`, `workflow_dispatch`; `refs/tags/*` and `refs/heads/master` for dry runs). Every fleet job reaches `event-guard` through `needs`,
+so a refusal skips the whole fleet. The workflow-shape gate (`event-guard`)
+pins the job text, the per-pipeline lists and the edges, and rejects a job
+between the guard and a fleet job that can still run after the guard failed
+(`always()`, `failure()`, a `||`, or a multi-line `if:` that does).
+
+This narrows the merge-queue boundary; it does not close it. The policy stays:
+no fork or Dependabot pull request is added to the merge queue. The `@ci-dev`
+allow-list entries stay, but the `ci-dev` copies of `pipeline-pr.yml` and
+`pipeline-full.yml` gain the queue fork guard and this guard only when `ci-dev`
+is next pushed from a `master`-based branch that carries them; until then a queued
+tree calling `@ci-dev` is not covered.
 
 ## Required checks
 

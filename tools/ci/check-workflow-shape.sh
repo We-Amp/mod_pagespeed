@@ -651,43 +651,73 @@ done
 # runs-on that is not a plain hosted label) must carry the hosted job
 # `event-guard`, in exactly the form below, and every fleet job must reach it
 # through `needs`. A merge_group run takes its caller workflow from the queued
-# tree, so a queued tree can call any fleet pipeline; the guard makes those
-# pipelines refuse the events they must never run on. The ALLOWED list is fixed
-# per pipeline (eg_allowed_for); a file not named there may list only push,
-# schedule and workflow_dispatch. pipeline-full.yml also allows pull_request:
-# the caller runs it for the ci:full label.
+# tree, and the queued tree can also produce push and workflow_dispatch events
+# of its own, so the guard checks the event, the ref and the actor: it refuses
+# merge-queue refs, any ref outside the pipeline's ALLOWED_REFS, a dispatch
+# made with a workflow token and a pull request from a fork or another
+# repository. ALLOWED and ALLOWED_REFS are fixed per pipeline (eg_allowed_for,
+# eg_refs_for); a file not named there may list only push, schedule and
+# workflow_dispatch events and refs/heads, refs/tags and refs/pull refs.
+# pipeline-full.yml also allows pull_request (the caller runs it for the
+# ci:full label).
 #   - "Reaches" means a path of needs edges to event-guard along which no job
-#     can run after a failed guard: a job without a status-check function in
-#     its if: needs any reaching job; a job whose if: has !cancelled() needs a
-#     `needs.<job>.result == 'success'` term for a reaching job; a job with
-#     always() in its if: never reaches; a job with continue-on-error other
-#     than false does not pass the guard on to its dependents.
+#     can run after a failed guard. A job whose if: has always() or failure(),
+#     or (when it is not a fleet job, whose if: rule d already pins) a ||,
+#     reaches only when the if: starts with the conjunct
+#     `needs.event-guard.result == 'success'` (optionally after always() or
+#     !cancelled()) and the job needs event-guard. A job whose if: has
+#     !cancelled() needs a `needs.<job>.result == 'success'` term for a
+#     reaching job. A job with continue-on-error other than false does not
+#     pass the guard on to its dependents. A multi-line if: is joined first.
+EG_DEFAULT_BRANCH="master"
 eg_allowed_for() { # workflow file base name
   case "$1" in
     pipeline-full.yml) printf '%s' "push workflow_dispatch pull_request" ;;
     pipeline-nightly.yml) printf '%s' "schedule workflow_dispatch" ;;
     pipeline-tidy-sweep.yml) printf '%s' "workflow_dispatch" ;;
-    gate-*.yml) printf '%s' "push workflow_dispatch" ;;
-    pipeline-release-*.yml) printf '%s' "push workflow_dispatch" ;;
+    gate-*.yml|pipeline-release-*.yml) printf '%s' "push workflow_dispatch" ;;
+    *) printf '%s' "" ;;
+  esac
+}
+eg_refs_for() { # workflow file base name
+  case "$1" in
+    pipeline-full.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH} refs/heads/ci-dev refs/pull/*/merge" ;;
+    pipeline-nightly.yml|pipeline-tidy-sweep.yml) printf '%s' "refs/heads/${EG_DEFAULT_BRANCH}" ;;
+    gate-*.yml|pipeline-release-*.yml) printf '%s' "refs/tags/* refs/heads/${EG_DEFAULT_BRANCH}" ;;
     *) printf '%s' "" ;;
   esac
 }
 
-# Expected text of the event-guard job for an ALLOWED value.
+# Expected text of the event-guard job for an ALLOWED and an ALLOWED_REFS value.
 eg_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${{ ... }}
   printf '%s\n' \
     '  event-guard:' \
-    '    name: Event guard (refuses merge_group and unexpected events)' \
+    '    name: Event guard (refuses merge_group, unexpected events, refs and actors)' \
     '    runs-on: ubuntu-latest' \
     '    steps:' \
-    '      - name: Refuse events this pipeline must never run on' \
+    '      - name: Refuse events, refs and actors this pipeline must never run on' \
     '        env:' \
     '          EVENT: ${{ github.event_name }}' \
+    '          REF: ${{ github.ref }}' \
+    '          ACTOR: ${{ github.actor }}' \
+    '          PR_FORK: ${{ github.event.pull_request.head.repo.fork }}' \
+    '          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}' \
+    '          REPOSITORY: ${{ github.repository }}' \
     "          ALLOWED: \"$1\"" \
+    "          ALLOWED_REFS: \"$2\"" \
     '        run: |' \
     '          set -euo pipefail' \
-    '          case " ${ALLOWED} " in *" ${EVENT} "*) echo "event ${EVENT} accepted";; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac'
+    '          set -f' \
+    '          case " ${ALLOWED} " in *" ${EVENT} "*) ;; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac' \
+    '          case "${REF}" in refs/heads/gh-readonly-queue/*) echo "::error::merge queue refs never run this pipeline"; exit 1;; esac' \
+    '          ok=no' \
+    '          # shellcheck disable=SC2254  # the allowed refs are globs on purpose' \
+    '          for r in ${ALLOWED_REFS}; do case "${REF}" in ${r}) ok=yes;; esac; done' \
+    '          [ "${ok}" = yes ] || { echo "::error::ref ${REF} is not allowed in this pipeline"; exit 1; }' \
+    '          if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi' \
+    '          if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi' \
+    '          echo "event ${EVENT} on ${REF} accepted"'
 }
 
 # Fleet jobs that do not reach event-guard, one per line (see the rules above).
@@ -697,6 +727,10 @@ eg_unreached() {
     /^[[:space:]]*#/ { next }
     /^jobs:[[:space:]]*$/ { injobs = 1; next }
     injobs && /^[^[:space:]#]/ { injobs = 0 }
+    injobs && inif {
+      if ($0 ~ /^      / || $0 ~ /^[[:space:]]*$/) { v = $0; gsub(/^[[:space:]]+/, "", v); iff[job] = iff[job] " " v; next }
+      inif = 0
+    }
     injobs && /^  [^[:space:]]/ {
       job = $1; sub(/:$/, "", job); order[++nj] = job; inneeds = 0; next
     }
@@ -708,7 +742,7 @@ eg_unreached() {
     injobs && /^    [A-Za-z_-]+:/ {
       inneeds = 0
       k = $1; sub(/:$/, "", k); v = $0; sub(/^    [^:]+:[[:space:]]*/, "", v)
-      if (k == "if") iff[job] = v
+      if (k == "if") { iff[job] = v; if (v ~ /^[>|][-+]?[[:space:]]*$/) { iff[job] = ""; inif = 1 } }
       else if (k == "continue-on-error") coe[job] = v
       else if (k == "runs-on") ro[job] = v
     }
@@ -720,14 +754,22 @@ eg_unreached() {
         for (i = 1; i <= nj; i++) {
           j = order[i]
           if (reach[j]) continue
-          if (iff[j] ~ /always\(\)/) continue
+          t = iff[j]
           m = split(needs[j], nd, " "); ok = 0
-          for (x = 1; x <= m; x++) {
-            d = nd[x]
-            if (d != "event-guard" && (!(d in reach) || !reach[d])) continue
-            if (coe[d] != "" && coe[d] != "false") continue
-            if (iff[j] ~ /!cancelled\(\)/ && index(iff[j], "needs." d ".result == \047success\047") == 0) continue
-            ok = 1; break
+          hasg = 0
+          for (x = 1; x <= m; x++) if (nd[x] == "event-guard") hasg = 1
+          fleet = (ro[j] != "" && !(ro[j] in ishosted))
+          if (hasg && (t ~ /^\$\{\{ (always\(\) && |!cancelled\(\) && )?needs\.event-guard\.result == .success. && /)) ok = 1
+          else if (t ~ /always\(\)|failure\(\)/) ok = 0
+          else if (!fleet && t ~ /\|\|/) ok = 0
+          else {
+            for (x = 1; x <= m; x++) {
+              d = nd[x]
+              if (d != "event-guard" && (!(d in reach) || !reach[d])) continue
+              if (coe[d] != "" && coe[d] != "false") continue
+              if (t ~ /cancelled\(\)/ && index(t, "needs." d ".result == \047success\047") == 0) continue
+              ok = 1; break
+            }
           }
           if (ok) { reach[j] = 1; changed = 1 }
         }
@@ -750,21 +792,27 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     if [ -n "${v}" ] && ! is_hosted_label "${v}"; then printf '%s\n' "${j}"; fi
   done)"
   [ -n "${fleet_jobs}" ] || continue
-  eg_block="$(awk '/^[[:space:]]*#/ { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
+  eg_block="$(awk '/^(  )?#/ { next } /^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "event-guard:") } /^[^[:space:]]/ { inj = 0 } inj { print }' "${wf}")"
   if [ -z "${eg_block}" ]; then
     err "${wf}: a fleet pipeline needs the hosted job 'event-guard' (event-guard)"
     continue
   fi
   eg_allowed="$(eg_allowed_for "${base}")"
+  eg_refs="$(eg_refs_for "${base}")"
   eg_val="$(printf '%s\n' "${eg_block}" | sed -n 's/^          ALLOWED: "\([^"]*\)"$/\1/p')"
+  eg_rval="$(printf '%s\n' "${eg_block}" | sed -n 's/^          ALLOWED_REFS: "\([^"]*\)"$/\1/p')"
   if [ -n "${eg_allowed}" ]; then
     [ "${eg_val}" = "${eg_allowed}" ] || err "${wf}: the event-guard ALLOWED list must be exactly '${eg_allowed}' (event-guard)"
+    [ "${eg_rval}" = "${eg_refs}" ] || err "${wf}: the event-guard ALLOWED_REFS list must be exactly '${eg_refs}' (event-guard)"
   else
     for t in ${eg_val}; do
       case "${t}" in push|schedule|workflow_dispatch) ;; *) err "${wf}: event '${t}' may not be allowed by the event-guard (event-guard)" ;; esac
     done
+    for t in ${eg_rval}; do
+      case "${t}" in refs/heads/gh-readonly-queue/*) err "${wf}: ref '${t}' may not be allowed by the event-guard (event-guard)" ;; refs/heads/*|refs/tags/*|refs/pull/*) ;; *) err "${wf}: ref '${t}' may not be allowed by the event-guard (event-guard)" ;; esac
+    done
   fi
-  if [ -z "${eg_val}" ] || [ "${eg_block}" != "$(eg_expected "${eg_val}")" ]; then
+  if [ -z "${eg_val}" ] || [ -z "${eg_rval}" ] || [ "${eg_block}" != "$(eg_expected "${eg_val}" "${eg_rval}")" ]; then
     err "${wf}: the event-guard job must match the spec form exactly: no other key, step or command (event-guard)"
   fi
   while IFS= read -r uj; do
