@@ -86,18 +86,7 @@ jobs:
           set -euo pipefail
           git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
             git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          git rev-parse --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null
-          if git cat-file -e "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" 2>/dev/null; then
-            git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
-          elif git cat-file -e "${HEAD_SHA}:tools/ci/queue_fork_guard.sh" 2>/dev/null; then
-            # Bootstrap, removed the day this lands: the default branch has no
-            # guard yet, so the one pull request that adds it runs its own copy.
-            echo "::notice::bootstrap"
-            git show "${HEAD_SHA}:tools/ci/queue_fork_guard.sh" | bash
-          else
-            echo "refusing: no queue guard on ${DEFAULT_BRANCH} or in the queued tree" >&2
-            exit 1
-          fi
+          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
 
       - name: Diff against the base commit
         id: diff

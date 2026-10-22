@@ -17,7 +17,7 @@ trap 'rm -rf "${WORK}"' EXIT
 
 BIN="${WORK}/bin"
 mkdir -p "${BIN}"
-# Fake gh: FAKE_PR_<n> holds "<fork>\t<login>"; FAKE_GH_FAIL=1 fails every call.
+# Fake gh: FAKE_PR_<n> holds "<fork>\t<login>\t<head repo full name>"; FAKE_GH_FAIL=1 fails every call.
 cat > "${BIN}/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_LOG}"
@@ -27,7 +27,7 @@ if [ "${FAKE_GH_FAIL:-0}" = "1" ]; then
 fi
 n="${2##*/}"
 var="FAKE_PR_${n}"
-printf '%s\n' "${!var-false$(printf '\t')oschaaf}"
+printf '%s\n' "${!var-false$(printf '\t')oschaaf$(printf '\t')We-Amp/example}"
 GH
 cat > "${BIN}/sleep" <<'SL'
 #!/usr/bin/env bash
@@ -86,9 +86,12 @@ HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-203-abc"
 make_repo "a (#201)" "b (#202)" "c (#203)"
 run_case same-repo-group-of-3 0 "PR #203"
 
-run_case fork-in-middle 1 "refusing: PR #202 is from a fork" "FAKE_PR_202=true${TAB}someone"
-run_case dependabot 1 "refusing: PR #203 is authored by dependabot[bot]" "FAKE_PR_203=false${TAB}dependabot[bot]"
-run_case null-head-repo 1 "refusing: PR #202" "FAKE_PR_202=null${TAB}someone"
+run_case fork-in-middle 1 "refusing: PR #202 is from a fork" "FAKE_PR_202=true${TAB}someone${TAB}someone/example"
+run_case dependabot 1 "refusing: PR #203 is authored by dependabot[bot]" "FAKE_PR_203=false${TAB}dependabot[bot]${TAB}We-Amp/example"
+run_case null-head-repo 1 "refusing: PR #202" "FAKE_PR_202=null${TAB}someone${TAB}"
+run_case foreign-head-repo 1 "refusing: PR #202 head repository other/Example is not We-Amp/example" "FAKE_PR_202=false${TAB}someone${TAB}other/Example"
+run_case head-repo-case-insensitive 0 "PR #202" "FAKE_PR_202=false${TAB}someone${TAB}we-amp/EXAMPLE"
+run_case bad-head-ref 1 "refusing: unparseable merge group head ref" HEAD_REF=
 
 make_repo "a (#201)" "fix things"
 run_case no-pr-number 1 "no PR number"

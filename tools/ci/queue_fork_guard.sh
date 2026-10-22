@@ -13,6 +13,11 @@
 # (refs/heads/gh-readonly-queue/<base>/pr-<N>-<sha>), GITHUB_REPOSITORY,
 # GH_TOKEN. Run from a checkout that holds BASE..HEAD_SHA.
 #
+# The PR-number rule depends on the queue's SQUASH merge method: one squash
+# commit per pull request, its subject ending in "(#N)". A different merge
+# method (merge commits, rebase) must change this classifier first; until
+# then a group without that shape is refused.
+#
 # Exit 0: every pull request in the group is same-repo and not authored by
 # dependabot[bot]. Exit 1: refuse.
 
@@ -22,6 +27,9 @@ refuse() { echo "refusing: $*" >&2; exit 1; }
 
 # PR numbers: the last "(#N)" of each commit subject in BASE..HEAD_SHA, plus
 # N from HEAD_REF.
+ref_n="$(printf '%s\n' "${HEAD_REF:-}" | sed -nE 's|.*/pr-([0-9]+)-.*|\1|p')"
+[ -n "${ref_n}" ] || refuse "unparseable merge group head ref"
+
 shas="$(git rev-list "${BASE}..${HEAD_SHA}")"
 [ -n "${shas}" ] || refuse "empty merge group (${BASE}..${HEAD_SHA} holds no commits)"
 
@@ -37,8 +45,7 @@ for sha in ${shas}; do
   add_pr "${n}"
 done
 
-ref_n="$(printf '%s\n' "${HEAD_REF:-}" | sed -nE 's|.*/pr-([0-9]+)-.*|\1|p')"
-[ -z "${ref_n}" ] || add_pr "${ref_n}"
+add_pr "${ref_n}"
 
 for n in ${prs}; do
   out=""
@@ -47,7 +54,7 @@ for n in ${prs}; do
   while :; do
     tries=$((tries + 1))
     if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" \
-      --jq '[(.head.repo.fork | tostring), (.user.login // "")] | @tsv')"; then
+      --jq '[(.head.repo.fork | tostring), (.user.login // ""), (.head.repo.full_name // "")] | @tsv')"; then
       break
     fi
     [ "${tries}" -lt 5 ] || refuse "could not look up PR #${n} after 5 tries"
@@ -56,10 +63,16 @@ for n in ${prs}; do
   done
 
   fork="${out%%$'\t'*}"
-  login="${out#*$'\t'}"
+  rest="${out#*$'\t'}"
+  login="${rest%%$'\t'*}"
+  full=""
+  case "${rest}" in *$'\t'*) full="${rest#*$'\t'}" ;; esac
   [ "${fork}" != "true" ] || refuse "PR #${n} is from a fork"
   [ "${fork}" != "null" ] || refuse "PR #${n} has no head repository (deleted fork)"
   [ "${fork}" = "false" ] || refuse "PR #${n} has an unreadable fork flag"
   [ "${login}" != "dependabot[bot]" ] || refuse "PR #${n} is authored by dependabot[bot]"
+  want_lc="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+  full_lc="$(printf '%s' "${full}" | tr '[:upper:]' '[:lower:]')"
+  [ "${full_lc}" = "${want_lc}" ] || refuse "PR #${n} head repository ${full} is not ${GITHUB_REPOSITORY}"
   echo "PR #${n}: same-repo, author ${login}"
 done

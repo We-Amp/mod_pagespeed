@@ -518,21 +518,59 @@ EOF
 done
 
 # --- queue-guard-reads-default-branch ----------------------------------------
-# The merge-queue guard step must read the classifier from the default branch
-# (`git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh"`), never
-# run the copy in the queued tree.
-QUEUE_GUARD_STEP="Refuse fork and Dependabot PRs in the merge queue"
-# shellcheck disable=SC2016  # the text to find carries a literal ${...}
-QUEUE_GUARD_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh"'
+# The merge-queue guard (docs/ci/pipelines.md, "Merge-queue runs") must read
+# its classifier from the default branch, never from the queued tree. In
+# pipeline-pr.yml (and any workflow that names the classifier):
+#   - the `changes` job holds exactly one step named QG_STEP;
+#   - that step has only the keys name, if, env and run, with the exact if:
+#     `github.event_name == 'merge_group'`, and its run: block is exactly one
+#     of the two allowed bodies below (no other command, comment or wrapper);
+#   - no other non-comment line of the file names tools/ci/queue_fork_guard.sh.
+QG_STEP="Refuse fork and Dependabot PRs in the merge queue"
+QG_IF="        if: github.event_name == 'merge_group'"
+QG_PAT='(^|[^_A-Za-z0-9])queue_fork_guard\.sh'
+# shellcheck disable=SC2016  # the text to match carries literal ${...}
+QG_SET='set -euo pipefail'
+# shellcheck disable=SC2016
+QG_REV='git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||'
+# shellcheck disable=SC2016
+QG_FETCH='  git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"'
+# shellcheck disable=SC2016
+QG_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash'
+QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "${QG_SHOW}")"
+QG_BODY_MIN="$(printf '%s\n%s' "${QG_SET}" "${QG_SHOW}")"
+qg_err() { err "${wf}: $1 (queue-guard-reads-default-branch)"; }
+
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue
-  grep -qF "name: ${QUEUE_GUARD_STEP}" "${wf}" || continue
-  # The lines of that step (up to the next step).
-  step_run="$(awk -v n="name: ${QUEUE_GUARD_STEP}" '
-    /^ *- / { instep = (index($0, n) > 0) }
-    instep { print }' "${wf}")"
-  if ! printf '%s\n' "${step_run}" | grep -v '^ *#' | grep -qF "${QUEUE_GUARD_SHOW}"; then
-    err "${wf}: step '${QUEUE_GUARD_STEP}' must run ${QUEUE_GUARD_SHOW}, not the queued tree's copy (queue-guard-reads-default-branch)"
+  mentions="$(grep -E "${QG_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
+  if [ "$(basename "${wf}")" != "pipeline-pr.yml" ] && [ "${mentions}" = "0" ]; then
+    continue
+  fi
+  job="$(awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { inj = ($1 == "changes:") } inj { print }' "${wf}")"
+  n_steps="$(printf '%s\n' "${job}" | grep -cxF "      - name: ${QG_STEP}" || true)"
+  if [ "${n_steps}" != "1" ]; then
+    qg_err "the changes job must hold exactly one step named '${QG_STEP}' (found ${n_steps})"
+    continue
+  fi
+  step="$(printf '%s\n' "${job}" | awk -v n="      - name: ${QG_STEP}" '
+    /^      - / { instep = ($0 == n) }
+    instep { print }')"
+  keys="$(printf '%s\n' "${step}" | grep -E '^        [A-Za-z_-]+:' | sed -E 's/^ +([A-Za-z_-]+):.*/\1/' | sort | tr '\n' ' ')"
+  if [ "${keys}" != "env if run " ]; then
+    qg_err "the guard step must have exactly the keys name, if, env and run (found: name ${keys})"
+  fi
+  if [ "$(printf '%s\n' "${step}" | grep -cxF "${QG_IF}")" != "1" ]; then
+    qg_err "the guard step must carry exactly: ${QG_IF# }"
+  fi
+  body="$(printf '%s\n' "${step}" | awk '
+    $0 == "        run: |" { inrun = 1; next }
+    inrun { if ($0 ~ /^          /) print; else if ($0 !~ /^[[:space:]]*$/) inrun = 0 }' | sed -E 's/^          //')"
+  if [ "${body}" != "${QG_BODY_FULL}" ] && [ "${body}" != "${QG_BODY_MIN}" ]; then
+    qg_err "the guard step's run: block must be only: ${QG_SET}, the optional default-branch fetch, and ${QG_SHOW}"
+  fi
+  if [ "${mentions}" != "1" ]; then
+    qg_err "queue_fork_guard.sh must be named exactly once, in the guard step (found ${mentions} reads); never read the queued tree's copy"
   fi
 done
 
