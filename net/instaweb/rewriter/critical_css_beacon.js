@@ -23,13 +23,12 @@
  * @author jud@google.com (Jud Porter)
  */
 
-goog.require('pagespeedutils');
+import * as pagespeedutils from '../js/js_utils.js';
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits an inline call to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 
 
@@ -116,7 +115,7 @@ pagespeed.CriticalCssBeacon.prototype.sendBeacon_ = function() {
     data += '&of=1';
   }
   // Export the URL for testing purposes.
-  pagespeed['criticalCssBeaconData'] = data;
+  pagespeed.criticalCssBeaconData = data;
   // TODO(jud): This beacon should coordinate with the add_instrumentation JS
   // so that only one beacon request is sent if both filters are enabled.
   pagespeedutils.sendBeacon(this.beaconUrl_, this.htmlUrl_, data);
@@ -248,5 +247,3 @@ pagespeed.criticalCssBeaconInit = function(beaconUrl, htmlUrl, optionsHash,
   };
   pagespeedutils.addHandler(window, 'load', beacon_onload);
 };
-
-pagespeed['criticalCssBeaconInit'] = pagespeed.criticalCssBeaconInit;
