@@ -635,7 +635,7 @@ jobs:
           docker run --rm --init --name "${CTR}" "${EXTRA[@]}" \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
-            -e HOME=/tmp/ci-home -e USER=dev -e BZL_FLAGS \
+            -e HOME=/tmp/ci-home -e USER=dev -e "BZL_FLAGS=${BZL_FLAGS}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${RUNNER_TEMP}/shared-cache:/out" \
