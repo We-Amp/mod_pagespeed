@@ -79,6 +79,17 @@ load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
 
+# rules_shell (0.2.0, declared by protobuf_deps()). Bazel 8 removed the native
+# sh_* rules, so sh_binary/sh_test (ours and rules_foreign_cc's) now use
+# rules_shell's Starlark implementation, which needs its own sh toolchain
+# (detected from BAZEL_SH / PATH). Without it, Windows analysis fails with
+# "No suitable shell toolchain found".
+load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")
+
+rules_shell_dependencies()
+
+rules_shell_toolchains()
+
 load("@rules_java//java:rules_java_deps.bzl", "rules_java_dependencies")
 
 rules_java_dependencies()
