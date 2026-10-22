@@ -52,6 +52,8 @@ BORINGSSL_SHA = "de3371d3fe085afd34778a4c988fb7840b9c92cb21504e674f33ebefd98edc0
 # Protocol Buffers C++ runtime + codegen. Same v31.1 release commit that
 # gRPC 1.78.1's grpc_deps() provided before the gRPC dependency was removed
 # along with the experimental central controller.
+# The commit of the protobuf tag in MODULE.bazel. tools/check-module-versions.py
+# checks the tag (the SBOM purl), not this commit: update both together.
 PROTOBUF_COMMIT = "74211c0dfc2777318ab53c2cd2c317a2ef9012de"  # v31.1, mirrored in MODULE.bazel
 # sha256 of the BCR source archive (protobuf-31.1.zip release asset).
 PROTOBUF_SHA = "554e847e46c705bfc44fb2d0ae5bf78f34395fcbfd86ba747338b570eef26771"

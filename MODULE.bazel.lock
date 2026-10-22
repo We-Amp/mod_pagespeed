@@ -215,7 +215,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_bcr_deps": {
       "general": {
-        "bzlTransitiveDigest": "pet6Un379RFi9TTlt3dHPhQWwNlGLjvfjUgUIAlE3+c=",
+        "bzlTransitiveDigest": "MHSbz0kMLN7hf00UBPh4jREicxywVnojzcZ5rjbE6og=",
         "usagesDigest": "Ba3C/QSRWx/cj/SHNe4MyHopX+FuysaxdGMyG9CHa7E=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools"

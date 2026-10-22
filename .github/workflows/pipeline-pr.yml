@@ -118,7 +118,7 @@ jobs:
             if grep -qE "(\.lds\$)|^(MODULE\.bazel|bazel/repositories\.bzl|bazel/extensions\.bzl|tools/assert-serf-removed\.sh|third_party/|${wf})" "${changed}"; then
               serf=true
             fi
-            if grep -qE "^(bazel/repositories\.bzl|tools/dependency/|test/tools/dependency/|tools/generate-sbom\.py|${wf})" "${changed}"; then
+            if grep -qE "^(bazel/repositories\.bzl|MODULE\.bazel|tools/dependency/|test/tools/dependency/|tools/generate-sbom\.py|tools/bzlmod_versions\.py|${wf})" "${changed}"; then
               cve=true
             fi
             if grep -qE "^(install/|${wf})" "${changed}"; then
@@ -330,8 +330,8 @@ jobs:
         run: bash pagespeed/system/console/check-no-drift.sh
 
       # Security gates: SBOM drift (the committed SPDX must match what
-      # bazel/repositories.bzl and the bundled console dependencies produce
-      # today), notices drift, OpenVEX format, and a grype scan of the
+      # MODULE.bazel.lock, bazel/repositories.bzl and the bundled console
+      # dependencies produce today), module version drift, notices drift, OpenVEX format, and a grype scan of the
       # committed SPDX SBOM, failing on medium and above. A not_affected
       # finding gets a documented sbom/*.vex.json entry.
       - name: SBOM drift - generate-sbom.py --verify
@@ -341,6 +341,15 @@ jobs:
       - name: SBOM scoping - generate-sbom.py --self-test
         if: ${{ !cancelled() }}
         run: python3 tools/generate-sbom.py --self-test
+
+      # The BCR libraries' resolved versions (MODULE.bazel.lock) must equal
+      # the root pins and overrides, the bazel/repositories.bzl mirror
+      # constants and the committed SBOM.
+      - name: Module version drift - check-module-versions.py
+        if: ${{ !cancelled() }}
+        run: |
+          python3 tools/check-module-versions.py --self-test
+          python3 tools/check-module-versions.py
 
       # THIRD-PARTY-NOTICES ships in every package, so it must agree with the
       # SBOM in both directions.
@@ -739,6 +748,12 @@ jobs:
       - name: Lockfile unchanged
         id: diff
         run: git diff --stat --exit-code MODULE.bazel.lock
+      # The versions Bazel resolved (boringssl included) must be the pinned
+      # ones, and the lock must agree with the resolved graph.
+      - name: Resolved module versions match the pins
+        run: |
+          bazel mod graph --output=json > "${RUNNER_TEMP}/mod-graph.json"
+          python3 tools/check-module-versions.py --graph "${RUNNER_TEMP}/mod-graph.json"
       - name: Upload regenerated lock
         if: ${{ failure() && steps.diff.conclusion == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
