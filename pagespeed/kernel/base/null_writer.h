@@ -27,10 +27,7 @@ namespace net_instaweb {
 class MessageHandler;
 
 // A writer that silently eats the bytes.  This can be used, for
-// example, with writers is designed to cascade to another one, such
-// as CountingWriter.  If you just want to count the bytes and don't
-// want to store them, you can pass a NullWriter to a CountingWriter's
-// constructor.
+// example, with writers designed to cascade to another one.
 class NullWriter : public Writer {
  public:
   explicit NullWriter() {}
