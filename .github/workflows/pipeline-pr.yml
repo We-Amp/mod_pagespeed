@@ -1007,13 +1007,13 @@ jobs:
           mkdir -p "${OUT}" "${GITHUB_WORKSPACE}/.build-artifacts"
           BUILD_LOG="${OUT}/build-all.log"
           EXTRA_DOCKER=()
-          BAZEL_CONFIG="--config=ci"
+          BAZEL_CONFIG="--config=ci --config=ci_lock"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
+            BAZEL_CONFIG="--config=ci --config=ci_lock --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
@@ -1213,13 +1213,13 @@ jobs:
           slot_budget 55g || exit 1
           rm -rf "${GITHUB_WORKSPACE}/_failed-testlogs"
           EXTRA_DOCKER=()
-          BAZEL_CONFIG="--config=ci"
+          BAZEL_CONFIG="--config=ci --config=ci_lock"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
           else
             # Degraded mode: the ci config pulls in the remote cache, so
             # switch it off and size the job count for a small runner.
-            BAZEL_CONFIG="--config=ci --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
+            BAZEL_CONFIG="--config=ci --config=ci_lock --remote_cache= --remote_upload_local_results=false --jobs=${SLOT_JOBS}"
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
