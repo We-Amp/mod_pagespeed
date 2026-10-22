@@ -21,13 +21,12 @@
  * @author matterbury@google.com (Matt Atterbury)
  */
 
-goog.require('pagespeedutils');
+import * as pagespeedutils from '../js/js_utils.js';
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 
 
@@ -53,9 +52,6 @@ pagespeed.LocalStorageCache.prototype.hasExpired = function(obj) {
   return (!isNaN(expiry) && expiry <= pagespeedutils.now());
 };
 
-pagespeed.LocalStorageCache.prototype['hasExpired'] =
-    pagespeed.LocalStorageCache.prototype.hasExpired;
-
 
 /**
  * @return {string} The data part of the given object.
@@ -66,9 +62,6 @@ pagespeed.LocalStorageCache.prototype.getData = function(obj) {
   var pos2 = obj.indexOf(' ', pos1 + 1);
   return obj.substring(pos2 + 1);
 };
-
-pagespeed.LocalStorageCache.prototype['getData'] =
-    pagespeed.LocalStorageCache.prototype.getData;
 
 
 /**
@@ -84,9 +77,6 @@ pagespeed.LocalStorageCache.prototype.replaceLastScript = function(newElement) {
   var lastElement = scripts[scripts.length - 1];
   lastElement.parentNode.replaceChild(newElement, lastElement);
 };
-
-pagespeed.LocalStorageCache.prototype['replaceLastScript'] =
-    pagespeed.LocalStorageCache.prototype.replaceLastScript;
 
 
 /**
@@ -114,9 +104,6 @@ pagespeed.LocalStorageCache.prototype.inlineCss = function(url) {
   }
   this.replaceLastScript(newNode);
 };
-
-pagespeed.LocalStorageCache.prototype['inlineCss'] =
-    pagespeed.LocalStorageCache.prototype.inlineCss;
 
 
 /**
@@ -150,9 +137,6 @@ pagespeed.LocalStorageCache.prototype.inlineImg = function(url, hash) {
   }
   this.replaceLastScript(newNode);
 };
-
-pagespeed.LocalStorageCache.prototype['inlineImg'] =
-    pagespeed.LocalStorageCache.prototype.inlineImg;
 
 
 /**
@@ -290,7 +274,7 @@ pagespeed.localStorageCacheInit = function() {
   // storage is disabled by browser policy), so storage access is guarded at
   // the point of use rather than gated here.
   var temp = new pagespeed.LocalStorageCache();
-  pagespeed['localStorageCache'] = temp;
+  pagespeed.localStorageCache = temp;
   pagespeedutils.addHandler(window, 'load',
       function() {
         temp.saveInlinedData_();
@@ -300,5 +284,3 @@ pagespeed.localStorageCacheInit = function() {
         temp.generateCookie_();
       });
 };
-
-pagespeed['localStorageCacheInit'] = pagespeed.localStorageCacheInit;

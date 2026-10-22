@@ -72,6 +72,7 @@ ESBUILD_FILES=(
     deterministic.js
     extended_instrumentation.js
     lazyload_images.js
+    local_storage_cache.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -313,7 +314,6 @@ WITHOUT_DEP_FILES=(
 )
 WITH_DEP_FILES=(
     js_defer.js
-    local_storage_cache.js
 )
 
 for src_file in ${WITHOUT_DEP_FILES[@]+"${WITHOUT_DEP_FILES[@]}"}; do
