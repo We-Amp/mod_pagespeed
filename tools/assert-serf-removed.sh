@@ -48,7 +48,7 @@ fi
 # Match a repo-rule declaration whose name is serf, e.g.
 #   http_archive(name = "serf", ...)  /  native.new_local_repository(name="serf")
 REPO_HITS=$(grep -rniE 'name[[:space:]]*=[[:space:]]*"serf"' \
-  WORKSPACE MODULE.bazel 2>/dev/null || true)
+  WORKSPACE WORKSPACE.bzlmod MODULE.bazel bazel/repositories.bzl 2>/dev/null || true)
 if [ -n "${REPO_HITS}" ]; then
   echo "FAIL: a Bazel repository named 'serf' is declared — serf is removed:" >&2
   echo "${REPO_HITS}" | sed 's/^/   /' >&2

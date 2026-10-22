@@ -16,7 +16,6 @@ load(":apr.bzl", "apr_build_rule")
 load(":aprutil.bzl", "aprutil_build_rule")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
-load(":zlib_compat.bzl", "zlib_ng_alias_repository")
 # NOTE: do NOT `load(":libavif.bzl"/":libaom.bzl"/":libdav1d.bzl", ...)` here.
 # Those files top-level-load @rules_foreign_cc//foreign_cc:defs.bzl, but this
 # module is loaded from WORKSPACE *before* the rules_foreign_cc http_archive is
@@ -36,9 +35,12 @@ load(":zlib_compat.bzl", "zlib_ng_alias_repository")
 ENVOY_COMMIT = "cf413bdb37b36d3ffbe570b8a48760abe2b588f5"  # v1.37.6 - fixes the 2026-08-26 advisory batch (13 CVEs). ABI-compat pins (BoringSSL/zlib-ng below) unchanged v1.37.5->v1.37.6.
 ENVOY_SHA = "60a4cc0ebced36c78f7fd7f8e7bdaea38d62c1ce933f0efc59bc531e2f47d263"
 
-# Standalone zlib-ng — replaces @envoy//bazel:zlib for non-Envoy builds.
-ZLIB_NG_VERSION = "2.3.2"
-ZLIB_NG_SHA = "6a0561b50b8f5f6434a6a9e667a67026f2b2064a1ffa959c6b2dae320161c2a8"
+# zlib-ng (module zlib-ng, plus the third_party/zlib_alias_module "zlib"
+# module) and protobuf are bazel_deps in MODULE.bazel; the constants below are
+# mirrored from there (and from their BCR source archives) for the SBOM,
+# notices, CVE and vendoring tools.
+ZLIB_NG_VERSION = "2.3.3"  # mirrored in MODULE.bazel (2.3.3.bcr.2)
+ZLIB_NG_SHA = "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
 
 # Standalone BoringSSL — previously only an Envoy transitive dep.
 # Bumped May 2026: ~12 months of upstream drift (post-quantum + hardening rolls).
@@ -48,8 +50,9 @@ BORINGSSL_SHA = "de3371d3fe085afd34778a4c988fb7840b9c92cb21504e674f33ebefd98edc0
 # Protocol Buffers C++ runtime + codegen. Same v31.1 release commit that
 # gRPC 1.78.1's grpc_deps() provided before the gRPC dependency was removed
 # along with the experimental central controller.
-PROTOBUF_COMMIT = "74211c0dfc2777318ab53c2cd2c317a2ef9012de"  # v31.1
-PROTOBUF_SHA = "d0e3a75876a81e1536028bb9cf9181382b198da4cc6fa6aef86879ef629ac807"
+PROTOBUF_COMMIT = "74211c0dfc2777318ab53c2cd2c317a2ef9012de"  # v31.1, mirrored in MODULE.bazel
+# sha256 of the BCR source archive (protobuf-31.1.zip release asset).
+PROTOBUF_SHA = "554e847e46c705bfc44fb2d0ae5bf78f34395fcbfd86ba747338b570eef26771"
 
 # Standalone googletest — previously only an Envoy transitive dep.
 GOOGLETEST_VERSION = "1.17.0"  # mirrored in MODULE.bazel (1.17.0.bcr.2)
@@ -619,26 +622,10 @@ cc_library(
 _ABSEIL_VERSION = "20260107.1"  # mirrored in MODULE.bazel
 _ABSEIL_SHA = "4314e2a7cbac89cac25a2f2322870f343d81579756ceff7f431803c2c9090195"
 _RE2_VERSION = "2025-11-05"  # mirrored in MODULE.bazel
-_RE2_SHA = "87f6029d2f6de8aa023654240a03ada90e876ce9a4676e258dd01ea4c26ffd67"
+# sha256 of the BCR source archive (re2-2025-11-05.zip release asset).
+_RE2_SHA = "c7b1a7a7c68d2d7cf8d343dc56655c1b5a8c8aadedc017db453d4c1d8913b844"
 
 def mod_pagespeed_dependencies():
-    # Phase 0: Standalone zlib-ng
-    http_archive(
-        name = "zlib_ng",
-        strip_prefix = "zlib-ng-%s" % ZLIB_NG_VERSION,
-        url = "https://github.com/zlib-ng/zlib-ng/archive/%s.tar.gz" % ZLIB_NG_VERSION,
-        sha256 = ZLIB_NG_SHA,
-        build_file = "//bazel:zlib_ng.BUILD",
-    )
-
-    # Collapse the duplicate deflate: alias @zlib -> @zlib_ng so protobuf's
-    # gzip_stream links the SAME single zlib-ng as libpng/kernel/util,
-    # instead of dragging in a second (stock madler) zlib. Declared here, before
-    # protobuf_deps() in WORKSPACE, so its maybe()-guarded madler
-    # @zlib is skipped. Fixes the ODR/UB two-deflate hazard (was the PngOptimizer
-    # golden "flake"). See bazel/zlib_compat.bzl.
-    zlib_ng_alias_repository(name = "zlib")
-
     # Phase 1: Standalone BoringSSL
     http_archive(
         name = "boringssl",
@@ -655,18 +642,6 @@ def mod_pagespeed_dependencies():
             "@mod_pagespeed//bazel:boringssl_no_weak_alloc_hooks.patch",
         ],
         patch_args = ["-p1"],
-    )
-
-    # Protocol Buffers. Its @abseil-cpp refs are mapped onto @com_google_absl,
-    # the abseil-cpp module (repo_name in MODULE.bazel).
-    http_archive(
-        name = "com_google_protobuf",
-        strip_prefix = "protobuf-%s" % PROTOBUF_COMMIT,
-        url = "https://github.com/protocolbuffers/protobuf/archive/%s.tar.gz" % PROTOBUF_COMMIT,
-        sha256 = PROTOBUF_SHA,
-        # Redirect protobuf's internal @abseil-cpp refs to @com_google_absl,
-        # the single abseil in the build.
-        repo_mapping = {"@abseil-cpp": "@com_google_absl"},
     )
 
     # Phase 2: Standalone libevent.

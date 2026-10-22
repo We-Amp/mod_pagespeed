@@ -1047,25 +1047,6 @@ jobs:
                 bazel-bin/libmod_pagespeed.so
               bash tools/ci/assert_module_symbols.sh --profile nginx \
                 bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
-
-              # Hybrid mode only (drop when protobuf becomes a bazel_dep):
-              # rulesets pull their own protobuf module, and nothing we build
-              # may link that copy next to the WORKSPACE one (abseil-cpp is
-              # already a single module). cquery with the build flags so
-              # toolchains and implicit deps count; canonical labels so a
-              # module copy always shows as @@<name>+.
-              bazel --output_user_root=/tmp/bazel-out \
-                cquery ${BAZEL_CONFIG} --disk_cache=/cache \
-                --action_env=CC=clang --action_env=CXX=clang++ \
-                --consistent_labels --output=label \
-                "deps(//:libmod_pagespeed.so + //pagespeed/nginx:ngx_pagespeed_module.so + //test/pagespeed/kernel/... + //test/net/... + //test/pagespeed/opt/... + //test/pagespeed/system/... + //test/pagespeed/apache/... + //test/pagespeed/nginx/...)" \
-                > /tmp/module-copies.txt
-              wc -l < /tmp/module-copies.txt
-              test -s /tmp/module-copies.txt
-              if grep -E "^@@protobuf\+//" /tmp/module-copies.txt; then
-                echo "::error::a module copy of protobuf is linked next to the WORKSPACE one"
-                exit 1
-              fi
               # Collect the modules for the bundle (bazel-bin points into the
               # container-internal output base).
               mkdir -p /workspace/.build-artifacts/bazel-bin/pagespeed/nginx

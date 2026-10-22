@@ -1,2 +1,3 @@
 pagespeed/envoy
 test/pagespeed/envoy
+third_party/zlib_alias_module
