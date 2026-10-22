@@ -506,9 +506,6 @@ build:zig-windows --define=enable_memcached=false
 # the lean workspace already pins system_icu=0 globally.
 build:envoy-filter --config=clang-libstdcxx13
 build:envoy-filter --@googleurl//build_config:system_icu=0
-# Selects the EXT_BUILD_DEPS spelling the Envoy rules_foreign_cc pin accepts
-# (//bazel:rules_foreign_cc_envoy_pin config_setting).
-build:envoy-filter --define=rules_foreign_cc_pin=envoy
 
 try-import %workspace%/clang.bazelrc
 try-import %workspace%/local_tsan.bazelrc

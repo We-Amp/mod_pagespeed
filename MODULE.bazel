@@ -7,6 +7,21 @@
 # the module name so @mod_pagespeed//... labels used by patches keep resolving.
 module(name = "mod_pagespeed")
 
+# ---- toolchain rulesets (each registers its own toolchains) ----
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+
+# 0.2.26 carries the clang-cl DUMPBIN fix that
+# bazel/rules_cc_clang_cl_dumpbin.patch used to backport.
+bazel_dep(name = "rules_cc", version = "0.2.26")
+bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
+
+# The macOS 26 -no_uuid/-no_adhoc_codesign flags that
+# bazel/apple_support_macos26.patch removed are gone upstream.
+bazel_dep(name = "apple_support", version = "2.10.1", repo_name = "build_bazel_apple_support")
+
+# ---- other rulesets ----
 # Only remotejdk_11 is used (--java_runtime_version in .bazelrc).
 bazel_dep(name = "rules_java", version = "8.6.1")
 bazel_dep(name = "rules_python", version = "1.9.0")
