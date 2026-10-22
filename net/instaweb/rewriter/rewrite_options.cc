@@ -733,7 +733,7 @@ const RewriteOptions::Filter kDangerousFilterSet[] = {
 const RewriteOptions::Filter kRequiresScriptExecutionFilterSet[] = {
     RewriteOptions::kDedupInlinedImages, RewriteOptions::kDeferJavascript,
     RewriteOptions::kDelayImages,        RewriteOptions::kLazyloadImages,
-    RewriteOptions::kLocalStorageCache,
+    RewriteOptions::kLocalStorageCache,  RewriteOptions::kMobilize,
     // We do not include kPrioritizeVisibleContent since we do not want to
     // attach SupportNoscriptFilter in the case of blink pcache miss
     // pass-through, since this response will not have any custom script
