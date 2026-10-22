@@ -36,7 +36,6 @@ make_vars\.mk
 changelog\.template
 control\.template
 .*\.vcl
-genfiles
 generated
 VERSION
 version\.h\.in

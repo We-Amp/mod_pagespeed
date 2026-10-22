@@ -255,7 +255,7 @@ self_test() {
     "$(printf 'pagespeed/apache/mod_instaweb.cc\n')" ""
 
   check "generated shipped JS triggers       -> BLOCK" 1 \
-    "$(printf 'net/instaweb/genfiles/rewriter/js_defer_opt.js\n')" ""
+    "$(printf 'net/instaweb/rewriter/generated/js_defer_opt.js\n')" ""
 
   # --- the waiver ---
 

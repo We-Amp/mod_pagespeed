@@ -128,8 +128,7 @@ a filter, work there. `pagespeed/` holds the modern subsystems: the server
 adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/` and
 `automatic/`. There is no `rewriter/` directory under `pagespeed/`.
 `net/instaweb/rewriter/generated/` is generated; edit the source `.js` and run
-`tools/regenerate-rewriter-js.sh` (`net/instaweb/genfiles/` is a stale
-pre-Bazel copy that nothing builds from).
+`tools/regenerate-rewriter-js.sh`.
 
 ```
 mod_pagespeed/
