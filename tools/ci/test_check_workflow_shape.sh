@@ -40,6 +40,7 @@ expect_bad bad-caller-steps 'rule b'
 expect_bad bad-caller-fleet 'rule b'
 expect_bad bad-caller-expression 'rule b'
 expect_bad bad-caller-foreign-uses 'rule b'
+expect_bad bad-caller-full-ref 'rule b'
 expect_bad bad-local-uses 'rule c'
 expect_bad bad-fleet-literal 'rule d'
 expect_bad bad-routing-drift 'rule d'
@@ -78,6 +79,10 @@ expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'
 expect_bad bad-port 'rule e'
+
+# ci-dev-full-input: the good tree's ci-dev caller has a full job that uses
+# pipeline-full.yml@ci-dev (accepted by the good-tree case above); the same
+# call at a feature ref is rejected (bad-caller-full-ref above).
 
 # The repository itself passes (self-test).
 REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
