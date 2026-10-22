@@ -1572,7 +1572,7 @@ jobs:
               done
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out \
-                test --config="${BAZEL_CI_CONFIG}" ${BAZEL_CACHE_FLAGS} --disk_cache=/cache -c opt \
+                test --config="${BAZEL_CI_CONFIG}" ${BAZEL_CACHE_FLAGS} --disk_cache=/cache -c opt --nocache_test_results \
                 --deleted_packages=test/pagespeed/envoy \
                 --keep_going \
                 --test_tag_filters=-external \

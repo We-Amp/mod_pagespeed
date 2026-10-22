@@ -467,7 +467,7 @@ jobs:
               set -e
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out-asan \
-                test ${BAZEL_CONFIG} --config=clang-asan \
+                test ${BAZEL_CONFIG} --config=clang-asan --nocache_test_results \
                 --action_env=CC=clang --action_env=CXX=clang++ \
                 --keep_going \
                 --test_env=REDIS_HOST="${REDIS_HOST}" \
@@ -596,7 +596,7 @@ jobs:
               set -e
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out-tsan \
-                test ${BAZEL_CONFIG} --config=clang-tsan \
+                test ${BAZEL_CONFIG} --config=clang-tsan --nocache_test_results \
                 --action_env=CC=clang --action_env=CXX=clang++ \
                 --keep_going \
                 --test_env=REDIS_HOST="${REDIS_HOST}" \
@@ -1237,7 +1237,7 @@ jobs:
           $ErrorActionPreference = 'Continue'
           Set-Location $env:GITHUB_WORKSPACE
           $common = @(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'asan-flags.txt'))
-          & $env:BAZEL_CMD "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)" test @common `
+          & $env:BAZEL_CMD "--output_user_root=$($env:WIN_BAZEL_OUTPUT_ROOT)" test @common --nocache_test_results `
             --test_output=errors --keep_going --test_env=PATH `
             -- //test/pagespeed/iis/...
           exit $LASTEXITCODE
@@ -1703,7 +1703,7 @@ jobs:
             bash -c '
               set -e
               bazel --output_user_root=/tmp/bazel-out \
-                test --config=ci-linux-arm64 --remote_cache= \
+                test --config=ci-linux-arm64 --remote_cache= --nocache_test_results \
                 --jobs=HOST_CPUS*.75 \
                 --disk_cache=/cache --experimental_disk_cache_gc_max_size=3G \
                 --action_env=CC=clang --action_env=CXX=clang++ \
