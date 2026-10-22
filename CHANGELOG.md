@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Package descriptions name the product mod_pagespeed.** The
+  `mod-pagespeed` and `nginx-module-pagespeed` packages now describe
+  themselves as "mod_pagespeed web page optimization module for Apache
+  httpd" and "... for nginx" in `apt show` and `dnf info`, instead of
+  "Apache 2 module to optimize web content" and a summary that repeated
+  the package version.
+
 ### Removed
 
 - The unbuilt `css_minify_main` and `js_minify_main` command-line sources are
