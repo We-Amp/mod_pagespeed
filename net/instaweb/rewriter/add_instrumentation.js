@@ -19,15 +19,15 @@
  * AddInstrumentationFilter.  Gathers Core Web Vitals (LCP, session-window
  * CLS, INP) through PerformanceObserver plus Navigation Timing Level 2
  * data, and reports them in a single navigator.sendBeacon POST when the
- * page is hidden or unloaded.  Web APIs are accessed with bracket notation
- * throughout so the Closure Compiler's ADVANCED mode cannot rename them.
+ * page is hidden or unloaded.  The bracket notation on Web APIs dates from
+ * the Closure Compiler's ADVANCED mode, which renamed dotted properties;
+ * esbuild never renames properties, so it is now only a matter of style.
  */
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 /**
  * @constructor
@@ -269,8 +269,8 @@ pagespeed.AddInstrumentation.prototype.buildBody_ = function() {
   if (this.extraParams_ != '') {
     body += this.extraParams_;
   }
-  if (pagespeed['getResourceTimingData']) {
-    body += pagespeed['getResourceTimingData']();
+  if (pagespeed.getResourceTimingData) {
+    body += pagespeed.getResourceTimingData();
   }
   if (document.referrer) {
     body += '&ref=' + encodeURIComponent(document.referrer);
@@ -353,5 +353,3 @@ pagespeed.addInstrumentationInit = function(beaconUrl, extraParams, htmlUrl) {
     }
   });
 };
-
-pagespeed['addInstrumentationInit'] = pagespeed.addInstrumentationInit;

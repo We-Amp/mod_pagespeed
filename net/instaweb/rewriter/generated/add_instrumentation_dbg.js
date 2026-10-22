@@ -1,135 +1,198 @@
-(function(){window.pagespeed = window.pagespeed || {};
-var pagespeed = window.pagespeed;
-pagespeed.AddInstrumentation = function(a, c, b) {
-  this.beaconUrlPrefix_ = a;
-  this.extraParams_ = c;
-  this.htmlUrl_ = b;
-  this.sent_ = !1;
-  this.lcpMs_ = -1;
-  this.clsSession_ = {sum:0, firstTime:0, lastTime:0};
-  this.cls_ = 0;
-  this.clsObserved_ = !1;
-  this.inpMs_ = -1;
-  this.observers_ = [];
-  this.initObservers_();
-};
-pagespeed.AddInstrumentation.prototype.observe_ = function(a, c, b) {
-  var e = window.PerformanceObserver;
-  if (!e || !e.supportedEntryTypes || e.supportedEntryTypes.indexOf(a) == -1) {
-    return !1;
-  }
-  try {
-    var d = new e(function(f) {
-      c(f.getEntries());
-    });
-    b = b || {};
-    b.type = a;
-    b.buffered = !0;
-    d.observe(b);
-    this.observers_.push({observer:d, handler:c});
-    return !0;
-  } catch (f) {
-    return !1;
-  }
-};
-pagespeed.AddInstrumentation.prototype.initObservers_ = function() {
-  var a = this;
-  this.observe_("largest-contentful-paint", function(b) {
-    for (var e = 0; e < b.length; e++) {
-      var d = b[e];
-      a.lcpMs_ = Math.round(d.renderTime || d.loadTime || d.startTime);
+(() => {
+  window.pagespeed = window.pagespeed || {};
+  var pagespeed = window.pagespeed;
+  pagespeed.AddInstrumentation = function(beaconUrlPrefix, extraParams, htmlUrl) {
+    this.beaconUrlPrefix_ = beaconUrlPrefix;
+    this.extraParams_ = extraParams;
+    this.htmlUrl_ = htmlUrl;
+    this.sent_ = false;
+    this.lcpMs_ = -1;
+    this.clsSession_ = { sum: 0, firstTime: 0, lastTime: 0 };
+    this.cls_ = 0;
+    this.clsObserved_ = false;
+    this.inpMs_ = -1;
+    this.observers_ = [];
+    this.initObservers_();
+  };
+  pagespeed.AddInstrumentation.prototype.observe_ = function(type, handler, opt_extra) {
+    var PO = window["PerformanceObserver"];
+    if (!PO) {
+      return false;
     }
-  });
-  this.clsObserved_ = this.observe_("layout-shift", function(b) {
-    for (var e = 0; e < b.length; e++) {
-      var d = b[e];
-      if (!d.hadRecentInput) {
-        var f = a.clsSession_;
-        f.sum > 0 && d.startTime - f.lastTime < 1000 && d.startTime - f.firstTime < 5000 ? (f.sum += d.value, f.lastTime = d.startTime) : (f.sum = d.value, f.firstTime = f.lastTime = d.startTime);
-        f.sum > a.cls_ && (a.cls_ = f.sum);
-      }
+    if (!PO["supportedEntryTypes"] || PO["supportedEntryTypes"].indexOf(type) == -1) {
+      return false;
     }
-  });
-  var c = function(b) {
-    for (var e = 0; e < b.length; e++) {
-      var d = b[e];
-      if (d.entryType != "event" || d.interactionId) {
-        d = Math.round(d.duration), d > a.inpMs_ && (a.inpMs_ = d);
-      }
+    try {
+      var observer = new PO(function(list) {
+        handler(list["getEntries"]());
+      });
+      var opts = opt_extra || {};
+      opts["type"] = type;
+      opts["buffered"] = true;
+      observer["observe"](opts);
+      this.observers_.push({ observer, handler });
+      return true;
+    } catch (e) {
+      return false;
     }
   };
-  this.observe_("event", c, {durationThreshold:40});
-  this.observe_("first-input", c);
-};
-pagespeed.AddInstrumentation.prototype.rearm_ = function() {
-  for (var a = 0; a < this.observers_.length; a++) {
-    try {
-      this.observers_[a].observer.disconnect();
-    } catch (c) {
-    }
-  }
-  this.observers_ = [];
-  this.sent_ = !1;
-  this.lcpMs_ = -1;
-  this.clsSession_ = {sum:0, firstTime:0, lastTime:0};
-  this.cls_ = 0;
-  this.inpMs_ = -1;
-  this.initObservers_();
-};
-pagespeed.AddInstrumentation.prototype.buildBody_ = function() {
-  var a = [], c = window.performance, b = null;
-  c && c.getEntriesByType && (c = c.getEntriesByType("navigation")) && c.length > 0 && (b = c[0]);
-  b ? (c = Math.round(b.loadEventStart), c > 0 && (a.push("ets=load:" + c), a.push("rload=" + c)), a.push("nav=" + Math.round(b.fetchStart)), a.push("dns=" + Math.round(b.domainLookupEnd - b.domainLookupStart)), a.push("connect=" + Math.round(b.connectEnd - b.connectStart)), a.push("req_start=" + Math.round(b.requestStart)), a.push("c_ttfb=" + Math.round(b.responseStart)), a.push("dwld=" + Math.round(b.responseEnd - b.responseStart)), a.push("dom_c=" + Math.round(b.domContentLoadedEventStart)), b.type && 
-  a.push("nt=" + b.type)) : window.mod_pagespeed_start && a.push("ets=load:" + (Number(new Date()) - window.mod_pagespeed_start));
-  this.lcpMs_ >= 0 && a.push("lcp=" + this.lcpMs_);
-  this.clsObserved_ && a.push("cls=" + Math.round(this.cls_ * 1000));
-  this.inpMs_ >= 0 && a.push("inp=" + this.inpMs_);
-  a.push("dpr=" + window.devicePixelRatio);
-  a = a.join("&");
-  this.extraParams_ != "" && (a += this.extraParams_);
-  pagespeed.getResourceTimingData && (a += pagespeed.getResourceTimingData());
-  document.referrer && (a += "&ref=" + encodeURIComponent(document.referrer));
-  return a;
-};
-pagespeed.AddInstrumentation.prototype.send_ = function() {
-  if (!this.sent_) {
-    this.sent_ = !0;
-    for (var a = 0; a < this.observers_.length; a++) {
-      var c = this.observers_[a];
+  pagespeed.AddInstrumentation.prototype.initObservers_ = function() {
+    var that = this;
+    this.observe_("largest-contentful-paint", function(entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        that.lcpMs_ = Math.round(e["renderTime"] || e["loadTime"] || e["startTime"]);
+      }
+    });
+    this.clsObserved_ = this.observe_("layout-shift", function(entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (e["hadRecentInput"]) {
+          continue;
+        }
+        var s = that.clsSession_;
+        if (s.sum > 0 && e["startTime"] - s.lastTime < 1e3 && e["startTime"] - s.firstTime < 5e3) {
+          s.sum += e["value"];
+          s.lastTime = e["startTime"];
+        } else {
+          s.sum = e["value"];
+          s.firstTime = s.lastTime = e["startTime"];
+        }
+        if (s.sum > that.cls_) {
+          that.cls_ = s.sum;
+        }
+      }
+    });
+    var inpHandler = function(entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var e = entries[i];
+        if (e["entryType"] == "event" && !e["interactionId"]) {
+          continue;
+        }
+        var duration = Math.round(e["duration"]);
+        if (duration > that.inpMs_) {
+          that.inpMs_ = duration;
+        }
+      }
+    };
+    this.observe_("event", inpHandler, { "durationThreshold": 40 });
+    this.observe_("first-input", inpHandler);
+  };
+  pagespeed.AddInstrumentation.prototype.rearm_ = function() {
+    for (var i = 0; i < this.observers_.length; i++) {
       try {
-        c.handler(c.observer.takeRecords()), c.observer.disconnect();
+        this.observers_[i].observer["disconnect"]();
       } catch (e) {
       }
     }
-    a = this.buildBody_();
-    c = this.beaconUrlPrefix_;
-    c += c.indexOf("?") == -1 ? "?" : "&";
-    c += "url=" + encodeURIComponent(this.htmlUrl_);
-    var b = window.navigator;
-    if (b && b.sendBeacon) {
+    this.observers_ = [];
+    this.sent_ = false;
+    this.lcpMs_ = -1;
+    this.clsSession_ = { sum: 0, firstTime: 0, lastTime: 0 };
+    this.cls_ = 0;
+    this.inpMs_ = -1;
+    this.initObservers_();
+  };
+  pagespeed.AddInstrumentation.prototype.buildBody_ = function() {
+    var parts = [];
+    var perf = window["performance"];
+    var navEntry = null;
+    if (perf && perf["getEntriesByType"]) {
+      var navEntries = perf["getEntriesByType"]("navigation");
+      if (navEntries && navEntries.length > 0) {
+        navEntry = navEntries[0];
+      }
+    }
+    if (navEntry) {
+      var loadMs = Math.round(navEntry["loadEventStart"]);
+      if (loadMs > 0) {
+        parts.push("ets=load:" + loadMs);
+        parts.push("rload=" + loadMs);
+      }
+      parts.push("nav=" + Math.round(navEntry["fetchStart"]));
+      parts.push("dns=" + Math.round(navEntry["domainLookupEnd"] - navEntry["domainLookupStart"]));
+      parts.push("connect=" + Math.round(navEntry["connectEnd"] - navEntry["connectStart"]));
+      parts.push("req_start=" + Math.round(navEntry["requestStart"]));
+      parts.push("c_ttfb=" + Math.round(navEntry["responseStart"]));
+      parts.push("dwld=" + Math.round(navEntry["responseEnd"] - navEntry["responseStart"]));
+      parts.push("dom_c=" + Math.round(navEntry["domContentLoadedEventStart"]));
+      if (navEntry["type"]) {
+        parts.push("nt=" + navEntry["type"]);
+      }
+    } else if (window["mod_pagespeed_start"]) {
+      parts.push("ets=load:" + (Number(new Date()) - window["mod_pagespeed_start"]));
+    }
+    if (this.lcpMs_ >= 0) {
+      parts.push("lcp=" + this.lcpMs_);
+    }
+    if (this.clsObserved_) {
+      parts.push("cls=" + Math.round(this.cls_ * 1e3));
+    }
+    if (this.inpMs_ >= 0) {
+      parts.push("inp=" + this.inpMs_);
+    }
+    parts.push("dpr=" + window.devicePixelRatio);
+    var body = parts.join("&");
+    if (this.extraParams_ != "") {
+      body += this.extraParams_;
+    }
+    if (pagespeed.getResourceTimingData) {
+      body += pagespeed.getResourceTimingData();
+    }
+    if (document.referrer) {
+      body += "&ref=" + encodeURIComponent(document.referrer);
+    }
+    return body;
+  };
+  pagespeed.AddInstrumentation.prototype.send_ = function() {
+    if (this.sent_) {
+      return;
+    }
+    this.sent_ = true;
+    for (var i = 0; i < this.observers_.length; i++) {
+      var o = this.observers_[i];
       try {
-        if (b.sendBeacon(c, a)) {
+        o.handler(o.observer["takeRecords"]());
+        o.observer["disconnect"]();
+      } catch (e) {
+      }
+    }
+    var body = this.buildBody_();
+    var url = this.beaconUrlPrefix_;
+    url += url.indexOf("?") == -1 ? "?" : "&";
+    url += "url=" + encodeURIComponent(this.htmlUrl_);
+    var nav = window.navigator;
+    if (nav && nav["sendBeacon"]) {
+      try {
+        if (nav["sendBeacon"](url, body)) {
           return;
         }
       } catch (e) {
       }
     }
-    (new Image()).src = c + "&" + a;
-  }
-};
-pagespeed.addInstrumentationInit = function(a, c, b) {
-  if (window.parent == window) {
-    var e = new pagespeed.AddInstrumentation(a, c, b);
+    new Image().src = url + "&" + body;
+  };
+  pagespeed.addInstrumentationInit = function(beaconUrl, extraParams, htmlUrl) {
+    if (window.parent != window) {
+      return;
+    }
+    var collector = new pagespeed.AddInstrumentation(
+      beaconUrl,
+      extraParams,
+      htmlUrl
+    );
     document.addEventListener("visibilitychange", function() {
-      document.visibilityState == "hidden" && e.send_();
+      if (document["visibilityState"] == "hidden") {
+        collector.send_();
+      }
     });
     window.addEventListener("pagehide", function() {
-      e.send_();
+      collector.send_();
     });
-    window.addEventListener("pageshow", function(d) {
-      d.persisted && e.rearm_();
+    window.addEventListener("pageshow", function(event) {
+      if (event["persisted"]) {
+        collector.rearm_();
+      }
     });
-  }
-};
-pagespeed.addInstrumentationInit = pagespeed.addInstrumentationInit;
+  };
 })();

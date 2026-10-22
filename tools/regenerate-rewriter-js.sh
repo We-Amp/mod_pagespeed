@@ -52,6 +52,7 @@ done
 
 # Sources compiled with esbuild instead of the Closure Compiler.
 ESBUILD_FILES=(
+    add_instrumentation.js
     client_domain_rewriter.js
     dedup_inlined_images.js
     defer_iframe.js
@@ -266,7 +267,6 @@ done
 
 # --- closure_compiler_without_dependency_mode files ---
 WITHOUT_DEP_FILES=(
-    add_instrumentation.js
     deterministic.js
 )
 WITH_DEP_FILES=(
