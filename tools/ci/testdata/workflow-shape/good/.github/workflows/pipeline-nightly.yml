@@ -34,7 +34,7 @@ jobs:
           echo "event ${EVENT} on ${REF} accepted"
   relay:
     needs: event-guard
-    if: ${{ !cancelled() && needs.event-guard.result == 'success' && true }}
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && true) }}
     runs-on: ubuntu-latest
     steps:
       - run: echo relay

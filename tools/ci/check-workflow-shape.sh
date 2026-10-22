@@ -699,18 +699,25 @@ done
 # pipeline-full.yml also allows pull_request (the caller runs it for the
 # ci:full label).
 #   - "Reaches" means a path of needs edges to event-guard along which no job
-#     can run after a failed guard. A job whose if: has always() or failure(),
-#     or (when it is not a fleet job, whose if: rule d already pins) a ||,
-#     reaches only when the if: starts with the conjunct
-#     `needs.event-guard.result == 'success'` (optionally after always() or
-#     !cancelled()) and the job needs event-guard. A job whose if: has
-#     !cancelled() needs a `needs.<job>.result == 'success'` term for a
-#     reaching job. A job with continue-on-error other than false does not
-#     pass the guard on to its dependents. Before matching, every job's
-#     key is unquoted and its if: is normalised: quotes stripped, all lines
-#     (folded, literal or plain multi-line) joined, lowercased, whitespace
-#     collapsed. The scan covers every workflow file with a fleet runs-on, not
-#     a fixed list.
+#     can run after a failed guard. Before matching, every job's key is
+#     unquoted and its if: is normalised: quotes stripped, all lines (folded,
+#     literal or plain multi-line) joined, lowercased, whitespace collapsed,
+#     and the space between a function name and its ( removed.
+#   - Relay rule: for every job on a needs path between event-guard and a
+#     fleet job (and the fleet jobs themselves, unless rule d pins their if:,
+#     that is in a workflow_call file), an if: that contains always(,
+#     failure(, cancelled(, ||, ! (a negation anywhere, != included) or
+#     == false must be exactly
+#       needs.event-guard.result == 'success' && (<inner>)
+#     (optionally inside ${{ }}), the parentheses around <inner> one balanced
+#     group (string literals ignored) and <inner> free of event-guard, and
+#     the job must need event-guard. Otherwise the job is rejected by name.
+#     Any other if: is success()-implied and passes the guard on as before.
+#   - A pinned fleet job whose if: has always( or failure( does not reach; one
+#     whose if: has !cancelled() needs a `needs.<job>.result == 'success'`
+#     term for a reaching job. A job with continue-on-error other than false
+#     does not pass the guard on to its dependents. The scan covers every
+#     workflow file with a fleet runs-on, not a fixed list.
 EG_DEFAULT_BRANCH="master"
 eg_allowed_for() { # workflow file base name
   case "$1" in
@@ -763,9 +770,30 @@ eg_expected() {
 }
 
 # Fleet jobs that do not reach event-guard, one per line (see the rules above).
-eg_unreached() {
-  awk -v hosted="${HOSTED_LABELS}" '
+eg_unreached() { # workflow file, 1 if it is a workflow_call file (rule d pins its fleet jobs)
+  awk -v hosted="${HOSTED_LABELS}" -v wcall="$2" '
     BEGIN { n = split(hosted, h, " "); for (i = 1; i <= n; i++) ishosted[h[i]] = 1 }
+    # The parenthesised guard conjunct: exactly
+    # needs.event-guard.result == \047success\047 && (<inner>), the parentheses
+    # around <inner> one balanced group (string literals ignored) and <inner>
+    # free of event-guard.
+    function guardform(t,   p, inner, q, d, c, i) {
+      if (t ~ /^\$\{\{/) { if (t !~ /\}\}$/) return 0; sub(/^\$\{\{ ?/, "", t); sub(/ ?\}\}$/, "", t) }
+      if (index(t, "${{") || index(t, "}}")) return 0
+      p = "needs.event-guard.result == \047success\047 && ("
+      if (index(t, p) != 1 || substr(t, length(t), 1) != ")") return 0
+      inner = substr(t, length(p) + 1, length(t) - length(p) - 1)
+      if (index(inner, "event-guard")) return 0
+      q = inner; gsub(/\047[^\047]*\047/, "", q)
+      if (index(q, "\047")) return 0
+      d = 0
+      for (i = 1; i <= length(q); i++) {
+        c = substr(q, i, 1)
+        if (c == "(") d++
+        else if (c == ")") { d--; if (d < 0) return 0 }
+      }
+      return d == 0
+    }
     /^[[:space:]]*#/ { next }
     /^jobs:[[:space:]]*$/ { injobs = 1; next }
     injobs && /^[^[:space:]#]/ { injobs = 0 }
@@ -798,13 +826,16 @@ eg_unreached() {
           if (reach[j]) continue
           t = tolower(iff[j]); gsub(/[[:space:]]+/, " ", t); sub(/^ /, "", t); sub(/ $/, "", t)
           if (t ~ /^".*"$/ || t ~ /^\047.*\047$/) t = substr(t, 2, length(t) - 2)
+          while (match(t, /[a-z0-9_] \(/)) t = substr(t, 1, RSTART) substr(t, RSTART + 2)
+          u = t; gsub(/ /, "", u)
+          risky = (u ~ /always\(|failure\(|cancelled\(|\|\||!|==false/)
           m = split(needs[j], nd, " "); ok = 0
           hasg = 0
           for (x = 1; x <= m; x++) if (nd[x] == "event-guard") hasg = 1
           fleet = (ro[j] != "" && !(ro[j] in ishosted))
-          if (hasg && (t ~ /^\$\{\{ (always\(\) && |!cancelled\(\) && )?needs\.event-guard\.result == .success. && /)) ok = 1
-          else if (t ~ /always\(\)|failure\(\)/) ok = 0
-          else if (!fleet && t ~ /\|\|/) ok = 0
+          pinned = (fleet && wcall == 1)
+          if (!pinned && risky) { ok = (hasg && guardform(t)); if (!ok) badform[j] = 1 }
+          else if (t ~ /always\(|failure\(/) ok = 0
           else {
             for (x = 1; x <= m; x++) {
               d = nd[x]
@@ -817,10 +848,33 @@ eg_unreached() {
           if (ok) { reach[j] = 1; changed = 1 }
         }
       }
+      # Jobs below event-guard (a needs path up to it).
+      changed = 1
+      while (changed) {
+        changed = 0
+        for (i = 1; i <= nj; i++) {
+          j = order[i]
+          if (below[j]) continue
+          m = split(needs[j], nd, " ")
+          for (x = 1; x <= m; x++) if (nd[x] == "event-guard" || below[nd[x]]) { below[j] = 1; changed = 1; break }
+        }
+      }
+      # Unreached fleet jobs ("F <job>"), and every job on a needs path between
+      # event-guard and a fleet job whose if: breaks the parenthesised guard
+      # rule ("R <job>").
       for (i = 1; i <= nj; i++) {
         j = order[i]
         if (j == "event-guard" || ro[j] == "" || (ro[j] in ishosted)) continue
-        if (!reach[j]) print j
+        if (!reach[j]) print "F " j
+        sp = 0; stk[++sp] = j
+        while (sp > 0) {
+          a = stk[sp--]
+          if (a in seen) continue
+          seen[a] = 1
+          if (badform[a] && below[a]) print "R " a
+          m = split(needs[a], nd, " ")
+          for (x = 1; x <= m; x++) if (nd[x] != "event-guard") stk[++sp] = nd[x]
+        }
       }
     }
   ' "$1"
@@ -860,11 +914,15 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   if [ -z "${eg_val}" ] || [ -z "${eg_rval}" ] || [ "${eg_block}" != "$(eg_expected "${eg_val}" "${eg_rval}")" ]; then
     err "${wf}: the event-guard job must match the spec form exactly: no other key, step or command (event-guard)"
   fi
-  while IFS= read -r uj; do
+  while read -r ukind uj; do
     [ -n "${uj}" ] || continue
-    err "${wf}: fleet job '${uj}' does not reach event-guard through needs, or could run after it failed (event-guard)"
+    if [ "${ukind}" = R ]; then
+      err "${wf}: job '${uj}' has an if: with always(, failure(, cancelled(, ||, ! or == false that is not exactly needs.event-guard.result == 'success' && (<inner>) (event-guard)"
+    else
+      err "${wf}: fleet job '${uj}' does not reach event-guard through needs, or could run after it failed (event-guard)"
+    fi
   done <<EOT
-$(eg_unreached "${wf}")
+$(eg_unreached "${wf}" "$(on_triggers "${wf}" | grep -qx workflow_call && echo 1 || echo 0)")
 EOT
 done
 

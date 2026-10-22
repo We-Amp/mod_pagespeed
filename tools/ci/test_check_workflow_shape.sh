@@ -143,6 +143,14 @@ expect_bad bad-event-guard-relay-quoted-if 'event-guard'
 expect_bad bad-event-guard-relay-quoted-coe 'event-guard'
 expect_bad bad-event-guard-unnamed-queue-ref 'event-guard'
 expect_bad bad-event-guard-unnamed-wide-ref 'event-guard'
+expect_bad bad-event-guard-relay-guard-or-always "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-guard-or-failure "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-negated-guard "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-guard-eq-false "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-always-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-not-equal "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-quoted-paren "job 'relay' has an if:"
+expect_good good-event-guard-relay-paren
 expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'
