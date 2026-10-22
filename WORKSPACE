@@ -55,6 +55,12 @@ http_archive(
     urls = [
         "https://github.com/bazelbuild/rules_cc/releases/download/0.0.17/rules_cc-0.0.17.tar.gz",
     ],
+    # Bazel 8 configures @local_config_cc from rules_cc instead of its builtin
+    # copy. rules_cc's clang-cl branch never sets DUMPBIN, so the Windows
+    # clang-cl autoconfigure fails ("key DUMPBIN not found"). Fixed on rules_cc
+    # main, not yet released; this backports the fix.
+    patches = ["//bazel:rules_cc_clang_cl_dumpbin.patch"],
+    patch_args = ["-p1"],
 )
 
 http_archive(
