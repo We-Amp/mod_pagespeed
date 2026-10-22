@@ -550,10 +550,13 @@ this text.
 
 This narrows the merge-queue boundary; it does not close it. The policy stays:
 no fork or Dependabot pull request is added to the merge queue. The `@ci-dev`
-allow-list entries stay, but the `ci-dev` copies of `pipeline-pr.yml` and
-`pipeline-full.yml` gain the queue fork guard and this guard only when `ci-dev`
-is next pushed from a `master`-based branch that carries them; until then a queued
-tree calling `@ci-dev` is not covered.
+allow-list entries stay. Pushing `ci-dev` from a `master`-based branch gives its
+copies of `pipeline-pr.yml` and `pipeline-full.yml` the queue fork guard and
+this guard, but that alone does not close the `@ci-dev` path: it stays open
+until the default workflow token permission is read-only and the `ci-dev`
+branch is restricted so that only administrators can update it (or the
+`@ci-dev` allow-list entries are removed), and `ci-dev` has been pushed again
+from the default branch. Until then the policy above applies.
 
 ## Required checks
 
@@ -591,12 +594,15 @@ A change to a reusable workflow does not reach the build runners from its own
 pull request (the callers pin `@master`). To exercise it before merge:
 
 1. Push the change to the `ci-dev` branch:
-   `git push --force origin HEAD:ci-dev`.
+   `git push --force origin HEAD:ci-dev`. Push `ci-dev` only from a branch
+   based on the current `master`, so it carries the queue and event guards.
 2. Dispatch the `CI (ci-dev)` workflow (`ci-dev.yml`) from the Actions tab or
-   with `gh workflow run ci-dev.yml`. It calls `pipeline-pr.yml@ci-dev`.
-   To run the full tier as well, set the `full` input:
-   `gh workflow run ci-dev.yml --ref <branch> -f full=true` (or tick `full`
-   in the Actions tab). The `full` job then calls `pipeline-full.yml@ci-dev`.
+   with `gh workflow run ci-dev.yml --ref ci-dev`. It calls `pipeline-pr.yml@ci-dev`.
+   Use `--ref ci-dev`: the event guard of the full-tier pipeline accepts
+   a dispatch only on `master` or `ci-dev`. To run the full tier as well,
+   set the `full` input: `gh workflow run ci-dev.yml --ref ci-dev -f full=true`
+   (or tick `full` in the Actions tab). The `full` job then calls
+   `pipeline-full.yml@ci-dev`.
 3. When it is green, merge the pull request as usual.
 
 The `ci-dev` workflow is latest-wins: its concurrency group cancels the run in
@@ -671,8 +677,9 @@ and fails the build when the shape breaks:
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
 - **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`
-  job holds the merge-queue guard step as the first step after the checkout
-  step (which sets no `env:`), with fixed keys (compared unquoted), `if:`,
+  job holds the merge-queue guard step as the third of three fixed steps
+  after the checkout step (after the push-ref and token-dispatch refusal
+  steps; the checkout sets no `env:`), with fixed keys (compared unquoted), `if:`,
   `run:` block (the classifier is read from `origin/${DEFAULT_BRANCH}` with
   `git show`) and only the guard's own env keys; no other line names the
   script in any spelling, and the job has no glob, `find`, `source` or
