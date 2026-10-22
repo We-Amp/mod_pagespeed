@@ -1,42 +1,45 @@
-(function(){var ENTER_KEY_CODE = 13;
-window.pagespeed = window.pagespeed || {};
-var pagespeed = window.pagespeed;
-pagespeed.ClientDomainRewriter = function(a) {
-  this.mappedDomainNames_ = a;
-};
-pagespeed.ClientDomainRewriter.prototype.anchorListener = function(a) {
-  a = a || window.event;
-  if (a.type != "keypress" || a.keyCode == ENTER_KEY_CODE) {
-    for (var b = a.target; b != null; b = b.parentNode) {
-      if (b.tagName == "A") {
-        this.processEvent(b.href, a);
-        break;
+(() => {
+  var ENTER_KEY_CODE = 13;
+  window.pagespeed = window.pagespeed || {};
+  var pagespeed = window.pagespeed;
+  pagespeed.ClientDomainRewriter = function(mappedDomainNames) {
+    this.mappedDomainNames_ = mappedDomainNames;
+  };
+  pagespeed.ClientDomainRewriter.prototype.anchorListener = function(event) {
+    event = event || window.event;
+    if (event.type == "keypress" && event.keyCode != ENTER_KEY_CODE) {
+      return;
+    }
+    for (var target = event.target; target != null; target = target.parentNode) {
+      if (target.tagName == "A") {
+        this.processEvent(target.href, event);
+        return;
       }
     }
-  }
-};
-pagespeed.ClientDomainRewriter.prototype.addEventListeners = function() {
-  var a = this;
-  document.body.onclick = function(b) {
-    a.anchorListener(b);
   };
-  document.body.onkeypress = function(b) {
-    a.anchorListener(b);
+  pagespeed.ClientDomainRewriter.prototype.addEventListeners = function() {
+    var me = this;
+    document.body.onclick = function(event) {
+      me.anchorListener(event);
+    };
+    document.body.onkeypress = function(event) {
+      me.anchorListener(event);
+    };
   };
-};
-pagespeed.ClientDomainRewriter.prototype.processEvent = function(a, b) {
-  for (var c = 0; c < this.mappedDomainNames_.length; c++) {
-    if (a.indexOf(this.mappedDomainNames_[c]) == 0) {
-      window.location = window.location.protocol + "//" + window.location.hostname + "/" + a.substr(this.mappedDomainNames_[c].length);
-      b.preventDefault();
-      break;
+  pagespeed.ClientDomainRewriter.prototype.processEvent = function(url, event) {
+    for (var i = 0; i < this.mappedDomainNames_.length; i++) {
+      if (url.indexOf(this.mappedDomainNames_[i]) == 0) {
+        window.location = window.location.protocol + "//" + window.location.hostname + "/" + url.substr(this.mappedDomainNames_[i].length);
+        event.preventDefault();
+        return;
+      }
     }
-  }
-};
-pagespeed.clientDomainRewriterInit = function(a) {
-  a = new pagespeed.ClientDomainRewriter(a);
-  pagespeed.clientDomainRewriter = a;
-  a.addEventListeners();
-};
-pagespeed.clientDomainRewriterInit = pagespeed.clientDomainRewriterInit;
+  };
+  pagespeed.clientDomainRewriterInit = function(mappedDomainNames) {
+    var clientDomainRewriter = new pagespeed.ClientDomainRewriter(
+      mappedDomainNames
+    );
+    pagespeed.clientDomainRewriter = clientDomainRewriter;
+    clientDomainRewriter.addEventListeners();
+  };
 })();

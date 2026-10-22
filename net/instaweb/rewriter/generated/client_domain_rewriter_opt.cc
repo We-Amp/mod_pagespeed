@@ -20,16 +20,22 @@
 namespace net_instaweb {
 
 const char* JS_client_domain_rewriter_opt =
-    "(function(){window.pagespeed=window.pagespeed||{};var d=wind"
-    "ow.pagespeed;function f(a){this.g=a}function g(a,b){b=b||win"
-    "dow.event;if(b.type!=\"keypress\"||b.keyCode==13)for(var c=b.t"
-    "arget;c!=null;c=c.parentNode)if(c.tagName==\"A\"){c=c.href;for"
-    "(var e=0;e<a.g.length;e++)if(c.indexOf(a.g[e])==0){window.lo"
-    "cation=window.location.protocol+\"//\"+window.location.hostnam"
-    "e+\"/\"+c.substr(a.g[e].length);b.preventDefault();break}break"
-    "}}\nfunction h(a){document.body.onclick=function(b){g(a,b)};d"
-    "ocument.body.onkeypress=function(b){g(a,b)}}d.h=function(a){"
-    "a=new f(a);d.clientDomainRewriter=a;h(a)};d.clientDomainRewr"
-    "iterInit=d.h;})();\n";
+    "(()=>{var t=13;window.pagespeed=window.pagespeed||{};var i=w"
+    "indow.pagespeed;i.ClientDomainRewriter=function(e){this.mapp"
+    "edDomainNames_=e};i.ClientDomainRewriter.prototype.anchorLis"
+    "tener=function(e){if(e=e||window.event,!(e.type==\"keypress\"&"
+    "&e.keyCode!=t)){for(var n=e.target;n!=null;n=n.parentNode)if"
+    "(n.tagName==\"A\"){this.processEvent(n.href,e);return}}};i.Cli"
+    "entDomainRewriter.prototype.addEventListeners=function(){var"
+    " e=this;document.body.onclick=function(n){e.anchorListener(n"
+    ")},document.body.onkeypress=function(n){e.anchorListener(n)}"
+    "};i.ClientDomainRewriter.prototype.processEvent=function(e,n"
+    "){for(var o=0;o<this.mappedDomainNames_.length;o++)if(e.inde"
+    "xOf(this.mappedDomainNames_[o])==0){window.location=window.l"
+    "ocation.protocol+\"//\"+window.location.hostname+\"/\"+e.substr("
+    "this.mappedDomainNames_[o].length),n.preventDefault();return"
+    "}};i.clientDomainRewriterInit=function(e){var n=new i.Client"
+    "DomainRewriter(e);i.clientDomainRewriter=n,n.addEventListene"
+    "rs()};})();\n";
 
 }  // namespace net_instaweb

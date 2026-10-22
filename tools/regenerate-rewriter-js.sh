@@ -52,6 +52,7 @@ done
 
 # Sources compiled with esbuild instead of the Closure Compiler.
 ESBUILD_FILES=(
+    client_domain_rewriter.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -262,7 +263,6 @@ done
 # --- closure_compiler_without_dependency_mode files ---
 WITHOUT_DEP_FILES=(
     add_instrumentation.js
-    client_domain_rewriter.js
     dedup_inlined_images.js
     defer_iframe.js
     delay_images_inline.js

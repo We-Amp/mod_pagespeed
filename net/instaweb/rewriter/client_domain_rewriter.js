@@ -24,11 +24,10 @@
 
 var ENTER_KEY_CODE = 13;
 
-// Exporting functions using quoted attributes to prevent Closure Compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 /**
  * @constructor
@@ -101,7 +100,6 @@ pagespeed.ClientDomainRewriter.prototype.processEvent = function(url, event) {
 pagespeed.clientDomainRewriterInit = function(mappedDomainNames) {
   var clientDomainRewriter = new pagespeed.ClientDomainRewriter(
       mappedDomainNames);
-  pagespeed['clientDomainRewriter'] = clientDomainRewriter;
+  pagespeed.clientDomainRewriter = clientDomainRewriter;
   clientDomainRewriter.addEventListeners();
 };
-pagespeed['clientDomainRewriterInit'] = pagespeed.clientDomainRewriterInit;
