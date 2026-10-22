@@ -81,7 +81,7 @@ nginx_repository = repository_rule(
     implementation = _nginx_repository_impl,
     attrs = {
         "build_file": attr.label(
-            default = "@mod_pagespeed//bazel:nginx.BUILD",
+            default = Label("//bazel:nginx.BUILD"),
             allow_single_file = True,
         ),
     },
@@ -333,7 +333,7 @@ _NGX_AUTO_HEADERS_STUB = """
 def nginx_dependencies():
     """Register NGINX as an external dependency.
 
-    Call this function from WORKSPACE after mod_pagespeed_dependencies().
+    Called by the non_bcr_deps module extension (bazel/extensions.bzl).
 
     This sets up NGINX using the nginx_repository rule which:
     1. Checks NGINX_PATH environment variable

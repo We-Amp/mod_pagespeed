@@ -80,3 +80,34 @@ local_path_override(
     module_name = "zlib",
     path = "third_party/zlib_alias_module",
 )
+
+# ---- everything else: our own module extension (bazel/extensions.bzl) ----
+non_bcr_deps = use_extension("//bazel:extensions.bzl", "non_bcr_deps")
+use_repo(
+    non_bcr_deps,
+    "aom_src",
+    "apr",
+    "aprutil",
+    "bazel_compdb",
+    "com_github_gflags_gflags",
+    "com_github_libevent_libevent",
+    "com_googlesource_googleurl",
+    "curl_src",
+    "cyclone",
+    "dav1d_src",
+    "ed25519",
+    "fmt",
+    "giflib",
+    "google_sparsehash",
+    "hiredis",
+    "jsoncpp",
+    "libavif_src",
+    "libjpeg_turbo",
+    "libmemcached_src",
+    "libpng",
+    "libpsl",
+    "libwebp",
+    "nginx",
+    "optipng",
+    "spdlog",
+)

@@ -36,7 +36,7 @@ esac
 
 echo "=== build $SAN module  obase=$OB  dst=$DST  ($(date -u +%H:%M:%S)Z) ==="
 "$BZL" --output_base="$OB" build "${EXTRA[@]}" \
-  --override_repository=cyclone="$CYC" \
+  --override_repository=+non_bcr_deps+cyclone="$CYC" \
   --disk_cache="$DC" \
   --jobs=48 \
   //:libmod_pagespeed.so 2>&1 | tail -30

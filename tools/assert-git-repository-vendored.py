@@ -13,8 +13,9 @@ normal CI leg — and then breaks ONLY at release time, inside a container that
 cannot clone it. That is exactly how the AVIF `aom_src` dep bit r20 attempt 1.
 
 The fix is "the cyclone pattern": every `git_repository` is redirected to a
-vendored source copy via a `build:vendored --override_repository=<name>=<path>`
-line in pagespeed.bazelrc, and `tools/vendor-deps.sh` populates that path. The
+vendored source copy via a
+`build:vendored --override_repository=+non_bcr_deps+<name>=<path>` line in
+pagespeed.bazelrc, and `tools/vendor-deps.sh` populates that path. The
 release build runs `--config=ci`, which pulls in `--config=vendored`, so the
 override is what actually keeps `git` off the release critical path. This guard
 fails if any `git_repository` lacks that override (or if the override points at
@@ -22,6 +23,11 @@ a directory tools/vendor-deps.sh never creates).
 
 Design notes (fail closed, like the sibling bazelrc guard):
 
+  * CANONICAL NAMES. The git_repository deps are declared by the non_bcr_deps
+    module extension (bazel/extensions.bzl), so their canonical repo name is
+    `+non_bcr_deps+<name>`. Bazel 8 applies --override_repository by canonical
+    name only: an override spelled with the apparent name is silently ignored
+    and the build git-clones the dep. Only the canonical spelling counts here.
   * SCAN THE WHOLE MACRO TREE. `git_repository` calls are discovered across
     every `bazel/*.bzl` — the files the WORKSPACE loads its deps from — not just
     repositories.bzl, so a dep added in a new .bzl is covered automatically.
@@ -64,6 +70,8 @@ VENDOR_SCRIPT = "tools/vendor-deps.sh"
 # (`build:ci --config=vendored`). Only overrides declared under THIS config
 # keep git off the release critical path.
 VENDOR_CONFIG = "vendored"
+# Canonical-name prefix of the repos the non_bcr_deps extension declares.
+EXTENSION_PREFIX = "+non_bcr_deps+"
 
 # `git_repository(` (but not the `load(... "git_repository")` statement or a
 # comment). Matches the call, then the FIRST `name = "..."` that follows it.
@@ -125,7 +133,9 @@ def find_git_repositories(bzl_texts: dict[str, str]) -> dict[str, str]:
 
 def parse_vendored_overrides(bazelrc_texts: dict[str, str]) -> dict[str, str]:
     """Map repo name -> vendored path for every `build:<vendored> ...
-    --override_repository=<name>=<path>` line across the bazelrc files."""
+    --override_repository=+non_bcr_deps+<name>=<path>` line across the bazelrc
+    files. Overrides spelled with any other repo name do not reach the
+    extension's repos and are not counted."""
     overrides: dict[str, str] = {}
     override_re = re.compile(
         r"--override_repository[=\s]+([^=\s]+)=(\S+)"
@@ -137,7 +147,8 @@ def parse_vendored_overrides(bazelrc_texts: dict[str, str]) -> dict[str, str]:
             if not config_re.match(line):
                 continue
             for name, path in override_re.findall(line):
-                overrides[name] = path
+                if name.startswith(EXTENSION_PREFIX):
+                    overrides[name[len(EXTENSION_PREFIX):]] = path
     return overrides
 
 
@@ -169,7 +180,9 @@ def evaluate(
                 f"vendored override.\n"
                 f"      Add to {BAZELRC_FILES[0]} (the cyclone pattern):\n"
                 f"        build:{VENDOR_CONFIG} --override_repository="
-                f"{name}=vendor/{name}\n"
+                f"{EXTENSION_PREFIX}{name}=vendor/{name}\n"
+                f"      (the canonical name: an apparent-name override is "
+                f"ignored for extension repos)\n"
                 f"      and vendor its source in {VENDOR_SCRIPT}. Without this the "
                 f"dep is git-cloned at\n"
                 f"      build time, which the git-less release distro containers "
@@ -243,8 +256,8 @@ def deps():
 
 _COMPLIANT_RC = (
     "build:vendored --repository_cache=vendor/repo-cache\n"
-    "build:vendored --override_repository=cyclone=vendor/cyclone\n"
-    "build:vendored --override_repository=aom_src=vendor/aom\n"
+    "build:vendored --override_repository=+non_bcr_deps+cyclone=vendor/cyclone\n"
+    "build:vendored --override_repository=+non_bcr_deps+aom_src=vendor/aom\n"
 )
 
 _COMPLIANT_VENDOR = (
@@ -273,7 +286,7 @@ def self_test() -> int:
 
     # 2. A git_repository with no override fails (the r20 shape).
     rc_no_aom = (
-        "build:vendored --override_repository=cyclone=vendor/cyclone\n"
+        "build:vendored --override_repository=+non_bcr_deps+cyclone=vendor/cyclone\n"
     )
     check("dep missing its vendored override",
           _run_case(_COMPLIANT_BZL, rc_no_aom, _COMPLIANT_VENDOR), True)
@@ -285,19 +298,27 @@ def self_test() -> int:
 
     # 4. Override declared under the WRONG config does not count.
     rc_wrong_config = (
-        "build:vendored --override_repository=cyclone=vendor/cyclone\n"
-        "build:linux --override_repository=aom_src=vendor/aom\n"
+        "build:vendored --override_repository=+non_bcr_deps+cyclone=vendor/cyclone\n"
+        "build:linux --override_repository=+non_bcr_deps+aom_src=vendor/aom\n"
     )
     check("override under a non-vendored config is not accepted",
           _run_case(_COMPLIANT_BZL, rc_wrong_config, _COMPLIANT_VENDOR), True)
 
     # 5. Spacing spelling `--override_repository name=path` is honoured.
     rc_space = (
-        "build:vendored --override_repository cyclone=vendor/cyclone\n"
-        "build:vendored --override_repository aom_src=vendor/aom\n"
+        "build:vendored --override_repository +non_bcr_deps+cyclone=vendor/cyclone\n"
+        "build:vendored --override_repository +non_bcr_deps+aom_src=vendor/aom\n"
     )
     check("space-separated override spelling accepted",
           _run_case(_COMPLIANT_BZL, rc_space, _COMPLIANT_VENDOR), False)
+
+    # 5b. An apparent-name override does not reach an extension repo.
+    rc_apparent = (
+        "build:vendored --override_repository=cyclone=vendor/cyclone\n"
+        "build:vendored --override_repository=aom_src=vendor/aom\n"
+    )
+    check("apparent-name override is not accepted (ignored by Bazel)",
+          _run_case(_COMPLIANT_BZL, rc_apparent, _COMPLIANT_VENDOR), True)
 
     # 6. An unparsable git_repository (name not first attr) fails closed.
     bad_bzl = (

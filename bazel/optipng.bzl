@@ -10,6 +10,10 @@ cc_library(
     hdrs = [
         "src/opngreduc/opngreduc.h"
     ],
+    # Our sources include these headers as "external/optipng/...". Under bzlmod
+    # the repo directory carries a canonical name, so serve the headers at the
+    # old spelling through _virtual_includes.
+    include_prefix = "external/optipng",
     # NOTE:export_dependent_settings not included.
     deps = ["@libpng//:libpng",],
     visibility = ["//visibility:public"],

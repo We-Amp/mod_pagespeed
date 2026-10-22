@@ -106,6 +106,10 @@ cc_library(
         ".",
         "src",
     ],
+    # Our sources include these headers as "external/libwebp/...". Under bzlmod
+    # the repo directory carries a canonical name, so serve the headers at the
+    # old spelling through _virtual_includes.
+    include_prefix = "external/libwebp",
     linkopts = [],
     visibility = ["//visibility:public"],
     deps = [

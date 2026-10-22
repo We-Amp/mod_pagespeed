@@ -83,7 +83,7 @@ cc_library(
     # under the exec-root AND under the genfiles root, so psl.c's
     # `#include <config.h>` and `#include "suffixes_dafsa.h"` resolve to the
     # genrule outputs while the checked-in sources resolve from source. Raw
-    # `-Iexternal/libpsl/src` copts only cover the source variant — that is the
+    # -I copts on the source tree only cover the source variant; that is the
     # build break this fixes.
     includes = [
         "src",
@@ -128,9 +128,10 @@ cc_library(
         ],
     }),
     # The wrapper includes "external/libpsl/include/libpsl.h" (the same
-    # external/<repo>/... convention drp used). That path resolves from the
-    # exec root with no extra -I, but list the header in hdrs (above) so
-    # Bazel's strict include checking accepts it.
+    # external/<repo>/... convention drp used). Under bzlmod the repo
+    # directory carries a canonical name, so serve the headers at that
+    # spelling through _virtual_includes.
+    include_prefix = "external/libpsl",
     visibility = ["//visibility:public"],
 )
 """

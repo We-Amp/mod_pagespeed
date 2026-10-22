@@ -2,7 +2,6 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load(":hiredis.bzl", "hiredis_build_rule")
 load(":jsoncpp.bzl", "jsoncpp_build_rule")
@@ -17,13 +16,11 @@ load(":aprutil.bzl", "aprutil_build_rule")
 load(":cyclone.bzl", "cyclone_build_rule")
 load(":ed25519.bzl", "ed25519_build_rule")
 # NOTE: do NOT `load(":libavif.bzl"/":libaom.bzl"/":libdav1d.bzl", ...)` here.
-# Those files top-level-load @rules_foreign_cc//foreign_cc:defs.bzl, but this
-# module is loaded from WORKSPACE *before* the rules_foreign_cc http_archive is
-# declared -- importing them creates a "repository used prior to being defined"
-# repo-mapping cycle. The *_src archives only need the trivial all_srcs
-# filegroup, so they reuse _ALL_SRCS_BUILD_FILE (below), exactly like curl/
-# memcached. The cmake() macros in those .bzl files are loaded later, at BUILD
-# loading time, which is fine.
+# Those files load @rules_foreign_cc//foreign_cc:defs.bzl, which the module
+# extension that calls non_bcr_repositories() does not need. The *_src
+# archives only need the trivial all_srcs filegroup, so they reuse
+# _ALL_SRCS_BUILD_FILE (below), exactly like curl/memcached. The cmake()
+# macros in those .bzl files are loaded at BUILD loading time.
 
 # CVE matcher: every vendored C/C++ dep below carries a CPE +
 # release_date annotation in tools/dependency/cpe-map.yaml, scanned daily
@@ -32,6 +29,9 @@ load(":ed25519.bzl", "ed25519_build_rule")
 # justification) — a new C/C++ dep cannot land unscanned. When you add or bump a
 # dep, update its cpe-map.yaml release_date.
 
+# Envoy is not fetched while the build moves to bzlmod (pagespeed/envoy is in
+# .bazelignore); the Envoy 1.40 step re-adds it as a module. The pin stays for
+# the SBOM.
 ENVOY_COMMIT = "cf413bdb37b36d3ffbe570b8a48760abe2b588f5"  # v1.37.6 - fixes the 2026-08-26 advisory batch (13 CVEs). ABI-compat pins (BoringSSL/zlib-ng below) unchanged v1.37.5->v1.37.6.
 ENVOY_SHA = "60a4cc0ebced36c78f7fd7f8e7bdaea38d62c1ce933f0efc59bc531e2f47d263"
 
@@ -627,13 +627,13 @@ _RE2_VERSION = "2025-11-05"  # mirrored in MODULE.bazel
 # sha256 of the BCR source archive (re2-2025-11-05.zip release asset).
 _RE2_SHA = "c7b1a7a7c68d2d7cf8d343dc56655c1b5a8c8aadedc017db453d4c1d8913b844"
 
-def mod_pagespeed_dependencies():
+def non_bcr_repositories():
+    """Declares every repository that does not come from the BCR.
+
+    Called by the non_bcr_deps module extension (bazel/extensions.bzl).
+    """
     # Standalone libevent.
-    # maybe(): WORKSPACE.envoy pre-defines this repo with Envoy's patched
-    # snapshot (event2/watch.h) before calling mod_pagespeed_dependencies();
-    # the lean WORKSPACE does not, so it gets this vanilla release.
-    maybe(
-        http_archive,
+    http_archive(
         name = "com_github_libevent_libevent",
         strip_prefix = "libevent-%s" % LIBEVENT_VERSION,
         url = "https://github.com/libevent/libevent/releases/download/release-%s/libevent-%s.tar.gz" % (LIBEVENT_VERSION, LIBEVENT_VERSION),
@@ -688,15 +688,6 @@ cc_library(
     )
 
     http_archive(
-        name = "envoy",
-        strip_prefix = "envoy-%s" % ENVOY_COMMIT,
-        url = "https://github.com/envoyproxy/envoy/archive/%s.tar.gz" % ENVOY_COMMIT,
-        sha256 = ENVOY_SHA,
-        patches = ["//bazel:envoy_repo_yq_windows.patch"],
-        patch_args = ["-p1"],
-    )
-
-    http_archive(
         name = "hiredis",
         strip_prefix = "hiredis-%s" % HIREDIS_COMMIT,
         url = "https://github.com/redis/hiredis/archive/v%s.tar.gz" % HIREDIS_COMMIT,
@@ -736,7 +727,7 @@ cc_library(
         url = "https://github.com/sparsehash/sparsehash/archive/%s.tar.gz" % GOOGLE_SPARSEHASH_COMMIT,
         build_file_content = google_sparsehash_build_rule,
         sha256 = GOOGLE_SPARSEHASH_SHA,
-        patches = ["@mod_pagespeed//bazel:sparsehash_cstring.patch"],
+        patches = [Label("//bazel:sparsehash_cstring.patch")],
         patch_args = ["-p1"],
     )
 
@@ -745,7 +736,7 @@ cc_library(
         sha256 = GOOGLEURL_SHA,
         strip_prefix = "gurl-%s" % GOOGLEURL_COMMIT,
         urls = ["https://github.com/google/gurl/archive/%s.tar.gz" % GOOGLEURL_COMMIT],
-        patches = ["@mod_pagespeed//bazel:googleurl_visibility.patch"],
+        patches = [Label("//bazel:googleurl_visibility.patch")],
         patch_args = ["-p1"],
         # NOTE: the former Darwin-only patch_cmds sed renaming
         # __is_cpp17_contiguous_iterator -> __libcpp_is_contiguous_iterator
@@ -791,7 +782,7 @@ cc_library(
         name = "libjpeg_turbo",
         strip_prefix = "libjpeg-turbo-%s" % LIBJPEG_TURBO_VERSION,
         url = "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/%s.tar.gz" % LIBJPEG_TURBO_VERSION,
-        build_file = "//bazel:libjpeg_turbo.BUILD",
+        build_file = Label("//bazel:libjpeg_turbo.BUILD"),
         sha256 = LIBJPEG_TURBO_SHA,
     )
 
@@ -826,7 +817,7 @@ cc_library(
         url = "https://github.com/curl/curl/archive/refs/tags/curl-%s.tar.gz" % LIBCURL_VERSION.replace(".", "_"),
         sha256 = LIBCURL_SHA,
         build_file_content = _ALL_SRCS_BUILD_FILE,
-        patches = ["@mod_pagespeed//bazel:curl_boringssl_ssl_connect_8_20.patch"],
+        patches = [Label("//bazel:curl_boringssl_ssl_connect_8_20.patch")],
         patch_args = ["-p1"],
     )
 
@@ -852,7 +843,7 @@ cc_library(
         # bundling tool by compiler ID -- which routes clang-cl into the GNU `ar`
         # branch and produces no archive at all. See the patch header for the
         # full diagnosis. No effect on the Linux/macOS legs.
-        patches = ["//bazel:libavif_merge_static_libs_clang_cl.patch"],
+        patches = [Label("//bazel:libavif_merge_static_libs_clang_cl.patch")],
         patch_args = ["-p1"],
     )
 
@@ -882,4 +873,15 @@ cc_library(
         url = "https://github.com/orlp/ed25519/archive/b1f19fab4aebe607805620d25a5e42566ce46a0e.tar.gz",
         build_file_content = ed25519_build_rule,
         sha256 = "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a",
+    )
+
+    # bazel_compdb: compile_commands.json for clang-tidy, via the
+    # compilation_database_aspect in tools/gen_compilation_database.py.
+    # NOTE: sha updated 2026-07-20: GitHub re-rolled the 0.5.2 archive (same
+    # release content, new tarball bytes); any cold fetch with the old sha fails.
+    http_archive(
+        name = "bazel_compdb",
+        sha256 = "d32835b26dd35aad8fd0ba0d712265df6565a3ad860d39e4c01ad41059ea7eda",
+        strip_prefix = "bazel-compilation-database-0.5.2",
+        urls = ["https://github.com/grailbio/bazel-compilation-database/archive/refs/tags/0.5.2.tar.gz"],
     )

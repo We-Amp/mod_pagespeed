@@ -29,6 +29,10 @@ cc_library(
         "sockcompat.h",
         "win32.h",
     ],
+    # Our sources include these headers as "external/hiredis/...". Under bzlmod
+    # the repo directory carries a canonical name, so serve the headers at the
+    # old spelling through _virtual_includes.
+    include_prefix = "external/hiredis",
     linkopts = select({
         "@platforms//os:windows": ["ws2_32.lib"],
         "//conditions:default": [],

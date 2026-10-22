@@ -16,28 +16,16 @@ test --test_env=REDIS_PORT=6379
 test --test_env=MEMCACHED_PORT=11211
 test --test_env=HTTPS_TEST=1
 
-# POSIX-specific: APR includes for Apache module (not used on Windows)
-build:linux --copt="-Iexternal/aprutil/include/"
-build:linux --copt="-Iexternal/aprutil/include/private/"
-build:linux --copt="-Iexternal/aprutil/include/arch/unix/"
-build:linux --copt="-Iexternal/aprutil/"
+# POSIX-specific: generated APR headers for the Apache module (not used on
+# Windows). The APR and APR-util source include directories come from the
+# includes of @apr and @aprutil.
 build:linux --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
 build:linux --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
-build:linux --copt="-Iexternal/apr/include/"
-build:linux --copt="-Iexternal/apr/include/arch/unix/"
-build:linux --copt="-Iexternal/apr/"
 build:linux --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 
-# macOS-specific: APR includes for Apache module
-build:macos --copt="-Iexternal/aprutil/include/"
-build:macos --copt="-Iexternal/aprutil/include/private/"
-build:macos --copt="-Iexternal/aprutil/include/arch/unix/"
-build:macos --copt="-Iexternal/aprutil/"
+# macOS-specific: generated APR headers for the Apache module
 build:macos --copt="-Ithird_party/aprutil/gen/arch/linux/x64/include/"
 build:macos --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"
-build:macos --copt="-Iexternal/apr/include/"
-build:macos --copt="-Iexternal/apr/include/arch/unix/"
-build:macos --copt="-Iexternal/apr/"
 build:macos --copt="-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=1"
 
 # Windows-specific: No POSIX shared memory, no APR
@@ -79,9 +67,9 @@ build --cxxopt="-DABSL_LEGACY_THREAD_ANNOTATIONS=1"
 # so the per_file_copt here is only needed for Linux/macOS (clang-cl rejects -std=c++23).
 # Windows uses --config=windows which does NOT inherit these global lines because we gate
 # the -std=c++23 flag behind config:linux and config:macos only.
-build:linux --per_file_copt=external/cyclone/.*\\.cpp@-std=c++23
+build:linux --per_file_copt=external/.*cyclone/.*\\.cpp@-std=c++23
 build:linux --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
-build:macos --per_file_copt=external/cyclone/.*\\.cpp@-std=c++23
+build:macos --per_file_copt=external/.*cyclone/.*\\.cpp@-std=c++23
 build:macos --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
 
 # =============================================================================
@@ -97,7 +85,7 @@ build:macos --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-std=c++23
 build:clang-libstdcxx13 --config=clang
 
 # Force __cpp_concepts=202002L and use GCC 13 libstdc++ for Cyclone files only
-build:clang-libstdcxx13 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
+build:clang-libstdcxx13 --per_file_copt=external/.*cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
 build:clang-libstdcxx13 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/13,-I/usr/include/aarch64-linux-gnu/c++/13,-I/usr/include/x86_64-linux-gnu/c++/13
 
 # Link against GCC 13's libstdc++ (include both arch paths; non-existent is ignored)
@@ -119,7 +107,7 @@ build:clang-libstdcxx13 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/13
 build:clang-libstdcxx15 --config=clang
 
 # Force __cpp_concepts=202002L and use GCC 15 libstdc++ for Cyclone files only
-build:clang-libstdcxx15 --per_file_copt=external/cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
+build:clang-libstdcxx15 --per_file_copt=external/.*cyclone/.*\\.cpp@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
 build:clang-libstdcxx15 --per_file_copt=pagespeed/kernel/cache/cyclone/.*\\.cc@-D__cpp_concepts=202002L,-nostdinc++,-I/usr/include/c++/15,-I/usr/include/aarch64-linux-gnu/c++/15,-I/usr/include/x86_64-linux-gnu/c++/15
 
 # Link against GCC 15's libstdc++ (include both arch paths; non-existent is ignored)
@@ -138,8 +126,11 @@ build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/15
 #   Windows: bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagespeed/iis:pagespeed_iis.dll
 # =============================================================================
 build:vendored --repository_cache=vendor/repo-cache
-build:vendored --override_repository=cyclone=vendor/cyclone
-build:vendored --override_repository=aom_src=vendor/aom
+# The git_repository deps live in the non_bcr_deps module extension, and Bazel
+# applies --override_repository by canonical repo name only (an apparent name
+# such as `cyclone` is silently ignored and the build would git-clone).
+build:vendored --override_repository=+non_bcr_deps+cyclone=vendor/cyclone
+build:vendored --override_repository=+non_bcr_deps+aom_src=vendor/aom
 
 # =============================================================================
 # Windows performance tuning for high-core-count machines
@@ -202,8 +193,9 @@ build:ci --define=go_build=disabled
 build:ci --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
 test:ci --test_output=errors
 # Note: --override_repository maps vendor/cyclone/ into the execroot as
-# external/cyclone/, so the existing per_file_copt patterns from build:linux
-# and build:clang-libstdcxx13 match correctly. No vendored-path duplicates needed.
+# external/+non_bcr_deps+cyclone/, so the existing per_file_copt
+# patterns from build:linux and build:clang-libstdcxx13 (external/.*cyclone/)
+# match correctly. No vendored-path duplicates needed.
 
 # =============================================================================
 # CI arm64 configuration (the arm64 leg of the multi-arch CI matrix)

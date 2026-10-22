@@ -56,11 +56,7 @@ cc_library(
     copts = select({
         "//bazel:linux_arm64": ["-Ithird_party/apr/gen/arch/linux/arm64/include/"],
         "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
-    }) + [
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
-        "-Iexternal/apr/",
-    ],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/system:system_apache",
@@ -137,9 +133,6 @@ cc_library(
     ],
     copts = [
         "-I/usr/include/apache2/",
-        "-Iexternal/aprutil/include/",
-        "-Iexternal/aprutil/include/arch/unix/",
-        "-Iexternal/aprutil/",
     ] + select({
         "//bazel:linux_arm64": [
             "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
@@ -149,11 +142,7 @@ cc_library(
             "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
             "-Ithird_party/apr/gen/arch/linux/x64/include/",
         ],
-    }) + [
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
-        "-Iexternal/apr/",
-    ],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":apache_apr",
@@ -189,9 +178,6 @@ cc_library(
     ],
     copts = [
         "-I/usr/include/apache2/",
-        "-Iexternal/aprutil/include/",
-        "-Iexternal/aprutil/include/arch/unix/",
-        "-Iexternal/aprutil/",
     ] + select({
         "//bazel:linux_arm64": [
             "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
@@ -201,11 +187,7 @@ cc_library(
             "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
             "-Ithird_party/apr/gen/arch/linux/x64/include/",
         ],
-    }) + [
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
-        "-Iexternal/apr/",
-    ],
+    }),
     alwayslink = True,
     visibility = ["//visibility:public"],
     deps = [
