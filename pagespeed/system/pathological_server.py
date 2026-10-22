@@ -144,12 +144,10 @@ _responses = {
         "Cache-Control: max-age=5\r\n"
         "\r\n"
         "RunExperiment on\n"
-        "AnalyticsID UA-MyExperimentID-1\n"
-        "UseAnalyticsJs false\n"
-        # insert_ga is deprecated and no longer auto-enabled by experiments;
-        # enable it explicitly so test/system/system/test_remote_config.py
-        # can observe the AnalyticsID being applied from remote config.
-        "EnableFilters insert_ga\n"
+        # A single always-on experiment variant that removes comments, so
+        # test/system/system/test_remote_config.py can observe the
+        # experiment being applied from remote config.
+        "ExperimentSpec id=1;percent=100;enable=remove_comments\n"
         "EndRemoteConfig\n",
         _nohook),
 

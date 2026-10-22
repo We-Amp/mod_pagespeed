@@ -60,7 +60,6 @@
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
 #include "net/instaweb/rewriter/public/insert_amp_link_filter.h"
 #include "net/instaweb/rewriter/public/insert_dns_prefetch_filter.h"
-#include "net/instaweb/rewriter/public/insert_ga_filter.h"
 #include "net/instaweb/rewriter/public/insert_speculation_rules_filter.h"
 #include "net/instaweb/rewriter/public/javascript_filter.h"
 #include "net/instaweb/rewriter/public/js_combine_filter.h"
@@ -150,7 +149,6 @@ void RewriteDriver::InitStats(Statistics* statistics) {
   ImageCombineFilter::InitStats(statistics);
   ImageRewriteFilter::InitStats(statistics);
   InPlaceRewriteContext::InitStats(statistics);
-  InsertGAFilter::InitStats(statistics);
   JavascriptFilter::InitStats(statistics);
   JsCombineFilter::InitStats(statistics);
   JsInlineFilter::InitStats(statistics);
@@ -366,11 +364,6 @@ void RewriteDriver::AddPreRenderFilters() {
     // This can only be called once and requires a server_context_ to be set.
     CHECK(server_context_ != nullptr);
     AppendOwnedPreRenderFilter(new JsOutlineFilter(this));
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kInsertGA) &&
-      rewrite_options->ga_id() != "") {
-    // InsertGA should be before js rewriting.
-    AppendOwnedPreRenderFilter(new InsertGAFilter(this));
   }
   if (rewrite_options->Enabled(RewriteOptions::kCombineJavascript)) {
     // Combine external JS resources. Done after minification and analytics
