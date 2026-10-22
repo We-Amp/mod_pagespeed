@@ -224,7 +224,7 @@ Depends: ${NGINX_DEP}
 Maintainer: ${MAINTNAME} <${MAINTMAIL}>
 Installed-Size: ${INSTSIZE}
 Homepage: ${PRODUCTURL}
-Description: nginx module to optimize web content (mod_pagespeed ${VERSION})
+Description: mod_pagespeed web page optimization module for nginx
  ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and
  their resources (CSS, JavaScript, images) to apply web performance best
  practices automatically. Pinned to the exact stock nginx version it was built
@@ -249,7 +249,7 @@ cat > "${STAGEDIR}/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 if [ "$1" = "configure" ]; then
   # Join the web-server user to the `pagespeed` group. After the optimizer
-  # daemon's privilege drop (2.1) its cache volume, notify socket and shared
+  # daemon's privilege drop (2.1.0) its cache volume, notify socket and shared
   # config are group-rw (0660/0640 pagespeed:pagespeed), and group membership
   # is what lets the module reach them. Stock Debian/Ubuntu nginx runs as
   # www-data. Guarded and idempotent; a no-op when the optimizer package
