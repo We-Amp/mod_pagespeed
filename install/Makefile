@@ -304,7 +304,7 @@ setup_staging_dir :
 	mkdir -m 711 $(STAGING_DIR)
 
 LIBRARY_CONF_SOURCE = \
-    $(GIT_SRC)/net/instaweb/genfiles/conf/pagespeed_libraries.conf
+    $(GIT_SRC)/install/common/pagespeed_libraries.conf
 
 # Generate a configuration file and copy it to the staging area.
 # Also copy the example tree, and the built Apache module

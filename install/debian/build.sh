@@ -85,9 +85,9 @@ stage_install_debian() {
   fi
   # Install pagespeed_libraries.conf if available
   # Try Bazel output path first, then legacy GYP path
-  local LIBRARIES_CONF="${BUILDDIR}/net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+  local LIBRARIES_CONF="${BUILDDIR}/install/common/pagespeed_libraries.conf"
   if [ ! -f "${LIBRARIES_CONF}" ]; then
-    LIBRARIES_CONF="${BUILDDIR}/../../net/instaweb/genfiles/conf/pagespeed_libraries.conf"
+    LIBRARIES_CONF="${BUILDDIR}/../../install/common/pagespeed_libraries.conf"
   fi
   if [ -f "${LIBRARIES_CONF}" ]; then
     install -m 644 "${LIBRARIES_CONF}" \
