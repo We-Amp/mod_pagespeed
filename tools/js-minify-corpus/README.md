@@ -99,7 +99,7 @@ anyway so a contract break is caught). The manifest also pins the sha256 of
 `generate_synthetic.py` and of `gen_goldens.py` itself. The fetched
 real-world corpus and the locally-built bundle outputs are network-dependent
 and deliberately excluded (they stay covered by the oracle gate and the
-release-readiness cross-product run).
+release cross-product run).
 
 The manifest is vendored into the ModPageSpeed 2.0 repo through the same pin
 as the kernel, so ONE shared expectation gates both repos against silent

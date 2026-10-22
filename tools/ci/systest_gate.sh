@@ -5,7 +5,9 @@
 # The release's system-test gate: a run of ci.yml for the release commit must
 # have passed both the Apache and the Nginx System Tests. This script checks
 # those two lanes only; it does not assert the full tier (that is checked by
-# the /release-readiness R2 step against the full=true dispatch run).
+# the release checklist: every fleet job of the full=true dispatch at the
+# candidate SHA must be success; the only allowed skip is iis-sys-tests when
+# the repository variable FLEET_IIS_ENABLED is not true).
 #
 #   * Every API call is retried on a transient failure (HTTP 5xx, timeouts,
 #     connection errors) with backoff 10/20/40/80 s; a 4xx is not retried.
