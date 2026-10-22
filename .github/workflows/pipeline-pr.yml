@@ -680,6 +680,73 @@ jobs:
   # header). While FLEET_ENABLED is 'false' they run hosted instead. No secret
   # and no write token reaches any of them.
   # ---------------------------------------------------------------------
+  lock-check:
+    name: Bzlmod lockfile is current
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # contents: write only to push a regenerated MODULE.bazel.lock back to a
+    # same-repository pull request branch (see the last step).
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+          # The PR head, not the merge commit, so a regenerated lock can be
+          # pushed back onto the branch.
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+      - name: Ensure bazel
+        run: |
+          if ! command -v bazel >/dev/null 2>&1; then
+            npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          fi
+          bazel --version
+      # Resolve the module graph in update mode, then fail if that changed the
+      # committed lock. The regenerated lock is uploaded so it can be committed
+      # without a local Bazel.
+      - name: Regenerate MODULE.bazel.lock
+        run: bazel mod deps --lockfile_mode=update
+      - name: Print the resolved module graph
+        if: ${{ !cancelled() }}
+        run: |
+          bazel mod graph --depth=1
+          bazel mod explain rules_cc abseil-cpp protobuf zlib apple_support || true
+      - name: Lockfile unchanged
+        id: diff
+        run: git diff --stat --exit-code MODULE.bazel.lock
+      - name: Upload regenerated lock
+        if: ${{ failure() && steps.diff.conclusion == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: MODULE.bazel.lock
+          path: MODULE.bazel.lock
+      # Same-repository PRs only (a fork's token cannot push), plus a manual
+      # dispatch on a branch of this repository (ci-dev), and never on top of a
+      # lock commit this job made itself (loop guard). The run still fails: a
+      # push made with GITHUB_TOKEN does not start a new run, so the branch
+      # stays red until the next push or a re-run checks the new lock.
+      - name: Commit regenerated lock to the branch
+        if: >-
+          failure() && steps.diff.conclusion == 'failure' &&
+          ((github.event_name == 'pull_request' &&
+            github.event.pull_request.head.repo.full_name == github.repository) ||
+           (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'))
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          last_author="$(git log -1 --format=%an)"
+          if [ "${last_author}" = "github-actions[bot]" ]; then
+            echo "::error::the last commit already regenerated the lock and it is still stale; regenerate it locally"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add MODULE.bazel.lock
+          git commit -m "Build: regenerate MODULE.bazel.lock"
+          git push origin "HEAD:refs/heads/${HEAD_REF}"
+          echo "::error::MODULE.bazel.lock was stale; pushed a regenerated lock to ${HEAD_REF}. Re-run CI on the new commit."
+          exit 1
+
   vendor:
     name: Vendor Dependencies
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -731,7 +798,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       # The dependency sources are public and fetched over https. The vendor
       # script names one of them with an ssh-style address, so the rewrite
@@ -883,7 +950,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1066,7 +1133,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1232,7 +1299,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1443,7 +1510,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1600,7 +1667,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -1703,7 +1770,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-vendor-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
           fail-on-cache-miss: true
 
       # Hub channel: extract the vendor job's tarball over this checkout
@@ -2797,7 +2864,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
-          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE', 'MODULE.bazel', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
+          key: mps-sidecar-vendor-${{ runner.arch }}-${{ hashFiles('WORKSPACE', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
 
       - name: Ensure bazel
         if: steps.vendor-cache.outputs.cache-hit != 'true'

@@ -72,6 +72,15 @@ http_archive(
     patch_args = ["-p1"],
 )
 
+# Configure and register @local_config_cc from the patched rules_cc above.
+# With bzlmod on, Bazel otherwise takes @local_config_cc from the rules_cc
+# module bazel_tools depends on, which lacks the DUMPBIN fix; a WORKSPACE
+# registration outranks that non-root module one. Goes when rules_cc becomes a
+# bazel_dep.
+load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
+
+rules_cc_toolchains()
+
 http_archive(
     name = "rules_proto",
     sha256 = "0e5c64a2599a6e26c6a03d6162242d231ecc0de219534c38cb4402171def21e8",

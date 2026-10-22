@@ -19,8 +19,19 @@ build:macos --copt -UDEBUG                                                      
 # Startup options cannot be selected via config.
 startup --host_jvm_args=-Xmx3g
 
-# Disable bzlmod to use WORKSPACE dependencies only
-common --noenable_bzlmod
+# Bzlmod on (the Bazel 8 default; stated for clarity). Hybrid mode while the
+# migration is in progress: deps move from WORKSPACE to MODULE.bazel commit by
+# commit, and WORKSPACE is deleted at the end.
+common --enable_bzlmod
+# CI (Linux) asserts MODULE.bazel.lock is current. Extension results are
+# per-platform in the lock, so Windows/macOS stay in the default update mode.
+common:ci_lock --lockfile_mode=error
+# Hybrid-mode only (drop when protobuf becomes a bazel_dep): Bazel's builtin
+# defaults for these point at @bazel_tools' own protobuf module (29.x), whose
+# ProtoLangToolchainInfo is not the provider the WORKSPACE @com_google_protobuf
+# (31.1) proto rules expect, and whose protoc would not match the 31.1 runtime.
+build --proto_toolchain_for_cc=@com_google_protobuf//:cc_toolchain
+build --proto_compiler=@com_google_protobuf//:protoc
 # Bazel 8 disables WORKSPACE by default; keep it on until the bzlmod migration
 # lands.
 common --enable_workspace
