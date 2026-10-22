@@ -14,7 +14,8 @@
 # The Envoy WORKSPACE loads the full Envoy dependency graph (~100+ repos).
 # Use this for building the Envoy HTTP filter.
 #
-# Also swaps .bazelignore: the lean build ignores pagespeed/envoy (its BUILD
+# Also pins .bazelversion to 7.7.1 (Envoy v1.37.x needs Bazel 7) and swaps
+# .bazelignore: the lean build ignores pagespeed/envoy (its BUILD
 # files load @envoy rules that don't exist in the lean workspace), which
 # would otherwise make the envoy packages unbuildable in the Envoy workspace
 # too ("Package is considered deleted").
@@ -37,6 +38,11 @@ if [[ "${1:-}" == "--lean" ]]; then
         rm -f .bazelignore.lean.bak
         echo "Restored lean .bazelignore."
     fi
+    if [[ -f .bazelversion.lean.bak ]]; then
+        cp .bazelversion.lean.bak .bazelversion
+        rm -f .bazelversion.lean.bak
+        echo "Restored lean .bazelversion."
+    fi
 else
     if [[ ! -f WORKSPACE.envoy ]]; then
         echo "ERROR: WORKSPACE.envoy not found." >&2
@@ -48,5 +54,9 @@ else
         cp .bazelignore .bazelignore.lean.bak
         : > .bazelignore
     fi
+    # The pinned Envoy (v1.37.x) is a Bazel 7 WORKSPACE build; the lean build
+    # is on Bazel 8. Pin bazelisk to Bazel 7 while the Envoy workspace is active.
+    cp .bazelversion .bazelversion.lean.bak
+    echo "7.7.1" > .bazelversion
     echo "Activated Envoy WORKSPACE. Restore with: $0 --lean"
 fi
