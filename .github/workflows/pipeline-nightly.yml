@@ -2,8 +2,8 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
 # pipeline-nightly.yml -- the nightly tier, as a reusable workflow, called by
-# nightly.yml (schedule 03:30 UTC + workflow_dispatch). See
-# docs/ci/pipelines.md. The caller serializes nightlies (one group, never
+# nightly.yml (schedule 21:30 UTC Monday to Saturday plus the Sunday run, and
+# workflow_dispatch). See docs/ci/pipelines.md. The caller serializes nightlies (one group, never
 # cancelled); this file carries no concurrency block.
 #
 # Jobs by class:

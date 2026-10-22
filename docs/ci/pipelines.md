@@ -352,9 +352,9 @@ later jobs (`docs/ci/release.md`).
 
 ## The nightly tier
 
-`nightly.yml` holds the schedule (21:30 UTC, two cron entries: Monday to Saturday and Sunday) and `workflow_dispatch`, takes
-the run-wide `nightly` concurrency group (one nightly at a time, never
-cancelled) and calls `pipeline-nightly.yml@master`. Its inputs reach the
+`nightly.yml` holds the schedule (21:30 UTC, two cron entries: Monday to
+Saturday and Sunday) and `workflow_dispatch`, takes the run-wide `nightly`
+concurrency group (one nightly at a time, never cancelled) and calls `pipeline-nightly.yml@master`. Its inputs reach the
 jobs as strings and every one is validated before use: `fuzz_seconds` and
 `duration` (1 to 1800 seconds), `concurrency`, `protocols`, `arms` and
 `severity`.

@@ -54,6 +54,9 @@ fi
 peak=""
 while read -r m h rest; do
   [ -n "${h}" ] || continue
+  case "${h}" in
+    ''|*[!0-9]*) peak="${peak} non-integer-hour:${h}"; continue ;;
+  esac
   hh=$((10#${h}))
   if [ "${hh}" -ge 6 ] && [ "${hh}" -le 14 ]; then peak="${peak} ${h}"; fi
 done <<< "${crons}"
