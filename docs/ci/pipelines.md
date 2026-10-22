@@ -640,7 +640,7 @@ and fails the build when the shape breaks:
   `run:` block (the classifier is read from `origin/${DEFAULT_BRANCH}` with
   `git show`) and only the guard's own env keys; no other line names the
   script in any spelling, and the job has no glob, `find`, `source` or
-  `GITHUB_ENV` write under `tools/ci/`; `BASH_ENV`, `PATH` and `GIT_*` are not
+  `GITHUB_ENV` write under `tools/ci/`; `BASH_ENV`, `PATH`, `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CONFIG*` are not
   set at workflow level or in that job; `vendor` has `needs: changes` and no
   `if:` (see "Merge-queue runs");
 - **(e)** `.github/` and `tools/ci/` carry no LAN address literals, no
