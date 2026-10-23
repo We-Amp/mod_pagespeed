@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Building the Envoy filter from source works again, against Envoy 1.40.**
   Build it with `bazel build --config=envoy-filter
   //pagespeed/envoy:envoy_pagespeed //pagespeed/envoy:pagespeed_filter.so`.
+  The filter remains experimental and ships in no package; it is built and
+  tested nightly, not on every change.
 - **Updated bundled libraries.** The Apache, nginx and IIS modules are built
   with BoringSSL 0.20260929.0 (was 0.20260508.0), Abseil 20260817.0 (was
   20260107.1), Protocol Buffers 35.1 (was 31.1), GoogleTest 1.18.0 (was

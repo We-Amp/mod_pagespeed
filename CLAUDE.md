@@ -111,9 +111,8 @@ whole tree, the shipped modules included, resolves one dependency graph with
 Envoy: abseil, BoringSSL, protobuf, fmt, spdlog and googleurl are the versions
 Envoy uses. No package or image contains the filter, and its targets are tagged
 manual, so `//...` leaves it out; name the targets as above. CI builds it and
-runs its tests in the nightly tier, and in the full tier when its inputs
-change (job `envoy-filter`). A cold build compiles all of Envoy: about an hour
-on 8 cores.
+runs its tests in the nightly tier only (job `envoy-filter`). A cold build
+compiles all of Envoy: about an hour on 8 cores.
 
 ## Two Source Trees
 
