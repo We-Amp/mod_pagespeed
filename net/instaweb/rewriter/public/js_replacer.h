@@ -68,7 +68,7 @@ class JsReplacer {
 
  private:
   struct Pattern {
-    Pattern() : rewriter(NULL) {}
+    Pattern() : rewriter(nullptr) {}
     Pattern(const GoogleString& object, const GoogleString& field,
             StringRewriter* rewriter)
         : object(object), field(field), rewriter(rewriter) {}

@@ -148,9 +148,9 @@ class NgxFetch : public PoolElement<NgxFetch> {
   ngx_event_t* timeout_event() { return timeout_event_; }
   void set_timeout_event(ngx_event_t* x) { timeout_event_ = x; }
   void release_resolver() {
-    if (resolver_ctx_ != NULL && resolver_ctx_ != NGX_NO_RESOLVER) {
+    if (resolver_ctx_ != nullptr && resolver_ctx_ != NGX_NO_RESOLVER) {
       ngx_resolve_name_done(resolver_ctx_);
-      resolver_ctx_ = NULL;
+      resolver_ctx_ = nullptr;
     }
   }
 

@@ -169,7 +169,7 @@ class SystemCaches {
   using MetadataShmCache = SharedMemCache<64>;
   struct MetadataShmCacheInfo {
     MetadataShmCacheInfo()
-        : cache_to_use(NULL), cache_backend(NULL), initialized(false) {}
+        : cache_to_use(nullptr), cache_backend(nullptr), initialized(false) {}
 
     // Note that the fields may be NULL if e.g. initialization failed.
     CacheInterface* cache_to_use;  // may be CacheStats or such.
@@ -181,7 +181,7 @@ class SystemCaches {
   };
 
   struct ExternalCacheInterfaces {
-    ExternalCacheInterfaces() : async(NULL), blocking(NULL) {}
+    ExternalCacheInterfaces() : async(nullptr), blocking(nullptr) {}
     CacheInterface* async;
     CacheInterface* blocking;
   };

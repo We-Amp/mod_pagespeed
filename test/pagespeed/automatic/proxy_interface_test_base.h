@@ -85,7 +85,7 @@ class ProxyUrlNamer : public UrlNamer {
 class MockFilter : public EmptyHtmlFilter {
  public:
   explicit MockFilter(RewriteDriver* driver)
-      : driver_(driver), num_elements_(0), num_elements_property_(NULL) {}
+      : driver_(driver), num_elements_(0), num_elements_property_(nullptr) {}
 
   void StartDocument() override;
 
@@ -143,8 +143,10 @@ class BackgroundFetchCheckingAsyncFetch : public SharedAsyncFetch {
 
  private:
   AsyncFetch* async_fetch_;
-  BackgroundFetchCheckingAsyncFetch(const BackgroundFetchCheckingAsyncFetch&) = delete;
-  BackgroundFetchCheckingAsyncFetch& operator=(const BackgroundFetchCheckingAsyncFetch&) = delete;
+  BackgroundFetchCheckingAsyncFetch(const BackgroundFetchCheckingAsyncFetch&) =
+      delete;
+  BackgroundFetchCheckingAsyncFetch& operator=(
+      const BackgroundFetchCheckingAsyncFetch&) = delete;
 };
 
 // Subclass of UrlAsyncFetcher that wraps the AsyncFetch with a
@@ -171,8 +173,10 @@ class BackgroundFetchCheckingUrlAsyncFetcher : public UrlAsyncFetcher {
  private:
   UrlAsyncFetcher* base_fetcher_;
   int num_background_fetches_;
-  BackgroundFetchCheckingUrlAsyncFetcher(const BackgroundFetchCheckingUrlAsyncFetcher&) = delete;
-  BackgroundFetchCheckingUrlAsyncFetcher& operator=(const BackgroundFetchCheckingUrlAsyncFetcher&) = delete;
+  BackgroundFetchCheckingUrlAsyncFetcher(
+      const BackgroundFetchCheckingUrlAsyncFetcher&) = delete;
+  BackgroundFetchCheckingUrlAsyncFetcher& operator=(
+      const BackgroundFetchCheckingUrlAsyncFetcher&) = delete;
 };
 
 class ProxyInterfaceTestBase : public RewriteTestBase {

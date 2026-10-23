@@ -1316,7 +1316,7 @@ class RewriteOptions {
                           semantic_type::Category* category) const;
 
   int num_url_valued_attributes() const {
-    if (url_valued_attributes_ == NULL) {
+    if (url_valued_attributes_ == nullptr) {
       return 0;
     } else {
       return url_valued_attributes_->size();
@@ -1343,7 +1343,7 @@ class RewriteOptions {
     if (Enabled(kCanonicalizeJavascriptLibraries)) {
       return javascript_library_identification_.get();
     } else {
-      return NULL;
+      return nullptr;
     }
   }
 
@@ -2926,8 +2926,8 @@ class RewriteOptions {
                                  const GoogleString& wildcard) {
     Modify();
     std::pair<FastWildcardGroupMap::iterator, bool> insert_result =
-        rejected_request_map_.insert(
-            std::make_pair(header_name, static_cast<FastWildcardGroup*>(NULL)));
+        rejected_request_map_.insert(std::make_pair(
+            header_name, static_cast<FastWildcardGroup*>(nullptr)));
 
     if (insert_result.second) {
       insert_result.first->second = new FastWildcardGroup;
@@ -3105,7 +3105,7 @@ class RewriteOptions {
    public:
     using ValueType = T;
 
-    OptionTemplateBase() : was_set_(false), property_(NULL) {}
+    OptionTemplateBase() : was_set_(false), property_(nullptr) {}
 
     bool was_set() const override { return was_set_; }
 
@@ -3580,7 +3580,7 @@ class RewriteOptions {
                                  OptionClass RewriteOptions::* offset,
                                  const char* id, bool safe_to_print) {
     AddProperty(default_value, offset, id, kNullOption, kProcessScopeStrict,
-                NULL, safe_to_print, properties_);
+                nullptr, safe_to_print, properties_);
   }
 
   // Adds a property with a unique option_name_ field, allowing use of

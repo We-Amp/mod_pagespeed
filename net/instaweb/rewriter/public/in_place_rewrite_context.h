@@ -61,7 +61,7 @@ class InPlaceRewriteResourceSlot : public ResourceSlot {
   static const char kIproSlotLocation[];
   explicit InPlaceRewriteResourceSlot(const ResourcePtr& resource);
 
-  HtmlElement* element() const override { return NULL; }
+  HtmlElement* element() const override { return nullptr; }
 
   // Implements ResourceSlot::Render().
   void Render() override;

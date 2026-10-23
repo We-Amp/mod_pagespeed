@@ -55,7 +55,7 @@ class MockTimer : public Timer {
 
   // Set time advances in microseconds for the next calls to NowUs/NowMs.
   void SetTimeDeltaUs(int64 delta_us) {
-    SetTimeDeltaUsWithCallback(delta_us, NULL);
+    SetTimeDeltaUsWithCallback(delta_us, nullptr);
   }
 
   // Set time advances in microseconds for the next calls to

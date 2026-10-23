@@ -124,11 +124,11 @@ class ApacheServerContext : public SystemServerContext {
   // These return true if the given overlays were constructed (in response
   // to having something in config files to put in them).
   bool has_spdy_config_overlay() const {
-    return spdy_config_overlay_.get() != NULL;
+    return spdy_config_overlay_.get() != nullptr;
   }
 
   bool has_non_spdy_config_overlay() const {
-    return non_spdy_config_overlay_.get() != NULL;
+    return non_spdy_config_overlay_.get() != nullptr;
   }
 
   // These two take ownership of their parameters.

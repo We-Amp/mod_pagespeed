@@ -107,7 +107,7 @@ SequenceBoundCallback<TransactionContext>::~SequenceBoundCallback() {}
 
 template <typename TransactionContext>
 void SequenceBoundCallback<TransactionContext>::Run() {
-  CHECK(context_ != NULL);
+  CHECK(context_ != nullptr);
   // Now enqueue the call to actually run.
   // Will synchronously call CancelAfterRequeue if sequence_ is shutdown.
   sequence_->Add(MakeFunction(
@@ -127,7 +127,7 @@ void SequenceBoundCallback<TransactionContext>::Cancel() {
 template <typename TransactionContext>
 void SequenceBoundCallback<TransactionContext>::RunAfterRequeue() {
   // Actually run the callback. Note that RunImpl may steal the pointer.
-  CHECK(context_ != NULL);
+  CHECK(context_ != nullptr);
   RunImpl(&context_);
   delete this;
 }
@@ -141,7 +141,7 @@ void SequenceBoundCallback<TransactionContext>::CancelAfterRequeue() {
 template <typename TransactionContext>
 void SequenceBoundCallback<TransactionContext>::SetTransactionContext(
     TransactionContext* context) {
-  CHECK(context_ == NULL);
+  CHECK(context_ == nullptr);
   context_.reset(context);
 }
 

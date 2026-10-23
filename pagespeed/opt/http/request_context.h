@@ -65,7 +65,7 @@ class RequestContext : public RefCounted<RequestContext> {
   //             Makes a request context for running tests.
   // Note: Test RequestContexts do not pay attention to options.
   static RequestContextPtr NewTestRequestContext(ThreadSystem* thread_system) {
-    return NewTestRequestContextWithTimer(thread_system, NULL);
+    return NewTestRequestContextWithTimer(thread_system, nullptr);
   }
   static RequestContextPtr NewTestRequestContextWithTimer(
       ThreadSystem* thread_system, Timer* timer);
@@ -96,7 +96,7 @@ class RequestContext : public RefCounted<RequestContext> {
   //   to ReleaseDependentTraceContext(). Cleanup should be automatic and
   //   managed by RequestContext subclass implementations.
   virtual RequestTrace* CreateDependentTraceContext(const StringPiece& label) {
-    return NULL;
+    return nullptr;
   }
 
   // Releases this object's reference to the given context and frees memory.

@@ -184,7 +184,7 @@ class CacheUrlAsyncFetcher : public UrlAsyncFetcher {
   // fetch callbacks in addition to cache callbacks.  This is not hard to do,
   // but we don't need it yet so it's not done.
   void set_response_sequence(Sequence* x) {
-    CHECK(fetcher_ == NULL);
+    CHECK(fetcher_ == nullptr);
     response_sequence_ = x;
   }
 

@@ -38,7 +38,7 @@ struct UrlCategoryPair {
   HtmlElement::Attribute* url;
   semantic_type::Category category;
 
-  UrlCategoryPair() : url(NULL), category(semantic_type::kUndefined) {}
+  UrlCategoryPair() : url(nullptr), category(semantic_type::kUndefined) {}
 };
 
 using UrlCategoryVector = std::vector<UrlCategoryPair>;

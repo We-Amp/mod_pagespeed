@@ -39,7 +39,7 @@ class Statistics;
 class MockCriticalImagesFinder : public TestCriticalImagesFinder {
  public:
   explicit MockCriticalImagesFinder(Statistics* stats)
-      : TestCriticalImagesFinder(NULL, stats), compute_calls_(0) {}
+      : TestCriticalImagesFinder(nullptr, stats), compute_calls_(0) {}
 
   MockCriticalImagesFinder(const PropertyCache::Cohort* cohort,
                            Statistics* stats)

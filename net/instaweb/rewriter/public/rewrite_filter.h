@@ -134,7 +134,7 @@ class RewriteFilter : public CommonFilter {
   // Return the names of options related to this RewriteFilter in
   // case-insensitive alphabetical order. NULL means there are none.
   // Ownership of the vector is not transferred to the caller.
-  virtual const StringPieceVector* RelatedOptions() const { return NULL; }
+  virtual const StringPieceVector* RelatedOptions() const { return nullptr; }
 
  protected:
   // This class logs using id().

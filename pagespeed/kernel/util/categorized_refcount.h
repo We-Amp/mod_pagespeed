@@ -81,7 +81,7 @@ class CategorizedRefcount {
   // TODO(jud): Instead of holding the mutex in this class, pass in the mutex to
   // each function so that thread safety annotation can be used.
   explicit CategorizedRefcount(ObjectType* object)
-      : total_refcount_(0), object_(object), mutex_(NULL) {
+      : total_refcount_(0), object_(object), mutex_(nullptr) {
     for (int i = 0; i < ObjectType::kNumRefCategories; ++i) {
       ref_counts_[i] = 0;
     }

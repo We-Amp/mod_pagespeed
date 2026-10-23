@@ -69,7 +69,7 @@ namespace net_instaweb {
 // just saving the command will not work.
 class ngx_command_ctx {
  public:
-  ngx_command_ctx() : command_(NULL), module_(NULL) {}
+  ngx_command_ctx() : command_(nullptr), module_(nullptr) {}
   void* GetConfPtr(ngx_conf_t* cf);
   char* GetModuleConfPtr(ngx_conf_t* cf);
   ngx_command_t* command_;

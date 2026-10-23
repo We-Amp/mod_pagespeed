@@ -136,7 +136,7 @@ class HTTPCache {
     // ResponseHeaders::IsProxyCacheable (e.g. via the 2-arg Callback
     // constructor) must be applied when needed.
     explicit Callback(const RequestContextPtr& request_ctx)
-        : response_headers_(NULL),
+        : response_headers_(nullptr),
           owns_response_headers_(false),
           request_ctx_(request_ctx),
           cache_level_(0),
@@ -146,7 +146,7 @@ class HTTPCache {
     // that the cookies and authorization in the request-headers are valid.
     Callback(const RequestContextPtr& request_ctx,
              RequestHeaders::Properties req_properties)
-        : response_headers_(NULL),
+        : response_headers_(nullptr),
           req_properties_(req_properties),
           owns_response_headers_(false),
           request_ctx_(request_ctx),
@@ -204,7 +204,7 @@ class HTTPCache {
     // response_headers.
     HTTPValue* http_value() { return &http_value_; }
     ResponseHeaders* response_headers() {
-      if (response_headers_ == NULL) {
+      if (response_headers_ == nullptr) {
         response_headers_ = new ResponseHeaders(request_ctx_->options());
         owns_response_headers_ = true;
       }

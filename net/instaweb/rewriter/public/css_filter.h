@@ -342,7 +342,9 @@ class CssFilter::Context : public SingleRewriteContext {
   // Used by the asynchronous rewrite callbacks (RewriteSingle + Harvest) to
   // determine if what is being rewritten is a style attribute or a stylesheet,
   // since an attribute comprises only declarations, unlike a stlyesheet.
-  bool IsInlineAttribute() const { return (rewrite_inline_attribute_ != NULL); }
+  bool IsInlineAttribute() const {
+    return (rewrite_inline_attribute_ != nullptr);
+  }
 
   // Determine the appropriate image inlining threshold based upon whether we're
   // in an html file (<style> tag or style= attribute) or in an external css

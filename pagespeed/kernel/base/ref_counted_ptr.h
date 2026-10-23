@@ -69,15 +69,15 @@ class RefCounted {
 template <class T>
 class RefCountedPtr {
  public:
-  RefCountedPtr() : ptr_(NULL) {}
+  RefCountedPtr() : ptr_(nullptr) {}
   explicit RefCountedPtr(T* t) : ptr_(t) {
-    if (t != NULL) {
+    if (t != nullptr) {
       t->AddRef();
     }
   }
 
   RefCountedPtr(const RefCountedPtr<T>& src) : ptr_(src.ptr_) {
-    if (ptr_ != NULL) {
+    if (ptr_ != nullptr) {
       ptr_->AddRef();
     }
   }
@@ -85,13 +85,13 @@ class RefCountedPtr {
   template <class U>
   explicit RefCountedPtr(const RefCountedPtr<U>& src)
       : ptr_(static_cast<T*>(src.ptr_)) {
-    if (ptr_ != NULL) {
+    if (ptr_ != nullptr) {
       ptr_->AddRef();
     }
   }
 
   ~RefCountedPtr() {
-    if (ptr_ != NULL) {
+    if (ptr_ != nullptr) {
       ptr_->Release();
     }
   }

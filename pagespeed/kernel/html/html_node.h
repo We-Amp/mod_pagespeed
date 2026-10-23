@@ -106,7 +106,7 @@ class HtmlLeafNode : public HtmlNode {
  public:
   ~HtmlLeafNode() override;
   bool live() const override {
-    return (data_.get() != NULL) && data_->is_live_;
+    return (data_.get() != nullptr) && data_->is_live_;
   }
   void MarkAsDead(const HtmlEventListIterator& end) override;
   GoogleString ToString() const override;
@@ -116,7 +116,7 @@ class HtmlLeafNode : public HtmlNode {
   HtmlEventListIterator end() const override { return data_->iter_; }
   void set_iter(const HtmlEventListIterator& iter) { data_->iter_ = iter; }
 
-  void FreeData() { data_.reset(NULL); }
+  void FreeData() { data_.reset(nullptr); }
 
  protected:
   HtmlLeafNode(HtmlElement* parent, const HtmlEventListIterator& iter,

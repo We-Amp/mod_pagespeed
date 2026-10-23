@@ -47,7 +47,7 @@ class ScriptArgIndex {
  public:
   explicit ScriptArgIndex(ngx_http_script_compile_t* script, int index)
       : script_(script), index_(index) {
-    CHECK(script != NULL);
+    CHECK(script != nullptr);
     CHECK(index > 0 && index < NGX_PAGESPEED_MAX_ARGS);
   }
 
@@ -81,7 +81,7 @@ class ScriptLine : public RefCounted<ScriptLine> {
 
   void AddScriptAndArgIndex(ngx_http_script_compile_t* script,
                             int script_index) {
-    CHECK(script != NULL);
+    CHECK(script != nullptr);
     CHECK(script_index < NGX_PAGESPEED_MAX_ARGS);
     data_.push_back(new ScriptArgIndex(script, script_index));
   }

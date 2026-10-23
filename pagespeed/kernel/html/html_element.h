@@ -225,7 +225,9 @@ class HtmlElement : public HtmlNode {
   // html_parse->IsRewritable(node) is false.  Once a node is closed, a FLUSH
   // will cause the node's data to be freed, which triggers this method
   // returning false.
-  bool live() const override { return (data_.get() != NULL) && data_->live_; }
+  bool live() const override {
+    return (data_.get() != nullptr) && data_->live_;
+  }
 
   void MarkAsDead(const HtmlEventListIterator& end) override;
 
@@ -288,10 +290,10 @@ class HtmlElement : public HtmlNode {
   // (this avoids a double lookup).
   const char* AttributeValue(HtmlName::Keyword name) const {
     const Attribute* attribute = FindAttribute(name);
-    if (attribute != NULL) {
+    if (attribute != nullptr) {
       return attribute->DecodedValueOrNull();
     }
-    return NULL;
+    return nullptr;
   }
 
   // Look up escaped attribute value by name.
@@ -304,10 +306,10 @@ class HtmlElement : public HtmlNode {
   // (this avoids a double lookup).
   const char* EscapedAttributeValue(HtmlName::Keyword name) const {
     const Attribute* attribute = FindAttribute(name);
-    if (attribute != NULL) {
+    if (attribute != nullptr) {
       return attribute->escaped_value();
     }
-    return NULL;
+    return nullptr;
   }
 
   // Returns the element tag name, which is not guaranteed to be
@@ -408,7 +410,7 @@ class HtmlElement : public HtmlNode {
   // retained and can correctly answer element->IsRewritable() and
   // element->is_live(), but the rest of the data (attributes etc)
   // is deleted.
-  void FreeData() { data_.reset(NULL); }
+  void FreeData() { data_.reset(nullptr); }
 
   std::unique_ptr<Data> data_;
 

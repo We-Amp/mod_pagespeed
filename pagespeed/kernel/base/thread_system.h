@@ -100,9 +100,9 @@ class ThreadSystem {
     void Release() UNLOCK_FUNCTION() {
       // We allow Release called explicitly, before the ScopedReader goes
       // out of scope and is destructed, calling Release again.
-      if (lock_ != NULL) {
+      if (lock_ != nullptr) {
         lock_->ReaderUnlock();
-        lock_ = NULL;
+        lock_ = nullptr;
       }
     }
 

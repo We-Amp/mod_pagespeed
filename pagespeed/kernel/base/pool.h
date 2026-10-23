@@ -92,7 +92,7 @@ class Pool {
 
   // Return oldest object in pool, or NULL.
   T* oldest() const {
-    T* result = NULL;
+    T* result = nullptr;
     if (!contents_.empty()) {
       result = contents_.front();
     }
@@ -102,7 +102,7 @@ class Pool {
   // Remove the least-recently-inserted object from the pool.  Potentially
   // cheaper than Remove(Oldest()).
   T* RemoveOldest() {
-    T* result = NULL;
+    T* result = nullptr;
     if (!contents_.empty()) {
       result = contents_.front();
       iterator* position = result->pool_position();

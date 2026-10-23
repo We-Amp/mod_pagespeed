@@ -51,7 +51,8 @@ class CssFlattenImportsContext : public SingleRewriteContext {
   CssFlattenImportsContext(RewriteContext* parent, CssFilter* filter,
                            CssFilter::Context* rewriter,
                            CssHierarchy* hierarchy)
-      : SingleRewriteContext(NULL, parent, NULL /* no resource_context */),
+      : SingleRewriteContext(nullptr, parent,
+                             nullptr /* no resource_context */),
         filter_(filter),
         rewriter_(rewriter),
         hierarchy_(hierarchy) {}

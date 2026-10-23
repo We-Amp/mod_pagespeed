@@ -54,7 +54,7 @@ void ApacheRequestToRequestHeaders(const request_rec& request,
 // Fully converts apache request header structure into RequestHeaders.
 inline void ApacheRequestToRequestHeaders(const request_rec& request,
                                           RequestHeaders* request_headers) {
-  return ApacheRequestToRequestHeaders(request, request_headers, NULL);
+  return ApacheRequestToRequestHeaders(request, request_headers, nullptr);
 }
 
 // Converts Apache header structure (request.headers_out) into ResponseHeaders

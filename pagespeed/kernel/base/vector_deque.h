@@ -57,7 +57,7 @@ class VectorDeque {
         data_(new T[initial_capacity()]) {}
   ~VectorDeque() {
     delete[] data_;
-    data_ = NULL;
+    data_ = nullptr;
   }
 
   static size_t initial_capacity() { return 4; }

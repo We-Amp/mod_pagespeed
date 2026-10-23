@@ -103,7 +103,7 @@ class HtmlParseTestBaseNoAlloc : public testing::Test {
 
   void SetupWriter(std::unique_ptr<HtmlWriterFilter>* html_writer_filter) {
     output_buffer_.clear();
-    if (html_writer_filter->get() == NULL) {
+    if (html_writer_filter->get() == nullptr) {
       *html_writer_filter = std::make_unique<HtmlWriterFilter>(html_parse());
       (*html_writer_filter)->set_writer(&write_to_string_);
       html_parse()->AddFilter(html_writer_filter->get());

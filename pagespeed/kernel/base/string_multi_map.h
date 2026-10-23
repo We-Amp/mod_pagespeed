@@ -85,7 +85,7 @@ class StringMultiMap {
     if (Lookup(name, &v) && v.size() == 1) {
       return v[0];
     }
-    return NULL;
+    return nullptr;
   }
 
   bool Has(const StringPiece& name) const {
@@ -186,8 +186,8 @@ class StringMultiMap {
       // The first time we insert, make a copy of the key in storage we own.
       entry.SaveKey();
     }
-    GoogleString* value_copy = NULL;
-    if (value.data() != NULL) {
+    GoogleString* value_copy = nullptr;
+    if (value.data() != nullptr) {
       value_copy = new GoogleString(value.as_string());
     }
     entry.AddValue(value_copy);
@@ -211,7 +211,7 @@ class StringMultiMap {
       if (pos != StringPiece::npos) {
         Add(pair.substr(0, pos), pair.substr(pos + 1));
       } else if (!omit_if_no_value) {
-        Add(pair, StringPiece(NULL, 0));
+        Add(pair, StringPiece(nullptr, 0));
       }
     }
   }
@@ -220,7 +220,7 @@ class StringMultiMap {
     Clear();
     for (int i = 0; i < string_multi_map.num_values(); ++i) {
       const GoogleString* value = string_multi_map.value(i);
-      if (value != NULL) {
+      if (value != nullptr) {
         Add(string_multi_map.name(i), *value);
       } else {
         Add(string_multi_map.name(i), StringPiece());

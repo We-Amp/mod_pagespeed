@@ -23,9 +23,9 @@
 #ifndef NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_CONTEXT_TEST_BASE_H_
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_CONTEXT_TEST_BASE_H_
 
+#include <memory>
 #include <utility>
 #include <vector>
-#include <memory>
 
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
@@ -145,7 +145,7 @@ class UpperCaseRewriter : public SimpleTextFilter::Rewriter {
     if (element->keyword() == HtmlName::kLink) {
       return element->FindAttribute(HtmlName::kHref);
     }
-    return NULL;
+    return nullptr;
   }
   OutputResourceKind kind() const override { return kind_; }
   const char* id() const override { return kFilterId; }
@@ -210,7 +210,7 @@ class NestedFilter : public RewriteFilter {
   class NestedSlot : public ResourceSlot {
    public:
     explicit NestedSlot(const ResourcePtr& resource) : ResourceSlot(resource) {}
-    HtmlElement* element() const override { return NULL; }
+    HtmlElement* element() const override { return nullptr; }
     void Render() override {}
     GoogleString LocationString() const override { return "nested:"; }
   };
@@ -218,7 +218,7 @@ class NestedFilter : public RewriteFilter {
   class Context : public SingleRewriteContext {
    public:
     Context(RewriteDriver* driver, NestedFilter* filter, bool chain)
-        : SingleRewriteContext(driver, NULL, NULL),
+        : SingleRewriteContext(driver, nullptr, nullptr),
           filter_(filter),
           chain_(chain) {}
     ~Context() override;
@@ -360,7 +360,7 @@ class CombiningFilter : public RewriteFilter {
   void StartDocumentImpl() override {}
   void StartElementImpl(HtmlElement* element) override;
   void Flush() override {
-    if (context_.get() != NULL) {
+    if (context_.get() != nullptr) {
       driver()->InitiateRewrite(context_.release());
     }
   }

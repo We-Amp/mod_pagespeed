@@ -37,9 +37,9 @@ class CondvarTestBase : public testing::Test {
   using SignalMethod = void (ThreadSystem::Condvar::*)();
 
   CondvarTestBase()
-      : mutex_(NULL),
-        startup_condvar_(NULL),
-        condvar_(NULL),
+      : mutex_(nullptr),
+        startup_condvar_(nullptr),
+        condvar_(nullptr),
         ready_to_start_(false),
         iters_(0),
         current_iter_(0),
@@ -63,7 +63,7 @@ class CondvarTestBase : public testing::Test {
   static void* HelperThread(void* data) {
     CondvarTestBase* test = static_cast<CondvarTestBase*>(data);
     test->HelperThreadMethod();
-    return NULL;
+    return nullptr;
   }
 
   // CreateHelper creates a thread that ultimately calls

@@ -42,7 +42,7 @@ class Timer;
 class NullCondvar : public ThreadSystem::Condvar {
  public:
   explicit NullCondvar(ThreadSystem::CondvarCapableMutex* m)
-      : mutex_(m), timed_wait_callback_(NULL) {}
+      : mutex_(m), timed_wait_callback_(nullptr) {}
   ~NullCondvar() override;
   ThreadSystem::CondvarCapableMutex* mutex() const override { return mutex_; }
   void Signal() override { actions_.push_back("Signal()"); }
@@ -60,7 +60,7 @@ class NullCondvar : public ThreadSystem::Condvar {
   // Calls callback once the next time TimedWait() is called.  If TimedWait() is
   // not called we will CHECK-fail.  Doesn't take ownership of the callback.
   void set_timed_wait_callback(TimedWaitCallback* x) {
-    CHECK(timed_wait_callback_ == NULL);
+    CHECK(timed_wait_callback_ == nullptr);
     timed_wait_callback_ = x;
   }
 

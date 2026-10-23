@@ -113,7 +113,7 @@ class NamedLockTester {
   }
 
   void Quiesce() {
-    if (quiesce_.get() != NULL) {
+    if (quiesce_.get() != nullptr) {
       quiesce_->CallRun();
       quiesce_->Reset();
     }
