@@ -438,13 +438,12 @@ jobs:
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
 
       # Redis and memcached for the cache tests, on a network named for this
-      # run so concurrent runs on one host never share a name. Only the
-      # containers started here are ever removed, by name.
+      # job, run and attempt so concurrent jobs on one host never share a
+      # name. Only the containers started here are ever removed, by name.
       - name: Start the test services
         run: |
-          NET="ci-net-asan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          R="ci-redis-asan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          M="ci-memcached-asan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SUF="${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NET="ci-net-${SUF}"; R="ci-redis-${SUF}"; M="ci-memcached-${SUF}"
           {
             echo "CI_NET=${NET}"
             echo "CI_REDIS=${R}"
@@ -566,9 +565,8 @@ jobs:
 
       - name: Start the test services
         run: |
-          NET="ci-net-tsan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          R="ci-redis-tsan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          M="ci-memcached-tsan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SUF="${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NET="ci-net-${SUF}"; R="ci-redis-${SUF}"; M="ci-memcached-${SUF}"
           {
             echo "CI_NET=${NET}"
             echo "CI_REDIS=${R}"
@@ -1702,9 +1700,8 @@ jobs:
 
       - name: Start the test services
         run: |
-          NET="ci-net-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          R="ci-redis-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          M="ci-memcached-arm64-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SUF="${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NET="ci-net-${SUF}"; R="ci-redis-${SUF}"; M="ci-memcached-${SUF}"
           {
             echo "CI_NET=${NET}"
             echo "CI_REDIS=${R}"
