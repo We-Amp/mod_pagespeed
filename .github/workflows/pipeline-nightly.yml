@@ -3114,14 +3114,16 @@ jobs:
           cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
 
       # A per-runner Bazel repository cache, mounted at /repo-cache: Envoy's
-      # dependency archives are large, so they are kept between runs. Nothing
-      # prunes it yet; that is tracked in issue #187. The name is suffixed per
-      # runner instance and is never logged.
+      # dependency archives are large, so they are kept between runs. The name
+      # is suffixed per runner instance and is never logged.
       - name: Prepare the per-runner repository cache directory
         run: |
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-envoy-repo${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (30 days, 8G; the sizing is in
+          # tools/ci/prune-bazel-repository-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-repository-cache.sh" "${CACHE_ROOT}" 30d 8G || true
           echo "REPO_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       - name: Build the Envoy filter and run its tests
