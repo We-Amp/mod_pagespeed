@@ -912,7 +912,8 @@ ScanlineStatus GifFrameReader::Initialize() {
     }
     // Allocate and initialize gif_palette_, if that has not been done.
     if (gif_palette_ == nullptr) {
-      gif_palette_.reset(new PaletteRGBA[kGifPaletteSize]);
+      gif_palette_ =
+          std::make_unique_for_overwrite<PaletteRGBA[]>(kGifPaletteSize);
       if (gif_palette_ == nullptr) {
         return PS_LOGGED_STATUS(PS_LOG_ERROR, message_handler(),
                                 SCANLINE_STATUS_MEMORY_ERROR, FRAME_GIFREADER,

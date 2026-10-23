@@ -242,7 +242,7 @@ class DaemonServeArmTest : public testing::Test {
   DaemonServeDecision ServeHoldingBytes(
       const DaemonServeRequest& request,
       std::unique_ptr<DaemonServeReader>* reader) {
-    reader->reset(new DaemonServeReader(abi_.get(), cache_));
+    *reader = std::make_unique<DaemonServeReader>(abi_.get(), cache_);
     return (*reader)->Serve(request, 1100 /* now_seconds */);
   }
 

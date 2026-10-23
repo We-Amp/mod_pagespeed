@@ -635,7 +635,7 @@ webbotauth::Verdict ClassifyRequest(ngx_http_request_t* r,
     std::vector<webbotauth::KeyDirectoryProvider*> chain;
     chain.push_back(&cache_only);
     chain.push_back(&local_provider);
-    chained.reset(new webbotauth::ChainedKeyDirectoryProvider(chain));
+    chained = std::make_unique<webbotauth::ChainedKeyDirectoryProvider>(chain);
     provider = chained.get();
   }
 
@@ -853,7 +853,7 @@ ngx_int_t ps_rsl_cap_preaccess_handler(ngx_http_request_t* r) {
     std::vector<webbotauth::KeyDirectoryProvider*> chain;
     chain.push_back(&cache_only);
     chain.push_back(&local_provider);
-    chained.reset(new webbotauth::ChainedKeyDirectoryProvider(chain));
+    chained = std::make_unique<webbotauth::ChainedKeyDirectoryProvider>(chain);
     provider = chained.get();
   }
 
