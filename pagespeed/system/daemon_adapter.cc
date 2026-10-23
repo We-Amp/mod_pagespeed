@@ -186,8 +186,9 @@ static_assert(kSocketConnectDeadlineMs == 2000, "message says two seconds");
 // long enough to cover one start's pass over all servers, short enough that
 // a later graceful restart or reload in the same process re-probes a daemon
 // that has since recovered.  A daemon that starts accepting inside this
-// window is not noticed by the checks made inside it: the startup verdict
-// is final for the process.
+// window is not noticed by the checks made inside it: only the serving
+// recheck (ServingHealth, on its own longer interval) picks the daemon up
+// again without a restart.
 constexpr int64_t kSocketVerdictLatchMs = 10000;
 
 // The deadline message for a probe that did not get accepted in time,
@@ -885,7 +886,8 @@ bool DaemonAdapter::VolumeWasReplaced() const {
 }
 
 void* DaemonAdapter::RecordCache() {
-  if (health_ != DaemonHealth::kReady || abi_ == nullptr) {
+  if (health_.load(std::memory_order_acquire) != DaemonHealth::kReady ||
+      abi_ == nullptr) {
     return nullptr;
   }
   std::lock_guard<std::mutex> lock(record_cache_mutex_);
@@ -1659,12 +1661,15 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
 }
 
 DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
-  health_ = DaemonHealth::kUnavailable;
+  health_.store(DaemonHealth::kUnavailable, std::memory_order_release);
+  // Only the exits below that mean "the daemon was not running yet" turn
+  // this back on; everything else is final for the process.
+  unavailable_is_retryable_ = false;
   extra_volume_warning_.clear();
   legacy_generation_layout_ = false;
 
   if (socket_path_.empty() && volume_path_.empty()) {
-    health_ = DaemonHealth::kNotConfigured;
+    health_.store(DaemonHealth::kNotConfigured, std::memory_order_release);
     return DaemonStartupStatus::kOk;
   }
   if (!configured()) {
@@ -1743,6 +1748,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
                 volume_path_, ": permission denied.", kGroupMembershipHint);
       return DaemonStartupStatus::kOk;
     }
+    // The daemon has never published its size, in the way time can fix: it
+    // may simply not be running yet.  This is one of the exits the serving
+    // recheck retries.
+    unavailable_is_retryable_ = true;
     StrAppend(error,
               "in-place optimization is OFF: the optimizer daemon has not "
               "published the size of its cache volume at ",
@@ -1767,7 +1776,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     }
     // The daemon published a size but its volume file is not there.  Creating
     // it is exactly what must not happen: the daemon is the volume's owner and
-    // a volume we invent is one nothing else reads.
+    // a volume we invent is one nothing else reads.  Also a race time can fix
+    // -- the daemon may not have finished starting -- so the serving recheck
+    // retries this exit too.
+    unavailable_is_retryable_ = true;
     StrAppend(error,
               "in-place optimization is OFF: the optimizer daemon's cache "
               "volume does not exist yet at ",
@@ -2013,11 +2025,14 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   }
 
   if (!SocketAnswers(socket_path_, &why)) {
+    // The daemon was not running when the check ran -- the one verdict the
+    // serving recheck looks for again.
+    unavailable_is_retryable_ = true;
     StrAppend(error, "in-place optimization is OFF: ", why);
     return DaemonStartupStatus::kOk;
   }
 
-  health_ = DaemonHealth::kReady;
+  health_.store(DaemonHealth::kReady, std::memory_order_release);
   if (legacy_generation_layout_) {
     // Reported even though the server is healthy: the tolerance is a
     // deliberate, working state, and one loud line is what keeps it from
@@ -2041,14 +2056,86 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
 DaemonStartupStatus DaemonAdapter::StartupCheck() {
   GoogleString error;
   const DaemonStartupStatus status = Resolve(&error);
+  if (unavailable_is_retryable_) {
+    // The first retry of the "not running" verdict is due one interval after
+    // the check that produced it, not immediately.
+    unavailable_retry_due_ms_.store(
+        monotonic_clock_() + kUnavailableRetryIntervalMs,
+        std::memory_order_release);
+  }
   // Kept so a serving child can repeat it once its message history exists.
   // Only a verdict that leaves the arm off is a refusal: the healthy-path
   // notes (legacy layout, left-over volumes) are not repeated.
-  startup_refusal_ = health_ == DaemonHealth::kReady ? GoogleString() : error;
+  startup_refusal_ =
+      health_.load(std::memory_order_acquire) == DaemonHealth::kReady
+          ? GoogleString()
+          : error;
   if (!error.empty() && handler_ != nullptr && ShouldAnnounce(error)) {
     handler_->Message(kError, "%s", error.c_str());
   }
   return status;
+}
+
+DaemonHealth DaemonAdapter::ServingHealth() const {
+  const DaemonHealth verdict = health_.load(std::memory_order_acquire);
+  if (verdict != DaemonHealth::kUnavailable || !unavailable_is_retryable_) {
+    // Ready, unconfigured, or one of the verdicts that are final for the
+    // process: the serving seam takes the answer as it stands.
+    return verdict;
+  }
+  const int64_t now_ms = monotonic_clock_();
+  int64_t due_ms = unavailable_retry_due_ms_.load(std::memory_order_relaxed);
+  if (now_ms < due_ms) {
+    return verdict;
+  }
+  // One thread per interval probes; the rest answer from the verdict, the
+  // same claim idiom as the generation check.
+  if (!unavailable_retry_due_ms_.compare_exchange_strong(
+          due_ms, now_ms + kUnavailableRetryIntervalMs,
+          std::memory_order_relaxed)) {
+    return verdict;
+  }
+  // The re-check, deliberately without opening anything and without
+  // reloading the library: abi() is borrowed by the serve arms, and
+  // RecordCache() is the one that performs the checked open.  Any failure
+  // returns silently -- the start-up line already said why, and a repeat of
+  // it every thirty seconds would be noise.
+  GoogleString why;
+  if (abi_ == nullptr) {
+    return verdict;
+  }
+  const uint32_t generation =
+      abi_->SharedConfigGeneration(volume_path_.c_str());
+  if (generation != 0 && generation != kCacheDirGeneration) {
+    return verdict;
+  }
+  const uint64_t published = abi_->SharedConfigVolumeSize(volume_path_.c_str());
+  if (published == 0) {
+    return verdict;
+  }
+  // Stored before the verdict flips: RecordCache()'s directory-path branch
+  // reads it after seeing kReady, so the release store below orders it.
+  inherited_volume_size_ = published;
+  if (CurrentFormatVolumeFiles(volume_path_, VolumeFiles(volume_path_))
+          .empty()) {
+    return verdict;
+  }
+  if (!SocketAnswers(socket_path_, &why)) {
+    return verdict;
+  }
+  health_.store(DaemonHealth::kReady, std::memory_order_release);
+  // A refusal that is no longer true must not be repeated into any message
+  // history attached later.
+  startup_refusal_.clear();
+  if (handler_ != nullptr) {
+    const GoogleString message =
+        StrCat("the optimizer daemon at ", socket_path_,
+               " answers again: in-place optimization is on");
+    if (ShouldAnnounce(message)) {
+      handler_->Message(kInfo, "%s", message.c_str());
+    }
+  }
+  return DaemonHealth::kReady;
 }
 
 void DaemonAdapter::ReannounceStartupRefusal() {

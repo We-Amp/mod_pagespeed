@@ -67,11 +67,13 @@ count resets after a day.
    site. `DaemonVolumePath` must not be the module's own `FileCachePath`.
 
 3. **Recycle the application pools** (or run `iisreset`) so the worker
-   processes read the new configuration. Start the optimizer before the
-   application pools: with the two directives set, a site whose worker process
-   finds the optimizer not answering when it starts has in-place optimization
-   off until its pool recycles (the classic in-place path is not used while
-   the directives are set).
+   processes read the new configuration. The optimizer can be started before
+   or after the pools: a worker process that starts while the optimizer is
+   not running or not answering checks for it again every 30 seconds and
+   picks it up without a restart once it answers, with one info line in the
+   message history (the classic in-place path is not used while the
+   directives are set, whatever the check finds). Other startup verdicts,
+   a volume split above all, are final until the pool recycles.
 
 ### Checking it works
 

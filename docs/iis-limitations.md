@@ -45,10 +45,11 @@ enforced on IIS as on the other ports.
   that source is not registered on the machine, Event Viewer still shows the
   entry, prefixed with a note that the description cannot be found. The
   verdict lives until the application pool recycles: a configuration edit that
-  leaves both paths unchanged does not re-probe, and a daemon that is not
-  answering when the first site with this configuration starts in a worker
-  process leaves in-place optimization off for those sites until the pool
-  recycles (the other ports need a web-server restart for the same). The
+  leaves both paths unchanged does not re-probe. (A daemon that was merely
+  not running when the first site with this configuration started in a worker
+  process is the one verdict that recovers on its own: the module checks for
+  the daemon again every 30 seconds and turns in-place optimization on once
+  it answers, without a pool recycle.) The
   check removes the volume file its own open created; the event-log entry's
   appended report says so, or names the file to remove by hand when it could
   not. Recovery: start or restart the optimizer daemon and let it create its

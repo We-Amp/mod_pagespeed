@@ -1618,6 +1618,148 @@ TEST_F(DaemonAdapterTest, TwoThreadsProbingOnePathCannotRaceTheLatch) {
   EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
 }
 
+// --- the serving recheck (#104) ---------------------------------------------
+//
+// One verdict is not final for the process's life: the daemon was not
+// running when the check ran.  ServingHealth() looks for it again, on the
+// serving thread, at most once per retry interval per adapter, and only
+// ever turns kUnavailable into kReady.  Every other verdict, the split
+// above all, stays exactly as final as it was.
+
+TEST_F(DaemonAdapterTest,
+       AStoppedDaemonIsPickedUpOnceTheRetryIntervalHasPassed) {
+  // The case the issue describes: the worker started while the optimizer was
+  // stopped, and the optimizer came up later.
+  const GoogleString socket_path = SocketPath("later.sock");
+  DaemonCreatedItsVolume(kDaemonSize);
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  ASSERT_EQ(1, handler_.MessagesOfType(kError));
+  EXPECT_NE(GoogleString::npos, Messages().find(kStartDaemonFragment))
+      << Messages();
+
+  // The optimizer starts.  Inside the retry interval nothing probes, even
+  // though the socket now answers.
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->ServingHealth());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
+  EXPECT_EQ(0, handler_.MessagesOfType(kInfo)) << Messages();
+
+  // One interval later the recheck reattaches: the verdict flips once, one
+  // info line announces it, and the startup error stays the only error.
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
+  EXPECT_EQ(DaemonHealth::kReady, adapter->ServingHealth());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->health());
+  EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+  EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
+  EXPECT_NE(GoogleString::npos, Messages().find("answers again")) << Messages();
+  // The recheck itself opened nothing (the fake counted the startup probe's
+  // one open); the volume handle is RecordCache()'s to open, and it opens.
+  ASSERT_TRUE(last_abi_ != nullptr);
+  EXPECT_EQ(1, last_abi_->opens);
+  EXPECT_TRUE(adapter->RecordCache() != nullptr);
+  EXPECT_EQ(2, last_abi_->opens);
+  // A ready verdict is answered from the verdict: no second probe, no
+  // second line.
+  EXPECT_EQ(DaemonHealth::kReady, adapter->ServingHealth());
+  EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, TheRecoveryRetryNeverProbesALatchedPathAgain) {
+  // The recheck must not take the deadline a second time for a path the
+  // startup probe just paid for: the probe latch holds, and a retry that
+  // lands inside it answers from the latch at once and silently.  The
+  // injected clock is past the retry interval while real time is still
+  // inside the latch, so a recheck that ignored the latch would pay the
+  // two-second deadline here.
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("latched-retry.sock");
+  std::unique_ptr<BacklogFillGuard> fill = FillBackloggedQueue(socket_path);
+  ASSERT_TRUE(fill->bound());
+  if (!QueueFilledWithEagain(*fill)) {
+    GTEST_SKIP() << "this kernel answers a full queue with "
+                 << fill->fill_errno();
+  }
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  ASSERT_EQ(1, handler_.MessagesOfType(kError));
+
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
+  const std::chrono::steady_clock::time_point start =
+      std::chrono::steady_clock::now();
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->ServingHealth());
+  const int64_t elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count();
+  EXPECT_LT(elapsed_ms, 200) << elapsed_ms;
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  // The latched answer is silent: no new line of either level.
+  EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
+  EXPECT_EQ(0, handler_.MessagesOfType(kInfo)) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, TheVolumeSplitIsNeverRechecked) {
+  // The refusal is final by design: the split is a setup fault an operator
+  // must fix, not a race that time heals.  The recheck leaves it alone even
+  // though the socket answers and the daemon publishes a size, because a
+  // verdict that flipped back here would attach this module to a volume it
+  // must not touch.
+  DaemonCreatedItsVolume(64ULL << 20);  // the daemon's file, at a size it
+                                        // does not publish
+  const GoogleString socket_path = SocketPath("split-retry.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kRefuseToStart, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  ASSERT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size());
+  ASSERT_TRUE(last_abi_ != nullptr);
+  ASSERT_EQ(1, last_abi_->opens);
+
+  now_ms_ += 10 * DaemonAdapter::kUnavailableRetryIntervalMs;
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->ServingHealth());
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  // Nothing was probed, opened or created, and nothing new was said.
+  EXPECT_EQ(1, last_abi_->opens);
+  EXPECT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size());
+  EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
+  EXPECT_EQ(0, handler_.MessagesOfType(kInfo)) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, AnUnpublishedVolumeIsPickedUpWhenTheDaemonCreatesIt) {
+  // The other recoverable start: the daemon had never run when the check
+  // ran, so it published no size and made no volume.  Once it has done
+  // both, the next recheck reattaches -- the module never creates the
+  // volume itself.
+  published_size_ = 0;
+  const GoogleString socket_path = SocketPath("novol-retry.sock");
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  ASSERT_TRUE(DaemonAdapter::VolumeFiles(volume_).empty());
+
+  // The daemon runs for the first time: it publishes a size, creates its
+  // volume, and answers.
+  ASSERT_TRUE(last_abi_ != nullptr);
+  last_abi_->republished_size = kDaemonSize;
+  DaemonCreatedItsVolume(kDaemonSize);
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
+  EXPECT_EQ(DaemonHealth::kReady, adapter->ServingHealth());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->health());
+  EXPECT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size());
+  EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+  EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
+}
+
 // --- permission denied vs absent (H2/H3) -----------------------------------
 //
 // After the daemon's privilege drop its cache directory, socket and shared

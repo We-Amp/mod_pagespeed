@@ -261,7 +261,31 @@ class DaemonAdapter {
   // host failing for a different reason is still heard.
   DaemonStartupStatus StartupCheck();
 
-  DaemonHealth health() const { return health_; }
+  DaemonHealth health() const {
+    return health_.load(std::memory_order_acquire);
+  }
+
+  // How long ServingHealth() waits before looking for a daemon whose
+  // start-up verdict was only "not running".  DELIBERATELY LONGER THAN THE
+  // PROBE LATCH (kSocketVerdictLatchMs, ten seconds, in the .cc): a retry
+  // interval shorter than the latch would land inside it and be answered by
+  // the latched deadline verdict without ever really asking, so at thirty
+  // seconds every retry is a real probe while the latch still bounds a busy
+  // pipe on its own.
+  static constexpr int64_t kUnavailableRetryIntervalMs = 30000;
+
+  // The per-request verdict for the serving seams; the ports read it through
+  // their daemon_health() accessor.  May turn the ONE verdict that is not
+  // final for the process -- the daemon was not running when the start-up
+  // check ran -- back into kReady, at most one probe per adapter per
+  // kUnavailableRetryIntervalMs and one direction only (kUnavailable ->
+  // kReady, never back).  Never for the split or any configuration or
+  // package fault, all of which stay exactly as final as Resolve() left
+  // them.  The probe opens nothing and reloads nothing (abi() is borrowed by
+  // the serve arms): it re-reads what the daemon publishes, requires a
+  // current-format volume file to be there, and asks the socket;
+  // RecordCache() performs the checked open on first use.
+  DaemonHealth ServingHealth() const;
 
   // Logs the start-up refusal once more, as a warning, through the same
   // handler; nothing when the start-up check left the arm ready or found no
@@ -558,12 +582,26 @@ class DaemonAdapter {
   MessageHandler* handler_;
   AbiLoader abi_loader_;
   std::unique_ptr<DaemonAbi> abi_;
-  DaemonHealth health_ = DaemonHealth::kNotConfigured;
+  // Mutable and atomic because ServingHealth() may store kReady on a request
+  // thread while other request threads read the verdict through health().
+  mutable std::atomic<DaemonHealth> health_{DaemonHealth::kNotConfigured};
+  // Whether the kUnavailable verdict means only "the daemon was not running
+  // yet", and is therefore retried by ServingHealth().  Set at exactly the
+  // three Resolve() exits that say so -- no published size, no volume on
+  // disk, no answer on the socket -- and written only inside Resolve(),
+  // before the adapter is published to serving threads, so a plain bool is
+  // read safely on the request path.
+  bool unavailable_is_retryable_ = false;
+  // When ServingHealth() may next probe.  Claimed by compare-and-swap, so
+  // one thread probes per interval; the others answer from the verdict.
+  mutable std::atomic<int64_t> unavailable_retry_due_ms_{0};
   // The size the daemon published when the start-up check ran.  A serving
   // process's open asks the daemon again and looks at the disk before and
   // after (see "a volume the daemon replaced"); this one is used only where
   // that look is not possible, a configured path that is a directory.
-  uint64_t inherited_volume_size_ = 0;
+  // Mutable because ServingHealth() refreshes it when a late recovery learns
+  // the size the start-up check never saw.
+  mutable uint64_t inherited_volume_size_ = 0;
   MonotonicClock monotonic_clock_;
   std::mutex record_cache_mutex_;
   void* record_cache_ = nullptr;
@@ -620,8 +658,10 @@ class DaemonAdapter {
 
   // The text StartupCheck() logged when its verdict left in-place
   // optimization off; empty otherwise (including the healthy-path notes).
-  // Repeated by ReannounceStartupRefusal().
-  GoogleString startup_refusal_;
+  // Repeated by ReannounceStartupRefusal(), and cleared by ServingHealth()
+  // once a late recovery has made it no longer true.  Mutable for the same
+  // reason inherited_volume_size_ is.
+  mutable GoogleString startup_refusal_;
 };
 
 }  // namespace net_instaweb

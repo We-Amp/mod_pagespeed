@@ -297,13 +297,14 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		// distinct (library, socket, volume) triple for the life of the
 		// process: the client library is never unloaded, so reusing the
 		// adapter across this context's rebuilds keeps the loader
-		// reference count and the handle count flat.  The verdict also
-		// lives until the process ends -- a configuration edit that
-		// leaves the paths unchanged does not re-probe, so every verdict,
-		// the split included, persists until the application pool
-		// recycles, and a daemon that is not answering when this site
-		// first starts in a worker process leaves in-place optimization
-		// off until then.  Every verdict except the split leaves the
+		// reference count and the handle count flat.  A configuration
+		// edit that leaves the paths unchanged does not re-probe, so
+		// every verdict, the split included, lives until the process
+		// ends -- with one exception: a daemon that was not running when
+		// this site first started in a worker process is looked for
+		// again by the serving accessor (at most once per retry
+		// interval), so the worker picks it up without a pool recycle
+		// once it answers.  Every verdict except the split leaves the
 		// site serving normally.
 		{
 			IisRewriteOptions* daemon_options =

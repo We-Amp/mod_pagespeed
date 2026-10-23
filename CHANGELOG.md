@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without it, so a shared cache could key the page inconsistently. The page
   now carries `Vary: Save-Data` whenever the filter and critical-image
   reporting are enabled, whatever the cache state.
+- **IIS and Apache pick up an optimizer service that starts or restarts after
+  the web server, without a restart.** A worker that started while the
+  service was not running kept in-place optimization off until its
+  application pool was recycled or the web server was restarted. The module
+  now checks for the service again every 30 seconds and turns in-place
+  optimization back on once it answers, with one info line saying so; the
+  volume split and every other configuration or package fault are still
+  final until a restart. nginx still requires a restart after starting the
+  service.
 - **`resize_rendered_image_dimensions` now uses the largest size of an image
   that appears more than once on a page, as documented.** Previously the size
   of its first appearance was used even when a later one was larger, so the

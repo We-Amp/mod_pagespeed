@@ -585,6 +585,14 @@ the `pagespeed` group** — then, for that server:
 * the classic in-place recorder does **not** come back;
 * the daemon's cache volume is **not** opened and never created.
 
+Three of those conditions mean only "the daemon was not running yet": no
+published size, no volume on disk, nothing answering on the socket. Apache
+looks for those three again while it serves, at most once every 30 seconds
+per server process, and turns in-place optimization back on by itself when
+the daemon answers; one info line in the error log says so. nginx does not
+recheck: after starting or restarting the optimizer, restart nginx (see
+"Start order and upgrades" in [install-nginx.md](install-nginx.md)).
+
 A version too old to use is a **refusal**, not a partial start, and that is
 deliberate. The published interface grows, and this module binds what it needs;
 a release missing part of it is missing rules, not merely features. The
@@ -620,6 +628,10 @@ costs optimization, never availability.
   (`usermod -a -G pagespeed <web user>`); an **absent** socket or volume line
   tells you to start the daemon. The two are not the same fix, and the log
   says which one you have.
+* A daemon that was not running when the server started is picked up again
+  within about 30 seconds of it answering: one info line says in-place
+  optimization is on again. Only the three not-running conditions recover
+  this way; every other line above stays until the server restarts.
 * A daemon publishing no cache-directory generation logs one line about the
   legacy layout and keeps working; one publishing a *different* generation
   logs a handshake failure and in-place optimization stays off until the
