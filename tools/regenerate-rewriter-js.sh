@@ -74,6 +74,7 @@ ESBUILD_FILES=(
     delay_images_inline.js
     deterministic.js
     extended_instrumentation.js
+    js_defer.js
     lazyload_images.js
     local_storage_cache.js
     responsive_js.js
@@ -256,7 +257,6 @@ closure_js_utils "$CLOSURE_JS_UTILS"
 WITHOUT_DEP_FILES=(
 )
 WITH_DEP_FILES=(
-    js_defer.js
 )
 
 for src_file in ${WITHOUT_DEP_FILES[@]+"${WITHOUT_DEP_FILES[@]}"}; do
@@ -273,7 +273,7 @@ for src_file in ${WITHOUT_DEP_FILES[@]+"${WITHOUT_DEP_FILES[@]}"}; do
         --externs "$EXTERNS"
 done
 
-for src_file in "${WITH_DEP_FILES[@]}"; do
+for src_file in ${WITH_DEP_FILES[@]+"${WITH_DEP_FILES[@]}"}; do
     if is_esbuild_file "$src_file"; then
         echo "ERROR: $src_file is listed for both esbuild and Closure" >&2
         exit 1
