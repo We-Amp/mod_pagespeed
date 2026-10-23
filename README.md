@@ -67,7 +67,7 @@ docker compose exec dev bash
 # Build for your target platform
 bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so                   # Apache
 bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so # Nginx
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy (not buildable at this revision)
+bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed              # Envoy (Envoy 1.40)
 
 # Run C++ unit tests
 bazel test --config=clang-libstdcxx13 \

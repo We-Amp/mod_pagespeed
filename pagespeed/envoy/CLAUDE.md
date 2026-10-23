@@ -39,22 +39,33 @@ virtual host overrides, circuit breaker, and admin authentication.
 
 ## Build Notes
 
-The filter is not buildable at the moment. The build is bzlmod only and the
-Envoy repositories are not declared in `MODULE.bazel` yet; they return with
-the move to Envoy 1.40, consumed as Envoy modules. Until then `pagespeed/envoy`
-and `test/pagespeed/envoy` stay in `.bazelignore`. Once the Envoy modules are
-declared, build with `--config=envoy-filter` (clang + libstdc++, googleurl
-without system ICU):
+The filter builds against Envoy 1.40, which `MODULE.bazel` declares as a
+module (`envoy` and `envoy_api`, both an `archive_override` of the v1.40.0
+commit; Envoy's registry follows the BCR in `.bazelrc`). Build with
+`--config=envoy-filter` (clang + libstdc++). Every target here and in
+`test/pagespeed/envoy` is tagged manual, so `//...` leaves the filter out
+(building it compiles all of Envoy); name the targets:
 
 ```
 bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed      # standalone binary
 bazel build --config=envoy-filter //pagespeed/envoy:pagespeed_filter.so  # shared library
+bazel test --config=envoy-filter //test/pagespeed/envoy:http_filter_test # unit tests (tagged manual, so named)
 ```
 
-Envoy needs its patched libevent snapshot (`event2/watch.h`). Our
-`com_github_libevent_libevent` (from the `non_bcr_deps` extension) is vanilla
-2.1.12, so the Envoy step replaces it, and `com_googlesource_googleurl`, `fmt`
-and `spdlog`, with Envoy's modules to avoid linking two copies into the filter.
+The extension list Envoy compiles in is `bazel/envoy/extensions_build_config.bzl`,
+served to Envoy as its `envoy_build_config` repository through `override_repo`
+in `MODULE.bazel`.
+
+The filter links one copy of each library it shares with Envoy: abseil,
+BoringSSL, protobuf, fmt, spdlog and googleurl are single modules in the graph
+(googleurl is our newer snapshot, overridden for Envoy too). Our libevent
+(`com_github_libevent_libevent`, vanilla 2.1.12) is separate from Envoy's
+`libevent` module; the filter does not link ours (only the Apache dispatcher
+does).
+
+Envoy's build macros name some repositories with plain string labels that
+resolve in the calling repository, so the root module declares them under
+Envoy's names too (`protobuf`, `re2`, `googleapis`, `protoc-gen-validate`).
 
 ## Testing
 

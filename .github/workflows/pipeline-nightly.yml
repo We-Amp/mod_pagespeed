@@ -3087,6 +3087,51 @@ jobs:
   # have no hosted twin (the IIS and Application Verifier lanes and the
   # privileged stress rigs) are skipped. This job only says so, in an
   # annotation and the job summary, so a skipped check is never a silent one.
+  # ---------------------------------------------------------------------
+  # The Envoy filter (pagespeed/envoy) against Envoy 1.40, every night: the
+  # full tier builds it only when its inputs change. No hosted twin (a cold
+  # Envoy build does not fit a hosted runner). Same script as the full tier.
+  # ---------------------------------------------------------------------
+  envoy-filter:
+    name: Envoy Filter Build and Tests
+    needs: event-guard
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      # A per-runner Bazel repository cache, mounted at /repo-cache: Envoy's
+      # dependency archives are large, so they are kept between runs. Nothing
+      # prunes it yet; that is tracked in issue #187. The name is suffixed per
+      # runner instance and is never logged.
+      - name: Prepare the per-runner repository cache directory
+        run: |
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-envoy-repo${RUNNER_TAG:+-${RUNNER_TAG}}"
+          mkdir -p "${CACHE_ROOT}"
+          echo "REPO_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
+
+      - name: Build the Envoy filter and run its tests
+        run: bash tools/ci/envoy-filter-build.sh
+
   fleet-off-notice:
     name: Shared build runners are switched off
     if: ${{ vars.FLEET_ENABLED == 'false' }}
