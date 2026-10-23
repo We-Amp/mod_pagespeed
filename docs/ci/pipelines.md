@@ -24,7 +24,7 @@ jobs exist today.
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 21:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane: build, package, smoke, the Windows installer, the release gates and validation, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`; a real run also signs and creates the release, in hosted jobs of the `release` environment. A dry run signs nothing and uses no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
-| Tidy sweep | `pipeline-tidy-sweep.yml`, called by `tidy-sweep.yml` | on dispatch | one clang-tidy check full-tree with `-fix`; uploads the patch as an artifact |
+| Tidy sweep | `pipeline-tidy-sweep.yml`, called by `tidy-sweep.yml` | on dispatch | one clang-tidy check full-tree with `-fix`, or a census of several checks with `fix` off; uploads the patch and the log as artifacts |
 
 The license audit (Apache RAT), the public-tree hygiene gate, the workflow-shape
 gate and the CI tooling self-tests run inline in `ci.yml`, on hosted runners.
@@ -499,6 +499,44 @@ The threshold is a repository variable: set `SWEEP_MAX_AGE_MINUTES` (a whole
 number of minutes) to override the 30 minute default. The logic is tested
 against a fake `gh` by `tools/ci/test_sweep_queued_runs.sh`, which the sweep
 job runs first.
+
+## The tidy sweep
+
+`tidy-sweep.yml` (dispatch, master only) runs `pipeline-tidy-sweep.yml` on a
+fleet runner. It builds the compilation database in the dev image the way the
+PR lint job does, then runs `run-clang-tidy` with `-checks=-*,<check>` and
+`-warnings-as-errors=<check>`. Inputs:
+
+- `check`: with `fix: true` exactly one plain check name, for example
+  `modernize-use-using`. With `fix: false` a comma-separated list of check
+  names or globs, with exclusions (a leading `-`) allowed after the first
+  entry, for example
+  `bugprone-*,-bugprone-easily-swappable-parameters,performance-*`. Only
+  lowercase letters, digits, `.`, `-`, `*` and `,` are accepted. The artifact
+  and patch file names are derived from it with every other character replaced
+  by `_`.
+- `paths`: space-separated path regexes for `run-clang-tidy`; the default is
+  `pagespeed/ net/`, and `pagespeed/ net/ test/` when `tests` is set.
+- `fix`: `true` applies the fixes and uploads a patch; `false` is a gate that
+  fails on any diagnostic.
+- `tests`: `true` adds the test packages the PR tier builds (the same list as
+  `linux-build` in `pipeline-pr.yml`) to the compilation database, so `test/`
+  sources are analysed. The default is `false`.
+
+The header filter is a POSIX extended regular expression that selects the
+project's own roots (`base/`, `net/`, `pagespeed/`, `test/`) positively, with
+an optional execroot or `./` prefix. clang-tidy compiles `-header-filter`
+with LLVM's regex engine, which has no lookahead, so a negated filter such as
+`^(?!...)` is invalid there and silently matches no header. The filter in
+`.clang-tidy`, the PR and nightly lint jobs and `tools/tidyup.sh` is still the
+negated form; those switch to the positive one after the header debt of the
+enforced checks has been cleared.
+
+Census use: dispatch with `fix: false`, `tests: true` and a check list. The
+job fails when it finds diagnostics (it is a gate), but the job summary lists
+the unique diagnostics per directory and per check, and the `hits.txt` and
+`tidy-sweep.log` artifacts hold every one of them. Compiler diagnostics
+(`clang-diagnostic-*`) are not counted as hits.
 
 ## Merge-queue runs
 

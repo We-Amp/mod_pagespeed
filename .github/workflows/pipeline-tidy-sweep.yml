@@ -73,12 +73,27 @@ jobs:
     timeout-minutes: 240
     steps:
       - name: Validate inputs
+        id: validate
         env:
           CHECK: ${{ inputs.check }}
           PATHS: ${{ inputs.paths }}
+          FIX: ${{ inputs.fix }}
         run: |
-          [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.]+)+$ ]] || {
-            echo "::error::check must be a single clang-tidy check name (got '${CHECK}')"; exit 1; }
+          if [ "${FIX}" = "true" ]; then
+            [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.]+)+$ ]] || {
+              echo "::error::with fix=true, check must be a single clang-tidy check name (got '${CHECK}')"; exit 1; }
+          else
+            # Census mode: a comma-separated list of check names or globs; the
+            # first entry is a plain or glob name, later ones may be exclusions
+            # (a leading '-'). No entry is empty and none starts a shell word
+            # with '-' on its own.
+            entry='-?[a-z0-9]+(-[a-z0-9.*]+)+'
+            [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.*]+)+(,${entry})*$ ]] || {
+              echo "::error::check must be clang-tidy check names or globs separated by commas, exclusions only after the first entry (got '${CHECK}')"; exit 1; }
+          fi
+          # File-name-safe form of the check list (no '*' or ',').
+          SAFE="${CHECK//[^A-Za-z0-9._-]/_}"
+          echo "safe=${SAFE:0:100}" >> "$GITHUB_OUTPUT"
           [[ "${PATHS}" =~ ^[A-Za-z0-9_./\ -]*$ ]] || {
             echo "::error::paths may only contain [A-Za-z0-9_./ -]"; exit 1; }
           for tok in ${PATHS}; do
@@ -271,13 +286,16 @@ jobs:
         env:
           CHECK: ${{ inputs.check }}
           FIX: ${{ inputs.fix }}
+          SAFE: ${{ steps.validate.outputs.safe }}
         run: |
           LOG=.tidy-sweep.log
           RC="$(cat .tidy-sweep.rc 2>/dev/null || echo missing)"
-          PATCH="${RUNNER_TEMP}/tidy-sweep-${CHECK}.patch"
+          PATCH="${RUNNER_TEMP}/tidy-sweep-${SAFE}.patch"
           git diff -- . ':!compile_commands.json' > "${PATCH}"
           # Unique diagnostics (a header diagnostic repeats per including TU).
-          grep -E "\[${CHECK}(,[^]]*)?\]$" "${LOG}" | grep -E ': (warning|error):' | sort -u > "${RUNNER_TEMP}/hits.txt" || true
+          # Any check tag the run produced counts, except compiler diagnostics
+          # (clang-diagnostic-*, counted separately below).
+          grep -E ': (warning|error): .*\[[a-z0-9.-]+(,[^]]*)?\]$' "${LOG}" | grep -vE '\[clang-diagnostic-[a-z0-9-]+(,[^]]*)?\]$' | sort -u > "${RUNNER_TEMP}/hits.txt" || true
           HITS="$(wc -l < "${RUNNER_TEMP}/hits.txt" | tr -d ' ')"
           # Parse failures and crashes make the hit count untrustworthy.
           DIAG_ERRORS="$(grep -cE '\[clang-diagnostic-error\]' "${LOG}" || true)"
@@ -294,6 +312,11 @@ jobs:
             echo '```'
             sed -E 's#^/workspace/##; s#^.*/execroot/[^/]+/##' "${RUNNER_TEMP}/hits.txt" | cut -d: -f1 \
               | awk -F/ '{ print ($2 != "" ? $1 "/" $2 : $1) }' | sort | uniq -c | sort -rn
+            echo '```'
+            echo
+            echo "### Diagnostics per check"
+            echo '```'
+            sed -E 's#^.*\[([a-z0-9.-]+)(,[^]]*)?\]$#\1#' "${RUNNER_TEMP}/hits.txt" | sort | uniq -c | sort -rn
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
           echo "patch=${PATCH}" >> "$GITHUB_OUTPUT"
@@ -321,7 +344,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tidy-sweep-${{ inputs.check }}
+          name: tidy-sweep-${{ steps.validate.outputs.safe || 'invalid-input' }}
           path: |
             ${{ runner.temp }}/tidy-sweep-*.patch
             ${{ runner.temp }}/tidy-sweep.log

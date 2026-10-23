@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       check:
-        description: "A single clang-tidy check name, e.g. modernize-use-using"
+        description: "A single clang-tidy check name, e.g. modernize-use-using. With fix=false also a comma-separated list of names or globs, exclusions after the first entry: bugprone-*,-bugprone-easily-swappable-parameters,performance-*"
         required: true
         type: string
       paths:
