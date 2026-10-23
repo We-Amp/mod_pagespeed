@@ -95,9 +95,6 @@ $ArmSpecs = @{
 
 $gflags = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe'
 $appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
-# The ports each iteration's site setup binds: run_iis_tests.ps1's -Port
-# (8080) and setup_iis_full.ps1's https binding (8443).
-$TestPorts = @(8080, 8443)
 $detector = Join-Path $RepoDir 'tools\ci\Assert-NoWorkerFailFast.ps1'
 if (-not (Test-Path $detector)) { throw "detector not found: $detector" }
 
@@ -157,35 +154,6 @@ function Stop-PoolWorker {
     }
 }
 
-function Wait-TestPortsFree {
-    # Wait until the test site's ports have no LISTEN entry left. The
-    # quiesce above waits for w3wp to EXIT, but w3wp never owned the
-    # listening sockets: HTTP.sys (kernel, PID 4) does, and it keeps them
-    # bound until it finishes processing the previous teardown's
-    # `appcmd stop site`. When the next iteration's setup then binds the
-    # same ports mid-release, every test dies in setup with WinError 10048
-    # before any request reaches the module -- a harness race that reads
-    # like a product failure in the log (issue #178). Poll the listener
-    # table, not process liveness. Returns the ports still held once the
-    # bounded wait expires, or an empty list once all are free.
-    param([int[]]$Ports, [int]$TimeoutSec = 60)
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    $announced = $false
-    while ($true) {
-        $held = @($Ports | Where-Object {
-                @(Get-NetTCPConnection -LocalPort $_ -State Listen -ErrorAction SilentlyContinue).Count -gt 0
-            })
-        if ($held.Count -eq 0) { return @() }
-        if (-not $announced) {
-            Write-Host "waiting for port(s) $($held -join ', ') to leave LISTEN (previous teardown still releasing)"
-            $announced = $true
-        }
-        if ((Get-Date) -ge $deadline) { return $held }
-        Start-Sleep -Milliseconds 500
-    }
-}
-
 $results = [System.Collections.Generic.List[object]]::new()
 
 try {
@@ -217,29 +185,6 @@ try {
                     # the residual lock, and a persistent failure fails LOUD.
                     Write-Host "WARNING: $pool worker still alive after the bounded drain wait; purging will retry around the lock."
                 }
-            }
-
-            # The worker-exit wait above is not a port-release wait (see
-            # Wait-TestPortsFree). Fail THIS iteration, with the holder
-            # named, if a test port is still bound at the deadline -- do not
-            # hand the setup a half-released port and let the tests fail one
-            # by one with WinError 10048.
-            $heldPorts = @(Wait-TestPortsFree -Ports $TestPorts)
-            if ($heldPorts.Count -gt 0) {
-                foreach ($p in $heldPorts) {
-                    foreach ($conn in @(Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)) {
-                        $holder = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
-                        $holderName = if ($holder) { $holder.Name } else { 'unknown' }
-                        Write-Host "ERROR: port $p still has a listener after the bounded wait: PID $($conn.OwningProcess) ($holderName)."
-                    }
-                }
-                Write-Host "Skipping ${tag}: the test ports never freed up, so no trustworthy run is possible."
-                $results.Add([pscustomobject]@{
-                        Arm = $arm.Name; Iteration = $i; Seconds = 0
-                        TestRc = -2; FailFast = $false; Ok = $false
-                    })
-                Write-Host "$tag : SKIPPED (test ports still held), counted as regressed"
-                continue
             }
 
             # Purge the file cache so a previous iteration's cache-extended
@@ -340,7 +285,6 @@ if ($bad.Count -gt 0) {
     foreach ($b in $bad) {
         $why = @()
         if ($b.TestRc -eq -1) { $why += 'cache purge failed (locked)' }
-        elseif ($b.TestRc -eq -2) { $why += 'test ports still held at start' }
         elseif ($b.TestRc -ne 0) { $why += "tests rc=$($b.TestRc)" }
         if ($b.FailFast)     { $why += 'worker fail-fast' }
         Write-Host "  $($b.Arm)-$($b.Iteration): $($why -join ', ')"
