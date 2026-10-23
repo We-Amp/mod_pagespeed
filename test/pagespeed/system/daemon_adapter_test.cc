@@ -1325,7 +1325,12 @@ TEST_F(DaemonAdapterTest, AnAbsentSocketAnswersAtOnceWithTheSameText) {
           std::chrono::steady_clock::now() - start)
           .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
-  EXPECT_LT(elapsed_ms, 200) << elapsed_ms;
+  // Only the probe is timed.  The bound sits just under the 2000 ms
+  // connect deadline: a probe that wrongly waits the deadline out answers
+  // at 2000 ms or later and trips it, while anything short of the
+  // deadline is host load on one failing connect, which issue #208 shows
+  // can run to seconds.
+  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
   EXPECT_NE(GoogleString::npos,
             Messages().find("the optimizer daemon does not answer at "))
       << Messages();
@@ -1362,15 +1367,23 @@ TEST_F(DaemonAdapterTest, ABackloggedListenerCostsTheDeadlineAndNoMore) {
   EXPECT_EQ(1, handler_.MessagesOfType(kError));
   EXPECT_NE(GoogleString::npos, Messages().find("did not accept a connection"))
       << Messages();
+  // The lower bound shows the deadline really is paid.  The upper bound is
+  // that 2000 ms deadline plus 3 s of headroom, because a loaded CI host
+  // or a sanitizer build can stretch even a deadline-bounded wait by
+  // seconds (issue #208); the point is that the start does not hang, and
+  // an overrun of the deadline plus headroom still reports it.
   EXPECT_GE(elapsed_ms, 1900) << elapsed_ms;
   EXPECT_LT(elapsed_ms, 5000) << elapsed_ms;
 }
 
 TEST_F(DaemonAdapterTest, ASecondProbeOfTheSamePathInsideTheLatchIsFree) {
   // The deadline is paid once per process per path: the first probe of a
-  // backlogged socket costs it, the second returns at once with the SAME
-  // text -- a different text would announce a second line, because the
-  // announcement latch only collapses identical messages.
+  // backlogged socket costs it, and the second reuses the latched verdict
+  // without probing again.  The second probe is checked by outcome, not by
+  // a wall-clock bound: the fill guard is dropped first, so the path no
+  // longer exists and a probe that slipped past the latch would answer
+  // with the absent-socket text, a different line the announcement latch
+  // cannot collapse (issue #208).
   DaemonCreatedItsVolume(kDaemonSize);
   const GoogleString socket_path = SocketPath("latched.sock");
   std::unique_ptr<BacklogFillGuard> fill = FillBackloggedQueue(socket_path);
@@ -1389,24 +1402,30 @@ TEST_F(DaemonAdapterTest, ASecondProbeOfTheSamePathInsideTheLatchIsFree) {
           std::chrono::steady_clock::now() - first_start)
           .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, first->health());
+  // The deadline really was paid, so the latch has a verdict to serve and
+  // this case is not vacuous.
   EXPECT_GE(first_ms, 1900) << first_ms;
 
+  // The guard drops: the parked clients and the listener close, and the
+  // socket file is unlinked, so the path no longer exists.
+  fill.reset();
   std::unique_ptr<DaemonAdapter> second(MakeAdapter(socket_path));
-  const std::chrono::steady_clock::time_point second_start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonStartupStatus::kOk, second->StartupCheck());
-  const int64_t second_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - second_start)
-          .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, second->health());
-  EXPECT_LT(second_ms, 200) << second_ms;
+  // The latched verdict, not a fresh probe: a fresh probe of the now
+  // absent path would announce the absent-socket text as a second line.
+  EXPECT_NE(GoogleString::npos, Messages().find("did not accept a connection"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find(kNotExistsStartFragment))
+      << Messages();
   EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
 }
 
 TEST_F(DaemonAdapterTest, TheLatchIsPerSocketPath) {
-  // An absent socket probed while a different path is latched still answers
-  // at once with its own ENOENT text.
+  // A socket absent while a different path is latched is still probed for
+  // real -- the latch serves only its own path -- and answers with its own
+  // ENOENT text.  Checked by outcome, not by a wall-clock bound, which a
+  // loaded CI host or a sanitizer build overruns (issue #208).
   DaemonCreatedItsVolume(kDaemonSize);
   const GoogleString socket_path = SocketPath("latched2.sock");
   std::unique_ptr<BacklogFillGuard> fill = FillBackloggedQueue(socket_path);
@@ -1420,15 +1439,10 @@ TEST_F(DaemonAdapterTest, TheLatchIsPerSocketPath) {
   ASSERT_EQ(DaemonHealth::kUnavailable, latched->health());
 
   std::unique_ptr<DaemonAdapter> absent(MakeAdapter(SocketPath("gone2.sock")));
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonStartupStatus::kOk, absent->StartupCheck());
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, absent->health());
-  EXPECT_LT(elapsed_ms, 200) << elapsed_ms;
+  EXPECT_NE(GoogleString::npos, Messages().find("did not accept a connection"))
+      << Messages();
   EXPECT_NE(GoogleString::npos, Messages().find(kNotExistsStartFragment))
       << Messages();
   // Both messages were heard: their texts differ, so the announcement latch
@@ -1469,7 +1483,11 @@ TEST_F(DaemonAdapterTest, AnAbsentPipeAnswersAtOnceWhileAnotherPipeIsBusy) {
           std::chrono::steady_clock::now() - start)
           .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, absent->health());
-  EXPECT_LT(elapsed_ms, 200) << elapsed_ms;
+  // Only the absent pipe's probe is timed.  The bound sits just under the
+  // 2000 ms deadline a wrongly waiting probe (#1050) would pay: anything
+  // short of that is host load on the one failing open, which issue #208
+  // shows can run to seconds.
+  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
 
   busy_thread.join();
   EXPECT_EQ(DaemonHealth::kUnavailable, busy_health);
@@ -1556,7 +1574,8 @@ TEST_F(DaemonAdapterTest, ALatchedPathThatRecoversAnswersAfterExpiry) {
 TEST_F(DaemonAdapterTest, TwoThreadsProbingOnePathCannotRaceTheLatch) {
   // Two threads may both pay the deadline once for one path; the latch must
   // not race them. Afterwards the path is latched once: a third probe
-  // returns at once, and the whole exchange announced exactly one line.
+  // reuses the latched verdict without probing again, and the whole
+  // exchange announced exactly one line.
   DaemonCreatedItsVolume(kDaemonSize);
   const GoogleString socket_path = SocketPath("race.sock");
   std::unique_ptr<BacklogFillGuard> fill = FillBackloggedQueue(socket_path);
@@ -1583,16 +1602,19 @@ TEST_F(DaemonAdapterTest, TwoThreadsProbingOnePathCannotRaceTheLatch) {
   EXPECT_EQ(DaemonHealth::kUnavailable, first_health);
   EXPECT_EQ(DaemonHealth::kUnavailable, second_health);
 
+  // The guard drops, so the path no longer exists: the latch, set once by
+  // the racing pair, must serve the third probe the busy verdict without
+  // probing again.  A probe that slipped past the latch would answer with
+  // the absent-socket text, a second and different line, so the outcome
+  // separates the two however loaded the host is.
+  fill.reset();
   std::unique_ptr<DaemonAdapter> third(MakeAdapter(socket_path));
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonStartupStatus::kOk, third->StartupCheck());
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, third->health());
-  EXPECT_LT(elapsed_ms, 200) << elapsed_ms;
+  EXPECT_NE(GoogleString::npos, Messages().find("did not accept a connection"))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find(kNotExistsStartFragment))
+      << Messages();
   EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
 }
 
@@ -3980,7 +4002,10 @@ TEST_F(DaemonAdapterTest, RecordCacheIfOpenNeverWaitsOnAnOpenInFlight) {
           std::chrono::steady_clock::now() - start)
           .count();
   EXPECT_TRUE(answer == nullptr);
-  EXPECT_LT(elapsed_ms, 200) << elapsed_ms;
+  // Only RecordCacheIfOpen() is timed, and the bound is its cost plus a
+  // full second of headroom: a loaded CI host or a sanitizer build can
+  // stall even a call that must not wait (issue #208).
+  EXPECT_LT(elapsed_ms, 1000) << elapsed_ms;
 }
 
 TEST_F(DaemonAdapterTest, RecordCacheIfOpenIsNullOutsideReady) {
