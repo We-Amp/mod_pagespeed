@@ -570,8 +570,8 @@ jobs:
         run: npm ci --prefix tools/js --no-fund --no-audit
       - name: Build data2c
         run: c++ -std=c++17 -O2 -o "$RUNNER_TEMP/data2c" net/instaweb/js/data_to_c.cc
-      - name: Regenerate the esbuild assets
-        run: DATA2C="$RUNNER_TEMP/data2c" bash tools/regenerate-rewriter-js.sh --esbuild-only
+      - name: Regenerate the client JS assets
+        run: DATA2C="$RUNNER_TEMP/data2c" bash tools/regenerate-rewriter-js.sh
       - name: Fail on drift
         run: git diff --exit-code net/instaweb/rewriter/generated/
 
