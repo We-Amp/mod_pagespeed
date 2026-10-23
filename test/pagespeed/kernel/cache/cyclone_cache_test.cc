@@ -81,6 +81,8 @@ void* operator new(size_t size) {
     ++t_failed_allocations;
     throw std::bad_alloc();
   }
+  // Countdown idiom: the post-decrement both tests and consumes the budget.
+  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   if (t_allocations_before_failure >= 0 && t_allocations_before_failure-- == 0) {
     ++t_failed_allocations;
     throw std::bad_alloc();
