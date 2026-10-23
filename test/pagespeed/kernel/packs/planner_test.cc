@@ -49,6 +49,7 @@ PageContext Ctx(std::string_view path = "/x") {
 
 // A fake element handle: the planner never dereferences it.
 net_instaweb::HtmlElement* Handle(int n) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr): intentional fake handle
   return reinterpret_cast<net_instaweb::HtmlElement*>(
       static_cast<uintptr_t>(n * 16));
 }

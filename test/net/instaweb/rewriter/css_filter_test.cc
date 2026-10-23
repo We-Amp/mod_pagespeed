@@ -288,6 +288,8 @@ TEST_F(CssFilterTestCustomOptions, CssPreserveUrls) {
   options()->SoftEnableFilterForTesting(RewriteOptions::kInlineCss);
   options()->SoftEnableFilterForTesting(RewriteOptions::kRewriteCss);
   options()->set_css_preserve_urls(true);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssFilterTest::SetUp();
   // Verify that preserve had a chance to forbid some filters.
   EXPECT_FALSE(options()->Enabled(RewriteOptions::kInlineCss));
@@ -324,6 +326,8 @@ TEST_F(CssFilterTestCustomOptions, CssPreserveUrlsOverridingExtend) {
   options()->Merge(*global_options);
   options()->Merge(*vhost_options);
 
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssFilterTest::SetUp();
   // Verify that preserve had a chance to forbid some filters.
   EXPECT_FALSE(options()->Enabled(RewriteOptions::kInlineCss));
@@ -360,6 +364,8 @@ TEST_F(CssFilterTestCustomOptions, CssPreserveUrlsWithMergedCacheExtend) {
   options()->Merge(*global_options);
   options()->Merge(*vhost_options);
 
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssFilterTest::SetUp();
   SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kInputStyle, 100);
 
@@ -390,6 +396,8 @@ TEST_F(CssFilterTestCustomOptions, CssPreserveUrlsNoPreemptiveRewrite) {
   options()->SoftEnableFilterForTesting(RewriteOptions::kInlineCss);
   options()->set_css_preserve_urls(true);
   options()->set_in_place_preemptive_rewrite_css(false);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssFilterTest::SetUp();
   // Verify that preserve had a chance to forbid some filters.
   EXPECT_FALSE(options()->Enabled(RewriteOptions::kInlineCss));
@@ -421,6 +429,8 @@ TEST_F(CssFilterTestCustomOptions, FallbackWithGzipData) {
   options()->set_http_cache_compression_level(6);
   // Force the fallback since rewrite is taking too long" path.
   options()->set_test_instant_fetch_rewrite_deadline(true);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssFilterTest::SetUp();
 
   // Store an already-gzipped version of the resource in the cace.

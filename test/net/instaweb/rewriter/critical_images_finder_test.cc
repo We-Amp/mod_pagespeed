@@ -78,6 +78,9 @@ class CriticalImagesFinderTest : public CriticalImagesFinderTestBase {
 class CriticalImagesHistoryFinderTest : public CriticalImagesFinderTest {
  protected:
   void SetUp() override {
+    // The parent SetUp installs a plain TestCriticalImagesFinder; its steps
+    // are repeated below with the history-aware finder instead.
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     CriticalImagesFinderTestBase::SetUp();
     SetupCohort(page_property_cache(), kCriticalImagesCohort);
     finder_ = std::make_unique<HistoryTestCriticalImagesFinder>(

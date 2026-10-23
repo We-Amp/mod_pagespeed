@@ -306,6 +306,7 @@ class GoogleFontCssInlineFilterAndImportTest
     : public GoogleFontCssInlineFilterTest {
  protected:
   void SetUp() override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     RewriteTestBase::SetUp();  // skipped base on purpose
     options()->EnableFilter(
         RewriteOptions::RewriteOptions::kInlineImportToLink);

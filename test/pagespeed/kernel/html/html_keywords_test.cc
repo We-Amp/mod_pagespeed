@@ -273,8 +273,8 @@ TEST_F(HtmlKeywordsTest, Unescape) {
   EXPECT_TRUE(decoding_error);
   GoogleString expected;
   expected += 'a';
-  expected += 0x03;
-  expected += 0xa7;  // equivalent to &sect;
+  expected += static_cast<char>(0x03);
+  expected += static_cast<char>(0xa7);  // equivalent to &sect;
   expected += 'b';
   EXPECT_STREQ("a&#03;&sect;b", HtmlKeywords::Escape(expected, &buf));
 }

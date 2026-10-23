@@ -117,6 +117,7 @@ class CssFlattenImportsTest : public CssRewriteTestBase {
     // We don't use the parent class setup, because we want to make sure that
     // RewriteCss is enabled implicitly by enabling FlattenCssImports.  We
     // skip to the setup for the parent of our parent class.
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     RewriteTestBase::SetUp();
     SetUpFilters();
     SetUpResponses();

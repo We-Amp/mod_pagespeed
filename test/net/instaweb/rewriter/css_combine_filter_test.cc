@@ -606,6 +606,8 @@ TEST_F(CssCombineFilterCustomOptions, CssCombineAcrossProxyDomains) {
   GoogleString proxy_target = StrCat(kTestDomain, "proxied/");
   ASSERT_TRUE(lawyer->AddProxyDomainMapping(proxy_target, kProxyMapDomain,
                                             StringPiece(), &message_handler_));
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssCombineFilterTest::SetUp();
   SetHtmlMimetype();
 
@@ -657,6 +659,8 @@ TEST_F(CssCombineFilterCustomOptions, CssCombineAcrossProxyDomains) {
 // do not combine CSS files from different domains.
 TEST_F(CssCombineFilterCustomOptions, CssDoNotCombineAcrossNotProxiedDomains) {
   // Proxy http://kProxyMapDomain/ onto http://kTestDomain/proxied/
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssCombineFilterTest::SetUp();
   SetHtmlMimetype();
 

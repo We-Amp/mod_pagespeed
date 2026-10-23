@@ -652,6 +652,7 @@ TEST_F(CssImageMultiFilterTest, SpritesAndNonSprites) {
   // We setup the options before the upcall so that the
   // CSS filter is created aware of these.
   options()->EnableFilter(RewriteOptions::kExtendCacheImages);
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssImageCombineTest::SetUp();
 
   GoogleString before, after, encoded, cuppa_encoded, sprite;
@@ -721,6 +722,7 @@ TEST_F(CssImageMultiFilterTest, WithFlattening) {
   // We setup the options before the upcall so that the
   // CSS filter is created aware of these.
   options()->EnableFilter(RewriteOptions::kFlattenCssImports);
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssImageCombineTest::SetUp();
 
   AddFileToMockFetcher("dir/Cuppa.png", kCuppaPngFile, kContentTypePng, 100);
@@ -755,6 +757,7 @@ TEST_F(CssImageMultiFilterTest, NoCombineAcrossFlattening) {
   // We setup the options before the upcall so that the
   // CSS filter is created aware of these.
   options()->EnableFilter(RewriteOptions::kFlattenCssImports);
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssImageCombineTest::SetUp();
 
   AddFileToMockFetcher("dir/Cuppa.png", kCuppaPngFile, kContentTypePng, 100);

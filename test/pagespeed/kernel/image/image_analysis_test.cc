@@ -285,6 +285,9 @@ TEST_F(ImageAnalysisTest, HistogramOfBlankImage) {
   expected_hist_[seed_value[0]] = (width - x0) * (height - y0);
 
   Histogram(image.get(), width - x0, height - y0, bytes_per_line, x0, y0, hist);
+  // Bitwise equality is intended: both arrays hold exact counts
+  // (0.0f, 1.0f, or a pixel count), deterministically computed.
+  // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison)
   EXPECT_EQ(0, memcmp(expected_hist_, hist,
                       kNumColorHistogramBins * sizeof(hist[0])));
 }
@@ -311,6 +314,9 @@ TEST_F(ImageAnalysisTest, HistogramOfIncreasingPixelValues) {
 
   float hist[kNumColorHistogramBins];
   Histogram(image.get(), width, height, bytes_per_line, 0, 0, hist);
+  // Bitwise equality is intended: both arrays hold exact counts
+  // (0.0f, 1.0f, or a pixel count), deterministically computed.
+  // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison)
   EXPECT_EQ(0, memcmp(expected_hist_, hist,
                       kNumColorHistogramBins * sizeof(hist[0])));
 }

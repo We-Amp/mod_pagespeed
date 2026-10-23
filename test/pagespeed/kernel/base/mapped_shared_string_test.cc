@@ -225,6 +225,7 @@ TEST_F(MappedSharedStringTest, MoveConstructorOwned) {
   EXPECT_FALSE(mss2.is_mapped());
 
   // mss1 should be in valid empty state
+  // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
   EXPECT_TRUE(mss1.empty());
 }
 
@@ -235,6 +236,7 @@ TEST_F(MappedSharedStringTest, MoveConstructorMapped) {
 
   EXPECT_EQ("Hello, World!", mss2.Value());
   EXPECT_TRUE(mss2.is_mapped());
+  // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
   EXPECT_TRUE(mss1.empty());
 
   // Release callback not called - ownership transferred
@@ -249,6 +251,7 @@ TEST_F(MappedSharedStringTest, MoveAssignmentOwned) {
   mss2 = std::move(mss1);
 
   EXPECT_EQ("hello", mss2.Value());
+  // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
   EXPECT_TRUE(mss1.empty());
 }
 
@@ -261,6 +264,7 @@ TEST_F(MappedSharedStringTest, MoveAssignmentMapped) {
 
   EXPECT_EQ("Hello, World!", mss2.Value());
   EXPECT_TRUE(mss2.is_mapped());
+  // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
   EXPECT_TRUE(mss1.empty());
   EXPECT_EQ(0, release_count_.load());
 }
