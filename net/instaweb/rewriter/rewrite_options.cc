@@ -751,7 +751,6 @@ const RewriteOptions::Filter kAddHeadFilters[] = {
     RewriteOptions::kCombineHeads,
     RewriteOptions::kDeterministicJs,
     RewriteOptions::kHandleNoscriptRedirect,
-    RewriteOptions::kMobilize,
     RewriteOptions::kMoveCssAboveScripts,
     RewriteOptions::kMoveCssToHead,
 };
@@ -762,7 +761,6 @@ const RewriteOptions::Filter kAddHeadFilters[] = {
 // TODO(huibao): Once rewrite levels can be combined, move kRewriteCss and
 // kRewriteDomains (and kDomainRewriteHyperlinks Option) into a proxy mode.
 const RewriteOptions::Filter kMobilizeFilterSet[] = {
-    RewriteOptions::kMobilize,
     // Turn on rewrite_css in order to rewrite hyper-links in CSS.
     RewriteOptions::kRewriteCss,
     RewriteOptions::kRewriteDomains,
@@ -2134,6 +2132,7 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
              "Filter 'in_place_optimize_for_browser' is deprecated and has "
              "no effect; image format negotiation at the original URL is "
              "controlled by the optimizer daemon, not this filter."},
+            {kMobilize, "Filter 'mobilize' is deprecated and has no effect."},
             {kMobilizePrecomputeDeprecated,
              "Filter 'mobilize_precompute' is deprecated and has no "
              "effect."},
@@ -2392,6 +2391,11 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
             "'AnalyticsID' is deprecated and ignored: it only configured the "
             "insert_ga filter, which no longer has any effect. Remove the "
             "directive.");
+      } else if (StringCaseEqual(name, kLogMobilizationSamples)) {
+        handler->Message(
+            kWarning,
+            "'LogMobilizationSamples' is deprecated and ignored: the mobilize "
+            "filter it served has been removed. Remove the directive.");
       } else if (StringCaseEqual(name, kUseAnalyticsJs)) {
         handler->Message(
             kWarning,
@@ -3025,10 +3029,6 @@ bool RewriteOptions::RequiresAddHead() const {
     }
   }
   return false;
-}
-
-bool RewriteOptions::UsePerOriginPropertyCachePage() const {
-  return Enabled(kMobilize);
 }
 
 DomainLawyer* RewriteOptions::WriteableDomainLawyer() {

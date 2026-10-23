@@ -1336,7 +1336,6 @@ ProxyFetchFactory::InitiatePropertyCacheLookup(const bool is_resource_fetch,
 
   ProxyFetchPropertyCallback* property_callback = nullptr;
   ProxyFetchPropertyCallback* fallback_property_callback = nullptr;
-  ProxyFetchPropertyCallback* origin_property_callback = nullptr;
   PropertyCache* page_property_cache = server_context->page_property_cache();
   if (!is_resource_fetch && server_context->page_property_cache()->enabled() &&
       UrlMightHavePropertyCacheEntry(request_url)) {
@@ -1381,21 +1380,6 @@ ProxyFetchFactory::InitiatePropertyCacheLookup(const bool is_resource_fetch,
         }
       }
     }
-
-    // For site-wide properties, we want to handle POSTs as well, so form
-    // results can use global info as well --- the globalness reducing
-    // concerns about dynamism of forms.
-    if (options != nullptr && options->UsePerOriginPropertyCachePage() &&
-        (async_fetch->request_headers()->method() == RequestHeaders::kGet ||
-         async_fetch->request_headers()->method() == RequestHeaders::kPost)) {
-      origin_property_callback = new ProxyFetchPropertyCallback(
-          PropertyPage::kPropertyCachePerOriginPage, page_property_cache,
-          request_url.Origin(), options_signature_hash, device_type,
-          callback_collector.get(),
-          server_context->thread_system()->NewMutex());
-      callback_collector->AddCallback(origin_property_callback);
-      added_callback = true;
-    }
   }
 
   // All callbacks need to be registered before Reads to avoid race.
@@ -1410,10 +1394,6 @@ ProxyFetchFactory::InitiatePropertyCacheLookup(const bool is_resource_fetch,
     // no property in BlinkCohort which can used fallback values.
     page_property_cache->ReadWithCohorts(cohort_list,
                                          fallback_property_callback);
-  }
-
-  if (origin_property_callback != nullptr) {
-    page_property_cache->ReadWithCohorts(cohort_list, origin_property_callback);
   }
 
   if (added_callback) {
