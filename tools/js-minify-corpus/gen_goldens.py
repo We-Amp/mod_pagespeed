@@ -23,7 +23,7 @@ Covered corpora (checked in or regenerated deterministically, no network):
 
 The FETCHED real-world corpus and the locally-built bundle outputs are
 network-dependent and deliberately excluded; they stay covered by the
-existing oracle gate and the release cross-product run.
+existing oracle gate and the release-readiness cross-product run.
 
 The manifest is deterministic: entries sorted by input path, no timestamps,
 no absolute paths, no machine identifiers. It is vendored into the
