@@ -548,6 +548,172 @@ class TestFetchUntilRetryBehavior:
         assert calls["n"] == 1  # no extra attempts
 
 
+class TestConnectRetry:
+    """Time-bounded retry of connect() on local-port exhaustion (issue #178).
+
+    The client opens a new connection per request, so when the ephemeral
+    port range empties every direct get() dies in connect() (WSAEADDRINUSE
+    on Windows, EADDRNOTAVAIL on Linux) while the server keeps serving.
+    These prove a transient burst is absorbed, any other error still fails
+    fast, exhaustion that never clears still raises once the time limit is
+    spent, and the one-line diagnostic warns once and cannot itself raise.
+    """
+
+    @staticmethod
+    def _exhaustion_error(errno_value, winerror=None):
+        err = OSError("no local port left")
+        err.errno = errno_value
+        if winerror is not None:
+            err.winerror = winerror
+        return err
+
+    def _client_with_outcomes(self, monkeypatch, outcomes, sleeps):
+        """A client whose Nth connection raises outcomes[N] in request();
+        connections past the list succeed with a canned 200. Returns
+        (client, made): the connections opened, in order. ``sleeps`` records
+        the backoff and advances a fake monotonic clock by the same amount,
+        so the time-bounded retry plays out instantly instead of stalling
+        the test for the full budget."""
+        from pagespeed_test_framework import client as client_mod
+
+        made = []
+        clock = [0.0]
+
+        class FakeResponse:
+            status = 200
+
+            def getheaders(self):
+                return []
+
+            def read(self):
+                return b"ok"
+
+        class FakeConnection:
+            def __init__(self, outcome):
+                self.outcome = outcome
+                self.closed = False
+
+            def request(self, method, target, body=None, headers=None):
+                if isinstance(self.outcome, BaseException):
+                    raise self.outcome
+
+            def getresponse(self):
+                return FakeResponse()
+
+            def close(self):
+                self.closed = True
+
+        def fake_make_connection(self):
+            index = len(made)
+            outcome = outcomes[index] if index < len(outcomes) else None
+            conn = FakeConnection(outcome)
+            made.append(conn)
+            return conn
+
+        def fake_sleep(duration):
+            sleeps.append(duration)
+            clock[0] += duration
+
+        monkeypatch.setattr(
+            client_mod.PageSpeedClient, "_make_connection", fake_make_connection
+        )
+        monkeypatch.setattr(client_mod.time, "sleep", fake_sleep)
+        monkeypatch.setattr(client_mod.time, "monotonic", lambda: clock[0])
+        return client_mod.PageSpeedClient("localhost", 80), made
+
+    def test_transient_burst_absorbed(self, monkeypatch):
+        # Two Windows-style WSAEADDRINUSE failures, then success: get()
+        # returns instead of raising, with the documented backoff between
+        # attempts and every failed connection closed.
+        sleeps = []
+        client, made = self._client_with_outcomes(
+            monkeypatch,
+            [
+                self._exhaustion_error(10048, winerror=10048),
+                self._exhaustion_error(10048, winerror=10048),
+            ],
+            sleeps,
+        )
+        response = client.get("/x")
+        assert response.status == 200
+        assert len(made) == 3  # 2 failed connects + 1 success
+        assert all(c.closed for c in made)
+        assert sleeps == [0.05, 0.1]  # 50 ms doubling
+
+    def test_linux_eaddrnotavail_also_retried(self, monkeypatch):
+        import errno
+
+        sleeps = []
+        client, made = self._client_with_outcomes(
+            monkeypatch, [self._exhaustion_error(errno.EADDRNOTAVAIL)], sleeps
+        )
+        assert client.get("/x").status == 200
+        assert len(made) == 2  # 1 failed connect + 1 success
+        assert sleeps == [0.05]
+
+    def test_other_oserror_raises_at_once(self, monkeypatch):
+        import errno
+
+        sleeps = []
+        err = self._exhaustion_error(errno.ECONNREFUSED)
+        client, made = self._client_with_outcomes(monkeypatch, [err], sleeps)
+        with pytest.raises(OSError) as excinfo:
+            client.get("/x")
+        assert excinfo.value is err  # the original error, unchanged
+        assert len(made) == 1
+        assert sleeps == []  # no retry for a non-exhaustion failure
+
+    def test_unclearing_exhaustion_raises_at_time_limit(self, monkeypatch):
+        from pagespeed_test_framework import client as client_mod
+
+        # The budget is elapsed time, not an attempt count: connect() keeps
+        # failing for as long as the backoff allows, and the sleeps must sum
+        # to the time limit (never past it) before the error propagates.
+        err = self._exhaustion_error(10048, winerror=10048)
+        sleeps = []
+        client, made = self._client_with_outcomes(
+            monkeypatch, [err] * 1000, sleeps
+        )
+        with pytest.raises(OSError) as excinfo:
+            client.get("/x")
+        assert excinfo.value is err  # the last error propagates, not a wrapper
+        assert sum(sleeps) == pytest.approx(
+            client_mod._CONNECT_RETRY_TIME_LIMIT
+        )  # the full budget spent, never exceeded
+        assert len(made) == len(sleeps) + 1  # every sleep buys one more attempt
+        # 50 ms doubling, capped at 1 s; the final sleep is the truncated
+        # remainder of the budget.
+        assert sleeps[:5] == [0.05, 0.1, 0.2, 0.4, 0.8]
+        assert max(sleeps) == 1.0
+
+    def test_diagnostic_warns_once_and_never_raises(self, monkeypatch, recwarn):
+        from pagespeed_test_framework import client as client_mod
+
+        monkeypatch.setattr(client_mod, "_local_port_exhaustion_logged", False)
+        # A broken netstat must not mask the retry: the diagnostic degrades
+        # to "unknown" and the request still goes through.
+        def broken_netstat(*args, **kwargs):
+            raise RuntimeError("no netstat here")
+
+        monkeypatch.setattr(client_mod.subprocess, "run", broken_netstat)
+        monkeypatch.setattr(client_mod.sys, "platform", "win32")
+
+        sleeps = []
+        win_err = self._exhaustion_error(10048, winerror=10048)
+        # First get(): one exhaustion, then success. Second get(): another
+        # exhaustion -- the warning must NOT repeat.
+        client, _made = self._client_with_outcomes(
+            monkeypatch, [win_err, None, win_err], sleeps
+        )
+        assert client.get("/x").status == 200
+        assert client.get("/x").status == 200
+        user_warnings = [w for w in recwarn.list if w.category is UserWarning]
+        assert len(user_warnings) == 1
+        message = str(user_warnings[0].message)
+        assert "local port exhaustion" in message
+        assert "TIME_WAIT sockets: unknown" in message
+
+
 class TestFetchUntilTimeoutDiagnostics:
     """Failure-window diagnostics for fetch_until timeouts.
 
