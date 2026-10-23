@@ -11,7 +11,8 @@
 #   5. a missing or empty directory is not an error.
 #   6. a symlink in ac/ is removed as a link, its target is never followed.
 #   7. malformed age or size arguments are refused (status 2), nothing
-#      deleted; a size with more than six digits is refused, six digits pass.
+#      deleted; an age with more than five digits or a size with more than
+#      six digits is refused, a six-digit size cap is applied.
 #   8. a candidate name containing a newline is removed as one file and never
 #      yields a delete path outside the cache.
 #   9. numbers with leading zeros are read base 10 (08d is 8 days, 02500 bytes).
@@ -83,15 +84,18 @@ if [ ! -L "$D/ac/flink" ] && [ ! -L "$D/ac/dlink" ] && exists "$D/ac/real" \
 
 # 7. malformed arguments are refused with status 2 and delete nothing
 D="$T/bad"; mk "$D/cas/x" 100 30
-for args in "7 12G" "7d 12g" "7d 12X" "7d 12GB" "1xd 12G" "7d 1.5G" "7d G" "7d 1000000" "7d 1000000G"; do
+for args in "7 12G" "7d 12g" "7d 12X" "7d 12GB" "1xd 12G" "7d 1.5G" "7d G" "7d 1000000" \
+            "7d 1000000G" "1000000d 12G" "9223372036854775807d 12G"; do
   # shellcheck disable=SC2086
   "$PRUNE" "$D" $args >/dev/null 2>&1; rc=$?
   if [ "$rc" -eq 2 ] && exists "$D/cas/x"; then pass "arguments '$args' refused"; else fail "arguments '$args' (rc=$rc)"; fi
 done
-# the digit cap rejects the seventh digit, not the sixth
-"$PRUNE" "$D" 7d 999999 >/dev/null 2>&1; rc=$?
-if [ "$rc" -eq 0 ] && ! exists "$D/cas/x"; then
-  pass "a six-digit size is accepted"; else fail "six-digit size accepted (rc=$rc)"; fi
+# the size digit cap rejects the seventh digit, not the sixth; the files are
+# recent, so only the size cap can remove the one over it
+D="$T/six"; mk "$D/cas/big" 300000 1; mk "$D/cas/small" 100 1
+"$PRUNE" "$D" 7d 250000 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && ! exists "$D/cas/big" && exists "$D/cas/small"; then
+  pass "a six-digit size cap is applied"; else fail "six-digit size cap (rc=$rc)"; fi
 
 # 8. a name containing a newline: the name's second line must not be parsed
 #    as its own list record and delete a path outside the cache

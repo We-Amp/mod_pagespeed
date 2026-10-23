@@ -36,7 +36,9 @@ if [ "$#" -ne 3 ]; then
 fi
 DIR="$1"; AGE="$2"; SIZE="$3"
 
-[[ $AGE =~ ^[0-9]+d$ ]] || { echo "max-age must look like 7d, got: $AGE" >&2; exit 2; }
+# Five digits cap the age: 99999d * 86400s fits int64, a longer number
+# could wrap it and empty the cache.
+[[ $AGE =~ ^[0-9]{1,5}d$ ]] || { echo "max-age must look like 7d (at most five digits), got: $AGE" >&2; exit 2; }
 [[ $SIZE =~ ^[0-9]{1,6}[KMGT]?$ ]] || { echo "max-size must look like 12G (at most six digits), got: $SIZE" >&2; exit 2; }
 # 10# reads the numbers base 10: a leading zero would be octal otherwise.
 AGE_S=$(( 10#${AGE%d} * 86400 ))
