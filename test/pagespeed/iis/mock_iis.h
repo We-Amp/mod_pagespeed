@@ -45,14 +45,14 @@
 // Define minimal IIS types for cross-platform compilation of tests
 // These allow the test code to compile on Linux for development
 
-typedef unsigned short USHORT;
-typedef unsigned long ULONG;
-typedef unsigned long DWORD;
-typedef long HRESULT;
-typedef int BOOL;
-typedef const char* PCSTR;
-typedef const wchar_t* PCWSTR;
-typedef wchar_t* BSTR;
+using USHORT = unsigned short;
+using ULONG = unsigned long;
+using DWORD = unsigned long;
+using HRESULT = long;
+using BOOL = int;
+using PCSTR = const char*;
+using PCWSTR = const wchar_t*;
+using BSTR = wchar_t*;
 
 #define S_OK 0
 #define E_FAIL -1
