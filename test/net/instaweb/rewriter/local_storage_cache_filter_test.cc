@@ -236,6 +236,9 @@ TEST_F(LocalStorageCacheTest, LinkUrlTransormationFails) {
 class LocalStorageCacheTinyTest : public LocalStorageCacheTest {
  protected:
   void SetUp() override {
+    // Skips LocalStorageCacheTest::SetUp so css_inline_max_bytes is set
+    // before MySetUp() builds the filters.
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     RewriteTestBase::SetUp();
     options()->set_css_inline_max_bytes(10);  // An arbitrary tiny value.
     MySetUp();

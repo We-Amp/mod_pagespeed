@@ -343,6 +343,8 @@ class JsInlineFilterTestCustomOptions : public JsInlineFilterTest {
 TEST_F(JsInlineFilterTestCustomOptions, InlineJsPreserveURLSOn) {
   // Make sure that we don't inline when preserve urls is on.
   options()->set_js_preserve_urls(true);
+  // Fixture SetUp is empty by design; the real SetUp runs here.
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   JsInlineFilterTest::SetUp();
   SetHtmlMimetype();
 

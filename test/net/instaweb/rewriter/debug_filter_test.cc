@@ -319,6 +319,9 @@ TEST_F(DebugFilterWithCriticalImagesTest, CriticalImageMessageBlankSrc) {
 class DebugFilterNoOtherFiltersTest : public DebugFilterTest {
  protected:
   void SetUp() override {
+    // Skips DebugFilterTest::SetUp: the filters it enables are exactly what
+    // this "no other filters" fixture must not add.
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     RewriteTestBase::SetUp();
     options()->set_support_noscript_enabled(false);
     options()->EnableFilter(RewriteOptions::kDebug);

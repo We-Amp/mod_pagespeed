@@ -413,6 +413,9 @@ class CommonFilterNonUpcallingCharactersTest
     : public CommonFilterInsertNodeAtBodyEndTest {
  protected:
   void SetUp() override {
+    // The parent SetUp installs EndDocumentInserterFilter, which this fixture
+    // replaces; its remaining steps are repeated below.
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     RewriteTestBase::SetUp();
     filter_ = std::make_unique<NonUpcallingCharactersFilter>(rewrite_driver());
     rewrite_driver()->AddFilter(filter_.get());
