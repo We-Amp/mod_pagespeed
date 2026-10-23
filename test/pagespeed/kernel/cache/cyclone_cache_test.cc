@@ -56,13 +56,18 @@
 // calling thread: then the next allocation on that thread throws
 // std::bad_alloc, once.  Sanitizers interpose operator new themselves, so
 // the replacement (and the tests that need it) is left out of those builds.
+// CYCLONE_CACHE_TEST_SANITIZERS marks the build for that exclusion and for
+// the sanitizer-scaled watchdogs in the fork tests below.
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
     __has_feature(memory_sanitizer)
-#define CYCLONE_CACHE_TEST_NO_ALLOC_HOOK 1
+#define CYCLONE_CACHE_TEST_SANITIZERS 1
 #endif
 #endif
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define CYCLONE_CACHE_TEST_SANITIZERS 1
+#endif
+#ifdef CYCLONE_CACHE_TEST_SANITIZERS
 #define CYCLONE_CACHE_TEST_NO_ALLOC_HOOK 1
 #endif
 
@@ -1434,7 +1439,14 @@ TEST_F(CycloneCacheTest, SmallTierCrossProcessReadVisibility) {
   auto make_cfg = [&]() {
     CycloneCache::Config config;
     config.cache_path = vis_path;
-    config.cache_size_bytes = static_cast<int64>(10) * 1024 * 1024 * 1024;
+    // The smallest volume that keeps both tiers active is 256 MiB + 128 B
+    // (Cyclone's compute_small_tier_sizes: a 128 MiB kMinStripeSize stripe
+    // plus a 64 B volume header, per tier).  320 MiB clears that floor with
+    // one 128 MiB small-tier stripe: 65,536 directory slots, about 3%
+    // loaded by this test's 2000 keys, and no wrap, so a miss can only mean
+    // cross-process invisibility.  A larger volume only adds stripes, and
+    // with them the per-stripe create/sync/teardown cost of issue #228.
+    config.cache_size_bytes = static_cast<int64>(320) * 1024 * 1024;
     config.ram_cache_size_bytes = 0;
     config.enable_checksum = true;
     config.num_segments = 0;
@@ -1478,8 +1490,21 @@ TEST_F(CycloneCacheTest, SmallTierCrossProcessReadVisibility) {
       _exit(3);
     }
     close(go_pipe[0]);
-    // Never let a wedged child hang the parent's waitpid() to the test timeout.
+    // Never let a wedged child hang the parent's waitpid() to the test
+    // timeout.  The watchdog only has to tell a wedged writer from a slow
+    // one, and under sanitizers on a loaded runner the slow case is real:
+    // the issue #228 run spent 18 s creating its volume and 67 s shutting
+    // one down, and its writer outlived the 120 s bound.  The volume has
+    // since been shrunk (its size was the root cause), so this is now a
+    // backstop; the 600 s bound covers the sanitizer configs that raise
+    // the Bazel test timeout (clang-asan and clang-tsan set 900 s in
+    // .bazelrc; clang-msan keeps the 300 s default).  Plain builds keep
+    // the tight bound under their 300 s timeout.
+#ifdef CYCLONE_CACHE_TEST_SANITIZERS
+    alarm(600);
+#else
     alarm(120);
+#endif
 
     CycloneCache writer(make_cfg(), stats_.get(), handler_.get());
     if (!writer.IsHealthy()) {
