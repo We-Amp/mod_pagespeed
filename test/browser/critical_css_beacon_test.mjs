@@ -3,8 +3,8 @@
 
 // Browser integration tests for the critical CSS beacon client JS.
 //
-// Drives the SHIPPED asset — the compiled bytes embedded in
-// net/instaweb/rewriter/generated/critical_css_beacon_opt.cc — in headless
+// Drives the SHIPPED asset, the compiled bytes embedded in
+// net/instaweb/rewriter/generated/critical_css_beacon_opt.cc, in headless
 // Chromium, and asserts on the actual beacon XHR the browser sends:
 //
 //   1. Selection: by default every selector that matches anything in the
