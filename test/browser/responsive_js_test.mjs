@@ -18,6 +18,12 @@
 //      device ratio.
 //   3. Raising the device ratio later (a resize) upgrades again; srcsets
 //      with w descriptors are ignored.
+//   4. Page zoom counts: the ratio is devicePixelRatio times
+//      clientWidth / innerWidth, re-evaluated on resize and on a touchmove
+//      with more than one touch (pinch zoom), not on a single touch.
+//   5. Descriptors: a srcset whose x descriptor is not a number (here a
+//      descriptor that is only a no-break space) is ignored as a whole; an
+//      image without src uses the smallest sufficient candidate even at 1x.
 //
 // Run via run_browser_tests.sh (installs playwright + chromium on demand).
 
@@ -56,10 +62,11 @@ function check(ok, label) {
 
 const browser = await chromium.launch();
 
-async function openPage(deviceScaleFactor, expected) {
+async function openPage(deviceScaleFactor, expected, html = testPage, init = null) {
   const page = await browser.newPage({
     viewport: { width: 800, height: 600 }, deviceScaleFactor,
   });
+  if (init) await page.addInitScript(init);
   await page.route('http://test/**', (route) => {
     const url = route.request().url();
     if (url.endsWith('/responsive.js')) {
@@ -69,7 +76,7 @@ async function openPage(deviceScaleFactor, expected) {
     if (url.startsWith('http://test/img/')) {
       return route.fulfill({ contentType: 'image/gif', body: GIF });
     }
-    return route.fulfill({ contentType: 'text/html', body: testPage });
+    return route.fulfill({ contentType: 'text/html', body: html });
   });
   await page.goto('http://test/');
   await page.waitForLoadState('load');
@@ -95,9 +102,10 @@ async function waitSrcs(page, expected) {
   }
 }
 
-const srcs = (page) => page.evaluate(() => Object.fromEntries(
-    ['std', 'unordered', 'wdesc'].map(
-        (i) => [i, document.getElementById(i).getAttribute('src')])));
+const srcs = (page, ids = ['std', 'unordered', 'wdesc']) => page.evaluate(
+    (list) => Object.fromEntries(
+        list.map((i) => [i, document.getElementById(i).getAttribute('src')])),
+    ids);
 
 // --- 1. DPR 1 leaves sources alone ---------------------------------------
 {
@@ -147,6 +155,91 @@ const srcs = (page) => page.evaluate(() => Object.fromEntries(
   await page.evaluate(() => window.dispatchEvent(new Event('resize')));
   await page.waitForTimeout(200);
   check((await srcs(page)).std === I('a4'), 'ratio 3 -> 1: no downgrade');
+  await page.close();
+}
+
+// --- 4. Page zoom ------------------------------------------------------------
+// innerWidth is made to be half of clientWidth after load, which is what a
+// zoom of 2 looks like to the script, without changing devicePixelRatio.
+const zoomIn = () => {
+  Object.defineProperty(window, 'innerWidth', { get: () => 400, configurable: true });
+};
+{
+  const page = await openPage(1);
+  await page.evaluate(zoomIn);
+  await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+  await waitSrcs(page, { std: I('a2'), unordered: I('b2') });
+  const s = await srcs(page);
+  check(s.std === I('a2') && s.unordered === I('b2'),
+        `zoom 2 at ratio 1: resize upgrades to the 2x candidates (got ${s.std} ${s.unordered})`);
+  await page.close();
+}
+{
+  const page = await openPage(1);
+  await page.evaluate(zoomIn);
+  const touch = (n) => page.evaluate((count) => {
+    const mk = (id) => new Touch({ identifier: id, target: document.body });
+    const touches = Array.from({ length: count }, (_, i) => mk(i));
+    window.dispatchEvent(new TouchEvent('touchmove', { touches, cancelable: true }));
+  }, n);
+  await touch(1);
+  await page.waitForTimeout(200);
+  check((await srcs(page)).std === I('a1'), 'touchmove with one touch: no change');
+  await touch(2);
+  await waitSrcs(page, { std: I('a2'), unordered: I('b2') });
+  const s = await srcs(page);
+  check(s.std === I('a2') && s.unordered === I('b2'),
+        `touchmove with two touches: upgrades (got ${s.std} ${s.unordered})`);
+  await page.close();
+}
+{
+  // Already zoomed when the script starts.
+  const page = await openPage(1, { std: I('a2'), unordered: I('b2') }, testPage, zoomIn);
+  const s = await srcs(page);
+  check(s.std === I('a2') && s.unordered === I('b2'),
+        `zoom 2 at start: upgraded without a resize (got ${s.std} ${s.unordered})`);
+  await page.close();
+}
+
+// --- 5. Descriptors -------------------------------------------------------
+{
+  const html = `<!DOCTYPE html><html><body>
+    <img id="nbsp" src="${I('d1')}" srcset="${I('d2')} \u00a0x, ${I('d3')} 2x"
+         width="10" height="10">
+    <img id="nosrc" srcset="${I('e2')} 2x" width="10" height="10">
+    <img id="exp" src="${I('f1')}" srcset="${I('f2')} 1e0x, ${I('f3')} 2.5e0x"
+         width="10" height="10">
+    <script src="http://test/static/responsive.js"><\/script>
+  </body></html>`;
+  const ids = ['nbsp', 'nosrc', 'exp'];
+  const page = await openPage(2, null, html);
+  await page.waitForFunction(
+      () => document.getElementById('nosrc').getAttribute('src') !== null,
+      null, { timeout: 15000 }).catch(() => {});
+  await page.waitForFunction(
+      (u) => document.getElementById('exp').getAttribute('src') === u,
+      I('f3'), { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const s = await srcs(page, ids);
+  check(s.nbsp === I('d1'),
+        `DPR 2: a srcset with a non-numeric descriptor is ignored (got ${s.nbsp})`);
+  check(s.nosrc === I('e2'), `DPR 2: image without src gets its 2x candidate (got ${s.nosrc})`);
+  check(s.exp === I('f3'),
+        `DPR 2: numeric descriptors in exponent form count (got ${s.exp})`);
+  await page.close();
+}
+{
+  const html = `<!DOCTYPE html><html><body>
+    <img id="nosrc" srcset="${I('g2')} 2x" width="10" height="10">
+    <script src="http://test/static/responsive.js"><\/script>
+  </body></html>`;
+  const page = await openPage(1, null, html);
+  await page.waitForFunction(
+      () => document.getElementById('nosrc').getAttribute('src') !== null,
+      null, { timeout: 15000 }).catch(() => {});
+  const s = await srcs(page, ['nosrc']);
+  check(s.nosrc === I('g2'),
+        `DPR 1: image without src gets the smallest sufficient candidate (got ${s.nosrc})`);
   await page.close();
 }
 
