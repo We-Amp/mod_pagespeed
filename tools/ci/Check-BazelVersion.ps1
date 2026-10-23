@@ -27,10 +27,21 @@ $want = 'bazel ' + (Get-Content -LiteralPath (Join-Path $Root '.bazelversion') -
 $ErrorActionPreference = 'Continue'
 Push-Location -LiteralPath $Root
 try {
-    $got = "$(& $Launcher --version 2>$null | Select-Object -First 1)".Trim()
+    # Collect the whole output before picking the first line: cutting the
+    # pipeline short (Select-Object -First 1) can stop the launcher while it
+    # is still running, which leaves an exit code of -1 behind in
+    # $LASTEXITCODE and fails the calling step.
+    $out = @(& $Launcher --version 2>$null)
+    $rc = $LASTEXITCODE
 } finally {
     Pop-Location
 }
+if ($rc -ne 0) {
+    $msg = "'$Launcher --version' exited with $rc on runner $env:RUNNER_NAME ($env:RUNNER_OS, $env:RUNNER_ENVIRONMENT). See docs/ci/runner-environment.md."
+    Write-Host "::error::$msg"
+    throw $msg
+}
+$got = "$($out | Select-Object -First 1)".Trim()
 if ($got -ne $want) {
     $msg = "'$Launcher' on runner $env:RUNNER_NAME ($env:RUNNER_OS, $env:RUNNER_ENVIRONMENT) reports '$got', not '$want' from .bazelversion. A Bazelisk launcher must be 1.19.0 or newer; a plain Bazel must be exactly the pinned version. See docs/ci/runner-environment.md."
     Write-Host "::error::$msg"

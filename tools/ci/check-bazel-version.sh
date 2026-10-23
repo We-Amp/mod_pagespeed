@@ -19,7 +19,13 @@ set -euo pipefail
 launcher="${1:-bazel}"
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 want="bazel $(tr -d '[:space:]' < "${root}/.bazelversion")"
-got="$(cd "${root}" && "${launcher}" --version 2>/dev/null | head -n 1 | tr -d '\r')" || got=""
+rc=0
+out="$(cd "${root}" && "${launcher}" --version 2>/dev/null)" || rc=$?
+if [ "${rc}" -ne 0 ]; then
+  echo "::error::'${launcher} --version' exited with ${rc} on runner ${RUNNER_NAME:-unknown} (${RUNNER_OS:-unknown}, ${RUNNER_ENVIRONMENT:-unknown}). See docs/ci/runner-environment.md."
+  exit 1
+fi
+got="$(printf '%s\n' "${out}" | head -n 1 | tr -d '\r')"
 if [ "${got}" != "${want}" ]; then
   echo "::error::'${launcher}' on runner ${RUNNER_NAME:-unknown} (${RUNNER_OS:-unknown}, ${RUNNER_ENVIRONMENT:-unknown}) reports '${got}', not '${want}' from .bazelversion. A Bazelisk launcher must be 1.19.0 or newer; a plain Bazel must be exactly the pinned version. See docs/ci/runner-environment.md."
   exit 1
