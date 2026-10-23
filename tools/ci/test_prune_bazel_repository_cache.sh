@@ -11,7 +11,8 @@
 #   5. a symlink is removed as a link, its target is never followed; a
 #      symlinked content_addressable/ is left alone.
 #   6. hash directories left empty are removed, others are kept.
-#   7. malformed age or size arguments are refused (status 2), nothing deleted.
+#   7. id-* markers survive while their `file` does, and go with it.
+#   8. malformed age or size arguments are refused (status 2), nothing deleted.
 #
 # Run: tools/ci/test_prune_bazel_repository_cache.sh
 
@@ -56,7 +57,7 @@ if ! exists "$D/$CA/aa/file" && exists "$D/registry/x" && exists "$D/tmp/y" && e
   pass "only content_addressable/ is touched"; else fail "scope guarantee"; fi
 
 # 4. missing and empty directories
-if "$PRUNE" "$T/nope" 30d 4G >/dev/null && mkdir -p "$T/empty" && "$PRUNE" "$T/empty" 30d 4G >/dev/null; then
+if "$PRUNE" "$T/nope" 30d 8G >/dev/null && mkdir -p "$T/empty" && "$PRUNE" "$T/empty" 30d 8G >/dev/null; then
   pass "a missing or empty directory is not an error"; else fail "missing directory"; fi
 
 # 5. symlinks are never followed
@@ -84,9 +85,18 @@ mk "$D/$CA/old/file" 100 90; mk "$D/$CA/new/file" 100 1
 if [ ! -d "$D/$CA/old" ] && exists "$D/$CA/new/file" && [ -d "$D/content_addressable" ]; then
   pass "emptied hash directories are removed, the rest kept"; else fail "empty directory cleanup"; fi
 
-# 7. malformed arguments are refused with status 2 and delete nothing
+# 7. id-* markers: kept while the archive is kept (however old), removed with it
+D="$T/marker"
+mk "$D/$CA/keep/file" 100 1; mk "$D/$CA/keep/id-abc" 10 90
+mk "$D/$CA/gone/file" 100 90; mk "$D/$CA/gone/id-abc" 10 90
+"$PRUNE" "$D" 30d 1G >/dev/null
+if exists "$D/$CA/keep/file" && exists "$D/$CA/keep/id-abc" \
+   && ! exists "$D/$CA/gone/file" && ! exists "$D/$CA/gone/id-abc" && [ ! -d "$D/$CA/gone" ]; then
+  pass "an id-* marker is kept with its archive and removed with it"; else fail "id marker"; fi
+
+# 8. malformed arguments are refused with status 2 and delete nothing
 D="$T/bad"; mk "$D/$CA/x/file" 100 90
-for args in "30 4G" "30d 4g" "30d 4X" "30d 4GB" "1xd 4G" "30d 1.5G" "30d G"; do
+for args in "30 8G" "30d 8g" "30d 8X" "30d 8GB" "1xd 8G" "30d 1.5G" "30d G"; do
   # shellcheck disable=SC2086
   "$PRUNE" "$D" $args >/dev/null 2>&1; rc=$?
   if [ "$rc" -eq 2 ] && exists "$D/$CA/x/file"; then pass "arguments '$args' refused"; else fail "arguments '$args' (rc=$rc)"; fi

@@ -3121,9 +3121,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-envoy-repo${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
-          # Cap the cache before the job uses it (30 days, 4G; the sizing is in
+          # Cap the cache before the job uses it (30 days, 8G; the sizing is in
           # tools/ci/prune-bazel-repository-cache.sh). It never fails the job.
-          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-repository-cache.sh" "${CACHE_ROOT}" 30d 4G || true
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-repository-cache.sh" "${CACHE_ROOT}" 30d 8G || true
           echo "REPO_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       - name: Build the Envoy filter and run its tests

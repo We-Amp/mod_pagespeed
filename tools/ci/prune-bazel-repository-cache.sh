@@ -5,7 +5,7 @@
 # Cap one Bazel repository cache directory by age and size.
 #
 #   prune-bazel-repository-cache.sh <cache-dir> <max-age> <max-size>
-#   e.g. prune-bazel-repository-cache.sh "$REPO_CACHE_DIR" 30d 4G
+#   e.g. prune-bazel-repository-cache.sh "$REPO_CACHE_DIR" 30d 8G
 #
 # Bazel's --repository_cache has no eviction of its own. The nightly Envoy
 # filter job keeps one per runner so Envoy's large dependency archives are not
@@ -18,13 +18,21 @@
 # (Nd) go first; if what remains still exceeds <max-size> (N[K|M|G|T]), the
 # oldest files by mtime go until it fits. Bazel refreshes the mtime of an
 # archive it reads from the cache, so mtime order is least-recently-used
-# order. Hash directories left empty are removed. A missing directory is not
+# order. A hash directory may also hold an id-* marker file; Bazel never
+# refreshes its mtime, so markers are not candidates by age or size and are
+# removed only together with the sibling `file` they belong to. Hash
+# directories left empty are removed. A missing directory is not
 # an error, and the script always exits 0 on that path.
 #
 # Sizing: the vendored repository cache is about 0.5 GB with Envoy's module
 # archive; the Envoy filter job fetches much more (its toolchains and build
-# dependencies). 4G leaves headroom over a warm working set, and 30d keeps the
-# nightly cadence warm across a few missed weeks.
+# dependencies). The caller passes 8G: each nightly reuses its whole archive
+# set, so the age limit does the real clearing and the cap is a ceiling; the
+# log line below shows the real size to lower it from. 30d keeps the nightly
+# cadence warm across a few missed weeks.
+#
+# Bazel 9 adds a contents/ directory next to content_addressable/; this script
+# does not prune it.
 #
 # GNU find/stat/sort/xargs (the Linux runners); `gstat` stands in for stat on
 # a Mac.
@@ -38,7 +46,7 @@ fi
 DIR="$1"; AGE="$2"; SIZE="$3"
 
 [[ $AGE =~ ^[0-9]+d$ ]] || { echo "max-age must look like 30d, got: $AGE" >&2; exit 2; }
-[[ $SIZE =~ ^[0-9]+[KMGT]?$ ]] || { echo "max-size must look like 4G, got: $SIZE" >&2; exit 2; }
+[[ $SIZE =~ ^[0-9]+[KMGT]?$ ]] || { echo "max-size must look like 8G, got: $SIZE" >&2; exit 2; }
 AGE_S=$(( ${AGE%d} * 86400 ))
 UNIT="${SIZE: -1}"; NUM="${SIZE%[KMGT]}"
 case "$UNIT" in
@@ -75,7 +83,7 @@ NOW="$(date +%s)"
 
 # "<mtime> <size> <path>" (a symlink is listed as the link itself, never
 # followed), oldest first.
-find "$ROOT" \( -type f -o -type l \) -exec "$STAT" -c '%Y %s %n' {} + 2>/dev/null \
+find "$ROOT" \( -type f -o -type l \) ! -name 'id-*' -exec "$STAT" -c '%Y %s %n' {} + 2>/dev/null \
   | sort -t ' ' -k1,1n -k3 > "$T/list"
 
 awk -v dlist="$T/delete" -v now="$NOW" -v age="$AGE_S" -v max="$MAX" '
@@ -96,6 +104,10 @@ awk -v dlist="$T/delete" -v now="$NOW" -v age="$AGE_S" -v max="$MAX" '
 read -r N FREED LEFT < "$T/summary"
 if [ "${N:-0}" -gt 0 ]; then
   tr '\n' '\0' < "$T/delete" | xargs -0 rm -f --
+  # An id-* marker goes with the archive it belongs to, and only then.
+  while IFS= read -r f; do
+    [ "$(basename "$f")" = file ] && rm -f -- "$(dirname "$f")"/id-*
+  done < "$T/delete"
   # Drop the hash directories that are now empty (a real, empty directory
   # only; find does not follow symlinks here).
   find "$ROOT" -mindepth 1 -type d -empty -delete 2>/dev/null

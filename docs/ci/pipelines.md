@@ -113,7 +113,7 @@ The per-runner Bazel repository cache of the nightly `envoy-filter` job is
 pruned the same way at the start of that job
 (`tools/ci/prune-bazel-repository-cache.sh`: files under
 `content_addressable/` older than 30 days go, then the oldest until the rest
-fit in 4G). Bazel's `--repository_cache` has no eviction of its own.
+fit in 8G). Bazel's `--repository_cache` has no eviction of its own.
 
 ### Path-filtered hosted guards
 
