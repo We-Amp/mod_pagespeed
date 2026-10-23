@@ -9,6 +9,8 @@
 #   3. on equal mtime an ac/ entry goes before a cas/ blob.
 #   4. nothing outside ac/ and cas/ is touched, however old or large.
 #   5. a missing or empty directory is not an error.
+#   6. a symlink in ac/ is removed as a link, its target is never followed.
+#   7. malformed age or size arguments are refused (status 2), nothing deleted.
 #
 # Run: tools/ci/test_prune_bazel_disk_cache.sh
 
@@ -63,8 +65,25 @@ if ! exists "$D/ac/a" && ! exists "$D/cas/c" && exists "$D/disk/ac/x" && exists 
 if "$PRUNE" "$T/nope" 7d 12G >/dev/null && mkdir -p "$T/empty" && "$PRUNE" "$T/empty" 7d 12G >/dev/null; then
   pass "a missing or empty directory is not an error"; else fail "missing directory"; fi
 
-# bad arguments are refused
-if ! "$PRUNE" "$T/empty" 7 12G >/dev/null 2>&1; then pass "a malformed age is refused"; else fail "bad age"; fi
+# 6. a symlink inside ac/ pointing outside is removed as a link, never followed
+D="$T/link"; mkdir -p "$T/outside/dir"
+mk "$T/outside/file" 100 30; mk "$T/outside/dir/inner" 100 30
+mk "$D/ac/real" 100 1
+ln -s "$T/outside/file" "$D/ac/flink"; ln -s "$T/outside/dir" "$D/ac/dlink"
+touch -h -d "@$(( NOW - 30 * 86400 ))" "$D/ac/flink" "$D/ac/dlink" 2>/dev/null \
+  || touch -h -t "$(date -r $(( NOW - 30 * 86400 )) +%Y%m%d%H%M.%S)" "$D/ac/flink" "$D/ac/dlink"
+"$PRUNE" "$D" 7d 1G >/dev/null
+if [ ! -L "$D/ac/flink" ] && [ ! -L "$D/ac/dlink" ] && exists "$D/ac/real" \
+   && exists "$T/outside/file" && exists "$T/outside/dir/inner"; then
+  pass "a symlink is removed as a link and its target is never followed"; else fail "symlink fixture"; fi
+
+# 7. malformed arguments are refused with status 2 and delete nothing
+D="$T/bad"; mk "$D/cas/x" 100 30
+for args in "7 12G" "7d 12g" "7d 12X" "7d 12GB" "1xd 12G" "7d 1.5G" "7d G"; do
+  # shellcheck disable=SC2086
+  "$PRUNE" "$D" $args >/dev/null 2>&1; rc=$?
+  if [ "$rc" -eq 2 ] && exists "$D/cas/x"; then pass "arguments '$args' refused"; else fail "arguments '$args' (rc=$rc)"; fi
+done
 
 if [ "$FAILS" -ne 0 ]; then echo "$FAILS failure(s)"; exit 1; fi
 echo "All prune-bazel-disk-cache cases passed"

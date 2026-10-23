@@ -36,14 +36,9 @@ if [ "$#" -ne 3 ]; then
 fi
 DIR="$1"; AGE="$2"; SIZE="$3"
 
-case "$AGE" in
-  [0-9]*d) AGE_S=$(( ${AGE%d} * 86400 )) ;;
-  *) echo "max-age must look like 7d, got: $AGE" >&2; exit 2 ;;
-esac
-case "$SIZE" in
-  [0-9]*[KMGT]|[0-9]*) ;;
-  *) echo "max-size must look like 12G, got: $SIZE" >&2; exit 2 ;;
-esac
+[[ $AGE =~ ^[0-9]+d$ ]] || { echo "max-age must look like 7d, got: $AGE" >&2; exit 2; }
+[[ $SIZE =~ ^[0-9]+[KMGT]?$ ]] || { echo "max-size must look like 12G, got: $SIZE" >&2; exit 2; }
+AGE_S=$(( ${AGE%d} * 86400 ))
 UNIT="${SIZE: -1}"; NUM="${SIZE%[KMGT]}"
 case "$UNIT" in
   K) MAX=$(( NUM * 1024 )) ;;
@@ -76,14 +71,16 @@ if ! stat -c %Y / >/dev/null 2>&1; then
 fi
 
 export LC_ALL=C
-T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+T="$(mktemp -d)" || exit 0
+trap 'rm -rf "$T"' EXIT
 NOW="$(date +%s)"
 
-# "<mtime> <size> <path>", oldest first, ac/ before cas/ on equal mtime.
-find "${ROOTS[@]}" -type f -exec "$STAT" -c '%Y %s %n' {} + 2>/dev/null \
+# "<mtime> <size> <path>" (a symlink is listed as the link itself, never
+# followed), oldest first, ac/ before cas/ on equal mtime.
+find "${ROOTS[@]}" \( -type f -o -type l \) -exec "$STAT" -c '%Y %s %n' {} + 2>/dev/null \
   | sort -t ' ' -k1,1n -k3 > "$T/list"
 
-awk -v now="$NOW" -v age="$AGE_S" -v max="$MAX" '
+awk -v dlist="$T/delete" -v now="$NOW" -v age="$AGE_S" -v max="$MAX" '
   { m[NR] = $1; s[NR] = $2; p = $0; sub(/^[0-9]+ [0-9]+ /, "", p); path[NR] = p; total += $2 }
   END {
     for (i = 1; i <= NR; i++) {
@@ -93,9 +90,10 @@ awk -v now="$NOW" -v age="$AGE_S" -v max="$MAX" '
     for (i = 1; i <= NR && total > max; i++) {
       if (!kill[i]) { kill[i] = 1; total -= s[i] }
     }
-    for (i = 1; i <= NR; i++) if (kill[i]) { print path[i] > "/dev/stderr"; fb += s[i]; n++ }
-    printf "%d %d %d\n", n, fb, total
-  }' "$T/list" 2> "$T/delete" > "$T/summary"
+    for (i = 1; i <= NR; i++) if (kill[i]) { print path[i] > dlist; fb += s[i]; n++ }
+    close(dlist)
+    printf "%d %.0f %.0f\n", n, fb, total
+  }' "$T/list" > "$T/summary"
 
 read -r N FREED LEFT < "$T/summary"
 if [ "${N:-0}" -gt 0 ]; then
