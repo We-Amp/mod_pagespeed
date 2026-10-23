@@ -49,6 +49,11 @@ namespace net_instaweb {
 namespace {
 static const int kReconnectionDelayMs = 10;
 static const int kTimeoutUs = 100 * Timer::kMsUs;
+// Operation timeout for the caches that talk to the real Redis server from
+// the environment. A round trip to it (INFO in RedisCacheTest.GetStatus,
+// say) can exceed the 100 ms kTimeoutUs on a loaded host or in a sanitizer
+// build; the tight value is only needed by the scripted timeout tests.
+static const int kRealServerTimeoutUs = 2 * Timer::kSecondUs;
 static const int kDatabaseIndex[] = {0, 1};
 static const int kTTLSec = -1;
 static const char kSomeKey[] = "SomeKey";
@@ -134,10 +139,10 @@ class RedisCacheTest : public CacheTestBase {
   }
 
   void InitRedisWithCustomDatabaseIndex(const int database_index) {
-    cache_.emplace_back(new RedisCache(redis_host_env_, redis_port_env_,
-                                       thread_system_.get(), &handler_, &timer_,
-                                       kReconnectionDelayMs, kTimeoutUs,
-                                       &statistics_, database_index, kTTLSec));
+    cache_.emplace_back(new RedisCache(
+        redis_host_env_, redis_port_env_, thread_system_.get(), &handler_,
+        &timer_, kReconnectionDelayMs, kRealServerTimeoutUs, &statistics_,
+        database_index, kTTLSec));
     cache_.back()->StartUp();
   }
 
@@ -714,9 +719,11 @@ namespace {
 const int kTimedOutOperationMinTimeUs = kTimeoutUs - 20 * Timer::kMsUs;
 
 // Upper gap is bigger because taking more time than time out is expected.
-// Unfortunately, it still gives 0.05%-0.1% of spurious failures and 'real'
-// overhead in these outliers can be bigger than 100ms.
-const int kTimedOutOperationMaxTimeUs = kTimeoutUs + 50 * Timer::kMsUs;
+// On top of that, a loaded CI host or a sanitizer build can stall the process
+// for several hundred milliseconds inside the timed operation, so the old
+// 50 ms allowance still flaked. A full second absorbs those stalls while the
+// tests still fail if the operation hangs.
+const int kTimedOutOperationMaxTimeUs = kTimeoutUs + Timer::kSecondUs;
 
 // We want timeout to be significantly greater than measuring gap.
 static_assert(kTimeoutUs >= 60 * Timer::kMsUs,
@@ -846,26 +853,36 @@ class RedisCacheOperationTimeoutTest : public RedisCacheTest {
     InitRedisWithCustomServer();
     CHECK(StartCustomServer<RedisNotRespondingOperationTimeoutServerThread>());
     cache_[0]->StartUp();
-    started_at_us_ = timer_.NowUs();
   }
 
-  void TearDown() {
-    int64 waited_for_us = timer_.NowUs() - started_at_us_;
+  // Times only the operation under test and checks that it did not return
+  // before the operation timeout fired and did not run wildly past it. The
+  // process can stall for hundreds of milliseconds on a loaded CI host or in
+  // a sanitizer build; measuring anything besides the operation itself bills
+  // those stalls to the operation under test.
+  template <class Operation>
+  void CheckOperationTimesOut(Operation operation) {
+    PosixTimer timer;
+    int64 started_at_us = timer.NowUs();
+    operation();
+    int64 waited_for_us = timer.NowUs() - started_at_us;
     EXPECT_GE(waited_for_us, kTimedOutOperationMinTimeUs);
     EXPECT_LE(waited_for_us, kTimedOutOperationMaxTimeUs);
   }
-
- private:
-  PosixTimer timer_;
-  int64 started_at_us_;
 };
 
-TEST_F(RedisCacheOperationTimeoutTest, Get) { CheckNotFound("Key"); }
+TEST_F(RedisCacheOperationTimeoutTest, Get) {
+  CheckOperationTimesOut([this] { CheckNotFound("Key"); });
+}
 
 // TODO(yeputons): test MultiGet when it's a single command, not sequenced GET()
 
-TEST_F(RedisCacheOperationTimeoutTest, Put) { CheckPut("Key", "Value"); }
+TEST_F(RedisCacheOperationTimeoutTest, Put) {
+  CheckOperationTimesOut([this] { CheckPut("Key", "Value"); });
+}
 
-TEST_F(RedisCacheOperationTimeoutTest, Delete) { CheckDelete("Key"); }
+TEST_F(RedisCacheOperationTimeoutTest, Delete) {
+  CheckOperationTimesOut([this] { CheckDelete("Key"); });
+}
 
 }  // namespace net_instaweb
