@@ -1085,6 +1085,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       - name: Build all targets
@@ -1268,6 +1271,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # Redis and memcached for the tests, on a network of their own. The
@@ -1434,6 +1440,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}/disk" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # Decide WHICH translation units clang-tidy lints this run:
@@ -1645,6 +1654,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}/disk" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # Guards the tokenizer-based JS minifier: builds js_minify_probe and
@@ -1802,6 +1814,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}/disk" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # Anti-drift gate for the HTML lexer/parser: the committed goldens
@@ -1905,6 +1920,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}/disk" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # The sanitizer binaries are built, and run, inside the dev image: the

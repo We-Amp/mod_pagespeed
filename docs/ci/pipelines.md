@@ -103,6 +103,12 @@ checks out a tree starts with a step that makes `vendor/` writable again,
 because a previous run's vendored toolchain files are read-only and would stop
 the checkout's cleanup on a persistent runner.
 
+Each of those caches is pruned at the start of the job that uses it
+(`tools/ci/prune-bazel-disk-cache.sh`: entries older than 7 days go, then the
+oldest until `ac/` and `cas/` fit in 12G). Bazel's own disk cache collection
+never runs there, because a step's container ends right after its last Bazel
+command.
+
 ### Path-filtered hosted guards
 
 The `changes` job diffs a pull request against its base and publishes one
