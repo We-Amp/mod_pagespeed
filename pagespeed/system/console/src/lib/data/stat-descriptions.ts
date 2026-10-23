@@ -670,8 +670,6 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   // ---------------------------------------------------------------------
   instrumentation_filter_script_added_count:
     "Pages that received the timing script which reports real page load measurements back to the server. It should closely track instrumented page views.",
-  inserted_ga_snippets:
-    "Pages where an analytics snippet was injected because the page did not already carry one.",
   show_ads_api_replaced_for_async:
     "Legacy ad interface calls replaced with the modern asynchronous equivalent, so the ad no longer blocks parsing.",
   show_ads_snippets_converted:

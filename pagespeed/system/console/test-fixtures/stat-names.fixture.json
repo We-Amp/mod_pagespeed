@@ -129,7 +129,6 @@
   "image_webp_rewrites",
   "in_place_oversized_opt_stream",
   "in_place_uncacheable_rewrites",
-  "inserted_ga_snippets",
   "instrumentation_filter_script_added_count",
   "ipro_daemon_fallback_notified",
   "ipro_daemon_fallback_notify_failed",
