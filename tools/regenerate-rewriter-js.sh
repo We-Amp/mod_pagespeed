@@ -7,7 +7,7 @@
 # This script re-runs the JS compiler and data2c pipeline that was
 # previously executed at build time via Bazel genrules.  The outputs are
 # checked into net/instaweb/rewriter/generated/ so that normal builds do
-# NOT require Node.js, npx, esbuild or the Google Closure Library.
+# NOT require Node.js, npx, esbuild or the Closure Compiler.
 #
 # Assets are being moved from the Closure Compiler to esbuild one at a time:
 # ESBUILD_FILES below go through the pinned esbuild in tools/js/ (config in
@@ -203,10 +203,9 @@ closure_js_utils() {
     ' "$JS_UTILS" > "$out"
 }
 
-# The pinned library's sources carry an @license header the compiler
-# preserves into the output. Shipped assets must stay comment-free
-# (StaticAssetManagerTest asserts this); attribution is retained in the
-# pinned tools/closure/ checkout this script fetches.
+# The compiler can preserve an @license header from its inputs into the
+# output. Shipped assets must stay comment-free (StaticAssetManagerTest
+# asserts this), so such a header is stripped.
 strip_closure_license() {
     perl -0777 -pi -e \
         's{/\*\s*Copyright The Closure Library Authors\.\s*SPDX-License-Identifier: Apache-2\.0\s*\*/\n?}{}g' \

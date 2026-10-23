@@ -6,6 +6,11 @@
 //
 //   node tools/js/build-rewriter-js.mjs <src.js> <out_dir> <name>
 //
+// The output floor is ES2015 for every asset built here, including
+// critical_css_loader (served wherever prioritize_critical_css is): a browser
+// that cannot parse ES2015 fails to run it, leaving the deferred stylesheets
+// as preload links.
+//
 // Writes <out_dir>/<name>_dbg.js (bundled, readable) and
 // <out_dir>/<name>_opt.js (bundled, minified). Each asset is one IIFE with
 // no comments; public entry points are the explicit window.pagespeed.*
