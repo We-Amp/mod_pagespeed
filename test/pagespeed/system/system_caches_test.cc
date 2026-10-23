@@ -21,6 +21,8 @@
 
 #include "pagespeed/system/system_caches.h"
 
+#include <unistd.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -52,6 +54,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/async_cache.h"
 #include "pagespeed/kernel/cache/cache_batcher.h"
+#include "pagespeed/kernel/cache/cache_key_prepender.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
 #include "pagespeed/kernel/cache/fallback_cache.h"
@@ -95,6 +98,19 @@ GoogleString MakeTempCacheDir(const char* suffix) {
   char* dir = mkdtemp(tmpl.data());
   CHECK(dir != nullptr) << "Failed to create temp dir: " << tmpl;
   return GoogleString(dir) + "/";
+}
+
+// Prefix for every key this suite writes to an external cache (memcached or
+// redis): the running test's name plus this process's pid.  CI can run two
+// builds of this suite in parallel against the same server, and without the
+// prefix both processes write the same keys, so one can delete or overwrite
+// the other's entry between its Put and its Get.  Same isolation idea as the
+// prefix memcached_cache_test builds for its CacheKeyPrepender.
+GoogleString ServerCacheKeyPrefix() {
+  const ::testing::TestInfo* const test_info =
+      ::testing::UnitTest::GetInstance()->current_test_info();
+  return StrCat(test_info->test_suite_name(), ".", test_info->name(), "_",
+                getpid(), "_");
 }
 
 // Cache paths are created per-process to avoid test interference.
@@ -276,14 +292,17 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
     // TODO(yeputons): it's important that RedisCache is connected at that
     // point. Otherwise it will try to connect in Put() and combination of
     // AsyncCache and fast-fail in "connecting" state will play against us.
-    TestPut(server_context->metadata_cache(), "a", "b");
-    TestGet(server_context->metadata_cache(), "a", CacheInterface::kAvailable,
-            "b");
+    const GoogleString sanity_prefix = ServerCacheKeyPrefix();
+    const GoogleString sanity_key = StrCat(sanity_prefix, "a");
+    TestPut(server_context->metadata_cache(), sanity_key, "b");
+    TestGet(server_context->metadata_cache(), sanity_key,
+            CacheInterface::kAvailable, "b");
 
-    TestHttpPut(server_context->http_cache(), "http://www.example.com",
-                "fragment", "a");
-    TestHttpGet(server_context->http_cache(), "http://www.example.com",
-                "fragment", kFoundResult, "a");
+    const GoogleString sanity_http_url =
+        StrCat(sanity_prefix, "http://www.example.com");
+    TestHttpPut(server_context->http_cache(), sanity_http_url, "fragment", "a");
+    TestHttpGet(server_context->http_cache(), sanity_http_url, "fragment",
+                kFoundResult, "a");
     return server_context.release();
   }
 
@@ -626,9 +645,15 @@ class SystemCachesExternalCacheTestBase : public SystemCachesTest {
     // because the async nature of these caches means keys may not be
     // immediately available after a Put. Multiple threads writing to the
     // same keys can also cause transient unavailability.
+    //
+    // The spammer writes fixed keys carrying a fresh random value on every
+    // run, so prefix them per test and process (see ServerCacheKeyPrefix) or
+    // a parallel build of this suite sharing the server fails the
+    // found-value check.
+    CacheKeyPrepender prefixed_cache(ServerCacheKeyPrefix(), cache);
     CacheSpammer::RunTests(4 /* num_threads */, 200 /* iters */,
                            200 /* inserts */, true /* expecting_evictions */,
-                           do_deletes, value.c_str(), cache,
+                           do_deletes, value.c_str(), &prefixed_cache,
                            thread_system_.get());
   }
 
@@ -1230,22 +1255,26 @@ void SystemCachesExternalCacheTestBase::TestCacheShare() {
                  servers[i]->page_property_cache()->property_store()->Name());
   }
 
-  // Metadata + HTTP cache will end up shared
-  TestPut(servers[0]->metadata_cache(), "b", "value");
-  TestGet(servers[0]->metadata_cache(), "b", CacheInterface::kAvailable,
+  // Metadata + HTTP cache will end up shared.  The keys carry the per-test,
+  // per-process prefix (see ServerCacheKeyPrefix) so this test cannot
+  // collide with a parallel build of this suite sharing the same server.
+  const GoogleString key = StrCat(ServerCacheKeyPrefix(), "b");
+  TestPut(servers[0]->metadata_cache(), key, "value");
+  TestGet(servers[0]->metadata_cache(), key, CacheInterface::kAvailable,
           "value");
-  TestGet(servers[1]->metadata_cache(), "b", CacheInterface::kAvailable,
+  TestGet(servers[1]->metadata_cache(), key, CacheInterface::kAvailable,
           "value");
-  TestGet(servers[2]->metadata_cache(), "b", CacheInterface::kAvailable,
+  TestGet(servers[2]->metadata_cache(), key, CacheInterface::kAvailable,
           "value");
 
-  TestHttpPut(servers[0]->http_cache(), "http://b.org", "fragment", "value");
-  TestHttpGet(servers[0]->http_cache(), "http://b.org", "fragment",
-              kFoundResult, "value");
-  TestHttpGet(servers[1]->http_cache(), "http://b.org", "fragment",
-              kFoundResult, "value");
-  TestHttpGet(servers[2]->http_cache(), "http://b.org", "fragment",
-              kFoundResult, "value");
+  const GoogleString http_key = StrCat(ServerCacheKeyPrefix(), "http://b.org");
+  TestHttpPut(servers[0]->http_cache(), http_key, "fragment", "value");
+  TestHttpGet(servers[0]->http_cache(), http_key, "fragment", kFoundResult,
+              "value");
+  TestHttpGet(servers[1]->http_cache(), http_key, "fragment", kFoundResult,
+              "value");
+  TestHttpGet(servers[2]->http_cache(), http_key, "fragment", kFoundResult,
+              "value");
 
   STLDeleteElements(&servers);
 }
