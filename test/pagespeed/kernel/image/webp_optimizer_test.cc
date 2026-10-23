@@ -123,8 +123,7 @@ class WebpScanlineOptimizerTest : public testing::Test {
     std::unique_ptr<ScanlineWriterInterface> webp_writer(CreateScanlineWriter(
         pagespeed::image_compression::IMAGE_WEBP, pixel_format, width, height,
         &webp_config, webp_image, &message_handler_));
-    ASSERT_NE(reinterpret_cast<ScanlineWriterInterface*>(NULL),
-              webp_writer.get());
+    ASSERT_NE(nullptr, webp_writer.get());
 
     // Read the scanlines from the original image and write them to the new one.
     while (png_reader.HasMoreScanLines()) {
