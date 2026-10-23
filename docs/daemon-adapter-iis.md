@@ -79,10 +79,16 @@ count resets after a day.
 
 Request a stylesheet or an image a page uses, wait a few seconds, and request
 it again. The second response carries a weak ETag beginning `W/"ps-` and an
-`Age` header: it came from the optimizer's volume. The module's statistics
-page (`/pagespeed_admin/statistics`, local requests only) counts these as
-`ipro_daemon_served`, and requests the volume could not answer yet as
-`ipro_daemon_fallthrough`.
+`Age` header: it is optimized output from the optimizer's volume. The module's
+statistics page (`/pagespeed_admin/statistics`, local requests only) counts
+these as `ipro_daemon_served`.
+
+A response the volume answered with the stored ORIGINAL -- the optimizer has
+no variant for the URL yet, or is not running -- carries the origin's own
+weak ETag instead and counts as `ipro_daemon_served_original`; requests the
+volume could not answer at all count as `ipro_daemon_fallthrough`.
+`ipro_daemon_served_original` climbing while `ipro_daemon_served` stays flat
+is the shape of an optimizer that is not producing variants.
 
 If a site does not engage, the module says why: see the
 `X-Pagespeed-Init-Status` values and the event-log entry described in

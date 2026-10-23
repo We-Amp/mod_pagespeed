@@ -196,6 +196,7 @@ const ORIGINAL = [
 const ACTIVITY = [
   ...ORIGINAL,
   "ipro_daemon_served",
+  "ipro_daemon_served_original",
   "ipro_daemon_fallthrough",
   "num_flushes",
   "num_resource_fetch_successes",
@@ -230,7 +231,11 @@ export function moduleSummary(vars: Record<string, number>): ModuleSummary {
     originalBytes: original,
     savedPercent,
     servedByOptimizer: sumOf(vars, ["ipro_daemon_served"]),
-    inPlaceRequests: sumOf(vars, ["ipro_daemon_served", "ipro_daemon_fallthrough"]),
+    inPlaceRequests: sumOf(vars, [
+      "ipro_daemon_served",
+      "ipro_daemon_served_original",
+      "ipro_daemon_fallthrough",
+    ]),
     fetchFailures: sumOf(vars, ["num_resource_fetch_failures"]),
   };
 }

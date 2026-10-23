@@ -168,6 +168,7 @@ const char* const kGraphsVars[] = {
     "ipro_served",
     "ipro_not_rewritable",
     "ipro_daemon_served",
+    "ipro_daemon_served_original",
     "ipro_daemon_fallthrough",
     "ipro_daemon_served_css",
     "ipro_daemon_served_js",

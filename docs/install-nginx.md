@@ -196,10 +196,15 @@ classic in-place path does not take over. Fix the cause and restart nginx.
 2. Request a stylesheet or script of the site a few times.
 3. Read the module's statistics (`StatisticsPath`, or the admin console's
    Statistics page). `ipro_daemon_served` counts in-place requests answered
-   from the daemon's cache; `ipro_daemon_fallthrough` counts the ones passed
-   to the ordinary path. Once the daemon has built a variant,
-   `ipro_daemon_served` rises. If only `ipro_daemon_fallthrough` rises, see
-   "Limits" below.
+   with an optimized variant from the daemon's cache;
+   `ipro_daemon_fallthrough` counts the ones passed to the ordinary path.
+   `ipro_daemon_served_original` counts the ones answered with the stored
+   original's own bytes: the daemon held no variant for the URL yet, which
+   is every such answer while the optimizer service is down. Once the daemon
+   has built a variant, `ipro_daemon_served` rises. If only
+   `ipro_daemon_fallthrough` rises, see "Limits" below; if
+   `ipro_daemon_served_original` rises instead, the optimizer service is
+   answering no variants -- check that it is running.
 
 The admin console's optimizer panels read the daemon's management API through
 the separate `DaemonApiSocketPath` directive.
@@ -212,8 +217,8 @@ the separate `DaemonApiSocketPath` directive.
   headers the nginx configuration adds to every response with `add_header`
   (an HSTS header, for example): the module cannot tell them apart from
   headers the origin sent. On a server that sets such a header site-wide,
-  little or nothing is optimized in place and `ipro_daemon_served` does not
-  rise.
+  little or nothing is optimized in place: `ipro_daemon_served` does not
+  rise, and those requests land in `ipro_daemon_fallthrough`.
 - An optimized image is chosen by `Accept`, the device class in `User-Agent`,
   `Sec-CH-DPR` when sent, and `Save-Data`, and says so in `Vary: Accept, Save-Data, User-Agent, Sec-CH-DPR`. For
   a cache or CDN in front of nginx, see "Behind a shared cache or CDN" in

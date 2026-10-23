@@ -541,11 +541,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
                            VouchedServeHost(serve_request.hostname,
                                             ConfiguredHostNames()));
   }
-  // One serve, counted once: a 200, a 304 and a HEAD each answered this
-  // request from the daemon's cache, and the two counters are documented as
-  // covering every in-place-eligible request between them.
-  stats->ipro_daemon_served()->Add(1);
-  RecordDaemonServedClass(stats, decision.ps_content_type);
+  // One answered request, counted once by the shared rule: an optimized
+  // variant moves ipro_daemon_served and its per-class split, the stored
+  // original's bytes move ipro_daemon_served_original.  A 200, a 304 and a
+  // HEAD alike, and the three counters cover every in-place-eligible
+  // request between them.
+  RecordDaemonServeCounters(stats, decision);
 
   // A FALLBACK HIT IS SERVED -- and it is also ANSWERED. The serve recorded
   // nothing, so without this nothing would ever ask the worker for the

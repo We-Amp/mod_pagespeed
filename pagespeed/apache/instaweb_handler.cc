@@ -821,9 +821,7 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
     }
   }
 
-  server_context_->rewrite_stats()->ipro_daemon_served()->Add(1);
-  RecordDaemonServedClass(server_context_->rewrite_stats(),
-                          decision.ps_content_type);
+  RecordDaemonServeCounters(server_context_->rewrite_stats(), decision);
 
   // A FALLBACK HIT IS SERVED -- and now it is also ANSWERED.  The serve
   // recorded nothing, so without this call nothing would ever ask the worker

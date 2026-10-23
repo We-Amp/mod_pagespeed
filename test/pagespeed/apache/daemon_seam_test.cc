@@ -224,7 +224,7 @@ TEST_F(DaemonSeamTest, AFallbackHitIsAnsweredWithOneWorkerRenotify) {
   ASSERT_NE(GoogleString::npos, fn_end);
   const GoogleString body = source.substr(serve, fn_end - serve);
 
-  const size_t served = body.find("ipro_daemon_served");
+  const size_t served = body.find("RecordDaemonServeCounters(");
   ASSERT_NE(GoogleString::npos, served);
   EXPECT_NE(GoogleString::npos, body.find("decision.fallback_hit"))
       << "the re-notify is no longer conditioned on the arm's fallback "
@@ -285,7 +285,7 @@ TEST_F(DaemonSeamTest, ALostOptimizedCopyIsAskedForOnceAfterTheServe) {
   EXPECT_LT(opt_in, decided)
       << "the limiter must be set before the serve it applies to";
 
-  const size_t served = body.find("ipro_daemon_served");
+  const size_t served = body.find("RecordDaemonServeCounters(");
   ASSERT_NE(GoogleString::npos, served);
   const size_t gate = body.find("if (decision.lost_optimized_copy) {");
   ASSERT_NE(GoogleString::npos, gate)
@@ -752,11 +752,11 @@ TEST_F(DaemonSeamTest, TheServeLegMovesThePerClassSplit) {
   ASSERT_NE(GoogleString::npos, fn_end);
   const GoogleString body = source.substr(serve, fn_end - serve);
 
-  const size_t served = body.find("ipro_daemon_served()->Add(1)");
-  ASSERT_NE(GoogleString::npos, served);
-  EXPECT_NE(GoogleString::npos, body.find("RecordDaemonServedClass("))
-      << "the per-class split of the serve counter no longer moves on the "
-         "serve leg";
+  // The shared serve-counting rule moves the total and its per-class split
+  // together; the seam must not count the total by hand beside it.
+  const size_t served = body.find("RecordDaemonServeCounters(");
+  ASSERT_NE(GoogleString::npos, served)
+      << "the serve counters no longer move on the serve leg";
 
   // The record side hands the recorder the counters it moves per class.
   const size_t record = source.find("MakeDaemonIproRecorderIfReady(");

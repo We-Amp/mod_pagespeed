@@ -773,6 +773,58 @@ TEST_F(DaemonServeArmTest, ReadsTheDurableOriginalByIdWhenNoVariantFits) {
               GoogleString::npos);
 }
 
+TEST_F(DaemonServeArmTest, ADurableOriginalCarriesTheOriginsValidatorNotADerivedOne) {
+  // ORIGIN BYTES, ORIGIN VALIDATOR.  The durable-original serve used to
+  // carry the derived `W/"ps-` tag: a label that on every other response
+  // means optimizer output, stamped on bytes the optimizer did not produce,
+  // and the one thing that made a down optimizer read as healthy in the
+  // module's own statistics.  The origin's tag, weakly, is what the server
+  // would send with no daemon at all.
+  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_EQ("W/\"origin-tag\"", decision.etag);
+  EXPECT_FALSE(StringCaseStartsWith(decision.etag, "W/\"ps-"));
+
+  // A client holding the ORIGIN's validator -- strong or weak, the
+  // comparison is weak on both planes -- gets its 304.
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = "\"origin-tag\"";
+  const DaemonServeDecision revalidated = Serve(conditional);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, revalidated.verdict);
+  EXPECT_TRUE(revalidated.not_modified);
+
+  // No origin ETag: no validator.  The origin's `Last-Modified` is emitted
+  // on this serve and `If-Modified-Since` answers over it (pinned below),
+  // so the response still has a conditional -- just not a minted one.
+  unsetenv("PS_STUB_ORIGIN_ETAG");
+  const DaemonServeDecision bare = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, bare.verdict);
+  EXPECT_EQ("", bare.etag);
+}
+
+TEST_F(DaemonServeArmTest, AnOriginalsValidatorNeverRevalidatesTheOptimizedVariant) {
+  // The other half of the split planes.  A client that holds the ORIGINAL's
+  // validator and meets a family that has since gained a variant must be
+  // handed the variant, not told its origin bytes are current: the two tags
+  // never match, weak comparison included, so the answer is a 200 with the
+  // variant and its derived tag.
+  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  ASSERT_EQ("W/\"origin-tag\"", original.etag);
+
+  SetAlternates("09:00:1,0c:00:0");
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = original.etag;
+  const DaemonServeDecision variant = Serve(conditional);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
+  EXPECT_FALSE(variant.not_modified);
+  EXPECT_TRUE(StringCaseStartsWith(variant.etag, "W/\"ps-"));
+}
+
 TEST_F(DaemonServeArmTest, TheCurrentPeerSelectsNothingAndTheOriginalIsById) {
   // THE SHAPE A REAL FAMILY NOW PRESENTS, pinned here because it is exactly
   // what stops being observable elsewhere.  A durable original with WebP and
@@ -2344,6 +2396,37 @@ TEST_F(DaemonServeArmTest, TheServedClassSplitMovesOnlyKnownClasses) {
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_image")->Get());
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_other")->Get());
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
+}
+
+TEST_F(DaemonServeArmTest, ADurableOriginalServeIsNotCountedAsOptimizerServed) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), nullptr);
+
+  // Only the durable original exists: the arm answers with the ORIGIN's
+  // bytes, and the optimizer-served counter must not claim them.  The
+  // partition counts them separately so that an optimizer producing no
+  // variants -- down, or still working on the URL -- reads as exactly that.
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  RecordDaemonServeCounters(&rewrite_stats, original);
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served_image")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_original")->Get());
+
+  // A variant answer moves the optimizer-served total and its per-class
+  // split, and leaves the original counter where it was.
+  SetAlternates("09:00:1");
+  const DaemonServeDecision variant = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
+  RecordDaemonServeCounters(&rewrite_stats, variant);
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_image")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_original")->Get());
+
+  // A null stats pointer (a seam without shared statistics) is a no-op.
+  RecordDaemonServeCounters(nullptr, variant);
 }
 
 // ---------------------------------------------------------------------------
