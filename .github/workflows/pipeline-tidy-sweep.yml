@@ -30,6 +30,10 @@ on:
         required: false
         type: boolean
         default: true
+      tests:
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -139,6 +143,7 @@ jobs:
           CHECK: ${{ inputs.check }}
           PATHS: ${{ inputs.paths }}
           FIX: ${{ inputs.fix }}
+          TESTS: ${{ inputs.tests }}
         run: |
           # compdb and clang-tidy must share a container: the compdb holds
           # absolute execroot paths that exist only in the container.
@@ -154,7 +159,7 @@ jobs:
             -e CI_SLOT_CPUS="${SLOT_CPUS}" -e CI_SLOT_MEM_GB="${SLOT_MEM_GB}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
-            -e CHECK -e PATHS -e FIX \
+            -e CHECK -e PATHS -e FIX -e TESTS \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -162,7 +167,15 @@ jobs:
             bash -c '
               set -e
               rm -f compile_commands.json
-              python3 tools/gen_compilation_database.py -- //pagespeed/... //net/... || {
+              # tests=true also puts the test packages the PR tier builds into
+              # the compdb (the same list as pipeline-pr.yml linux-build).
+              COMPDB_TARGETS=(//pagespeed/... //net/...)
+              DEFAULT_PATHS="pagespeed/ net/"
+              if [ "${TESTS}" = "true" ]; then
+                COMPDB_TARGETS+=(//test/pagespeed/kernel/... //test/net/... //test/pagespeed/opt/... //test/pagespeed/system/... //test/pagespeed/apache/... //test/pagespeed/nginx/...)
+                DEFAULT_PATHS="pagespeed/ net/ test/"
+              fi
+              python3 tools/gen_compilation_database.py -- "${COMPDB_TARGETS[@]}" || {
                 echo "::error::compile_commands.json generation failed"; exit 1; }
               grep -q pagespeed/nginx/ngx_pagespeed.cc compile_commands.json || {
                 echo "::error::compile_commands.json lost the nginx sources"; exit 1; }
@@ -170,12 +183,12 @@ jobs:
               python3 - <<"PY"
           import json
           db = json.load(open("compile_commands.json"))
-          bad = ("net/instaweb/rewriter/generated/", "pagespeed/iis/", "/external/", "/third_party/", "bazel-out/")
+          bad = ("net/instaweb/rewriter/generated/", "pagespeed/iis/", "test/pagespeed/iis/", "/external/", "/third_party/", "bazel-out/")
           keep = [e for e in db if not any(b in e["file"] for b in bad)]
           print(f"compdb: {len(db)} entries, {len(keep)} after exclusions")
           json.dump(keep, open("compile_commands.json", "w"))
           PY
-              read -r -a CT_TARGETS <<< "${PATHS:-pagespeed/ net/}"
+              read -r -a CT_TARGETS <<< "${PATHS:-${DEFAULT_PATHS}}"
               CT_J=()
               if [ -n "${CI_SLOT_CPUS:-}" ]; then
                 ct_j="${CI_SLOT_CPUS}"
