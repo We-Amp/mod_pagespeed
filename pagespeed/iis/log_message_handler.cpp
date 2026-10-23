@@ -23,7 +23,7 @@
 
 namespace {
 
-static net_instaweb::IisMessageHandler* global_message_handler = NULL;
+static net_instaweb::IisMessageHandler* global_message_handler = nullptr;
 
 // Log sink that forwards pagespeed_logging messages to the IIS message handler.
 class IisLogSink : public pagespeed_logging::LogSink {
@@ -31,7 +31,7 @@ class IisLogSink : public pagespeed_logging::LogSink {
   void send(int severity, const char* full_filename,
             const char* base_filename, int line, const char* message,
             size_t message_len) override {
-    if (global_message_handler == NULL) {
+    if (global_message_handler == nullptr) {
       OutputDebugStringA(message);
       return;
     }
@@ -65,7 +65,7 @@ class IisLogSink : public pagespeed_logging::LogSink {
   }
 };
 
-static IisLogSink* g_log_sink = NULL;
+static IisLogSink* g_log_sink = nullptr;
 
 }  // namespace
 
@@ -80,18 +80,18 @@ const int kDebugLogLevel = -2;
 void Install(IisMessageHandler* handler) {
   global_message_handler = handler;
   OutputDebugStringA("Hooking up handling of chromium messages");
-  if (g_log_sink == NULL) {
+  if (g_log_sink == nullptr) {
     g_log_sink = new IisLogSink();
     pagespeed_logging::AddLogSink(g_log_sink);
   }
 }
 
 void Deinstall() {
-  global_message_handler = NULL;
-  if (g_log_sink != NULL) {
+  global_message_handler = nullptr;
+  if (g_log_sink != nullptr) {
     pagespeed_logging::RemoveLogSink(g_log_sink);
     delete g_log_sink;
-    g_log_sink = NULL;
+    g_log_sink = nullptr;
   }
 }
 

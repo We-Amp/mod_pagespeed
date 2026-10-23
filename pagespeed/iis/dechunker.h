@@ -24,7 +24,7 @@ class Dechunker
 	void setInvalidStream()
 	{
 		validStream=false;
-		data=NULL;
+		data=nullptr;
 		datalength=0;
 		eof=true;
 	}
@@ -52,12 +52,12 @@ public:
 		this->chunked=chunked;
 		eof=false;
 		datalength=0;
-		data=NULL;
+		data=nullptr;
 		validStream=true;
 		sizepos=0;
 		currentmode=0;
 		currentblocklength=0;
-		currentData=NULL;
+		currentData=nullptr;
 		currentDatalength=0;	
 		return true;
 	}
@@ -70,7 +70,7 @@ public:
 		}
 		this->data=data;
 		this->datalength=datalength;
-		this->currentData=NULL;
+		this->currentData=nullptr;
 		this->currentDatalength=0;
 		return true;
 	}
@@ -82,19 +82,19 @@ public:
 			{
 				this->currentData=data;
 				this->currentDatalength=datalength;
-				this->data=NULL; // for next call we reset data
+				this->data=nullptr; // for next call we reset data
 				this->datalength=0;
 				return true;
 			}
 			else // no data (second) or invalid call
 			{
-				this->currentData=NULL;
+				this->currentData=nullptr;
 				this->currentDatalength=0;
 				return false;
 			}
 		}
 		if (!validStream || eof) return false;
-		this->currentData=NULL;
+		this->currentData=nullptr;
 		this->currentDatalength=0;
 	
 		char *endptr=data+datalength;
@@ -131,9 +131,9 @@ public:
 					sizepos=0;
 					if (currentblocklength==0)
 					{
-						data=NULL;
+						data=nullptr;
 						datalength=0;
-						currentData=NULL;
+						currentData=nullptr;
 						currentDatalength=0;
 						eof=true; 
 						currentmode=0;
@@ -157,7 +157,7 @@ public:
 					size_t dataleft=static_cast<size_t>(endptr-data);
 					if (dataleft==0) // no data in block
 					{
-						data=NULL;
+						data=nullptr;
 						datalength=0;
 						return false;
 					}
@@ -195,19 +195,19 @@ public:
 			}
 			data++;
 		}
-		currentData=NULL;
+		currentData=nullptr;
 		currentDatalength=0;
 		return false;		
 	}
 	bool HasData()
 	{
-		return currentData!=NULL;			
+		return currentData!=nullptr;			
 	}
 	bool GetDataBlock(char **datablock,size_t *datablocklength)
 	{
 		*datablock=currentData;
 		*datablocklength=currentDatalength;
-		return currentData!=NULL;
+		return currentData!=nullptr;
 	}
 };
 #endif

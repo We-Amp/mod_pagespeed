@@ -53,7 +53,7 @@ namespace {
 bool HasHeader(IHttpContext* http_context, const char* name) {
   USHORT length = 0;
   PCSTR value = http_context->GetRequest()->GetHeader(name, &length);
-  return value != NULL;
+  return value != nullptr;
 }
 
 // A server variable counts as naming a user when it is there and spells
@@ -61,13 +61,13 @@ bool HasHeader(IHttpContext* http_context, const char* name) {
 // lookup is the one this port already uses elsewhere (the pristine-URL
 // read).
 bool ServerVariableNamesUser(IHttpContext* http_context, const char* name) {
-  PCWSTR value = NULL;
+  PCWSTR value = nullptr;
   DWORD length = 0;
   if (http_context->GetRootContext()->GetServerVariable(name, &value,
                                                         &length) != S_OK) {
     return false;
   }
-  if (value == NULL || length == 0) {
+  if (value == nullptr || length == 0) {
     return false;
   }
   for (DWORD i = 0; i < length; ++i) {
@@ -81,7 +81,7 @@ bool ServerVariableNamesUser(IHttpContext* http_context, const char* name) {
 // A wide string counts as naming a user when it spells more than
 // whitespace.
 bool NamesUser(PCWSTR value) {
-  if (value == NULL) {
+  if (value == nullptr) {
     return false;
   }
   for (PCWSTR at = value; *at != L'\0'; ++at) {
@@ -99,7 +99,7 @@ IisAuthFacts ReadIisAuthFacts(IHttpContext* http_context) {
   facts.has_authorization_header =
       HasHeader(http_context, HttpAttributes::kAuthorization);
   IHttpUser* user = http_context->GetUser();
-  if (user != NULL) {
+  if (user != nullptr) {
     // Anonymous access reports an empty authentication type; a
     // connection-authenticated follow-up request reports the scheme
     // with no Authorization header anywhere.
@@ -114,12 +114,12 @@ IisAuthFacts ReadIisAuthFacts(IHttpContext* http_context) {
   // A negotiated handshake with no certificate (clientCertificate="Accept")
   // counts too: it is the safe direction, at the cost of not recording on
   // such a site.
-  HTTP_SSL_CLIENT_CERT_INFO* certificate_info = NULL;
+  HTTP_SSL_CLIENT_CERT_INFO* certificate_info = nullptr;
   BOOL certificate_negotiated = FALSE;
   http_context->GetRequest()->GetClientCertificate(&certificate_info,
                                                    &certificate_negotiated);
   facts.has_client_certificate =
-      certificate_negotiated || certificate_info != NULL;
+      certificate_negotiated || certificate_info != nullptr;
   return facts;
 }
 
@@ -130,22 +130,23 @@ void IisCapabilityHeaders(IHttpContext* http_context, StringPiece* accept,
   USHORT length = 0;
   PCSTR value =
       http_context->GetRequest()->GetHeader(HttpAttributes::kAccept, &length);
-  *accept = StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+  *accept = StringPiece(value == nullptr ? "" : value,
+                        value == nullptr ? 0 : length);
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kUserAgent,
                                                 &length);
   *user_agent =
-      StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
   value =
       http_context->GetRequest()->GetHeader(HttpAttributes::kSaveData, &length);
   *save_data =
-      StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kAcceptEncoding,
                                                 &length);
   *accept_encoding =
-      StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
   value = http_context->GetRequest()->GetHeader("Sec-CH-DPR", &length);
   *sec_ch_dpr =
-      StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
 }
 
 void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
@@ -172,7 +173,7 @@ void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
   // halves or neither: a payload with no signature has no name, and a
   // refusal here is not an error -- the record arm responds by keeping
   // the original and asking for nothing, which the gate answers.
-  if (options != NULL &&
+  if (options != nullptr &&
       OptionContext::Compute(*options, &request->option_context,
                              &request->option_signature) !=
           OptionContextStatus::kOk) {

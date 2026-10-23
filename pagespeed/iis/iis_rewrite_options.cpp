@@ -90,7 +90,7 @@ const char* const main_only_options[] = {
 }  // namespace
 
 
-RewriteOptions::Properties* IisRewriteOptions::iis_properties_ = NULL;
+RewriteOptions::Properties* IisRewriteOptions::iis_properties_ = nullptr;
 
 IisRewriteOptions::IisRewriteOptions(ThreadSystem* thread_system) 
 	: SystemRewriteOptions(thread_system) {
@@ -99,7 +99,7 @@ IisRewriteOptions::IisRewriteOptions(ThreadSystem* thread_system)
 }
 
 void IisRewriteOptions::Init() {
-  DCHECK(iis_properties_ != NULL)
+  DCHECK(iis_properties_ != nullptr)
       << "Call IisRewriteOptions::Initialize() before construction";
   InitializeOptions(iis_properties_);
 }
@@ -185,7 +185,7 @@ void IisRewriteOptions::AddProperties() {
 		true);
 
 	MergeSubclassProperties(iis_properties_);
-	IisRewriteOptions dummy_config(NULL);
+	IisRewriteOptions dummy_config(nullptr);
   
   dummy_config.set_default_x_header_value(kModPagespeedVersion);
 }
@@ -428,7 +428,7 @@ IisRewriteOptions::ParseAndSetOptions(
 
   switch (result) {
     case RewriteOptions::kOptionOk:
-      return NULL;
+      return nullptr;
     case RewriteOptions::kOptionNameUnknown:
 		handler->Message(kWarning, "%s", JoinString(args, ' ').c_str());
       return "unknown option";
@@ -439,7 +439,7 @@ IisRewriteOptions::ParseAndSetOptions(
   }
 
   CHECK(false);
-  return NULL;
+  return nullptr;
 }
 
 IisRewriteOptions* IisRewriteOptions::Clone() const {

@@ -14,17 +14,17 @@ void FileCheck::CreateFileID(std::string file)
 	memset(&ft,0,sizeof(ft));
 	filehash=0;
 	// Check if we can read this another way without opening the file
-	HANDLE hFile=CreateFileA(file.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+	HANDLE hFile=CreateFileA(file.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
 	if (hFile==INVALID_HANDLE_VALUE)
 	{
 		return;
 	}
-	GetFileTime(hFile,NULL,NULL,&ft);
+	GetFileTime(hFile,nullptr,nullptr,&ft);
 	DWORD sizeHigh;
 	DWORD size=GetFileSize(hFile,&sizeHigh);
 	DWORD read;
 	char *temp=new char[size];
-	if (ReadFile(hFile,temp,size,&read,NULL))
+	if (ReadFile(hFile,temp,size,&read,nullptr))
 	{
 		MD5Hasher hasher;
 		filehash=hasher.HashToUint64(StringPiece(temp,read));
@@ -36,14 +36,14 @@ bool FileCheck::FileIDChanged(std::string file)
 {
 	FILETIME myTime;
 		
-	HANDLE hFile=CreateFileA(file.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+	HANDLE hFile=CreateFileA(file.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
 	if (hFile==INVALID_HANDLE_VALUE)
 	{
 		memset(&myTime,0,sizeof(FILETIME));
 	}
 	else
 	{
-		GetFileTime(hFile,NULL,NULL,&myTime);
+		GetFileTime(hFile,nullptr,nullptr,&myTime);
 	}
 		
 	bool changed=(myTime.dwHighDateTime!=ft.dwHighDateTime || myTime.dwLowDateTime!=ft.dwLowDateTime);		
@@ -56,7 +56,7 @@ bool FileCheck::FileIDChanged(std::string file)
 			DWORD size=GetFileSize(hFile,&sizeHigh);
 			DWORD read;
 			char *temp=new char[size];
-			if (ReadFile(hFile,temp,size,&read,NULL))
+			if (ReadFile(hFile,temp,size,&read,nullptr))
 			{
 				MD5Hasher hasher;
 				uint64 myfilehash=hasher.HashToUint64(StringPiece(temp,read));

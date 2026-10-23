@@ -68,18 +68,18 @@ extern "C" const char* __asan_default_options() {
 // ---------------------------------------------------------------------------
 namespace net_instaweb {
 
-HMODULE currentModule = NULL;
+HMODULE currentModule = nullptr;
 std::string modulePath;
 std::string moduleFilename;
-IisMessageHandler* message_handler = NULL;
-ConfigFactory* cf = NULL;
+IisMessageHandler* message_handler = nullptr;
+ConfigFactory* cf = nullptr;
 // Backing thread system + timer for `message_handler`. Held in globals so
 // DLL_PROCESS_DETACH can free them: SystemMessageHandler owns its mutex (via
 // unique_ptr) but NOT its Timer (its dtor is empty), and nothing owned the
 // thread system — so every app-pool recycle leaked both and tripped
 // AppVerifier's Leak provider (stop 0x900) at FreeLibrary/unload.
-ThreadSystem* dll_thread_system = NULL;
-Timer* dll_timer = NULL;
+ThreadSystem* dll_thread_system = nullptr;
+Timer* dll_timer = nullptr;
 
 }  // namespace net_instaweb
 
@@ -99,12 +99,12 @@ class MyGlobalModule : public CGlobalModule {
     UNREFERENCED_PARAMETER(pProvider);
     auto rq = pProvider->GetHttpContext()->GetRequest();
 
-    PCWSTR tmpx = NULL;
+    PCWSTR tmpx = nullptr;
     DWORD len;
     // Set X-PRISTINE-URL before any other module can modify the URL.
     pProvider->GetHttpContext()->GetRootContext()->GetServerVariable(
         "X-PRISTINE-URL", &tmpx, &len);
-    if (tmpx == NULL) {
+    if (tmpx == nullptr) {
       auto url = rq->GetRawHttpRequest()->CookedUrl.pFullUrl;
       pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
           "X-PRISTINE-URL", url);
@@ -155,7 +155,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
     case DLL_PROCESS_DETACH:
       delete net_instaweb::cf;
-      net_instaweb::cf = NULL;
+      net_instaweb::cf = nullptr;
 
       net_instaweb::IisRewriteOptions::Terminate();
       net_instaweb::IisRewriteDriverFactory::Terminate();
@@ -166,7 +166,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
       // Must run before ShutdownProtobufLibrary so ~ProcessContext can still
       // touch protobuf state during its own teardown.
       delete net_instaweb::IisProcessContext::PSOL_PROCESS_CONTEXT;
-      net_instaweb::IisProcessContext::PSOL_PROCESS_CONTEXT = NULL;
+      net_instaweb::IisProcessContext::PSOL_PROCESS_CONTEXT = nullptr;
 
       google::protobuf::ShutdownProtobufLibrary();
       net_instaweb::HtmlKeywords::ShutDown();
@@ -182,7 +182,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
       // OS has already terminated every other thread, so the flag only
       // guards teardown code below.
       pagespeed_logging::ShutDownLogging();
-      if (lpReserved == NULL) {
+      if (lpReserved == nullptr) {
         // Unregister IisLogSink and null its global_message_handler BEFORE
         // deleting the handler it dereferences. Deinstall() previously had
         // no caller, so the sink kept a dangling handler pointer after
@@ -196,16 +196,16 @@ BOOL APIENTRY DllMain(HMODULE hModule,
         net_instaweb::log_message_handler::Deinstall();
       }
       delete net_instaweb::message_handler;
-      net_instaweb::message_handler = NULL;
+      net_instaweb::message_handler = nullptr;
 
       // Free the thread system + timer created for message_handler. The handler
       // is already gone (it owned only the mutex, via unique_ptr), so the timer
       // and thread system now have no live users. Delete the timer before the
       // thread system that minted it.
       delete net_instaweb::dll_timer;
-      net_instaweb::dll_timer = NULL;
+      net_instaweb::dll_timer = nullptr;
       delete net_instaweb::dll_thread_system;
-      net_instaweb::dll_thread_system = NULL;
+      net_instaweb::dll_thread_system = nullptr;
 
       // Release BoringSSL's process-wide TLS slot. Must come
       // after any code path that could still touch BoringSSL thread locals.

@@ -45,21 +45,21 @@ IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fet
 	, flush_html_(false)
 	, ctx_(ctx)
 	, handler_(handler)
-	, zc_data_(NULL)
+	, zc_data_(nullptr)
 	, zc_size_(0)
 	, zc_has_borrowed_(false)
 	, zc_aliased_counted_(false)
 	, zc_active_(false)
-	, zc_aliased_stat_(NULL)
-	, zc_copied_out_stat_(NULL)
-	, zc_renew_fail_stat_(NULL)
-	, zc_aborted_stat_(NULL)
+	, zc_aliased_stat_(nullptr)
+	, zc_copied_out_stat_(nullptr)
+	, zc_renew_fail_stat_(nullptr)
+	, zc_aborted_stat_(nullptr)
 	
 {
 	lastwritetime=0;
 	donetime=0;
 	currentblock=0;
-	currentblockpos=NULL;
+	currentblockpos=0;
 	currentblocksize=0;
 	write_failed_=false;
 	PopulateRequestHeaders(http_context_, request_headers());
@@ -107,7 +107,7 @@ void IisModuleBaseFetch::PopulateRequestHeaders(IHttpContext* http_context, Requ
 	for (int i = 0; i < n; ++i) 
 	{
 		PCSTR val = http_context->GetRequest()->GetHeader( kPassThroughRequestAttributes[i] );
-		if (val != NULL)
+		if (val != nullptr)
 		{
 			request_headers->Add(kPassThroughRequestAttributes[i], val);
 		}
@@ -157,7 +157,7 @@ void IisModuleBaseFetch::PopulateResponseHeaders(IHttpContext* http_context, Res
 		if ( hdr->RawValueLength > 0 )
 		{
 			response_headers->Add(HTTP_HEADER_ID_STRINGS_RESPONSE[i], hdr->pRawValue );
-			if (HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[i]!=NULL) // for safe keeping, we might need the cache headers
+			if (HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[i]!=nullptr) // for safe keeping, we might need the cache headers
 				response_headers->Add(HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[i], hdr->pRawValue);
 		}
 	}
@@ -235,7 +235,7 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 			if (currentblocksize>65536) currentblocksize=65536;
 			currentblockpos=0;
 			currentblock=(char *) http_context_->AllocateRequestMemory(currentblocksize);
-			if (currentblock == NULL)
+			if (currentblock == nullptr)
 			{
 				// The request pool is exhausted: drop the block bookkeeping so a
 				// later write or SendData never stores through a missing block,
@@ -299,14 +299,14 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 bool IisModuleBaseFetch::ZeroCopyGuardsAllowAlias()
 {
 	IHttpRequest* req = http_context_->GetRequest();
-	if (req == NULL)
+	if (req == nullptr)
 	{
 		return false;
 	}
 	// GET only: HEAD keeps the legacy path (no entity aliasing), anything
 	// else never reaches the resource serve anyway.
 	PCSTR method = req->GetHttpMethod();
-	if (method == NULL || !StringCaseEqual(method, "GET"))
+	if (method == nullptr || !StringCaseEqual(method, "GET"))
 	{
 		return false;
 	}
@@ -316,13 +316,13 @@ bool IisModuleBaseFetch::ZeroCopyGuardsAllowAlias()
 	// exists -- this is belt-and-braces.
 	USHORT len = 0;
 	PCSTR hdr = req->GetHeader("Range", &len);
-	if (hdr != NULL && len > 0)
+	if (hdr != nullptr && len > 0)
 	{
 		return false;
 	}
 	len = 0;
 	hdr = req->GetHeader("If-Range", &len);
-	if (hdr != NULL && len > 0)
+	if (hdr != nullptr && len > 0)
 	{
 		return false;
 	}
@@ -335,10 +335,10 @@ bool IisModuleBaseFetch::ZeroCopyGuardsAllowAlias()
 	// rewritten CSS/JS that IIS would gzip -- keeps the copying path.
 	len = 0;
 	hdr = req->GetHeader("Accept-Encoding", &len);
-	if (hdr != NULL && len > 0)
+	if (hdr != nullptr && len > 0)
 	{
 		const ContentType* ct = response_headers()->DetermineContentType();
-		if (ct == NULL)
+		if (ct == nullptr)
 		{
 			return false;
 		}
@@ -383,7 +383,7 @@ bool IisModuleBaseFetch::WriteMapped(const StringPiece& mmap_sp,
 	// (rewrite_driver.cc CacheCallback::DeliverDone), so a missing
 	// headers-complete means an unexpected caller: decline.
 	bool decline = fetch_type_ != FetchType::kResource ||
-	               http_context_ == NULL || !headers_complete() ||
+	               http_context_ == nullptr || !headers_complete() ||
 	               mmap_sp.size() > kZcMaxServeBytes ||
 	               !ZeroCopyGuardsAllowAlias();
 	if (!decline)
@@ -440,11 +440,11 @@ void IisModuleBaseFetch::StartZeroCopyServe()
 	// centrally in RewriteDriverFactory::InitStats).
 	IisModuleRequestContext* rc =
 	    IisModuleRequestContext::GetRequestContext(http_context_);
-	if (rc != NULL && rc->GetInnerContext() != NULL)
+	if (rc != nullptr && rc->GetInnerContext() != nullptr)
 	{
 		Statistics* stats =
 		    rc->GetInnerContext()->server_context()->statistics();
-		if (stats != NULL)
+		if (stats != nullptr)
 		{
 			zc_aliased_stat_ = stats->FindVariable("zerocopy_serve_aliased");
 			zc_copied_out_stat_ =
@@ -464,7 +464,7 @@ void IisModuleBaseFetch::StartZeroCopyServe()
 	IHttpResponse* r = http_context_->GetResponse();
 	r->DisableKernelCache();
 	auto cp = r->GetCachePolicy();
-	if (cp != NULL)
+	if (cp != nullptr)
 	{
 		auto kcp = cp->GetKernelCachePolicy();
 		if (kcp)
@@ -493,7 +493,7 @@ void IisModuleBaseFetch::StartZeroCopyServe()
 	// notification handler (OnBeginRequest returned PENDING long ago), so
 	// resume the pipeline explicitly, exactly like the legacy HandleDone.
 	IHttpContext* http_context = http_context_;
-	http_context_ = NULL;
+	http_context_ = nullptr;
 	zc_active_.store(false, std::memory_order_release);
 	http_context->IndicateCompletion(RQ_NOTIFICATION_FINISH_REQUEST);
 }
@@ -540,7 +540,7 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::DriveZeroCopyServe()
 		{
 			char* owned =
 			    (char*)http_context_->AllocateRequestMemory((DWORD)n.length);
-			if (owned == NULL)
+			if (owned == nullptr)
 			{
 				return AbortZeroCopyServe("tail copy allocation failed",
 			                           false /* epoch_torn */);
@@ -570,7 +570,7 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::DriveZeroCopyServe()
 				                           false /* epoch_torn */);
 			}
 			zc_planner_->Advance(n.length);
-			if (zc_copied_out_stat_ != NULL)
+			if (zc_copied_out_stat_ != nullptr)
 			{
 				zc_copied_out_stat_->Add(1);
 			}
@@ -598,7 +598,7 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::DriveZeroCopyServe()
 		if (!zc_aliased_counted_)
 		{
 			zc_aliased_counted_ = true;
-			if (zc_aliased_stat_ != NULL)
+			if (zc_aliased_stat_ != nullptr)
 			{
 				zc_aliased_stat_->Add(1);  // once per aliased serve
 			}
@@ -667,17 +667,17 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::AbortZeroCopyServe(
 	// allocation/submit-HRESULT aborts count separately.
 	if (epoch_torn)
 	{
-		if (zc_renew_fail_stat_ != NULL)
+		if (zc_renew_fail_stat_ != nullptr)
 		{
 			zc_renew_fail_stat_->Add(1);
 		}
 	}
-	else if (zc_aborted_stat_ != NULL)
+	else if (zc_aborted_stat_ != nullptr)
 	{
 		zc_aborted_stat_->Add(1);
 	}
 	zc_pin_ = MappedSharedString();
-	if (http_context_ != NULL)
+	if (http_context_ != nullptr)
 	{
 		// The client must never see a COMPLETE body assembled from an
 		// overwritten region, and the serve is HTTP/1.1 chunked (no
@@ -691,7 +691,7 @@ IisModuleBaseFetch::ZcDrive IisModuleBaseFetch::AbortZeroCopyServe(
 		// M1 gate rig).  ResetConnection() aborts the socket immediately
 		// (TCP RST), so no terminator is ever emitted for a torn serve.
 		IHttpResponse* r = http_context_->GetResponse();
-		if (r != NULL)
+		if (r != nullptr)
 		{
 			r->ResetConnection();
 		}
@@ -714,7 +714,7 @@ REQUEST_NOTIFICATION_STATUS IisModuleBaseFetch::OnZeroCopyCompletion(
 		log("zero-copy serve: completion error 0x%08x, finishing",
 		    (unsigned)completion_status);
 		zc_pin_ = MappedSharedString();
-		if (http_context_ != NULL)
+		if (http_context_ != nullptr)
 		{
 			http_context_->SetRequestHandled();
 		}
@@ -739,7 +739,7 @@ REQUEST_NOTIFICATION_STATUS IisModuleBaseFetch::OnZeroCopyCompletion(
 		return RQ_NOTIFICATION_PENDING;
 	}
 	zc_active_.store(false, std::memory_order_release);
-	http_context_ = NULL;
+	http_context_ = nullptr;
 	// We are inside OnAsyncCompletion for the parked RQ_BEGIN_REQUEST:
 	// returning FINISH here resumes and finishes the request without an
 	// IndicateCompletion call.
@@ -1048,10 +1048,10 @@ void IisModuleBaseFetch::HandleDone(bool success)
 		// it with a hole; reset the connection so no client or cache takes
 		// the short body for the whole one.
 		success = false;
-		if (http_context_ != NULL)
+		if (http_context_ != nullptr)
 		{
 			IHttpResponse* r = http_context_->GetResponse();
-			if (r != NULL)
+			if (r != nullptr)
 			{
 				r->ResetConnection();
 			}
@@ -1061,7 +1061,7 @@ void IisModuleBaseFetch::HandleDone(bool success)
 	{
 		// Zero-copy aliased serve (CycloneZeroCopyServe): WriteMapped
 		// recorded the borrowed mmap span instead of copying it.
-		if (success && http_context_ != NULL &&
+		if (success && http_context_ != nullptr &&
 		    fetch_type_ == FetchType::kResource && chunks_.empty() &&
 		    currentblockpos == 0)
 		{
@@ -1083,13 +1083,13 @@ void IisModuleBaseFetch::HandleDone(bool success)
 		// has nothing to copy and must not fail a producible response.
 		zc_has_borrowed_ = false;
 		bool copy_ok = (zc_size_ == 0);
-		if (success && http_context_ != NULL && zc_size_ > 0)
+		if (success && http_context_ != nullptr && zc_size_ > 0)
 		{
 			// zc_size_ <= kZcMaxServeBytes (WriteMapped bound), so the
 			// DWORD/ULONG casts below cannot truncate.
 			char* owned =
 			    (char*)http_context_->AllocateRequestMemory((DWORD)zc_size_);
-			if (owned != NULL)
+			if (owned != nullptr)
 			{
 				memcpy(owned, zc_data_, zc_size_);
 				// Verify AFTER the memcpy (copy-then-verify): only kTorn
@@ -1128,7 +1128,7 @@ void IisModuleBaseFetch::HandleDone(bool success)
 		}
 	}
 	if (success) {
-		SendData(NULL, false);
+		SendData(nullptr, false);
 	}
 	DWORD bytessent=0;
 	//http_context_->GetResponse()->Flush(false,false,&bytessent);
@@ -1149,7 +1149,7 @@ void IisModuleBaseFetch::HandleDone(bool success)
 	}
 	else
 		http_context_->IndicateCompletion(next_status);
-	http_context_=NULL;
+	http_context_=nullptr;
 	//ctx_->set_base_fetch(NULL);
 	ReleaseRef(); 
 }

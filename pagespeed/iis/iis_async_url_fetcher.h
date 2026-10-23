@@ -99,10 +99,10 @@ public:
 	void set_deferred_stop(bool val) { deferred_stop_ = val; }
 	bool GetUrl(GoogleString url, const char* host)
 	{
-		CHECK(host != NULL);
+		CHECK(host != nullptr);
 		url_ = url;
 		client.SetAllowSelfSigned(fetcher->allow_self_signed());
-		bool res = client.GetUrl(std::string(url.c_str()), std::string(host == NULL ? "" : host));
+		bool res = client.GetUrl(std::string(url.c_str()), std::string(host == nullptr ? "" : host));
 		messagehandler->Message(kInfo, "Request to [%s] with host header [%s] -> %s", url.c_str(), host, res ? "OK":"Fail");
 		return res;
 	}

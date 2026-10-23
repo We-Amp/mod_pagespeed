@@ -36,7 +36,7 @@ public:
 
 
 struct ConfigLine {
-	ConfigLine(string key,string value,int mode):valuematch(value) {this->key=key;/*this->value=value*/;this->mode=mode;this->rewriteoptions=NULL;}
+	ConfigLine(string key,string value,int mode):valuematch(value) {this->key=key;/*this->value=value*/;this->mode=mode;this->rewriteoptions=nullptr;}
 	string key;
 	//string value;
 	RE2 valuematch;
@@ -93,7 +93,7 @@ class ConfigurationFile:public ReferenceCounter
 	                     net_instaweb::global_settings& global_config,
 	                     std::function<std::string(const std::string&)> expand_env)
 	{
-		IisRewriteOptions *currewriteoptions=NULL;
+		IisRewriteOptions *currewriteoptions=nullptr;
 		// item 3: options appearing after a match rule are per-request (matched)
 		// scope; process/server-only directives are rejected there.
 		bool seen_match_rule=false;
@@ -166,7 +166,7 @@ class ConfigurationFile:public ReferenceCounter
 								matchLines.push_back(currentLine );
 							}
 							// TODO(oschaaf): FIXME
-							currentLine->rewriteoptions=new IisRewriteOptions(NULL);
+							currentLine->rewriteoptions=new IisRewriteOptions(nullptr);
 						}
 						currewriteoptions=currentLine->rewriteoptions;
 
@@ -309,14 +309,14 @@ class ConfigurationFile:public ReferenceCounter
 
 	void LoadFile(string path,MessageHandler *mh, net_instaweb::global_settings& global_config)
 	{
-		HANDLE file=CreateFileA(path.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+		HANDLE file=CreateFileA(path.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
 		//mh->Message(kInfo, "read file [%s]", path.c_str());
 		if (file!=INVALID_HANDLE_VALUE)
 		{
 			// Bug 3 fix: use DWORD instead of int to avoid signed overflow
 			// for files > 2GB. INVALID_FILE_SIZE (0xFFFFFFFF) is also returned
 			// for legitimate 4GB-1 files, but the 100MB cap rejects those anyway.
-			DWORD size=GetFileSize(file,NULL);
+			DWORD size=GetFileSize(file,nullptr);
 			if ((size == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
 			    || size > (100 * 1024 * 1024)) {
 				CloseHandle(file);
@@ -325,14 +325,14 @@ class ConfigurationFile:public ReferenceCounter
 			}
 			DWORD read;
 			// Bug 4 fix: check GetFileTime return value.
-			if (!GetFileTime(file,NULL,NULL,&orgtime)) {
+			if (!GetFileTime(file,nullptr,nullptr,&orgtime)) {
 				// If GetFileTime fails, orgtime stays zero-initialized
 				// (from constructor). Expired() will reload on next check.
 			}
 			this->path=path;
 
 			char *tempbuf=new char [size+1];
-			bool ret=ReadFile(file,tempbuf,size,&read,NULL);
+			bool ret=ReadFile(file,tempbuf,size,&read,nullptr);
 			CloseHandle(file);
 
 			if (ret)
@@ -382,11 +382,11 @@ public:
 		bool expired=expiresat<GetTickCount64();
 		if (expired && path!="")
 		{
-			HANDLE file=CreateFileA(path.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+			HANDLE file=CreateFileA(path.c_str(),GENERIC_READ ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
 			if (file!=INVALID_HANDLE_VALUE)
 			{
 				FILETIME ftc;
-				if (GetFileTime(file,NULL,NULL,&ftc))
+				if (GetFileTime(file,nullptr,nullptr,&ftc))
 				{
 					if (ftc.dwHighDateTime==orgtime.dwHighDateTime
 						&&
@@ -413,7 +413,7 @@ public:
 		bool stopmatching=false;
 		bool matched=true;
 		// TODO(oschaaf): FIXME
-		IisRewriteOptions *ret=new IisRewriteOptions(NULL);
+		IisRewriteOptions *ret=new IisRewriteOptions(nullptr);
 		for(list<ConfigLine*>::iterator it=matchLines.begin();it!=matchLines.end();it++)
 		{
 			ConfigLine *c=*it;
@@ -429,7 +429,7 @@ public:
 					{
 						delete ret;
 						// TODO(oschaaf): FIXME
-						ret=new IisRewriteOptions(NULL);
+						ret=new IisRewriteOptions(nullptr);
 
 					}
 					if (matched && c->mode&8) //last -> merge
@@ -541,7 +541,7 @@ ConfigurationFile *ConfigFactory::GetConfiguration(string path,MessageHandler *m
 	// drop the shared lock, allocate, and reacquire exclusive. Re-check the
 	// map under the exclusive lock to avoid double-insert races between two
 	// threads that both saw a missing entry.
-	ConfigurationFile *file = NULL;
+	ConfigurationFile *file = nullptr;
 	AcquireSRWLockShared(&rwlock);
 	auto it = configurationFiles.find(path);
 	if (it != configurationFiles.end()) {

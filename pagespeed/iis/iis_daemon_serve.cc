@@ -48,7 +48,7 @@ namespace net_instaweb {
 // compress hands two different bodies out under one key.
 bool IisCompressibleMediaType(StringPiece media_type) {
   const ContentType* type = MimeTypeToContentType(media_type);
-  if (type == NULL) {
+  if (type == nullptr) {
     return true;
   }
   switch (type->type()) {
@@ -157,12 +157,12 @@ void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
   USHORT length = 0;
   PCSTR value = http_context->GetRequest()->GetHeader(
       HttpAttributes::kIfNoneMatch, &length);
-  request->if_none_match = StringPiece(value == NULL ? "" : value,
-                                       value == NULL ? 0 : length);
+  request->if_none_match = StringPiece(value == nullptr ? "" : value,
+                                       value == nullptr ? 0 : length);
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kIfModifiedSince,
                                                 &length);
   request->if_modified_since =
-      StringPiece(value == NULL ? "" : value, value == NULL ? 0 : length);
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
 
   // A forced reload, in both spellings a client still sends. It is handed to
   // the peer's freshness evaluator rather than acted on here: the peer
@@ -170,12 +170,12 @@ void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
   // second means the entry expired.
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kCacheControl,
                                                 &length);
-  const StringPiece cache_control(value == NULL ? "" : value,
-                                  value == NULL ? 0 : length);
+  const StringPiece cache_control(value == nullptr ? "" : value,
+                                  value == nullptr ? 0 : length);
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kPragma,
                                                 &length);
-  const StringPiece pragma(value == NULL ? "" : value,
-                           value == NULL ? 0 : length);
+  const StringPiece pragma(value == nullptr ? "" : value,
+                           value == nullptr ? 0 : length);
   request->force_revalidate =
       cache_control.find("no-cache") != StringPiece::npos ||
       StringCaseEqual(pragma, "no-cache");

@@ -37,7 +37,7 @@ namespace net_instaweb {
 		: SystemServerContext(factory, "site." + site_app_id, port),
 		iis_factory_(factory),
 		site_app_id_(site_app_id),
-		fetch_factory_(NULL)
+		fetch_factory_(nullptr)
 	{ 
 	}
 

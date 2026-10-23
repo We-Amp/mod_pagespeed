@@ -70,7 +70,7 @@ void IisAsyncWorker::OnCompleted(WinHTTPStatus status)
 }
 void IisAsyncWorker::Cancel()
 {
-	client.SetEventHandler(NULL);
+	client.SetEventHandler(nullptr);
 	client.Cancel();
 	client.Wait();
 	//fetch->Done(false);

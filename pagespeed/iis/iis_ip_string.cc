@@ -24,7 +24,7 @@ namespace net_instaweb {
 GoogleString GetIPString(SOCKADDR* addr) {
   GoogleString ip_address;
 
-  if (addr == NULL) {
+  if (addr == nullptr) {
     return ip_address;
   }
 
