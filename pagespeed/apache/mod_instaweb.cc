@@ -1807,7 +1807,8 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedExperimentSpec,
         "Configuration for one side of an experiment in the form: "
-        "'id= ;enabled= ;disabled= ;ga= ;percent= ...'"),
+        "'id= ;enabled= ;disabled= ;ga= ;percent= ...' The 'ga=' "
+        "component is accepted for compatibility and ignored."),
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedListOutstandingUrlsOnError,
         "Adds an error message into the log for every URL fetch in "
