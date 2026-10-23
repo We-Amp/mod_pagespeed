@@ -346,15 +346,17 @@ The gate looks for a completed run of `ci.yml` on `master` for the release
 commit in which the jobs named `Apache System Tests` and `Nginx System Tests`
 (under any caller prefix) finished with `success`. Both a `push` run and a
 `workflow_dispatch` run count (the dispatch with `full=true` is the release
-candidate run the runbook requires), and the log line names the event of the
+candidate run the release checklist requires), and the log line names the event of the
 run that passed. A release commit that never ran those lanes cannot be
 released: run the CI on it first. Until the pipelines of this repository
 contain both lanes the gate cannot pass, so a real run refuses and a dry run
 reports it.
 
 The gate checks the system-test lanes only. It does not assert the full tier:
-that every fleet job of the `full=true` dispatch at the candidate commit is
-`success` and none `skipped` is checked by the `/release-readiness` R2 step.
+that every fleet job of the `full=true` dispatch at the candidate SHA is
+`success` is checked by the release checklist's release-readiness check (the
+only allowed skip is `iis-sys-tests` when the repository variable
+`FLEET_IIS_ENABLED` is not `true`).
 
 A completed run without green system-test lanes, with nothing in flight, is
 refused only after two consecutive checks agree, so a flaky empty API page
