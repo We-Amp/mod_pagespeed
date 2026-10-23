@@ -155,6 +155,28 @@ bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     //pagespeed/iis:pagespeed_iis.dll \
     || true
 
+# The prebuilt protoc archives for every platform a release leg runs on. Proto
+# toolchain resolution (--incompatible_enable_proto_toolchain_resolution in
+# .bazelrc) fetches only the archive for the host that builds, so the Linux
+# fetches above vendor just linux_x86_64. Fetch the other three explicitly, with
+# the same sha256 pins protobuf carries, so a vendored build on Windows x64,
+# Linux arm64 or macOS arm64 does not download protoc at build time.
+PROTOC_REPOS=(
+    prebuilt_protoc.linux_x86_64
+    prebuilt_protoc.win64
+    prebuilt_protoc.linux_aarch_64
+    prebuilt_protoc.osx_aarch_64
+)
+PROTOC_FETCH=()
+for r in "${PROTOC_REPOS[@]}"; do
+    PROTOC_FETCH+=(--repo="@@protobuf++protoc+$r")
+done
+bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
+    --repository_cache="$REPO_CACHE" \
+    --repo_contents_cache= \
+    "${OVERRIDE_FLAGS[@]}" \
+    "${PROTOC_FETCH[@]}"
+
 # Note: Some dependencies use repository_ctx.download() instead of http_archive
 # (e.g., yq_windows_amd64). These bypass --repository_cache and are NOT vendored.
 # Windows builds from the tarball still need network access for these small downloads.
@@ -186,6 +208,13 @@ check_dep "boringssl" "$(sha_of BORINGSSL_SHA)"
 check_dep "abseil"    "$(sha_of _ABSEIL_SHA)"
 check_dep "protobuf"  "$(sha_of PROTOBUF_SHA)"
 check_dep "libpng"    "$(sha_of LIBPNG_SHA)"
+# The four prebuilt protoc repos: Bazel checks each archive against the sha256
+# in protobuf's integrity table when it fetches, so a repo that exists here was
+# downloaded and verified (and its archive is in the repository cache).
+for r in "${PROTOC_REPOS[@]}"; do
+    f="$VENDOR_OUTPUT_BASE/external/protobuf++protoc+$r"
+    [ -d "$f" ] || { echo "    MISSING: protoc repo $r" >&2; MISSING=$((MISSING + 1)); }
+done
 
 if [ "$MISSING" -gt 0 ]; then
     echo "ERROR: $MISSING critical deps missing from repository cache." >&2
