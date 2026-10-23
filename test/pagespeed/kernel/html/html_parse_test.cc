@@ -1210,9 +1210,10 @@ TEST_F(HtmlAnnotationTest, ScriptDoubleEscapingMultipleCloses) {
   ValidateNoChanges("script_double_escaping_multiple_closes",
                     "<script><!--<script>inner code</script>outer code"
                     "</script><p>after</p>");
-  EXPECT_EQ("+script '<!--<script>inner code</script>outer code' -script(e)"
-            " +p 'after' -p(e)",
-            annotation());
+  EXPECT_EQ(
+      "+script '<!--<script>inner code</script>outer code' -script(e)"
+      " +p 'after' -p(e)",
+      annotation());
 }
 
 TEST_F(HtmlAnnotationTest, ScriptQuirkCloseAttr) {
@@ -1686,7 +1687,8 @@ class EventListManipulationTest : public HtmlParseTest {
 
  private:
   EventListManipulationTest(const EventListManipulationTest&) = delete;
-  EventListManipulationTest& operator=(const EventListManipulationTest&) = delete;
+  EventListManipulationTest& operator=(const EventListManipulationTest&) =
+      delete;
 };
 
 TEST_F(EventListManipulationTest, TestReplace) {
@@ -2057,7 +2059,8 @@ class InsertCommentOnFirstDivFilter : public EmptyHtmlFilter {
   bool first_;
 
   InsertCommentOnFirstDivFilter(const InsertCommentOnFirstDivFilter&) = delete;
-  InsertCommentOnFirstDivFilter& operator=(const InsertCommentOnFirstDivFilter&) = delete;
+  InsertCommentOnFirstDivFilter& operator=(
+      const InsertCommentOnFirstDivFilter&) = delete;
 };
 
 TEST_F(HtmlParseTestNoBody, CommentInsideFirstDiv) {
@@ -2187,7 +2190,8 @@ class AttributeManipulationTest : public HtmlParseTest {
 
  private:
   AttributeManipulationTest(const AttributeManipulationTest&) = delete;
-  AttributeManipulationTest& operator=(const AttributeManipulationTest&) = delete;
+  AttributeManipulationTest& operator=(const AttributeManipulationTest&) =
+      delete;
 };
 
 TEST_F(AttributeManipulationTest, PropertiesAndDeserialize) {
@@ -2859,7 +2863,7 @@ class RestoreNodesFilter : public CountingCallbacksFilter {
   const char* Name() const override { return "RestoreNodesFilter"; }
 
  private:
-  typedef std::map<GoogleString, HtmlNode*> RestoreMap;
+  using RestoreMap = std::map<GoogleString, HtmlNode*>;
 
   const char* FindId(HtmlElement* element) {
     const HtmlElement::Attribute* attr = element->FindAttribute("id");

@@ -374,7 +374,7 @@ class CspContext {
   bool empty() const { return policies_.empty(); }
 
  private:
-  typedef bool (CspPolicy::*SimplePredicateFn)() const;
+  using SimplePredicateFn = bool (CspPolicy::*)() const;
 
   bool AllPermit(SimplePredicateFn predicate) const {
     // Note that empty policies_ means "true" --- there is no policy whatsoever,

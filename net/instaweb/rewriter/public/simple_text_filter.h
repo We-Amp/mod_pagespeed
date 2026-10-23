@@ -71,7 +71,7 @@ class SimpleTextFilter : public RewriteFilter {
     Rewriter& operator=(const Rewriter&) = delete;
   };
 
-  typedef RefCountedPtr<Rewriter> RewriterPtr;
+  using RewriterPtr = RefCountedPtr<Rewriter>;
 
   class Context : public SingleRewriteContext {
    public:

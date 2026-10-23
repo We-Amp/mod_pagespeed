@@ -42,9 +42,9 @@ class RewriteContext;
 class RewriteDriver;
 class RewriteOptions;
 
-typedef RefCountedPtr<ResourceSlot> ResourceSlotPtr;
-typedef RefCountedPtr<HtmlResourceSlot> HtmlResourceSlotPtr;
-typedef std::vector<ResourceSlotPtr> ResourceSlotVector;
+using ResourceSlotPtr = RefCountedPtr<ResourceSlot>;
+using HtmlResourceSlotPtr = RefCountedPtr<HtmlResourceSlot>;
+using ResourceSlotVector = std::vector<ResourceSlotPtr>;
 
 // A slot is a place in a web-site resource a URL is found, and may be
 // rewritten.  Types of slots include HTML element attributes and CSS
@@ -294,8 +294,8 @@ class HtmlResourceSlotComparator {
                   const HtmlResourceSlotPtr& q) const;
 };
 
-typedef std::set<HtmlResourceSlotPtr, HtmlResourceSlotComparator>
-    HtmlResourceSlotSet;
+using HtmlResourceSlotSet =
+    std::set<HtmlResourceSlotPtr, HtmlResourceSlotComparator>;
 
 }  // namespace net_instaweb
 

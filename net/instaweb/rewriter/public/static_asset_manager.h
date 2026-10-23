@@ -154,8 +154,8 @@ class StaticAssetManager {
     ContentType content_type;
   };
 
-  typedef std::map<GoogleString, StaticAssetEnum::StaticAsset>
-      FileNameToModuleMap;
+  using FileNameToModuleMap =
+      std::map<GoogleString, StaticAssetEnum::StaticAsset>;
 
   void InitializeAssetStrings();
   void InitializeAssetUrls() EXCLUSIVE_LOCKS_REQUIRED(lock_);

@@ -691,11 +691,11 @@ class RewriteOptions {
   // Used for enumerating over all entries in the Filter enum.
   static const Filter kFirstFilter = kAddBaseTag;
 
-  typedef EnumSet<Filter, kEndOfFilters> FilterSet;
-  typedef std::vector<Filter> FilterVector;
+  using FilterSet = EnumSet<Filter, kEndOfFilters>;
+  using FilterVector = std::vector<Filter>;
 
   // Convenience name for a set of rewrite filter ids.
-  typedef std::set<GoogleString> FilterIdSet;
+  using FilterIdSet = std::set<GoogleString>;
 
   // Lookup the given name to see if it's a filter name or one of the special
   // names like "core" or "rewrite_images", and if so add the corresponding
@@ -711,8 +711,8 @@ class RewriteOptions {
 
   // Convenience name for (name,value) pairs of options (typically filter
   // parameters), as well as sets of those pairs.
-  typedef std::pair<GoogleString, GoogleString> OptionStringPair;
-  typedef std::set<OptionStringPair> OptionSet;
+  using OptionStringPair = std::pair<GoogleString, GoogleString>;
+  using OptionSet = std::set<OptionStringPair>;
 
   // The base class for a Property.  This class contains fields of
   // Properties that are independent of type.
@@ -767,7 +767,7 @@ class RewriteOptions {
     PropertyBase& operator=(const PropertyBase&) = delete;
   };
 
-  typedef std::vector<PropertyBase*> PropertyVector;
+  using PropertyVector = std::vector<PropertyBase*>;
 
   // Base class for Option -- the instantiation of a Property that
   // occurs in each RewriteOptions instance.
@@ -796,7 +796,7 @@ class RewriteOptions {
   };
 
   // Convenience name for a set of rewrite options.
-  typedef std::vector<OptionBase*> OptionBaseVector;
+  using OptionBaseVector = std::vector<OptionBase*>;
 
   // TODO(huibao): Use bitmask for the values of the enums, and make combination
   // of rewrite levels possible.
@@ -998,8 +998,8 @@ class RewriteOptions {
     // preserve vs extend_cache, *this will take precedence.
     void Merge(const ExperimentSpec& spec);
 
-    typedef std::bitset<net_instaweb::UserAgentMatcher::kEndOfDeviceType>
-        DeviceTypeBitSet;
+    using DeviceTypeBitSet =
+        std::bitset<net_instaweb::UserAgentMatcher::kEndOfDeviceType>;
 
     static bool ParseDeviceTypeBitSet(const StringPiece& in,
                                       DeviceTypeBitSet* out,
@@ -1067,7 +1067,7 @@ class RewriteOptions {
     bool use_default_;
     // vector of parsed alternate_origin_domain options. These mutations will
     // be applied to a DomainLawyer when passed to MutateDomainLawer.
-    typedef std::vector<AlternateOriginDomainSpec> AlternateOriginDomains;
+    using AlternateOriginDomains = std::vector<AlternateOriginDomainSpec>;
     AlternateOriginDomains alternate_origin_domains_;
 
     ExperimentSpec(const ExperimentSpec&) = delete;
@@ -1154,7 +1154,7 @@ class RewriteOptions {
 
   static bool ParseRewriteLevel(const StringPiece& in, RewriteLevel* out);
 
-  typedef std::set<semantic_type::Category> ResourceCategorySet;
+  using ResourceCategorySet = std::set<semantic_type::Category>;
 
   static bool ParseInlineUnauthorizedResourceType(
       const StringPiece& in, ResourceCategorySet* resource_types);
@@ -3103,7 +3103,7 @@ class RewriteOptions {
   template <class T>
   class OptionTemplateBase : public OptionBase {
    public:
-    typedef T ValueType;
+    using ValueType = T;
 
     OptionTemplateBase() : was_set_(false), property_(NULL) {}
 
@@ -3413,8 +3413,8 @@ class RewriteOptions {
     // Fancy C++ pointers to members; a typesafe version of offsetof.  See
     // http://publib.boulder.ibm.com/infocenter/comphelp/v8v101/index.jsp?
     // topic=%2Fcom.ibm.xlcpp8a.doc%2Flanguage%2Fref%2Fcplr034.htm
-    typedef OptionClass RewriteOptionsSubclass::* OptionOffset;
-    typedef typename OptionClass::ValueType ValueType;
+    using OptionOffset = OptionClass RewriteOptionsSubclass::*;
+    using ValueType = typename OptionClass::ValueType;
 
     PropertyLeaf(ValueType default_value, OptionOffset offset, const char* id,
                  StringPiece option_name)
@@ -3552,16 +3552,16 @@ class RewriteOptions {
     bool ignores_metadata_and_pcache;
   };
 
-  typedef std::vector<UrlCacheInvalidationEntry*>
-      UrlCacheInvalidationEntryVector;
-  typedef absl::node_hash_map<GoogleString, int64> UrlCacheInvalidationMap;
+  using UrlCacheInvalidationEntryVector =
+      std::vector<UrlCacheInvalidationEntry*>;
+  using UrlCacheInvalidationMap = absl::node_hash_map<GoogleString, int64>;
 
   // Sigh. The folding Hash struct is required so that we ignore case when
   // inserting. The folding Equal struct is required for looking up. Damned
   // if I know why one needs to specify both.
-  typedef absl::flat_hash_map<StringPiece, const PropertyBase*,
-                              CaseFoldStringPieceHash, CaseFoldStringPieceEqual>
-      PropertyNameMap;
+  using PropertyNameMap =
+      absl::flat_hash_map<StringPiece, const PropertyBase*,
+                          CaseFoldStringPieceHash, CaseFoldStringPieceEqual>;
 
   // Private methods to help add properties to
   // RewriteOptions::properties_.  Subclasses define their own
@@ -4329,7 +4329,7 @@ class RewriteOptions {
 
   // Using StringPiece here is safe since all entries in this map have static
   // strings as the key.
-  typedef std::map<StringPiece, FastWildcardGroup*> FastWildcardGroupMap;
+  using FastWildcardGroupMap = std::map<StringPiece, FastWildcardGroup*>;
   FastWildcardGroupMap rejected_request_map_;
 
   GoogleString signature_;

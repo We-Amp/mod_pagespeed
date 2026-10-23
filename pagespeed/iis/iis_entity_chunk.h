@@ -43,7 +43,7 @@ HRESULT ReadFileChunkInto(const HTTP_DATA_CHUNK& chunk, char* buf,
 
 // Allocates `size` bytes that stay valid for as long as the response (the
 // request memory pool). Returns null on failure.
-typedef void* (*EntityChunkAllocator)(void* context, DWORD size);
+using EntityChunkAllocator = void* (*)(void* context, DWORD size);
 
 // Reads every HttpDataChunkFromFileHandle chunk among the `count` chunks into
 // memory obtained from `allocate`, each bounded by `max_length` bytes. Only

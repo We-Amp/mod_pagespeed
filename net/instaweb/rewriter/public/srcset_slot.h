@@ -128,7 +128,7 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   SrcSetSlotCollection& operator=(const SrcSetSlotCollection&) = delete;
 };
 
-typedef RefCountedPtr<SrcSetSlotCollection> SrcSetSlotCollectionPtr;
+using SrcSetSlotCollectionPtr = RefCountedPtr<SrcSetSlotCollection>;
 
 // Note: this is non-deterministic between executions.
 class SrcSetSlotCollectionComparator {
@@ -137,8 +137,8 @@ class SrcSetSlotCollectionComparator {
                   const SrcSetSlotCollectionPtr& q) const;
 };
 
-typedef std::set<SrcSetSlotCollectionPtr, SrcSetSlotCollectionComparator>
-    SrcSetSlotCollectionSet;
+using SrcSetSlotCollectionSet =
+    std::set<SrcSetSlotCollectionPtr, SrcSetSlotCollectionComparator>;
 
 class SrcSetSlot : public ResourceSlot {
  public:

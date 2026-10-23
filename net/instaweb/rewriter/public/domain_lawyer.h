@@ -357,7 +357,7 @@ class DomainLawyer {
   class Domain;
   friend class DomainLawyerTest;
 
-  typedef bool (Domain::*SetDomainFn)(Domain* domain, MessageHandler* handler);
+  using SetDomainFn = bool (Domain::*)(Domain* domain, MessageHandler* handler);
 
   static GoogleString NormalizeDomainName(const StringPiece& domain_name);
 
@@ -393,9 +393,9 @@ class DomainLawyer {
 
   // Map-order is important as ordering is taken into consideration while
   // constructing the signature of the domain lawyer.
-  typedef std::map<GoogleString, Domain*> DomainMap;  // see AddDomainHelper
+  using DomainMap = std::map<GoogleString, Domain*>;  // see AddDomainHelper
   DomainMap domain_map_;
-  typedef std::vector<Domain*> DomainVector;  // see AddDomainHelper
+  using DomainVector = std::vector<Domain*>;  // see AddDomainHelper
   DomainVector wildcarded_domains_;
   GoogleString proxy_suffix_;
   bool can_rewrite_domains_;

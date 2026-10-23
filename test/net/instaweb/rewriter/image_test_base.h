@@ -47,7 +47,7 @@ class ImageTestBase : public testing::Test {
   static const char kScenery[];
   static const char kTransparent[];
 
-  typedef std::unique_ptr<Image> ImagePtr;
+  using ImagePtr = std::unique_ptr<Image>;
 
   ImageTestBase() : timer_(new NullMutex, 0), message_handler_(new NullMutex) {}
 

@@ -36,7 +36,7 @@ namespace net_instaweb {
 
 class JsReplacer {
  public:
-  typedef Callback1<GoogleString*> StringRewriter;
+  using StringRewriter = Callback1<GoogleString*>;
 
   // Does not take ownership of patterns.
   explicit JsReplacer(const pagespeed::js::JsTokenizerPatterns* patterns)

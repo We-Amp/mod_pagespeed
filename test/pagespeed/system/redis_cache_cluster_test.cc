@@ -67,7 +67,7 @@ static const char kValue3[] = "Value3";
 static const char kValue4[] = "Value4";
 }  // namespace
 
-typedef std::vector<std::unique_ptr<TcpConnectionForTesting>> ConnectionList;
+using ConnectionList = std::vector<std::unique_ptr<TcpConnectionForTesting>>;
 
 class RedisCacheClusterTest : public CacheTestBase {
  protected:

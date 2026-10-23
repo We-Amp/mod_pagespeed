@@ -54,8 +54,8 @@ class Resource;
 class RewriteDriver;
 class ServerContext;
 
-typedef RefCountedPtr<Resource> ResourcePtr;
-typedef std::vector<ResourcePtr> ResourceVector;
+using ResourcePtr = RefCountedPtr<Resource>;
+using ResourceVector = std::vector<ResourcePtr>;
 
 class Resource : public RefCounted<Resource> {
  public:
@@ -357,7 +357,7 @@ class Resource : public RefCounted<Resource> {
 // by dedicated resource subclasses. ResourceProvider callbacks are used
 // to teach RewriteDriver about these, so it knows not to build regular
 // UrlInputResource objects.
-typedef Callback2<const GoogleUrl&, bool*> ResourceUrlClaimant;
+using ResourceUrlClaimant = Callback2<const GoogleUrl&, bool*>;
 
 }  // namespace net_instaweb
 

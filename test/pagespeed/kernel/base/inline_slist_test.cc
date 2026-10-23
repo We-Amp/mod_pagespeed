@@ -42,7 +42,7 @@ class IntElement : public InlineSListElement<IntElement> {
   IntElement& operator=(const IntElement&) = delete;
 };
 
-typedef InlineSList<IntElement> IntList;
+using IntList = InlineSList<IntElement>;
 
 class InlineSListTest : public testing::Test {
  protected:

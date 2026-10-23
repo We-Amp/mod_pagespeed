@@ -56,8 +56,10 @@ class SchedulerBasedAbstractLockTest : public testing::Test {
   MockScheduler scheduler_;
 
  private:
-  SchedulerBasedAbstractLockTest(const SchedulerBasedAbstractLockTest&) = delete;
-  SchedulerBasedAbstractLockTest& operator=(const SchedulerBasedAbstractLockTest&) = delete;
+  SchedulerBasedAbstractLockTest(const SchedulerBasedAbstractLockTest&) =
+      delete;
+  SchedulerBasedAbstractLockTest& operator=(
+      const SchedulerBasedAbstractLockTest&) = delete;
 };
 
 // A mock lock base class
@@ -324,7 +326,7 @@ class ThreadedSchedulerBasedLockTest : public SchedulerBasedAbstractLockTest {
   }
 
  protected:
-  typedef void (ThreadedSchedulerBasedLockTest::*HelperThreadMethod)();
+  using HelperThreadMethod = void (ThreadedSchedulerBasedLockTest::*)();
   ThreadedSchedulerBasedLockTest()
       : never_lock_(&scheduler_),
         startup_condvar_(scheduler_.mutex()->NewCondvar()),
@@ -411,8 +413,10 @@ class ThreadedSchedulerBasedLockTest : public SchedulerBasedAbstractLockTest {
   std::unique_ptr<HelperThread> helper_thread_;
   HelperThreadMethod helper_thread_method_;
 
-  ThreadedSchedulerBasedLockTest(const ThreadedSchedulerBasedLockTest&) = delete;
-  ThreadedSchedulerBasedLockTest& operator=(const ThreadedSchedulerBasedLockTest&) = delete;
+  ThreadedSchedulerBasedLockTest(const ThreadedSchedulerBasedLockTest&) =
+      delete;
+  ThreadedSchedulerBasedLockTest& operator=(
+      const ThreadedSchedulerBasedLockTest&) = delete;
 };
 
 // Meta-Test that all is well.

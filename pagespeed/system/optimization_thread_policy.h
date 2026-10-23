@@ -230,7 +230,7 @@ StringVector CgroupCandidateDirs(StringPiece mount_root,
 
 // Reads a small file whole.  Returns false when the file does not exist, which
 // is the ordinary outcome for most candidate paths.
-typedef bool (*CgroupFileReader)(StringPiece path, GoogleString* contents);
+using CgroupFileReader = bool (*)(StringPiece path, GoogleString* contents);
 
 // Walks the cgroup hierarchy of the calling process and returns the tightest
 // CPU limit found, in whole cores, or kNoCpuLimit when there is none.  Every

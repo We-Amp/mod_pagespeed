@@ -92,12 +92,12 @@ class JsCombineFilterTest : public RewriteTestBase {
  public:
   struct ScriptInfo {
     HtmlElement* element;  // Only valid during parsing; dangles after.
-    GoogleString url;  // if empty, the <script> didn't have a src
-    GoogleString type;  // if empty, the <script> didn't have a type
+    GoogleString url;      // if empty, the <script> didn't have a src
+    GoogleString type;     // if empty, the <script> didn't have a type
     GoogleString text_content;
   };
 
-  typedef std::vector<ScriptInfo> ScriptInfoVector;
+  using ScriptInfoVector = std::vector<ScriptInfo>;
 
   // Helper class that collects all the script elements in html and
   // their sources and bodies.
@@ -663,14 +663,13 @@ TEST_F(JsCombineFilterTest, TestBarriers) {
 TEST_F(JsCombineFilterTest, ModuleIsCombinationBarrier) {
   // Classic scripts on either side of a module are not combined across it,
   // and the module itself is untouched.
-  ValidateNoChanges("module_barrier",
-                    StrCat("<script src=", kJsUrl1,
-                           "></script>"
-                           "<script type=\"module\" src=",
-                           kJsUrl2,
-                           "></script>"
-                           "<script src=",
-                           kJsUrl3, "></script>"));
+  ValidateNoChanges("module_barrier", StrCat("<script src=", kJsUrl1,
+                                             "></script>"
+                                             "<script type=\"module\" src=",
+                                             kJsUrl2,
+                                             "></script>"
+                                             "<script src=",
+                                             kJsUrl3, "></script>"));
 }
 
 TEST_F(JsCombineFilterTest, ModulesNeverCombined) {
@@ -691,9 +690,11 @@ TEST_F(JsCombineFilterTest, IntegrityIsCombinationBarrier) {
   ValidateNoChanges("integrity_barrier",
                     StrCat("<script src=", kJsUrl1,
                            "></script>"
-                           "<script src=", kJsUrl2,
+                           "<script src=",
+                           kJsUrl2,
                            " integrity=\"sha384-x\"></script>"
-                           "<script src=", kJsUrl3, "></script>"));
+                           "<script src=",
+                           kJsUrl3, "></script>"));
 }
 
 TEST_F(JsCombineFilterTest, IntegrityScriptsNeverCombined) {
@@ -704,11 +705,13 @@ TEST_F(JsCombineFilterTest, IntegrityScriptsNeverCombined) {
   // would be missed and all three would combine into one partition.
   ScriptInfoVector scripts;
   PrepareToCollectScriptsInto(&scripts);
-  ParseUrl(kTestDomain,
-           StrCat("<script src=", kJsUrl1,
-                  " Integrity=\"sha384-x\"></script>"
-                  "<script src=", kJsUrl2, "></script>"
-                  "<script src=", kJsUrl3, "></script>"));
+  ParseUrl(kTestDomain, StrCat("<script src=", kJsUrl1,
+                               " Integrity=\"sha384-x\"></script>"
+                               "<script src=",
+                               kJsUrl2,
+                               "></script>"
+                               "<script src=",
+                               kJsUrl3, "></script>"));
   ASSERT_EQ(4, scripts.size());
   EXPECT_EQ(GoogleString(kJsUrl1), scripts[0].url);
   EXPECT_TRUE(scripts[0].text_content.empty());
@@ -724,13 +727,19 @@ TEST_F(JsCombineFilterTest, IntegrityBarrierPartitionsCombination) {
   // through untouched.
   ScriptInfoVector scripts;
   PrepareToCollectScriptsInto(&scripts);
-  ParseUrl(kTestDomain,
-           StrCat("<script src=", kJsUrl1, "></script>"
-                  "<script src=", kJsUrl2, "></script>"
-                  "<script src=", kJsUrl3,
-                  " integrity=\"sha384-x\"></script>"
-                  "<script src=", kJsUrl4, "></script>"
-                  "<script src=", kPseudoStrictUrl1, "></script>"));
+  ParseUrl(kTestDomain, StrCat("<script src=", kJsUrl1,
+                               "></script>"
+                               "<script src=",
+                               kJsUrl2,
+                               "></script>"
+                               "<script src=",
+                               kJsUrl3,
+                               " integrity=\"sha384-x\"></script>"
+                               "<script src=",
+                               kJsUrl4,
+                               "></script>"
+                               "<script src=",
+                               kPseudoStrictUrl1, "></script>"));
   ASSERT_EQ(7, scripts.size());
   VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
   VerifyUse(scripts[1], kJsUrl1);

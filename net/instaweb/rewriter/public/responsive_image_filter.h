@@ -41,7 +41,7 @@ struct ResponsiveImageCandidate {
   HtmlElement* element;
   double resolution;
 };
-typedef std::vector<ResponsiveImageCandidate> ResponsiveImageCandidateVector;
+using ResponsiveImageCandidateVector = std::vector<ResponsiveImageCandidate>;
 
 // We insert several virtual <img> tags. This structure keeps track of all
 // the virtual <img> inserted for a single original <img>.
@@ -59,8 +59,8 @@ struct ResponsiveVirtualImages {
   // case users zoom in far enough.
   ResponsiveImageCandidate fullsized_candidate;
 };
-typedef std::map<HtmlElement*, ResponsiveVirtualImages>
-    ResponsiveImageCandidateMap;
+using ResponsiveImageCandidateMap =
+    std::map<HtmlElement*, ResponsiveVirtualImages>;
 
 // Filter which converts <img> tags into responsive srcset= counterparts by
 // rewriting the images at multiple resolutions.

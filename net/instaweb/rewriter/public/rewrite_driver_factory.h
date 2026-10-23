@@ -523,7 +523,7 @@ class RewriteDriverFactory {
   std::unique_ptr<ThreadSystem> thread_system_;
 
   // protected by server_context_mutex_;
-  typedef std::set<ServerContext*> ServerContextSet;
+  using ServerContextSet = std::set<ServerContext*>;
   ServerContextSet server_contexts_;
   std::unique_ptr<AbstractMutex> server_context_mutex_;
 

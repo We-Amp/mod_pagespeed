@@ -19,9 +19,8 @@
 
 #include "pagespeed/kernel/util/statistics_logger.h"
 
-#include <cstdlib>
-
 #include <chrono>
+#include <cstdlib>
 #include <future>
 #include <map>
 #include <memory>
@@ -62,8 +61,8 @@ const char kUnloggedVariable[] = "unlogged_variable_";
 
 class StatisticsLoggerTest : public ::testing::Test {
  protected:
-  typedef StatisticsLogger::VarMap VarMap;
-  typedef StatisticsLogger::VariableInfo VariableInfo;
+  using VarMap = StatisticsLogger::VarMap;
+  using VariableInfo = StatisticsLogger::VariableInfo;
 
   StatisticsLoggerTest()
       : thread_system_(Platform::CreateThreadSystem()),
@@ -236,8 +235,8 @@ TEST_F(StatisticsLoggerTest, MissingVariableSerializesAsNullNotZero) {
   FileSystem::InputFile* log_file =
       file_system_.OpenInputFile(kStatsLogFile, &handler_);
   ASSERT_TRUE(log_file != nullptr);
-  StatisticsLogfileReader reader(log_file, start_time, end_time,
-                                 granularity_ms, &handler_);
+  StatisticsLogfileReader reader(log_file, start_time, end_time, granularity_ms,
+                                 &handler_);
   std::vector<int64> list_of_timestamps;
   VarMap parsed_var_data;
   ParseDataFromReader(var_titles, &reader, &list_of_timestamps,
@@ -264,8 +263,8 @@ TEST_F(StatisticsLoggerTest, GraphsParseEmitsNullForMissingCounters) {
   FileSystem::InputFile* log_file =
       file_system_.OpenInputFile(kStatsLogFile, &handler_);
   ASSERT_TRUE(log_file != nullptr);
-  StatisticsLogfileReader reader(log_file, start_time, end_time,
-                                 granularity_ms, &handler_);
+  StatisticsLogfileReader reader(log_file, start_time, end_time, granularity_ms,
+                                 &handler_);
   std::vector<int64> list_of_timestamps;
   VarMap parsed_var_data;
   ParseDataForGraphs(&reader, &list_of_timestamps, &parsed_var_data);

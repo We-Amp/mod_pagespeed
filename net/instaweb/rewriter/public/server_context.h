@@ -94,8 +94,8 @@ class UrlNamer;
 class UsageDataReporter;
 class UserAgentMatcher;
 
-typedef RefCountedPtr<OutputResource> OutputResourcePtr;
-typedef std::vector<OutputResourcePtr> OutputResourceVector;
+using OutputResourcePtr = RefCountedPtr<OutputResource>;
+using OutputResourceVector = std::vector<OutputResourcePtr>;
 
 // Server-specific context and platform adaption: threads, file system, locking,
 // and so on.
@@ -106,7 +106,7 @@ typedef std::vector<OutputResourcePtr> OutputResourceVector;
 // 3. Rename methods.
 class ServerContext {
  public:
-  typedef std::pair<RewriteOptions*, bool> OptionsBoolPair;
+  using OptionsBoolPair = std::pair<RewriteOptions*, bool>;
 
   // The lifetime for cache-extended generated resources, in milliseconds.
   static const int64 kGeneratedMaxAgeMs;
@@ -683,7 +683,7 @@ class ServerContext {
 
  private:
   friend class ServerContextTest;
-  typedef std::set<RewriteDriver*> RewriteDriverSet;
+  using RewriteDriverSet = std::set<RewriteDriver*>;
 
   // Must be called with rewrite_drivers_mutex_ held.
   void ReleaseRewriteDriverImpl(RewriteDriver* rewrite_driver);

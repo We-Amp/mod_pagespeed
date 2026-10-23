@@ -133,7 +133,7 @@ TEST(IisAsyncUrlFetcherDeriveHostTest,
 // WinHttpConnect for a loopback host per attempt, while the Host request
 // header keeps naming the original authority. These tests pin the mapping.
 
-typedef ::ASyncWinHTTP::WinHTTP WinHttpClient;
+using WinHttpClient = ::ASyncWinHTTP::WinHTTP;
 
 TEST(WinHttpLoopbackConnectHostTest, LocalhostPinsIpv4ThenIpv6) {
   // First attempt connects to the IPv4 loopback; the single retry attempt

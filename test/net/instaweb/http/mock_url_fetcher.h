@@ -201,7 +201,7 @@ class MockUrlFetcher : public UrlAsyncFetcher {
     HttpResponse(const HttpResponse&) = delete;
     HttpResponse& operator=(const HttpResponse&) = delete;
   };
-  typedef std::map<const GoogleString, HttpResponse*> ResponseMap;
+  using ResponseMap = std::map<const GoogleString, HttpResponse*>;
 
   // Notes: response_map_ should be only changed during setup/teardown, and
   //     should not be considered thread-safe to change during fetching.

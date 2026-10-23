@@ -39,8 +39,8 @@ class RewriteOptions;
 class Statistics;
 class Variable;
 
-typedef std::map<GoogleString, std::pair<int32, int32> >
-    RenderedImageDimensionsMap;
+using RenderedImageDimensionsMap =
+    std::map<GoogleString, std::pair<int32, int32> >;
 
 // The instantiated CriticalImagesFinder is held by ServerContext, meaning
 // there is only 1 per server. CriticalImagesInfo stores all of the request

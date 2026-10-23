@@ -55,7 +55,7 @@ class InlineResourceSlot : public ResourceSlot {
   InlineResourceSlot& operator=(const InlineResourceSlot&) = delete;
 };
 
-typedef RefCountedPtr<InlineResourceSlot> InlineResourceSlotPtr;
+using InlineResourceSlotPtr = RefCountedPtr<InlineResourceSlot>;
 
 class InlineResourceSlotComparator {
  public:
@@ -63,8 +63,8 @@ class InlineResourceSlotComparator {
                   const InlineResourceSlotPtr& q) const;
 };
 
-typedef std::set<InlineResourceSlotPtr, InlineResourceSlotComparator>
-    InlineResourceSlotSet;
+using InlineResourceSlotSet =
+    std::set<InlineResourceSlotPtr, InlineResourceSlotComparator>;
 
 }  // namespace net_instaweb
 

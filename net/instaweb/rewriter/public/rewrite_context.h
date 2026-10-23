@@ -151,7 +151,7 @@ enum class RenderOp { kDontRender, kRenderOnlyCspWarning, kRender };
 // TODO(jmarantz): add support for controlling TTL on failures.
 class RewriteContext {
  public:
-  typedef std::vector<InputInfo*> InputInfoStarVector;
+  using InputInfoStarVector = std::vector<InputInfo*>;
   static const char kNumRewritesAbandonedForLockContention[];
   static const char kNumDeadlineAlarmInvocations[];
   static const char kHashMismatchMessage[];
@@ -312,7 +312,7 @@ class RewriteContext {
   static void InitStats(Statistics* stats);
 
  protected:
-  typedef std::vector<GoogleUrl*> GoogleUrlStarVector;
+  using GoogleUrlStarVector = std::vector<GoogleUrl*>;
 
   // -----------------------------------------------------------------------
   // Resource transformation APIs. If you are implementing an optimization,
@@ -664,7 +664,7 @@ class RewriteContext {
   class TryLockFunction;
   friend class RewriteDriver;
 
-  typedef std::set<RewriteContext*> ContextSet;
+  using ContextSet = std::set<RewriteContext*>;
 
   // This is passed to CanFetchFallbackToOriginal when trying to determine
   // whether using the 0th input resource would be an acceptable substitute

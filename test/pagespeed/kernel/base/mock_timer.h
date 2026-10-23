@@ -20,8 +20,8 @@
 #ifndef PAGESPEED_KERNEL_BASE_MOCK_TIMER_H_
 #define PAGESPEED_KERNEL_BASE_MOCK_TIMER_H_
 
-#include <vector>  // for vector
 #include <memory>
+#include <vector>  // for vector
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -33,7 +33,7 @@ class Function;
 
 class MockTimer : public Timer {
  public:
-  typedef void (*Callback)(void* user_data);
+  using Callback = void (*)(void* user_data);
 
   // A useful recent time-constant for testing.
   static const int64 kApr_5_2010_ms;
@@ -80,10 +80,10 @@ class MockTimer : public Timer {
   void SleepMs(int64 ms) override { AdvanceUs(1000 * ms); }
 
  private:
-  typedef struct {
+  using TimeAndCallback = struct {
     int64 time;
     Function* callback;
-  } TimeAndCallback;
+  };
   mutable int64 time_us_;
   // Accumulated wall-clock step-back; added to NowUs() for NowMonotonicUs().
   int64 monotonic_skew_us_;

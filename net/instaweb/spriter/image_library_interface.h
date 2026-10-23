@@ -43,7 +43,7 @@ class ImageLibraryInterface {
  public:
   // TODO(skerner): Chromium's base lib has a class FilePath that
   // handles paths in a cross-platform way.  Use it.
-  typedef GoogleString FilePath;
+  using FilePath = GoogleString;
 
   // Users of the image library interface provide a delegate which
   // is informend of errors.

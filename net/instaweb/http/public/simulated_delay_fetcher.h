@@ -65,7 +65,7 @@ class SimulatedDelayFetcher : public UrlAsyncFetcher {
              AsyncFetch* fetch) override;
 
  private:
-  typedef std::map<GoogleString, int> DelayMap;
+  using DelayMap = std::map<GoogleString, int>;
   void ProduceReply(AsyncFetch* fetch);
   void ParseDelayMap(StringPiece delay_map_path);
 

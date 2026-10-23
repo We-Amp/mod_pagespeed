@@ -105,7 +105,7 @@ class AsyncCacheTest : public CacheTestBase {
       sync_point->Notify();
     }
 
-    typedef std::map<GoogleString, WorkerTestBase::SyncPoint*> Map;
+    using Map = std::map<GoogleString, WorkerTestBase::SyncPoint*>;
 
     std::unique_ptr<AbstractMutex> mutex_;
     ThreadSystem* thread_system_;

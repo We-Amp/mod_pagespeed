@@ -35,7 +35,7 @@ class RewriteOptionsManager {
   virtual ~RewriteOptionsManager() {}
 
   // Given the request url and request headers, generate the rewrite options.
-  typedef Callback1<RewriteOptions*> OptionsCallback;
+  using OptionsCallback = Callback1<RewriteOptions*>;
   virtual void GetRewriteOptions(const GoogleUrl& url,
                                  const RequestHeaders& headers,
                                  OptionsCallback* done);
@@ -44,7 +44,7 @@ class RewriteOptionsManager {
   // "done" once preparation has finished with a boolean argument
   // representing success.  "url" may be modified by PrepareRequest, but should
   // be owned by the caller.
-  typedef Callback1<bool> BoolCallback;
+  using BoolCallback = Callback1<bool>;
   virtual void PrepareRequest(const RewriteOptions* rewrite_options,
                               const RequestContextPtr& request_context,
                               GoogleString* url,

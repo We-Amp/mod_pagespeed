@@ -142,7 +142,7 @@ enum PreserveCachingHeaders {
   kDontPreserveHeaders,
 };
 
-typedef struct {
+using ps_request_ctx_t = struct {
   NgxBaseFetch* base_fetch;
 
   ngx_http_request_t* r;
@@ -196,7 +196,7 @@ typedef struct {
   // ps_base_fetch_filter on every invocation while incomplete.  Mutually
   // exclusive with zerocopy_alias.
   PsBoundedCopyRing* bounded_ring;
-} ps_request_ctx_t;
+};
 
 ps_request_ctx_t* ps_get_request_context(ngx_http_request_t* r);
 

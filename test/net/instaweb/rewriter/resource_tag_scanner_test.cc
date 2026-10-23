@@ -37,7 +37,7 @@ namespace net_instaweb {
 
 namespace {
 
-typedef std::vector<semantic_type::Category> CategoryVector;
+using CategoryVector = std::vector<semantic_type::Category>;
 
 // Helper class to collect all external resources.
 class ResourceCollector : public EmptyHtmlFilter {

@@ -39,7 +39,7 @@ class StatisticsLogger;
 
 class SharedMemStatisticsTestBase : public testing::Test {
  protected:
-  typedef void (SharedMemStatisticsTestBase::*TestMethod)();
+  using TestMethod = void (SharedMemStatisticsTestBase::*)();
 
   static const int64 kLogIntervalMs;
   static const int64 kMaxLogfileSizeKb;
@@ -95,7 +95,8 @@ class SharedMemStatisticsTestBase : public testing::Test {
   std::unique_ptr<MockTimer> timer_;
 
   SharedMemStatisticsTestBase(const SharedMemStatisticsTestBase&) = delete;
-  SharedMemStatisticsTestBase& operator=(const SharedMemStatisticsTestBase&) = delete;
+  SharedMemStatisticsTestBase& operator=(const SharedMemStatisticsTestBase&) =
+      delete;
 };
 
 template <typename ConcreteTestEnv>
