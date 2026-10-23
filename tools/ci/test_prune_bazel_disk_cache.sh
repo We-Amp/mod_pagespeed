@@ -10,7 +10,11 @@
 #   4. nothing outside ac/ and cas/ is touched, however old or large.
 #   5. a missing or empty directory is not an error.
 #   6. a symlink in ac/ is removed as a link, its target is never followed.
-#   7. malformed age or size arguments are refused (status 2), nothing deleted.
+#   7. malformed age or size arguments are refused (status 2), nothing
+#      deleted; a size with more than six digits is refused, six digits pass.
+#   8. a candidate name containing a newline is removed as one file and never
+#      yields a delete path outside the cache.
+#   9. numbers with leading zeros are read base 10 (08d is 8 days, 02500 bytes).
 #
 # Run: tools/ci/test_prune_bazel_disk_cache.sh
 
@@ -79,11 +83,33 @@ if [ ! -L "$D/ac/flink" ] && [ ! -L "$D/ac/dlink" ] && exists "$D/ac/real" \
 
 # 7. malformed arguments are refused with status 2 and delete nothing
 D="$T/bad"; mk "$D/cas/x" 100 30
-for args in "7 12G" "7d 12g" "7d 12X" "7d 12GB" "1xd 12G" "7d 1.5G" "7d G"; do
+for args in "7 12G" "7d 12g" "7d 12X" "7d 12GB" "1xd 12G" "7d 1.5G" "7d G" "7d 1000000" "7d 1000000G"; do
   # shellcheck disable=SC2086
   "$PRUNE" "$D" $args >/dev/null 2>&1; rc=$?
   if [ "$rc" -eq 2 ] && exists "$D/cas/x"; then pass "arguments '$args' refused"; else fail "arguments '$args' (rc=$rc)"; fi
 done
+# the digit cap rejects the seventh digit, not the sixth
+"$PRUNE" "$D" 7d 999999 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && ! exists "$D/cas/x"; then
+  pass "a six-digit size is accepted"; else fail "six-digit size accepted (rc=$rc)"; fi
+
+# 8. a name containing a newline: the name's second line must not be parsed
+#    as its own list record and delete a path outside the cache
+D="$T/newline"; OUT="$T/newline-outside"; mkdir -p "$D/cas" "$OUT"
+mk "$OUT/innocent" 100 1; mk "$D/cas/good" 100 1
+EVIL="$D/cas/evil
+1000000000 0 $OUT/innocent"
+mk "$EVIL" 100 30
+"$PRUNE" "$D" 7d 1G >/dev/null
+if ! exists "$EVIL" && exists "$D/cas/good" && exists "$OUT/innocent"; then
+  pass "a name with a newline is removed whole, nothing outside is touched"; else fail "newline in file name"; fi
+
+# 9. leading zeros are decimal: 08d means eight days, 02500 means 2500 bytes
+D="$T/zeros"
+mk "$D/cas/c1" 1000 5; mk "$D/cas/c2" 1000 4; mk "$D/cas/c3" 1000 3; mk "$D/cas/c4" 1000 2
+"$PRUNE" "$D" 08d 02500 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && ! exists "$D/cas/c1" && ! exists "$D/cas/c2" && exists "$D/cas/c3" && exists "$D/cas/c4"; then
+  pass "leading zeros are read base 10 for age and size"; else fail "leading zeros (rc=$rc)"; fi
 
 if [ "$FAILS" -ne 0 ]; then echo "$FAILS failure(s)"; exit 1; fi
 echo "All prune-bazel-disk-cache cases passed"

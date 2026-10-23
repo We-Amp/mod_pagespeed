@@ -37,9 +37,10 @@ fi
 DIR="$1"; AGE="$2"; SIZE="$3"
 
 [[ $AGE =~ ^[0-9]+d$ ]] || { echo "max-age must look like 7d, got: $AGE" >&2; exit 2; }
-[[ $SIZE =~ ^[0-9]+[KMGT]?$ ]] || { echo "max-size must look like 12G, got: $SIZE" >&2; exit 2; }
-AGE_S=$(( ${AGE%d} * 86400 ))
-UNIT="${SIZE: -1}"; NUM="${SIZE%[KMGT]}"
+[[ $SIZE =~ ^[0-9]{1,6}[KMGT]?$ ]] || { echo "max-size must look like 12G (at most six digits), got: $SIZE" >&2; exit 2; }
+# 10# reads the numbers base 10: a leading zero would be octal otherwise.
+AGE_S=$(( 10#${AGE%d} * 86400 ))
+UNIT="${SIZE: -1}"; NUM=$((10#${SIZE%[KMGT]}))
 case "$UNIT" in
   K) MAX=$(( NUM * 1024 )) ;;
   M) MAX=$(( NUM * 1024 * 1024 )) ;;
@@ -75,29 +76,38 @@ T="$(mktemp -d)" || exit 0
 trap 'rm -rf "$T"' EXIT
 NOW="$(date +%s)"
 
-# "<mtime> <size> <path>" (a symlink is listed as the link itself, never
-# followed), oldest first, ac/ before cas/ on equal mtime.
-find "${ROOTS[@]}" \( -type f -o -type l \) -exec "$STAT" -c '%Y %s %n' {} + 2>/dev/null \
-  | sort -t ' ' -k1,1n -k3 > "$T/list"
+# "<mtime> <size> <path>" records, NUL-terminated (a symlink is listed as the
+# link itself, never followed), oldest first, ac/ before cas/ on equal mtime.
+# NUL separation holds a name containing a newline together end to end, so it
+# can never yield a delete path outside the cache.
+find "${ROOTS[@]}" \( -type f -o -type l \) -exec "$STAT" --printf '%Y %s %n\0' {} + 2>/dev/null \
+  | sort -z -t ' ' -k1,1n -k3 > "$T/list"
 
-awk -v dlist="$T/delete" -v now="$NOW" -v age="$AGE_S" -v max="$MAX" '
-  { m[NR] = $1; s[NR] = $2; p = $0; sub(/^[0-9]+ [0-9]+ /, "", p); path[NR] = p; total += $2 }
-  END {
-    for (i = 1; i <= NR; i++) {
-      kill[i] = (now - m[i] > age)
-      if (kill[i]) total -= s[i]
-    }
-    for (i = 1; i <= NR && total > max; i++) {
-      if (!kill[i]) { kill[i] = 1; total -= s[i] }
-    }
-    for (i = 1; i <= NR; i++) if (kill[i]) { print path[i] > dlist; fb += s[i]; n++ }
-    close(dlist)
-    printf "%d %.0f %.0f\n", n, fb, total
-  }' "$T/list" > "$T/summary"
-
-read -r N FREED LEFT < "$T/summary"
-if [ "${N:-0}" -gt 0 ]; then
-  tr '\n' '\0' < "$T/delete" | xargs -0 rm -f --
+# Age first, then oldest-first until what is left fits MAX.
+M=() S=() P=() K=() nrec=0 total=0
+while IFS= read -r -d '' rec; do
+  rest="${rec#* }"
+  M+=("${rec%% *}"); S+=("${rest%% *}"); P+=("${rest#* }")
+  total=$((total + ${rest%% *}))
+  nrec=$((nrec + 1))
+done < "$T/list"
+for ((i = 0; i < nrec; i++)); do
+  if (( NOW - M[i] > AGE_S )); then K[i]=1; total=$((total - S[i])); fi
+done
+for ((i = 0; i < nrec; i++)); do
+  [ "$total" -le "$MAX" ] && break
+  if [ -z "${K[i]:-}" ]; then K[i]=1; total=$((total - S[i])); fi
+done
+: > "$T/delete"
+n=0 freed=0
+for ((i = 0; i < nrec; i++)); do
+  if [ -n "${K[i]:-}" ]; then
+    printf '%s\0' "${P[i]}"
+    freed=$((freed + S[i])); n=$((n + 1))
+  fi
+done >> "$T/delete"
+if [ "$n" -gt 0 ]; then
+  xargs -0 rm -f -- < "$T/delete"
 fi
-echo "disk cache prune: ${DIR}: removed ${N:-0} files, freed ${FREED:-0} bytes, ${LEFT:-0} bytes kept (limits ${AGE}, ${SIZE})"
+echo "disk cache prune: ${DIR}: removed ${n} files, freed ${freed} bytes, ${total} bytes kept (limits ${AGE}, ${SIZE})"
 exit 0
