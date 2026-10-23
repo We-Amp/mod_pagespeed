@@ -37,10 +37,21 @@ const DAEMON = {
 
 describe("curatedSample", () => {
   it("reads one poll's raw values in series order", () => {
-    // requests = served + fall-through; module savings ignore a negative
-    // family; hit total = served + the three optimizable fall-throughs.
+    // requests = served + originals + fall-through; module savings ignore
+    // a negative family; hit total = served + the three optimizable
+    // fall-throughs.  This module predates nothing: the originals counter
+    // is absent, which reads as zero.
     expect(curatedSample(VARS, DAEMON, null)).toEqual([120, 1500, 200, 90, 100, 4, 2]);
     expect(CURATED_SERIES).toHaveLength(7);
+  });
+
+  it("original serves are in-place requests in the live sample too", () => {
+    // The same split the log history applies: originals count in requests
+    // and in the hit-rate denominator, never in the served numerator.
+    const s = curatedSample({ ...VARS, ipro_daemon_served_original: 25 }, DAEMON, null);
+    expect(s[0]).toBe(145); // 90 served + 25 originals + 30 fall-through
+    expect(s[3]).toBe(90);
+    expect(s[4]).toBe(125); // 90 served + 25 originals + 5+3+2 classes
   });
 
   it("a host's optimizer savings come from its own row, exactly", () => {
@@ -144,6 +155,79 @@ describe("curatedFromLog", () => {
   it("no log: no history", () => {
     expect(curatedFromLog(null).timestamps).toEqual([]);
     expect(curatedFromLog({ kind: "no-log" }).series.requests).toEqual([]);
+  });
+
+  it("an outage's originals keep the in-place request chart alive", () => {
+    // The optimizer is down: served has stopped moving and every answered
+    // request is a stored original.  Under the old two-member partition
+    // the requests series would sit at served + fall-through (flat 60) and
+    // the chart's rate would drop to zero, reading the outage as "traffic
+    // stopped" instead of "the optimizer stopped".  Originals are in-place
+    // requests; the chart keeps its traffic.
+    const view: GraphsView = {
+      kind: "data",
+      timestamps: [1_000_000, 1_060_000, 1_120_000],
+      graphs: [
+        { name: "ipro_daemon_served", data: [50, 50, 50] },
+        { name: "ipro_daemon_served_original", data: [100, 200, 300] },
+        { name: "ipro_daemon_fallthrough", data: [10, 10, 10] },
+      ],
+    };
+    const h = curatedFromLog(view);
+    expect(h.series.requests).toEqual([160, 260, 360]);
+    expect(h.series.hit_served).toEqual([50, 50, 50]);
+    expect(h.series.hit_total).toEqual([160, 260, 360]);
+    const chart = curatedCharts(h.timestamps, h.series).find((c) => c.id === "requests");
+    expect(chart?.series).toEqual([null, 100 / 60, 100 / 60]);
+    expect(chart?.hasData).toBe(true);
+  });
+
+  it("a log written before the originals counter reads it as zero", () => {
+    // The series is new; an older log cannot carry it.  A plain sum()
+    // would turn that absence into null and blank the whole history, so a
+    // missing originals column reads as zero and the log still renders:
+    // identically to one that logged explicit zeros.
+    const base: GraphsView = {
+      kind: "data",
+      timestamps: [1_000_000, 1_060_000],
+      graphs: [
+        { name: "ipro_daemon_served", data: [10, 20] },
+        { name: "ipro_daemon_fallthrough", data: [5, 8] },
+        { name: "ipro_daemon_fallthrough_css", data: [1, 2] },
+        { name: "ipro_daemon_fallthrough_js", data: [1, 1] },
+        { name: "ipro_daemon_fallthrough_image", data: [1, 1] },
+      ],
+    };
+    const carried: GraphsView = {
+      ...base,
+      graphs: [...base.graphs, { name: "ipro_daemon_served_original", data: [0, 0] }],
+    };
+    expect(curatedFromLog(base).series).toEqual(curatedFromLog(carried).series);
+    expect(curatedFromLog(base).series.requests).toEqual([15, 28]);
+  });
+
+  it("the live point and a logged row share one denominator", () => {
+    // mergeCurated puts the log's history and the live tail on one axis and
+    // intervalPercent takes its deltas across the join, so the two must
+    // count in-place requests the same way: served + originals + classes.
+    const vars = {
+      ipro_daemon_served: 90,
+      ipro_daemon_served_original: 30,
+      ipro_daemon_fallthrough: 30,
+      ipro_daemon_fallthrough_css: 5,
+      ipro_daemon_fallthrough_js: 3,
+      ipro_daemon_fallthrough_image: 2,
+    };
+    const live = curatedSample(vars, null, null);
+    const log = curatedFromLog({
+      kind: "data",
+      timestamps: [1_000_000],
+      graphs: Object.entries(vars).map(([name, value]) => ({ name, data: [value] })),
+    });
+    expect(live[0]).toBe(log.series.requests[0]);
+    expect(live[3]).toBe(log.series.hit_served[0]);
+    expect(live[4]).toBe(log.series.hit_total[0]);
+    expect(live[4]).toBe(130); // 90 served + 30 originals + 5+3+2 classes
   });
 });
 

@@ -151,7 +151,7 @@ export interface OptimizedCopyHitRate {
  *
  * Stored-original serves (ipro_daemon_served_original: origin bytes the
  * volume answered with before any variant existed) count in the
- * denominator, not the numerator — the optimizer had no variant to give. */
+ * denominator, not the numerator: the optimizer had no variant to give. */
 export function optimizedCopyHitRate(vars: Record<string, unknown>): OptimizedCopyHitRate {
   const served = Math.max(0, rawCounter(vars, "ipro_daemon_served"));
   const originalServes = Math.max(0, rawCounter(vars, "ipro_daemon_served_original"));

@@ -586,6 +586,27 @@ TEST_F(DaemonServeArmTest, ConditionalIsMatchedOnTheDerivedPlaneOnly) {
   EXPECT_FALSE(ServeDerivedValidatorMatches("", derived));
 }
 
+TEST_F(DaemonServeArmTest, OriginPlaneETagIsAlwaysAWellFormedWeakTag) {
+  // Three spellings of one weak tag: strong, weak, and the lower-case
+  // weakness marker RFC 9110 does not define (it spells it
+  // case-sensitively) all name the same emitted tag.
+  EXPECT_EQ("W/\"abc123\"", ServeOriginPlaneETag("\"abc123\""));
+  EXPECT_EQ("W/\"abc123\"", ServeOriginPlaneETag("W/\"abc123\""));
+  EXPECT_EQ("W/\"abc123\"", ServeOriginPlaneETag("w/\"abc123\""));
+  // Not an entity-tag at all: no validator, never a minted one.  The
+  // quotes are part of the tag, so quoting `abc123` would invent a
+  // validator the origin would not confirm for its own bytes; a half, a
+  // twice-quoted or a spaced-out tag is not one either (etagc is VCHAR
+  // except DQUOTE, plus obs-text).
+  EXPECT_EQ("", ServeOriginPlaneETag(""));
+  EXPECT_EQ("", ServeOriginPlaneETag("abc123"));
+  EXPECT_EQ("", ServeOriginPlaneETag("W/abc123"));
+  EXPECT_EQ("", ServeOriginPlaneETag("\"abc123"));
+  EXPECT_EQ("", ServeOriginPlaneETag("abc123\""));
+  EXPECT_EQ("", ServeOriginPlaneETag("\"a\"b\""));
+  EXPECT_EQ("", ServeOriginPlaneETag("\"a b\""));
+}
+
 // ---------------------------------------------------------------------------
 // Selection, against the real loader and the real stand-in.
 // ---------------------------------------------------------------------------
@@ -802,6 +823,19 @@ TEST_F(DaemonServeArmTest, ADurableOriginalCarriesTheOriginsValidatorNotADerived
   const DaemonServeDecision bare = Serve(Request("image/webp"));
   EXPECT_EQ(DaemonServeVerdict::kServeOriginal, bare.verdict);
   EXPECT_EQ("", bare.etag);
+
+  // A MALFORMED origin tag is dropped, not repaired into one: a lower-case
+  // `w/` names the same weak tag and is normalised, but an unquoted value
+  // is no entity-tag, and the response carries no ETag at all rather than
+  // an invalid header or a minted validator.
+  setenv("PS_STUB_ORIGIN_ETAG", "w/\"origin-tag\"", 1);
+  const DaemonServeDecision lower = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, lower.verdict);
+  EXPECT_EQ("W/\"origin-tag\"", lower.etag);
+  setenv("PS_STUB_ORIGIN_ETAG", "unquoted", 1);
+  const DaemonServeDecision malformed = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, malformed.verdict);
+  EXPECT_EQ("", malformed.etag);
 }
 
 TEST_F(DaemonServeArmTest, AnOriginalsValidatorNeverRevalidatesTheOptimizedVariant) {

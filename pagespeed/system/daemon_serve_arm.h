@@ -887,9 +887,14 @@ GoogleString ServeDerivedETag(uint32_t full_mask, uint8_t flags,
 
 // The validator for the one serve that emits the ORIGIN's own bytes (the
 // durable original, read by id): the origin's stored ETag in weak form --
-// `W/` plus the tag, unless the tag is weak already.  Empty when the origin
-// sent no ETag; the origin's `Last-Modified` is emitted on that serve and
-// `If-Modified-Since` answers conditionals over it.  Weak because this
+// `W/` plus the opaque tag, whatever weakness marker it carried (a
+// lower-case `w/` names the same weak tag and is normalised).  Empty when
+// the origin sent no ETag, and empty when what it sent is not a
+// well-formed entity-tag (an unquoted value): the header this arm emits is
+// always valid, and quoting the unquoted bytes would mint a validator the
+// origin itself would not confirm.  The origin's `Last-Modified` is
+// emitted on that serve and `If-Modified-Since` answers conditionals over
+// it.  Weak because this
 // module cannot promise the optimizer will not have a variant for the URL
 // on the next request: a strong tag would let a client skip revalidating
 // exactly when the answer is about to change planes.

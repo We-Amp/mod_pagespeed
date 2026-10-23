@@ -123,7 +123,7 @@ class RewriteStats {
   }
   Variable* ipro_daemon_fallthrough() { return ipro_daemon_fallthrough_; }
 
-  // Per-content-class splits of the counters above (not partition
+  // Per-content-class splits of served and fallthrough (not partition
   // members; see the comment beside their names in rewrite_stats.cc).
   Variable* ipro_daemon_served_css() { return ipro_daemon_served_css_; }
   Variable* ipro_daemon_served_js() { return ipro_daemon_served_js_; }

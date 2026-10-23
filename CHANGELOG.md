@@ -78,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variants only; a new `ipro_daemon_served_original` counter counts
   responses answered with the stored original (no variant exists for the
   URL yet), and those responses carry the origin's own weak ETag instead.
+  An origin that sent no ETag, or a malformed one, now yields a response
+  with no ETag at all, where before it always carried the derived tag.
   Applies to Apache, nginx and IIS.
 - **`resize_rendered_image_dimensions` now uses the largest size of an image
   that appears more than once on a page, as documented.** Previously the size

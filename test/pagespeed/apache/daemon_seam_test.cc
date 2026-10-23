@@ -758,6 +758,15 @@ TEST_F(DaemonSeamTest, TheServeLegMovesThePerClassSplit) {
   ASSERT_NE(GoogleString::npos, served)
       << "the serve counters no longer move on the serve leg";
 
+  // Nothing in the port increments either total directly: a hand-counted
+  // request beside the shared rule would count the same answered request
+  // twice, and the partition's documented sum would silently over-report.
+  EXPECT_EQ(GoogleString::npos, source.find("ipro_daemon_served()->Add("))
+      << "the optimizer-served total moves outside RecordDaemonServeCounters";
+  EXPECT_EQ(GoogleString::npos,
+            source.find("ipro_daemon_served_original()->Add("))
+      << "the originals total moves outside RecordDaemonServeCounters";
+
   // The record side hands the recorder the counters it moves per class.
   const size_t record = source.find("MakeDaemonIproRecorderIfReady(");
   ASSERT_NE(GoogleString::npos, record);

@@ -68,9 +68,9 @@ const char kIproDaemonServed[] = "ipro_daemon_served";
 const char kIproDaemonServedOriginal[] = "ipro_daemon_served_original";
 const char kIproDaemonFallthrough[] = "ipro_daemon_fallthrough";
 
-// The per-class SPLITS of the served and fallthrough counters above -- not
-// new partition
-// members: every count here is already inside its total.  served_<class>
+// The per-class SPLITS of the served and fallthrough counters above --
+// not new partition members: every count here is already inside its
+// total.  served_<class>
 // moves on the serve leg, from the served entry's stored content class
 // (css, js, image, other; a served entry classed html has no split and
 // stays only in the total).  fallthrough_<class> moves in the record arm,

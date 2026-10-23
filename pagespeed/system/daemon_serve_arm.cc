@@ -460,10 +460,29 @@ GoogleString ServeOriginPlaneETag(StringPiece origin_etag) {
     // Last-Modified remains the one conditional it answers.
     return GoogleString();
   }
-  if (origin_etag.starts_with("W/")) {
-    return origin_etag.as_string();
+  StringPiece tag = origin_etag;
+  TrimWhitespace(&tag);
+  if (tag.size() >= 2 && (tag[0] == 'W' || tag[0] == 'w') && tag[1] == '/') {
+    tag.remove_prefix(2);
   }
-  return StrCat("W/", origin_etag);
+  // opaque-tag is a quoted string whose interior is etagc (RFC 9110
+  // 8.8.3).  Anything else is not an entity-tag, and the serve says so by
+  // emitting none: the quotes are part of the tag, so quoting `abc` would
+  // mint a validator the origin would not confirm for its own bytes, and
+  // half a tag is a tag for a representation that does not exist.
+  if (tag.size() < 2 || tag[0] != '"' || tag[tag.size() - 1] != '"') {
+    return GoogleString();
+  }
+  for (size_t i = 1; i + 1 < tag.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(tag[i]);
+    // etagc: VCHAR except DQUOTE, plus obs-text.
+    if (c < 0x21 || c == '"' || c == 0x7f) {
+      return GoogleString();
+    }
+  }
+  // Always weak on emission: a lower-case `w/` prefix names the same weak
+  // tag, so it is normalised, not preserved.
+  return StrCat("W/", tag);
 }
 
 bool ServeDerivedValidatorMatches(StringPiece if_none_match,
