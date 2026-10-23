@@ -33,6 +33,8 @@
 #ifndef PAGESPEED_KERNEL_UTIL_REF_COUNTED_PTR_H_
 #define PAGESPEED_KERNEL_UTIL_REF_COUNTED_PTR_H_
 
+#include <utility>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -94,27 +96,22 @@ class RefCountedPtr {
     }
   }
 
+  // Copy-and-swap: the temporary takes the new reference (reading the
+  // source) while it is still alive, and ptr_ is updated before the old
+  // reference drops in the temporary's destructor. Beyond self-assignment,
+  // this is safe when the source or *this lives inside the object being
+  // released, e.g. head = head->next_ with head holding the last reference.
   RefCountedPtr<T>& operator=(const RefCountedPtr<T>& other) {
-    // ref before deref to deal with self-assignment.
-    if (other.ptr_ != NULL) {
-      other.ptr_->AddRef();
-    }
-    if (ptr_ != NULL) {
-      ptr_->Release();
-    }
-    ptr_ = other.ptr_;
+    RefCountedPtr<T> tmp(other);
+    std::swap(ptr_, tmp.ptr_);
     return *this;
   }
 
   template <class U>
   RefCountedPtr<T>& operator=(const RefCountedPtr<U>& other) {
-    if (other.ptr_ != NULL) {
-      other.ptr_->AddRef();
-    }
-    if (ptr_ != NULL) {
-      ptr_->Release();
-    }
-    ptr_ = static_cast<T*>(other.ptr_);
+    // Copy-and-swap, for the same reasons as the operator= above.
+    RefCountedPtr<T> tmp(other);
+    std::swap(ptr_, tmp.ptr_);
     return *this;
   }
 

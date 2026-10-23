@@ -59,6 +59,27 @@ class BaseClass : public RefCounted<BaseClass> {
 struct DerivedA : public BaseClass {};
 struct DerivedB : public BaseClass {};
 
+struct DerivedChainNode;
+
+// Nodes whose next_ member holds the only reference to the successor. When
+// head holds the last reference, head = head->next_ releases the node that
+// stores the assignment's source, so the assignment must not read the source
+// after the release.
+struct ChainNode : public RefCounted<ChainNode> {
+  RefCountedPtr<ChainNode> next_;
+};
+
+// Same shape, but the successor is stored as RefCountedPtr<DerivedChainNode>
+// so assigning it into a RefCountedPtr<UpcastChainNode> goes through the
+// templated converting operator=. The destructor must be virtual: a
+// DerivedChainNode ends up held, and deleted, as an UpcastChainNode.
+struct UpcastChainNode : public RefCounted<UpcastChainNode> {
+  virtual ~UpcastChainNode() {}
+  RefCountedPtr<DerivedChainNode> next_;
+};
+
+struct DerivedChainNode : public UpcastChainNode {};
+
 }  // namespace
 
 typedef RefCountedObj<SimpleClass> SimplePtr;
@@ -152,5 +173,38 @@ TEST_F(RefCountedPtrTest, ExplicitDowncast) {
 //   EXPECT_FALSE(derived_a.unique());
 //   EXPECT_FALSE(derived_b.unique());
 // }
+
+TEST_F(RefCountedPtrTest, SelfAssignment) {
+  PolymorphicPtr poly(new DerivedA);
+  int index = poly->index();
+  // Assign through an alias so clang does not diagnose a literal x = x.
+  PolymorphicPtr& poly_alias = poly;
+  poly = poly_alias;
+  EXPECT_TRUE(poly.unique());
+  EXPECT_EQ(index, poly->index());
+}
+
+TEST_F(RefCountedPtrTest, AssignFromMemberOfReleasedNode) {
+  RefCountedPtr<ChainNode> head(new ChainNode);
+  head->next_.reset(new ChainNode);
+  ChainNode* second = head->next_.get();
+  // Releases the first node, destroying the next_ member that is the
+  // assignment's source; the old ref-before-deref operator= read that member
+  // after the free.
+  head = head->next_;
+  EXPECT_EQ(second, head.get());
+  EXPECT_TRUE(head.unique());
+  EXPECT_TRUE(head->next_.get() == nullptr);
+}
+
+TEST_F(RefCountedPtrTest, AssignFromMemberOfReleasedNodeUpcast) {
+  RefCountedPtr<UpcastChainNode> head(new UpcastChainNode);
+  head->next_.reset(new DerivedChainNode);
+  DerivedChainNode* second = head->next_.get();
+  head = head->next_;  // Exercises the templated operator=.
+  EXPECT_EQ(second, head.get());
+  EXPECT_TRUE(head.unique());
+  EXPECT_TRUE(head->next_.get() == nullptr);
+}
 
 }  // namespace net_instaweb
