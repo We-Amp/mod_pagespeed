@@ -303,6 +303,20 @@ for (const engine of engines) {
     check(once(r.hits['/full.css']),
           `${tag} loader: scripts off — the stylesheet is requested once`);
   }
+
+  // --- 8. Run() is the entry point, and calling it again is harmless ---------
+  {
+    const r = await runCase(engine, {
+      html: testPage(deferred('/full.css')).replace(
+          START_LOADER, `${START_LOADER}pagespeed.CriticalCssLoader.Run();`),
+      css: { '/full.css': FULL_CSS },
+      until: lateIsStyled,
+    });
+    check(r.early !== null && r.early.readyState !== 'complete' &&
+              r.final.rels.join() === 'stylesheet' &&
+              r.final.color === 'rgb(3, 3, 3)' && once(r.hits['/full.css']),
+          `${tag} loader: a second Run() changes nothing`);
+  }
 }
 
 console.log(failures ? `${failures} FAILURE(S)` : 'ALL PASS');
