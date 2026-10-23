@@ -16,56 +16,84 @@
 
     The Windows config builds no runfiles links (--nobuild_runfile_links), so
     new output bases no longer get such trees, but an output base that
-    persists between jobs keeps the ones made before. This removes them: only runfiles
-    trees of exec-configuration outputs (build tools), and only those that
-    contain a junction. Tools then resolve their runfiles through the
+    persists between jobs keeps the ones made before. This removes them: only
+    runfiles trees of exec-configuration outputs (build tools), and only those
+    that contain a junction. Tools then resolve their runfiles through the
     manifest, as in a fresh output base. Test runfiles trees are left alone.
+
+    Safety: the walks never descend into a link (Windows PowerShell 5.1's
+    Get-ChildItem -Recurse and Remove-Item -Recurse do), a listing error
+    aborts before anything is deleted, and a tree is removed with
+    `rmdir /s /q`, which removes links as links and never enters them. A tree
+    that is still there afterwards fails the script.
 
     Only the given output base is touched: other runners on the same host
     share the output root and may be building in theirs.
 
 .PARAMETER OutputBase
-    The job's output base (`bazel info output_base`).
+    The job's output base (`bazel info output_base`). When
+    WIN_BAZEL_OUTPUT_ROOT is set, the output base must lie under it.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$OutputBase
 )
 
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Stop'
+$reparse = [IO.FileAttributes]::ReparsePoint
+
+function Test-IsLink([string]$Path) {
+    return (([IO.File]::GetAttributes($Path) -band $reparse) -ne 0)
+}
+
+# Every *.runfiles directory under $Dir, without entering links. Throws on a
+# listing error.
+function Find-RunfilesTrees([string]$Dir) {
+    foreach ($d in [IO.Directory]::GetDirectories($Dir)) {
+        if (Test-IsLink $d) { continue }
+        if ($d.EndsWith('.runfiles')) { $d } else { Find-RunfilesTrees $d }
+    }
+}
+
+# True when $Dir holds a directory link (junction or directory symlink) at
+# any depth, without entering links. Throws on a listing error.
+function Test-HoldsJunction([string]$Dir) {
+    foreach ($d in [IO.Directory]::GetDirectories($Dir)) {
+        if (Test-IsLink $d) { return $true }
+        if (Test-HoldsJunction $d) { return $true }
+    }
+    return $false
+}
+
+$base = [IO.Path]::GetFullPath($OutputBase)
+if ($env:WIN_BAZEL_OUTPUT_ROOT) {
+    $root = [IO.Path]::GetFullPath($env:WIN_BAZEL_OUTPUT_ROOT).TrimEnd('\') + '\'
+    if (-not $base.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "output base '$base' is not under WIN_BAZEL_OUTPUT_ROOT '$root'"
+    }
+}
+
 $removed = 0
-$out = Join-Path $OutputBase 'execroot\_main\bazel-out'
+$out = Join-Path $base 'execroot\_main\bazel-out'
 if (Test-Path -LiteralPath $out) {
-    $execBins = Get-ChildItem -LiteralPath $out -Directory -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like '*-exec-*' } |
-        ForEach-Object { Join-Path $_.FullName 'bin' } |
-        Where-Object { Test-Path -LiteralPath $_ }
-    foreach ($bin in $execBins) {
-        # -Attributes !ReparsePoint keeps the walk out of the junctions.
-        $trees = Get-ChildItem -LiteralPath $bin -Recurse -Directory -Force -Attributes !ReparsePoint -Filter '*.runfiles' -ErrorAction SilentlyContinue
-        foreach ($tree in $trees) {
-            $links = @(Get-ChildItem -LiteralPath $tree.FullName -Recurse -Force -Attributes ReparsePoint -ErrorAction SilentlyContinue)
-            $junctions = @($links | Where-Object { $_.PSIsContainer })
-            if ($junctions.Count -gt 0) {
-                try {
-                    # Unlink every link first (deleting a junction or a file
-                    # symlink removes the link, never its target), then the
-                    # rest of the tree.
-                    foreach ($l in $links) {
-                        if ($l.PSIsContainer) { [IO.Directory]::Delete($l.FullName, $false) }
-                        else { [IO.File]::Delete($l.FullName) }
-                    }
-                    Remove-Item -LiteralPath $tree.FullName -Recurse -Force -ErrorAction Stop
-                } catch {
-                    Write-Host "::warning::$($_.Exception.Message)"
-                }
-                if (Test-Path -LiteralPath $tree.FullName) {
-                    Write-Host "::warning::could not remove the stale runfiles tree $($tree.FullName)"
-                } else {
-                    Write-Host "removed a stale tool runfiles tree: $($tree.FullName)"
-                    $removed++
-                }
-            }
+    $execBins = @([IO.Directory]::GetDirectories($out) |
+        Where-Object { (Split-Path -Leaf $_) -like '*-exec-*' } |
+        ForEach-Object { Join-Path $_ 'bin' } |
+        Where-Object { Test-Path -LiteralPath $_ })
+    # Decide first, for every tree, before deleting anything.
+    $stale = @(foreach ($bin in $execBins) {
+        foreach ($tree in @(Find-RunfilesTrees $bin)) {
+            if (Test-HoldsJunction $tree) { $tree }
         }
+    })
+    foreach ($tree in $stale) {
+        & $env:ComSpec /c "rmdir /s /q `"$tree`""
+        if (Test-Path -LiteralPath $tree) {
+            Write-Host "::error::could not remove the stale tool runfiles tree $tree"
+            throw "could not remove the stale tool runfiles tree $tree"
+        }
+        Write-Host "removed a stale tool runfiles tree: $tree"
+        $removed++
     }
 }
 Write-Host "stale tool runfiles trees removed: $removed"
+$global:LASTEXITCODE = 0
