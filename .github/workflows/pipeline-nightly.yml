@@ -3082,15 +3082,10 @@ jobs:
       ARCH: arm64
     steps: *sidecar-weekly-steps
 
-  # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
-  # every build runner job here runs on its hosted twin, and the jobs that
-  # have no hosted twin (the IIS and Application Verifier lanes and the
-  # privileged stress rigs) are skipped. This job only says so, in an
-  # annotation and the job summary, so a skipped check is never a silent one.
   # ---------------------------------------------------------------------
-  # The Envoy filter (pagespeed/envoy) against Envoy 1.40, every night: the
-  # full tier builds it only when its inputs change. No hosted twin (a cold
-  # Envoy build does not fit a hosted runner). Same script as the full tier.
+  # The Envoy filter (pagespeed/envoy) against Envoy 1.40, every night, and
+  # only here: no other tier builds it. No hosted twin (a cold Envoy build
+  # does not fit a hosted runner), so it runs on the fleet or not at all.
   # ---------------------------------------------------------------------
   envoy-filter:
     name: Envoy Filter Build and Tests
@@ -3132,6 +3127,11 @@ jobs:
       - name: Build the Envoy filter and run its tests
         run: bash tools/ci/envoy-filter-build.sh
 
+  # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
+  # every build runner job here runs on its hosted twin, and the jobs that
+  # have no hosted twin (the IIS and Application Verifier lanes and the
+  # privileged stress rigs) are skipped. This job only says so, in an
+  # annotation and the job summary, so a skipped check is never a silent one.
   fleet-off-notice:
     name: Shared build runners are switched off
     if: ${{ vars.FLEET_ENABLED == 'false' }}

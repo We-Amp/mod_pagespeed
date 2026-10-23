@@ -37,9 +37,9 @@
         "aliases": ["GHSA-5vff-j9p4-38j3"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -47,9 +47,9 @@
         "aliases": ["GHSA-q8wp-gf7q-m8cv"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -57,9 +57,9 @@
         "aliases": ["GHSA-m745-gh6x-349x"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -67,9 +67,9 @@
         "aliases": ["GHSA-r6j2-mrm5-72mg"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -77,9 +77,9 @@
         "aliases": ["GHSA-jjmm-fw8p-crpw"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -87,9 +87,9 @@
         "aliases": ["GHSA-pv9h-4fxf-7vrg"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -97,9 +97,9 @@
         "aliases": ["GHSA-87ph-jqwm-pg6r"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -107,9 +107,9 @@
         "aliases": ["GHSA-3vhp-c83q-jqc2"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -117,9 +117,9 @@
         "aliases": ["GHSA-jp5f-qr64-c9vw"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -127,9 +127,9 @@
         "aliases": ["GHSA-qgf6-qvhw-4hvh"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -137,9 +137,9 @@
         "aliases": ["GHSA-2w8w-rfw7-8gg4"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -147,9 +147,9 @@
         "aliases": ["GHSA-23xh-2qxr-3xv8"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     },
     {
       "vulnerability": {
@@ -157,9 +157,9 @@
         "aliases": ["GHSA-77x5-xqjg-hprq"]
       },
       "timestamp": "2026-10-23T12:00:00Z",
-      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.0" } ],
+      "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
-      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.0 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+      "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
     }
   ]
 }

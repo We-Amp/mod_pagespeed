@@ -40,7 +40,7 @@ virtual host overrides, circuit breaker, and admin authentication.
 ## Build Notes
 
 The filter builds against Envoy 1.40, which `MODULE.bazel` declares as a
-module (`envoy` and `envoy_api`, both an `archive_override` of the v1.40.0
+module (`envoy` and `envoy_api`, both an `archive_override` of the v1.40.1
 commit; Envoy's registry follows the BCR in `.bazelrc`). Build with
 `--config=envoy-filter` (clang + libstdc++). Every target here and in
 `test/pagespeed/envoy` is tagged manual, so `//...` leaves the filter out
