@@ -193,9 +193,20 @@ public class InverseModeIntegrationTests
         using var host = await StartInverseHostAsync(port);
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
 
-        var resp = await client.GetAsync("/");
-        resp.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await resp.Content.ReadAsStringAsync();
+        // The first response can legitimately carry the rewritten ".pagespeed." URL when
+        // the loopback stylesheet fetch misses the rewrite deadline on a loaded runner.
+        // Poll (bounded) until the stylesheet is inlined, then assert the steady state.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        HttpResponseMessage resp;
+        string body;
+        while (true)
+        {
+            resp = await client.GetAsync("/");
+            resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            body = await resp.Content.ReadAsStringAsync();
+            if (!body.Contains(".pagespeed.") || DateTime.UtcNow >= deadline) break;
+            await Task.Delay(250);
+        }
 
         resp.Headers.Contains("X-Page-Speed").Should().BeTrue("the optimized top-level HTML must carry X-Page-Speed");
         // mod_pagespeed 2.1 has no licensing: no optimized response carries the old
@@ -204,7 +215,7 @@ public class InverseModeIntegrationTests
             "no X-PageSpeed-Warn header may appear on any optimized response");
         // The IsHtmlLike gate optimizes the non-browser loopback sub-request: the
         // external <link> should be inlined/minified into a <style>, NEVER a literal
-        // ".pagespeed." substring in the top-level HTML.
+        // ".pagespeed." substring in the top-level HTML once the fetch has completed.
         body.Should().NotContain(".pagespeed.");
 
         await host.StopAsync();
