@@ -204,7 +204,7 @@ const zoomIn = () => {
 // --- 5. Descriptors -------------------------------------------------------
 {
   const html = `<!DOCTYPE html><html><body>
-    <img id="nbsp" src="${I('d1')}" srcset="${I('d2')} \u00a0x, ${I('d3')} 2x"
+    <img id="nbsp" src="${I('d1')}" srcset="${I('d2')} &nbsp;x, ${I('d3')} 2x"
          width="10" height="10">
     <img id="nosrc" srcset="${I('e2')} 2x" width="10" height="10">
     <img id="exp" src="${I('f1')}" srcset="${I('f2')} 1e0x, ${I('f3')} 2.5e0x"
