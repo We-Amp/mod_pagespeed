@@ -25,9 +25,11 @@ permissions:
 jobs:
   pr:
     # The called pipeline requests pull-requests: read for the release-note
-    # gate; a called workflow cannot exceed what its caller grants.
+    # gate, and contents: write for its lock-check job (pushes a regenerated
+    # MODULE.bazel.lock to a same-repository PR branch); a called workflow
+    # cannot exceed what its caller grants.
     permissions:
-      contents: read
+      contents: write
       pull-requests: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@ci-dev
 

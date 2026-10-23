@@ -19,8 +19,7 @@
 
 #include "pagespeed/kernel/util/gzip_inflater.h"
 
-#include <zconf.h>  // Provided by @envoy//bazel:zlib
-#include <zlib.h>   // Provided by @envoy//bazel:zlib
+#include <zlib.h>  // @zlib_ng//:zlib-ng (ZLIB_COMPAT); includes zconf.h
 
 #include <cstddef>
 #include <cstdlib>

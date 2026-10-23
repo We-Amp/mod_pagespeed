@@ -499,17 +499,18 @@
     "opportunity to optimize an image.  The value should be an integer " \
     "between 0 and 100 inclusive.", true) \
   X("", ga_id_, "ig", kAnalyticsID, kDirectoryScope, \
-    "Google Analytics ID to use on site.", true) \
+    "Deprecated and ignored (configured the insert_ga filter).", true) \
   X("", content_experiment_id_, "cxid", \
     kContentExperimentID, kDirectoryScope, \
-    "Which Google Analytics content experiment to log to.", true) \
+    "Deprecated and ignored (configured the insert_ga filter).", true) \
   X("", content_experiment_variant_id_, "cxvid", \
     kContentExperimentVariantID, kDirectoryScope, \
-    "Which Google Analytics content experiment variant to log to.", true) \
+    "Deprecated and ignored (configured the insert_ga filter).", true) \
   X(true, use_analytics_js_, "uajs", kUseAnalyticsJs, kQueryScope, \
-    "Log to analytics.js instead of ga.js with insert_ga.", true) \
+    "Deprecated and ignored (configured the insert_ga filter).", true) \
   X(true, increase_speed_tracking_, "st", \
-    kIncreaseSpeedTracking, kDirectoryScope, nullptr, true) \
+    kIncreaseSpeedTracking, kDirectoryScope, \
+    "Deprecated and ignored (configured the insert_ga filter).", true) \
   X(false, running_experiment_, "fur", \
     kRunningExperiment, kDirectoryScope, nullptr, true) \
   X(kDefaultExperimentSlot, experiment_ga_slot_, "fga", \

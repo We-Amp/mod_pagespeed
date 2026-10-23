@@ -2053,9 +2053,9 @@ TEST_F(RewriteOptionsTest, ExperimentSpecTest) {
       options_.AddExperimentSpec("id=200;percent=1;default", &handler));
 }
 
-TEST_F(RewriteOptionsTest, ExperimentSpecInsertGAExplicitOptIn) {
-  // insert_ga is not force-enabled by experiments anymore, but a spec can
-  // still opt in explicitly with enable=insert_ga.
+TEST_F(RewriteOptionsTest, ExperimentSpecInsertGAStillParses) {
+  // insert_ga is a deprecated no-op, but a spec that names it must still
+  // parse (config compatibility); the bit it sets is inert.
   NullMessageHandler handler;
   options_.set_ga_id("UA-111111-1");
   EXPECT_TRUE(
@@ -2076,12 +2076,15 @@ TEST_F(RewriteOptionsTest, MakeGoogleAnalyticsAsyncConfigCompat) {
 
 TEST_F(RewriteOptionsTest, DeprecatedAnalyticsFiltersWarn) {
   // Enabling a Universal-Analytics-era filter emits a deprecation warning.
+  // insert_ga is a no-op: the name still parses, the warning says it has no
+  // effect, and the bit it sets is not consulted by anything.
   TestMessageHandler handler;
   EXPECT_TRUE(
       options_.EnableFiltersByCommaSeparatedList("insert_ga", &handler));
   ASSERT_EQ(1U, handler.messages().size());
   EXPECT_NE(GoogleString::npos,
-            handler.messages()[0].find("insert_ga targets Universal Analytics"))
+            handler.messages()[0].find(
+                "Filter 'insert_ga' is deprecated and has no effect"))
       << handler.messages()[0];
 
   EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList(
@@ -2103,8 +2106,8 @@ TEST_F(RewriteOptionsTest, DeprecatedAnalyticsFiltersWarn) {
 }
 
 TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
-  // Setting AnalyticsID succeeds (config compatibility) but warns that it
-  // targets the discontinued Universal Analytics service.
+  // Setting AnalyticsID succeeds (config compatibility), is ignored, and
+  // warns.
   TestMessageHandler handler;
   GoogleString msg;
   EXPECT_EQ(RewriteOptions::kOptionOk,
@@ -2113,7 +2116,46 @@ TEST_F(RewriteOptionsTest, AnalyticsIDWarns) {
   EXPECT_EQ("UA-111111-1", options_.ga_id());
   ASSERT_EQ(1U, handler.messages().size());
   EXPECT_NE(GoogleString::npos, handler.messages()[0].find(
-                                    "AnalyticsID targets Universal Analytics"))
+                                    "'AnalyticsID' is deprecated and ignored"))
+      << handler.messages()[0];
+}
+
+TEST_F(RewriteOptionsTest, InsertGAOnlyOptionsWarn) {
+  // These options only configured insert_ga: accepted, ignored, and warned.
+  const struct {
+    const char* name;
+    const char* value;
+  } kCases[] = {
+      {RewriteOptions::kContentExperimentID, "abc"},
+      {RewriteOptions::kContentExperimentVariantID, "1"},
+      {RewriteOptions::kIncreaseSpeedTracking, "false"},
+      {RewriteOptions::kExperimentVariable, "3"},
+  };
+  for (const auto& c : kCases) {
+    TestMessageHandler handler;
+    GoogleString msg;
+    EXPECT_EQ(RewriteOptions::kOptionOk, options_.ParseAndSetOptionFromName1(
+                                             c.name, c.value, &msg, &handler))
+        << c.name;
+    ASSERT_EQ(1U, handler.messages().size()) << c.name;
+    EXPECT_NE(GoogleString::npos,
+              handler.messages()[0].find("is deprecated and ignored"))
+        << handler.messages()[0];
+  }
+}
+
+TEST_F(RewriteOptionsTest, UseAnalyticsJsWarns) {
+  // UseAnalyticsJs only configured insert_ga, so it is accepted for config
+  // compatibility, ignored, and warns.
+  TestMessageHandler handler;
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1(RewriteOptions::kUseAnalyticsJs,
+                                                "false", &msg, &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(
+      GoogleString::npos,
+      handler.messages()[0].find("'UseAnalyticsJs' is deprecated and ignored"))
       << handler.messages()[0];
 }
 
