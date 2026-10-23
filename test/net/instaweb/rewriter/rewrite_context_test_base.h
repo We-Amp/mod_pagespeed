@@ -107,7 +107,6 @@ class TrimWhitespaceSyncFilter : public SimpleTextFilter {
 
   void StartElementImpl(HtmlElement* element) override;
   const char* id() const override { return kFilterId; }
-  virtual const char* name() { return "TrimWhitespaceSync"; }
 
  private:
   TrimWhitespaceSyncFilter(const TrimWhitespaceSyncFilter&) = delete;
