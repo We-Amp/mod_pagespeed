@@ -2337,11 +2337,6 @@ jobs:
       run:
         shell: powershell
     steps: &windows-steps
-      - name: Clear the workspace
-        run: |
-          Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force -ErrorAction SilentlyContinue |
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
       - name: Download the release tree
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -2441,19 +2436,39 @@ jobs:
           if ($env:CI_WIN_CACHE_MAX_SIZE) { Set-JobEnv 'WIN_CACHE_MAX_SIZE' $env:CI_WIN_CACHE_MAX_SIZE }
           Write-Host "build tool: $bazel"
 
-      # Decompress with all cores, then extract with the Windows tar (the
-      # MSYS2 GNU tar reads a drive letter as a remote host).
+      # The release tree tarball carries the CI tooling itself: a first pass
+      # decompresses it and unpacks only its tools/ subtree into a fresh
+      # per-run directory under the runner's temp (nothing to overwrite
+      # there). That copy of tools/ci/fetch-vendor-tarball.ps1, the one
+      # hardened Windows path, then stages and verifies the tarball, clears
+      # the workspace of everything an earlier job left (never entering a
+      # link, keeping .git if a checkout left one) and only then extracts,
+      # so tar never writes over an existing file (issue #231). The tree
+      # artifact carries no digest sidecar, hence -Retries 1.
       - name: Extract the release tree
         env:
           RELEASE_SHA: ${{ needs.version.outputs.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $tarball = Join-Path $env:RUNNER_TEMP 'tree\module-tree.tar.zst'
-          & zstd -d -f -T0 $tarball -o "$tarball.tar"
+          $zst = Join-Path $env:RUNNER_TEMP 'tree\module-tree.tar.zst'
+          $boot = Join-Path $env:RUNNER_TEMP ("tree-boot-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)")
+          New-Item -ItemType Directory -Force -Path $boot | Out-Null
+          $bootTar = Join-Path $env:RUNNER_TEMP 'tree-boot.tar'
+          & zstd -d -f -T0 $zst -o $bootTar
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
-          & "$($env:SystemRoot)\System32\tar.exe" xf "$tarball.tar" -C $env:GITHUB_WORKSPACE
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
-          Remove-Item -LiteralPath $tarball, "$tarball.tar" -ErrorAction SilentlyContinue
+          # The Windows tar: the MSYS2 GNU tar reads a drive letter as a
+          # remote host. The tree members are ./-prefixed.
+          & "$($env:SystemRoot)\System32\tar.exe" xf $bootTar -C $boot ./tools
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::could not unpack the CI tooling from the release tree (exit $LASTEXITCODE)"; exit 1 }
+          Remove-Item -LiteralPath $bootTar -Force -ErrorAction SilentlyContinue
+          & (Join-Path $boot 'tools\ci\fetch-vendor-tarball.ps1') `
+            -Name 'module-tree.tar.zst' -Dest $env:GITHUB_WORKSPACE `
+            -StageDir (Join-Path $env:RUNNER_TEMP 'vendor-download') `
+            -SearchDirs @((Join-Path $env:RUNNER_TEMP 'tree')) -Retries 1
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) { Write-Host "::error::release tree extraction failed (exit $rc)"; exit $rc }
+          Remove-Item -LiteralPath $boot -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $zst -Force -ErrorAction SilentlyContinue
           $stamped = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'GIT_COMMIT') -Raw).Trim()
           if ($stamped -ne $env:RELEASE_SHA) {
             Write-Host "::error::stale or missing GIT_COMMIT stamp in the extracted tree"
