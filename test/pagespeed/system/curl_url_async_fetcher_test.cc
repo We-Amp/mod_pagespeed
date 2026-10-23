@@ -295,8 +295,6 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
     // kNoContent (6)
     AddTestUrl(StrCat("http:", fetch_test_domain, "/status/204"), "");
 
-    prev_done_count = 0;
-
     // Trust the embedded test CA so the trusted-CA HTTPS server's leaf
     // validates in the "succeeds" cases. (No SSL_CERT_DIR/FILE env handling:
     // the test is fully self-contained and must not pick up host CA state.)
@@ -390,12 +388,20 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
         statistics_->GetVariable(CurlStats::kCurlFetchUltimateFailure)->Get());
   }
 
+  // Waits until every fetch in [first, last] reports done, then returns how
+  // many were done. The budget is a monotonic deadline, not an iteration
+  // count: the old budget of 100000 sleeps of 50 us was nominally equal to
+  // the fetcher's timeout (fetcher_timeout_ms_), while a fetch the fetcher
+  // abandons at that timeout only completes after the timeout plus
+  // poll-thread pickup and scheduling, so on a loaded host the loop could
+  // give up just before the timeout landed. Three times the timeout removes
+  // that race; a fetch still not done by then is a genuine hang, and the
+  // callers fail on the returned count then.
   int WaitTillDone(size_t first, size_t last) {
     bool done = false;
     size_t done_count = 0;
-    int max_iterations = fetcher_timeout_ms_ * 20;  // ~50us per iter
-    int iter = 0;
-    while (!done && iter++ < max_iterations) {
+    int64 deadline_ms = timer_->NowMonotonicMs() + 3 * fetcher_timeout_ms_;
+    while (!done && timer_->NowMonotonicMs() < deadline_ms) {
       usleep(50);
       done_count = 0;
       for (size_t idx = first; idx <= last; ++idx) {
@@ -403,10 +409,7 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
           ++done_count;
         }
       }
-      if (done_count != prev_done_count) {
-        prev_done_count = done_count;
-        done = (done_count == (last - first + 1));
-      }
+      done = (done_count == (last - first + 1));
     }
     return done_count;
   }
@@ -484,7 +487,6 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
   std::vector<CurlTestFetch*> fetches_;
   std::unique_ptr<CurlUrlAsyncFetcher> curl_fetcher_;
   std::unique_ptr<Timer> timer_;
-  size_t prev_done_count;
   std::unique_ptr<AbstractMutex> mutex_;
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler message_handler_;
@@ -1044,7 +1046,6 @@ TEST_F(CurlUrlAsyncFetcherTest, FinishedFetchesAreReleased) {
   const int kNumFetches = 20;
   int index = AddTestUrl(StrCat("http://", test_host_, "/get"), "");
   for (int i = 0; i < kNumFetches; ++i) {
-    prev_done_count = 0;
     StartFetch(index);
     ASSERT_EQ(1, WaitTillDone(index, index));
     EXPECT_TRUE(fetches_[index]->success());
@@ -1108,7 +1109,6 @@ TEST_F(CurlUrlAsyncFetcherTest, CancelActiveFetchesCompletesEachFetchOnce) {
             statistics_->GetVariable(CurlStats::kCurlFetchTimeoutCount)->Get());
 
   // The fetcher keeps working after a cancellation.
-  prev_done_count = 0;
   EXPECT_TRUE(TestFetch(kModpagespeedSite, kModpagespeedSite));
 }
 
@@ -1319,8 +1319,10 @@ class CurlUrlAsyncFetcherTestFakeWebServer : public CurlUrlAsyncFetcherTest {
 
       ssize_t written = write(client_fd, kResponse, strlen(kResponse));
       (void)written;
-      // Wait for over the timeout to make really sure it times out.
-      WaitForHangupOrTimeout(client_fd, FetcherTimeoutMs() * 1000 * 2);
+      // Wait for well over the timeout to make really sure it times out.
+      // 4x stays above WaitTillDone's 3x deadline, so a fetcher that never
+      // times out fails the wait's own assert.
+      WaitForHangupOrTimeout(client_fd, FetcherTimeoutMs() * 1000 * 4);
     }
   };
 
