@@ -27,9 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logs a warning that it has no effect. `AnalyticsID` and `UseAnalyticsJs`
   are likewise accepted and ignored with a warning, as is the `ga=` component
   of an experiment spec. Use your own analytics snippet.
-- The admin console no longer lists the `inserted_ga_snippets` statistic.
-  The counter could only ever be increased by `insert_ga`, which is now a
-  no-op, so it would have stayed at zero forever.
 - **Building from source: the Bazel build is bzlmod only.** Every
   dependency is declared in `MODULE.bazel` (Bazel Central Registry modules
   plus a module extension for the rest), with a committed
@@ -67,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Debian and RPM package build scripts now stop with an error when
   `pagespeed_libraries.conf` is missing, instead of silently producing a
   package without it.
+- The admin console no longer lists the `inserted_ga_snippets` statistic.
+  The counter could only ever be increased by `insert_ga`, which is now a
+  no-op, so it would have stayed at zero forever.
 
 ## [2.5.2] - 2026-10-22
 
