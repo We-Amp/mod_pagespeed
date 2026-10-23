@@ -108,7 +108,7 @@ CPP_DEPS = [
     {"name": "spdlog", "version": {"key": "SPDLOG_VERSION"}, "license": "MIT",
      "holder": "Gabi Melman", "repo": "gabime/spdlog", "purl_version": "v1.17.0"},
     {"name": "envoy", "version": {"key": "ENVOY_COMMIT"}, "license": "Apache-2.0",
-     "holder": "The Envoy Project Authors", "repo": "envoyproxy/envoy", "purl_version": "v1.40.0",
+     "holder": "The Envoy Project Authors", "repo": "envoyproxy/envoy", "purl_version": "v1.40.1",
      "source_only": True},
     {"name": "hiredis", "version": {"key": "HIREDIS_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Salvatore Sanfilippo and contributors", "repo": "redis/hiredis", "purl_version": "v1.3.0"},

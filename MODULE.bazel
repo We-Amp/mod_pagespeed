@@ -117,22 +117,22 @@ bazel_dep(name = "bazel-compdb", version = "0.0.0-20220906-4086479.envoy", repo_
 # vendored, offline builds keep working: every build resolves this module.
 # Keep ENVOY_COMMIT and ENVOY_SHA in bazel/repositories.bzl, the registry pin
 # in .bazelrc and the envoy_api override below in step with it.
-bazel_dep(name = "envoy", version = "1.40.0")
+bazel_dep(name = "envoy", version = "1.40.1")
 archive_override(
     module_name = "envoy",
-    integrity = "sha256-0zXzUBsqt8wVE7ewhBdL2IHTn4NRTEs/13R5S4L54mY=",
-    strip_prefix = "envoy-9e5580933739775e8bce696a57a2e1bc99368f23",
-    urls = ["https://github.com/envoyproxy/envoy/archive/9e5580933739775e8bce696a57a2e1bc99368f23.tar.gz"],
+    integrity = "sha256-96ZVBHoxqXdL31steT56ooTgTkPQ4CUi8te9qmkq5oA=",
+    strip_prefix = "envoy-86af01fdec40c31d025c495a4aa303c4126b2fd0",
+    urls = ["https://github.com/envoyproxy/envoy/archive/86af01fdec40c31d025c495a4aa303c4126b2fd0.tar.gz"],
 )
 
 # Envoy's local_path_override(envoy_api, "api") only applies when Envoy is the
 # root module, so it is repeated here on the same archive.
-bazel_dep(name = "envoy_api", version = "1.40.0")
+bazel_dep(name = "envoy_api", version = "1.40.1")
 archive_override(
     module_name = "envoy_api",
-    integrity = "sha256-0zXzUBsqt8wVE7ewhBdL2IHTn4NRTEs/13R5S4L54mY=",
-    strip_prefix = "envoy-9e5580933739775e8bce696a57a2e1bc99368f23/api",
-    urls = ["https://github.com/envoyproxy/envoy/archive/9e5580933739775e8bce696a57a2e1bc99368f23.tar.gz"],
+    integrity = "sha256-96ZVBHoxqXdL31steT56ooTgTkPQ4CUi8te9qmkq5oA=",
+    strip_prefix = "envoy-86af01fdec40c31d025c495a4aa303c4126b2fd0/api",
+    urls = ["https://github.com/envoyproxy/envoy/archive/86af01fdec40c31d025c495a4aa303c4126b2fd0.tar.gz"],
 )
 
 # Envoy's build macros (envoy_cc_library, api_cc_py_proto_library, ...) name

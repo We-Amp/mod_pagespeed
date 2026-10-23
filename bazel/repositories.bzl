@@ -33,8 +33,8 @@ load(":ed25519.bzl", "ed25519_build_rule")
 # (archive_override of this commit, for both envoy and envoy_api); mirrored here
 # for the SBOM, notices and CVE tooling. Envoy is source-only: no shipped
 # binary contains it.
-ENVOY_COMMIT = "9e5580933739775e8bce696a57a2e1bc99368f23"  # v1.40.0, mirrored in MODULE.bazel
-ENVOY_SHA = "d335f3501b2ab7cc1513b7b084174bd881d39f83514c4b3fd774794b82f9e266"
+ENVOY_COMMIT = "86af01fdec40c31d025c495a4aa303c4126b2fd0"  # v1.40.1, mirrored in MODULE.bazel
+ENVOY_SHA = "f7a655047a31a9774bdf5b2d793e7aa284e04e43d0e02522f2d7bdaa692ae680"
 
 # zlib-ng (module zlib-ng, plus the third_party/zlib_alias_module "zlib"
 # module) and protobuf are bazel_deps in MODULE.bazel; the constants below are

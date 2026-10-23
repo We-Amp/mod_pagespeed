@@ -186,7 +186,7 @@
     {
       "SPDXID": "SPDXRef-Package-envoy",
       "name": "envoy",
-      "versionInfo": "9e5580933739775e8bce696a57a2e1bc99368f23",
+      "versionInfo": "86af01fdec40c31d025c495a4aa303c4126b2fd0",
       "supplier": "Organization: The Envoy Project Authors",
       "downloadLocation": "https://github.com/envoyproxy/envoy",
       "filesAnalyzed": false,
@@ -197,7 +197,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.40.0"
+          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.40.1"
         }
       ],
       "comment": "Required only by the source-only Envoy filter; not contained in any binary artefact."

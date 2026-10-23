@@ -541,7 +541,7 @@ spdlog 1.17.0
     This software depends on the fmt lib (MIT License),
     and users must comply to its license: https://raw.githubusercontent.com/fmtlib/fmt/master/LICENSE
 
-envoy 9e55809337 (v1.40.0)
+envoy 86af01fdec (v1.40.1)
   License: Apache-2.0
   Copyright (c) The Envoy Project Authors
   https://github.com/envoyproxy/envoy

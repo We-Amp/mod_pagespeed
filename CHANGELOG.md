@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   esbuild, so building from source no longer needs Java or the Closure
   Compiler. The shipped scripts behave the same and keep their public names; the
   deferred-JavaScript script is larger (about 8 KB raw, 1 KB gzipped).
-- **Building the Envoy filter from source works again, against Envoy 1.40.**
+- **Building the Envoy filter from source works again, against Envoy 1.40.1.**
   Build it with `bazel build --config=envoy-filter
   //pagespeed/envoy:envoy_pagespeed //pagespeed/envoy:pagespeed_filter.so`.
   The filter remains experimental and ships in no package; it is built and
