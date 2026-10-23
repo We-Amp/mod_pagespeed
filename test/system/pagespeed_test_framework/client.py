@@ -18,12 +18,15 @@ This module provides a client for making HTTP requests to a PageSpeed-enabled
 server. It mirrors the wget-based fetching from the bash system tests.
 """
 
+import errno
 import gzip
 import http.client
 import itertools
 import os
 import re
 import ssl
+import subprocess
+import sys
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -120,6 +123,71 @@ def _format_last_body_excerpt(body: Optional[bytes]) -> str:
     if len(body) > shown:
         note += f" (+{len(body) - shown} more bytes)"
     return note
+
+
+# Local (ephemeral) port exhaustion on connect(), retried with a short
+# bounded backoff by _connect_and_request. This client opens a NEW
+# connection for every request, so when the ephemeral port range empties
+# every direct get() dies in connect() while the server keeps serving --
+# issue #178 shows such a burst (WinError 10048) killing 17 tests in 13
+# seconds. Windows surfaces WSAEADDRINUSE as winerror 10048 (its errno
+# may carry the raw code, or the mapped EADDRINUSE); Linux/macOS surface
+# EADDRNOTAVAIL when the range is empty, and EADDRINUSE on a 4-tuple
+# collision with a TIME_WAIT socket. All of these clear by themselves as
+# TIME_WAIT entries drain.
+_WSAEADDRINUSE = 10048
+_CONNECT_ATTEMPTS = 10
+_CONNECT_RETRY_INITIAL_DELAY = 0.05
+_CONNECT_RETRY_MAX_DELAY = 1.0
+# The exhaustion diagnostic logs once per process: a burst would otherwise
+# repeat it for every affected request.
+_local_port_exhaustion_logged = False
+
+
+def _is_local_port_exhaustion(err: OSError) -> bool:
+    """True when ``err`` is connect() failing for lack of a local port."""
+    if getattr(err, "winerror", None) == _WSAEADDRINUSE:
+        return True
+    return err.errno in (_WSAEADDRINUSE, errno.EADDRINUSE, errno.EADDRNOTAVAIL)
+
+
+def _count_time_wait_sockets() -> str:
+    """Current number of TIME_WAIT TCP sockets per netstat, or "unknown".
+
+    A broken diagnostic must never mask the error it accompanies, so this
+    swallows every failure of its own.
+    """
+    try:
+        output = subprocess.run(
+            ["netstat", "-an", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return str(
+            sum(1 for line in output.stdout.splitlines() if "TIME_WAIT" in line)
+        )
+    except Exception:
+        return "unknown"
+
+
+def _log_local_port_exhaustion(err: OSError) -> None:
+    """Log ONE line about the first local-port exhaustion in the process:
+    the error plus, on Windows, the TIME_WAIT socket count, so the next
+    burst confirms or refutes port exhaustion straight from the log."""
+    global _local_port_exhaustion_logged
+    if _local_port_exhaustion_logged:
+        return
+    _local_port_exhaustion_logged = True
+    timewait_note = (
+        f", TIME_WAIT sockets: {_count_time_wait_sockets()}"
+        if sys.platform == "win32"
+        else ""
+    )
+    print(
+        f"[client] connect failed on local port exhaustion: {err!r}{timewait_note}",
+        flush=True,
+    )
 
 
 # Default User-Agent matching the bash tests (Chrome 6).
@@ -261,6 +329,41 @@ class PageSpeedClient:
             )
         return http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
 
+    def _connect_and_request(
+        self,
+        method: str,
+        target: str,
+        body: Optional[bytes] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Union[http.client.HTTPConnection, http.client.HTTPSConnection]:
+        """Open a fresh connection, send one request on it, return it.
+
+        ``conn.request()`` performs the TCP connect on first use, so this is
+        where connect() failures surface. When the failure is local (ephemeral)
+        port exhaustion, retry with a short bounded backoff: those failures
+        clear by themselves as TIME_WAIT entries drain (see the constants
+        block above and issue #178). Any other error raises at once, and
+        exhaustion that never clears raises the last error after the final
+        attempt. A retry is safe for any method: the connect failed, so no
+        byte of the request ever left the process.
+        """
+        delay = _CONNECT_RETRY_INITIAL_DELAY
+        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+            conn = self._make_connection()
+            try:
+                conn.request(method, target, body=body, headers=headers)
+                return conn
+            except OSError as err:
+                conn.close()
+                if not _is_local_port_exhaustion(err):
+                    raise
+                _log_local_port_exhaustion(err)
+                if attempt == _CONNECT_ATTEMPTS:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, _CONNECT_RETRY_MAX_DELAY)
+        raise AssertionError("unreachable: the loop returns or raises")
+
     def get(
         self,
         path: str,
@@ -361,9 +464,10 @@ class PageSpeedClient:
         if headers:
             request_headers.update(headers)
 
-        conn = self._make_connection()
+        conn = self._connect_and_request(
+            method, path, body=body, headers=request_headers
+        )
         try:
-            conn.request(method, path, body=body, headers=request_headers)
             resp = conn.getresponse()
 
             # Join duplicate headers with commas (per HTTP spec)
@@ -773,9 +877,10 @@ class ProxiedPageSpeedClient(PageSpeedClient):
         # For proxied requests, use full URL
         full_url = f"http://{self.host}:{self.port}{path}"
 
-        conn = self._make_connection()
+        conn = self._connect_and_request(
+            method, full_url, body=body, headers=request_headers
+        )
         try:
-            conn.request(method, full_url, body=body, headers=request_headers)
             resp = conn.getresponse()
 
             # Join duplicate headers with commas (per HTTP spec)
@@ -870,9 +975,10 @@ class VhostClient(PageSpeedClient):
             request_headers.update(headers)
         target = f"http://{self.vhost}{path}"
 
-        conn = self._make_connection()
+        conn = self._connect_and_request(
+            method, target, body=body, headers=request_headers
+        )
         try:
-            conn.request(method, target, body=body, headers=request_headers)
             resp = conn.getresponse()
             raw_headers = resp.getheaders()
             header_dict: Dict[str, str] = {}
