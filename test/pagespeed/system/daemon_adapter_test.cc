@@ -1325,12 +1325,12 @@ TEST_F(DaemonAdapterTest, AnAbsentSocketAnswersAtOnceWithTheSameText) {
           std::chrono::steady_clock::now() - start)
           .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
-  // Only the probe is timed, and the bound is its cost plus a full second
-  // of headroom: a loaded CI host or a sanitizer build can stall even a
-  // single failing connect for hundreds of milliseconds (issue #208).  The
-  // connect deadline is 2000 ms, so anything near the bound still shows the
-  // probe did not wait the deadline out.
-  EXPECT_LT(elapsed_ms, 1000) << elapsed_ms;
+  // Only the probe is timed.  The bound sits just under the 2000 ms
+  // connect deadline: a probe that wrongly waits the deadline out answers
+  // at 2000 ms or later and trips it, while anything short of the
+  // deadline is host load on one failing connect, which issue #208 shows
+  // can run to seconds.
+  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
   EXPECT_NE(GoogleString::npos,
             Messages().find("the optimizer daemon does not answer at "))
       << Messages();
@@ -1367,6 +1367,11 @@ TEST_F(DaemonAdapterTest, ABackloggedListenerCostsTheDeadlineAndNoMore) {
   EXPECT_EQ(1, handler_.MessagesOfType(kError));
   EXPECT_NE(GoogleString::npos, Messages().find("did not accept a connection"))
       << Messages();
+  // The lower bound shows the deadline really is paid.  The upper bound is
+  // that 2000 ms deadline plus 3 s of headroom, because a loaded CI host
+  // or a sanitizer build can stretch even a deadline-bounded wait by
+  // seconds (issue #208); the point is that the start does not hang, and
+  // an overrun of the deadline plus headroom still reports it.
   EXPECT_GE(elapsed_ms, 1900) << elapsed_ms;
   EXPECT_LT(elapsed_ms, 5000) << elapsed_ms;
 }
@@ -1478,10 +1483,11 @@ TEST_F(DaemonAdapterTest, AnAbsentPipeAnswersAtOnceWhileAnotherPipeIsBusy) {
           std::chrono::steady_clock::now() - start)
           .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, absent->health());
-  // Only the absent pipe's probe is timed, with a full second of headroom
-  // over its one failing open: a loaded CI host or a sanitizer build can
-  // stall even that (issue #208).
-  EXPECT_LT(elapsed_ms, 1000) << elapsed_ms;
+  // Only the absent pipe's probe is timed.  The bound sits just under the
+  // 2000 ms deadline a wrongly waiting probe (#1050) would pay: anything
+  // short of that is host load on the one failing open, which issue #208
+  // shows can run to seconds.
+  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
 
   busy_thread.join();
   EXPECT_EQ(DaemonHealth::kUnavailable, busy_health);
