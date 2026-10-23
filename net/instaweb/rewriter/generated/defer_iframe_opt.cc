@@ -20,13 +20,13 @@
 namespace net_instaweb {
 
 const char* JS_defer_iframe_opt =
-    "(function(){window.pagespeed=window.pagespeed||{};var b=wind"
-    "ow.pagespeed;function c(){}c.prototype.h=function(){var a=do"
-    "cument.getElementsByTagName(\"pagespeed_iframe\");if(a.length>"
-    "0){a=a[0];for(var f=document.createElement(\"iframe\"),d=0,e=a"
-    ".attributes,g=e.length;d<g;++d)f.setAttribute(e[d].name,e[d]"
-    ".value);a.parentNode.replaceChild(f,a)}};c.prototype.convert"
-    "ToIframe=c.prototype.h;b.g=function(){b.deferIframe=new c};b"
-    ".deferIframeInit=b.g;})();\n";
+    "(()=>{window.pagespeed=window.pagespeed||{};var e=window.pag"
+    "espeed;e.DeferIframe=function(){};e.DeferIframe.prototype.co"
+    "nvertToIframe=function(){var r=document.getElementsByTagName"
+    "(\"pagespeed_iframe\");if(r.length>0){for(var f=r[0],n=documen"
+    "t.createElement(\"iframe\"),a=0,t=f.attributes,d=t.length;a<d;"
+    "++a)n.setAttribute(t[a].name,t[a].value);f.parentNode.replac"
+    "eChild(n,f)}};e.deferIframeInit=function(){var r=new e.Defer"
+    "Iframe;e.deferIframe=r};})();\n";
 
 }  // namespace net_instaweb

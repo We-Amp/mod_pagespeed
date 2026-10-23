@@ -21,11 +21,10 @@
  * @author pulkitg@google.com (Pulkit Goyal)
  */
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 
 
@@ -51,8 +50,6 @@ pagespeed.DelayImagesInline.prototype.addLowResImages =
     function(url, lowResImage) {
   this.inlineMap_[url] = lowResImage;
 };
-pagespeed.DelayImagesInline.prototype['addLowResImages'] =
-    pagespeed.DelayImagesInline.prototype.addLowResImages;
 
 
 /**
@@ -74,8 +71,6 @@ pagespeed.DelayImagesInline.prototype.replaceElementSrc =
     }
   }
 };
-pagespeed.DelayImagesInline.prototype['replaceElementSrc'] =
-    pagespeed.DelayImagesInline.prototype.replaceElementSrc;
 
 
 /**
@@ -85,8 +80,6 @@ pagespeed.DelayImagesInline.prototype.replaceWithLowRes = function() {
   this.replaceElementSrc(document.getElementsByTagName('img'));
   this.replaceElementSrc(document.getElementsByTagName('input'));
 };
-pagespeed.DelayImagesInline.prototype['replaceWithLowRes'] =
-    pagespeed.DelayImagesInline.prototype.replaceWithLowRes;
 
 
 /**
@@ -94,6 +87,5 @@ pagespeed.DelayImagesInline.prototype['replaceWithLowRes'] =
  */
 pagespeed.delayImagesInlineInit = function() {
   var temp = new pagespeed.DelayImagesInline();
-  pagespeed['delayImagesInline'] = temp;
+  pagespeed.delayImagesInline = temp;
 };
-pagespeed['delayImagesInlineInit'] = pagespeed.delayImagesInlineInit;

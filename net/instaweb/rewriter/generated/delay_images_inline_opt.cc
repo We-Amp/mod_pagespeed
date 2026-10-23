@@ -20,16 +20,17 @@
 namespace net_instaweb {
 
 const char* JS_delay_images_inline_opt =
-    "(function(){window.pagespeed=window.pagespeed||{};var a=wind"
-    "ow.pagespeed;function d(){this.h={}}d.prototype.j=function(c"
-    ",b){this.h[c]=b};d.prototype.addLowResImages=d.prototype.j;d"
-    ".prototype.g=function(c){for(var b=0;b<c.length;++b){var e=c"
-    "[b].getAttribute(\"data-pagespeed-high-res-src\"),f=c[b].getAt"
-    "tribute(\"src\");e&&!f&&(e=this.h[e])&&c[b].setAttribute(\"src\""
-    ",e)}};d.prototype.replaceElementSrc=d.prototype.g;d.prototyp"
-    "e.l=function(){this.g(document.getElementsByTagName(\"img\"));"
-    "this.g(document.getElementsByTagName(\"input\"))};\nd.prototype"
-    ".replaceWithLowRes=d.prototype.l;a.i=function(){a.delayImage"
-    "sInline=new d};a.delayImagesInlineInit=a.i;})();\n";
+    "(()=>{window.pagespeed=window.pagespeed||{};var a=window.pag"
+    "espeed;a.DelayImagesInline=function(){this.inlineMap_={}};a."
+    "DelayImagesInline.prototype.addLowResImages=function(e,n){th"
+    "is.inlineMap_[e]=n};a.DelayImagesInline.prototype.replaceEle"
+    "mentSrc=function(e){for(var n=0;n<e.length;++n){var t=e[n].g"
+    "etAttribute(\"data-pagespeed-high-res-src\"),p=e[n].getAttribu"
+    "te(\"src\");if(t&&!p){var i=this.inlineMap_[t];i&&e[n].setAttr"
+    "ibute(\"src\",i)}}};a.DelayImagesInline.prototype.replaceWithL"
+    "owRes=function(){this.replaceElementSrc(document.getElements"
+    "ByTagName(\"img\")),this.replaceElementSrc(document.getElement"
+    "sByTagName(\"input\"))};a.delayImagesInlineInit=function(){var"
+    " e=new a.DelayImagesInline;a.delayImagesInline=e};})();\n";
 
 }  // namespace net_instaweb

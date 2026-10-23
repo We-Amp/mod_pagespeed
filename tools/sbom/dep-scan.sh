@@ -164,11 +164,14 @@ package-test-test-rocky-apache:latest
 #   loadtest-collect       - load-test result collector (tools/stress/loadtest_collect)
 #   minify-corpus-fixtures - pinned bundler toolchain used to grow the
 #                            js-minify corpus (tools/js-minify-corpus)
+#   rewriter-js-toolchain  - pinned esbuild that builds the rewriter client JS
+#                            (tools/js, tools/regenerate-rewriter-js.sh)
 NPM_LOCKFILES="
 admin-console pagespeed/system/console/pnpm-lock.yaml
 browser-tests test/browser/package-lock.json
 loadtest-collect tools/stress/loadtest_collect/package-lock.json
 minify-corpus-fixtures tools/js-minify-corpus/bundle-fixtures/package-lock.json
+rewriter-js-toolchain tools/js/package-lock.json
 "
 
 note() { printf '\033[36m[dep-scan]\033[0m %s\n' "$*" >&2; }

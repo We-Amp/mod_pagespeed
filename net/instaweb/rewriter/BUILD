@@ -29,9 +29,18 @@ _JS_SOURCES = [
     "responsive_js.js",
 ]
 
+# Build tooling whose changes alter the generated output: hashed into
+# generated/.source-hash after the sources, in this order, by
+# tools/regenerate-rewriter-js.sh.
+_JS_TOOLING = [
+    "//tools/js:build-rewriter-js.mjs",
+    "//tools/js:package-lock.json",
+    "//tools:regenerate-rewriter-js.sh",
+]
+
 genrule(
     name = "verify_generated_js",
-    srcs = _JS_SOURCES + [
+    srcs = _JS_SOURCES + _JS_TOOLING + [
         "//net/instaweb/js:js_utils.js",
         "//net/instaweb/js:externs.js",
         "generated/.source-hash",
@@ -44,7 +53,8 @@ genrule(
             "ACTUAL=$$(cat " +
             " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
             " $(execpath //net/instaweb/js:js_utils.js)" +
-            " $(execpath //net/instaweb/js:externs.js)" +
+            " $(execpath //net/instaweb/js:externs.js) " +
+            " ".join(["$(execpath %s)" % f for f in _JS_TOOLING]) +
             " | shasum -a 256 | cut -d' ' -f1) && " +
             "EXPECTED=$$(cat $(execpath generated/.source-hash) | tr -d '[:space:]') && " +
             "if [ \"$$ACTUAL\" != \"$$EXPECTED\" ]; then " +
@@ -56,7 +66,8 @@ genrule(
             "ACTUAL=$$(cat " +
             " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
             " $(execpath //net/instaweb/js:js_utils.js)" +
-            " $(execpath //net/instaweb/js:externs.js)" +
+            " $(execpath //net/instaweb/js:externs.js) " +
+            " ".join(["$(execpath %s)" % f for f in _JS_TOOLING]) +
             " | sha256sum | cut -d' ' -f1) && " +
             "EXPECTED=$$(cat $(execpath generated/.source-hash) | tr -d '[:space:]') && " +
             "if [ \"$$ACTUAL\" != \"$$EXPECTED\" ]; then " +

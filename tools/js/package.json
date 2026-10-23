@@ -1,0 +1,11 @@
+{
+  "name": "pagespeed-rewriter-js-build",
+  "private": true,
+  "description": "Pinned esbuild toolchain for tools/regenerate-rewriter-js.sh",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

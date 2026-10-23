@@ -21,11 +21,10 @@
  * @author pulkitg@google.com (Pulkit Goyal)
  */
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 /**
  * @constructor
@@ -49,14 +48,11 @@ pagespeed.DeferIframe.prototype.convertToIframe = function() {
     oldElement.parentNode.replaceChild(newElement, oldElement);
   }
 };
-pagespeed.DeferIframe.prototype['convertToIframe'] =
-  pagespeed.DeferIframe.prototype.convertToIframe;
 
 /**
  * Initializes the defer iframe module.
  */
 pagespeed.deferIframeInit = function() {
   var deferIframe = new pagespeed.DeferIframe();
-  pagespeed['deferIframe'] = deferIframe;
+  pagespeed.deferIframe = deferIframe;
 };
-pagespeed['deferIframeInit'] = pagespeed.deferIframeInit;

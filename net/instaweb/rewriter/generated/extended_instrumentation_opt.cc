@@ -20,24 +20,24 @@
 namespace net_instaweb {
 
 const char* JS_extended_instrumentation_opt =
-    "(function(){window.pagespeed=window.pagespeed||{};var l=wind"
-    "ow.pagespeed;\nl.getResourceTimingData=function(){if(window.p"
-    "erformance&&(window.performance.getEntries||window.performan"
-    "ce.webkitGetEntries)){for(var n=0,m=0,e=0,p=0,f=0,q=0,g=0,r="
-    "0,h=0,t=0,k=0,c={},d=window.performance.getEntries?window.pe"
-    "rformance.getEntries():window.performance.webkitGetEntries()"
-    ",b=0;b<d.length;b++){var a=d[b].duration;a>0&&(n+=a,++e,m=Ma"
-    "th.max(m,a));a=d[b].connectEnd-d[b].connectStart;a>0&&(q+=a,"
-    "++g);a=d[b].domainLookupEnd-d[b].domainLookupStart;a>0&&(p+="
-    "a,++f);a=d[b].initiatorType;c[a]?++c[a]:\nc[a]=1;a=d[b].reque"
-    "stStart-d[b].fetchStart;a>0&&(t+=a,++k);a=d[b].responseStart"
-    "-d[b].requestStart;a>0&&(r+=a,++h)}return\"&afd=\"+(e?Math.rou"
-    "nd(n/e):0)+\"&nfd=\"+e+\"&mfd=\"+Math.round(m)+\"&act=\"+(g?Math.r"
-    "ound(q/g):0)+\"&nct=\"+g+\"&adt=\"+(f?Math.round(p/f):0)+\"&ndt=\""
-    "+f+\"&abt=\"+(k?Math.round(t/k):0)+\"&nbt=\"+k+\"&attfb=\"+(h?Math"
-    ".round(r/h):0)+\"&nttfb=\"+h+(c.css?\"&rit_css=\"+c.css:\"\")+(c.l"
-    "ink?\"&rit_link=\"+c.link:\"\")+(c.script?\"&rit_script=\"+c.scrip"
-    "t:\"\")+(c.img?\"&rit_img=\"+c.img:\"\")}return\"\"};\nl.getResourceT"
-    "imingData=l.getResourceTimingData;})();\n";
+    "(()=>{window.pagespeed=window.pagespeed||{};var I=window.pag"
+    "espeed;I.getResourceTimingData=function(){if(window.performa"
+    "nce&&(window.performance.getEntries||window.performance.webk"
+    "itGetEntries)){for(var c=0,E=0,v=0,_=0,f=0,h=0,w=0,G=0,g=0,i"
+    "=0,p=0,a={},d=window.performance.getEntries?window.performan"
+    "ce.getEntries():window.performance.webkitGetEntries(),r=0;r<"
+    "d.length;r++){var S=d[r].duration;S>0&&(c+=S,++v,E=Math.max("
+    "E,S));var j=d[r].connectEnd-d[r].connectStart;j>0&&(h+=j,++w"
+    ");var z=d[r].domainLookupEnd-d[r].domainLookupStart;z>0&&(_+"
+    "=z,++f);var b=d[r].initiatorType;a[b]?++a[b]:a[b]=1;var A=d["
+    "r].requestStart-d[r].fetchStart;A>0&&(i+=A,++p);var H=d[r].r"
+    "esponseStart-d[r].requestStart;H>0&&(G+=H,++g)}return\"&afd=\""
+    "+(v?Math.round(c/v):0)+\"&nfd=\"+v+\"&mfd=\"+Math.round(E)+\"&act"
+    "=\"+(w?Math.round(h/w):0)+\"&nct=\"+w+\"&adt=\"+(f?Math.round(_/f"
+    "):0)+\"&ndt=\"+f+\"&abt=\"+(p?Math.round(i/p):0)+\"&nbt=\"+p+\"&att"
+    "fb=\"+(g?Math.round(G/g):0)+\"&nttfb=\"+g+(a.css?\"&rit_css=\"+a."
+    "css:\"\")+(a.link?\"&rit_link=\"+a.link:\"\")+(a.script?\"&rit_scri"
+    "pt=\"+a.script:\"\")+(a.img?\"&rit_img=\"+a.img:\"\")}return\"\"};})("
+    ");\n";
 
 }  // namespace net_instaweb

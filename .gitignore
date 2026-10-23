@@ -58,6 +58,7 @@ __pycache__/
 # In-container nginx module build scratch tree (build_module_in_container.sh)
 .ngx-module-build/
 test/browser/node_modules/
+tools/js/node_modules/
 
 # parity adapter-arm container build (HOME=/workspace) droppings
 /.cache/

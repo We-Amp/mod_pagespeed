@@ -20,11 +20,10 @@
  * @author matterbury@google.com (Matt Atterbury)
  */
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 /**
  * @constructor
@@ -64,15 +63,10 @@ pagespeed.DedupInlinedImages.prototype.inlineImg = function(
   scriptNode.parentNode.removeChild(scriptNode);
 };
 
-pagespeed.DedupInlinedImages.prototype['inlineImg'] =
-    pagespeed.DedupInlinedImages.prototype.inlineImg;
-
 /**
  * Initializes the dedup inlined images module.
  */
 pagespeed.dedupInlinedImagesInit = function() {
   var dedupInlinedImages = new pagespeed.DedupInlinedImages();
-  pagespeed['dedupInlinedImages'] = dedupInlinedImages;
+  pagespeed.dedupInlinedImages = dedupInlinedImages;
 };
-
-pagespeed['dedupInlinedImagesInit'] = pagespeed.dedupInlinedImagesInit;
