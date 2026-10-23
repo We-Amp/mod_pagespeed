@@ -60,7 +60,7 @@
     {
       "SPDXID": "SPDXRef-Package-zlib-ng",
       "name": "zlib-ng",
-      "versionInfo": "2.3.2",
+      "versionInfo": "2.3.3",
       "supplier": "Organization: zlib-ng contributors",
       "downloadLocation": "https://github.com/zlib-ng/zlib-ng",
       "filesAnalyzed": false,
@@ -71,7 +71,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/zlib-ng/zlib-ng@2.3.2"
+          "referenceLocator": "pkg:github/zlib-ng/zlib-ng@2.3.3"
         }
       ]
     },

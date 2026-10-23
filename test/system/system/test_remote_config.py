@@ -165,10 +165,10 @@ class TestRemoteConfig:
             assert_contains(response.text, r"<!--")
 
     def test_remote_configuration_specify_an_experiment(self, vhost_client):
-        # /experiment explicitly enables insert_ga (experiments no longer
-        # auto-enable it), so the AnalyticsID it sets shows up in the body.
+        # /experiment runs a single always-on experiment variant that enables
+        # remove_comments, so the comments in the page are gone.
         vhost = vhost_client("remote-config-experiment.example.com")
-        vhost.fetch_until_count(FORBIDDEN, "MyExperimentID", 1)
+        vhost.fetch_until_count(FORBIDDEN, "<!--", 0)
 
     def test_config_takes_a_long_time_to_fetch_but_is_still_applied(self, vhost_client):
         # /slightly-slow waits 2s, past the 1500ms timeout, but a background

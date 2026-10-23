@@ -1,5 +1,6 @@
+load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
 
 licenses(["notice"])  # Apache 2
 
@@ -275,7 +276,6 @@ cc_library(
         "public/input_info_utils.h",
         "public/insert_amp_link_filter.h",
         "public/insert_dns_prefetch_filter.h",
-        "public/insert_ga_filter.h",
         "public/insert_speculation_rules_filter.h",
         "public/javascript_code_block.h",
         "public/javascript_filter.h",
@@ -431,7 +431,6 @@ cc_library(
         "image_url_encoder.cc",
         "insert_amp_link_filter.cc",
         "insert_dns_prefetch_filter.cc",
-        "insert_ga_filter.cc",
         "insert_speculation_rules_filter.cc",
         "javascript_code_block.cc",
         "javascript_filter.cc",

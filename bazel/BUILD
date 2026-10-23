@@ -16,15 +16,6 @@ exports_files([
     "libavif_merge_static_libs_clang_cl.patch",
 ])
 
-# =============================================================================
-# Set by --config=envoy-filter (.bazelrc); selects the EXT_BUILD_DEPS
-# spelling the Envoy workspace's rules_foreign_cc pin accepts (see the
-# cache_entries select below).
-config_setting(
-    name = "rules_foreign_cc_envoy_pin",
-    define_values = {"rules_foreign_cc_pin": "envoy"},
-)
-
 # Selects the Linux/arm64 target — used to pick the arm64 pre-generated APR /
 # apr-util configure headers (third_party/{apr,aprutil}/gen/arch/linux/arm64)
 # over the x64 tree. macOS is matched separately (os:macos) so a native
@@ -149,31 +140,15 @@ cmake(
             # Link against BoringSSL (same instance used by Envoy) for HTTPS.
             # BoringSSL libs are staged as libssl_internal.a / libcrypto_internal.a
             # by rules_foreign_cc, so we set explicit paths for FindOpenSSL.
-            # ${VAR} syntax for rules_foreign_cc variable substitution.
+            # rules_foreign_cc runs make-variable expansion on cache_entries,
+            # so the shell variable is spelled $$EXT_BUILD_DEPS.
             "CURL_USE_OPENSSL": "ON",
-            "OPENSSL_INCLUDE_DIR": "${EXT_BUILD_DEPS}/include",
-            "OPENSSL_SSL_LIBRARY": "${EXT_BUILD_DEPS}/lib/libssl_internal.a",
-            "OPENSSL_CRYPTO_LIBRARY": "${EXT_BUILD_DEPS}/lib/libcrypto_internal.a",
-            "CURL_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
-            "CURL_CA_PATH": "/etc/ssl/certs",
-        },
-    }) | select({
-        # The two workspaces pin INCOMPATIBLE rules_foreign_cc versions and
-        # no single $-spelling for EXT_BUILD_DEPS passes both:
-        #   lean 0.11.1:  ${X} ok, $X ok, $$X fails its $$VAR$$ parser,
-        #                 $$X$$ ok
-        #   Envoy pin:    runs bazel make-var expansion, so ${X}/$X/$(X) all
-        #                 fail analysis; only $$X survives (escapes to a
-        #                 literal $X the wrapper shell script then expands)
-        # The envoy-filter config (the only supported way to build the Envoy
-        # workspace, see pagespeed/envoy/CLAUDE.md) sets this define; the
-        # union overrides the lean ${X} spellings above with the $$X ones.
-        ":rules_foreign_cc_envoy_pin": {
             "OPENSSL_INCLUDE_DIR": "$$EXT_BUILD_DEPS/include",
             "OPENSSL_SSL_LIBRARY": "$$EXT_BUILD_DEPS/lib/libssl_internal.a",
             "OPENSSL_CRYPTO_LIBRARY": "$$EXT_BUILD_DEPS/lib/libcrypto_internal.a",
+            "CURL_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+            "CURL_CA_PATH": "/etc/ssl/certs",
         },
-        "//conditions:default": {},
     }),
     visibility = ["//visibility:public"],
 )

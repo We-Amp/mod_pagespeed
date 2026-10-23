@@ -118,9 +118,9 @@ struct GoldImageCompressionInfo : public ImageCompressionInfo {
 
 // Note: compressed_size_best / compressed_size_default are exact deflate byte
 // counts pinned to the vendored @libpng / @optipng / @zlib_ng. The build links a
-// single deflate (zlib-ng; @zlib is aliased to @zlib_ng, bazel/zlib_compat.bzl),
-// so the output is deterministic and arch-invariant -- regenerate these values
-// only when those deps bump.
+// single deflate (zlib-ng; module zlib is an alias onto it, see
+// third_party/zlib_alias_module), so the output is deterministic and
+// arch-invariant -- regenerate these values only when those deps bump.
 const GoldImageCompressionInfo kValidGifImages[] = {
     GoldImageCompressionInfo("basi0g01", 153, 166, 165, 32, 32, 8, 3, 1, 3,
                              false),

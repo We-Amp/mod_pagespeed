@@ -304,12 +304,12 @@ void AssertReadersMatch(ScanlineReaderInterface* reader1,
 //
 // GOLDENS: compressed_size_default and compressed_size_best are exact deflate
 // byte counts pinned to the vendored @libpng / @optipng / @zlib_ng. The build
-// now links a SINGLE deflate (zlib-ng): @zlib is aliased to @zlib_ng
-// (bazel/zlib_compat.bzl), removing the duplicate stock-zlib that previously
-// made the size depend on link composition -- the real cause of the historical
-// ValidPngs/ValidGifs "flake" (it was an ODR/link-order effect, NOT zlib-ng SIMD
-// nondeterminism; zlib-ng here is built generic-only, no SIMD -- bazel/
-// zlib_ng.BUILD). Output is now deterministic and arch-invariant (x86_64 ==
+// now links a SINGLE deflate (zlib-ng): module zlib is an alias onto zlib-ng
+// (third_party/zlib_alias_module), removing the duplicate stock-zlib that
+// previously made the size depend on link composition -- the real cause of the
+// historical ValidPngs/ValidGifs "flake" (it was an ODR/link-order effect, NOT
+// zlib-ng SIMD nondeterminism; the BCR zlib-ng :zlib-ng target is built
+// generic-only, no SIMD). Output is now deterministic and arch-invariant (x86_64 ==
 // arm64), so the sizes are asserted exactly again. Regenerate these values if
 // @libpng/@optipng/@zlib_ng bump (instrument the EXPECT_NEAR in AssertMatch to
 // dump out.size()).

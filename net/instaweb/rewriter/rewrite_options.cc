@@ -2126,6 +2126,10 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
             {kFlushSubresourcesDeprecated,
              "Filter 'flush_subresources' is deprecated and has no effect; "
              "the flush-early flow it fed was removed."},
+            {kInsertGA,
+             "Filter 'insert_ga' is deprecated and has no effect: it "
+             "targeted Universal Analytics, which was discontinued in July "
+             "2023. Use your own analytics snippet."},
             {kInPlaceOptimizeForBrowser,
              "Filter 'in_place_optimize_for_browser' is deprecated and has "
              "no effect; image format negotiation at the original URL is "
@@ -2155,13 +2159,7 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
     // they are being enabled: disabling or forbidding them is exactly what
     // the warning asks operators to do, so those mentions stay silent.
     if (enabling && handler != nullptr) {
-      if (filter == kInsertGA) {
-        handler->Message(
-            kWarning,
-            "insert_ga targets Universal Analytics, which was discontinued in "
-            "July 2023; the injected tracker reports to a dead service. The "
-            "filter is deprecated and experiments no longer auto-enable it.");
-      } else if (filter == kMakeGoogleAnalyticsAsyncDeprecated) {
+      if (filter == kMakeGoogleAnalyticsAsyncDeprecated) {
         handler->Message(
             kWarning,
             "make_google_analytics_async is deprecated and is now a no-op: it "
@@ -2391,9 +2389,25 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
       if (StringCaseEqual(name, kAnalyticsID)) {
         handler->Message(
             kWarning,
-            "AnalyticsID targets Universal Analytics, which was discontinued "
-            "in July 2023. insert_ga is deprecated; use your own analytics "
-            "for experiment reporting.");
+            "'AnalyticsID' is deprecated and ignored: it only configured the "
+            "insert_ga filter, which no longer has any effect. Remove the "
+            "directive.");
+      } else if (StringCaseEqual(name, kUseAnalyticsJs)) {
+        handler->Message(
+            kWarning,
+            "'UseAnalyticsJs' is deprecated and ignored: it only configured "
+            "the insert_ga filter, which no longer has any effect. Remove "
+            "the directive.");
+      } else if (StringCaseEqual(name, kContentExperimentID) ||
+                 StringCaseEqual(name, kContentExperimentVariantID) ||
+                 StringCaseEqual(name, kIncreaseSpeedTracking)) {
+        handler->Message(
+            kWarning,
+            StrCat("'", name,
+                   "' is deprecated and ignored: it only "
+                   "configured the insert_ga filter, which no longer has any "
+                   "effect. Remove the directive.")
+                .c_str());
       } else if (StringCaseEqual(name, kUseExperimentalJsMinifier)) {
         // Either value warns: with the legacy minifier gone, 'on' is as
         // meaningless as 'off'.
@@ -2452,6 +2466,13 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
       result = RewriteOptions::kOptionValueInvalid;
     } else {
       set_experiment_ga_slot(slot);
+      if (handler != nullptr) {
+        handler->Message(
+            kWarning,
+            "'ExperimentVariable' is deprecated and ignored: it only "
+            "configured the insert_ga filter, which no longer has any "
+            "effect. Remove the directive.");
+      }
     }
   } else if (StringCaseEqual(name, kExperimentSpec)) {
     ExperimentSpec* spec = AddExperimentSpec(arg, handler);
@@ -4105,10 +4126,9 @@ bool RewriteOptions::InsertExperimentSpecInVector(ExperimentSpec* spec) {
 }
 
 // Always enable add_head, add_instrumentation, and HtmlWriter.  This is
-// considered a "no-filter" base for experiments.  insert_ga is no longer
-// force-enabled: it targets the discontinued Universal Analytics service, so
-// experiments do variant assignment only and reporting is bring-your-own
-// analytics (enable=insert_ga in a spec remains an explicit opt-in).
+// considered a "no-filter" base for experiments.  Experiments do variant
+// assignment only; reporting is bring-your-own analytics (the insert_ga
+// filter is a deprecated no-op).
 // Note: add_instrumentation needs add_head.
 bool RewriteOptions::SetupExperimentRewriters() {
   // Don't change anything if we're not in an experiment or have some
@@ -4238,9 +4258,9 @@ void RewriteOptions::ExperimentSpec::Initialize(const StringPiece& spec,
         if (handler != nullptr) {
           handler->Message(
               kWarning,
-              "Experiment spec 'ga=' component targets Universal Analytics, "
-              "which was discontinued in July 2023. insert_ga is deprecated; "
-              "use your own analytics for experiment reporting.");
+              "Experiment spec 'ga=' component is deprecated and ignored: it "
+              "only configured the insert_ga filter, which no longer has any "
+              "effect. Use your own analytics for experiment reporting.");
         }
       }
     } else if (StringCaseStartsWith(piece, "slot")) {
