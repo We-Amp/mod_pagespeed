@@ -2487,6 +2487,10 @@ jobs:
           }
           # Shut down a stale server so it picks up the vcvars-enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel @startup shutdown 2>$null } *>$null
+          # Build-tool runfiles trees with junctions that an earlier job left in this
+          # output base break rules_foreign_cc's tool copy; drop them first.
+          $outputBase = "$(& $bazel @startup info output_base 2>$null)".Trim()
+          if ($outputBase) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Remove-StaleToolRunfiles.ps1') -OutputBase $outputBase }
           & $bazel @startup build @common -- //pagespeed/iis:pagespeed_iis.dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # bazel-bin is a convenience link that a runner without link
