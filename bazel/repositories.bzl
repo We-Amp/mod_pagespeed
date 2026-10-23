@@ -29,11 +29,12 @@ load(":ed25519.bzl", "ed25519_build_rule")
 # justification) — a new C/C++ dep cannot land unscanned. When you add or bump a
 # dep, update its cpe-map.yaml release_date.
 
-# Envoy is not fetched while the build moves to bzlmod (pagespeed/envoy is in
-# .bazelignore); the Envoy 1.40 step re-adds it as a module. The pin stays for
-# the SBOM.
-ENVOY_COMMIT = "cf413bdb37b36d3ffbe570b8a48760abe2b588f5"  # v1.37.6 - fixes the 2026-08-26 advisory batch (13 CVEs). ABI-compat pins (BoringSSL/zlib-ng below) unchanged v1.37.5->v1.37.6.
-ENVOY_SHA = "60a4cc0ebced36c78f7fd7f8e7bdaea38d62c1ce933f0efc59bc531e2f47d263"
+# Envoy (pagespeed/envoy, test/pagespeed/envoy) is a bazel_dep in MODULE.bazel
+# (archive_override of this commit, for both envoy and envoy_api); mirrored here
+# for the SBOM, notices and CVE tooling. Envoy is source-only: no shipped
+# binary contains it.
+ENVOY_COMMIT = "9e5580933739775e8bce696a57a2e1bc99368f23"  # v1.40.0, mirrored in MODULE.bazel
+ENVOY_SHA = "d335f3501b2ab7cc1513b7b084174bd881d39f83514c4b3fd774794b82f9e266"
 
 # zlib-ng (module zlib-ng, plus the third_party/zlib_alias_module "zlib"
 # module) and protobuf are bazel_deps in MODULE.bazel; the constants below are
@@ -45,28 +46,29 @@ ZLIB_NG_SHA = "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1"
 # Standalone BoringSSL — previously only an Envoy transitive dep.
 # Bumped May 2026: ~12 months of upstream drift (post-quantum + hardening rolls).
 # A bazel_dep with our patches in MODULE.bazel; mirrored here for the tools.
-BORINGSSL_VERSION = "0.20260508.0"  # mirrored in MODULE.bazel
+BORINGSSL_VERSION = "0.20260929.0"  # mirrored in MODULE.bazel
 # sha256 of the release tarball the BCR source.json fetches (same bytes).
-BORINGSSL_SHA = "de3371d3fe085afd34778a4c988fb7840b9c92cb21504e674f33ebefd98edc00"
+BORINGSSL_SHA = "04da9ba0664e0a7f028e961c38d604f2cc6dac852a84ca0e51dc1fa051d4c8fe"
 
-# Protocol Buffers C++ runtime + codegen. Same v31.1 release commit that
-# gRPC 1.78.1's grpc_deps() provided before the gRPC dependency was removed
-# along with the experimental central controller.
+# Protocol Buffers C++ runtime + codegen: 35.1, the version Envoy 1.40 uses
+# (module 35.1.bcr.envoy from Envoy's registry: the v35.1 release with Envoy's
+# patches).
 # The commit of the protobuf tag in MODULE.bazel. tools/check-module-versions.py
 # checks the tag (the SBOM purl), not this commit: update both together.
-PROTOBUF_COMMIT = "74211c0dfc2777318ab53c2cd2c317a2ef9012de"  # v31.1, mirrored in MODULE.bazel
-# sha256 of the BCR source archive (protobuf-31.1.zip release asset).
-PROTOBUF_SHA = "554e847e46c705bfc44fb2d0ae5bf78f34395fcbfd86ba747338b570eef26771"
+PROTOBUF_COMMIT = "35cd01f9fe9afbeea38cc7b979a3b6bfcde82c03"  # v35.1, mirrored in MODULE.bazel
+# sha256 of the registry's source archive (protobuf-35.1.tar.gz release asset).
+PROTOBUF_SHA = "f0b6838e7522a8da96126d487068c959bc624926368f3024ac8fd03abd0a1ac4"
 
 # Standalone googletest — previously only an Envoy transitive dep.
-GOOGLETEST_VERSION = "1.17.0"  # mirrored in MODULE.bazel (1.17.0.bcr.2)
-GOOGLETEST_SHA = "65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c"
+GOOGLETEST_VERSION = "1.18.0"  # mirrored in MODULE.bazel (1.18.0.bcr.1)
+GOOGLETEST_SHA = "6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5"
 
-# Standalone fmt + spdlog — previously only Envoy transitive deps.
-# Both are header-only libraries used by base/log_shim.
-FMT_VERSION = "12.1.0"
-FMT_SHA = "695fd197fa5aff8fc67b5f2bbc110490a875cdf7a41686ac8512fb480fa8ada7"
-SPDLOG_VERSION = "1.17.0"
+# fmt + spdlog (used by base/log_shim) are bazel_deps in MODULE.bazel, the same
+# modules Envoy uses; mirrored here for the tools. spdlog is header-only, fmt
+# is a compiled library.
+FMT_VERSION = "12.2.0"  # mirrored in MODULE.bazel
+FMT_SHA = "a2f4a8d51178f954e4c339007f77edd76ba0cb2e36f87a48e5a5403d9be5878f"
+SPDLOG_VERSION = "1.17.0"  # mirrored in MODULE.bazel
 SPDLOG_SHA = "d8862955c6d74e5846b3f580b1605d2428b11d97a410d86e2fb13e857cd3a744"
 
 HIREDIS_COMMIT = "1.3.0"  # Updated Jan 2026 - major version upgrade
@@ -92,6 +94,8 @@ GFLAGS_SHA = "b563851a60342abc35281fa9c684de7e9604a2bf1982c85035180b9ce3afa774"
 # mirrors Envoy-pinned commits). This is the newest snapshot for which
 # bazel/googleurl_visibility.patch still applies cleanly (the Nov 2025 HEAD
 # 94ff147 drifted; see openQuestions).
+# A bazel_dep in MODULE.bazel (module googleurl, archive_override of this
+# commit), which Envoy and quiche use too; mirrored here for the tools.
 GOOGLEURL_COMMIT = "e6c272102e0554e02c1bb317edff927ee56c7d0b"
 GOOGLEURL_SHA = "9b998fea702bfcfa7d8e763389e56a1e889f718a11ada6b7c4e8c77b43d5a999"
 # libpsl — maintained Public Suffix List library. Replaces the dead
@@ -623,8 +627,8 @@ cc_library(
 # abseil-cpp, googletest and re2 are bazel_deps in MODULE.bazel. Their version
 # and sha constants stay here, mirrored from MODULE.bazel, because the SBOM,
 # notices, CVE and vendoring tools read them from this file.
-_ABSEIL_VERSION = "20260107.1"  # mirrored in MODULE.bazel
-_ABSEIL_SHA = "4314e2a7cbac89cac25a2f2322870f343d81579756ceff7f431803c2c9090195"
+_ABSEIL_VERSION = "20260817.0"  # mirrored in MODULE.bazel
+_ABSEIL_SHA = "f7e05179df39c45434cad433f5783840bb3788ef322976f9138bc6b72b3a107d"
 _RE2_VERSION = "2025-11-05"  # mirrored in MODULE.bazel
 # sha256 of the BCR source archive (re2-2025-11-05.zip release asset).
 _RE2_SHA = "c7b1a7a7c68d2d7cf8d343dc56655c1b5a8c8aadedc017db453d4c1d8913b844"
@@ -649,41 +653,6 @@ filegroup(
 filegroup(
     name = "all",
     srcs = glob(["**"]),
-    visibility = ["//visibility:public"],
-)
-""",
-    )
-
-    # Standalone fmt — header-only formatting library, dep of spdlog.
-    http_archive(
-        name = "fmt",
-        strip_prefix = "fmt-%s" % FMT_VERSION,
-        url = "https://github.com/fmtlib/fmt/releases/download/%s/fmt-%s.zip" % (FMT_VERSION, FMT_VERSION),
-        sha256 = FMT_SHA,
-        build_file_content = """
-cc_library(
-    name = "fmt",
-    hdrs = glob(["include/fmt/*.h"]),
-    includes = ["include"],
-    defines = ["FMT_HEADER_ONLY"],
-    visibility = ["//visibility:public"],
-)
-""",
-    )
-
-    # Standalone spdlog — header-only logging library, used by base/log_shim.
-    http_archive(
-        name = "spdlog",
-        strip_prefix = "spdlog-%s" % SPDLOG_VERSION,
-        url = "https://github.com/gabime/spdlog/archive/v%s.tar.gz" % SPDLOG_VERSION,
-        sha256 = SPDLOG_SHA,
-        build_file_content = """
-cc_library(
-    name = "spdlog",
-    hdrs = glob(["include/**/*.h"]),
-    includes = ["include"],
-    defines = ["SPDLOG_FMT_EXTERNAL", "SPDLOG_NO_EXCEPTIONS", "FMT_HEADER_ONLY"],
-    deps = ["@fmt"],
     visibility = ["//visibility:public"],
 )
 """,
@@ -731,21 +700,6 @@ cc_library(
         sha256 = GOOGLE_SPARSEHASH_SHA,
         patches = [Label("//bazel:sparsehash_cstring.patch")],
         patch_args = ["-p1"],
-    )
-
-    http_archive(
-        name = "com_googlesource_googleurl",
-        sha256 = GOOGLEURL_SHA,
-        strip_prefix = "gurl-%s" % GOOGLEURL_COMMIT,
-        urls = ["https://github.com/google/gurl/archive/%s.tar.gz" % GOOGLEURL_COMMIT],
-        patches = [Label("//bazel:googleurl_visibility.patch")],
-        patch_args = ["-p1"],
-        # NOTE: the former Darwin-only patch_cmds sed renaming
-        # __is_cpp17_contiguous_iterator -> __libcpp_is_contiguous_iterator
-        # was removed: current libc++ (Xcode 16+ / macOS 26) already uses the
-        # new spelling, and the pinned gurl snapshot now carries an upstream
-        # block with that spelling too, so the sed produced a
-        # duplicate-definition error.
     )
 
     http_archive(
@@ -877,13 +831,3 @@ cc_library(
         sha256 = "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a",
     )
 
-    # bazel_compdb: compile_commands.json for clang-tidy, via the
-    # compilation_database_aspect in tools/gen_compilation_database.py.
-    # NOTE: sha updated 2026-07-20: GitHub re-rolled the 0.5.2 archive (same
-    # release content, new tarball bytes); any cold fetch with the old sha fails.
-    http_archive(
-        name = "bazel_compdb",
-        sha256 = "d32835b26dd35aad8fd0ba0d712265df6565a3ad860d39e4c01ad41059ea7eda",
-        strip_prefix = "bazel-compilation-database-0.5.2",
-        urls = ["https://github.com/grailbio/bazel-compilation-database/archive/refs/tags/0.5.2.tar.gz"],
-    )

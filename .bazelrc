@@ -31,6 +31,12 @@ common --enable_bzlmod
 # it serves cannot change under us; move it together with the Envoy pin.
 common --registry=https://bcr.bazel.build
 common --registry=https://raw.githubusercontent.com/envoyproxy/bazel-registry/8ef390e133ec41491e397681c91c30e9cda1395a
+# protoc comes from proto toolchain resolution: protobuf registers a prebuilt
+# protoc (its release binary, sha256-pinned in protobuf's own tool_integrity
+# table) and prefers it, as Envoy does. protoc is then never compiled. That is
+# faster everywhere, and on Windows it is required: protobuf 35.1's protoc
+# sources (compiler/java/full) fail clang-cl's include check there.
+common --incompatible_enable_proto_toolchain_resolution
 # CI (Linux) asserts MODULE.bazel.lock is current. Extension results are
 # per-platform in the lock, so Windows/macOS stay in the default update mode.
 common:ci_lock --lockfile_mode=error

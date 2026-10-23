@@ -37,18 +37,20 @@ namespace testing {
 namespace internal {
 
 // Allows EXPECT_STREQ to be used on StringPiece.
-inline GTEST_API_ AssertionResult
-CmpHelperSTREQ(const char* expected_expression, const char* actual_expression,
-               const StringPiece& expected, const StringPiece& actual) {
+inline AssertionResult CmpHelperSTREQ(const char* expected_expression,
+                                      const char* actual_expression,
+                                      const StringPiece& expected,
+                                      const StringPiece& actual) {
   return CmpHelperSTREQ(expected_expression, actual_expression,
                         expected.as_string().c_str(),
                         actual.as_string().c_str());
 }
 
 // Allows EXPECT_STRNE to be used on StringPiece.
-inline GTEST_API_ AssertionResult
-CmpHelperSTRNE(const char* expected_expression, const char* actual_expression,
-               const StringPiece& expected, const StringPiece& actual) {
+inline AssertionResult CmpHelperSTRNE(const char* expected_expression,
+                                      const char* actual_expression,
+                                      const StringPiece& expected,
+                                      const StringPiece& actual) {
   return CmpHelperSTRNE(expected_expression, actual_expression,
                         expected.as_string().c_str(),
                         actual.as_string().c_str());
@@ -63,33 +65,37 @@ CmpHelperSTRNE(const char* expected_expression, const char* actual_expression,
   EXPECT_PRED_FORMAT2(::testing::internal::CmpHelperSUBSTRNE, needle, haystack)
 
 template <typename StringType>
-inline GTEST_API_ AssertionResult
-CmpHelperSUBSTR(const char* haystack_expression, const char* needle_expression,
-                const StringType haystack, const StringPiece& needle) {
+inline AssertionResult CmpHelperSUBSTR(const char* haystack_expression,
+                                       const char* needle_expression,
+                                       const StringType haystack,
+                                       const StringPiece& needle) {
   return ::testing::IsSubstring(haystack_expression, needle_expression,
                                 haystack, needle.as_string());
 }
 
 template <typename StringType1, typename StringType2>
-inline GTEST_API_ AssertionResult
-CmpHelperSUBSTR(const char* haystack_expression, const char* needle_expression,
-                const StringType1 haystack, const StringType2 needle) {
+inline AssertionResult CmpHelperSUBSTR(const char* haystack_expression,
+                                       const char* needle_expression,
+                                       const StringType1 haystack,
+                                       const StringType2 needle) {
   return ::testing::IsSubstring(haystack_expression, needle_expression,
                                 haystack, needle);
 }
 
 template <typename StringType>
-inline GTEST_API_ AssertionResult CmpHelperSUBSTRNE(
-    const char* haystack_expression, const char* needle_expression,
-    const StringType haystack, const StringPiece& needle) {
+inline AssertionResult CmpHelperSUBSTRNE(const char* haystack_expression,
+                                         const char* needle_expression,
+                                         const StringType haystack,
+                                         const StringPiece& needle) {
   return ::testing::IsNotSubstring(haystack_expression, needle_expression,
                                    haystack, needle.as_string());
 }
 
 template <typename StringType1, typename StringType2>
-inline GTEST_API_ AssertionResult CmpHelperSUBSTRNE(
-    const char* haystack_expression, const char* needle_expression,
-    const StringType1 haystack, const StringType2 needle) {
+inline AssertionResult CmpHelperSUBSTRNE(const char* haystack_expression,
+                                         const char* needle_expression,
+                                         const StringType1 haystack,
+                                         const StringType2 needle) {
   return ::testing::IsNotSubstring(haystack_expression, needle_expression,
                                    haystack, needle);
 }

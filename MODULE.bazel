@@ -7,13 +7,13 @@
 module(name = "mod_pagespeed")
 
 # ---- toolchain rulesets (each registers its own toolchains) ----
-bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 
 # 0.2.26 carries the clang-cl DUMPBIN fix that
 # bazel/rules_cc_clang_cl_dumpbin.patch used to backport.
 bazel_dep(name = "rules_cc", version = "0.2.26")
-bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
 
 # The macOS 26 -no_uuid/-no_adhoc_codesign flags that
@@ -22,8 +22,8 @@ bazel_dep(name = "apple_support", version = "2.10.1", repo_name = "build_bazel_a
 
 # ---- other rulesets ----
 # Only remotejdk_11 is used (--java_runtime_version in .bazelrc).
-bazel_dep(name = "rules_java", version = "8.6.1")
-bazel_dep(name = "rules_python", version = "1.9.0")
+bazel_dep(name = "rules_java", version = "9.9.0")
+bazel_dep(name = "rules_python", version = "2.3.3")
 
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
@@ -34,7 +34,12 @@ python.toolchain(
 # ---- C++ libraries from the BCR ----
 # repo_names keep the apparent names our BUILD files have always used. Version constants are mirrored in
 # bazel/repositories.bzl for the SBOM/notices/CVE tooling.
-bazel_dep(name = "abseil-cpp", version = "20260107.1", repo_name = "com_google_absl")
+# The versions of abseil-cpp, googletest, re2 and protobuf are the ones Envoy
+# 1.40 asks for. Minimal version selection lifts googletest, re2 and protobuf
+# to them anyway; abseil-cpp has a single_version_override, which would hold
+# the whole graph at our version, so it must name Envoy's. The root states all
+# four so tools/check-module-versions.py can hold them.
+bazel_dep(name = "abseil-cpp", version = "20260817.0", repo_name = "com_google_absl")
 single_version_override(
     module_name = "abseil-cpp",
     patch_strip = 1,
@@ -42,16 +47,18 @@ single_version_override(
         "//bazel:abseil.patch",
         "//bazel:abseil_nullability.patch",
     ],
-    version = "20260107.1",
+    version = "20260817.0",
 )
-bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
-bazel_dep(name = "re2", version = "2025-11-05", repo_name = "com_googlesource_code_re2")
-bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
-bazel_dep(name = "rules_proto", version = "7.0.2")
+bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
+bazel_dep(name = "re2", version = "2025-11-05.bcr.1")
+# protobuf 35.1 with Envoy's patches, from Envoy's registry.
+bazel_dep(name = "protobuf", version = "35.1.bcr.envoy")
+bazel_dep(name = "rules_proto", version = "7.1.0")
 
 # BoringSSL with our two patches. single_version_override pins the exact
-# version, so no other module in the graph can float it.
-bazel_dep(name = "boringssl", version = "0.20260508.0")
+# version, so no other module in the graph can float it. The version is the one
+# Envoy 1.40 pins with its own (root-only) single_version_override.
+bazel_dep(name = "boringssl", version = "0.20260929.0")
 single_version_override(
     module_name = "boringssl",
     patch_strip = 1,
@@ -64,7 +71,7 @@ single_version_override(
         # must not leave crypto symbols for that process to satisfy.
         "//bazel:boringssl_no_weak_alloc_hooks.patch",
     ],
-    version = "0.20260508.0",
+    version = "0.20260929.0",
 )
 
 # ---- one deflate: module "zlib" is a local alias onto zlib-ng ----
@@ -79,6 +86,83 @@ local_path_override(
     path = "third_party/zlib_alias_module",
 )
 
+# ---- fmt, spdlog, googleurl and the compilation database ----
+# The same modules Envoy uses, so the Envoy filter links a single copy of each.
+# fmt is a compiled library (not header-only); spdlog stays header-only.
+bazel_dep(name = "fmt", version = "12.2.0")
+bazel_dep(name = "spdlog", version = "1.17.0")
+
+# googleurl: Envoy's registry carries an older snapshot (dd4080f, 2022). The
+# override keeps our newer snapshot (GOOGLEURL_COMMIT in bazel/repositories.bzl)
+# for the whole graph, Envoy included, with our visibility patch.
+bazel_dep(name = "googleurl", version = "0.0.0-221103-dd4080f.envoy", repo_name = "com_googlesource_googleurl")
+archive_override(
+    module_name = "googleurl",
+    integrity = "sha256-m5mP6nAr/Pp9jnYzieVqHoifcYoRraa3xOjHe0PVqZk=",
+    patch_strip = 1,
+    patches = [
+        "//bazel:googleurl_visibility.patch",
+        "//bazel:googleurl_module_rules_cc.patch",
+    ],
+    strip_prefix = "gurl-e6c272102e0554e02c1bb317edff927ee56c7d0b",
+    urls = ["https://github.com/google/gurl/archive/e6c272102e0554e02c1bb317edff927ee56c7d0b.tar.gz"],
+)
+
+# compile_commands.json for clang-tidy (tools/gen_compilation_database.py).
+bazel_dep(name = "bazel-compdb", version = "0.0.0-20220906-4086479.envoy", repo_name = "bazel_compdb")
+
+# ---- Envoy 1.40 (pagespeed/envoy, test/pagespeed/envoy) ----
+# Envoy is not in the BCR. archive_override (not git_override) so the source
+# archive goes through the repository cache like every other dependency and
+# vendored, offline builds keep working: every build resolves this module.
+# Keep ENVOY_COMMIT and ENVOY_SHA in bazel/repositories.bzl, the registry pin
+# in .bazelrc and the envoy_api override below in step with it.
+bazel_dep(name = "envoy", version = "1.40.0")
+archive_override(
+    module_name = "envoy",
+    integrity = "sha256-0zXzUBsqt8wVE7ewhBdL2IHTn4NRTEs/13R5S4L54mY=",
+    strip_prefix = "envoy-9e5580933739775e8bce696a57a2e1bc99368f23",
+    urls = ["https://github.com/envoyproxy/envoy/archive/9e5580933739775e8bce696a57a2e1bc99368f23.tar.gz"],
+)
+
+# Envoy's local_path_override(envoy_api, "api") only applies when Envoy is the
+# root module, so it is repeated here on the same archive.
+bazel_dep(name = "envoy_api", version = "1.40.0")
+archive_override(
+    module_name = "envoy_api",
+    integrity = "sha256-0zXzUBsqt8wVE7ewhBdL2IHTn4NRTEs/13R5S4L54mY=",
+    strip_prefix = "envoy-9e5580933739775e8bce696a57a2e1bc99368f23/api",
+    urls = ["https://github.com/envoyproxy/envoy/archive/9e5580933739775e8bce696a57a2e1bc99368f23.tar.gz"],
+)
+
+# Envoy's build macros (envoy_cc_library, api_cc_py_proto_library, ...) name
+# these repositories with plain string labels, which resolve in the calling
+# repository, so the root needs them under the same names.
+bazel_dep(name = "googleapis", version = "0.0.0-20251003-2193a2bf")
+bazel_dep(name = "protoc-gen-validate", version = "1.3.3.envoy")
+
+# Envoy's other root-only overrides, copied (boringssl's is above).
+single_version_override(
+    module_name = "proxy-wasm-cpp-sdk",
+    version = "0.0.0-250925-e5256b0.envoy",
+)
+single_version_override(
+    module_name = "openssl",
+    version = "3.5.9.envoy",
+)
+
+# Envoy reads its extension list from the envoy_build_config repository.
+# Point it at ours: only the extensions the PageSpeed binary needs.
+envoy_build_config = use_repo_rule("@envoy//bazel:envoy_build_config.bzl", "default_envoy_build_config")
+
+envoy_build_config(
+    name = "pagespeed_envoy_build_config",
+    config = "//bazel/envoy:extensions_build_config.bzl",
+)
+
+envoy_build_config_ext = use_extension("@envoy//bazel:extensions.bzl", "envoy_build_config_ext")
+override_repo(envoy_build_config_ext, envoy_build_config = "pagespeed_envoy_build_config")
+
 # ---- everything else: our own module extension (bazel/extensions.bzl) ----
 non_bcr_deps = use_extension("//bazel:extensions.bzl", "non_bcr_deps")
 use_repo(
@@ -86,15 +170,12 @@ use_repo(
     "aom_src",
     "apr",
     "aprutil",
-    "bazel_compdb",
     "com_github_gflags_gflags",
     "com_github_libevent_libevent",
-    "com_googlesource_googleurl",
     "curl_src",
     "cyclone",
     "dav1d_src",
     "ed25519",
-    "fmt",
     "giflib",
     "google_sparsehash",
     "hiredis",
@@ -107,5 +188,4 @@ use_repo(
     "libwebp",
     "nginx",
     "optipng",
-    "spdlog",
 )
