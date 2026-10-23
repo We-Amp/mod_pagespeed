@@ -185,6 +185,9 @@ jobs:
                 fi
                 CT_J=(-j "${ct_j}")
               fi
+              # The header filter is POSIX ERE (llvm::Regex has no lookahead):
+              # it selects our own roots positively, so headers under
+              # external/, bazel-out/ and third_party/ never match.
               # run-clang-tidy -fix needs clang-apply-replacements, which the
               # dev image may lack. Then: diagnose in parallel, and fix the
               # TUs with hits serially (header fixes would race in parallel).
@@ -205,7 +208,7 @@ jobs:
                 -p /workspace \
                 -checks="-*,${CHECK}" \
                 -warnings-as-errors="${CHECK}" \
-                -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+                -header-filter="^(.*/execroot/[^/]+/)?(\./)?(base|net|pagespeed|test)/.*\.(h|hpp)$" \
                 "${CT_TARGETS[@]}" > /workspace/.tidy-sweep.log 2>&1
               echo $? > /workspace/.tidy-sweep.rc
               if [ "${SERIAL_FIX}" = 1 ]; then
@@ -226,7 +229,7 @@ jobs:
                 echo "serial fix over $(wc -l < /workspace/.tidy-fix-tus.txt) TU(s)"
                 while read -r tu; do
                   clang-tidy-20 -p /workspace -checks="-*,${CHECK}" -fix \
-                    -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+                    -header-filter="^(.*/execroot/[^/]+/)?(\./)?(base|net|pagespeed|test)/.*\.(h|hpp)$" \
                     "${tu}" > /dev/null 2>&1 || true
                 done < /workspace/.tidy-fix-tus.txt
               fi
@@ -239,7 +242,7 @@ jobs:
         if: inputs.fix
         run: |
           # Revert anything a fix wrote outside the sweep scope.
-          git diff --name-only -- third_party external 'net/instaweb/rewriter/generated' pagespeed/iis \
+          git diff --name-only -- third_party external 'net/instaweb/rewriter/generated' pagespeed/iis pagespeed/windows pagespeed/envoy \
             | xargs -r git checkout --
           git diff --name-only -- '*.cc' '*.h' '*.hpp' '*.cpp' > "${RUNNER_TEMP}/touched.txt" || true
           echo "touched files: $(wc -l < "${RUNNER_TEMP}/touched.txt")"
