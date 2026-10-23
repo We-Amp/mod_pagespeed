@@ -19,15 +19,12 @@
 
 // TODO(sligocki): Move to third_party/pagespeed/opt/responsive?
 
-goog.provide('pagespeed.Responsive');
-goog.provide('pagespeed.ResponsiveImage');
-goog.provide('pagespeed.ResponsiveImageCandidate');
-goog.provide('pagespeed.responsiveInstance');
+import {getPixelRatio, toNumber} from '../js/client_compat.js';
 
-goog.require('goog.dom');
-goog.require('goog.dom.TagName');
-goog.require('goog.events.EventType');
-goog.require('goog.string');
+// The script initialises itself when it is loaded; the objects it creates
+// are properties of window.pagespeed.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 
 
@@ -147,7 +144,7 @@ pagespeed.ResponsiveImage.prototype.responsiveResize = function(
  */
 pagespeed.Responsive.prototype.computeDevicePixelRatioWithZoom = function() {
   var zoomRatio = document.documentElement.clientWidth / window.innerWidth;
-  return goog.dom.getPixelRatio() * zoomRatio;
+  return getPixelRatio() * zoomRatio;
 };
 
 
@@ -255,7 +252,7 @@ pagespeed.Responsive.prototype.parseSrcset = function(img, src, srcset) {
     rest = rest.slice(pos);
     if ((descriptor.length > 1) &&
         (descriptor[descriptor.length - 1] == 'x')) {
-      var resolution = goog.string.toNumber(descriptor.slice(0, -1));
+      var resolution = toNumber(descriptor.slice(0, -1));
       if (isNaN(resolution)) {
         return null;
       }
@@ -308,7 +305,7 @@ pagespeed.Responsive.prototype.parseSrcset = function(img, src, srcset) {
  */
 pagespeed.Responsive.prototype.init = function() {
   // Initialize responsive images.
-  var images = goog.dom.getElementsByTagName(goog.dom.TagName.IMG);
+  var images = document.getElementsByTagName('IMG');
   for (var i = 0, img; img = images[i]; ++i) {
     var src = img.getAttribute('src');
     var srcset = img.getAttribute('srcset');
@@ -323,8 +320,7 @@ pagespeed.Responsive.prototype.init = function() {
   // Set event listeners to resize all images if any zoom event happens.
 
   // Resize event is fired on desktop C-+/C--, but not mobile pinch zoom.
-  window.addEventListener(goog.events.EventType.RESIZE,
-                          goog.bind(this.responsiveResize, this));
+  window.addEventListener('resize', this.responsiveResize.bind(this));
   // Heuristic for detecting pinch zoom.
   // Detect touchmove with more than one touch.
   // TODO(sligocki): Will touchmove event give us most zoomed view? Or do we
@@ -332,13 +328,12 @@ pagespeed.Responsive.prototype.init = function() {
   // TODO(sligocki): Jud says this will fire continuously, test to see if this
   // will cause too much load on a site with many images and rate limit if it
   // does.
-  window.addEventListener(goog.events.EventType.TOUCHMOVE,
-                          goog.bind(function(event) {
-                            // Multiple fingers.
-                            if (event.touches.length > 1) {
-                              this.responsiveResize();
-                            }
-                          }, this));
+  window.addEventListener('touchmove', (event) => {
+    // Multiple fingers.
+    if (event.touches.length > 1) {
+      this.responsiveResize();
+    }
+  });
 
   // Polyfill (Apply responsive images for any browser which doesn't support
   // srcset natively).
