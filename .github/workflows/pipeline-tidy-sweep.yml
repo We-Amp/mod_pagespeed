@@ -30,6 +30,10 @@ on:
         required: false
         type: boolean
         default: true
+      tests:
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -69,12 +73,27 @@ jobs:
     timeout-minutes: 240
     steps:
       - name: Validate inputs
+        id: validate
         env:
           CHECK: ${{ inputs.check }}
           PATHS: ${{ inputs.paths }}
+          FIX: ${{ inputs.fix }}
         run: |
-          [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.]+)+$ ]] || {
-            echo "::error::check must be a single clang-tidy check name (got '${CHECK}')"; exit 1; }
+          if [ "${FIX}" = "true" ]; then
+            [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.]+)+$ ]] || {
+              echo "::error::with fix=true, check must be a single clang-tidy check name (got '${CHECK}')"; exit 1; }
+          else
+            # Census mode: a comma-separated list of check names or globs; the
+            # first entry is a plain or glob name, later ones may be exclusions
+            # (a leading '-'). No entry is empty and none starts a shell word
+            # with '-' on its own.
+            entry='-?[a-z0-9]+(-[a-z0-9.*]+)+'
+            [[ "${CHECK}" =~ ^[a-z0-9]+(-[a-z0-9.*]+)+(,${entry})*$ ]] || {
+              echo "::error::check must be clang-tidy check names or globs separated by commas, exclusions only after the first entry (got '${CHECK}')"; exit 1; }
+          fi
+          # File-name-safe form of the check list (no '*' or ',').
+          SAFE="${CHECK//[^A-Za-z0-9._-]/_}"
+          echo "safe=${SAFE:0:100}" >> "$GITHUB_OUTPUT"
           [[ "${PATHS}" =~ ^[A-Za-z0-9_./\ -]*$ ]] || {
             echo "::error::paths may only contain [A-Za-z0-9_./ -]"; exit 1; }
           for tok in ${PATHS}; do
@@ -139,6 +158,7 @@ jobs:
           CHECK: ${{ inputs.check }}
           PATHS: ${{ inputs.paths }}
           FIX: ${{ inputs.fix }}
+          TESTS: ${{ inputs.tests }}
         run: |
           # compdb and clang-tidy must share a container: the compdb holds
           # absolute execroot paths that exist only in the container.
@@ -154,7 +174,7 @@ jobs:
             -e CI_SLOT_CPUS="${SLOT_CPUS}" -e CI_SLOT_MEM_GB="${SLOT_MEM_GB}" \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -e BAZEL_BUILD_OPTIONS="--config=vendored --deleted_packages=pagespeed/envoy,pagespeed/iis,pagespeed/windows --keep_going --disk_cache=/cache/disk${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
-            -e CHECK -e PATHS -e FIX \
+            -e CHECK -e PATHS -e FIX -e TESTS \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
@@ -162,7 +182,15 @@ jobs:
             bash -c '
               set -e
               rm -f compile_commands.json
-              python3 tools/gen_compilation_database.py -- //pagespeed/... //net/... || {
+              # tests=true also puts the test packages the PR tier builds into
+              # the compdb (the same list as pipeline-pr.yml linux-build).
+              COMPDB_TARGETS=(//pagespeed/... //net/...)
+              DEFAULT_PATHS="pagespeed/ net/"
+              if [ "${TESTS}" = "true" ]; then
+                COMPDB_TARGETS+=(//test/pagespeed/kernel/... //test/net/... //test/pagespeed/opt/... //test/pagespeed/system/... //test/pagespeed/apache/... //test/pagespeed/nginx/...)
+                DEFAULT_PATHS="pagespeed/ net/ test/"
+              fi
+              python3 tools/gen_compilation_database.py -- "${COMPDB_TARGETS[@]}" || {
                 echo "::error::compile_commands.json generation failed"; exit 1; }
               grep -q pagespeed/nginx/ngx_pagespeed.cc compile_commands.json || {
                 echo "::error::compile_commands.json lost the nginx sources"; exit 1; }
@@ -170,12 +198,12 @@ jobs:
               python3 - <<"PY"
           import json
           db = json.load(open("compile_commands.json"))
-          bad = ("net/instaweb/rewriter/generated/", "pagespeed/iis/", "/external/", "/third_party/", "bazel-out/")
+          bad = ("net/instaweb/rewriter/generated/", "pagespeed/iis/", "test/pagespeed/iis/", "/external/", "/third_party/", "bazel-out/")
           keep = [e for e in db if not any(b in e["file"] for b in bad)]
           print(f"compdb: {len(db)} entries, {len(keep)} after exclusions")
           json.dump(keep, open("compile_commands.json", "w"))
           PY
-              read -r -a CT_TARGETS <<< "${PATHS:-pagespeed/ net/}"
+              read -r -a CT_TARGETS <<< "${PATHS:-${DEFAULT_PATHS}}"
               CT_J=()
               if [ -n "${CI_SLOT_CPUS:-}" ]; then
                 ct_j="${CI_SLOT_CPUS}"
@@ -185,6 +213,9 @@ jobs:
                 fi
                 CT_J=(-j "${ct_j}")
               fi
+              # The header filter is POSIX ERE (llvm::Regex has no lookahead):
+              # it selects our own roots positively, so headers under
+              # external/, bazel-out/ and third_party/ never match.
               # run-clang-tidy -fix needs clang-apply-replacements, which the
               # dev image may lack. Then: diagnose in parallel, and fix the
               # TUs with hits serially (header fixes would race in parallel).
@@ -205,7 +236,7 @@ jobs:
                 -p /workspace \
                 -checks="-*,${CHECK}" \
                 -warnings-as-errors="${CHECK}" \
-                -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+                -header-filter="^(.*/execroot/[^/]+/)?(\./)?(base|net|pagespeed|test)/.*\.(h|hpp)$" \
                 "${CT_TARGETS[@]}" > /workspace/.tidy-sweep.log 2>&1
               echo $? > /workspace/.tidy-sweep.rc
               if [ "${SERIAL_FIX}" = 1 ]; then
@@ -213,7 +244,7 @@ jobs:
                 # header with a diagnostic one compdb TU that reaches it (one
                 # fix per header is enough; later TUs then see it fixed).
                 grep -oE "^[^ :]+\.(cc|cpp|h|hpp):[0-9]+:[0-9]+: (warning|error): .*\[${CHECK}" /workspace/.tidy-sweep.log \
-                  | cut -d: -f1 | sed -E "s#^/workspace/##; s#^.*/execroot/[^/]+/##" | sort -u > /workspace/.tidy-hit-files.txt || true
+                  | cut -d: -f1 | sed -E "s#^/workspace/##; s#^.*/execroot/[^/]+/##; s#^\./##" | sort -u > /workspace/.tidy-hit-files.txt || true
                 grep -E "\.(cc|cpp)$" /workspace/.tidy-hit-files.txt > /workspace/.tidy-fix-tus.txt || true
                 python3 -c "import json;print(\"\\n\".join(sorted({e[\"file\"] for e in json.load(open(\"compile_commands.json\"))})))" > /workspace/.tidy-compdb-files.txt
                 : > /workspace/.tidy-empty.txt
@@ -226,7 +257,7 @@ jobs:
                 echo "serial fix over $(wc -l < /workspace/.tidy-fix-tus.txt) TU(s)"
                 while read -r tu; do
                   clang-tidy-20 -p /workspace -checks="-*,${CHECK}" -fix \
-                    -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
+                    -header-filter="^(.*/execroot/[^/]+/)?(\./)?(base|net|pagespeed|test)/.*\.(h|hpp)$" \
                     "${tu}" > /dev/null 2>&1 || true
                 done < /workspace/.tidy-fix-tus.txt
               fi
@@ -239,7 +270,7 @@ jobs:
         if: inputs.fix
         run: |
           # Revert anything a fix wrote outside the sweep scope.
-          git diff --name-only -- third_party external 'net/instaweb/rewriter/generated' pagespeed/iis \
+          git diff --name-only -- third_party external 'net/instaweb/rewriter/generated' pagespeed/iis pagespeed/windows pagespeed/envoy \
             | xargs -r git checkout --
           git diff --name-only -- '*.cc' '*.h' '*.hpp' '*.cpp' > "${RUNNER_TEMP}/touched.txt" || true
           echo "touched files: $(wc -l < "${RUNNER_TEMP}/touched.txt")"
@@ -255,13 +286,23 @@ jobs:
         env:
           CHECK: ${{ inputs.check }}
           FIX: ${{ inputs.fix }}
+          SAFE: ${{ steps.validate.outputs.safe }}
         run: |
           LOG=.tidy-sweep.log
           RC="$(cat .tidy-sweep.rc 2>/dev/null || echo missing)"
-          PATCH="${RUNNER_TEMP}/tidy-sweep-${CHECK}.patch"
+          PATCH="${RUNNER_TEMP}/tidy-sweep-${SAFE}.patch"
           git diff -- . ':!compile_commands.json' > "${PATCH}"
           # Unique diagnostics (a header diagnostic repeats per including TU).
-          grep -E "\[${CHECK}(,[^]]*)?\]$" "${LOG}" | grep -E ': (warning|error):' | sort -u > "${RUNNER_TEMP}/hits.txt" || true
+          # Any check tag the run produced counts, except compiler diagnostics
+          # (clang-diagnostic-*; only clang-diagnostic-error is counted, below).
+          # Header paths come out as ./pagespeed/... (Bazel passes -iquote .)
+          # or absolute execroot paths: normalise to repo-relative before
+          # deduplicating. Hits in code the sweep never rewrites are dropped,
+          # the same set the fix-mode revert list covers.
+          grep -E ': (warning|error): .*\[[A-Za-z0-9.-]+(,[^]]*)?\]$' "${LOG}" | grep -vE '\[clang-diagnostic-[a-z0-9-]+(,[^]]*)?\]$' \
+            | sed -E 's#^(/workspace/|.*/execroot/[^/]+/)?(\./)?##' \
+            | grep -vE '^(pagespeed/(envoy|windows|iis)/|net/instaweb/rewriter/generated/|test/pagespeed/iis/|test/iis/)' \
+            | sort -u > "${RUNNER_TEMP}/hits.txt" || true
           HITS="$(wc -l < "${RUNNER_TEMP}/hits.txt" | tr -d ' ')"
           # Parse failures and crashes make the hit count untrustworthy.
           DIAG_ERRORS="$(grep -cE '\[clang-diagnostic-error\]' "${LOG}" || true)"
@@ -278,6 +319,11 @@ jobs:
             echo '```'
             sed -E 's#^/workspace/##; s#^.*/execroot/[^/]+/##' "${RUNNER_TEMP}/hits.txt" | cut -d: -f1 \
               | awk -F/ '{ print ($2 != "" ? $1 "/" $2 : $1) }' | sort | uniq -c | sort -rn
+            echo '```'
+            echo
+            echo "### Diagnostics per check"
+            echo '```'
+            sed -E 's#^.*\[([A-Za-z0-9.-]+)(,[^]]*)?\]$#\1#' "${RUNNER_TEMP}/hits.txt" | sort | uniq -c | sort -rn
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
           echo "patch=${PATCH}" >> "$GITHUB_OUTPUT"
@@ -305,7 +351,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tidy-sweep-${{ inputs.check }}
+          name: tidy-sweep-${{ steps.validate.outputs.safe || 'invalid-input' }}
           path: |
             ${{ runner.temp }}/tidy-sweep-*.patch
             ${{ runner.temp }}/tidy-sweep.log
