@@ -1,126 +1,152 @@
-(function(){var pagespeedutils = {MAX_POST_SIZE:131072, sendBeacon:function(a, b, d) {
-  if (window.XMLHttpRequest) {
-    var c = new XMLHttpRequest();
-  } else if (window.ActiveXObject) {
-    try {
-      c = new ActiveXObject("Msxml2.XMLHTTP");
-    } catch (e) {
+(() => {
+  var MAX_POST_SIZE = 131072;
+  var sendBeacon = function(beaconUrl, htmlUrl, data) {
+    var httpRequest;
+    if (window.XMLHttpRequest) {
+      httpRequest = new XMLHttpRequest();
+    } else if (window.ActiveXObject) {
       try {
-        c = new ActiveXObject("Microsoft.XMLHTTP");
-      } catch (g) {
+        httpRequest = new ActiveXObject("Msxml2.XMLHTTP");
+      } catch (e) {
+        try {
+          httpRequest = new ActiveXObject("Microsoft.XMLHTTP");
+        } catch (e2) {
+        }
       }
     }
-  }
-  if (!c) {
-    return !1;
-  }
-  var f = a.indexOf("?") == -1 ? "?" : "&";
-  a = a + f + "url=" + encodeURIComponent(b);
-  c.open("POST", a);
-  c.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-  c.send(d);
-  return !0;
-}, addHandler:function(a, b, d) {
-  if (a.addEventListener) {
-    a.addEventListener(b, d, !1);
-  } else if (a.attachEvent) {
-    a.attachEvent("on" + b, d);
-  } else {
-    var c = a["on" + b];
-    a["on" + b] = function() {
-      d.call(this);
-      c && c.call(this);
-    };
-  }
-}, getPosition:function(a) {
-  for (var b = a.offsetTop, d = a.offsetLeft; a.offsetParent;) {
-    a = a.offsetParent, b += a.offsetTop, d += a.offsetLeft;
-  }
-  return {top:b, left:d};
-}, getWindowSize:function() {
-  return {height:window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight, width:window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth};
-}, inViewport:function(a, b) {
-  a = pagespeedutils.getPosition(a);
-  return pagespeedutils.positionInViewport(a, b);
-}, positionInViewport:function(a, b) {
-  return a.top < b.height && a.left < b.width;
-}, getRequestAnimationFrame:function() {
-  return window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame || window.msRequestAnimationFrame || null;
-}};
-pagespeedutils.now = Date.now || function() {
-  return +new Date();
-};
-window.pagespeed = window.pagespeed || {};
-var pagespeed = window.pagespeed;
-pagespeed.CriticalCssBeacon = function(a, b, d, c, f, e) {
-  this.MAXITERS_ = 250;
-  this.MAXMEASURES_ = 10;
-  this.beaconUrl_ = a;
-  this.htmlUrl_ = b;
-  this.optionsHash_ = d;
-  this.nonce_ = c;
-  this.selectors_ = f;
-  this.aboveTheFoldOnly_ = !!e;
-  this.criticalSelectors_ = [];
-  this.idx_ = 0;
-};
-pagespeed.CriticalCssBeacon.prototype.sendBeacon_ = function() {
-  var a = "oh=" + this.optionsHash_ + "&n=" + this.nonce_;
-  a += "&cs=";
-  for (var b = this.criticalSelectors_.length, d = Math.floor(Math.random() * b), c = pagespeedutils.MAX_POST_SIZE - 5, f = !1, e = 0; e < b; ++e) {
-    var g = e > 0 ? "," : "";
-    g += encodeURIComponent(this.criticalSelectors_[(d + e) % b]);
-    if (a.length + g.length > c) {
-      f = !0;
-      break;
+    if (!httpRequest) {
+      return false;
     }
-    a += g;
-  }
-  f && (a += "&of=1");
-  pagespeed.criticalCssBeaconData = a;
-  pagespeedutils.sendBeacon(this.beaconUrl_, this.htmlUrl_, a);
-};
-pagespeed.CriticalCssBeacon.prototype.isSelectorCritical_ = function(a) {
-  a = document.querySelectorAll(a);
-  if (a.length == 0) {
-    return !1;
-  }
-  if (!this.aboveTheFoldOnly_) {
-    return !0;
-  }
-  var b = window.innerHeight || document.documentElement.clientHeight;
-  if (!b || !a[0].getBoundingClientRect) {
-    return !0;
-  }
-  for (var d = window.pageYOffset || 0, c = Math.min(a.length, this.MAXMEASURES_), f = 0; f < c; ++f) {
-    var e = a[f].getBoundingClientRect();
-    if (e.width == 0 && e.height == 0 || e.top + d < b) {
-      return !0;
+    var query_param_char = beaconUrl.indexOf("?") == -1 ? "?" : "&";
+    var url = beaconUrl + query_param_char + "url=" + encodeURIComponent(htmlUrl);
+    httpRequest.open("POST", url);
+    httpRequest.setRequestHeader(
+      "Content-Type",
+      "application/x-www-form-urlencoded"
+    );
+    httpRequest.send(data);
+    return true;
+  };
+  var addHandler = function(elem, eventName, func) {
+    if (elem.addEventListener) {
+      elem.addEventListener(eventName, func, false);
+    } else if (elem.attachEvent) {
+      elem.attachEvent("on" + eventName, func);
+    } else {
+      var oldHandler = elem["on" + eventName];
+      elem["on" + eventName] = function() {
+        func.call(this);
+        if (oldHandler) {
+          oldHandler.call(this);
+        }
+      };
     }
-  }
-  return a.length > c;
-};
-pagespeed.CriticalCssBeacon.prototype.checkCssSelectors_ = function(a) {
-  for (var b = 0; b < this.MAXITERS_ && this.idx_ < this.selectors_.length; ++b, ++this.idx_) {
-    try {
-      this.isSelectorCritical_(this.selectors_[this.idx_]) && this.criticalSelectors_.push(this.selectors_[this.idx_]);
-    } catch (d) {
-      this.aboveTheFoldOnly_ || this.criticalSelectors_.push(this.selectors_[this.idx_]);
+  };
+  var now = Date.now || (function() {
+    return +new Date();
+  });
+
+  window.pagespeed = window.pagespeed || {};
+  var pagespeed = window.pagespeed;
+  pagespeed.CriticalCssBeacon = function(beaconUrl, htmlUrl, optionsHash, nonce, selectors, opt_aboveTheFoldOnly) {
+    this.MAXITERS_ = 250;
+    this.MAXMEASURES_ = 10;
+    this.beaconUrl_ = beaconUrl;
+    this.htmlUrl_ = htmlUrl;
+    this.optionsHash_ = optionsHash;
+    this.nonce_ = nonce;
+    this.selectors_ = selectors;
+    this.aboveTheFoldOnly_ = !!opt_aboveTheFoldOnly;
+    this.criticalSelectors_ = [];
+    this.idx_ = 0;
+  };
+  pagespeed.CriticalCssBeacon.prototype.sendBeacon_ = function() {
+    var data = "oh=" + this.optionsHash_ + "&n=" + this.nonce_;
+    data += "&cs=";
+    var numSelectors = this.criticalSelectors_.length;
+    var start = Math.floor(Math.random() * numSelectors);
+    var maxDataLen = MAX_POST_SIZE - "&of=1".length;
+    var truncated = false;
+    for (var i = 0; i < numSelectors; ++i) {
+      var tmp = i > 0 ? "," : "";
+      tmp += encodeURIComponent(
+        this.criticalSelectors_[(start + i) % numSelectors]
+      );
+      if (data.length + tmp.length > maxDataLen) {
+        truncated = true;
+        break;
+      }
+      data += tmp;
     }
-  }
-  this.idx_ < this.selectors_.length ? window.setTimeout(this.checkCssSelectors_.bind(this), 0, a) : a();
-};
-pagespeed.criticalCssBeaconInit = function(a, b, d, c, f, e) {
-  if (document.querySelector && document.querySelectorAll && Function.prototype.bind) {
-    var g = new pagespeed.CriticalCssBeacon(a, b, d, c, f, e);
-    pagespeedutils.addHandler(window, "load", function() {
+    if (truncated) {
+      data += "&of=1";
+    }
+    pagespeed.criticalCssBeaconData = data;
+    sendBeacon(this.beaconUrl_, this.htmlUrl_, data);
+  };
+  pagespeed.CriticalCssBeacon.prototype.isSelectorCritical_ = function(selector) {
+    var elements = document.querySelectorAll(selector);
+    if (elements.length == 0) {
+      return false;
+    }
+    if (!this.aboveTheFoldOnly_) {
+      return true;
+    }
+    var viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    if (!viewportHeight || !elements[0].getBoundingClientRect) {
+      return true;
+    }
+    var scrollY = window.pageYOffset || 0;
+    var numToMeasure = Math.min(elements.length, this.MAXMEASURES_);
+    for (var i = 0; i < numToMeasure; ++i) {
+      var rect = elements[i].getBoundingClientRect();
+      if (rect.width == 0 && rect.height == 0) {
+        return true;
+      }
+      if (rect.top + scrollY < viewportHeight) {
+        return true;
+      }
+    }
+    return elements.length > numToMeasure;
+  };
+  pagespeed.CriticalCssBeacon.prototype.checkCssSelectors_ = function(callback) {
+    for (var i = 0; i < this.MAXITERS_ && this.idx_ < this.selectors_.length; ++i, ++this.idx_) {
+      try {
+        if (this.isSelectorCritical_(this.selectors_[this.idx_])) {
+          this.criticalSelectors_.push(this.selectors_[this.idx_]);
+        }
+      } catch (e) {
+        if (!this.aboveTheFoldOnly_) {
+          this.criticalSelectors_.push(this.selectors_[this.idx_]);
+        }
+        continue;
+      }
+    }
+    if (this.idx_ < this.selectors_.length) {
+      window.setTimeout(this.checkCssSelectors_.bind(this), 0, callback);
+    } else {
+      callback();
+    }
+  };
+  pagespeed.criticalCssBeaconInit = function(beaconUrl, htmlUrl, optionsHash, nonce, selectors, opt_aboveTheFoldOnly) {
+    if (!document.querySelector || !document.querySelectorAll || !Function.prototype.bind) {
+      return;
+    }
+    var temp = new pagespeed.CriticalCssBeacon(
+      beaconUrl,
+      htmlUrl,
+      optionsHash,
+      nonce,
+      selectors,
+      opt_aboveTheFoldOnly
+    );
+    var beacon_onload = function() {
       window.setTimeout(function() {
-        g.checkCssSelectors_(function() {
-          g.sendBeacon_();
+        temp.checkCssSelectors_(function() {
+          temp.sendBeacon_();
         });
       }, 0);
-    });
-  }
-};
-pagespeed.criticalCssBeaconInit = pagespeed.criticalCssBeaconInit;
+    };
+    addHandler(window, "load", beacon_onload);
+  };
 })();

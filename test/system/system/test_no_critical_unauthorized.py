@@ -71,11 +71,11 @@ class TestNoCriticalUnauthorizedResources:
         # alone let the test assert on that transient page.
         response = client.fetch_until(
             f"{test_root}{_PAGE}",
-            lambda r: (_lines_containing(r.text, _BEACON_INIT) == 3
+            lambda r: (_lines_containing(r.text, _BEACON_INIT) == 2
                        and _REWRITTEN_CSS.search(r.text) is not None),
             detail_fn=lambda r: (
                 f"lines with {_BEACON_INIT}: "
-                f"{_lines_containing(r.text, _BEACON_INIT)} expected=3; "
+                f"{_lines_containing(r.text, _BEACON_INIT)} expected=2; "
                 f"rewritten .cf. CSS present: "
                 f"{_REWRITTEN_CSS.search(r.text) is not None}"),
         )
@@ -111,8 +111,10 @@ class TestUnauthorizedResourcesAllowedOnAllowingVhost:
             detail_fn=lambda r: "rewritten .cf. CSS and a second gsc-completion-selected not both present",
         )
         text = response.text
-        # This page had beaconing javascript on it.
-        assert _lines_containing(text, _BEACON_INIT) == 3, text[-2000:]
+        # This page had beaconing javascript on it: in debug mode one line of
+        # the asset defines pagespeed.criticalCssBeaconInit and the filter
+        # appends one line calling it.
+        assert _lines_containing(text, _BEACON_INIT) == 2, text[-2000:]
         assert_not_contains(text, "maia-display")
         assert_not_contains(text, "interesting_color")
         assert _lines_containing(text, "non_flattened_selector") == 1, text[-2000:]

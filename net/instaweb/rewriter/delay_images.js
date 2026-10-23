@@ -21,13 +21,12 @@
  * @author pulkitg@google.com (Pulkit Goyal)
  */
 
-goog.require('pagespeedutils');
+import * as pagespeedutils from '../js/js_utils.js';
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 
 
@@ -65,8 +64,6 @@ pagespeed.DelayImages.prototype.replaceElementSrc = function(elements) {
     }
   }
 };
-pagespeed.DelayImages.prototype['replaceElementSrc'] =
-    pagespeed.DelayImages.prototype.replaceElementSrc;
 
 
 /**
@@ -114,9 +111,6 @@ pagespeed.DelayImages.prototype.registerLazyLoadHighRes = function() {
   this.lazyLoadHighResHandlersRegistered_ = true;
 };
 
-pagespeed.DelayImages.prototype['registerLazyLoadHighRes'] =
-    pagespeed.DelayImages.prototype.registerLazyLoadHighRes;
-
 
 /**
  * Triggered from event handlers that were previously registered. Replaces
@@ -137,8 +131,6 @@ pagespeed.DelayImages.prototype.replaceWithHighRes = function() {
   this.replaceElementSrc(document.getElementsByTagName('img'));
   this.replaceElementSrc(document.getElementsByTagName('input'));
 };
-pagespeed.DelayImages.prototype['replaceWithHighRes'] =
-    pagespeed.DelayImages.prototype.replaceWithHighRes;
 
 
 /**
@@ -146,7 +138,5 @@ pagespeed.DelayImages.prototype['replaceWithHighRes'] =
  */
 pagespeed.delayImagesInit = function() {
   var temp = new pagespeed.DelayImages();
-  pagespeed['delayImages'] = temp;
+  pagespeed.delayImages = temp;
 };
-
-pagespeed['delayImagesInit'] = pagespeed.delayImagesInit;

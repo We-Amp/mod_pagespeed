@@ -64,11 +64,15 @@ SOURCE_NAMES=(
 ESBUILD_FILES=(
     add_instrumentation.js
     client_domain_rewriter.js
+    critical_css_beacon.js
     dedup_inlined_images.js
     defer_iframe.js
+    delay_images.js
     delay_images_inline.js
     deterministic.js
     extended_instrumentation.js
+    lazyload_images.js
+    local_storage_cache.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -169,6 +173,31 @@ closure_compile() {
     strip_closure_license "$output"
 }
 
+# js_utils.js is an ES module, imported by the esbuild assets. The files
+# still compiled with the Closure Compiler goog.require('pagespeedutils'), so
+# they get a derived copy instead: goog.provide('pagespeedutils') first, each
+# `export const name = ` turned into `pagespeedutils.name = `, and each bare
+# use of an exported name inside the file qualified as pagespeedutils.name.
+# That is the form the file had before it became a module, so the Closure
+# outputs stay the same. Fails if the module uses any other export form.
+closure_js_utils() {
+    local out="$1"
+    if grep -n '^[[:space:]]*export' "$JS_UTILS" | \
+       grep -v '^[0-9]*:export const [A-Za-z_][A-Za-z0-9_]* = ' >&2; then
+        echo "ERROR: $JS_UTILS: use only 'export const name = ...;'" \
+             "exports (see closure_js_utils)." >&2
+        exit 1
+    fi
+    perl -0777 -ne '
+        my @names = /^export const (\w+) = /mg;
+        s/^export const (\w+) = /pagespeedutils.$1 = /mg;
+        for my $n (@names) {
+            s/(?<![\w.\$])\Q$n\E(?![\w\$])/pagespeedutils.$n/g;
+        }
+        print "goog.provide(\x27pagespeedutils\x27);\n\n", $_;
+    ' "$JS_UTILS" > "$out"
+}
+
 # The pinned library's sources carry an @license header the compiler
 # preserves into the output. Shipped assets must stay comment-free
 # (StaticAssetManagerTest asserts this); attribution is retained in the
@@ -215,6 +244,10 @@ if [[ "$ESBUILD_ONLY" != true ]]; then
 # --------------------------------------------------------------------------
 echo "==> Compiling JS with Closure Compiler..."
 
+CLOSURE_JS_UTILS="$TMPDIR/closure/js_utils.js"
+mkdir -p "$TMPDIR/closure"
+closure_js_utils "$CLOSURE_JS_UTILS"
+
 # Files that need dependency mode + the Closure Library.
 #
 # The library is pinned to the final upstream release (upstream is archived,
@@ -240,8 +273,8 @@ fi
 
 # --- closure_compiler_gen files (with dependency mode, use closure library) ---
 for entry in \
-    "critical_css_loader.js:goog:pagespeed.CriticalCssLoader:$JS_UTILS" \
-    "critical_images_beacon.js:goog:pagespeed.CriticalImages:$JS_UTILS" \
+    "critical_css_loader.js:goog:pagespeed.CriticalCssLoader:$CLOSURE_JS_UTILS" \
+    "critical_images_beacon.js:goog:pagespeed.CriticalImages:$CLOSURE_JS_UTILS" \
     "responsive_js.js:goog:pagespeed.Responsive:"; do
 
     IFS=':' read -r src_file entry_ns entry_point includes <<< "$entry"
@@ -280,11 +313,7 @@ done
 WITHOUT_DEP_FILES=(
 )
 WITH_DEP_FILES=(
-    critical_css_beacon.js
-    lazyload_images.js
-    delay_images.js
     js_defer.js
-    local_storage_cache.js
 )
 
 for src_file in ${WITHOUT_DEP_FILES[@]+"${WITHOUT_DEP_FILES[@]}"}; do
@@ -310,9 +339,9 @@ for src_file in "${WITH_DEP_FILES[@]}"; do
     src="$REWRITER_DIR/$src_file"
     echo "  $base (dbg + opt, with includes)"
     closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
-        --js "$JS_UTILS" --externs "$EXTERNS"
+        --js "$CLOSURE_JS_UTILS" --externs "$EXTERNS"
     closure_compile "$src" "$TMPDIR/${base}_opt.js" ADVANCED \
-        --js "$JS_UTILS" --externs "$EXTERNS"
+        --js "$CLOSURE_JS_UTILS" --externs "$EXTERNS"
 done
 fi  # ESBUILD_ONLY
 
@@ -369,14 +398,15 @@ fi
 
 # Guard for --esbuild-only: .source-hash covers every input, but this mode
 # rebuilds only the esbuild assets. Installing a new hash after a
-# Closure-side input changed (a Closure-compiled source, js_utils.js or
-# externs.js) would mark the stale Closure outputs as fresh and defeat the
+# Closure-side input changed (a Closure-compiled source, js_utils.js,
+# externs.js or this script, which drives the Closure Compiler and derives
+# the Closure copy of js_utils.js) would mark the stale Closure outputs as fresh and defeat the
 # verify_generated_js genrule and --check-hash. So the new hash is only
 # installed when those inputs are unchanged since the commit that last
 # wrote .source-hash; otherwise the full regeneration is required.
 if [[ "$ESBUILD_ONLY" == true ]] && \
    ! diff -q "$TMPDIR/.source-hash" "$GEN_DIR/.source-hash" >/dev/null 2>&1; then
-    closure_inputs=("$JS_UTILS" "$EXTERNS")
+    closure_inputs=("$JS_UTILS" "$EXTERNS" "$SCRIPT_DIR/regenerate-rewriter-js.sh")
     for name in "${SOURCE_NAMES[@]}"; do
         is_esbuild_file "$name.js" || closure_inputs+=("$REWRITER_DIR/$name.js")
     done

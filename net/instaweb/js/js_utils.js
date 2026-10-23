@@ -16,19 +16,21 @@
 
 /**
  * @fileoverview Common set of JS snippets and utility functions for use in
- * static JS files. To use, include goog.require('pagespeedutils') in the JS
- * file and compile with the psa_js_library build rule, which automatically
- * includes this file as a dependency.
+ * static JS files. This is an ES module: import it with
+ *   import * as pagespeedutils from '../js/js_utils.js';
+ * and tools/regenerate-rewriter-js.sh bundles the parts a file uses into its
+ * asset. The files still compiled with the Closure Compiler use
+ * goog.require('pagespeedutils') instead: for them the script derives a
+ * goog.provide('pagespeedutils') copy of this file, so every export here must
+ * keep the `export const name = ...;` form.
  */
-
-goog.provide('pagespeedutils');
 
 
 /**
  * Define the maximum size (in bytes) of a POST that the server will accept. We
  * shouldn't send more data than this. This must match kMaxPostSizeBytes.
  */
-pagespeedutils.MAX_POST_SIZE = 131072;
+export const MAX_POST_SIZE = 131072;
 
 
 /**
@@ -38,7 +40,7 @@ pagespeedutils.MAX_POST_SIZE = 131072;
  * @param {string} data The data to be sent in the POST.
  * @return {boolean} Return true if the request was sent.
  */
-pagespeedutils.sendBeacon = function(beaconUrl, htmlUrl, data) {
+export const sendBeacon = function(beaconUrl, htmlUrl, data) {
   var httpRequest;
   // TODO(jud): Use the closure goog.net.Xhrlo.send function here once we have
   // closure lib support in our static JS files.
@@ -81,7 +83,7 @@ pagespeedutils.sendBeacon = function(beaconUrl, htmlUrl, data) {
  * @param {string} eventName Name of the event.
  * @param {function(Event=)} func New onload handler.
  */
-pagespeedutils.addHandler = function(elem, eventName, func) {
+export const addHandler = function(elem, eventName, func) {
   if (elem.addEventListener) {
     elem.addEventListener(eventName, func, false);
   } else if (elem.attachEvent) {
@@ -103,7 +105,7 @@ pagespeedutils.addHandler = function(elem, eventName, func) {
  * @return {{ top: (number), left: (number) }} The position of the top left
  *     corner of the element when rendered.
  */
-pagespeedutils.getPosition = function(element) {
+export const getPosition = function(element) {
   var top = element.offsetTop;
   var left = element.offsetLeft;
 
@@ -124,7 +126,7 @@ pagespeedutils.getPosition = function(element) {
  *     width: (number)
  * }}
  */
-pagespeedutils.getWindowSize = function() {
+export const getWindowSize = function() {
   var height = window.innerHeight || document.documentElement.clientHeight ||
       document.body.clientHeight;
   var width = window.innerWidth || document.documentElement.clientWidth ||
@@ -142,9 +144,9 @@ pagespeedutils.getWindowSize = function() {
  *     window.
  * @return {boolean} true iff some part of element is visible in viewport.
  */
-pagespeedutils.inViewport = function(element, windowSize) {
-  var position = pagespeedutils.getPosition(element);
-  return pagespeedutils.positionInViewport(position, windowSize);
+export const inViewport = function(element, windowSize) {
+  var position = getPosition(element);
+  return positionInViewport(position, windowSize);
 };
 
 
@@ -154,7 +156,7 @@ pagespeedutils.inViewport = function(element, windowSize) {
  * window.
  * @return {boolean} true iff pos is in viewport.
  */
-pagespeedutils.positionInViewport = function(pos, windowSize) {
+export const positionInViewport = function(pos, windowSize) {
   return (pos.top < windowSize.height && pos.left < windowSize.width);
 };
 
@@ -164,7 +166,7 @@ pagespeedutils.positionInViewport = function(pos, windowSize) {
  * @return {?function(function(number)): number} The requestAnimationFrame
  *     function, or null if not available on this browser.
  */
-pagespeedutils.getRequestAnimationFrame = function() {
+export const getRequestAnimationFrame = function() {
   return window.requestAnimationFrame ||
       window.webkitRequestAnimationFrame ||
       window.mozRequestAnimationFrame ||
@@ -177,7 +179,7 @@ pagespeedutils.getRequestAnimationFrame = function() {
  * @return {number} An integer value representing the number of milliseconds
  *     between midnight, January 1, 1970 and the current time.
  */
-pagespeedutils.now = Date.now || (function() {
+export const now = Date.now || (function() {
   // TODO(jud) : replace with goog.now when cleaned up.
   // Unary plus operator converts its operand to a number which in the case of
   // a date is done by calling getTime().

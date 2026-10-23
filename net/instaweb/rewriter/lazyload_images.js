@@ -21,13 +21,12 @@
  * @author nikhilmadan@google.com (Nikhil Madan)
  */
 
-goog.require('pagespeedutils');
+import * as pagespeedutils from '../js/js_utils.js';
 
-// Exporting functions using quoted attributes to prevent js compiler from
-// renaming them.
-// See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
-window['pagespeed'] = window['pagespeed'] || {};
-var pagespeed = window['pagespeed'];
+// The public entry points are properties of window.pagespeed: the C++
+// filter emits inline calls to them by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
 
 
 
@@ -324,9 +323,6 @@ pagespeed.LazyloadImages.prototype.loadIfVisibleAndMaybeBeacon =
   }, 0);
 };
 
-pagespeed.LazyloadImages.prototype['loadIfVisibleAndMaybeBeacon'] =
-    pagespeed.LazyloadImages.prototype.loadIfVisibleAndMaybeBeacon;
-
 
 /**
  * Loads all the images irrespective of whether or not they are in the
@@ -347,9 +343,6 @@ pagespeed.LazyloadImages.prototype.loadAllImages = function() {
     }
   }
 };
-
-pagespeed.LazyloadImages.prototype['loadAllImages'] =
-    pagespeed.LazyloadImages.prototype.loadAllImages;
 
 
 /**
@@ -396,9 +389,6 @@ pagespeed.LazyloadImages.prototype.overrideAttributeFunctions = function() {
   }
 };
 
-pagespeed.LazyloadImages.prototype['overrideAttributeFunctions'] =
-    pagespeed.LazyloadImages.prototype.overrideAttributeFunctions;
-
 
 /**
  * Overrides attribute functions for the given image if they have not already
@@ -434,7 +424,7 @@ pagespeed.LazyloadImages.prototype.overrideAttributeFunctionsInternal_ =
  */
 pagespeed.lazyLoadInit = function(loadAfterOnload, blankImageSrc) {
   var context = new pagespeed.LazyloadImages(blankImageSrc);
-  pagespeed['lazyLoadImages'] = context;
+  pagespeed.lazyLoadImages = context;
 
   // Add an event to the onload handler to check if any new images have now
   // become visible because of reflows or DOM manipulation. If loadAfterOnload
@@ -495,5 +485,3 @@ pagespeed.lazyLoadInit = function(loadAfterOnload, blankImageSrc) {
   pagespeedutils.addHandler(window, 'scroll', lazy_onscroll);
   pagespeedutils.addHandler(window, 'resize', lazy_onscroll);
 };
-
-pagespeed['lazyLoadInit'] = pagespeed.lazyLoadInit;
