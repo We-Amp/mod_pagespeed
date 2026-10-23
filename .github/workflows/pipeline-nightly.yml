@@ -1385,7 +1385,7 @@ jobs:
         run: |
           set +e
           docker exec -i -e BZL_FLAGS "${CTR}" bash -s <<'EOS'
-          bazel test ${BZL_FLAGS} --config=clang-asan -c opt --test_output=errors \
+          bazel test ${BZL_FLAGS} --config=clang-asan -c opt --test_output=errors --nocache_test_results \
             //third_party/css_parser:parser_fuzz_corpus_test
           EOS
           echo "CORPUS_RC=$?" >> "$GITHUB_ENV"

@@ -113,6 +113,8 @@ jobs:
         run: tools/ci/test_sweep_queued_runs.sh
       - name: Merge-queue fork guard
         run: tools/ci/test_queue_fork_guard.sh
+      - name: Post-merge tests never reuse cached results
+        run: tools/ci/test_post_merge_nocache.sh --selftest && tools/ci/test_post_merge_nocache.sh
       - name: Artifact staging and bundle validation
         run: |
           tools/ci/test_stage_artifacts.sh
