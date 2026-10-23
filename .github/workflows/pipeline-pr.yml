@@ -1277,11 +1277,12 @@ jobs:
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # Redis and memcached for the tests, on a network of their own. The
-      # names carry the run id so concurrent jobs on one host never collide,
-      # and the cleanup step removes only what this job started.
+      # names carry the job id, run id and attempt so concurrent jobs on one
+      # host never collide, and the cleanup step removes only what this job
+      # started.
       - name: Start the test services
         run: |
-          SUF="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-unit"
+          SUF="${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           NET="ci-net-${SUF}"; R="ci-redis-${SUF}"; M="ci-memcached-${SUF}"
           { echo "TEST_NET=${NET}"; echo "TEST_REDIS=${R}"; echo "TEST_MEMCACHED=${M}"; } >> "$GITHUB_ENV"
           for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done

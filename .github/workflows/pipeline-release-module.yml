@@ -1546,7 +1546,8 @@ jobs:
           export DOCKER_CONFIG="${RUNNER_TEMP}/docker-clean"; mkdir -p "$DOCKER_CONFIG"; printf '{}' > "$DOCKER_CONFIG/config.json"
           for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
           docker info >/dev/null 2>&1 || { echo "::error::Docker daemon unreachable after 60s"; exit 1; }
-          NET="ci-net-release-${GITHUB_RUN_ID}"; R="ci-redis-release-${GITHUB_RUN_ID}"; M="ci-memcached-release-${GITHUB_RUN_ID}"
+          SUF="${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NET="ci-net-${SUF}"; R="ci-redis-${SUF}"; M="ci-memcached-${SUF}"
           {
             echo "UNIT_NET=${NET}"
             echo "UNIT_REDIS=${R}"
