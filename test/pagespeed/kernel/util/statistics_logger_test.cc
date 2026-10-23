@@ -218,8 +218,9 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   // is file-local to the implementation; when it changes, this is the line
   // that says so, which is the intent -- a counter reaching the graphs page is
   // a user-visible surface change and should not slip in silently. Last moved
-  // when the per-class daemon-serve counter split was added.
-  EXPECT_EQ(99, parsed_var_data.size());
+  // when ipro_daemon_served_original was added, so the graphs count stored
+  // originals the optimizer serves without a variant.
+  EXPECT_EQ(100, parsed_var_data.size());
   EXPECT_EQ(4, list_of_timestamps.size());
   file_system_.Close(log_file, &handler_);
 }
