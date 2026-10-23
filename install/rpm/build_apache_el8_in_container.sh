@@ -99,13 +99,55 @@ fi
 # 2. Symlink dance — reuse --config=clang-libstdcxx13 verbatim (build_module_in_
 #    container.sh:629-672). The config hardcodes the Ubuntu multiarch paths; map
 #    gcc-toolset-13's libstdc++ (headers + static .a) into them so clang finds it
-#    as a builtin (no --gcc-install-dir absolute-path guard tripping).
+#    as a builtin. clang's --gcc-install-dir is set through its config files
+#    below, not by a Bazel flag, which would trip the absolute-path guard.
 # ---------------------------------------------------------------------------
 export PATH="${GCC13_PREFIX}/bin:${PATH}"
 mkdir -p /usr/include/c++ /usr/lib/gcc/x86_64-linux-gnu /usr/include/x86_64-linux-gnu/c++
 ln -sfn "${GCC13_PREFIX}/include/c++/13" /usr/include/c++/13
 ln -sfn "${GCC13_PREFIX}/lib/gcc/x86_64-redhat-linux/13" /usr/lib/gcc/x86_64-linux-gnu/13
 ln -sfn "${GCC13_PREFIX}/include/c++/13/x86_64-redhat-linux" /usr/include/x86_64-linux-gnu/c++/13
+
+# Pin clang to gcc-toolset-13. AlmaLinux 8.10's clang ships config files
+# (/etc/clang/*-redhat-linux-gnu-clang*.cfg) whose --gcc-install-dir names
+# gcc-toolset-15, which the clang install pulls in. Left alone, non-Cyclone
+# sources compile against GCC 15 libstdc++ headers while the link takes the
+# GCC 13 libstdc++.a. Rewrite the config rather than passing --copt or
+# --linkopt=--gcc-install-dir: Bazel finds the builtin include dirs by running
+# plain clang, so a flag-only pin makes it reject the toolset-13 headers
+# ("absolute path inclusion(s) found", see build_module_in_container.sh's el9
+# leg). The rewrite also covers exec-config tools, rules_foreign_cc builds and
+# cc_configure itself. The container is ephemeral, as for the edits above.
+GCC13_INSTALL_DIR="${GCC13_PREFIX}/lib/gcc/x86_64-redhat-linux/13"
+if [ ! -d "${GCC13_INSTALL_DIR}" ]; then
+  echo "ERROR: gcc-toolset-13 install dir not found: ${GCC13_INSTALL_DIR}" >&2
+  exit 1
+fi
+CLANG_CFGS=( /etc/clang/*-redhat-linux-gnu-clang*.cfg )
+if [ ! -f "${CLANG_CFGS[0]}" ]; then
+  echo "ERROR: no clang config files matched" \
+    "/etc/clang/*-redhat-linux-gnu-clang*.cfg" >&2
+  exit 1
+fi
+sed -i "s#--gcc-install-dir=[^ ]*#--gcc-install-dir=${GCC13_INSTALL_DIR}#" \
+  "${CLANG_CFGS[@]}"
+# Bazel detects the builtin includes with clang and compiles with clang++, so
+# check both select toolset 13. "|| true": a clang failure must reach the
+# message below, not kill the script silently under pipefail.
+for CLANG_BIN in clang clang++; do
+  SELECTED="$("${CLANG_BIN}" -v -E -x c++ /dev/null 2>&1 \
+    | sed -n 's/^Selected GCC installation: //p' || true)"
+  case "${SELECTED}" in
+    "${GCC13_INSTALL_DIR}"|"${GCC13_INSTALL_DIR}/") ;;
+    *)
+      echo "ERROR: ${CLANG_BIN} selects GCC installation '${SELECTED}'," \
+        "expected '${GCC13_INSTALL_DIR}'." >&2
+      echo "       The clang config rewrite did not take effect; headers and" \
+        "libstdc++.a would come from different toolsets." >&2
+      exit 1 ;;
+  esac
+  echo "    ${CLANG_BIN} GCC installation: ${SELECTED}"
+done
 
 # --- foreign_cc lib64 fix (RHEL-only) -------------------------------------
 # The PSOL graph builds libcurl/libevent/libmemcached via rules_foreign_cc
