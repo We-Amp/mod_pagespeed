@@ -244,7 +244,7 @@ jobs:
                 # header with a diagnostic one compdb TU that reaches it (one
                 # fix per header is enough; later TUs then see it fixed).
                 grep -oE "^[^ :]+\.(cc|cpp|h|hpp):[0-9]+:[0-9]+: (warning|error): .*\[${CHECK}" /workspace/.tidy-sweep.log \
-                  | cut -d: -f1 | sed -E "s#^/workspace/##; s#^.*/execroot/[^/]+/##" | sort -u > /workspace/.tidy-hit-files.txt || true
+                  | cut -d: -f1 | sed -E "s#^/workspace/##; s#^.*/execroot/[^/]+/##; s#^\./##" | sort -u > /workspace/.tidy-hit-files.txt || true
                 grep -E "\.(cc|cpp)$" /workspace/.tidy-hit-files.txt > /workspace/.tidy-fix-tus.txt || true
                 python3 -c "import json;print(\"\\n\".join(sorted({e[\"file\"] for e in json.load(open(\"compile_commands.json\"))})))" > /workspace/.tidy-compdb-files.txt
                 : > /workspace/.tidy-empty.txt
@@ -294,8 +294,15 @@ jobs:
           git diff -- . ':!compile_commands.json' > "${PATCH}"
           # Unique diagnostics (a header diagnostic repeats per including TU).
           # Any check tag the run produced counts, except compiler diagnostics
-          # (clang-diagnostic-*, counted separately below).
-          grep -E ': (warning|error): .*\[[a-z0-9.-]+(,[^]]*)?\]$' "${LOG}" | grep -vE '\[clang-diagnostic-[a-z0-9-]+(,[^]]*)?\]$' | sort -u > "${RUNNER_TEMP}/hits.txt" || true
+          # (clang-diagnostic-*; only clang-diagnostic-error is counted, below).
+          # Header paths come out as ./pagespeed/... (Bazel passes -iquote .)
+          # or absolute execroot paths: normalise to repo-relative before
+          # deduplicating. Hits in code the sweep never rewrites are dropped,
+          # the same set the fix-mode revert list covers.
+          grep -E ': (warning|error): .*\[[A-Za-z0-9.-]+(,[^]]*)?\]$' "${LOG}" | grep -vE '\[clang-diagnostic-[a-z0-9-]+(,[^]]*)?\]$' \
+            | sed -E 's#^(/workspace/|.*/execroot/[^/]+/)?(\./)?##' \
+            | grep -vE '^(pagespeed/(envoy|windows|iis)/|net/instaweb/rewriter/generated/|test/pagespeed/iis/|test/iis/)' \
+            | sort -u > "${RUNNER_TEMP}/hits.txt" || true
           HITS="$(wc -l < "${RUNNER_TEMP}/hits.txt" | tr -d ' ')"
           # Parse failures and crashes make the hit count untrustworthy.
           DIAG_ERRORS="$(grep -cE '\[clang-diagnostic-error\]' "${LOG}" || true)"
@@ -316,7 +323,7 @@ jobs:
             echo
             echo "### Diagnostics per check"
             echo '```'
-            sed -E 's#^.*\[([a-z0-9.-]+)(,[^]]*)?\]$#\1#' "${RUNNER_TEMP}/hits.txt" | sort | uniq -c | sort -rn
+            sed -E 's#^.*\[([A-Za-z0-9.-]+)(,[^]]*)?\]$#\1#' "${RUNNER_TEMP}/hits.txt" | sort | uniq -c | sort -rn
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
           echo "patch=${PATCH}" >> "$GITHUB_OUTPUT"

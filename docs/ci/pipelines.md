@@ -535,7 +535,11 @@ enforced checks has been cleared.
 Census use: dispatch with `fix: false`, `tests: true` and a check list. The
 job fails when it finds diagnostics (it is a gate), but the job summary lists
 the unique diagnostics per directory and per check, and the `hits.txt` and
-`tidy-sweep.log` artifacts hold every one of them. Compiler diagnostics
+`tidy-sweep.log` artifacts hold every one of them. A red census job is expected when it finds hits; the summary line
+"clang-diagnostic-error lines" and the error text tell a parse failure ("the hit
+count cannot be trusted") from a hits failure ("gate mode: N ... remain").
+Hits under `pagespeed/envoy`, `pagespeed/windows`, `pagespeed/iis`,
+`net/instaweb/rewriter/generated` and the IIS test directories are not counted. Compiler diagnostics
 (`clang-diagnostic-*`) are not counted as hits.
 
 ## Merge-queue runs
