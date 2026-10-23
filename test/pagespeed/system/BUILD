@@ -251,6 +251,10 @@ pagespeed_cc_test(
 # Backward-compatible aggregate test target
 # =============================================================================
 
+# system_caches_test.cc must run only once per job because its tests share the
+# job's memcached and redis servers, so it is not part of this aggregate
+# target (issue #204).
+
 pagespeed_cc_test(
     name = "system",
     srcs = [
@@ -259,7 +263,6 @@ pagespeed_cc_test(
         "loopback_route_fetcher_test.cc",
         "memcached_cache_test.cc",
         "redis_cache_cluster_test.cc",
-        "system_caches_test.cc",
         "system_message_handler_test.cc",
     ],
     shard_count = 1,
