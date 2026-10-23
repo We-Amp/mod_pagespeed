@@ -31,5 +31,9 @@ WarningsAsErrors: >
   -bugprone-unused-return-value,
   modernize-use-nullptr,
   modernize-use-override,
+  modernize-use-using,
   performance-*
+CheckOptions:
+  - key:   modernize-use-using.IgnoreExternC
+    value: 'true'
 HeaderFilterRegex: '^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$'
