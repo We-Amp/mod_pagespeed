@@ -11,42 +11,42 @@ namespace net_instaweb
 
 IisInnerRequestContext::~IisInnerRequestContext()
 {
-	pagespeedRequestPointer.reset(NULL);
+	pagespeedRequestPointer.reset(nullptr);
 }
 
 
 void IisInnerRequestContext::CleanupStoredContext()
 {
-	if (proxy_fetch_ != NULL)
+	if (proxy_fetch_ != nullptr)
 	{
 		//CHECK(false);
 		//TODO (oschaaf): ?!!!
 		//proxy_fetch_->Done(true);
-		proxy_fetch_ = NULL;
+		proxy_fetch_ = nullptr;
 	}
-	if (driver_ != NULL) {
+	if (driver_ != nullptr) {
 		driver_->Cleanup();
-		driver_ = NULL;
+		driver_ = nullptr;
 	}
 
-	if (recorder_ != NULL) {
+	if (recorder_ != nullptr) {
 		//log("IPRO: recorder CLEANUP");
 		recorder_->Fail();
-		recorder_->DoneAndSetHeaders(NULL, false);  // Deletes recorder.
-		recorder_ = NULL;
+		recorder_->DoneAndSetHeaders(nullptr, false);  // Deletes recorder.
+		recorder_ = nullptr;
 	}
 
-	if (base_fetch_ != NULL)
+	if (base_fetch_ != nullptr)
 	{
 		base_fetch_->ReleaseRef();
-		base_fetch_ = NULL;
+		base_fetch_ = nullptr;
 	}
 	if (this->process_context_)
 	{
 		this->process_context_->ReleaseRef();
 	}
 	delete gurl_;
-	gurl_ = NULL;
+	gurl_ = nullptr;
 	delete this;
 }
 

@@ -146,7 +146,7 @@ GoogleString ResolveWorkerIdentity(std::vector<BYTE>* sid_out) {
 // noise on multi-site hosts otherwise.
 static std::once_flag g_auto_create_log_once;
 
-ProcessContext* IisProcessContext::PSOL_PROCESS_CONTEXT = NULL;
+ProcessContext* IisProcessContext::PSOL_PROCESS_CONTEXT = nullptr;
 
 IisProcessContext::IisProcessContext(
 	const GoogleString& site_app_id,
@@ -163,14 +163,14 @@ IisProcessContext::IisProcessContext(
 	, root_options_(root_options)
 	, app_pool_name_(app_pool_name)
 	, settings_(settings)
-	, server_context_mutex_(NULL)
+	, server_context_mutex_(nullptr)
 	, ok_(true)
-	, server_context_(NULL)
+	, server_context_(nullptr)
 
 {
 	stopped_.set_value(0);
 	reference_count_=1;
-	driver_factory_ = NULL;
+	driver_factory_ = nullptr;
 	// Resolve the IIS worker identity once at construction. It does not
 	// change for the lifetime of the process, and we want it available
 	// even on early init-failure paths that bail before GetServerContext.
@@ -202,10 +202,10 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		// (the caller renders the diagnostic page) instead of CHECK-failing,
 		// which fail-fasted the whole worker (the 0xc0000409 ucrtbase
 		// fail-fast cluster seen under recycle stress).
-		return NULL;
+		return nullptr;
 	}
 
-	if (driver_factory_ == NULL) {
+	if (driver_factory_ == nullptr) {
 		auto ts = new SystemThreadSystem();
 		server_context_mutex_ = ts->NewMutex();
 		driver_factory_ = new IisRewriteDriverFactory(this, app_pool_name_, ts, new InProcessSharedMem(ts));
@@ -217,7 +217,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 	//DebugBreak();
 	ScopedMutex lock(server_context_mutex_);
 
-	if (server_context_ == NULL)
+	if (server_context_ == nullptr)
 	{
 		IisServerContext* server_context;
 		std::list<std::string> paths;
@@ -265,7 +265,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		server_contexts.push_back(server_context);
 		GoogleString error_message;
 		int error_index = -1;
-		Statistics* global_statistics = NULL;
+		Statistics* global_statistics = nullptr;
 		driver_factory_->PostConfig(
 			server_contexts, &error_message, &error_index, &global_statistics);
 		if (error_index != -1) {
@@ -278,9 +278,9 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 			// fall through to the local-only error page. We only annotate.
 			init_failure_kind_ = InitFailureKind::kPostConfigFailed;
 			init_error_message_ = error_message;
-			return NULL;
+			return nullptr;
 		}
-		if (global_statistics == NULL) {
+		if (global_statistics == nullptr) {
 			IisRewriteDriverFactory::InitStats(driver_factory_->statistics());
 		}
 		driver_factory_->SetServerContextMessageHandler(server_context);
@@ -308,12 +308,12 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		{
 			IisRewriteOptions* daemon_options =
 				dynamic_cast<IisRewriteOptions*>(server_context->global_options());
-			if (daemon_options != NULL) {
+			if (daemon_options != nullptr) {
 				IisDaemonCheckRegistry::Result daemon = CheckSite(
 					daemon_options->daemon_socket_path(),
 					daemon_options->daemon_volume_path(),
 					driver_factory_->message_handler());
-				daemon_handler_registered_ = (daemon.adapter != NULL);
+				daemon_handler_registered_ = (daemon.adapter != nullptr);
 				server_context->set_daemon_adapter(daemon.adapter);
 				if (daemon.split) {
 					init_failure_kind_ = InitFailureKind::kDaemonVolumeSplit;
@@ -321,7 +321,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 						daemon_options->daemon_volume_path();
 					ok_ = false;
 					driver_factory_->ShutDown();
-					return NULL;
+					return nullptr;
 				}
 			}
 		}
@@ -350,7 +350,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 				"FileCachePath is empty in pagespeed.config");
 			ok_ = false;
 			driver_factory_->ShutDown();
-			return NULL;
+			return nullptr;
 		}
 
 		// Emit the AutoCreateCachePath status once per
@@ -400,7 +400,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 					ec_error.c_str());
 				ok_ = false;
 				driver_factory_->ShutDown();
-				return NULL;
+				return nullptr;
 			}
 		}
 
@@ -420,7 +420,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 					cache_path.c_str(), init_error_message_.c_str());
 				ok_ = false;
 				driver_factory_->ShutDown();
-				return NULL;
+				return nullptr;
 			}
 		}
 
@@ -487,7 +487,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 				cache_path.c_str(), app_pool_identity_.c_str());
 			ok_ = false;
 			driver_factory_->ShutDown();
-			return NULL;
+			return nullptr;
 		}
 
 		// LogDir auto-create.
@@ -525,7 +525,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 					log_err.c_str());
 				ok_ = false;
 				driver_factory_->ShutDown();
-				return NULL;
+				return nullptr;
 			}
 		}
 
@@ -545,10 +545,10 @@ void IisProcessContext::Shutdown()
 		// server_context_mutex_ is created lazily by the first
 		// GetServerContext call; a context whose site never served a request
 		// reaches Shutdown with it still NULL.
-		if (server_context_mutex_ != NULL) server_context_mutex_->Lock();
+		if (server_context_mutex_ != nullptr) server_context_mutex_->Lock();
 		message_handler_->Message( net_instaweb::kInfo, "delete driver factory");
 	
-		if (driver_factory_ != NULL)
+		if (driver_factory_ != nullptr)
 		{
 			// The process-wide registry's adapters outlive this context:
 			// a configuration edit deletes the factory (and with it the
@@ -562,29 +562,29 @@ void IisProcessContext::Shutdown()
 				daemon_handler_registered_ = false;
 			}
 			delete driver_factory_;
-			driver_factory_ = NULL;
+			driver_factory_ = nullptr;
 		}
-		if ( fetch_factory_ != NULL ) {
+		if ( fetch_factory_ != nullptr ) {
 			message_handler_->Message( net_instaweb::kInfo, "delete fetch factory");
 			delete fetch_factory_;
-			fetch_factory_ = NULL;
+			fetch_factory_ = nullptr;
 		}
-		if (root_options_ != NULL)
+		if (root_options_ != nullptr)
 		{
 			delete root_options_;
-			root_options_ = NULL;
+			root_options_ = nullptr;
 		}
 
 
 		message_handler_->Message(kInfo, "Iis Process Context terminated");
 		delete message_handler_;
-		message_handler_ = NULL;
+		message_handler_ = nullptr;
 
 
-		if (server_context_mutex_ != NULL) {
+		if (server_context_mutex_ != nullptr) {
 			server_context_mutex_->Unlock();
 			delete server_context_mutex_;
-			server_context_mutex_= NULL;
+			server_context_mutex_= nullptr;
 		}
 	}
 }

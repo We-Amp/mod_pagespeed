@@ -48,7 +48,7 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 	//mutex_->Lock();
 	auto current_time=GetTickCount64();
 	auto process_context=site_contexts_[site_app_id.c_str()];
-	IisProcessContext *old_context=NULL;
+	IisProcessContext *old_context=nullptr;
 
 
 	// Config-path resolution.
@@ -107,9 +107,9 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 			)
 			{
 				OutputDebugStringA("FileID changed!");
-				site_contexts_[site_app_id.c_str()]=NULL;
+				site_contexts_[site_app_id.c_str()]=nullptr;
 				old_context=process_context;
-				process_context=NULL;
+				process_context=nullptr;
 			}
 			else
 			{
@@ -125,7 +125,7 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 		DWORD m_dwPageSize = sysInfo.dwPageSize;
 
 		// TODO(oschaaf): FIXME
-		IisRewriteOptions * options = new IisRewriteOptions(NULL);
+		IisRewriteOptions * options = new IisRewriteOptions(nullptr);
 		std::map<std::string,std::string> input;
 
 		std::string foopath("/");
@@ -181,7 +181,7 @@ HRESULT IisModuleFactory::GetHttpModule(
 	else
 	{
 		*ppModule = pModule;
-		pModule = NULL;
+		pModule = nullptr;
 		return S_OK;
 	}            
 }

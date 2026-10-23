@@ -120,7 +120,7 @@ namespace net_instaweb
 			// were no query params given.
 			//ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
 			//	"ps_route request: parsing headers or query params failed.");
-			return NULL;
+			return nullptr;
 		}
 
 		*pagespeed_query_params =
@@ -196,13 +196,13 @@ namespace net_instaweb
 	  // Request-specific options, nearly always null.  If set they need to be
 	  // rebased on the directory options or the global options.
 	  net_instaweb::RewriteOptions* request_options = 
-		  ps_determine_request_options(ctx, NULL, request_headers, response_headers, request_context,
+		  ps_determine_request_options(ctx, nullptr, request_headers, response_headers, request_context,
 		  server_context, url, pagespeed_query_params, pagespeed_option_cookie);
 
 	  // Because the caller takes memory ownership of any options we return, the
 	  // only situation in which we can avoid allocating a new RewriteOptions is if
 	  // the global options are ok as are.
-	  if (/*directory_options == NULL*/ request_options == NULL &&
+	  if (/*directory_options == NULL*/ request_options == nullptr &&
 		  !global_options->running_experiment()) {
 		//*options = NULL;
 		//return true;
@@ -236,7 +236,7 @@ namespace net_instaweb
 
 		  /* this is where we get our options: base first, per-site override last */
 		  std::list<std::string> paths(resolved.begin(), resolved.end());
-		  cf->GetConfig(paths,input,**options,server_context->message_handler(), NULL);
+		  cf->GetConfig(paths,input,**options,server_context->message_handler(), nullptr);
 	  }
 	  else
 		  *options = global_options->Clone(); // get global options
@@ -249,16 +249,16 @@ namespace net_instaweb
 	  // because we don't want experiments to be contaminated with unexpected
 	  // settings.
 	  bool ok = true;
-	  if (request_options != NULL) {
+	  if (request_options != nullptr) {
 		(*options)->Merge(*request_options);
 		delete request_options;
-		request_options=NULL;
+		request_options=nullptr;
 	  } else if ((*options)->running_experiment()) {
 		ok = set_experiment_state_and_cookie(pHttpContext, ctx, request_headers, *options, url->Host());
 		if (!ok) {
-		  if (*options != NULL) {
+		  if (*options != nullptr) {
 			delete *options;
-			*options = NULL;
+			*options = nullptr;
 		  }
 		  return false;
 		}
@@ -278,7 +278,7 @@ namespace net_instaweb
 
 	RewriteOptions* ps_determine_remote_options(ServerContext* server_context, const GoogleString& in_ip, const GoogleUrl& url) {
 		if (!server_context || !server_context->global_options()) {
-			return NULL;
+			return nullptr;
 		}
 		RewriteOptions* customized_options = nullptr;
 
@@ -289,7 +289,7 @@ namespace net_instaweb
 			return remote_options;
 		}
 
-		return NULL;
+		return nullptr;
 	}
 
 
@@ -303,7 +303,7 @@ namespace net_instaweb
 		if (StringCaseEqual(*name, "deflate")) {
 			return new GzipInflater(GzipInflater::InflateType::kDeflate);
 		}
-		return NULL;
+		return nullptr;
 	}
 
 	//todo: efficiency

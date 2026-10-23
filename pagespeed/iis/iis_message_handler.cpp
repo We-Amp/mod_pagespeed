@@ -21,7 +21,7 @@ namespace net_instaweb {
 
 	IisMessageHandler::IisMessageHandler(Timer* timer, AbstractMutex* mutex)
 		: SystemMessageHandler(timer, mutex)
-		 , buffer_(NULL),
+		 , buffer_(nullptr),
 		  mutex_(mutex)
 	{
 	}

@@ -40,7 +40,8 @@ std::string ResolveProgramDataConfig(bool* exists) {
     *exists = false;
   }
   CHAR szPath[MAX_PATH];
-  if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath))) {
+  if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0,
+                                 szPath))) {
     const std::string pdata(szPath);
     for (const char* dir : kProgramDataDirs) {
       // Within each directory: pagespeed.config before iiswebspeed.config

@@ -21,19 +21,19 @@ WinHTTP::WinHTTP()
 	// endEvent is set whenever no WinHTTP handle of this client is open, so
 	// Wait(), CleanUp() and the destructor return at once for a client that
 	// never started a request, or whose request failed before opening one.
-	endEvent=CreateEventA(NULL,TRUE,TRUE,NULL);
-	session=NULL;
-	requestHandle=NULL;
-	connectSession=NULL;
+	endEvent=CreateEventA(nullptr,TRUE,TRUE,nullptr);
+	session=nullptr;
+	requestHandle=nullptr;
+	connectSession=nullptr;
 	firstError=0;
-	tempbuf=NULL;
+	tempbuf=nullptr;
 	tempbufSize=0;
 	resolveTimeout=32000;
 	connectTimeout=30000;
 	sendTimeout=35000;
 	receiveTimeout=30000;
 	totalTimeout=75000;
-	eventhandler=NULL;
+	eventhandler=nullptr;
 	status=WinHTTPStatus::NotStarted;
 	allow_self_signed_=false;
 	loopback_pinned_=false;
@@ -84,19 +84,19 @@ void WinHTTP::OnHandleClosing(HINTERNET handle) {
 	if (handle==requestHandle) 
 	{
 		//std::cout << "closing connectsession" << std::endl;
-		requestHandle=NULL;
+		requestHandle=nullptr;
 		WinHttpCloseHandle(connectSession);
 	}
 	if (handle==connectSession) 
 	{
 		//std::cout << "closing session" << std::endl;
-		connectSession=NULL;
+		connectSession=nullptr;
 		WinHttpCloseHandle(session);
 	}
 	if (handle==session) 
 	{
 		//std::cout << "setting event" << std::endl;
-		session=NULL;
+		session=nullptr;
 		if (retry_scheduled_ && status!=WinHTTPStatus::Cancelled)
 		{
 			// The pinned loopback attempt failed before any response
@@ -130,7 +130,7 @@ void WinHTTP::OnHeadersAvailable()
 		
 	DWORD dwSize=0;
 	if (!WinHttpQueryHeaders( requestHandle, WINHTTP_QUERY_RAW_HEADERS_CRLF,
-                            WINHTTP_HEADER_NAME_BY_INDEX, NULL,
+                            WINHTTP_HEADER_NAME_BY_INDEX, nullptr,
                             &dwSize, WINHTTP_NO_HEADER_INDEX))
 	{
 		DWORD err=GetLastError();
@@ -176,7 +176,7 @@ void WinHTTP::OnHeadersAvailable()
 	// Async session: the available-byte count arrives via
 	// WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE, so lpdwNumberOfBytesAvailable must be
 	// NULL -- WinHTTP does not write it, and would race the callback if it did.
-	if (!WinHttpQueryDataAvailable(requestHandle,NULL))
+	if (!WinHttpQueryDataAvailable(requestHandle,nullptr))
 	{
 		diag_+="|qda_hdrs_fail="+std::to_string((unsigned long)GetLastError());
 		SetError(1014,GetLastError());
@@ -197,7 +197,7 @@ void WinHTTP::OnReadComplete(char *buffer,DWORD length)
 		return;
 	}
 	if (eventhandler) eventhandler->OnData(buffer,length,Content);
-	if (!WinHttpQueryDataAvailable(requestHandle,NULL))
+	if (!WinHttpQueryDataAvailable(requestHandle,nullptr))
 	{
 		diag_+="|qda_read_fail="+std::to_string((unsigned long)GetLastError());
 		SetError(1014,GetLastError());
@@ -250,7 +250,7 @@ void WinHTTP::OnSendRequestComplete()
 	// REQUEST_ERROR api=API_SEND_REQUEST err=12017 OPERATION_CANCELLED
 	// after headers already arrived, with no handle closed by this class
 	// (every CleanUp path was instrumented and silent).
-	if (!WinHttpReceiveResponse(requestHandle,NULL))
+	if (!WinHttpReceiveResponse(requestHandle,nullptr))
 	{
 		diag_+="|recvresp_fail="+std::to_string((unsigned long)GetLastError());
 		dwResult=1000;
@@ -294,7 +294,7 @@ void WinHTTP::OnDataAvailable(DWORD bytes)
 		tempbuf = new char[bytes];
 		tempbufSize = bytes;
 	}
-	if (!WinHttpReadData(requestHandle,(LPVOID) tempbuf,bytes,NULL))
+	if (!WinHttpReadData(requestHandle,(LPVOID) tempbuf,bytes,nullptr))
 	{
 		diag_+="|readdata_fail="+std::to_string((unsigned long)GetLastError());
 		SetError(1013,GetLastError());
@@ -530,7 +530,7 @@ bool WinHTTP::StartRequest()
 
 	
 	WinHTTP *thisptr=this;
-	session=WinHttpOpen(useragent.c_str(),WINHTTP_ACCESS_TYPE_NO_PROXY,NULL,NULL,WINHTTP_FLAG_ASYNC);
+	session=WinHttpOpen(useragent.c_str(),WINHTTP_ACCESS_TYPE_NO_PROXY,nullptr,nullptr,WINHTTP_FLAG_ASYNC);
 	WinHttpSetTimeouts(session,resolveTimeout,connectTimeout,sendTimeout,receiveTimeout);
 	if (session)
 	{
@@ -538,7 +538,7 @@ bool WinHTTP::StartRequest()
 		WinHttpSetOption(session,WINHTTP_OPTION_CONTEXT_VALUE,&thisptr,sizeof(thisptr));
 		WinHttpSetOption(session,WINHTTP_OPTION_REDIRECT_POLICY,&setting,sizeof(setting));
 		
-		WINHTTP_STATUS_CALLBACK callback=WinHttpSetStatusCallback(session, (WINHTTP_STATUS_CALLBACK) ASyncWinHTTP::WinHttpCallback,WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS|WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS,NULL);
+		WINHTTP_STATUS_CALLBACK callback=WinHttpSetStatusCallback(session, (WINHTTP_STATUS_CALLBACK) ASyncWinHTTP::WinHttpCallback,WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS|WINHTTP_CALLBACK_FLAG_ALL_NOTIFICATIONS,0);
 
 		// Security: removed OutputDebugStringW that leaked connection details
 
@@ -556,7 +556,7 @@ bool WinHTTP::StartRequest()
 			{
 				requestFlags|=WINHTTP_FLAG_SECURE;
 			}
-			requestHandle=WinHttpOpenRequest(connectSession,L"GET",urlpath.c_str(),NULL,NULL,NULL,requestFlags);
+			requestHandle=WinHttpOpenRequest(connectSession,L"GET",urlpath.c_str(),nullptr,nullptr,nullptr,requestFlags);
 			if (hostHeader != "") {
 				std::wstring w_host = s2ws(hostHeader);
 				w_host = L"Host: " + w_host;
@@ -586,7 +586,7 @@ bool WinHTTP::StartRequest()
 					itheaders++;
 					itvalues++;
 				}
-				bool result=WinHttpSendRequest(requestHandle,WINHTTP_NO_ADDITIONAL_HEADERS,0,NULL,NULL,0,(DWORD_PTR) this);
+				bool result=WinHttpSendRequest(requestHandle,WINHTTP_NO_ADDITIONAL_HEADERS,0,nullptr,0,0,(DWORD_PTR) this);
 				if (!result)
 				{
 					firstError=GetLastError();
@@ -663,7 +663,7 @@ WinHTTP::~WinHTTP()
 	// Only safe after the endEvent wait: a cancelled in-flight WinHttpReadData may
 	// still own this buffer.
 	delete [] tempbuf;
-	tempbuf=NULL;
+	tempbuf=nullptr;
 	tempbufSize=0;
 	
 }

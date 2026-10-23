@@ -228,7 +228,7 @@ namespace net_instaweb
 		}
 
 		const GoogleString* beacon_url;
-		if (pHttpContext->GetRequest()->GetRawHttpRequest()->pSslInfo != NULL) {
+		if (pHttpContext->GetRequest()->GetRawHttpRequest()->pSslInfo != nullptr) {
 			beacon_url = &(global_options->beacon_url().https);
 		}
 		else {
@@ -250,11 +250,11 @@ namespace net_instaweb
 		DWORD bufferSize = kMaxPostSizeBytes;
 		void * pvRequestBody = pHttpContext->AllocateRequestMemory(kMaxPostSizeBytes + 1); //+1 for \0
 
-		if (NULL == pvRequestBody)
+		if (nullptr == pvRequestBody)
 		{
 			OutputDebugStringA("failed to allocate request memory for the post body");
 			DCHECK(false);
-			return NULL;
+			return nullptr;
 		}
 		while (pHttpContext->GetRequest()->GetRemainingEntityBytes() != 0)
 		{
@@ -262,10 +262,10 @@ namespace net_instaweb
 			{
 				OutputDebugStringA("beacon post too large, bailing out");
 				//DCHECK(false);
-				return NULL;
+				return nullptr;
 			}
 			HRESULT hr = pHttpContext->GetRequest()->ReadEntityBody(
-				((char *)pvRequestBody) + pos, bufferSize, false, &cbBytesReceived, NULL);
+				((char *)pvRequestBody) + pos, bufferSize, false, &cbBytesReceived, nullptr);
 
 
 			if (FAILED(hr))
@@ -275,7 +275,7 @@ namespace net_instaweb
 				{
 					OutputDebugStringA("failed to allocate request memory for the post body");
 					DCHECK(false);
-					return NULL;
+					return nullptr;
 				}
 				pos += cbBytesReceived;
 				break;
@@ -388,7 +388,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   // event loop.
   std::unique_ptr<DaemonServeReader> reader(
       MakeDaemonServeReaderIfReady(server_context->daemon_adapter()));
-  if (reader == NULL) {
+  if (reader == nullptr) {
     // Reaching this at all means the daemon owns the site, so a null reader
     // is not "no daemon configured": it is this worker process having no
     // usable handle on the volume. Counted and said, or a dead volume would
@@ -398,7 +398,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
         "in-place serve: no usable handle on the optimizer daemon's cache "
         "volume in this worker process: %s",
         request_context->gurl()->spec_c_str());
-    if (serve_stats != NULL) {
+    if (serve_stats != nullptr) {
       serve_stats->Record(kPsServeClassOriginalSkew);
     }
     stats->ipro_daemon_fallthrough()->Add(1);
@@ -411,7 +411,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   const DaemonServeDecision decision =
       reader->Serve(serve_request, server_context->timer()->NowMs() / 1000);
 
-  if (serve_stats != NULL) {
+  if (serve_stats != nullptr) {
     serve_stats->Record(decision.serve_class);
   }
 
@@ -447,7 +447,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
     if (decision.stale_variant_expired_by_age) {
       DaemonAdapter* adapter = server_context->daemon_adapter();
       GoogleString option_context, option_signature;
-      if (adapter != NULL && adapter->abi() != NULL && options != NULL &&
+      if (adapter != nullptr && adapter->abi() != nullptr &&
+          options != nullptr &&
           OptionContext::Compute(*options, &option_context,
                                  &option_signature) ==
               OptionContextStatus::kOk) {
@@ -466,7 +467,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   IisServeResponse response;
   ComposeIisServeResponse(
       decision,
-      IisCompressibleMediaType(ServeCompressorMediaType(decision, NULL)),
+      IisCompressibleMediaType(ServeCompressorMediaType(decision, nullptr)),
       head_request, &response);
 
   // The body is copied out of the peer's result before the reader goes -- the
@@ -474,12 +475,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   // not this frame: the write below hands the buffer to IIS, which may still
   // be reading it when this function has returned, and every other write path
   // on this port allocates the same way.
-  char* body = NULL;
+  char* body = nullptr;
   const size_t body_size = response.has_body ? response.body.size() : 0;
   if (response.has_body && body_size > 0) {
     body = static_cast<char*>(http_context->AllocateRequestMemory(
         static_cast<DWORD>(body_size)));
-    if (body == NULL) {
+    if (body == nullptr) {
       // Nothing has been written yet, so the request can still go to the
       // origin and be recorded: decline rather than answer with nothing.
       stats->ipro_daemon_fallthrough()->Add(1);
@@ -520,13 +521,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
     iis_response->SetHeader(HttpAttributes::kContentLength, length.c_str(),
                             static_cast<USHORT>(length.size()), TRUE);
   }
-  if (response.has_body && body != NULL) {
+  if (response.has_body && body != nullptr) {
     WriteResponseMessage(http_context, body, body_size, true);
   }
   // The peer measures its saving on the bytes that actually went out, so a
   // hit is recorded on the body legs only, and only for an entry the worker
   // produced with an origin length to measure against.
-  if (serve_stats != NULL && response.has_body &&
+  if (serve_stats != nullptr && response.has_body &&
       decision.serve_class == kPsServeClassOptimized &&
       decision.worker_processed && decision.origin_content_length != 0) {
     // A serve is attributed to a host name only when the site's
@@ -557,7 +558,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   if (decision.fallback_hit) {
     DaemonAdapter* adapter = server_context->daemon_adapter();
     GoogleString option_context, option_signature;
-    if (adapter != NULL && adapter->abi() != NULL && options != NULL &&
+    if (adapter != nullptr && adapter->abi() != nullptr && options != nullptr &&
         OptionContext::Compute(*options, &option_context, &option_signature) ==
             OptionContextStatus::kOk) {
       DaemonServeFallbackRenotify(
@@ -581,13 +582,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// We set this in our global prebegin request hook, in an attempt to beat
 		// any other modules/filters that modify the url
 		pHttpContext->GetRootContext()->GetServerVariable("X-PRISTINE-URL", &tmpx, &len);
-		if (tmpx == NULL) {
+		if (tmpx == nullptr) {
 			log(pHttpContext, "Missing X-PRISTINE-URL -> retry on raw http request url..");
 			tmpx = pHttpContext->GetRootContext()->GetRequest()->GetRawHttpRequest()->CookedUrl.pFullUrl;
 		}
 		// Note: we have actually seen this happen at Lee's machine.
 		const wchar_t* wstr = tmpx;
-		if (wstr == NULL)
+		if (wstr == nullptr)
 		{
 			log(pHttpContext, "CookedUrl was NULL. Bail!");
 			return RQ_NOTIFICATION_CONTINUE;
@@ -604,14 +605,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
-		int url_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, 0, NULL);
+		int url_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, 0, nullptr);
 		if (url_len == 0)
 		{
 			log(pHttpContext, "Could not convert url 1");
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 		char *url = (char*)pHttpContext->AllocateRequestMemory(url_len + 32); // we could add https or a port
-		url_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, url, url_len, 0, NULL);
+		url_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, url, url_len, 0, nullptr);
 		if (url_len == 0)
 		{
 			log(pHttpContext, "Could not convert url 2");
@@ -633,9 +634,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 		StringPiece xf = StringPiece(pHttpContext->GetRequest()->GetHeader("X-Forwarded-Proto"));
 
-		bool https = pHttpContext->GetRequest()->GetRawHttpRequest()->pSslInfo != NULL;
+		bool https = pHttpContext->GetRequest()->GetRawHttpRequest()->pSslInfo != nullptr;
 		int port = ntohs(((PSOCKADDR_IN)pHttpContext->GetRequest()->GetLocalAddress())->sin_port);
-		bool noport = (https && port == 443) || (!https && port == 80) || xf != NULL;
+		bool noport = (https && port == 443) || (!https && port == 80) || xf != nullptr;
 		if (noport) {
 			int cc = 0;
 			int n_idx = 0;
@@ -659,7 +660,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			log(pHttpContext, "noport processing url [%s]", url);
 		}
 
-		if (xf != NULL && xf.length() <= 6) {
+		if (xf != nullptr && xf.length() <= 6) {
 			StringPiece url_sp(url);
 			StringPiece::size_type colon_pos = url_sp.find(":");
 			if (colon_pos != StringPiece::npos)
@@ -698,7 +699,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		GoogleString checkpath = FindConfigFile(ws2s(pHttpContext->GetApplication()->GetApplicationPhysicalPath()));
 		IisProcessContext* failed_pc = nullptr;
 		IisModuleRequestContext* ctx = CreateRequestContext(pHttpContext, checkpath, url, url_len, gurl, &failed_pc);
-		if (ctx == NULL) {
+		if (ctx == nullptr) {
 			if (!IsLocalRequest(pHttpContext)) {
 				log(pHttpContext, "OnBeginRequest: Failed to create a request context, bail");
 				delete gurl;
@@ -900,9 +901,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (!accept_post && StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "POST")){
 			log(pHttpContext, "POST to non-beacon url - bail");
 			innerContext->set_leave(true);
-			if (innerContext->base_fetch() != NULL) {
+			if (innerContext->base_fetch() != nullptr) {
 				delete innerContext->base_fetch();
-				innerContext->set_base_fetch(NULL);
+				innerContext->set_base_fetch(nullptr);
 			}
 			return RQ_NOTIFICATION_CONTINUE;
 		}
@@ -910,9 +911,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (!is_resource && IisModuleBaseFetch::fetchount > 250) {
 			log(pHttpContext, "Too many outstanding rewrites - bail");
 			innerContext->set_leave(true);
-			if (innerContext->base_fetch() != NULL) {
+			if (innerContext->base_fetch() != nullptr) {
 				delete innerContext->base_fetch();
-				innerContext->set_base_fetch(NULL);
+				innerContext->set_base_fetch(nullptr);
 			}
 			return RQ_NOTIFICATION_CONTINUE;
 		}
@@ -924,7 +925,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 		auto server_context = innerContext->server_context();
 		// If null, that means use global options.
-		net_instaweb::RewriteOptions* tmp = NULL;
+		net_instaweb::RewriteOptions* tmp = nullptr;
 		std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders);
 		IisModuleBaseFetch::PopulateRequestHeaders(pHttpContext, request_headers.get());
 		// TODO(oschaaf): this is a relatively expensive hack. Since the IPRO change, it now
@@ -935,7 +936,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		GoogleString pagespeed_query_params;
 		GoogleString pagespeed_option_cookies;
 		bool ok = true;
-		ok = determine_options(pHttpContext, innerContext, request_headers.get(), NULL, &tmp, innerContext->GetPagespeedRequestContext(),
+		ok = determine_options(pHttpContext, innerContext, request_headers.get(), nullptr, &tmp, innerContext->GetPagespeedRequestContext(),
 		     &xgurl, &pagespeed_query_params, &pagespeed_option_cookies);
 		std::unique_ptr<net_instaweb::RewriteOptions> custom_options(tmp);
 		if (!ok)
@@ -945,9 +946,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			{
 				innerContext->set_leave(true);
 			}
-			if (innerContext->base_fetch() != NULL) {
+			if (innerContext->base_fetch() != nullptr) {
 				delete innerContext->base_fetch();
-				innerContext->set_base_fetch(NULL);
+				innerContext->set_base_fetch(nullptr);
 			}
 			return RQ_NOTIFICATION_CONTINUE;
 		}
@@ -966,7 +967,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		}
 
 		net_instaweb::RewriteOptions* options;
-		if (custom_options.get() == NULL)
+		if (custom_options.get() == nullptr)
 		{
 			options = server_context->global_options();
 		}
@@ -997,7 +998,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			query_params.ParseFromUrl(*ctx->GetInnerContext()->gurl());
 			innerContext->set_leave(true);
 			innerContext->GetPagespeedRequestContext()->set_options(options->ComputeHttpOptions());
-			ctx->set_base_fetch(new IisModuleBaseFetch(pHttpContext, FetchType::kResource, innerContext->process_context()->handler(), innerContext->GetPagespeedRequestContext(), NULL));
+			ctx->set_base_fetch(new IisModuleBaseFetch(pHttpContext, FetchType::kResource, innerContext->process_context()->handler(), innerContext->GetPagespeedRequestContext(), nullptr));
 
 			StdTimer timer;
 			int64 now_ms = timer.NowMs();
@@ -1036,7 +1037,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				if (StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(),
 				                    "POST")) {
 					const char* body = SyncReadPostBody(pHttpContext);
-					if (body != NULL) {
+					if (body != nullptr) {
 						request_body = StringPiece(body);
 					}
 				}
@@ -1046,7 +1047,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					response_category == RequestRouting::kGlobalAdmin,
 					*ctx->GetInnerContext()->gurl(),
 					query_params,
-					custom_options == NULL ? server_context->config()
+					custom_options == nullptr ? server_context->config()
 					: custom_options.get(),
 					ctx->base_fetch(),
 					request_body);
@@ -1066,7 +1067,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		{
 			innerContext->set_leave(true);
 			innerContext->GetPagespeedRequestContext()->set_options(options->ComputeHttpOptions());
-			ctx->set_base_fetch(new IisModuleBaseFetch(pHttpContext, FetchType::kResource, innerContext->process_context()->handler(), innerContext->GetPagespeedRequestContext(), NULL));
+			ctx->set_base_fetch(new IisModuleBaseFetch(pHttpContext, FetchType::kResource, innerContext->process_context()->handler(), innerContext->GetPagespeedRequestContext(), nullptr));
 
 			std::unique_ptr<ProxyFetchPropertyCallbackCollector>
 				property_callback(
@@ -1134,7 +1135,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			if (!strcmp(pHttpContext->GetRequest()->GetHttpMethod(), "POST"))
 			{
 				const char* data = SyncReadPostBody(pHttpContext);
-				if (data != NULL)
+				if (data != nullptr)
 				{
 					beacon_post_data = StringPiece(data);
 				}
@@ -1220,7 +1221,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			//ctx->base_fetch()->SetRequestHeadersTakingOwnership(request_headers.release());
 			// Do not store driver in request_context, it's not safe.
 			RewriteDriver* driver;
-			if (custom_options.get() == NULL) {
+			if (custom_options.get() == nullptr) {
 				driver = innerContext->server_context()->NewRewriteDriver(
 					innerContext->base_fetch()->request_context());
 			}
@@ -1310,7 +1311,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 
 
-		if (pHttpResponse == NULL)
+		if (pHttpResponse == nullptr)
 		{
 			log(pHttpContext, "OnSendResponse - no pHttpResponse, bail");
 			DCHECK(false);
@@ -1320,7 +1321,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		bool more_data = (pProvider->GetFlags() & HTTP_SEND_RESPONSE_FLAG_MORE_DATA) != 0;
 		bool mx = pHttpResponse->GetHeadersSuppressed();
 		HTTP_RESPONSE *pResponseStruct = pHttpResponse->GetRawHttpResponse();
-		if (pResponseStruct == NULL)
+		if (pResponseStruct == nullptr)
 		{
 			log(pHttpContext, "OnSendResponse - no pResponseStruct, bail");
 			DCHECK(false);
@@ -1329,7 +1330,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 		if (!pHttpContext->GetConnection()->IsConnected()) {
 			// stop rewriting for disconnected clients.
-			if (innerContext->proxy_fetch() != NULL) {
+			if (innerContext->proxy_fetch() != nullptr) {
 				log(pHttpContext, "SendResponse -> Connection not connected - bail");
 				// proxy_fetch()->Done() can synchronously tear the request down
 				// and free innerContext (HandleDone -> IndicateCompletion ->
@@ -1357,7 +1358,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				return RQ_NOTIFICATION_CONTINUE;
 			}
 
-			if (innerContext->proxy_fetch() == NULL && !innerContext->end_request_seen())
+			if (innerContext->proxy_fetch() == nullptr && !innerContext->end_request_seen())
 			{
 				USHORT ct_len;
 				PCSTR ct = pHttpContext->GetResponse()->GetHeader(HttpHeaderContentType, &ct_len);
@@ -1370,7 +1371,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					// We don't know what this request is, but we only want to send html through
 					// to pagespeed.  Check the content type header and find out.
 					const net_instaweb::ContentType* content_type = net_instaweb::MimeTypeToContentType(scontent_type);
-					if (content_type != NULL && content_type->IsHtmlLike())
+					if (content_type != nullptr && content_type->IsHtmlLike())
 					{
 						StringPiece xmicrosoftajax = StringPiece(pHttpContext->GetRequest()->GetHeader("X-MicrosoftAjax"));
 						StringPiece xrequestedwith = StringPiece(pHttpContext->GetRequest()->GetHeader("X-Requested-With"));
@@ -1391,7 +1392,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					log(pHttpContext, "OnSendResponse --- no content type");
 				}
 
-				if (!innerContext->rewrite_html() && innerContext->recorder() == NULL) {
+				if (!innerContext->rewrite_html() && innerContext->recorder() == nullptr) {
 					log(pHttpContext, "OnSendResponse --- no recorder, no html - bail");
 					innerContext->set_leave(true);
 					return RQ_NOTIFICATION_CONTINUE;
@@ -1423,28 +1424,28 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			// chunks are read into request memory up front and replaced by memory
 			// chunks, so a file that changes size between its length lookup and
 			// the read can never leave a hole in what the rewriter sees.
-			if (innerContext->proxy_fetch() == NULL &&
+			if (innerContext->proxy_fetch() == nullptr &&
 				(!AllEntityChunksReadable(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount) ||
 				 !ConvertFileChunksToMemory(pResponseStruct->pEntityChunks, pResponseStruct->EntityChunkCount,
 					MAXDWORD, &AllocateResponseChunk, pHttpContext)))
 			{
 				log(pHttpContext, "OnSendResponse --- response has chunks that cannot be read, bail");
-				if (innerContext->recorder() != NULL) {
+				if (innerContext->recorder() != nullptr) {
 					innerContext->recorder()->Fail();
-					innerContext->recorder()->DoneAndSetHeaders(NULL, false);
-					innerContext->set_recorder(NULL);
+					innerContext->recorder()->DoneAndSetHeaders(nullptr, false);
+					innerContext->set_recorder(nullptr);
 				}
 				innerContext->set_leave(true);
 				return RQ_NOTIFICATION_CONTINUE;
 			}
 
 			// TODO(oschaaF): if first time, and we want to rewrite html, etc
-			if (innerContext->rewrite_html() && innerContext->proxy_fetch() == NULL && !innerContext->end_request_seen())
+			if (innerContext->rewrite_html() && innerContext->proxy_fetch() == nullptr && !innerContext->end_request_seen())
 			{
-				if (innerContext->recorder() != NULL) {
+				if (innerContext->recorder() != nullptr) {
 					innerContext->recorder()->Fail();
-					innerContext->recorder()->DoneAndSetHeaders(NULL, false);
-					innerContext->set_recorder(NULL);
+					innerContext->recorder()->DoneAndSetHeaders(nullptr, false);
+					innerContext->set_recorder(nullptr);
 					// release any pagespeed request pointer we have from IPRO here.
 				}
 
@@ -1457,7 +1458,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				size_t len = 0;
 				for (int c = 0; c < pResponseStruct->EntityChunkCount; c++)
 				{
-					char * data = NULL;
+					char * data = nullptr;
 
 
 					HTTP_DATA_CHUNK *currentchunk = pResponseStruct->pEntityChunks + c;
@@ -1489,7 +1490,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				ResponseHeaders hdrs;
 				{
 					HTTP_RESPONSE *resp = pResponseStruct;
-					for (int i = resp->Headers.UnknownHeaderCount - 1; i >= 0 && resp->Headers.pUnknownHeaders != NULL; i--)
+					for (int i = resp->Headers.UnknownHeaderCount - 1; i >= 0 && resp->Headers.pUnknownHeaders != nullptr; i--)
 					{
 						HTTP_UNKNOWN_HEADER *hdr = &resp->Headers.pUnknownHeaders[i];
 						std::string header(hdr->pName);
@@ -1509,7 +1510,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				}
 
 				// If null, that means use global options.
-				net_instaweb::RewriteOptions* tmp = NULL;
+				net_instaweb::RewriteOptions* tmp = nullptr;
 				GoogleString pagespeed_query_params;
 				GoogleString pagespeed_option_cookies;
 
@@ -1524,7 +1525,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					log(pHttpContext, "determine options failed!");
 					innerContext->set_leave(true);
 					delete innerContext->base_fetch();
-					innerContext->set_base_fetch(NULL);
+					innerContext->set_base_fetch(nullptr);
 					return RQ_NOTIFICATION_FINISH_REQUEST;
 				}
 
@@ -1542,7 +1543,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				}
 
 				net_instaweb::RewriteOptions* options;
-				if (custom_options.get() == NULL)
+				if (custom_options.get() == nullptr)
 				{
 					options = innerContext->server_context()->global_options();
 
@@ -1559,7 +1560,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				{
 					log(pHttpContext, "pagespeed disabled");
 					delete innerContext->base_fetch();
-					innerContext->set_base_fetch(NULL);
+					innerContext->set_base_fetch(nullptr);
 					innerContext->set_leave(true);
 					return RQ_NOTIFICATION_CONTINUE;
 				}
@@ -1579,7 +1580,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						{
 							log(pHttpContext, "OnSendResponse ---  content is already rewritten, don't rewrite");
 							delete innerContext->base_fetch();
-							innerContext->set_base_fetch(NULL);
+							innerContext->set_base_fetch(nullptr);
 							innerContext->set_leave(true);
 							return RQ_NOTIFICATION_CONTINUE;
 						}
@@ -1588,22 +1589,22 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						{
 							log(pHttpContext, "OnSendResponse ---  http response status code <> 200, don't rewrite");
 							delete innerContext->base_fetch();
-							innerContext->set_base_fetch(NULL);
+							innerContext->set_base_fetch(nullptr);
 							innerContext->set_leave(true);
 							return RQ_NOTIFICATION_CONTINUE;
 						}
 
-						if (content_encoding.pRawValue != NULL && content_encoding.RawValueLength > 0)
+						if (content_encoding.pRawValue != nullptr && content_encoding.RawValueLength > 0)
 						{
 							GoogleString encoding;
 							GzipInflater* inflater =
 								NewContentEncodingInflater(content_encoding, &encoding);
 
-							if (inflater == NULL)
+							if (inflater == nullptr)
 							{
 								log(pHttpContext, "OnSendResponse ---  unknown encoding %s", encoding.c_str());
 								delete innerContext->base_fetch();
-								innerContext->set_base_fetch(NULL);
+								innerContext->set_base_fetch(nullptr);
 								
 								innerContext->set_leave(true);
 								return RQ_NOTIFICATION_CONTINUE;
@@ -1617,7 +1618,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 							}
 						}
 
-						if (transfer_encoding.pRawValue != NULL || transfer_encoding.RawValueLength > 0)
+						if (transfer_encoding.pRawValue != nullptr || transfer_encoding.RawValueLength > 0)
 						{
 							innerContext->set_chunked(true);
 							pHttpContext->GetResponse()->DeleteHeader("Transfer-Encoding");
@@ -1638,7 +1639,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					innerContext->base_fetch()));
 
 
-				if (custom_options.get() == NULL)
+				if (custom_options.get() == nullptr)
 				{
 					driver = innerContext->server_context()->NewRewriteDriver(ctx);
 				}
@@ -1655,7 +1656,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				ProxyFetch* f = innerContext->server_context()->fetch_factory()->CreateNewProxyFetch(
 					innerContext->gurl()->Spec().as_string(), innerContext->base_fetch(), driver,
 					property_callback.release() /* property_callback */,
-					NULL /* original_content_fetch */);
+					nullptr /* original_content_fetch */);
 
 				innerContext->set_proxy_fetch(f);
 				log(pHttpContext, "OnSendResponse ---  proxy fetch set - [%p]", innerContext->proxy_fetch());
@@ -1676,7 +1677,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			// authentication fact into the request properties and can
 			// still record a public response to an authenticated request;
 			// this port refuses the whole recording instead.
-			if (innerContext->recorder() != NULL) {
+			if (innerContext->recorder() != nullptr) {
 				if (IisRequestIsAuthorized(ReadIisAuthFacts(pHttpContext))) {
 					// One line per refused recording, through the site's
 					// handler so an operator can see why an authenticated
@@ -1688,19 +1689,19 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						"not recorded: %s",
 						innerContext->gurl()->spec_c_str());
 					innerContext->recorder()->Fail();
-					innerContext->recorder()->DoneAndSetHeaders(NULL, false);
-					innerContext->set_recorder(NULL);
+					innerContext->recorder()->DoneAndSetHeaders(nullptr, false);
+					innerContext->set_recorder(nullptr);
 				}
 			}
 
-			if (pProvider->GetHeadersBeingSent() && innerContext->recorder() != NULL)
+			if (pProvider->GetHeadersBeingSent() && innerContext->recorder() != nullptr)
 			{
 				ResponseHeaders response_headers;
 				response_headers.SetDate(innerContext->server_context()->timer()->NowMs());
 				IisModuleBaseFetch::PopulateResponseHeaders(pHttpContext, &response_headers);
 				GoogleString s;
 				StringWriter sw(&s);
-				response_headers.WriteAsHttp(&sw, NULL);
+				response_headers.WriteAsHttp(&sw, nullptr);
 				if (response_headers.status_code() == 200) {
 					log(pHttpContext, "IPRO->consider response headers: %s", s.c_str());
 					// kFullHeaders only on this port: the headers are
@@ -1717,8 +1718,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					// opportunity. No seriuous consequences here AFAICT, so low priority.
 					log(pHttpContext, "IPRO-> abort recording due to status <> 200 (%d)", response_headers.status_code());
 					innerContext->recorder()->Fail();
-					innerContext->recorder()->DoneAndSetHeaders(NULL, false);
-					innerContext->set_recorder(NULL);
+					innerContext->recorder()->DoneAndSetHeaders(nullptr, false);
+					innerContext->set_recorder(nullptr);
 
 				}
 			}
@@ -1728,7 +1729,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 			for (int c = 0; c < pResponseStruct->EntityChunkCount; c++)
 			{
-				char * data = NULL;
+				char * data = nullptr;
 				size_t len=0;
 				bool unreadable = false;
 
@@ -1757,7 +1758,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					if (read_ok && file_length > 0)
 					{
 						data = (char*)pHttpContext->AllocateRequestMemory((DWORD)file_length);
-						read_ok = data != NULL &&
+						read_ok = data != nullptr &&
 							SUCCEEDED(ReadFileChunkInto(*currentchunk, data, file_length, &file_read)) &&
 							file_read == file_length;
 					}
@@ -1780,14 +1781,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				{
 					innerContext->process_context()->handler()->Message(net_instaweb::kWarning,
 						"Could not read a response body chunk of [%s]", innerContext->url());
-					if (innerContext->proxy_fetch() == NULL)
+					if (innerContext->proxy_fetch() == nullptr)
 					{
 						// Nothing of this response has been consumed: let it go out
 						// unchanged.
-						if (innerContext->recorder() != NULL) {
+						if (innerContext->recorder() != nullptr) {
 							innerContext->recorder()->Fail();
-							innerContext->recorder()->DoneAndSetHeaders(NULL, false);
-							innerContext->set_recorder(NULL);
+							innerContext->recorder()->DoneAndSetHeaders(nullptr, false);
+							innerContext->set_recorder(nullptr);
 						}
 						innerContext->set_leave(true);
 						return RQ_NOTIFICATION_CONTINUE;
@@ -1817,12 +1818,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 								//request_context->base_fetch()->SetLastWrite(GetTickCount());
 								GzipInflater* inflater = request_context->inflater();
-								if (inflater == NULL)
+								if (inflater == nullptr)
 								{
-									if (innerContext->proxy_fetch() != NULL) {
+									if (innerContext->proxy_fetch() != nullptr) {
 										innerContext->proxy_fetch()->Write(StringPiece(datablock, datablocklength), innerContext->process_context()->handler());
 									}
-									if (innerContext->recorder() != NULL) {
+									if (innerContext->recorder() != nullptr) {
 										innerContext->recorder()->Write(StringPiece(datablock, datablocklength), innerContext->process_context()->handler());
 									}
 								}
@@ -1840,10 +1841,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 										}
 										else if (num_inflated_bytes > 0)
 										{
-											if (innerContext->proxy_fetch() != NULL) {
+											if (innerContext->proxy_fetch() != nullptr) {
 												innerContext->proxy_fetch()->Write(StringPiece(buf, num_inflated_bytes), innerContext->process_context()->handler());
 											}
-											if (innerContext->recorder() != NULL) {
+											if (innerContext->recorder() != nullptr) {
 												innerContext->recorder()->Write(StringPiece(buf, num_inflated_bytes), innerContext->process_context()->handler());
 											}
 
@@ -1865,19 +1866,19 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					} //for (int c=0;c<pResponseStruct->EntityChunkCount;c++)
 
 
-			if (!more_data && innerContext->recorder() != NULL)  {
+			if (!more_data && innerContext->recorder() != nullptr)  {
 				ResponseHeaders* response_headers = new ResponseHeaders();
 				response_headers->SetDate(innerContext->server_context()->timer()->NowMs());
 				IisModuleBaseFetch::PopulateResponseHeaders(pHttpContext, response_headers);
 				GoogleString s;
 				StringWriter sw(&s);
-				response_headers->WriteAsHttp(&sw, NULL);
+				response_headers->WriteAsHttp(&sw, nullptr);
 				log(pHttpContext, "IPRO recorded. Final response headers: %s", s.c_str());
 				innerContext->recorder()->DoneAndSetHeaders(response_headers, true);
-				innerContext->set_recorder(NULL);
+				innerContext->set_recorder(nullptr);
 			}
 
-			if (innerContext->proxy_fetch() != NULL)
+			if (innerContext->proxy_fetch() != nullptr)
 			{
 				if (true)
 				{
@@ -1965,21 +1966,21 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		{
 			IisModuleRequestContext* request_context =
 			    IisModuleRequestContext::GetRequestContext(pHttpContext);
-			if (request_context != NULL &&
-			    request_context->GetInnerContext() != NULL)
+			if (request_context != nullptr &&
+			    request_context->GetInnerContext() != nullptr)
 			{
 				IisModuleBaseFetch* bf = request_context->base_fetch();
-				if (bf != NULL && bf->HasActiveZeroCopyServe())
+				if (bf != nullptr && bf->HasActiveZeroCopyServe())
 				{
 					HRESULT completion_status =
-					    (pCompletionInfo != NULL)
+					    (pCompletionInfo != nullptr)
 					        ? pCompletionInfo->GetCompletionStatus()
 					        : S_OK;
 					return bf->OnZeroCopyCompletion(completion_status);
 				}
 			}
 		}
-		if (NULL != pCompletionInfo)
+		if (nullptr != pCompletionInfo)
 		{
 			// Create strings for completion information.
 			char szNotification[256] = "";
@@ -2198,26 +2199,26 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			// No process context — module-factory failed to even allocate
 			// one. Leave failed_pc null; caller falls back to the generic
 			// "startup-failed" page.
-			return NULL;
+			return nullptr;
 		}
 		if (!process_context->ok()) {
 			log(pHttpContext, "process_context->ok() returned false");
 			if (failed_pc != nullptr) {
 				*failed_pc = process_context;
 			}
-			return NULL;
+			return nullptr;
 		}
 
 		auto server_context = process_context->GetServerContext(id, gurl->Host().as_string().c_str(), gurl->EffectiveIntPort(),
 			path.c_str());
-		if (server_context == NULL) {
+		if (server_context == nullptr) {
 			log(pHttpContext, "process_context->GetServerContext() returned null");
 			// GetServerContext sets init_failure_kind_ on the diagnostic
 			// failure paths (PostConfig / cache path); surface that.
 			if (failed_pc != nullptr) {
 				*failed_pc = process_context;
 			}
-			return NULL;
+			return nullptr;
 		}
 
 

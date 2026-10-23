@@ -214,7 +214,7 @@ private:
 	 use_per_vhost_statistics_(true),
 	 use_native_fetcher_(process_context->settings()->use_native_fetcher),
 	 //iis_url_async_fetcher_(NULL),
-	 iis_shared_circular_buffer_(NULL),
+	 iis_shared_circular_buffer_(nullptr),
 	 iis_message_handler_(new IisMessageHandler(timer(), this->thread_system()->NewMutex())),
 	 iis_html_parse_message_handler_(new IisMessageHandler(timer(), this->thread_system()->NewMutex())),
 	 site_app_id_(process_context->site_app_id()), shut_down_(false)
@@ -234,7 +234,7 @@ private:
 		set_html_parse_message_handler(iis_html_parse_message_handler_);
 
 		// We can't support convert_meta_tags as we don't see the response body before we send out the headers.
-		system_options->ForbidFiltersByCommaSeparatedList("convert_meta_tags", NULL);
+		system_options->ForbidFiltersByCommaSeparatedList("convert_meta_tags", nullptr);
 		// we need to seal the system_options to prevent a debug dcheck
 		
 		system_options->ComputeSignature();
@@ -277,9 +277,9 @@ private:
 		message_handler()->Message( net_instaweb::kInfo, "IisRewriteDriverFactory::~IisRewriteDriverFactory()");
 		ShutDown();
 		//Sleep(100);
-		if (iis_shared_circular_buffer_ != NULL) {
+		if (iis_shared_circular_buffer_ != nullptr) {
 			//delete iis_shared_circular_buffer_;
-			iis_shared_circular_buffer_ = NULL;
+			iis_shared_circular_buffer_ = nullptr;
 		}
 	}
 
@@ -587,7 +587,7 @@ private:
 		// FetchHttps allow_self_signed: the curl-based system fetcher parses
 		// the https_options string; the WinHTTP fetcher has no curl, so detect
 		// the token here and pass it through to relax TLS validation when set.
-		bool allow_self_signed = config != NULL &&
+		bool allow_self_signed = config != nullptr &&
 			config->https_options().find("allow_self_signed") != GoogleString::npos;
 		if (use_native_fetcher_) {
 			message_handler()->Message(kInfo, "Allocating native fetcher");
@@ -641,7 +641,7 @@ private:
 
 	NamedLockManager* IisRewriteDriverFactory::DefaultLockManager() {
 		CHECK(false);
-		return NULL;
+		return nullptr;
 	}
 
 	RewriteOptions* IisRewriteDriverFactory::NewRewriteOptions() {
@@ -693,15 +693,15 @@ private:
 
 	ServerContext* IisRewriteDriverFactory::NewServerContext() {
 	  LOG(DFATAL) << "MakeIisServerContext should be used instead";
-	  return NULL;
+	  return nullptr;
 	}
 	void IisRewriteDriverFactory::ShutDownMessageHandlers() {
-	  iis_message_handler_->set_buffer(NULL);
-	  iis_html_parse_message_handler_->set_buffer(NULL);
+	  iis_message_handler_->set_buffer(nullptr);
+	  iis_html_parse_message_handler_->set_buffer(nullptr);
 	  for (IisMessageHandlerSet::iterator p =
 			   server_context_message_handlers_.begin();
 		   p != server_context_message_handlers_.end(); ++p) {
-		(*p)->set_buffer(NULL);
+		(*p)->set_buffer(nullptr);
 	  }
 	  server_context_message_handlers_.clear();
 	}

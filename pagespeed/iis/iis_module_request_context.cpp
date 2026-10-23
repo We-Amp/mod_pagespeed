@@ -24,7 +24,7 @@ namespace net_instaweb
 		, IisProcessContext* process_context, IisServerContext* server_context, int local_port, GoogleString local_ip_address)
 		:
 		hideacceptencoding_(false),
-		inflater_(NULL),
+		inflater_(nullptr),
 		empty_(false),
 		hasNextStatus(false)
 		
@@ -37,13 +37,13 @@ namespace net_instaweb
 		// a forward-proxy deployment can present an https URL over a plain
 		// http connection).
 		GoogleString local_scheme =
-			(pContext->GetRequest()->GetRawHttpRequest()->pSslInfo != NULL) ? "https" : "http";
+			(pContext->GetRequest()->GetRawHttpRequest()->pSslInfo != nullptr) ? "https" : "http";
 		requestContext_ = new IisInnerRequestContext(is_resource, url, url_len, gurl,this, process_context, server_context, local_port, local_ip_address, local_scheme);
 		GoogleString checkpath = FindConfigFile(ws2s(pContext->GetApplication()->GetApplicationPhysicalPath()));
 		requestContext_->SetSiteConfigFile(checkpath);
 	}
-	IisModuleRequestContext::IisModuleRequestContext() :requestContext_(NULL), empty_(true), pRawValueAcceptEncoding(NULL), pRawValueLengthAcceptEncoding(0),
-		inflater_(NULL),
+	IisModuleRequestContext::IisModuleRequestContext() :requestContext_(nullptr), empty_(true), pRawValueAcceptEncoding(nullptr), pRawValueLengthAcceptEncoding(0),
+		inflater_(nullptr),
 		hideacceptencoding_(false),
 		hasNextStatus(false)
 	{
@@ -66,14 +66,14 @@ namespace net_instaweb
 				{
 					IisModuleRequestContext* r = (IisModuleRequestContext*)(currentModuleContext);
 					if (r->empty())
-						return NULL;
+						return nullptr;
 					return r;
 				}
 			}
 
 			checkContext = checkContext->GetParentContext();
 		}
-		return NULL;
+		return nullptr;
 
 
 		/*
@@ -103,10 +103,10 @@ namespace net_instaweb
 			requestContext_->CleanupStoredContext();
 		}
 		requestContext_ = 0;
-		if (inflater_ != NULL)
+		if (inflater_ != nullptr)
 		{
 			delete inflater_;
-			inflater_ = NULL;
+			inflater_ = nullptr;
 		}
 		delete this;
 	}
@@ -133,7 +133,7 @@ namespace net_instaweb
 		if (pRawValueAcceptEncoding)
 		{
 			auto rr = c->GetRequest()->GetRawHttpRequest();
-			if (rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue == NULL)
+			if (rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue == nullptr)
 			{
 				rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue = pRawValueAcceptEncoding;
 				rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].RawValueLength = pRawValueLengthAcceptEncoding;
@@ -146,7 +146,7 @@ namespace net_instaweb
 	{
 		// When switching from the IPRO cache lookup to html rewriting, 
 		// a fresh base fetch will be set. We need to release to old one.
-		if (this->GetInnerContext()->base_fetch() != NULL) {
+		if (this->GetInnerContext()->base_fetch() != nullptr) {
 			this->GetInnerContext()->base_fetch()->ReleaseRef();
 		}
 		this->GetInnerContext()->set_base_fetch(base_fetcher);

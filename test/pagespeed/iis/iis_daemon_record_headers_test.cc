@@ -45,7 +45,7 @@ TEST(IisDaemonRecordHeadersTest, EveryKnownHeaderBookmarkPassesTheRule) {
                              sizeof(HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[0]);
        ++i) {
     const char* bookmark = HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[i];
-    if (bookmark == NULL) {
+    if (bookmark == nullptr) {
       continue;
     }
     std::vector<DaemonOriginHeader> headers;
@@ -66,11 +66,11 @@ TEST(IisDaemonRecordHeadersTest, EveryBookmarkedRealHeaderNamePassesTheRule) {
   for (size_t i = 0; i < sizeof(HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE) /
                              sizeof(HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[0]);
        ++i) {
-    if (HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[i] == NULL) {
+    if (HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[i] == nullptr) {
       continue;
     }
     const char* name = HTTP_HEADER_ID_STRINGS_RESPONSE[i];
-    if (name == NULL) {
+    if (name == nullptr) {
       continue;
     }
     std::vector<DaemonOriginHeader> headers;
