@@ -807,6 +807,9 @@ jobs:
           RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
           CACHE_ROOT="${HOME}/.cache/mps-release-bazel${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
+          # Cap the cache before the job uses it (7 days, 12G; the sizing is in
+          # tools/ci/prune-bazel-disk-cache.sh). It never fails the job.
+          bash "${GITHUB_WORKSPACE}/tools/ci/prune-bazel-disk-cache.sh" "${CACHE_ROOT}" 7d 12G || true
           echo "BAZEL_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
 
       # Debug info is kept (--strip=never) and stripped afterwards, the
