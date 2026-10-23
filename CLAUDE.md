@@ -396,6 +396,12 @@ bazel build --config=vendored --config=windows --config=clang-cl -c opt //pagesp
 .\install\iis\build_iis_package.ps1 -OutputDir C:\output
 ```
 
+The nginx module builds offline from the same vendored tree (`tools/vendor-deps.sh` fetches its dependencies, including `ed25519`, which only the nginx module uses):
+
+```bash
+bazel build --config=vendored --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
+```
+
 The `--config=vendored` flag uses the `vendor/repo-cache` repository cache and the vendored Cyclone source. The tarball is produced by `tools/vendor-deps.sh` in CI. The `git_repository` dep (Cyclone) is vendored — no SSH keys or network access needed.
 
 ### IIS Module Architecture
