@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
-goog.provide('pagespeed.CriticalImages');
+import * as pagespeedutils from '../js/js_utils.js';
 
-goog.require('goog.array');
-goog.require('goog.dom');
-goog.require('goog.dom.TagName');
-goog.require('pagespeedutils');
+// The public entry points are properties of window.pagespeed: the C++
+// filters emit inline calls to them by name (Run, checkImageForCriticality;
+// checkCriticalImages and getBeaconData are used by other scripts and by
+// tests).
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
+pagespeed.CriticalImages = pagespeed.CriticalImages || {};
 
 
 
@@ -50,7 +53,7 @@ pagespeed.CriticalImages.Beacon_ = function(
   /** @private {!Object.<string, boolean>} */
   this.imgLocations_ = {};
 
-  // TODO(jud): Consider using goog.structs.Set instead of using an array + map
+  // TODO(jud): Consider using a Set instead of using an array + map
   // combination below.
   /**
    * Array of critical image URL hash keys.
@@ -323,11 +326,11 @@ pagespeed.CriticalImages.Beacon_.prototype.checkCriticalImages_ = function() {
   // onload time.
   this.imgLocations_ = {};
   // Generate a list of the elements that can be considered critical.
-  var tags = [goog.dom.TagName.IMG, goog.dom.TagName.INPUT];
+  var tags = ['IMG', 'INPUT'];
   var elemsToCheck = [];
   for (var i = 0; i < tags.length; ++i) {
     elemsToCheck = elemsToCheck.concat(
-        goog.array.toArray(document.getElementsByTagName(tags[i])));
+        Array.from(document.getElementsByTagName(tags[i])));
   }
 
   // Return early if there aren't any items to check.
@@ -396,7 +399,7 @@ pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
   // TODO(poojatandon): Get elements for 'input' tag with type="image". This
   // currently doesn't work because input tags don't support naturalWidth and
   // naturalHeight.
-  var images = goog.dom.getElementsByTagName(goog.dom.TagName.IMG);
+  var images = document.getElementsByTagName('IMG');
   if (images.length == 0) { return {}; }
 
   // naturalWidth and naturalHeight is defined for all browsers except in IE
@@ -433,8 +436,8 @@ pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
 pagespeed.CriticalImages.beaconData_ = '';
 
 
-/** @private Object Beacon object */
-pagespeed.CriticalImages.beaconObj_;
+// pagespeed.CriticalImages.beaconObj_ holds the Beacon_ object once Run() has
+// been called.
 
 
 /**

@@ -66,6 +66,7 @@ ESBUILD_FILES=(
     client_domain_rewriter.js
     critical_css_beacon.js
     critical_css_loader.js
+    critical_images_beacon.js
     dedup_inlined_images.js
     defer_iframe.js
     delay_images.js
@@ -274,7 +275,6 @@ fi
 
 # --- closure_compiler_gen files (with dependency mode, use closure library) ---
 for entry in \
-    "critical_images_beacon.js:goog:pagespeed.CriticalImages:$CLOSURE_JS_UTILS" \
     "responsive_js.js:goog:pagespeed.Responsive:"; do
 
     IFS=':' read -r src_file entry_ns entry_point includes <<< "$entry"
