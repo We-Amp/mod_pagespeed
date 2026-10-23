@@ -93,7 +93,6 @@ sudo apt-get install -y \
     clang \
     lld \
     python3 \
-    default-jre-headless \
     apache2-dev \
     libmemcached-dev \
     redis-tools \

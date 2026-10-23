@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Building from source: the Closure Compiler is no longer a build
   dependency.** The rewriter's client scripts are built with a pinned
   esbuild, so building from source no longer needs Java or the Closure
-  Compiler. The shipped scripts and their public names are unchanged; the
+  Compiler. The shipped scripts behave the same and keep their public names; the
   deferred-JavaScript script is larger (about 8 KB raw, 1 KB gzipped).
 
 ### Fixed
