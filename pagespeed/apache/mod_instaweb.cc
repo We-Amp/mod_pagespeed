@@ -1801,10 +1801,9 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
                              "Comma-separated list of enabled filters"),
     APACHE_CONFIG_DIR_OPTION(kModPagespeedForbidFilters,
                              "Comma-separated list of forbidden filters"),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedExperimentVariable,
-        "Specify the custom variable slot with which to run experiments."
-        "Defaults to 1."),
+    APACHE_CONFIG_DIR_OPTION(kModPagespeedExperimentVariable,
+                             "Deprecated and ignored (configured the "
+                             "insert_ga filter)."),
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedExperimentSpec,
         "Configuration for one side of an experiment in the form: "
@@ -1829,10 +1828,9 @@ static const command_rec mod_pagespeed_filter_cmds[] = {
     APACHE_CONFIG_DIR_OPTION(
         kModPagespeedRunExperiment,
         "Run an experiment to test the effectiveness of rewriters."),
-    APACHE_CONFIG_DIR_OPTION(
-        kModPagespeedSpeedTracking,
-        "Increase the percentage of sites that have Google Analytics page "
-        "speed tracking"),
+    APACHE_CONFIG_DIR_OPTION(kModPagespeedSpeedTracking,
+                             "Deprecated and ignored (configured the "
+                             "insert_ga filter)."),
 
     // All one parameter deprecated options.
     APACHE_CONFIG_DIR_OPTION(
