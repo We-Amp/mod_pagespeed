@@ -13,7 +13,8 @@
 # shared caches: nginx proxy_cache and Varnish, both with their stock Vary
 # handling.  One URL is requested as a desktop browser, a phone and a desktop
 # with Save-Data: first directly, until each client is answered with a
-# stable optimized variant, then through each cache in that order, then once
+# stable optimized variant of its own (no two clients may share a baseline:
+# a client still served another client's bytes is not ready), then through each cache in that order, then once
 # more as the desktop as a positive control.  Two more caches carry the
 # device-class configurations the deployment docs give (nginx-device-class.conf,
 # varnish-device-class.vcl); through those, a second phone with a different
@@ -114,23 +115,40 @@ describe() {
 # as a selected variant (Vary), and its bytes held still for STABLE_POLLS
 # polls a second apart.  A client whose own variant is not written yet is
 # first served another one (a fallback) while the worker writes it, which
-# takes seconds for a large image; the bytes change when it lands.
+# takes seconds for a large image; the bytes change when it lands.  The
+# fallback also carries Age and Vary and holds still, so stability alone is
+# not enough: a client whose stable bytes equal an already-ready client's
+# baseline is still on the fallback and is polled until it diverges.
 for _ in $(seq 1 30); do
   in_origin curl -s --max-time 30 -o /dev/null http://localhost/ && break
   sleep 1
 done
+declare -A baseline
 for c in $CLIENTS; do
   deadline=$((SECONDS + READY_TIMEOUT_S))
-  last="" same=0
+  last="" same=0 shared=""
   while :; do
     fetch http://localhost/big.jpg "$c"
     if [ -n "$(header age)" ] && [ -n "$(header vary)" ]; then
       h=$(body_hash)
       if [ "$h" = "$last" ]; then same=$((same + 1)); else same=0; last=$h; fi
-      [ "$same" -ge "$STABLE_POLLS" ] && break
+      if [ "$same" -ge "$STABLE_POLLS" ]; then
+        shared=""
+        for o in "${!baseline[@]}"; do
+          [ "${baseline[$o]}" = "$h" ] && shared="$shared $o"
+        done
+        if [ -z "$shared" ]; then
+          baseline[$c]=$h
+          break
+        fi
+      fi
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "FAIL: $c got no stable optimized variant within ${READY_TIMEOUT_S}s"
+      if [ -n "$shared" ]; then
+        echo "FAIL: $c still serves the bytes of${shared} (hash $last) after ${READY_TIMEOUT_S}s"
+      else
+        echo "FAIL: $c got no stable optimized variant within ${READY_TIMEOUT_S}s"
+      fi
       exit 1
     fi
     sleep 1
@@ -169,8 +187,11 @@ for cache in "$NGINX_CACHE" "$VARNISH" "$NGINX_CLASS" "$VARNISH_CLASS"; do
   for c in $CLIENTS; do
     fetch "http://$cache/big.jpg" "$c"
     describe "$c"
-    if [ "$(body_hash)" != "${want[$c]}" ]; then
-      echo "  FAIL: $c was served another client's variant"
+    got=$(body_hash)
+    if [ "$got" != "${want[$c]}" ]; then
+      who=none
+      for o in $CLIENTS; do [ "${want[$o]}" = "$got" ] && who=$o; done
+      echo "  FAIL: $c was served another client's variant (got the bytes of: $who, hash $got; its own baseline is ${want[$c]})"
       fail=1
     fi
   done
