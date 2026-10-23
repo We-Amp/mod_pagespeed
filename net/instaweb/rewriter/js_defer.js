@@ -22,7 +22,7 @@
  * @author ksimbili@google.com (Kishore Simbili)
  */
 
-goog.require('pagespeedutils');
+import * as pagespeedutils from '../js/js_utils.js';
 
 
 /**
@@ -292,37 +292,25 @@ deferJsNs.DeferJs.isExperimentalMode = false;
  *
  * Constants for different states of deferJs exeuction.
  * @enum {number}
+ *
+ * NOT_STARTED: Start state.
+ * WAITING_FOR_NEXT_RUN: This state used to mark when critical scripts are
+ *     done.
+ * SCRIPTS_REGISTERED: In this state all script tags with type as
+ *     'text/psajs' are registered for deferred execution.
+ * SCRIPTS_EXECUTING: Script execution is in process.
+ * SYNC_SCRIPTS_DONE: All the sync scripts are executed but some async
+ *     scripts may not executed till now.
+ * WAITING_FOR_ONLOAD: Waiting for onload event to be triggered.
+ * SCRIPTS_DONE: Final state.
  */
 deferJsNs.DeferJs.STATES = {
-  /**
-   * Start state.
-   */
   NOT_STARTED: 0,
-  /**
-   * This state used to mark when critical scripts are done.
-   */
   WAITING_FOR_NEXT_RUN: 1,
-  /**
-   * In this state all script tags with type as 'text/psajs' are registered for
-   * deferred execution.
-   */
   SCRIPTS_REGISTERED: 2,
-  /**
-   * Script execution is in process.
-   */
   SCRIPTS_EXECUTING: 3,
-  /**
-   * All the sync scripts are executed but some async scripts may not executed
-   * till now.
-   */
   SYNC_SCRIPTS_DONE: 4,
-  /**
-   * Waiting for onload event to be triggered.
-   */
   WAITING_FOR_ONLOAD: 5,
-  /**
-   * Final state.
-   */
   SCRIPTS_DONE: 6
 };
 
@@ -330,27 +318,18 @@ deferJsNs.DeferJs.STATES = {
 /**
  * Constants for different events used by deferJs.
  * @enum {number}
+ *
+ * NOT_STARTED: Start event state.
+ * BEFORE_SCRIPTS: Event triggered before executing deferred scripts.
+ * DOM_READY: Event corresponding to DOMContentLoaded.
+ * LOAD: Event corresponding to onload.
+ * AFTER_SCRIPTS: Event triggered after executing deferred scripts.
  */
 deferJsNs.DeferJs.EVENT = {
-  /**
-   * Start event state.
-   */
   NOT_STARTED: 0,
-  /**
-   * Event triggered before executing deferred scripts.
-   */
   BEFORE_SCRIPTS: 1,
-  /**
-   * Event corresponding to DOMContentLoaded.
-   */
   DOM_READY: 2,
-  /**
-   * Event corresponding to onload.
-   */
   LOAD: 3,
-  /**
-   * Event triggered after executing deferred scripts.
-   */
   AFTER_SCRIPTS: 4
 };
 
@@ -1288,7 +1267,7 @@ deferJsNs.DeferJs.prototype.markNodesAndExtractScriptNodes = function(
         // TODO(jud): Rewrite this function to just iterate over children,
         // instead of childNodes, and then we only have to operate over elements
         // instead of nodes.
-        scriptNodes.push(/** @type {!Element} */ (child));
+        scriptNodes.push(child);
         child.setAttribute(deferJsNs.DeferJs.PSA_ORIG_TYPE, child.type);
         child.setAttribute('type', this.psaScriptType_);
         child.setAttribute(deferJsNs.DeferJs.PSA_ORIG_SRC, child.src);

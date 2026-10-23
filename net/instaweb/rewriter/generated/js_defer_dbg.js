@@ -1,606 +1,923 @@
-(function(){var pagespeedutils = {MAX_POST_SIZE:131072, sendBeacon:function(a, b, d) {
-  if (window.XMLHttpRequest) {
-    var c = new XMLHttpRequest();
-  } else if (window.ActiveXObject) {
-    try {
-      c = new ActiveXObject("Msxml2.XMLHTTP");
-    } catch (f) {
-      try {
-        c = new ActiveXObject("Microsoft.XMLHTTP");
-      } catch (g) {
-      }
+(() => {
+  var addHandler = function(elem, eventName, func) {
+    if (elem.addEventListener) {
+      elem.addEventListener(eventName, func, false);
+    } else if (elem.attachEvent) {
+      elem.attachEvent("on" + eventName, func);
+    } else {
+      var oldHandler = elem["on" + eventName];
+      elem["on" + eventName] = function() {
+        func.call(this);
+        if (oldHandler) {
+          oldHandler.call(this);
+        }
+      };
     }
-  }
-  if (!c) {
-    return !1;
-  }
-  var e = a.indexOf("?") == -1 ? "?" : "&";
-  a = a + e + "url=" + encodeURIComponent(b);
-  c.open("POST", a);
-  c.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-  c.send(d);
-  return !0;
-}, addHandler:function(a, b, d) {
-  if (a.addEventListener) {
-    a.addEventListener(b, d, !1);
-  } else if (a.attachEvent) {
-    a.attachEvent("on" + b, d);
-  } else {
-    var c = a["on" + b];
-    a["on" + b] = function() {
-      d.call(this);
-      c && c.call(this);
-    };
-  }
-}, getPosition:function(a) {
-  for (var b = a.offsetTop, d = a.offsetLeft; a.offsetParent;) {
-    a = a.offsetParent, b += a.offsetTop, d += a.offsetLeft;
-  }
-  return {top:b, left:d};
-}, getWindowSize:function() {
-  return {height:window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight, width:window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth};
-}, inViewport:function(a, b) {
-  a = pagespeedutils.getPosition(a);
-  return pagespeedutils.positionInViewport(a, b);
-}, positionInViewport:function(a, b) {
-  return a.top < b.height && a.left < b.width;
-}, getRequestAnimationFrame:function() {
-  return window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame || window.msRequestAnimationFrame || null;
-}};
-pagespeedutils.now = Date.now || function() {
-  return +new Date();
-};
-window.pagespeed = window.pagespeed || {};
-var pagespeed = window.pagespeed;
-pagespeed.deferJsNs = {};
-var deferJsNs = pagespeed.deferJsNs;
-deferJsNs.DeferJs = function() {
-  this.queue_ = [];
-  this.logs = [];
-  this.dynamicInsertedScriptCount_ = this.next_ = 0;
-  this.dynamicInsertedScript_ = [];
-  this.documentWriteHtml_ = "";
-  this.eventListenersMap_ = {};
-  this.jsMimeTypes = "application/ecmascript application/javascript application/x-ecmascript application/x-javascript text/ecmascript text/javascript text/javascript1.0 text/javascript1.1 text/javascript1.2 text/javascript1.3 text/javascript1.4 text/javascript1.5 text/jscript text/livescript text/x-ecmascript text/x-javascript".split(" ");
-  this.overrideDefaultImplementation_ = !0;
-  this.origGetElementById_ = document.getElementById;
-  this.origGetElementsByTagName_ = document.getElementsByTagName;
-  this.origDocWrite_ = document.write;
-  this.origDocOpen_ = document.open;
-  this.origDocClose_ = document.close;
-  this.origDocAddEventListener_ = document.addEventListener;
-  this.origWindowAddEventListener_ = window.addEventListener;
-  this.origDocAttachEvent_ = document.attachEvent;
-  this.origWindowAttachEvent_ = window.attachEvent;
-  this.origCreateElement_ = document.createElement;
-  this.state_ = deferJsNs.DeferJs.STATES.NOT_STARTED;
-  this.eventState_ = deferJsNs.DeferJs.EVENT.NOT_STARTED;
-  this.lastIncrementalRun_ = this.firstIncrementalRun_ = !0;
-  this.incrementalScriptsDoneCallback_ = null;
-  this.noDeferAsyncScriptsCount_ = 0;
-  this.noDeferAsyncScripts_ = [];
-  this.psaNotProcessed_ = this.psaScriptType_ = "";
-  this.optLastIndex_ = -1;
-};
-deferJsNs.DeferJs.isExperimentalMode = !1;
-deferJsNs.DeferJs.STATES = {NOT_STARTED:0, WAITING_FOR_NEXT_RUN:1, SCRIPTS_REGISTERED:2, SCRIPTS_EXECUTING:3, SYNC_SCRIPTS_DONE:4, WAITING_FOR_ONLOAD:5, SCRIPTS_DONE:6};
-deferJsNs.DeferJs.EVENT = {NOT_STARTED:0, BEFORE_SCRIPTS:1, DOM_READY:2, LOAD:3, AFTER_SCRIPTS:4};
-deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED = "priority_psa_not_processed";
-deferJsNs.DeferJs.PSA_NOT_PROCESSED = "psa_not_processed";
-deferJsNs.DeferJs.PSA_CURRENT_NODE = "psa_current_node";
-deferJsNs.DeferJs.PSA_TO_BE_DELETED = "psa_to_be_deleted";
-deferJsNs.DeferJs.PSA_SCRIPT_TYPE = "text/psajs";
-deferJsNs.DeferJs.PRIORITY_PSA_SCRIPT_TYPE = "text/prioritypsajs";
-deferJsNs.DeferJs.PSA_ORIG_TYPE = "data-pagespeed-orig-type";
-deferJsNs.DeferJs.PSA_ORIG_SRC = "data-pagespeed-orig-src";
-deferJsNs.DeferJs.PSA_ORIG_INDEX = "data-pagespeed-orig-index";
-deferJsNs.DeferJs.PAGESPEED_ONLOAD = "data-pagespeed-onload";
-deferJsNs.DeferJs.prototype.log = function(a, b) {
-  this.logs && (this.logs.push("" + a), b && (this.logs.push(b.message), typeof console != "undefined" && typeof console.log != "undefined" && console.log("PSA ERROR: " + a + b.message)));
-};
-deferJsNs.DeferJs.prototype.submitTask = function(a, b) {
-  this.queue_.splice(b ? b : this.queue_.length, 0, a);
-};
-deferJsNs.DeferJs.prototype.globalEval = function(a, b) {
-  b = this.cloneScriptNode(b);
-  b.text = a;
-  b.setAttribute("type", "text/javascript");
-  a = this.getCurrentDomLocation();
-  a.parentNode.insertBefore(b, a);
-  return b;
-};
-deferJsNs.DeferJs.prototype.createIdVars = function() {
-  for (var a = document.getElementsByTagName("*"), b = "", d = 0; d < a.length; d++) {
-    if (a[d].hasAttribute("id")) {
-      var c = a[d].getAttribute("id");
-      if (c && c.search(/[-:.]/) == -1 && c.search(/^[0-9]/) == -1) {
-        try {
-          window[c] && window[c].tagName && (b += "var " + c + '=document.getElementById("' + c + '");');
-        } catch (e) {
-          this.log("Exception while evaluating.", e);
+  };
+  var now = Date.now || (function() {
+    return +new Date();
+  });
+
+  window["pagespeed"] = window["pagespeed"] || {};
+  var pagespeed = window["pagespeed"];
+  pagespeed["deferJsNs"] = {};
+  var deferJsNs = pagespeed["deferJsNs"];
+  deferJsNs.DeferJs = function() {
+    this.queue_ = [];
+    this.logs = [];
+    this.next_ = 0;
+    this.dynamicInsertedScriptCount_ = 0;
+    this.dynamicInsertedScript_ = [];
+    this.documentWriteHtml_ = "";
+    this.eventListenersMap_ = {};
+    this.jsMimeTypes = [
+      "application/ecmascript",
+      "application/javascript",
+      "application/x-ecmascript",
+      "application/x-javascript",
+      "text/ecmascript",
+      "text/javascript",
+      "text/javascript1.0",
+      "text/javascript1.1",
+      "text/javascript1.2",
+      "text/javascript1.3",
+      "text/javascript1.4",
+      "text/javascript1.5",
+      "text/jscript",
+      "text/livescript",
+      "text/x-ecmascript",
+      "text/x-javascript"
+    ];
+    this.overrideDefaultImplementation_ = true;
+    this.origGetElementById_ = document.getElementById;
+    this.origGetElementsByTagName_ = document.getElementsByTagName;
+    this.origDocWrite_ = document.write;
+    this.origDocOpen_ = document.open;
+    this.origDocClose_ = document.close;
+    this.origDocAddEventListener_ = document.addEventListener;
+    this.origWindowAddEventListener_ = window.addEventListener;
+    this.origDocAttachEvent_ = document.attachEvent;
+    this.origWindowAttachEvent_ = window.attachEvent;
+    this.origCreateElement_ = document.createElement;
+    this.state_ = deferJsNs.DeferJs.STATES.NOT_STARTED;
+    this.eventState_ = deferJsNs.DeferJs.EVENT.NOT_STARTED;
+    this.firstIncrementalRun_ = true;
+    this.lastIncrementalRun_ = true;
+    this.incrementalScriptsDoneCallback_ = null;
+    this.noDeferAsyncScriptsCount_ = 0;
+    this.noDeferAsyncScripts_ = [];
+    this.psaScriptType_ = "";
+    this.psaNotProcessed_ = "";
+    this.optLastIndex_ = -1;
+  };
+  deferJsNs.DeferJs.isExperimentalMode = false;
+  deferJsNs.DeferJs.STATES = {
+    NOT_STARTED: 0,
+    WAITING_FOR_NEXT_RUN: 1,
+    SCRIPTS_REGISTERED: 2,
+    SCRIPTS_EXECUTING: 3,
+    SYNC_SCRIPTS_DONE: 4,
+    WAITING_FOR_ONLOAD: 5,
+    SCRIPTS_DONE: 6
+  };
+  deferJsNs.DeferJs.EVENT = {
+    NOT_STARTED: 0,
+    BEFORE_SCRIPTS: 1,
+    DOM_READY: 2,
+    LOAD: 3,
+    AFTER_SCRIPTS: 4
+  };
+  deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED = "priority_psa_not_processed";
+  deferJsNs.DeferJs.PSA_NOT_PROCESSED = "psa_not_processed";
+  deferJsNs.DeferJs.PSA_CURRENT_NODE = "psa_current_node";
+  deferJsNs.DeferJs.PSA_TO_BE_DELETED = "psa_to_be_deleted";
+  deferJsNs.DeferJs.PSA_SCRIPT_TYPE = "text/psajs";
+  deferJsNs.DeferJs.PRIORITY_PSA_SCRIPT_TYPE = "text/prioritypsajs";
+  deferJsNs.DeferJs.PSA_ORIG_TYPE = "data-pagespeed-orig-type";
+  deferJsNs.DeferJs.PSA_ORIG_SRC = "data-pagespeed-orig-src";
+  deferJsNs.DeferJs.PSA_ORIG_INDEX = "data-pagespeed-orig-index";
+  deferJsNs.DeferJs.PAGESPEED_ONLOAD = "data-pagespeed-onload";
+  deferJsNs.DeferJs.prototype.log = function(line, opt_exception) {
+    if (this.logs) {
+      this.logs.push("" + line);
+      if (opt_exception) {
+        this.logs.push(opt_exception.message);
+        if (typeof console != "undefined" && typeof console.log != "undefined") {
+          console.log("PSA ERROR: " + line + opt_exception.message);
         }
       }
     }
-  }
-  b && (a = this.globalEval(b), a.setAttribute(deferJsNs.DeferJs.PSA_NOT_PROCESSED, ""), a.setAttribute(deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED, ""));
-};
-deferJsNs.DeferJs.prototype.attemptPrefetchOrQueue = function(a) {
-  var b = this.origCreateElement_.call(document, "link");
-  b.setAttribute("rel", "preload");
-  b.setAttribute("as", "script");
-  b.setAttribute("href", a);
-  document.head.appendChild(b);
-};
-deferJsNs.DeferJs.prototype.addNode = function(a, b, d) {
-  var c = a.getAttribute(deferJsNs.DeferJs.PSA_ORIG_SRC) || a.getAttribute("src");
-  c ? (d && this.attemptPrefetchOrQueue(c), this.addUrl(c, a, b)) : this.addStr(a.innerHTML || a.textContent || a.data || "", a, b);
-};
-deferJsNs.DeferJs.prototype.addStr = function(a, b, d) {
-  this.logs.push("Add to queue str: " + a);
-  var c = this;
-  this.submitTask(function() {
-    c.removeNotProcessedAttributeTillNode(b);
-    c.nextPsaJsNode().setAttribute(deferJsNs.DeferJs.PSA_CURRENT_NODE, "");
-    try {
-      c.globalEval(a, b);
-    } catch (e) {
-      c.log("Exception while evaluating.", e);
-    }
-    c.log("Evaluated: " + a);
-    c.runNext();
-  }, d);
-};
-deferJsNs.DeferJs.prototype.addStr = deferJsNs.DeferJs.prototype.addStr;
-deferJsNs.DeferJs.prototype.cloneScriptNode = function(a) {
-  var b = this.origCreateElement_.call(document, "script");
-  if (a) {
-    for (var d = a.attributes, c = d.length - 1; c >= 0; --c) {
-      d[c].name != "type" && d[c].name != "src" && d[c].name != "async" && d[c].name != "defer" && d[c].name != deferJsNs.DeferJs.PSA_ORIG_TYPE && d[c].name != deferJsNs.DeferJs.PSA_ORIG_SRC && d[c].name != deferJsNs.DeferJs.PSA_ORIG_INDEX && d[c].name != deferJsNs.DeferJs.PSA_CURRENT_NODE && d[c].name != this.psaNotProcessed_ && (b.setAttribute(d[c].name, d[c].value), a.removeAttribute(d[c].name));
-    }
-  }
-  return b;
-};
-deferJsNs.DeferJs.prototype.scriptOnLoad = function(a) {
-  var b = this.origCreateElement_.call(document, "script");
-  b.setAttribute("type", "text/javascript");
-  b.async = !1;
-  b.setAttribute(deferJsNs.DeferJs.PSA_TO_BE_DELETED, "");
-  b.setAttribute(deferJsNs.DeferJs.PSA_NOT_PROCESSED, "");
-  b.setAttribute(deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED, "");
-  var d = this, c = function() {
-    if (document.querySelector) {
-      var e = document.querySelector("[" + deferJsNs.DeferJs.PSA_TO_BE_DELETED + "]");
-      e && e.parentNode.removeChild(e);
-    }
-    d.log("Executed: " + a);
-    d.runNext();
   };
-  deferJsNs.addOnload(b, c);
-  pagespeedutils.addHandler(b, "error", c);
-  b.src = "data:text/javascript," + encodeURIComponent("window.pagespeed.psatemp=0;");
-  c = this.getCurrentDomLocation();
-  c.parentNode.insertBefore(b, c);
-};
-deferJsNs.DeferJs.prototype.addUrl = function(a, b, d) {
-  this.logs.push("Add to queue url: " + a);
-  var c = this;
-  this.submitTask(function() {
-    c.removeNotProcessedAttributeTillNode(b);
-    var e = c.cloneScriptNode(b);
-    e.setAttribute("type", "text/javascript");
-    var f = !0;
-    "async" in e ? e.async = !1 : e.readyState && (f = !1, pagespeedutils.addHandler(e, "readystatechange", function() {
-      if (e.readyState == "complete" || e.readyState == "loaded") {
-        e.onreadystatechange = null, c.log("Executed: " + a), c.runNext();
+  deferJsNs.DeferJs.prototype.submitTask = function(task, opt_pos) {
+    var pos = opt_pos ? opt_pos : this.queue_.length;
+    this.queue_.splice(pos, 0, task);
+  };
+  deferJsNs.DeferJs.prototype.globalEval = function(str, opt_script_elem) {
+    var script = this.cloneScriptNode(opt_script_elem);
+    script.text = str;
+    script.setAttribute("type", "text/javascript");
+    var currentElem = this.getCurrentDomLocation();
+    currentElem.parentNode.insertBefore(script, currentElem);
+    return script;
+  };
+  deferJsNs.DeferJs.prototype.createIdVars = function() {
+    var elems = document.getElementsByTagName("*");
+    var idVarsString = "";
+    for (var i = 0; i < elems.length; i++) {
+      if (elems[i].hasAttribute("id")) {
+        var idStr = elems[i].getAttribute("id");
+        if (idStr && idStr.search(/[-:.]/) == -1 && idStr.search(/^[0-9]/) == -1) {
+          try {
+            if (window[idStr] && window[idStr].tagName) {
+              idVarsString += "var " + idStr + '=document.getElementById("' + idStr + '");';
+            }
+          } catch (err) {
+            this.log("Exception while evaluating.", err);
+          }
+        }
       }
-    }));
-    e.setAttribute("src", a);
-    var g = b.innerHTML || b.textContent || b.data;
-    g && e.appendChild(document.createTextNode(g));
-    g = c.nextPsaJsNode();
-    g.setAttribute(deferJsNs.DeferJs.PSA_CURRENT_NODE, "");
-    g.parentNode.insertBefore(e, g);
-    f && c.scriptOnLoad(a);
-  }, d);
-};
-deferJsNs.DeferJs.prototype.addUrl = deferJsNs.DeferJs.prototype.addUrl;
-deferJsNs.DeferJs.prototype.removeNotProcessedAttributeTillNode = function(a) {
-  if (document.querySelectorAll && !(this.getIEVersion() <= 8)) {
-    for (var b = document.querySelectorAll("[" + this.psaNotProcessed_ + "]"), d = 0; d < b.length; d++) {
-      var c = b.item(d);
-      if (c == a) {
-        break;
-      }
-      c.getAttribute("type") != this.psaScriptType_ && c.removeAttribute(this.psaNotProcessed_);
     }
-  }
-};
-deferJsNs.DeferJs.prototype.setNotProcessedAttributeForNodes = function() {
-  for (var a = this.origGetElementsByTagName_.call(document, "*"), b = 0; b < a.length; b++) {
-    a.item(b).setAttribute(this.psaNotProcessed_, "");
-  }
-};
-deferJsNs.DeferJs.prototype.nextPsaJsNode = function() {
-  var a = null;
-  document.querySelector && (a = document.querySelector('[type="' + this.psaScriptType_ + '"]'));
-  return a;
-};
-deferJsNs.DeferJs.prototype.getCurrentDomLocation = function() {
-  var a;
-  document.querySelector && (a = document.querySelector("[" + deferJsNs.DeferJs.PSA_CURRENT_NODE + "]"));
-  return a || this.origGetElementsByTagName_.call(document, "psanode")[0];
-};
-deferJsNs.DeferJs.prototype.removeCurrentDomLocation = function() {
-  var a = this.getCurrentDomLocation();
-  a.nodeName == "SCRIPT" && a.parentNode.removeChild(a);
-};
-deferJsNs.DeferJs.prototype.onComplete = function() {
-  if (!(this.state_ >= deferJsNs.DeferJs.STATES.WAITING_FOR_ONLOAD)) {
-    if (this.lastIncrementalRun_ && this.isLowPriorityDeferJs() && (this.getIEVersion() && document.documentElement.originalDoScroll && (document.documentElement.doScroll = document.documentElement.originalDoScroll), Object.defineProperty && delete document.readyState, this.getIEVersion() && Object.defineProperty && delete document.all), this.overrideDefaultImplementation_ = !1, this.lastIncrementalRun_) {
-      if (this.state_ = deferJsNs.DeferJs.STATES.WAITING_FOR_ONLOAD, this.isLowPriorityDeferJs()) {
-        var a = this;
-        document.readyState != "complete" ? deferJsNs.addOnload(window, function() {
-          a.fireOnload();
-        }) : (document.onreadystatechange && this.exec(document.onreadystatechange, document), window.onload && (psaAddEventListener(window, "onload", window.onload), window.onload = null), this.fireOnload());
+    if (idVarsString) {
+      var script = this.globalEval(idVarsString);
+      script.setAttribute(deferJsNs.DeferJs.PSA_NOT_PROCESSED, "");
+      script.setAttribute(deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED, "");
+    }
+  };
+  deferJsNs.DeferJs.prototype.attemptPrefetchOrQueue = function(url) {
+    var newLink = this.origCreateElement_.call(document, "link");
+    newLink.setAttribute("rel", "preload");
+    newLink.setAttribute("as", "script");
+    newLink.setAttribute("href", url);
+    document.head.appendChild(newLink);
+  };
+  deferJsNs.DeferJs.prototype.addNode = function(script, opt_pos, opt_prefetch) {
+    var src = script.getAttribute(deferJsNs.DeferJs.PSA_ORIG_SRC) || script.getAttribute("src");
+    if (src) {
+      if (opt_prefetch) {
+        this.attemptPrefetchOrQueue(src);
+      }
+      this.addUrl(src, script, opt_pos);
+    } else {
+      var str = script.innerHTML || script.textContent || script.data || "";
+      this.addStr(str, script, opt_pos);
+    }
+  };
+  deferJsNs.DeferJs.prototype.addStr = function(str, script_elem, opt_pos) {
+    this.logs.push("Add to queue str: " + str);
+    var me = this;
+    this.submitTask(function() {
+      me.removeNotProcessedAttributeTillNode(script_elem);
+      var node = me.nextPsaJsNode();
+      node.setAttribute(deferJsNs.DeferJs.PSA_CURRENT_NODE, "");
+      try {
+        me.globalEval(str, script_elem);
+      } catch (err) {
+        me.log("Exception while evaluating.", err);
+      }
+      me.log("Evaluated: " + str);
+      me.runNext();
+    }, opt_pos);
+  };
+  deferJsNs.DeferJs.prototype["addStr"] = deferJsNs.DeferJs.prototype.addStr;
+  deferJsNs.DeferJs.prototype.cloneScriptNode = function(opt_script_elem) {
+    var newScript = this.origCreateElement_.call(document, "script");
+    if (opt_script_elem) {
+      for (var a = opt_script_elem.attributes, n = a.length, i = n - 1; i >= 0; --i) {
+        if (a[i].name != "type" && a[i].name != "src" && a[i].name != "async" && a[i].name != "defer" && a[i].name != deferJsNs.DeferJs.PSA_ORIG_TYPE && a[i].name != deferJsNs.DeferJs.PSA_ORIG_SRC && a[i].name != deferJsNs.DeferJs.PSA_ORIG_INDEX && a[i].name != deferJsNs.DeferJs.PSA_CURRENT_NODE && a[i].name != this.psaNotProcessed_) {
+          newScript.setAttribute(a[i].name, a[i].value);
+          opt_script_elem.removeAttribute(a[i].name);
+        }
+      }
+    }
+    return newScript;
+  };
+  deferJsNs.DeferJs.prototype.scriptOnLoad = function(url) {
+    var script = this.origCreateElement_.call(document, "script");
+    script.setAttribute("type", "text/javascript");
+    script.async = false;
+    script.setAttribute(deferJsNs.DeferJs.PSA_TO_BE_DELETED, "");
+    script.setAttribute(deferJsNs.DeferJs.PSA_NOT_PROCESSED, "");
+    script.setAttribute(deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED, "");
+    var me = this;
+    var runNextHandler = function() {
+      if (document.querySelector) {
+        var node = document.querySelector(
+          "[" + deferJsNs.DeferJs.PSA_TO_BE_DELETED + "]"
+        );
+        if (node) {
+          node.parentNode.removeChild(node);
+        }
+      }
+      me.log("Executed: " + url);
+      me.runNext();
+    };
+    deferJsNs.addOnload(script, runNextHandler);
+    addHandler(script, "error", runNextHandler);
+    script.src = "data:text/javascript," + encodeURIComponent("window.pagespeed.psatemp=0;");
+    var currentElem = this.getCurrentDomLocation();
+    currentElem.parentNode.insertBefore(script, currentElem);
+  };
+  deferJsNs.DeferJs.prototype.addUrl = function(url, script_elem, opt_pos) {
+    this.logs.push("Add to queue url: " + url);
+    var me = this;
+    this.submitTask(function() {
+      me.removeNotProcessedAttributeTillNode(script_elem);
+      var script = me.cloneScriptNode(script_elem);
+      script.setAttribute("type", "text/javascript");
+      var useSyncScript = true;
+      if ("async" in script) {
+        script.async = false;
+      } else if (script.readyState) {
+        useSyncScript = false;
+        var stateChangeHandler = function() {
+          if (script.readyState == "complete" || script.readyState == "loaded") {
+            script.onreadystatechange = null;
+            me.log("Executed: " + url);
+            me.runNext();
+          }
+        };
+        addHandler(script, "readystatechange", stateChangeHandler);
+      }
+      script.setAttribute("src", url);
+      var str = script_elem.innerHTML || script_elem.textContent || script_elem.data;
+      if (str) {
+        script.appendChild(document.createTextNode(str));
+      }
+      var currentElem = me.nextPsaJsNode();
+      currentElem.setAttribute(deferJsNs.DeferJs.PSA_CURRENT_NODE, "");
+      currentElem.parentNode.insertBefore(script, currentElem);
+      if (useSyncScript) {
+        me.scriptOnLoad(url);
+      }
+    }, opt_pos);
+  };
+  deferJsNs.DeferJs.prototype["addUrl"] = deferJsNs.DeferJs.prototype.addUrl;
+  deferJsNs.DeferJs.prototype.removeNotProcessedAttributeTillNode = function(opt_node) {
+    if (document.querySelectorAll && !(this.getIEVersion() <= 8)) {
+      var nodes = document.querySelectorAll(
+        "[" + this.psaNotProcessed_ + "]"
+      );
+      for (var i = 0; i < nodes.length; i++) {
+        var dom_node = nodes.item(i);
+        if (dom_node == opt_node) {
+          return;
+        }
+        if (dom_node.getAttribute("type") != this.psaScriptType_) {
+          dom_node.removeAttribute(this.psaNotProcessed_);
+        }
+      }
+    }
+  };
+  deferJsNs.DeferJs.prototype.setNotProcessedAttributeForNodes = function() {
+    var nodes = this.origGetElementsByTagName_.call(document, "*");
+    for (var i = 0; i < nodes.length; i++) {
+      var dom_node = nodes.item(i);
+      dom_node.setAttribute(this.psaNotProcessed_, "");
+    }
+  };
+  deferJsNs.DeferJs.prototype.nextPsaJsNode = function() {
+    var current_node = null;
+    if (document.querySelector) {
+      current_node = document.querySelector(
+        '[type="' + this.psaScriptType_ + '"]'
+      );
+    }
+    return current_node;
+  };
+  deferJsNs.DeferJs.prototype.getCurrentDomLocation = function() {
+    var current_node;
+    if (document.querySelector) {
+      current_node = document.querySelector(
+        "[" + deferJsNs.DeferJs.PSA_CURRENT_NODE + "]"
+      );
+    }
+    return current_node || this.origGetElementsByTagName_.call(document, "psanode")[0];
+  };
+  deferJsNs.DeferJs.prototype.removeCurrentDomLocation = function() {
+    var oldNode = this.getCurrentDomLocation();
+    if (oldNode.nodeName == "SCRIPT") {
+      oldNode.parentNode.removeChild(oldNode);
+    }
+  };
+  deferJsNs.DeferJs.prototype.onComplete = function() {
+    if (this.state_ >= deferJsNs.DeferJs.STATES.WAITING_FOR_ONLOAD) {
+      return;
+    }
+    if (this.lastIncrementalRun_ && this.isLowPriorityDeferJs()) {
+      if (this.getIEVersion() && document.documentElement["originalDoScroll"]) {
+        document.documentElement.doScroll = document.documentElement["originalDoScroll"];
+      }
+      if (Object.defineProperty) {
+        delete document["readyState"];
+      }
+      if (this.getIEVersion()) {
+        if (Object.defineProperty) {
+          delete document["all"];
+        }
+      }
+    }
+    this.overrideDefaultImplementation_ = false;
+    if (this.lastIncrementalRun_) {
+      this.state_ = deferJsNs.DeferJs.STATES.WAITING_FOR_ONLOAD;
+      if (this.isLowPriorityDeferJs()) {
+        var me = this;
+        if (document.readyState != "complete") {
+          deferJsNs.addOnload(window, function() {
+            me.fireOnload();
+          });
+        } else {
+          if (document.onreadystatechange) {
+            this.exec(document.onreadystatechange, document);
+          }
+          if (window.onload) {
+            psaAddEventListener(window, "onload", window.onload);
+            window.onload = null;
+          }
+          this.fireOnload();
+        }
       } else {
         this.highPriorityFinalize();
       }
     } else {
-      this.state_ = deferJsNs.DeferJs.STATES.WAITING_FOR_NEXT_RUN, this.firstIncrementalRun_ = !1, this.incrementalScriptsDoneCallback_ && this.isLowPriorityDeferJs() ? (pagespeed.deferJs = pagespeed.highPriorityDeferJs, pagespeed.deferJs = pagespeed.highPriorityDeferJs, this.exec(this.incrementalScriptsDoneCallback_), this.incrementalScriptsDoneCallback_ = null) : this.highPriorityFinalize();
+      this.state_ = deferJsNs.DeferJs.STATES.WAITING_FOR_NEXT_RUN;
+      this.firstIncrementalRun_ = false;
+      if (this.incrementalScriptsDoneCallback_ && this.isLowPriorityDeferJs()) {
+        pagespeed.deferJs = pagespeed.highPriorityDeferJs;
+        pagespeed["deferJs"] = pagespeed.highPriorityDeferJs;
+        this.exec(this.incrementalScriptsDoneCallback_);
+        this.incrementalScriptsDoneCallback_ = null;
+      } else {
+        this.highPriorityFinalize();
+      }
     }
-  }
-};
-deferJsNs.DeferJs.prototype.fireOnload = function() {
-  this.isLowPriorityDeferJs() && (this.addDeferredOnloadListeners(), pagespeed.highPriorityDeferJs.fireOnload());
-  this.fireEvent(deferJsNs.DeferJs.EVENT.LOAD);
-  if (this.isLowPriorityDeferJs()) {
-    for (var a = document.body.getElementsByTagName("psanode"), b = a.length - 1; b >= 0; b--) {
-      document.body.removeChild(a[b]);
+  };
+  deferJsNs.DeferJs.prototype.fireOnload = function() {
+    if (this.isLowPriorityDeferJs()) {
+      this.addDeferredOnloadListeners();
+      pagespeed.highPriorityDeferJs.fireOnload();
     }
-    a = document.body.getElementsByClassName("psa_prefetch_container");
-    for (b = a.length - 1; b >= 0; b--) {
-      a[b].parentNode.removeChild(a[b]);
+    this.fireEvent(deferJsNs.DeferJs.EVENT.LOAD);
+    if (this.isLowPriorityDeferJs()) {
+      var psanodes = document.body.getElementsByTagName("psanode");
+      for (var i = psanodes.length - 1; i >= 0; i--) {
+        document.body.removeChild(psanodes[i]);
+      }
+      var prefetchContainers = document.body.getElementsByClassName("psa_prefetch_container");
+      for (var i = prefetchContainers.length - 1; i >= 0; i--) {
+        prefetchContainers[i].parentNode.removeChild(prefetchContainers[i]);
+      }
     }
-  }
-  this.state_ = deferJsNs.DeferJs.STATES.SCRIPTS_DONE;
-  this.fireEvent(deferJsNs.DeferJs.EVENT.AFTER_SCRIPTS);
-};
-deferJsNs.DeferJs.prototype.highPriorityFinalize = function() {
-  var a = this;
-  window.setTimeout(function() {
-    pagespeed.deferJs = pagespeed.lowPriorityDeferJs;
-    pagespeed.deferJs = pagespeed.lowPriorityDeferJs;
-    a.incrementalScriptsDoneCallback_ ? (pagespeed.deferJs.registerScriptTags(a.incrementalScriptsDoneCallback_, a.optLastIndex_), a.incrementalScriptsDoneCallback_ = null) : pagespeed.deferJs.registerScriptTags();
-    pagespeed.deferJs.execute();
-  }, 0);
-};
-deferJsNs.DeferJs.prototype.checkNodeInDom = function(a) {
-  for (; a = a.parentNode;) {
-    if (a == document) {
-      return !0;
+    this.state_ = deferJsNs.DeferJs.STATES.SCRIPTS_DONE;
+    this.fireEvent(deferJsNs.DeferJs.EVENT.AFTER_SCRIPTS);
+  };
+  deferJsNs.DeferJs.prototype.highPriorityFinalize = function() {
+    var me = this;
+    window.setTimeout(function() {
+      pagespeed.deferJs = pagespeed.lowPriorityDeferJs;
+      pagespeed["deferJs"] = pagespeed.lowPriorityDeferJs;
+      if (me.incrementalScriptsDoneCallback_) {
+        pagespeed.deferJs.registerScriptTags(
+          me.incrementalScriptsDoneCallback_,
+          me.optLastIndex_
+        );
+        me.incrementalScriptsDoneCallback_ = null;
+      } else {
+        pagespeed.deferJs.registerScriptTags();
+      }
+      pagespeed.deferJs.execute();
+    }, 0);
+  };
+  deferJsNs.DeferJs.prototype.checkNodeInDom = function(node) {
+    while (node = node.parentNode) {
+      if (node == document) {
+        return true;
+      }
     }
-  }
-  return !1;
-};
-deferJsNs.DeferJs.prototype.getNumScriptsWithNoOnload = function(a) {
-  for (var b = 0, d = a.length, c = 0; c < d; ++c) {
-    var e = a[c], f = e.parentNode, g = e.src, h = e.textContent;
-    (this.getIEVersion() > 8 && (!f || g == "" && h == "") || !(this.getIEVersion() || this.checkNodeInDom(e) && g != "")) && b++;
-  }
-  return b;
-};
-deferJsNs.DeferJs.prototype.canCallOnComplete = function() {
-  if (this.state_ != deferJsNs.DeferJs.STATES.SYNC_SCRIPTS_DONE) {
-    return !1;
-  }
-  var a = 0;
-  this.dynamicInsertedScriptCount_ != 0 && (a = this.getNumScriptsWithNoOnload(this.dynamicInsertedScript_));
-  return this.dynamicInsertedScriptCount_ == a ? !0 : !1;
-};
-deferJsNs.DeferJs.prototype.scriptsAreDone = function() {
-  return this.state_ === deferJsNs.DeferJs.STATES.SCRIPTS_DONE;
-};
-deferJsNs.DeferJs.prototype.scriptsAreDone = deferJsNs.DeferJs.prototype.scriptsAreDone;
-deferJsNs.DeferJs.prototype.runNext = function() {
-  this.handlePendingDocumentWrites();
-  this.removeCurrentDomLocation();
-  if (this.next_ < this.queue_.length) {
-    this.next_++, this.queue_[this.next_ - 1].call(window);
-  } else {
-    if (this.lastIncrementalRun_) {
-      if (this.state_ = deferJsNs.DeferJs.STATES.SYNC_SCRIPTS_DONE, this.removeNotProcessedAttributeTillNode(), this.fireEvent(deferJsNs.DeferJs.EVENT.DOM_READY), this.canCallOnComplete()) {
+    return false;
+  };
+  deferJsNs.DeferJs.prototype.getNumScriptsWithNoOnload = function(dynamicInsertedScriptList) {
+    var count = 0;
+    var len = dynamicInsertedScriptList.length;
+    for (var i = 0; i < len; ++i) {
+      var node = dynamicInsertedScriptList[i];
+      var parent = node.parentNode;
+      var src = node.src;
+      var text = node.textContent;
+      if (this.getIEVersion() > 8 && (!parent || src == "" && text == "") || !this.getIEVersion() && (!this.checkNodeInDom(node) || src == "")) {
+        count++;
+      }
+    }
+    return count;
+  };
+  deferJsNs.DeferJs.prototype.canCallOnComplete = function() {
+    if (this.state_ != deferJsNs.DeferJs.STATES.SYNC_SCRIPTS_DONE) {
+      return false;
+    }
+    var count = 0;
+    if (this.dynamicInsertedScriptCount_ != 0) {
+      count = this.getNumScriptsWithNoOnload(this.dynamicInsertedScript_);
+    }
+    if (this.dynamicInsertedScriptCount_ == count) {
+      return true;
+    }
+    return false;
+  };
+  deferJsNs.DeferJs.prototype.scriptsAreDone = function() {
+    return this.state_ === deferJsNs.DeferJs.STATES.SCRIPTS_DONE;
+  };
+  deferJsNs.DeferJs.prototype["scriptsAreDone"] = deferJsNs.DeferJs.prototype.scriptsAreDone;
+  deferJsNs.DeferJs.prototype.runNext = function() {
+    this.handlePendingDocumentWrites();
+    this.removeCurrentDomLocation();
+    if (this.next_ < this.queue_.length) {
+      this.next_++;
+      this.queue_[this.next_ - 1].call(window);
+    } else {
+      if (this.lastIncrementalRun_) {
+        this.state_ = deferJsNs.DeferJs.STATES.SYNC_SCRIPTS_DONE;
+        this.removeNotProcessedAttributeTillNode();
+        this.fireEvent(deferJsNs.DeferJs.EVENT.DOM_READY);
+        if (this.canCallOnComplete()) {
+          this.onComplete();
+        }
+      } else {
         this.onComplete();
       }
+    }
+  };
+  deferJsNs.DeferJs.prototype.nodeListToArray = function(nodeList) {
+    var arr = [];
+    var len = nodeList.length;
+    for (var i = 0; i < len; ++i) {
+      arr.push(nodeList.item(i));
+    }
+    return arr;
+  };
+  deferJsNs.DeferJs.prototype.setUp = function() {
+    var me = this;
+    if (this.firstIncrementalRun_ && !this.isLowPriorityDeferJs()) {
+      var initialContextNode = document.createElement("psanode");
+      initialContextNode.setAttribute("psa_dw_target", "true");
+      document.body.appendChild(initialContextNode);
+      if (this.getIEVersion()) {
+        this.createIdVars();
+      }
+      if (Object.defineProperty) {
+        try {
+          var propertyDescriptor = { configurable: true };
+          propertyDescriptor.get = function() {
+            return me.state_ >= deferJsNs.DeferJs.STATES.SYNC_SCRIPTS_DONE ? "interactive" : "loading";
+          };
+          Object.defineProperty(document, "readyState", propertyDescriptor);
+        } catch (err) {
+          this.log("Exception while overriding document.readyState.", err);
+        }
+      }
+      if (this.getIEVersion()) {
+        document.documentElement["originalDoScroll"] = document.documentElement.doScroll;
+        document.documentElement.doScroll = function() {
+          throw "psa exception";
+        };
+        if (Object.defineProperty) {
+          try {
+            var propertyDescriptor = { configurable: true };
+            propertyDescriptor.get = function() {
+              return void 0;
+            };
+            Object.defineProperty(document, "all", propertyDescriptor);
+          } catch (err) {
+            this.log("Exception while overriding document.all.", err);
+          }
+        }
+      }
+    }
+    this.overrideAddEventListeners();
+    document.writeln = function(x) {
+      me.writeHtml(x + "\n");
+    };
+    document.write = function(x) {
+      me.writeHtml(x);
+    };
+    document.open = function() {
+      if (!me.overrideDefaultImplementation_) {
+        me.origDocOpen_.call(document);
+      }
+    };
+    document.close = function() {
+      if (!me.overrideDefaultImplementation_) {
+        me.origDocClose_.call(document);
+      }
+    };
+    document.getElementById = function(str) {
+      me.handlePendingDocumentWrites();
+      var node = me.origGetElementById_.call(document, str);
+      return node == null || node.hasAttribute(me.psaNotProcessed_) ? null : node;
+    };
+    if (document.querySelectorAll && !(me.getIEVersion() <= 8)) {
+      document.getElementsByTagName = function(tagName) {
+        if (me.overrideDefaultImplementation_) {
+          try {
+            return document.querySelectorAll(
+              tagName + ":not([" + me.psaNotProcessed_ + "])"
+            );
+          } catch (err) {
+          }
+        }
+        return me.origGetElementsByTagName_.call(document, tagName);
+      };
+    }
+    document.createElement = function(str) {
+      var elem = me.origCreateElement_.call(document, str);
+      if (me.overrideDefaultImplementation_ && str.toLowerCase() == "script") {
+        me.dynamicInsertedScript_.push(elem);
+        me.dynamicInsertedScriptCount_++;
+        var onload = function() {
+          me.dynamicInsertedScriptCount_--;
+          var index = me.dynamicInsertedScript_.indexOf(this);
+          if (index != -1) {
+            me.dynamicInsertedScript_.splice(index, 1);
+            if (me.canCallOnComplete()) {
+              me.onComplete();
+            }
+          }
+        };
+        deferJsNs.addOnload(elem, onload);
+        addHandler(elem, "error", onload);
+      }
+      return elem;
+    };
+  };
+  deferJsNs.DeferJs.prototype.execute = function() {
+    if (this.state_ != deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED) {
+      return;
+    }
+    var count = 0;
+    if (this.noDeferAsyncScriptsCount_ != 0) {
+      count = this.getNumScriptsWithNoOnload(this.noDeferAsyncScripts_);
+    }
+    if (this.noDeferAsyncScriptsCount_ == count) {
+      this.run();
+    }
+  };
+  deferJsNs.DeferJs.prototype["execute"] = deferJsNs.DeferJs.prototype.execute;
+  deferJsNs.DeferJs.prototype.run = function() {
+    if (this.state_ != deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED) {
+      return;
+    }
+    if (this.firstIncrementalRun_) {
+      this.fireEvent(deferJsNs.DeferJs.EVENT.BEFORE_SCRIPTS);
+    }
+    this.state_ = deferJsNs.DeferJs.STATES.SCRIPTS_EXECUTING;
+    this.setUp();
+    this.runNext();
+  };
+  deferJsNs.DeferJs.prototype["run"] = deferJsNs.DeferJs.prototype.run;
+  deferJsNs.DeferJs.prototype.parseHtml = function(html) {
+    var div = this.origCreateElement_.call(document, "div");
+    div.innerHTML = "<div>_</div>" + html;
+    div.removeChild(div.firstChild);
+    return div;
+  };
+  deferJsNs.DeferJs.prototype.disown = function(node) {
+    var parentNode = node.parentNode;
+    if (parentNode) {
+      parentNode.removeChild(node);
+    }
+  };
+  deferJsNs.DeferJs.prototype.insertNodesBeforeElem = function(nodes, elem) {
+    var nodeArray = this.nodeListToArray(nodes);
+    var len = nodeArray.length;
+    var parentNode = elem.parentNode;
+    for (var i = 0; i < len; ++i) {
+      var node = nodeArray[i];
+      this.disown(node);
+      parentNode.insertBefore(node, elem);
+    }
+  };
+  deferJsNs.DeferJs.prototype.isJSNode = function(node) {
+    if (node.nodeName != "SCRIPT") {
+      return false;
+    }
+    if (node.hasAttribute("type")) {
+      var type = node.getAttribute("type");
+      return !type || this.jsMimeTypes.indexOf(type) != -1;
+    } else if (node.hasAttribute("language")) {
+      var lang = node.getAttribute("language");
+      return !lang || this.jsMimeTypes.indexOf("text/" + lang.toLowerCase()) != -1;
+    }
+    return true;
+  };
+  deferJsNs.DeferJs.prototype.markNodesAndExtractScriptNodes = function(node, scriptNodes) {
+    if (!node.childNodes) {
+      return;
+    }
+    var nodeArray = this.nodeListToArray(node.childNodes);
+    var len = nodeArray.length;
+    for (var i = 0; i < len; ++i) {
+      var child = nodeArray[i];
+      if (child.nodeName == "SCRIPT") {
+        if (this.isJSNode(child)) {
+          scriptNodes.push(child);
+          child.setAttribute(deferJsNs.DeferJs.PSA_ORIG_TYPE, child.type);
+          child.setAttribute("type", this.psaScriptType_);
+          child.setAttribute(deferJsNs.DeferJs.PSA_ORIG_SRC, child.src);
+          child.setAttribute("src", "");
+          child.setAttribute(this.psaNotProcessed_, "");
+        }
+      } else {
+        this.markNodesAndExtractScriptNodes(child, scriptNodes);
+      }
+    }
+  };
+  deferJsNs.DeferJs.prototype.deferScripts = function(scripts, pos) {
+    var len = scripts.length;
+    for (var i = 0; i < len; ++i) {
+      this.addNode(scripts[i], pos + i, !!i);
+    }
+  };
+  deferJsNs.DeferJs.prototype.insertHtml = function(html, pos, opt_elem) {
+    var node = this.parseHtml(html);
+    var scriptNodes = [];
+    this.markNodesAndExtractScriptNodes(node, scriptNodes);
+    if (opt_elem) {
+      this.insertNodesBeforeElem(node.childNodes, opt_elem);
     } else {
-      this.onComplete();
+      this.log("Unable to insert nodes, no context element found");
     }
-  }
-};
-deferJsNs.DeferJs.prototype.nodeListToArray = function(a) {
-  for (var b = [], d = a.length, c = 0; c < d; ++c) {
-    b.push(a.item(c));
-  }
-  return b;
-};
-deferJsNs.DeferJs.prototype.setUp = function() {
-  var a = this;
-  if (this.firstIncrementalRun_ && !this.isLowPriorityDeferJs()) {
-    var b = document.createElement("psanode");
-    b.setAttribute("psa_dw_target", "true");
-    document.body.appendChild(b);
-    this.getIEVersion() && this.createIdVars();
-    if (Object.defineProperty) {
-      try {
-        var d = {configurable:!0, get:function() {
-          return a.state_ >= deferJsNs.DeferJs.STATES.SYNC_SCRIPTS_DONE ? "interactive" : "loading";
-        }};
-        Object.defineProperty(document, "readyState", d);
-      } catch (c) {
-        this.log("Exception while overriding document.readyState.", c);
-      }
+    this.deferScripts(scriptNodes, pos);
+  };
+  deferJsNs.DeferJs.prototype.handlePendingDocumentWrites = function() {
+    if (this.documentWriteHtml_ == "") {
+      return;
     }
-    if (this.getIEVersion() && (document.documentElement.originalDoScroll = document.documentElement.doScroll, document.documentElement.doScroll = function() {
-      throw "psa exception";
-    }, Object.defineProperty)) {
-      try {
-        d = {configurable:!0, get:function() {
-        }}, Object.defineProperty(document, "all", d);
-      } catch (c) {
-        this.log("Exception while overriding document.all.", c);
-      }
-    }
-  }
-  this.overrideAddEventListeners();
-  document.writeln = function(c) {
-    a.writeHtml(c + "\n");
-  };
-  document.write = function(c) {
-    a.writeHtml(c);
-  };
-  document.open = function() {
-    a.overrideDefaultImplementation_ || a.origDocOpen_.call(document);
-  };
-  document.close = function() {
-    a.overrideDefaultImplementation_ || a.origDocClose_.call(document);
-  };
-  document.getElementById = function(c) {
-    a.handlePendingDocumentWrites();
-    c = a.origGetElementById_.call(document, c);
-    return c == null || c.hasAttribute(a.psaNotProcessed_) ? null : c;
-  };
-  !document.querySelectorAll || a.getIEVersion() <= 8 || (document.getElementsByTagName = function(c) {
-    if (a.overrideDefaultImplementation_) {
-      try {
-        return document.querySelectorAll(c + ":not([" + a.psaNotProcessed_ + "])");
-      } catch (e) {
-      }
-    }
-    return a.origGetElementsByTagName_.call(document, c);
-  });
-  document.createElement = function(c) {
-    var e = a.origCreateElement_.call(document, c);
-    a.overrideDefaultImplementation_ && c.toLowerCase() == "script" && (a.dynamicInsertedScript_.push(e), a.dynamicInsertedScriptCount_++, c = function() {
-      a.dynamicInsertedScriptCount_--;
-      var f = a.dynamicInsertedScript_.indexOf(this);
-      if (f != -1 && (a.dynamicInsertedScript_.splice(f, 1), a.canCallOnComplete())) {
-        a.onComplete();
-      }
-    }, deferJsNs.addOnload(e, c), pagespeedutils.addHandler(e, "error", c));
-    return e;
-  };
-};
-deferJsNs.DeferJs.prototype.execute = function() {
-  if (this.state_ == deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED) {
-    var a = 0;
-    this.noDeferAsyncScriptsCount_ != 0 && (a = this.getNumScriptsWithNoOnload(this.noDeferAsyncScripts_));
-    this.noDeferAsyncScriptsCount_ == a && this.run();
-  }
-};
-deferJsNs.DeferJs.prototype.execute = deferJsNs.DeferJs.prototype.execute;
-deferJsNs.DeferJs.prototype.run = function() {
-  this.state_ == deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED && (this.firstIncrementalRun_ && this.fireEvent(deferJsNs.DeferJs.EVENT.BEFORE_SCRIPTS), this.state_ = deferJsNs.DeferJs.STATES.SCRIPTS_EXECUTING, this.setUp(), this.runNext());
-};
-deferJsNs.DeferJs.prototype.run = deferJsNs.DeferJs.prototype.run;
-deferJsNs.DeferJs.prototype.parseHtml = function(a) {
-  var b = this.origCreateElement_.call(document, "div");
-  b.innerHTML = "<div>_</div>" + a;
-  b.removeChild(b.firstChild);
-  return b;
-};
-deferJsNs.DeferJs.prototype.disown = function(a) {
-  var b = a.parentNode;
-  b && b.removeChild(a);
-};
-deferJsNs.DeferJs.prototype.insertNodesBeforeElem = function(a, b) {
-  a = this.nodeListToArray(a);
-  for (var d = a.length, c = b.parentNode, e = 0; e < d; ++e) {
-    var f = a[e];
-    this.disown(f);
-    c.insertBefore(f, b);
-  }
-};
-deferJsNs.DeferJs.prototype.isJSNode = function(a) {
-  return a.nodeName != "SCRIPT" ? !1 : a.hasAttribute("type") ? (a = a.getAttribute("type"), !a || this.jsMimeTypes.indexOf(a) != -1) : a.hasAttribute("language") ? (a = a.getAttribute("language"), !a || this.jsMimeTypes.indexOf("text/" + a.toLowerCase()) != -1) : !0;
-};
-deferJsNs.DeferJs.prototype.markNodesAndExtractScriptNodes = function(a, b) {
-  if (a.childNodes) {
-    a = this.nodeListToArray(a.childNodes);
-    for (var d = a.length, c = 0; c < d; ++c) {
-      var e = a[c];
-      e.nodeName == "SCRIPT" ? this.isJSNode(e) && (b.push(e), e.setAttribute(deferJsNs.DeferJs.PSA_ORIG_TYPE, e.type), e.setAttribute("type", this.psaScriptType_), e.setAttribute(deferJsNs.DeferJs.PSA_ORIG_SRC, e.src), e.setAttribute("src", ""), e.setAttribute(this.psaNotProcessed_, "")) : this.markNodesAndExtractScriptNodes(e, b);
-    }
-  }
-};
-deferJsNs.DeferJs.prototype.deferScripts = function(a, b) {
-  for (var d = a.length, c = 0; c < d; ++c) {
-    this.addNode(a[c], b + c, !!c);
-  }
-};
-deferJsNs.DeferJs.prototype.insertHtml = function(a, b, d) {
-  a = this.parseHtml(a);
-  var c = [];
-  this.markNodesAndExtractScriptNodes(a, c);
-  d ? this.insertNodesBeforeElem(a.childNodes, d) : this.log("Unable to insert nodes, no context element found");
-  this.deferScripts(c, b);
-};
-deferJsNs.DeferJs.prototype.handlePendingDocumentWrites = function() {
-  if (this.documentWriteHtml_ != "") {
     this.log("handle_dw: " + this.documentWriteHtml_);
-    var a = this.documentWriteHtml_;
+    var html = this.documentWriteHtml_;
     this.documentWriteHtml_ = "";
-    var b = this.getCurrentDomLocation();
-    this.insertHtml(a, this.next_, b);
-  }
-};
-deferJsNs.DeferJs.prototype.writeHtml = function(a) {
-  this.overrideDefaultImplementation_ ? (this.log("dw: " + a), this.documentWriteHtml_ += a) : this.origDocWrite_.call(document, a);
-};
-deferJsNs.DeferJs.prototype.addDeferredOnloadListeners = function() {
-  var a;
-  document.querySelectorAll && (a = document.querySelectorAll("[" + deferJsNs.DeferJs.PAGESPEED_ONLOAD + "][data-pagespeed-loaded]"));
-  for (var b = 0; b < a.length; b++) {
-    var d = a.item(b), c = "var psaFunc=function() {" + d.getAttribute(deferJsNs.DeferJs.PAGESPEED_ONLOAD) + "};";
-    window.eval.call(window, c);
-    typeof window.psaFunc != "function" ? this.log("Function is not defined", Error("")) : psaAddEventListener(d, "onload", window.psaFunc);
-  }
-};
-deferJsNs.DeferJs.prototype.addBeforeDeferRunFunctions = function(a) {
-  psaAddEventListener(window, "onbeforescripts", a);
-};
-deferJsNs.DeferJs.prototype.addBeforeDeferRunFunctions = deferJsNs.DeferJs.prototype.addBeforeDeferRunFunctions;
-deferJsNs.DeferJs.prototype.addAfterDeferRunFunctions = function(a) {
-  psaAddEventListener(window, "onafterscripts", a);
-};
-deferJsNs.DeferJs.prototype.addAfterDeferRunFunctions = deferJsNs.DeferJs.prototype.addAfterDeferRunFunctions;
-deferJsNs.DeferJs.prototype.fireEvent = function(a) {
-  this.eventState_ = a;
-  this.log("Firing Event: " + a);
-  a = this.eventListenersMap_[a] || [];
-  for (var b = 0; b < a.length; ++b) {
-    this.exec(a[b]);
-  }
-  a.length = 0;
-};
-deferJsNs.DeferJs.prototype.exec = function(a, b) {
-  try {
-    a.call(b || window);
-  } catch (d) {
-    this.log("Exception while evaluating.", d);
-  }
-};
-deferJsNs.DeferJs.prototype.overrideAddEventListeners = function() {
-  var a = this;
-  window.addEventListener ? (document.addEventListener = function(b, d, c) {
-    psaAddEventListener(document, b, d, a.origDocAddEventListener_, c);
-  }, window.addEventListener = function(b, d, c) {
-    psaAddEventListener(window, b, d, a.origWindowAddEventListener_, c);
-  }) : window.attachEvent && (document.attachEvent = function(b, d) {
-    psaAddEventListener(document, b, d, a.origDocAttachEvent_);
-  }, window.attachEvent = function(b, d) {
-    psaAddEventListener(window, b, d, a.origWindowAttachEvent_);
-  });
-};
-var psaAddEventListener = function(a, b, d, c, e) {
-  var f = pagespeed.deferJs;
-  if (f.state_ >= deferJsNs.DeferJs.STATES.WAITING_FOR_ONLOAD) {
-    if (c) {
-      c.call(a, b, d, e);
-      return;
+    var currentElem = this.getCurrentDomLocation();
+    this.insertHtml(html, this.next_, currentElem);
+  };
+  deferJsNs.DeferJs.prototype.writeHtml = function(html) {
+    if (this.overrideDefaultImplementation_) {
+      this.log("dw: " + html);
+      this.documentWriteHtml_ += html;
+    } else {
+      this.origDocWrite_.call(document, html);
     }
-    if (f.state_ >= deferJsNs.DeferJs.STATES.SCRIPTS_DONE) {
-      return;
+  };
+  deferJsNs.DeferJs.prototype.addDeferredOnloadListeners = function() {
+    var onloadDeferredElements;
+    if (document.querySelectorAll) {
+      onloadDeferredElements = document.querySelectorAll(
+        "[" + deferJsNs.DeferJs.PAGESPEED_ONLOAD + "][data-pagespeed-loaded]"
+      );
     }
-  }
-  if (f.eventState_ < deferJsNs.DeferJs.EVENT.DOM_READY && (b == "DOMContentLoaded" || b == "readystatechange" || b == "onDOMContentLoaded" || b == "onreadystatechange")) {
-    b = deferJsNs.DeferJs.EVENT.DOM_READY;
-    var g = "DOMContentLoaded";
-  } else if (f.eventState_ < deferJsNs.DeferJs.EVENT.LOAD && (b == "load" || b == "onload")) {
-    b = deferJsNs.DeferJs.EVENT.LOAD, g = "load";
-  } else if (b == "onbeforescripts") {
-    b = deferJsNs.DeferJs.EVENT.BEFORE_SCRIPTS;
-  } else if (b == "onafterscripts") {
-    b = deferJsNs.DeferJs.EVENT.AFTER_SCRIPTS;
-  } else {
-    c && c.call(a, b, d, e);
-    return;
-  }
-  f.eventListenersMap_[b] || (f.eventListenersMap_[b] = []);
-  f.eventListenersMap_[b].push(function() {
-    var h = {bubbles:!1, cancelable:!1, eventPhase:2};
-    h.timeStamp = (new Date()).getTime();
-    h.type = g;
-    h.target = a != window ? a : document;
-    h.currentTarget = a;
-    d.call(a, h);
-  });
-};
-deferJsNs.DeferJs.prototype.registerScriptTags = function(a, b) {
-  if (!(this.state_ >= deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED)) {
-    if (a) {
-      if (!deferJsNs.DeferJs.isExperimentalMode) {
-        a();
+    for (var i = 0; i < onloadDeferredElements.length; i++) {
+      var elem = onloadDeferredElements.item(i);
+      var handlerStr = elem.getAttribute(deferJsNs.DeferJs.PAGESPEED_ONLOAD);
+      var functionStr = "var psaFunc=function() {" + handlerStr + "};";
+      window["eval"].call(window, functionStr);
+      if (typeof window["psaFunc"] != "function") {
+        this.log("Function is not defined", new Error(""));
+        continue;
+      }
+      psaAddEventListener(elem, "onload", window["psaFunc"]);
+    }
+  };
+  deferJsNs.DeferJs.prototype.addBeforeDeferRunFunctions = function(func) {
+    psaAddEventListener(window, "onbeforescripts", func);
+  };
+  deferJsNs.DeferJs.prototype["addBeforeDeferRunFunctions"] = deferJsNs.DeferJs.prototype.addBeforeDeferRunFunctions;
+  deferJsNs.DeferJs.prototype.addAfterDeferRunFunctions = function(func) {
+    psaAddEventListener(window, "onafterscripts", func);
+  };
+  deferJsNs.DeferJs.prototype["addAfterDeferRunFunctions"] = deferJsNs.DeferJs.prototype.addAfterDeferRunFunctions;
+  deferJsNs.DeferJs.prototype.fireEvent = function(evt) {
+    this.eventState_ = evt;
+    this.log("Firing Event: " + evt);
+    var eventListeners = this.eventListenersMap_[evt] || [];
+    for (var i = 0; i < eventListeners.length; ++i) {
+      this.exec(eventListeners[i]);
+    }
+    eventListeners.length = 0;
+  };
+  deferJsNs.DeferJs.prototype.exec = function(func, opt_scopeObject) {
+    try {
+      func.call(opt_scopeObject || window);
+    } catch (err) {
+      this.log("Exception while evaluating.", err);
+    }
+  };
+  deferJsNs.DeferJs.prototype.overrideAddEventListeners = function() {
+    var me = this;
+    if (window.addEventListener) {
+      document.addEventListener = function(eventName, func, capture) {
+        psaAddEventListener(
+          document,
+          eventName,
+          func,
+          me.origDocAddEventListener_,
+          capture
+        );
+      };
+      window.addEventListener = function(eventName, func, capture) {
+        psaAddEventListener(
+          window,
+          eventName,
+          func,
+          me.origWindowAddEventListener_,
+          capture
+        );
+      };
+    } else if (window.attachEvent) {
+      document.attachEvent = function(eventName, func) {
+        psaAddEventListener(
+          document,
+          eventName,
+          func,
+          me.origDocAttachEvent_
+        );
+      };
+      window.attachEvent = function(eventName, func) {
+        psaAddEventListener(
+          window,
+          eventName,
+          func,
+          me.origWindowAttachEvent_
+        );
+      };
+    }
+  };
+  var psaAddEventListener = function(elem, eventName, func, opt_originalAddEventListener, opt_capture) {
+    var deferJs = pagespeed["deferJs"];
+    if (deferJs.state_ >= deferJsNs.DeferJs.STATES.WAITING_FOR_ONLOAD) {
+      if (opt_originalAddEventListener) {
+        opt_originalAddEventListener.call(elem, eventName, func, opt_capture);
         return;
       }
-      this.lastIncrementalRun_ = !1;
-      this.incrementalScriptsDoneCallback_ = a;
-      b && (this.optLastIndex_ = b);
+      if (deferJs.state_ >= deferJsNs.DeferJs.STATES.SCRIPTS_DONE) {
+        return;
+      }
+    }
+    var deferJsEvent;
+    var deferJsEventName;
+    if (deferJs.eventState_ < deferJsNs.DeferJs.EVENT.DOM_READY && (eventName == "DOMContentLoaded" || eventName == "readystatechange" || eventName == "onDOMContentLoaded" || eventName == "onreadystatechange")) {
+      deferJsEvent = deferJsNs.DeferJs.EVENT.DOM_READY;
+      deferJsEventName = "DOMContentLoaded";
+    } else if (deferJs.eventState_ < deferJsNs.DeferJs.EVENT.LOAD && (eventName == "load" || eventName == "onload")) {
+      deferJsEvent = deferJsNs.DeferJs.EVENT.LOAD;
+      deferJsEventName = "load";
+    } else if (eventName == "onbeforescripts") {
+      deferJsEvent = deferJsNs.DeferJs.EVENT.BEFORE_SCRIPTS;
+    } else if (eventName == "onafterscripts") {
+      deferJsEvent = deferJsNs.DeferJs.EVENT.AFTER_SCRIPTS;
     } else {
-      this.lastIncrementalRun_ = !0;
+      if (opt_originalAddEventListener) {
+        opt_originalAddEventListener.call(elem, eventName, func, opt_capture);
+      }
+      return;
+    }
+    var eventListenerClosure = function() {
+      var customEvent = {};
+      customEvent["bubbles"] = false;
+      customEvent["cancelable"] = false;
+      customEvent["eventPhase"] = 2;
+      customEvent["timeStamp"] = (new Date()).getTime();
+      customEvent["type"] = deferJsEventName;
+      customEvent["target"] = elem != window ? elem : document;
+      customEvent["currentTarget"] = elem;
+      func.call(elem, customEvent);
+    };
+    if (!deferJs.eventListenersMap_[deferJsEvent]) {
+      deferJs.eventListenersMap_[deferJsEvent] = [];
+    }
+    deferJs.eventListenersMap_[deferJsEvent].push(
+      eventListenerClosure
+    );
+  };
+  deferJsNs.DeferJs.prototype.registerScriptTags = function(opt_callback, opt_last_index) {
+    if (this.state_ >= deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED) {
+      return;
+    }
+    if (opt_callback) {
+      if (!deferJsNs.DeferJs.isExperimentalMode) {
+        opt_callback();
+        return;
+      }
+      this.lastIncrementalRun_ = false;
+      this.incrementalScriptsDoneCallback_ = opt_callback;
+      if (opt_last_index) {
+        this.optLastIndex_ = opt_last_index;
+      }
+    } else {
+      this.lastIncrementalRun_ = true;
     }
     this.state_ = deferJsNs.DeferJs.STATES.SCRIPTS_REGISTERED;
-    b = document.getElementsByTagName("script");
-    for (var d = b.length, c = 0; c < d; ++c) {
-      var e = this.queue_.length == this.next_, f = b[c];
-      f.getAttribute("type") == this.psaScriptType_ && (a ? f.getAttribute(deferJsNs.DeferJs.PSA_ORIG_INDEX) <= this.optLastIndex_ && this.addNode(f, void 0, !e) : (f.getAttribute(deferJsNs.DeferJs.PSA_ORIG_INDEX) < this.optLastIndex_ && this.log("Executing a script twice. Orig_Index: " + f.getAttribute(deferJsNs.DeferJs.PSA_ORIG_INDEX), Error("")), this.addNode(f, void 0, !e)));
+    var scripts = document.getElementsByTagName("script");
+    var len = scripts.length;
+    for (var i = 0; i < len; ++i) {
+      var isFirstScript = this.queue_.length == this.next_;
+      var script = scripts[i];
+      if (script.getAttribute("type") == this.psaScriptType_) {
+        if (opt_callback) {
+          var scriptIndex = script.getAttribute(deferJsNs.DeferJs.PSA_ORIG_INDEX);
+          if (scriptIndex <= this.optLastIndex_) {
+            this.addNode(script, void 0, !isFirstScript);
+          }
+        } else {
+          if (script.getAttribute(deferJsNs.DeferJs.PSA_ORIG_INDEX) < this.optLastIndex_) {
+            this.log(
+              "Executing a script twice. Orig_Index: " + script.getAttribute(deferJsNs.DeferJs.PSA_ORIG_INDEX),
+              new Error("")
+            );
+          }
+          this.addNode(script, void 0, !isFirstScript);
+        }
+      }
     }
-  }
-};
-deferJsNs.DeferJs.prototype.registerScriptTags = deferJsNs.DeferJs.prototype.registerScriptTags;
-deferJsNs.addOnload = function(a, b) {
-  pagespeedutils.addHandler(a, "load", b);
-};
-pagespeed.addOnload = deferJsNs.addOnload;
-deferJsNs.DeferJs.prototype.isWebKit = function() {
-  return navigator.userAgent.indexOf("AppleWebKit") != -1;
-};
-deferJsNs.DeferJs.prototype.getIEVersion = function() {
-  var a = /(?:MSIE.(\d+\.\d+))/.exec(navigator.userAgent);
-  return a && a[1] ? document.documentMode || parseFloat(a[1]) : NaN;
-};
-deferJsNs.DeferJs.prototype.setType = function(a) {
-  this.psaScriptType_ = a;
-};
-deferJsNs.DeferJs.prototype.setPsaNotProcessed = function(a) {
-  this.psaNotProcessed_ = a;
-};
-deferJsNs.DeferJs.prototype.isLowPriorityDeferJs = function() {
-  return this.psaScriptType_ == deferJsNs.DeferJs.PSA_SCRIPT_TYPE ? !0 : !1;
-};
-deferJsNs.DeferJs.prototype.noDeferCreateElementOverride = function() {
-  var a = this;
-  document.createElement = function(b) {
-    var d = a.origCreateElement_.call(document, b);
-    a.overrideDefaultImplementation_ && b.toLowerCase() == "script" && (a.noDeferAsyncScripts_.push(d), a.noDeferAsyncScriptsCount_++, b = function() {
-      var c = a.noDeferAsyncScripts_.indexOf(this);
-      c != -1 && (a.noDeferAsyncScripts_.splice(c, 1), a.noDeferAsyncScriptsCount_--, a.execute());
-    }, deferJsNs.addOnload(d, b), pagespeedutils.addHandler(d, "error", b));
-    return d;
   };
-};
-deferJsNs.DeferJs.prototype.isExperimentalMode = function() {
-  return deferJsNs.DeferJs.isExperimentalMode;
-};
-deferJsNs.DeferJs.prototype.isExperimentalMode = deferJsNs.DeferJs.prototype.isExperimentalMode;
-deferJsNs.deferInit = function() {
-  pagespeed.deferJs || (deferJsNs.DeferJs.isExperimentalMode = pagespeed.defer_js_experimental, pagespeed.highPriorityDeferJs = new deferJsNs.DeferJs(), pagespeed.highPriorityDeferJs.setType(deferJsNs.DeferJs.PRIORITY_PSA_SCRIPT_TYPE), pagespeed.highPriorityDeferJs.setPsaNotProcessed(deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED), pagespeed.highPriorityDeferJs.setNotProcessedAttributeForNodes(), pagespeed.lowPriorityDeferJs = new deferJsNs.DeferJs(), pagespeed.lowPriorityDeferJs.setType(deferJsNs.DeferJs.PSA_SCRIPT_TYPE), 
-  pagespeed.lowPriorityDeferJs.setPsaNotProcessed(deferJsNs.DeferJs.PSA_NOT_PROCESSED), pagespeed.lowPriorityDeferJs.setNotProcessedAttributeForNodes(), pagespeed.deferJs = pagespeed.highPriorityDeferJs, pagespeed.deferJs.noDeferCreateElementOverride(), pagespeed.deferJs = pagespeed.deferJs);
-};
-deferJsNs.deferInit();
-pagespeed.deferJsStarted = !1;
-deferJsNs.startDeferJs = function() {
-  pagespeed.deferJsStarted || (pagespeed.deferJsStarted = !0, pagespeed.deferJs.registerScriptTags(), pagespeed.deferJs.execute());
-};
-deferJsNs.startDeferJs = deferJsNs.startDeferJs;
-pagespeedutils.addHandler(document, "DOMContentLoaded", deferJsNs.startDeferJs);
-deferJsNs.addOnload(window, deferJsNs.startDeferJs);
+  deferJsNs.DeferJs.prototype["registerScriptTags"] = deferJsNs.DeferJs.prototype.registerScriptTags;
+  deferJsNs.addOnload = function(elem, func) {
+    addHandler(elem, "load", func);
+  };
+  pagespeed["addOnload"] = deferJsNs.addOnload;
+  deferJsNs.DeferJs.prototype.isWebKit = function() {
+    return navigator.userAgent.indexOf("AppleWebKit") != -1;
+  };
+  deferJsNs.DeferJs.prototype.getIEVersion = function() {
+    var version = /(?:MSIE.(\d+\.\d+))/.exec(navigator.userAgent);
+    return version && version[1] ? document.documentMode || parseFloat(version[1]) : NaN;
+  };
+  deferJsNs.DeferJs.prototype.setType = function(type) {
+    this.psaScriptType_ = type;
+  };
+  deferJsNs.DeferJs.prototype.setPsaNotProcessed = function(psaNotProcessed) {
+    this.psaNotProcessed_ = psaNotProcessed;
+  };
+  deferJsNs.DeferJs.prototype.isLowPriorityDeferJs = function() {
+    if (this.psaScriptType_ == deferJsNs.DeferJs.PSA_SCRIPT_TYPE) {
+      return true;
+    }
+    return false;
+  };
+  deferJsNs.DeferJs.prototype.noDeferCreateElementOverride = function() {
+    var me = this;
+    document.createElement = function(str) {
+      var elem = me.origCreateElement_.call(document, str);
+      if (me.overrideDefaultImplementation_ && str.toLowerCase() == "script") {
+        me.noDeferAsyncScripts_.push(elem);
+        me.noDeferAsyncScriptsCount_++;
+        var onload = function() {
+          var index = me.noDeferAsyncScripts_.indexOf(this);
+          if (index != -1) {
+            me.noDeferAsyncScripts_.splice(index, 1);
+            me.noDeferAsyncScriptsCount_--;
+            me.execute();
+          }
+        };
+        deferJsNs.addOnload(elem, onload);
+        addHandler(elem, "error", onload);
+      }
+      return elem;
+    };
+  };
+  deferJsNs.DeferJs.prototype.isExperimentalMode = function() {
+    return deferJsNs.DeferJs.isExperimentalMode;
+  };
+  deferJsNs.DeferJs.prototype["isExperimentalMode"] = deferJsNs.DeferJs.prototype.isExperimentalMode;
+  deferJsNs.deferInit = function() {
+    if (pagespeed["deferJs"]) {
+      return;
+    }
+    deferJsNs.DeferJs.isExperimentalMode = pagespeed["defer_js_experimental"];
+    pagespeed.highPriorityDeferJs = new deferJsNs.DeferJs();
+    pagespeed.highPriorityDeferJs.setType(
+      deferJsNs.DeferJs.PRIORITY_PSA_SCRIPT_TYPE
+    );
+    pagespeed.highPriorityDeferJs.setPsaNotProcessed(
+      deferJsNs.DeferJs.PRIORITY_PSA_NOT_PROCESSED
+    );
+    pagespeed.highPriorityDeferJs.setNotProcessedAttributeForNodes();
+    pagespeed.lowPriorityDeferJs = new deferJsNs.DeferJs();
+    pagespeed.lowPriorityDeferJs.setType(deferJsNs.DeferJs.PSA_SCRIPT_TYPE);
+    pagespeed.lowPriorityDeferJs.setPsaNotProcessed(
+      deferJsNs.DeferJs.PSA_NOT_PROCESSED
+    );
+    pagespeed.lowPriorityDeferJs.setNotProcessedAttributeForNodes();
+    pagespeed.deferJs = pagespeed.highPriorityDeferJs;
+    pagespeed.deferJs.noDeferCreateElementOverride();
+    pagespeed["deferJs"] = pagespeed.deferJs;
+  };
+  deferJsNs.deferInit();
+  pagespeed.deferJsStarted = false;
+  deferJsNs.startDeferJs = function() {
+    if (pagespeed.deferJsStarted) {
+      return;
+    }
+    pagespeed.deferJsStarted = true;
+    pagespeed.deferJs.registerScriptTags();
+    pagespeed.deferJs.execute();
+  };
+  deferJsNs["startDeferJs"] = deferJsNs.startDeferJs;
+  addHandler(document, "DOMContentLoaded", deferJsNs.startDeferJs);
+  deferJsNs.addOnload(window, deferJsNs.startDeferJs);
 })();

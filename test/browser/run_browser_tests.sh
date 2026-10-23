@@ -40,6 +40,7 @@ node responsive_js_test.mjs
 node delay_images_test.mjs
 node dedup_inlined_images_test.mjs
 node js_defer_test.mjs
+node js_defer_exports_test.mjs
 node client_domain_rewriter_test.mjs
 node defer_iframe_test.mjs
 node deterministic_test.mjs
