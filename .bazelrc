@@ -23,6 +23,14 @@ startup --host_jvm_args=-Xmx3g
 # from MODULE.bazel: BCR modules plus the non_bcr_deps extension in
 # bazel/extensions.bzl. WORKSPACE support is off.
 common --enable_bzlmod
+# Module registries, searched in this order. The BCR comes first and is named
+# explicitly because a --registry flag replaces the default. Envoy's own
+# registry follows it: Envoy 1.40 depends on modules that only exist there
+# (the *.envoy versions, e.g. protobuf 35.1.bcr.envoy and googleurl). It is
+# pinned to the commit Envoy v1.40.0's own .bazelrc names, so the module files
+# it serves cannot change under us; move it together with the Envoy pin.
+common --registry=https://bcr.bazel.build
+common --registry=https://raw.githubusercontent.com/envoyproxy/bazel-registry/8ef390e133ec41491e397681c91c30e9cda1395a
 # CI (Linux) asserts MODULE.bazel.lock is current. Extension results are
 # per-platform in the lock, so Windows/macOS stay in the default update mode.
 common:ci_lock --lockfile_mode=error
