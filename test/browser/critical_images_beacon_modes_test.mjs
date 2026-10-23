@@ -162,6 +162,27 @@ const settle = () => new Promise((r) => setTimeout(r, 400));
   await page.close();
 }
 
+// --- 1c. A later, larger instance of the same image wins the rendered size ---
+{
+  const dup = `
+    <img src="http://test/img/a.gif" data-pagespeed-url-hash="${HA}"
+         width="100" height="50" ${at(0, 0)}>
+    <img src="http://test/img/a2.gif" data-pagespeed-url-hash="${HA}"
+         width="200" height="100" ${at(100, 0)}>
+    <img src="http://test/img/a3.gif" data-pagespeed-url-hash="${HA}"
+         width="150" height="150" ${at(300, 0)}>`;
+  const { page, beacons } = await open(testPage(dup,
+      `pagespeed.CriticalImages.Run('http://test/beacon', 'http://test/',
+           'oh9', true, true, '');`));
+  await waitFor(() => beacons.length > 0);
+  await settle();
+  const rd = beacons.length ? new URLSearchParams(beacons[0].body).get('rd') : null;
+  check(rd === JSON.stringify({ [HA]: { rw: 200, rh: 100, ow: 1, oh: 1 } }),
+        `at load: the larger instance of an image replaces a smaller one, ` +
+        `and a wider but shorter one does not (got ${rd})`);
+  await page.close();
+}
+
 // --- 2. Sent later: per-image checks, then checkCriticalImages() -----------
 {
   const { page, beacons } = await open(testPage(IMAGES,

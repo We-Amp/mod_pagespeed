@@ -4,7 +4,7 @@
 // Browser integration tests for the script that turns deferred stylesheets
 // on (prioritize_critical_css).
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
+// Drives the SHIPPED asset, the compiled bytes embedded in
 // net/instaweb/rewriter/generated/critical_css_loader_opt.cc — against the
 // markup the filter writes: a preload link marked data-pagespeed-deferred-css
 // where the stylesheet link stood, followed by a <noscript> copy of the link.

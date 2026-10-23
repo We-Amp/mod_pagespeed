@@ -1,4 +1,5 @@
 exports_files([
+    "client_compat.js",
     "externs.js",
     "js_utils.js",
 ])

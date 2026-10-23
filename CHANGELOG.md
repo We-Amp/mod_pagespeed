@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built from source at this revision. The packages and images are
   unchanged.
 
+### Fixed
+
+- **`resize_rendered_image_dimensions` now uses the largest size of an image
+  that appears more than once on a page, as documented.** Previously the size
+  of its first appearance was used even when a later one was larger, so the
+  larger appearance could be served a smaller image that the browser scaled
+  up.
+
 ### Removed
 
 - The unbuilt `css_minify_main` and `js_minify_main` command-line sources are

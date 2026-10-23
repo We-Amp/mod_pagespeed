@@ -22,9 +22,13 @@
  * stylesheet again, in that same place, as soon as the file has arrived.
  */
 
-goog.provide('pagespeed.CriticalCssLoader');
+import * as pagespeedutils from '../js/js_utils.js';
 
-goog.require('pagespeedutils');
+// The public entry point is a property of window.pagespeed: the C++ filter
+// emits an inline call to it by name.
+window.pagespeed = window.pagespeed || {};
+var pagespeed = window.pagespeed;
+pagespeed.CriticalCssLoader = pagespeed.CriticalCssLoader || {};
 
 
 /**
@@ -58,7 +62,7 @@ pagespeed.CriticalCssLoader.apply_ = function(link) {
  * @private
  */
 pagespeed.CriticalCssLoader.onLinkEvent_ = function(event) {
-  var target = /** @type {Element} */ (event.target);
+  var target = event.target;
   if (target && target.nodeName == 'LINK' &&
       target.hasAttribute(pagespeed.CriticalCssLoader.DEFERRED_ATTRIBUTE_)) {
     pagespeed.CriticalCssLoader.apply_(target);

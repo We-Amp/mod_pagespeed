@@ -42,6 +42,7 @@ genrule(
     name = "verify_generated_js",
     srcs = _JS_SOURCES + _JS_TOOLING + [
         "//net/instaweb/js:js_utils.js",
+        "//net/instaweb/js:client_compat.js",
         "//net/instaweb/js:externs.js",
         "generated/.source-hash",
     ],
@@ -53,6 +54,7 @@ genrule(
             "ACTUAL=$$(cat " +
             " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
             " $(execpath //net/instaweb/js:js_utils.js)" +
+            " $(execpath //net/instaweb/js:client_compat.js)" +
             " $(execpath //net/instaweb/js:externs.js) " +
             " ".join(["$(execpath %s)" % f for f in _JS_TOOLING]) +
             " | shasum -a 256 | cut -d' ' -f1) && " +
@@ -66,6 +68,7 @@ genrule(
             "ACTUAL=$$(cat " +
             " ".join(["$(execpath %s)" % f for f in _JS_SOURCES]) +
             " $(execpath //net/instaweb/js:js_utils.js)" +
+            " $(execpath //net/instaweb/js:client_compat.js)" +
             " $(execpath //net/instaweb/js:externs.js) " +
             " ".join(["$(execpath %s)" % f for f in _JS_TOOLING]) +
             " | sha256sum | cut -d' ' -f1) && " +

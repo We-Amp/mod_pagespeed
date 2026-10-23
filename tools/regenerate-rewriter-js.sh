@@ -7,7 +7,7 @@
 # This script re-runs the JS compiler and data2c pipeline that was
 # previously executed at build time via Bazel genrules.  The outputs are
 # checked into net/instaweb/rewriter/generated/ so that normal builds do
-# NOT require Node.js, npx, esbuild or the Google Closure Library.
+# NOT require Node.js, npx, esbuild or the Closure Compiler.
 #
 # Assets are being moved from the Closure Compiler to esbuild one at a time:
 # ESBUILD_FILES below go through the pinned esbuild in tools/js/ (config in
@@ -35,6 +35,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REWRITER_DIR="$REPO_ROOT/net/instaweb/rewriter"
 GEN_DIR="$REWRITER_DIR/generated"
 JS_UTILS="$REPO_ROOT/net/instaweb/js/js_utils.js"
+CLIENT_COMPAT="$REPO_ROOT/net/instaweb/js/client_compat.js"
 EXTERNS="$REPO_ROOT/net/instaweb/js/externs.js"
 JS_TOOLS_DIR="$REPO_ROOT/tools/js"
 
@@ -65,6 +66,8 @@ ESBUILD_FILES=(
     add_instrumentation.js
     client_domain_rewriter.js
     critical_css_beacon.js
+    critical_css_loader.js
+    critical_images_beacon.js
     dedup_inlined_images.js
     defer_iframe.js
     delay_images.js
@@ -73,6 +76,7 @@ ESBUILD_FILES=(
     extended_instrumentation.js
     lazyload_images.js
     local_storage_cache.js
+    responsive_js.js
 )
 
 # Portable SHA-256: shasum on macOS, sha256sum on Linux
@@ -94,6 +98,7 @@ compute_source_hash() {
         "$REWRITER_DIR/local_storage_cache.js" \
         "$REWRITER_DIR/responsive_js.js" \
         "$JS_UTILS" \
+        "$CLIENT_COMPAT" \
         "$EXTERNS" \
         "$JS_TOOLS_DIR/build-rewriter-js.mjs" \
         "$JS_TOOLS_DIR/package-lock.json" \
@@ -198,10 +203,9 @@ closure_js_utils() {
     ' "$JS_UTILS" > "$out"
 }
 
-# The pinned library's sources carry an @license header the compiler
-# preserves into the output. Shipped assets must stay comment-free
-# (StaticAssetManagerTest asserts this); attribution is retained in the
-# pinned tools/closure/ checkout this script fetches.
+# The compiler can preserve an @license header from its inputs into the
+# output. Shipped assets must stay comment-free (StaticAssetManagerTest
+# asserts this), so such a header is stripped.
 strip_closure_license() {
     perl -0777 -pi -e \
         's{/\*\s*Copyright The Closure Library Authors\.\s*SPDX-License-Identifier: Apache-2\.0\s*\*/\n?}{}g' \
@@ -247,67 +251,6 @@ echo "==> Compiling JS with Closure Compiler..."
 CLOSURE_JS_UTILS="$TMPDIR/closure/js_utils.js"
 mkdir -p "$TMPDIR/closure"
 closure_js_utils "$CLOSURE_JS_UTILS"
-
-# Files that need dependency mode + the Closure Library.
-#
-# The library is pinned to the final upstream release (upstream is archived,
-# so this never moves). Fetched on demand into tools/closure/ (gitignored);
-# the commit hash is verified so a tampered or wrong checkout can't silently
-# change the shipped JS.
-CLOSURE_LIB_TAG="v20230802"
-CLOSURE_LIB_COMMIT="ccf3f1dcd7258ff413406daa45bad79277d40afd"
-CLOSURE_LIB_DIR="$REPO_ROOT/tools/closure/closure-library-$CLOSURE_LIB_TAG"
-if [[ ! -d "$CLOSURE_LIB_DIR" ]]; then
-    echo "==> Fetching Closure Library $CLOSURE_LIB_TAG..."
-    mkdir -p "$REPO_ROOT/tools/closure"
-    git clone --quiet --depth 1 --branch "$CLOSURE_LIB_TAG" \
-        https://github.com/google/closure-library "$CLOSURE_LIB_DIR"
-fi
-ACTUAL_COMMIT="$(git -C "$CLOSURE_LIB_DIR" rev-parse HEAD)"
-if [[ "$ACTUAL_COMMIT" != "$CLOSURE_LIB_COMMIT" ]]; then
-    echo "ERROR: Closure Library at $CLOSURE_LIB_DIR is at commit" >&2
-    echo "  $ACTUAL_COMMIT, expected $CLOSURE_LIB_COMMIT ($CLOSURE_LIB_TAG)." >&2
-    echo "Remove the directory and re-run to fetch the pinned version." >&2
-    exit 1
-fi
-
-# --- closure_compiler_gen files (with dependency mode, use closure library) ---
-for entry in \
-    "critical_css_loader.js:goog:pagespeed.CriticalCssLoader:$CLOSURE_JS_UTILS" \
-    "critical_images_beacon.js:goog:pagespeed.CriticalImages:$CLOSURE_JS_UTILS" \
-    "responsive_js.js:goog:pagespeed.Responsive:"; do
-
-    IFS=':' read -r src_file entry_ns entry_point includes <<< "$entry"
-    base="${src_file%.js}"
-    src="$REWRITER_DIR/$src_file"
-
-    include_flags=()
-    if [[ -n "$includes" ]]; then
-        include_flags+=(--js "$includes")
-    fi
-
-    # Collect closure library JS files
-    cl_flags=()
-    if [[ ! -d "$CLOSURE_LIB_DIR" ]]; then
-        echo "ERROR: Closure Library missing at $CLOSURE_LIB_DIR" >&2
-        exit 1
-    fi
-    while IFS= read -r f; do
-        cl_flags+=(--js "$f")
-    done < <(find "$CLOSURE_LIB_DIR" -name '*.js' ! -name '*_test.js' ! -name '*_perf.js' | sort)
-
-    echo "  $base (dbg + opt, dependency mode)"
-    # ${arr[@]+...} guard: macOS ships bash 3.2, where expanding an empty
-    # array under `set -u` is an unbound-variable error.
-    closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
-        ${include_flags[@]+"${include_flags[@]}"} \
-        --entry_point "$entry_ns:$entry_point" \
-        --dependency_mode PRUNE "${cl_flags[@]}"
-    closure_compile "$src" "$TMPDIR/${base}_opt.js" ADVANCED \
-        ${include_flags[@]+"${include_flags[@]}"} \
-        --entry_point "$entry_ns:$entry_point" \
-        --dependency_mode PRUNE "${cl_flags[@]}"
-done
 
 # --- closure_compiler_without_dependency_mode files ---
 WITHOUT_DEP_FILES=(
