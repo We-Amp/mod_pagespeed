@@ -416,7 +416,7 @@ class DaemonAdapter {
   // asks again.  Only a number that was read and differs from the handle's
   // own is a replacement.
   //
-  // EVERY OPEN LOOKS BEFORE AND AFTER, AND THIS MODULE DELETES NOTHING.  The
+  // EVERY OPEN LOOKS BEFORE AND AFTER.  The
   // daemon's library has one open call, and it creates the volume file it
   // does not find.  A volume file this module's open created is one the
   // daemon never reads, so every open in a serving process -- a process's
@@ -435,13 +435,21 @@ class DaemonAdapter {
   // After the open it looks once more.  If a volume file has appeared or
   // gone, or a file is no longer the same file, the open may itself have
   // created a volume file: the handle is closed without ever having been
-  // handed out, every file is LEFT WHERE IT IS, in-place optimization is off
-  // in this process until it ends, and one error line names the files.  A
-  // file left that way then keeps the other processes of the server from
+  // handed out, in-place optimization is off in this process until it ends,
+  // and one error line names the files.  What happens to a file that
+  // APPEARED depends on the start this process had.  A start whose mirror
+  // ran (Resolve() reached its open) LEAVES EVERY FILE WHERE IT IS: a file
+  // left that way then keeps the other processes of the server from
   // reopening too (they find two), which is the intent: an operator has to
-  // look.  So this module CAN create a volume file in that one way; what it
-  // guarantees is that it notices, does not use it, says so, and removes
-  // nothing.
+  // look.  A start whose mirror NEVER ran -- the daemon was down when the
+  // server started, and the serving recheck recovered the arm -- REMOVES
+  // what appeared, exactly the way a refusing start-up check removes the
+  // file its own probe open made (RemoveCreatedVolumeFiles in the .cc):
+  // nothing else is watching, and a stray file left behind is one the next
+  // start or pool recycle would attach to quietly.  So this module CAN
+  // create a volume file in that one way; what it guarantees is that it
+  // notices, does not use it, says so, and removes it when no start-up
+  // mirror ran.
   //
   // When the configured path is a directory the volume file cannot be told
   // from the other files in it.  No supported configuration has that shape.
@@ -592,6 +600,16 @@ class DaemonAdapter {
   // before the adapter is published to serving threads, so a plain bool is
   // read safely on the request path.
   bool unavailable_is_retryable_ = false;
+  // Whether Resolve() ever reached its open-and-compare mirror: published
+  // size known, volume file present, probe open made.  The exits before it
+  // -- no published size, no volume on disk -- are exactly the ones the
+  // serving recheck can recover from, and a process whose start never ran
+  // the mirror has no other cleanup watching the files its opens create:
+  // there RecordCache()'s checked open removes what appeared, the way the
+  // mirror would have.  After a mirror that ran, the serving open leaves
+  // every file in place.  Written only inside Resolve(), before the adapter
+  // is published to serving threads, like unavailable_is_retryable_ above.
+  bool startup_mirror_ran_ = false;
   // When ServingHealth() may next probe.  Claimed by compare-and-swap, so
   // one thread probes per interval; the others answer from the verdict.
   mutable std::atomic<int64_t> unavailable_retry_due_ms_{0};
@@ -600,7 +618,9 @@ class DaemonAdapter {
   // after (see "a volume the daemon replaced"); this one is used only where
   // that look is not possible, a configured path that is a directory.
   // Mutable because ServingHealth() refreshes it when a late recovery learns
-  // the size the start-up check never saw.
+  // the size the start-up check never saw -- on the success path only,
+  // immediately before it publishes kReady, so exactly one thread ever
+  // writes it.
   mutable uint64_t inherited_volume_size_ = 0;
   MonotonicClock monotonic_clock_;
   std::mutex record_cache_mutex_;

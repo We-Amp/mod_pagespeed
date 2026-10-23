@@ -65,7 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optimization back on once it answers, with one info line saying so; the
   volume split and every other configuration or package fault are still
   final until a restart. nginx still requires a restart after starting the
-  service.
+  service. A worker whose first volume open after such a recovery detects a
+  cache-layout split also removes the stray volume file that open created,
+  the same way a refusing start-up check does, so a later pool recycle or
+  restart cannot quietly attach to it.
 - **`resize_rendered_image_dimensions` now uses the largest size of an image
   that appears more than once on a page, as documented.** Previously the size
   of its first appearance was used even when a later one was larger, so the
