@@ -28,7 +28,7 @@
 
 namespace net_instaweb {
 
-typedef std::vector<std::unique_ptr<TcpConnectionForTesting>> ConnectionList;
+using ConnectionList = std::vector<std::unique_ptr<TcpConnectionForTesting>>;
 
 namespace RedisCluster {
 

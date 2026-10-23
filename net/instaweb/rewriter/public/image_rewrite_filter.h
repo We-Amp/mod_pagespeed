@@ -69,7 +69,7 @@ class ImageRewriteFilter : public RewriteFilter {
   class Context;
 
  public:
-  typedef std::map<GoogleString, AssociatedImageInfo> AssociatedImageInfoMap;
+  using AssociatedImageInfoMap = std::map<GoogleString, AssociatedImageInfo>;
 
   // Statistic names:
   static const char kImageNoRewritesHighResolution[];

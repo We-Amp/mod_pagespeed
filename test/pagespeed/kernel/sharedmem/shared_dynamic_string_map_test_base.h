@@ -20,8 +20,8 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_DYNAMIC_STRING_MAP_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_DYNAMIC_STRING_MAP_TEST_BASE_H_
 
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -36,8 +36,8 @@ class ThreadSystem;
 
 class SharedDynamicStringMapTestBase : public testing::Test {
  protected:
-  typedef void (SharedDynamicStringMapTestBase::*TestMethod0)();
-  typedef void (SharedDynamicStringMapTestBase::*TestMethod2)(int, int);
+  using TestMethod0 = void (SharedDynamicStringMapTestBase::*)();
+  using TestMethod2 = void (SharedDynamicStringMapTestBase::*)(int, int);
 
   explicit SharedDynamicStringMapTestBase(SharedMemTestEnv* test_env);
 
@@ -82,8 +82,10 @@ class SharedDynamicStringMapTestBase : public testing::Test {
   std::unique_ptr<ThreadSystem> thread_system_;
   MockMessageHandler handler_;
 
-  SharedDynamicStringMapTestBase(const SharedDynamicStringMapTestBase&) = delete;
-  SharedDynamicStringMapTestBase& operator=(const SharedDynamicStringMapTestBase&) = delete;
+  SharedDynamicStringMapTestBase(const SharedDynamicStringMapTestBase&) =
+      delete;
+  SharedDynamicStringMapTestBase& operator=(
+      const SharedDynamicStringMapTestBase&) = delete;
 };
 
 template <typename ConcreteTestEnv>

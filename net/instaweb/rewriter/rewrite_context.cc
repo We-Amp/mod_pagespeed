@@ -230,8 +230,8 @@ class FreshenMetadataUpdateManager {
 // be as streamlined as possible.
 class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
  public:
-  typedef void (RewriteContext::*CacheResultHandlerFunction)(
-      CacheLookupResult* cache_result);
+  using CacheResultHandlerFunction =
+      void (RewriteContext::*)(CacheLookupResult* cache_result);
 
   OutputCacheCallback(RewriteContext* rc, CacheResultHandlerFunction function)
       : rewrite_context_(rc),

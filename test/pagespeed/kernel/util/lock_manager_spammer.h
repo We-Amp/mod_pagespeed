@@ -22,8 +22,8 @@
 #ifndef PAGESPEED_KERNEL_UTIL_LOCK_MANAGER_SPAMMER_H_
 #define PAGESPEED_KERNEL_UTIL_LOCK_MANAGER_SPAMMER_H_
 
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
@@ -75,7 +75,7 @@ class LockManagerSpammer : public ThreadSystem::Thread {
     int value_ GUARDED_BY(scheduler_->mutex());
   };
 
-  typedef std::vector<NamedLock*> LockVector;
+  using LockVector = std::vector<NamedLock*>;
 
   LockManagerSpammer(Scheduler* scheduler, ThreadSystem::ThreadFlags flags,
                      const StringVector& lock_names,

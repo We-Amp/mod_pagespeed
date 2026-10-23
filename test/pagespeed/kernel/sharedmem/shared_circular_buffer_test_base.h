@@ -38,7 +38,7 @@ class ThreadSystem;
 // This TestBase is added to pthread_shared_mem_test
 class SharedCircularBufferTestBase : public testing::Test {
  protected:
-  typedef void (SharedCircularBufferTestBase::*TestMethod)();
+  using TestMethod = void (SharedCircularBufferTestBase::*)();
 
   explicit SharedCircularBufferTestBase(SharedMemTestEnv* test_env);
 
@@ -85,7 +85,8 @@ class SharedCircularBufferTestBase : public testing::Test {
   StringPiece expected_result_;
 
   SharedCircularBufferTestBase(const SharedCircularBufferTestBase&) = delete;
-  SharedCircularBufferTestBase& operator=(const SharedCircularBufferTestBase&) = delete;
+  SharedCircularBufferTestBase& operator=(const SharedCircularBufferTestBase&) =
+      delete;
 };
 
 template <typename ConcreteTestEnv>

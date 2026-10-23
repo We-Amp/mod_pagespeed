@@ -41,7 +41,7 @@ struct UrlCategoryPair {
   UrlCategoryPair() : url(NULL), category(semantic_type::kUndefined) {}
 };
 
-typedef std::vector<UrlCategoryPair> UrlCategoryVector;
+using UrlCategoryVector = std::vector<UrlCategoryPair>;
 
 // If the attribute is url-valued, determine it's semantic category.  Return
 // kUndefined otherwise.

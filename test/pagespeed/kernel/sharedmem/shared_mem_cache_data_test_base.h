@@ -20,8 +20,8 @@
 #ifndef PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_DATA_TEST_BASE_H_
 #define PAGESPEED_KERNEL_SHAREDMEM_SHARED_MEM_CACHE_DATA_TEST_BASE_H_
 
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -36,7 +36,7 @@ class ThreadSystem;
 
 class SharedMemCacheDataTestBase : public testing::Test {
  protected:
-  typedef void (SharedMemCacheDataTestBase::*TestMethod)();
+  using TestMethod = void (SharedMemCacheDataTestBase::*)();
   enum { kBlockSize = 512 };  // Can't use static const int here since it's
                               // passed to EXPECT_EQ
 
@@ -72,7 +72,8 @@ class SharedMemCacheDataTestBase : public testing::Test {
   MockMessageHandler handler_;
 
   SharedMemCacheDataTestBase(const SharedMemCacheDataTestBase&) = delete;
-  SharedMemCacheDataTestBase& operator=(const SharedMemCacheDataTestBase&) = delete;
+  SharedMemCacheDataTestBase& operator=(const SharedMemCacheDataTestBase&) =
+      delete;
 };
 
 template <typename ConcreteTestEnv>

@@ -45,7 +45,7 @@ namespace net_instaweb {
 
 class RewriteOptionsTest : public RewriteOptionsTestBase<RewriteOptions> {
  protected:
-  typedef RewriteOptions::FilterSet FilterSet;
+  using FilterSet = RewriteOptions::FilterSet;
 
   RewriteOptionsTest() : options_(&thread_system_) {}
 
@@ -1050,14 +1050,14 @@ TEST_F(RewriteOptionsTest, RulePackTrustListGainsBuiltInKey) {
   GoogleString msg;
   // The option itself lists only what the configuration names.
   EXPECT_TRUE(options_.rule_pack_trust_keys().empty());
-  EXPECT_EQ(1u, pagespeed::packs::WithBuiltInTrustKey(
-                    options_.rule_pack_trust_keys())
-                    .size());
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName2(
-                RewriteOptions::kRulePackTrustKey, "a-publisher",
-                "fuRqJ3FnXonzbp8KuLy7yWR8oZU8Yue62CUrstW39Z4=", &msg,
-                &handler));
+  EXPECT_EQ(
+      1u, pagespeed::packs::WithBuiltInTrustKey(options_.rule_pack_trust_keys())
+              .size());
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName2(
+          RewriteOptions::kRulePackTrustKey, "a-publisher",
+          "fuRqJ3FnXonzbp8KuLy7yWR8oZU8Yue62CUrstW39Z4=", &msg, &handler));
   ASSERT_EQ(1u, options_.rule_pack_trust_keys().size());
   const std::vector<pagespeed::packs::TrustKey> effective =
       pagespeed::packs::WithBuiltInTrustKey(options_.rule_pack_trust_keys());
@@ -1079,19 +1079,19 @@ TEST_F(RewriteOptionsTest, RulePackSigningOptionsParseAndMerge) {
                 RewriteOptions::kRulePackRequireSigned, "on", &msg, handler));
   EXPECT_TRUE(options_.rule_pack_require_signed());
 
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName2(
-                RewriteOptions::kRulePackTrustKey, "b-publisher", kKeyB, &msg,
-                handler));
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName2(
-                RewriteOptions::kRulePackTrustKey, "a-publisher", kKeyA, &msg,
-                handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
+                                          "b-publisher", kKeyB, &msg, handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
+                                          "a-publisher", kKeyA, &msg, handler));
   // The same pair again is accepted.
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName2(
-                RewriteOptions::kRulePackTrustKey, "a-publisher", kKeyA, &msg,
-                handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
+                                          "a-publisher", kKeyA, &msg, handler));
   ASSERT_EQ(2u, options_.rule_pack_trust_keys().size());
   EXPECT_EQ("a-publisher", options_.rule_pack_trust_keys()[0].key_id);
   EXPECT_EQ(32u, options_.rule_pack_trust_keys()[0].public_key.size());
@@ -1116,18 +1116,18 @@ TEST_F(RewriteOptionsTest, RulePackSigningOptionsParseAndMerge) {
   for (int i = 2; i < 16; ++i) {
     EXPECT_EQ(RewriteOptions::kOptionOk,
               options_.ParseAndSetOptionFromName2(
-                  RewriteOptions::kRulePackTrustKey,
-                  StrCat("k", i), kKeyA, &msg, handler));
+                  RewriteOptions::kRulePackTrustKey, StrCat("k", i), kKeyA,
+                  &msg, handler));
   }
   expect_invalid("k99", kKeyA, "RulePackTrustKey: at most 16 keys");
 
   // A virtual host's key overrides a global one of the same id; the list
   // stays sorted; the limit does not apply to the merged list.
   RewriteOptions vhost(&thread_system_);
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            vhost.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
-                                             "a-publisher", kKeyB, &msg,
-                                             handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      vhost.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
+                                       "a-publisher", kKeyB, &msg, handler));
   EXPECT_EQ(RewriteOptions::kOptionOk,
             vhost.ParseAndSetOptionFromName2(RewriteOptions::kRulePackTrustKey,
                                              "0-first", kKeyA, &msg, handler));
@@ -2196,14 +2196,14 @@ TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierIgnoredWarnOff) {
   // (config compatibility on every port) but is ignored, and warns once.
   TestMessageHandler handler;
   GoogleString msg;
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName1(
-                RewriteOptions::kUseExperimentalJsMinifier, "off", &msg,
-                &handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName1(
+          RewriteOptions::kUseExperimentalJsMinifier, "off", &msg, &handler));
   ASSERT_EQ(1U, handler.messages().size());
-  EXPECT_NE(GoogleString::npos,
-            handler.messages()[0].find(
-                "legacy JavaScript minifier has been removed"))
+  EXPECT_NE(
+      GoogleString::npos,
+      handler.messages()[0].find("legacy JavaScript minifier has been removed"))
       << handler.messages()[0];
   EXPECT_NE(GoogleString::npos,
             handler.messages()[0].find("deprecated and ignored"))
@@ -2216,14 +2216,14 @@ TEST_F(RewriteOptionsTest, UseExperimentalJsMinifierIgnoredWarnOn) {
   TestMessageHandler handler;
   GoogleString msg;
   EXPECT_EQ(0U, handler.messages().size());
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.ParseAndSetOptionFromName1(
-                RewriteOptions::kUseExperimentalJsMinifier, "on", &msg,
-                &handler));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.ParseAndSetOptionFromName1(
+          RewriteOptions::kUseExperimentalJsMinifier, "on", &msg, &handler));
   ASSERT_EQ(1U, handler.messages().size());
-  EXPECT_NE(GoogleString::npos,
-            handler.messages()[0].find(
-                "legacy JavaScript minifier has been removed"))
+  EXPECT_NE(
+      GoogleString::npos,
+      handler.messages()[0].find("legacy JavaScript minifier has been removed"))
       << handler.messages()[0];
 }
 
@@ -3165,9 +3165,8 @@ TEST_F(RewriteOptionsTest, DeferIframeDeprecatedIsInertButAccepted) {
   EXPECT_TRUE(options.Enabled(RewriteOptions::kDeferIframeDeprecated));
   EXPECT_STREQ(
       "df", RewriteOptions::FilterId(RewriteOptions::kDeferIframeDeprecated));
-  EXPECT_STREQ(
-      "Deprecated.",
-      RewriteOptions::FilterName(RewriteOptions::kDeferIframeDeprecated));
+  EXPECT_STREQ("Deprecated.", RewriteOptions::FilterName(
+                                  RewriteOptions::kDeferIframeDeprecated));
 
   // It must not require script execution, so enabling it must not trigger
   // the noscript-redirect machinery for no-JS clients.
@@ -3193,10 +3192,10 @@ TEST_F(RewriteOptionsTest, DeferIframeDeprecationWarnsOnlyWhenEnabling) {
             handler.messages()[0].find("Filter 'defer_iframe' is deprecated"))
       << handler.messages()[0];
 
-  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList("defer_iframe",
-                                                          &handler));
-  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList("defer_iframe",
-                                                         &handler));
+  EXPECT_TRUE(
+      options_.DisableFiltersByCommaSeparatedList("defer_iframe", &handler));
+  EXPECT_TRUE(
+      options_.ForbidFiltersByCommaSeparatedList("defer_iframe", &handler));
   EXPECT_EQ(1U, handler.messages().size());
 }
 
@@ -3210,12 +3209,11 @@ TEST_F(RewriteOptionsTest, ShardDomainDeprecationWarning) {
   RewriteOptions options(&thread_system_);
   TestMessageHandler handler;
   GoogleString msg;
-  EXPECT_EQ(
-      RewriteOptions::kOptionOk,
-      options.ParseAndSetOptionFromName2(
-          RewriteOptions::kShardDomain, "https://dep.example.com",
-          "https://dep1.cdn.example.com,https://dep2.cdn.example.com", &msg,
-          &handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options.ParseAndSetOptionFromName2(
+                RewriteOptions::kShardDomain, "https://dep.example.com",
+                "https://dep1.cdn.example.com,https://dep2.cdn.example.com",
+                &msg, &handler));
   ASSERT_EQ(1, handler.messages().size());
   EXPECT_NE(GoogleString::npos, handler.messages()[0].find("Warning"));
   EXPECT_NE(GoogleString::npos, handler.messages()[0].find("deprecated"));
@@ -3225,12 +3223,11 @@ TEST_F(RewriteOptionsTest, ShardDomainDeprecationWarning) {
   // Re-parsing the same mapping (e.g. an .htaccess re-parse per request)
   // does not re-warn.
   RewriteOptions options2(&thread_system_);
-  EXPECT_EQ(
-      RewriteOptions::kOptionOk,
-      options2.ParseAndSetOptionFromName2(
-          RewriteOptions::kShardDomain, "https://dep.example.com",
-          "https://dep1.cdn.example.com,https://dep2.cdn.example.com", &msg,
-          &handler));
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options2.ParseAndSetOptionFromName2(
+                RewriteOptions::kShardDomain, "https://dep.example.com",
+                "https://dep1.cdn.example.com,https://dep2.cdn.example.com",
+                &msg, &handler));
   EXPECT_EQ(1, handler.messages().size());
 }
 
@@ -3243,12 +3240,10 @@ TEST_F(RewriteOptionsTest, CachePartialHtmlDeprecatedIsInertButAccepted) {
   EXPECT_TRUE(options.EnableFiltersByCommaSeparatedList("cache_partial_html",
                                                         &handler));
   EXPECT_TRUE(options.Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
-  EXPECT_STREQ(
-      "ct",
-      RewriteOptions::FilterId(RewriteOptions::kCachePartialHtmlDeprecated));
-  EXPECT_STREQ(
-      "Deprecated.",
-      RewriteOptions::FilterName(RewriteOptions::kCachePartialHtmlDeprecated));
+  EXPECT_STREQ("ct", RewriteOptions::FilterId(
+                         RewriteOptions::kCachePartialHtmlDeprecated));
+  EXPECT_STREQ("Deprecated.", RewriteOptions::FilterName(
+                                  RewriteOptions::kCachePartialHtmlDeprecated));
 
   // It must not require script execution, so enabling it must not trigger
   // the noscript-redirect machinery for no-JS clients.
@@ -4220,9 +4215,9 @@ TEST_F(RewriteOptionsTest, RetiredVaryDirectivesNotInSignature) {
             options_.SetOptionFromName(RewriteOptions::kAllowVaryOn,
                                        "some-junk-value"));
   // A non-default value for the retired boolean, likewise.
-  EXPECT_EQ(RewriteOptions::kOptionOk,
-            options_.SetOptionFromName(RewriteOptions::kPrivateNotVaryForIE,
-                                       "off"));
+  EXPECT_EQ(
+      RewriteOptions::kOptionOk,
+      options_.SetOptionFromName(RewriteOptions::kPrivateNotVaryForIE, "off"));
   options_.ComputeSignature();
   EXPECT_EQ(GoogleString::npos, options_.signature().find("avo"))
       << options_.signature();
@@ -4230,7 +4225,6 @@ TEST_F(RewriteOptionsTest, RetiredVaryDirectivesNotInSignature) {
       << options_.signature();
   EXPECT_STREQ(default_signature, options_.signature());
 }
-
 
 TEST_F(RewriteOptionsTest, MergeAllowDisallow) {
   RewriteOptions one(&thread_system_), two(&thread_system_);
@@ -4382,7 +4376,6 @@ TEST_F(RewriteOptionsTest, SupportSaveData) {
             options_.SetOptionFromName(RewriteOptions::kAllowVaryOn, "None"));
   EXPECT_TRUE(options_.SupportSaveData());
 }
-
 
 // The agent_optimize toggle round-trips and merges.
 TEST_F(RewriteOptionsTest, AgentOptimizeOptionRoundTrip) {

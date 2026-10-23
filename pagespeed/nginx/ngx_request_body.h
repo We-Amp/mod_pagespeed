@@ -49,8 +49,8 @@ enum NgxRequestBodyStatus {
 
 // Reads up to `size` bytes at `offset` into `buf`: returns the number of
 // bytes read, 0 at the end of the body, or a negative value on error.
-typedef std::function<int64(char* buf, size_t size, int64 offset)>
-    NgxRequestBodyReader;
+using NgxRequestBodyReader =
+    std::function<int64(char* buf, size_t size, int64 offset)>;
 
 // Reads the whole body through `read` into `*body`, never holding more than
 // `max_bytes` of it.

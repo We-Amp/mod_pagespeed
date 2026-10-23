@@ -74,7 +74,7 @@ class DomainRewriteFilter : public CommonFilter {
 
   enum HeaderSource { kHttp, kMetaHttpEquiv };
 
-  typedef std::vector<std::pair<StringPiece, StringPiece> > SetCookieAttributes;
+  using SetCookieAttributes = std::vector<std::pair<StringPiece, StringPiece> >;
 
   // Rewrites the specified URL (which might be relative to the base tag)
   // into an absolute sharded url.

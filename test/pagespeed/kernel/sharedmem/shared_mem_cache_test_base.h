@@ -44,7 +44,7 @@ class ThreadSystem;
 
 class SharedMemCacheTestBase : public CacheTestBase {
  protected:
-  typedef void (SharedMemCacheTestBase::*TestMethod)();
+  using TestMethod = void (SharedMemCacheTestBase::*)();
   static const int kBlockSize = 512;
 
   explicit SharedMemCacheTestBase(SharedMemTestEnv* test_env);

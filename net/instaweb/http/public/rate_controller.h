@@ -82,9 +82,9 @@ class RateController {
   class CustomFetch;
   friend class CustomFetch;
 
-  typedef RefCountedPtr<HostFetchInfo> HostFetchInfoPtr;
+  using HostFetchInfoPtr = RefCountedPtr<HostFetchInfo>;
 
-  typedef std::map<GoogleString, HostFetchInfoPtr*> HostFetchInfoMap;
+  using HostFetchInfoMap = std::map<GoogleString, HostFetchInfoPtr*>;
 
   // Delete the fetch info from fetch_info_map_ if possible.
   void DeleteFetchInfoIfPossible(const HostFetchInfoPtr& fetch_info);

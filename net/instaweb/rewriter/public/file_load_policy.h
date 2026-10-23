@@ -118,9 +118,9 @@ class FileLoadPolicy {
                                         GoogleString* filename) const;
 
  private:
-  typedef std::list<FileLoadMapping*> FileLoadMappings;
+  using FileLoadMappings = std::list<FileLoadMapping*>;
   FileLoadMappings file_load_mappings_;
-  typedef std::list<FileLoadRule*> FileLoadRules;
+  using FileLoadRules = std::list<FileLoadRule*>;
   FileLoadRules file_load_rules_;
 
   FileLoadPolicy(const FileLoadPolicy&) = delete;

@@ -37,7 +37,7 @@ namespace net_instaweb {
 
 class SharedMemLockManagerTestBase : public testing::Test {
  protected:
-  typedef void (SharedMemLockManagerTestBase::*TestMethod)();
+  using TestMethod = void (SharedMemLockManagerTestBase::*)();
 
   explicit SharedMemLockManagerTestBase(SharedMemTestEnv* test_env);
   void SetUp() override;
@@ -70,7 +70,8 @@ class SharedMemLockManagerTestBase : public testing::Test {
       root_lock_manager_;  // used for init only.
 
   SharedMemLockManagerTestBase(const SharedMemLockManagerTestBase&) = delete;
-  SharedMemLockManagerTestBase& operator=(const SharedMemLockManagerTestBase&) = delete;
+  SharedMemLockManagerTestBase& operator=(const SharedMemLockManagerTestBase&) =
+      delete;
 };
 
 template <typename ConcreteTestEnv>

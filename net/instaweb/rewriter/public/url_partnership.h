@@ -96,7 +96,7 @@ class UrlPartnership {
   // will be and avoid exceeding URL limits.
   void IncrementalResolve(int index);
 
-  typedef std::vector<GoogleUrl*> GurlVector;
+  using GurlVector = std::vector<GoogleUrl*>;
   GurlVector url_vector_;
   GoogleString domain_and_path_prefix_;
   const RewriteOptions* rewrite_options_;

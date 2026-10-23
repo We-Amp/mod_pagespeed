@@ -1257,7 +1257,7 @@ class RewriteDriver : public HtmlParse {
   friend class RewriteTestBase;
   friend class ServerContextTest;
 
-  typedef std::map<GoogleString, RewriteFilter*> StringFilterMap;
+  using StringFilterMap = std::map<GoogleString, RewriteFilter*>;
 
   // Checks whether outstanding rewrites are completed in a satisfactory fashion
   // with respect to given wait_mode and timeout, and invokes done->Run() (with
@@ -1573,14 +1573,14 @@ class RewriteDriver : public HtmlParse {
 
   // This group of rewrite-context-related variables is accessed
   // only in the main thread of RewriteDriver (aka the HTML thread).
-  typedef std::vector<RewriteContext*> RewriteContextVector;
+  using RewriteContextVector = std::vector<RewriteContext*>;
   RewriteContextVector rewrites_;  // ordered list of rewrites to initiate
 
   // The maximum amount of time to wait for page processing across all flush
   // windows. A negative value implies no limit.
   int max_page_processing_delay_ms_;
 
-  typedef std::set<RewriteContext*> RewriteContextSet;
+  using RewriteContextSet = std::set<RewriteContext*>;
 
   // Contains the RewriteContext* that have been queued into the
   // RewriteThread, but have not gotten to the point where
@@ -1641,7 +1641,7 @@ class RewriteDriver : public HtmlParse {
 
   // Maps rewrite context partition keys to the context responsible for
   // rewriting them, in case a URL occurs more than once.
-  typedef std::map<GoogleString, RewriteContext*> PrimaryRewriteContextMap;
+  using PrimaryRewriteContextMap = std::map<GoogleString, RewriteContext*>;
   PrimaryRewriteContextMap primary_rewrite_context_map_;
 
   HtmlResourceSlotSet slots_;

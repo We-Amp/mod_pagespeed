@@ -35,7 +35,7 @@ namespace net_instaweb {
 // minified and unminified versions of library code one sees served in the wild.
 class JavascriptLibraryIdentification {
  public:
-  typedef uint64 SizeInBytes;
+  using SizeInBytes = uint64;
 
   static const int kNumHashChars = (126 + 5) / 6;  // >=126 bits in base64
 
@@ -61,9 +61,9 @@ class JavascriptLibraryIdentification {
   // We map minified file size to LibraryInfo (we expect few libraries to have
   // the same size in bytes, and this permits us to avoid computing the content
   // hash if we don't actually require it).
-  typedef GoogleString MD5Signature;
-  typedef std::map<MD5Signature, GoogleString> MD5ToUrlMap;
-  typedef std::map<SizeInBytes, MD5ToUrlMap> LibraryMap;
+  using MD5Signature = GoogleString;
+  using MD5ToUrlMap = std::map<MD5Signature, GoogleString>;
+  using LibraryMap = std::map<SizeInBytes, MD5ToUrlMap>;
 
   LibraryMap libraries_;
 

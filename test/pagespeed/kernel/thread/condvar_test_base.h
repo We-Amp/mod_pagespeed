@@ -34,7 +34,7 @@ namespace net_instaweb {
 
 class CondvarTestBase : public testing::Test {
  protected:
-  typedef void (ThreadSystem::Condvar::*SignalMethod)();
+  using SignalMethod = void (ThreadSystem::Condvar::*)();
 
   CondvarTestBase()
       : mutex_(NULL),

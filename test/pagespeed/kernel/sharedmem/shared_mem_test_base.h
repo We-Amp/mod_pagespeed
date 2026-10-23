@@ -70,7 +70,7 @@ class SharedMemTestEnv {
 
 class SharedMemTestBase : public testing::Test {
  protected:
-  typedef void (SharedMemTestBase::*TestMethod)();
+  using TestMethod = void (SharedMemTestBase::*)();
 
   explicit SharedMemTestBase(SharedMemTestEnv* test_env);
 

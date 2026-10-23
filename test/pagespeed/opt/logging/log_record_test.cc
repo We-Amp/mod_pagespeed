@@ -45,7 +45,7 @@ class LogRecordTest : public testing::Test {
   std::unique_ptr<AbstractLogRecord> log_record_;
 };
 
-typedef LogRecordTest LogRecordDeathTest;
+using LogRecordDeathTest = LogRecordTest;
 
 TEST_F(LogRecordTest, NoAppliedRewriters) {
   LoggingInfo* logging_info = log_record_->logging_info();

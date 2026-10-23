@@ -51,7 +51,7 @@ namespace net_instaweb {
 
 class SharedMemCacheSpammerTest : public testing::Test {
  protected:
-  typedef SharedMemCache<64> ShmCache;
+  using ShmCache = SharedMemCache<64>;
 
   SharedMemCacheSpammerTest()
       : timer_(Platform::CreateTimer()),
@@ -98,7 +98,8 @@ class SharedMemCacheSpammerTest : public testing::Test {
 
  private:
   SharedMemCacheSpammerTest(const SharedMemCacheSpammerTest&) = delete;
-  SharedMemCacheSpammerTest& operator=(const SharedMemCacheSpammerTest&) = delete;
+  SharedMemCacheSpammerTest& operator=(const SharedMemCacheSpammerTest&) =
+      delete;
 };
 
 TEST_F(SharedMemCacheSpammerTest, BasicOperation) {

@@ -45,7 +45,7 @@ class IntElement : public PoolElement<IntElement> {
   IntElement& operator=(const IntElement&) = delete;
 };
 
-typedef Pool<IntElement> IntPool;
+using IntPool = Pool<IntElement>;
 using PoolPosition = PoolElement<IntElement>::Position;
 
 class PoolTest : public testing::Test {

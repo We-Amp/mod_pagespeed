@@ -61,7 +61,7 @@ struct DerivedB : public BaseClass {};
 
 }  // namespace
 
-typedef RefCountedObj<SimpleClass> SimplePtr;
+using SimplePtr = RefCountedObj<SimpleClass>;
 using PolymorphicPtr = RefCountedPtr<BaseClass>;
 
 class RefCountedPtrTest : public testing::Test {

@@ -45,7 +45,7 @@ class FixReflowFilter : public EmptyHtmlFilter {
   const char* Name() const override { return "FixReflowFilter"; }
 
  private:
-  typedef StringStringMap ElementHeightMap;
+  using ElementHeightMap = StringStringMap;
   ElementHeightMap element_height_map_;
 
   // We do not own this.

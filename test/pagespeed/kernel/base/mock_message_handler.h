@@ -87,7 +87,7 @@ class MockMessageHandler : public MessageHandler {
   bool ShouldPrintMessage(const StringPiece& msg);
 
  private:
-  typedef std::map<MessageType, int> MessageCountMap;
+  using MessageCountMap = std::map<MessageType, int>;
 
   // The Impl versions don't grab the lock themselves
   int TotalMessagesImpl(const MessageCountMap& counts) const;

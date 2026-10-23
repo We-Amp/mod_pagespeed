@@ -27,7 +27,7 @@ namespace net_instaweb {
 class MessageHandler;
 
 // Progress hook for WebP conversions.
-typedef bool (*WebpProgressHook)(int percent, void* user_data);
+using WebpProgressHook = bool (*)(int percent, void* user_data);
 
 // Quality taken when no quality is passed through flags or when no quality is
 // retrieved from JpegUtils::GetImageQualityFromImage.

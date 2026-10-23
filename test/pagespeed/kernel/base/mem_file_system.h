@@ -48,7 +48,7 @@ class Timer;
 // TODO(jmarantz): make threadsafe.
 class MemFileSystem : public FileSystem {
  public:
-  typedef Callback1<const GoogleString&> FileCallback;
+  using FileCallback = Callback1<const GoogleString&>;
 
   explicit MemFileSystem(ThreadSystem* threads, Timer* timer);
   ~MemFileSystem() override;

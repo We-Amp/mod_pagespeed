@@ -46,10 +46,10 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
-#include "net/instaweb/rewriter/public/work_bound_expensive_operation_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/md5_hasher.h"  // for MD5Hasher
@@ -198,7 +198,7 @@ class TestRequestContext : public RequestContext {
   TestRequestContext(const TestRequestContext&) = delete;
   TestRequestContext& operator=(const TestRequestContext&) = delete;
 };
-typedef RefCountedPtr<TestRequestContext> TestRequestContextPtr;
+using TestRequestContextPtr = RefCountedPtr<TestRequestContext>;
 
 class ImageRewriteTest : public RewriteTestBase {
  protected:
@@ -272,8 +272,8 @@ class ImageRewriteTest : public RewriteTestBase {
     // comparison is against the raw STORED cache entry, which does not
     // carry the serving-time 'public, immutable' upgrade.
     GoogleString expect_headers;
-    AppendDefaultHeadersWithCanonical(content_type, kPuzzleUrl,
-                                      &expect_headers, false /* served */);
+    AppendDefaultHeadersWithCanonical(content_type, kPuzzleUrl, &expect_headers,
+                                      false /* served */);
 
     GoogleString src_string;
 
@@ -317,8 +317,8 @@ class ImageRewriteTest : public RewriteTestBase {
     // New time --- new timestamp. This comparison is against a SERVED
     // response, which carries the serving-time 'public, immutable' upgrade.
     expect_headers.clear();
-    AppendDefaultHeadersWithCanonical(content_type, kPuzzleUrl,
-                                      &expect_headers, true /* served */);
+    AppendDefaultHeadersWithCanonical(content_type, kPuzzleUrl, &expect_headers,
+                                      true /* served */);
 
     EXPECT_TRUE(
         rewrite_driver()->FetchResource(img_gurl.Spec(), &expect_callback));
@@ -4211,7 +4211,8 @@ TEST_F(ImageRewriteTest, AnimatedCapableLosslessFilterAloneKeepsLossyOnly) {
   const ResourceContext context = MintingResourceContext();
   EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_ONLY, context.libwebp_level())
       << "without recompress_webp the animated capability must not lift this "
-         "request to the lossless/alpha level; that would turn allow_webp_alpha "
+         "request to the lossless/alpha level; that would turn "
+         "allow_webp_alpha "
          "on where it has always been off";
 }
 
@@ -4548,7 +4549,6 @@ TEST_F(ImageRewriteTest, IproCssImageInliningIsRequestIndependent) {
   }
 }
 
-
 TEST_F(ImageRewriteTest, ContentTypeValidation) {
   ValidateFallbackHeaderSanitization("ic");
 }
@@ -4598,8 +4598,7 @@ TEST_F(ImageRewriteTest, CspBlocksDataUrlInlining) {
                         "Content-Security-Policy on the page does not "
                         "permit data: images."));
   EXPECT_EQ(
-      1,
-      statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
+      1, statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
 }
 
 TEST_F(ImageRewriteTest, CspPermitsDataUrlInlining) {
@@ -4616,8 +4615,7 @@ TEST_F(ImageRewriteTest, CspPermitsDataUrlInlining) {
   Parse("csp_data_inline", StrCat(kCsp, "<img src=\"a.png\">"));
   EXPECT_THAT(output_buffer_, HasSubstr("src=\"data:image/png"));
   EXPECT_EQ(
-      0,
-      statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
+      0, statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
 }
 
 TEST_F(ImageRewriteTest, CspBlockedRewriteStatistic) {
@@ -4634,8 +4632,7 @@ TEST_F(ImageRewriteTest, CspBlockedRewriteStatistic) {
   Parse("csp_blocked_stat", StrCat(kCsp, "<img src=\"images/a.jpg\">",
                                    "<img src=\"uploads/b.png\">"));
   EXPECT_EQ(
-      1,
-      statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
+      1, statistics()->GetVariable(RewriteStats::kCspBlockedRewrites)->Get());
 }
 
 TEST_F(ImageRewriteTest, RenderCsp) {

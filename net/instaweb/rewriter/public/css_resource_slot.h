@@ -81,7 +81,7 @@ class CssResourceSlot : public ResourceSlot {
   CssResourceSlot& operator=(const CssResourceSlot&) = delete;
 };
 
-typedef RefCountedPtr<CssResourceSlot> CssResourceSlotPtr;
+using CssResourceSlotPtr = RefCountedPtr<CssResourceSlot>;
 
 // Helper factory that makes sure we get a single CSS object for given value
 // slot in the CSS AST.
@@ -104,7 +104,7 @@ class CssResourceSlotFactory {
     bool operator()(const CssResourceSlotPtr& p,
                     const CssResourceSlotPtr& q) const;
   };
-  typedef std::set<CssResourceSlotPtr, SlotComparator> SlotSet;
+  using SlotSet = std::set<CssResourceSlotPtr, SlotComparator>;
 
   SlotSet slots_;
   CssResourceSlotFactory(const CssResourceSlotFactory&) = delete;

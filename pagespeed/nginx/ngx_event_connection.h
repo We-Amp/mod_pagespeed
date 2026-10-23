@@ -45,11 +45,11 @@ class NgxEventConnection;
 // Technically, sender is the only data we need to send. type and connection are
 // included to provide a means to trace the events along with some more
 // info.
-typedef struct {
+using ps_event_data = struct {
   char type;
   void* sender;
   NgxEventConnection* connection;
-} ps_event_data;
+};
 
 // Handler signature for receiving events
 using callbackPtr = void (*)(const ps_event_data&);
