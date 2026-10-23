@@ -119,7 +119,7 @@ the most common orientation mistake in this repo.
 |------|-------|-------|
 | `net/instaweb/` | ~57 rewriter filters (`net/instaweb/rewriter/*_filter.cc`, e.g. `cache_extender.cc`, `add_instrumentation_filter.cc`) plus their support code, `RewriteDriver`, and `RewriteOptions` (`net/instaweb/rewriter/rewrite_driver.cc`, `rewrite_options.cc`) — `net/instaweb/rewriter/` holds ~133 `.cc` in all | Legacy `net_instaweb::` namespace. To add or edit a rewriter filter, work HERE, not under `pagespeed/`. |
 | `net/instaweb/{htmlparse,http,util,spriter}/` | Legacy HTML-parse / HTTP / util / image-spriter support | — |
-| `net/instaweb/rewriter/generated/` | Generated Closure output for the rewriter client JS (minified `*_opt` / `*_dbg` bundles) | **GENERATED — DO NOT EDIT BY HAND.** These files are minified Closure output and carry no in-file DO-NOT-EDIT marker. Edit the source `.js` and regenerate via `tools/regenerate-rewriter-js.sh`; the generated set is hash-guarded by `net/instaweb/rewriter/generated/.source-hash` (run `tools/regenerate-rewriter-js.sh --check-hash` to detect staleness; the `verify_generated_js` genrule in `net/instaweb/rewriter/BUILD` enforces it at build time). |
+| `net/instaweb/rewriter/generated/` | Generated esbuild output for the rewriter client JS (minified `*_opt` / readable `*_dbg` bundles) | **GENERATED — DO NOT EDIT BY HAND.** These files are bundler output and carry no in-file DO-NOT-EDIT marker. Edit the source `.js` and regenerate via `tools/regenerate-rewriter-js.sh`; the generated set is hash-guarded by `net/instaweb/rewriter/generated/.source-hash` (run `tools/regenerate-rewriter-js.sh --check-hash` to detect staleness; the `verify_generated_js` genrule in `net/instaweb/rewriter/BUILD` enforces it at build time). |
 | `pagespeed/` | Modern subsystems: port adapters (`apache/`, `nginx/`, `envoy/`, `iis/`), `kernel/`, `system/`, `automatic/` | See [Code Architecture](#code-architecture). |
 | `base/logging.h` | glog-compatible logging | At repo root, not under `pagespeed/` (see [Logging System](#logging-system)). |
 
@@ -161,7 +161,7 @@ Custom glog-compatible logging in `base/logging.h` (at repo root, not under page
 - APR/APRUtil/Serf (Apache module only)
 - libjpeg-turbo, libpng, libwebp, giflib (image optimization)
 - Cyclone Cache (high-performance disk cache, requires C++23)
-- Python 3 (DRP code generation), Node.js (Closure Compiler via npx)
+- Python 3 (DRP code generation), Node.js (esbuild, only to regenerate the client JS)
 
 ## Testing
 

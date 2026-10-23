@@ -4,7 +4,7 @@
 // Browser integration tests for the delay_images and delay_images_inline
 // client JS.
 //
-// Drives the SHIPPED assets, the closure-compiled bytes embedded in
+// Drives the SHIPPED assets, the compiled bytes embedded in
 // net/instaweb/rewriter/generated/delay_images_inline_opt.cc and
 // delay_images_opt.cc, in headless Chromium against markup shaped like
 // DelayImagesFilter's output: src renamed to data-pagespeed-high-res-src,
@@ -130,9 +130,8 @@ const srcs = (page) => page.evaluate(() => ['a', 'b', 'c', 'd', 's'].map(
   check(hi[0] === HI_A && hi[1] === HI_B && hi[2] === HI_C,
         `replaceWithHighRes: all elements on high-res src (got ${hi.join(' ')})`);
   check(hi[4] === HI_A, 'replaceWithHighRes: srcset image gets its high-res src');
-  // KNOWN-QUIRK: this pins existing behaviour, not a contract. The
-  // Closure-removal rewrite may fix it (restore srcset) and should then
-  // update this assertion deliberately.
+  // KNOWN-QUIRK: this pins existing behaviour, not a contract. A
+  // fix that restores srcset should update this assertion deliberately.
   // Current behaviour: delay_images.js restores only src, never
   // data-pagespeed-high-res-srcset (the in-place onload snippet does).
   const srcset = await page.evaluate(

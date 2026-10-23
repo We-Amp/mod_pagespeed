@@ -3,7 +3,7 @@
 
 // Browser integration tests for the local_storage_cache client JS.
 //
-// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// Drives the SHIPPED asset, the compiled bytes embedded in
 // net/instaweb/rewriter/generated/local_storage_cache_opt.cc, in headless
 // Chromium against markup shaped like LocalStorageCacheFilter's output (the
 // asset plus pagespeed.localStorageCacheInit(), inlined resources stamped

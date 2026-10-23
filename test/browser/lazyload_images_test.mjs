@@ -3,7 +3,7 @@
 
 // Browser integration tests for the lazyload_images client JS.
 //
-// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// Drives the SHIPPED asset, the compiled bytes embedded in
 // net/instaweb/rewriter/generated/lazyload_images_opt.cc, in headless
 // Chromium against markup shaped like LazyloadImagesFilter's output: the
 // asset followed by pagespeed.lazyLoadInit(<after_onload>, <blank url>),

@@ -3,7 +3,7 @@
 
 // Browser integration tests for the responsive_images zoom client JS.
 //
-// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// Drives the SHIPPED asset, the compiled bytes embedded in
 // net/instaweb/rewriter/generated/responsive_js_opt.cc, in headless
 // Chromium. ResponsiveImageSecondFilter adds x-descriptor srcsets
 // ("url 1.5x,url 2x") and, with responsive_images_zoom, a

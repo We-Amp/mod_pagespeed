@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/use-envoy-workspace.sh` are removed. The Envoy filter cannot be
   built from source at this revision. The packages and images are
   unchanged.
+- **Building from source: the Closure Compiler is no longer a build
+  dependency.** The rewriter's client scripts are built with a pinned
+  esbuild, so building from source no longer needs Java or the Closure
+  Compiler. The shipped scripts and their public names are unchanged; the
+  deferred-JavaScript script is larger (about 8 KB raw, 1 KB gzipped).
 
 ### Fixed
 
