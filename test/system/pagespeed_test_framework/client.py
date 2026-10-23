@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import warnings
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -136,10 +137,14 @@ def _format_last_body_excerpt(body: Optional[bytes]) -> str:
 # collision with a TIME_WAIT socket. All of these clear by themselves as
 # TIME_WAIT entries drain.
 _WSAEADDRINUSE = 10048
-_CONNECT_ATTEMPTS = 10
 _CONNECT_RETRY_INITIAL_DELAY = 0.05
 _CONNECT_RETRY_MAX_DELAY = 1.0
-# The exhaustion diagnostic logs once per process: a burst would otherwise
+# The burst in issue #178 lasted about 13 s, so the retry gets roughly
+# twice that before giving up: one FAILED test already fails the whole
+# iteration. Bounded by elapsed time, not attempt count, because the
+# observed burst outlasted any plausible attempt budget.
+_CONNECT_RETRY_TIME_LIMIT = 30.0
+# The exhaustion diagnostic warns once per process: a burst would otherwise
 # repeat it for every affected request.
 _local_port_exhaustion_logged = False
 
@@ -154,12 +159,17 @@ def _is_local_port_exhaustion(err: OSError) -> bool:
 def _count_time_wait_sockets() -> str:
     """Current number of TIME_WAIT TCP sockets per netstat, or "unknown".
 
+    Counts both address families: ``localhost`` resolves to ``::1`` first,
+    so the IPv6 table can be the one that matters. The bare ``-an`` output
+    mixes TCP and UDP, but only TCP rows can read TIME_WAIT, so the
+    substring filter stays exact.
+
     A broken diagnostic must never mask the error it accompanies, so this
     swallows every failure of its own.
     """
     try:
         output = subprocess.run(
-            ["netstat", "-an", "-p", "tcp"],
+            ["netstat", "-an"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -172,9 +182,13 @@ def _count_time_wait_sockets() -> str:
 
 
 def _log_local_port_exhaustion(err: OSError) -> None:
-    """Log ONE line about the first local-port exhaustion in the process:
+    """Warn ONCE about the first local-port exhaustion in the process:
     the error plus, on Windows, the TIME_WAIT socket count, so the next
-    burst confirms or refutes port exhaustion straight from the log."""
+    burst confirms or refutes port exhaustion straight from the log.
+
+    A UserWarning rather than a print: pytest shows warnings in the
+    end-of-run summary whether the affected test passes or fails, and the
+    retry absorbing a burst normally leaves every test passing."""
     global _local_port_exhaustion_logged
     if _local_port_exhaustion_logged:
         return
@@ -184,9 +198,9 @@ def _log_local_port_exhaustion(err: OSError) -> None:
         if sys.platform == "win32"
         else ""
     )
-    print(
+    warnings.warn(
         f"[client] connect failed on local port exhaustion: {err!r}{timewait_note}",
-        flush=True,
+        UserWarning,
     )
 
 
@@ -340,15 +354,18 @@ class PageSpeedClient:
 
         ``conn.request()`` performs the TCP connect on first use, so this is
         where connect() failures surface. When the failure is local (ephemeral)
-        port exhaustion, retry with a short bounded backoff: those failures
-        clear by themselves as TIME_WAIT entries drain (see the constants
-        block above and issue #178). Any other error raises at once, and
-        exhaustion that never clears raises the last error after the final
-        attempt. A retry is safe for any method: the connect failed, so no
-        byte of the request ever left the process.
+        port exhaustion, retry until ``_CONNECT_RETRY_TIME_LIMIT`` of elapsed
+        time with a bounded backoff: those failures clear by themselves as
+        TIME_WAIT entries drain (see the constants block above and issue
+        #178), and the observed burst outlasted any fixed attempt count, so
+        the budget is time, not attempts. Any other error raises at once,
+        and exhaustion that never clears raises the last error once the
+        limit is spent. A retry is safe for any method: the connect failed,
+        so no byte of the request ever left the process.
         """
         delay = _CONNECT_RETRY_INITIAL_DELAY
-        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+        deadline = time.monotonic() + _CONNECT_RETRY_TIME_LIMIT
+        while True:
             conn = self._make_connection()
             try:
                 conn.request(method, target, body=body, headers=headers)
@@ -358,11 +375,11 @@ class PageSpeedClient:
                 if not _is_local_port_exhaustion(err):
                     raise
                 _log_local_port_exhaustion(err)
-                if attempt == _CONNECT_ATTEMPTS:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     raise
-                time.sleep(delay)
+                time.sleep(min(delay, remaining))
                 delay = min(delay * 2, _CONNECT_RETRY_MAX_DELAY)
-        raise AssertionError("unreachable: the loop returns or raises")
 
     def get(
         self,
