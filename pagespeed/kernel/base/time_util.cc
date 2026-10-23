@@ -45,7 +45,7 @@ bool TimeToString(int64 time, GoogleString* time_string,
   }
   struct tm time_buf;
 #ifdef _WIN32
-  struct tm* time_info = NULL;
+  struct tm* time_info = nullptr;
   if (gmtime_s(&time_buf, &time_sec) == 0) {
     time_info = &time_buf;
   }
