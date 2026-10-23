@@ -524,12 +524,39 @@ commit per pull request, its subject ending in `(#N)`. A different method
 (merge commits or rebase) must change the classifier first; a group without
 that shape is refused.
 
-**Scope.** The guard protects runs that go through `pipeline-pr.yml`. A queued
-tree can still change the caller `ci.yml` to call another allow-listed fleet
-pipeline (the full, nightly, tidy-sweep, release and gate workflows, and the
-`@ci-dev` refs), and those carry no guard. Closing that is a separate change.
-Until it lands, no fork or Dependabot pull request is added to the merge queue
-(policy).
+**Event guard.** A queued tree can change the caller `ci.yml` to call any
+other allow-listed fleet pipeline, and it can also produce `push` and
+`workflow_dispatch` events of its own (the queue pushes a temporary
+`gh-readonly-queue/` branch; a queued job with a write token can dispatch a
+workflow). Every one of those pipelines therefore opens with a hosted job
+`event-guard` that refuses: any event outside the pipeline's allowed list
+(`merge_group` is allowed nowhere but `pipeline-pr.yml`); a ref under
+`refs/heads/gh-readonly-queue/` or outside the pipeline's allowed refs; a
+`workflow_dispatch` made by `github-actions[bot]` (a dispatch with a workflow
+token); and a pull request from a fork or from another repository. The allowed
+events and refs are `pipeline-full.yml` (events `push`, `workflow_dispatch`, `pull_request`; refs `refs/heads/master`, `refs/heads/ci-dev`, `refs/pull/*/merge`: the caller runs it for a push to `master`, a dispatch with `full: true` and the `ci:full` label), `pipeline-nightly.yml` (`schedule`, `workflow_dispatch`; `refs/heads/master`), `pipeline-tidy-sweep.yml` (`workflow_dispatch`; `refs/heads/master`), and `pipeline-release-module.yml` plus the two gate workflows it calls (`push`, `workflow_dispatch`; `refs/tags/*` and `refs/heads/master` for dry runs). Every fleet job reaches `event-guard` through `needs`,
+so a refusal skips the whole fleet. The workflow-shape gate (`event-guard`)
+pins the job text, the per-pipeline lists and the edges, scans every workflow file that has a fleet `runs-on` (not a fixed list), and rejects a job between the guard and a fleet job that can still run after the guard failed. Job keys (`if`, `needs`, `runs-on`, `continue-on-error`, `uses`) are matched quoted or with whitespace before the colon. Each job's `if:` is normalised first (folded, literal and plain multi-line forms joined, where a plain value continues on every line indented more than its key and a `#`-led line inside a block scalar is content; lowercased, whitespace collapsed, the space between a function name and its `(` removed). Then, for every job on a `needs` path between `event-guard` and a fleet job (and the fleet jobs themselves, unless the routing-guard rule pins their `if:`), an `if:` that contains `always(`, `failure(`, `cancelled(`, `success(` (unless the whole `if:` is a bare `success()`), `||`, `!` (a negation anywhere, so `!=` and `!= true` too) or `== false` must be exactly `needs.event-guard.result == 'success' && (<inner>)`, optionally inside `${{ }}`, where the parentheses around `<inner>` are one balanced group (parentheses inside string literals do not count) and `<inner>` does not mention `event-guard`; the job must also need `event-guard`, and a block scalar holding the condition must strip its final newline (`|-` or `>-`), since a kept newline is text around `${{ }}`. Otherwise the gate rejects the job by name. Because `!` covers `!=`, an `if:` such as `${{ needs.event-guard.result != 'failure' }}` or `${{ vars.FLEET_ENABLED != 'true' }}` on such a job is rejected as well, although it would be safe; write it as `${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true') }}`. Any other `if:` is accepted as today (GitHub adds `success()` implicitly unless the expression names a status function). The gate also refuses, in every workflow's `jobs:` section, a YAML anchor or alias on a job or on a job-level key other than `steps:` and `env:`, and any `<<:` merge key, because it reads the text and cannot resolve them (anchored step lists and env maps stay allowed).
+
+The `changes` job of `pipeline-pr.yml` refuses the same two cases for itself,
+because a queued tree's caller can also reach that pipeline with a `push` on the
+queue's temporary branch: before the fork guard step, `Refuse pushes that are
+not on the default branch` accepts a push only on `refs/heads/<default>` or
+`refs/heads/ci-dev`, and `Refuse dispatches made with a workflow token` refuses
+a dispatch made by `github-actions[bot]`. The shape gate
+(`queue-guard-reads-default-branch`) requires these two steps and the fork guard
+step, in this order, as the first steps after the checkout, each in exactly
+this text.
+
+This narrows the merge-queue boundary; it does not close it. The policy stays:
+no fork or Dependabot pull request is added to the merge queue. The `@ci-dev`
+allow-list entries stay. Pushing `ci-dev` from a `master`-based branch gives its
+copies of `pipeline-pr.yml` and `pipeline-full.yml` the queue fork guard and
+this guard, but that alone does not close the `@ci-dev` path: it stays open
+until the default workflow token permission is read-only and the `ci-dev`
+branch is restricted so that only administrators can update it (or the
+`@ci-dev` allow-list entries are removed), and `ci-dev` has been pushed again
+from the default branch. Until then the policy above applies.
 
 ## Required checks
 
@@ -567,12 +594,15 @@ A change to a reusable workflow does not reach the build runners from its own
 pull request (the callers pin `@master`). To exercise it before merge:
 
 1. Push the change to the `ci-dev` branch:
-   `git push --force origin HEAD:ci-dev`.
+   `git push --force origin HEAD:ci-dev`. Push `ci-dev` only from a branch
+   based on the current `master`, so it carries the queue and event guards.
 2. Dispatch the `CI (ci-dev)` workflow (`ci-dev.yml`) from the Actions tab or
-   with `gh workflow run ci-dev.yml`. It calls `pipeline-pr.yml@ci-dev`.
-   To run the full tier as well, set the `full` input:
-   `gh workflow run ci-dev.yml --ref <branch> -f full=true` (or tick `full`
-   in the Actions tab). The `full` job then calls `pipeline-full.yml@ci-dev`.
+   with `gh workflow run ci-dev.yml --ref ci-dev`. It calls `pipeline-pr.yml@ci-dev`.
+   Use `--ref ci-dev`: the event guard of the full-tier pipeline accepts
+   a dispatch only on `master` or `ci-dev`. To run the full tier as well,
+   set the `full` input: `gh workflow run ci-dev.yml --ref ci-dev -f full=true`
+   (or tick `full` in the Actions tab). The `full` job then calls
+   `pipeline-full.yml@ci-dev`.
 3. When it is green, merge the pull request as usual.
 
 The `ci-dev` workflow is latest-wins: its concurrency group cancels the run in
@@ -647,8 +677,9 @@ and fails the build when the shape breaks:
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
 - **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`
-  job holds the merge-queue guard step as the first step after the checkout
-  step (which sets no `env:`), with fixed keys (compared unquoted), `if:`,
+  job holds the merge-queue guard step as the third of three fixed steps
+  after the checkout step (after the push-ref and token-dispatch refusal
+  steps; the checkout sets no `env:`), with fixed keys (compared unquoted), `if:`,
   `run:` block (the classifier is read from `origin/${DEFAULT_BRANCH}` with
   `git show`) and only the guard's own env keys; no other line names the
   script in any spelling, and the job has no glob, `find`, `source` or

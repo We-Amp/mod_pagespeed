@@ -114,6 +114,55 @@ expect_bad bad-queue-guard-git-config-job 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-vendor-no-needs 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-vendor-if 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-vendor-missing 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-push-step-missing 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-push-step-renamed 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-push-step-extra-command 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-push-step-wide 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-dispatch-step-missing 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-dispatch-step-extra-command 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-steps-misordered 'queue-guard-reads-default-branch'
+expect_bad bad-event-guard-missing 'event-guard'
+expect_bad bad-event-guard-unreached 'event-guard'
+expect_bad bad-event-guard-extra-command 'event-guard'
+expect_bad bad-event-guard-allowed 'event-guard'
+expect_bad bad-event-guard-always 'event-guard'
+expect_bad bad-event-guard-cancelled 'event-guard'
+expect_bad bad-event-guard-refs-widened 'event-guard'
+expect_bad bad-event-guard-actor-check-removed 'event-guard'
+expect_bad bad-event-guard-queue-ref-check-removed 'event-guard'
+expect_bad bad-event-guard-fork-check-removed 'event-guard'
+expect_bad bad-event-guard-relay-failure 'event-guard'
+expect_bad bad-event-guard-relay-or 'event-guard'
+expect_bad bad-event-guard-relay-multiline 'event-guard'
+expect_bad bad-event-guard-relay-or-always 'event-guard'
+expect_bad bad-event-guard-relay-or-failure 'event-guard'
+expect_bad bad-event-guard-relay-case 'event-guard'
+expect_bad bad-event-guard-relay-literal 'event-guard'
+expect_bad bad-event-guard-relay-plain-multiline 'event-guard'
+expect_bad bad-event-guard-relay-quoted-if 'event-guard'
+expect_bad bad-event-guard-relay-quoted-coe 'event-guard'
+expect_bad bad-event-guard-unnamed-queue-ref 'event-guard'
+expect_bad bad-event-guard-unnamed-wide-ref 'event-guard'
+expect_bad bad-event-guard-relay-guard-or-always "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-guard-or-failure "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-negated-guard "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-guard-eq-false "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-always-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-not-equal "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-quoted-paren "job 'relay' has an if:"
+expect_good good-event-guard-relay-paren
+expect_bad bad-event-guard-relay-success-eq-zero "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-success-lt "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-success-format "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-key-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-quoted-key-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-five-space "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-literal-hash "job 'relay' has an if:"
+expect_bad bad-event-guard-relay-block-clip "job 'relay' has an if:"
+expect_bad bad-yaml-alias 'yaml-alias'
+expect_bad bad-yaml-anchor 'yaml-alias'
+expect_bad bad-yaml-merge-key 'yaml-alias'
+expect_good good-event-guard-relay-bare-success
 expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'

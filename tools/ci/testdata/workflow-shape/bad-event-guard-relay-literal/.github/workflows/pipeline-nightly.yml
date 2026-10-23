@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: pipeline-nightly
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  event-guard:
+    name: Event guard (refuses merge_group, unexpected events, refs and actors)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse events, refs and actors this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          ALLOWED: "schedule workflow_dispatch"
+          ALLOWED_REFS: "refs/heads/master"
+        run: |
+          set -euo pipefail
+          set -f
+          case " ${ALLOWED} " in *" ${EVENT} "*) ;; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+          case "${REF}" in refs/heads/gh-readonly-queue/*) echo "::error::merge queue refs never run this pipeline"; exit 1;; esac
+          ok=no
+          # shellcheck disable=SC2254  # the allowed refs are globs on purpose
+          for r in ${ALLOWED_REFS}; do case "${REF}" in ${r}) ok=yes;; esac; done
+          [ "${ok}" = yes ] || { echo "::error::ref ${REF} is not allowed in this pipeline"; exit 1; }
+          if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
+          if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
+          echo "event ${EVENT} on ${REF} accepted"
+  relay:
+    needs: event-guard
+    if: |
+      ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo relay
+  vendor:
+    needs: relay
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    steps:
+      - run: echo vendor
+  build:
+    needs: vendor
+    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    steps:
+      - run: echo build
+  report:
+    needs: [build]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    steps:
+      - run: echo report
+  notice:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hosted jobs need no edge

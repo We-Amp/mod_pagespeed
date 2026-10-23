@@ -91,12 +91,40 @@ permissions:
   contents: read
 
 jobs:
+  event-guard:
+    name: Event guard (refuses merge_group, unexpected events, refs and actors)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse events, refs and actors this pipeline must never run on
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          ALLOWED: "push workflow_dispatch"
+          ALLOWED_REFS: "refs/tags/* refs/heads/master"
+        run: |
+          set -euo pipefail
+          set -f
+          case " ${ALLOWED} " in *" ${EVENT} "*) ;; *) echo "::error::event ${EVENT} is not allowed in this pipeline"; exit 1;; esac
+          case "${REF}" in refs/heads/gh-readonly-queue/*) echo "::error::merge queue refs never run this pipeline"; exit 1;; esac
+          ok=no
+          # shellcheck disable=SC2254  # the allowed refs are globs on purpose
+          for r in ${ALLOWED_REFS}; do case "${REF}" in ${r}) ok=yes;; esac; done
+          [ "${ok}" = yes ] || { echo "::error::ref ${REF} is not allowed in this pipeline"; exit 1; }
+          if [ "${EVENT}" = workflow_dispatch ] && [ "${ACTOR}" = "github-actions[bot]" ]; then echo "::error::dispatches made with a workflow token are not allowed"; exit 1; fi
+          if [ "${EVENT}" = pull_request ] && { [ "${PR_FORK}" = true ] || [ "${PR_HEAD_REPO}" != "${REPOSITORY}" ]; }; then echo "::error::pull requests from forks are not allowed in this pipeline"; exit 1; fi
+          echo "event ${EVENT} on ${REF} accepted"
+
   # ---------------------------------------------------------------------
   # Control: the ref guard and the version, both hosted. The guard code is
   # checked out from master, never from the tree being released.
   # ---------------------------------------------------------------------
   ref-guard:
     name: Ref guard
+    needs: event-guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -383,8 +411,8 @@ jobs:
 
   vendor-hosted:
     name: Vendor Dependencies (hosted)
-    needs: [ref-guard, version]
-    if: ${{ vars.FLEET_ENABLED != 'true' }}
+    needs: [event-guard, ref-guard, version]
+    if: ${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -397,8 +425,8 @@ jobs:
 
   vendor-ready:
     name: Vendor ready
-    needs: [vendor, vendor-hosted]
-    if: ${{ !cancelled() }}
+    needs: [event-guard, vendor, vendor-hosted]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -926,8 +954,8 @@ jobs:
 
   linux-release-build-hosted:
     name: Linux Release Build (x64, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [event-guard, version, vendor-ready]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *linux-x64-env
@@ -935,8 +963,8 @@ jobs:
 
   linux-ready:
     name: Linux build ready
-    needs: [linux-release-build, linux-release-build-hosted]
-    if: ${{ !cancelled() }}
+    needs: [event-guard, linux-release-build, linux-release-build-hosted]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1028,8 +1056,8 @@ jobs:
 
   nginx-distro-build-hosted:
     name: Nginx Distro Packages (x64, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [event-guard, version, vendor-ready]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *nginx-x64-env
@@ -1037,8 +1065,8 @@ jobs:
 
   nginx-ready:
     name: Nginx packages ready
-    needs: [nginx-distro-build, nginx-distro-build-hosted]
-    if: ${{ !cancelled() }}
+    needs: [event-guard, nginx-distro-build, nginx-distro-build-hosted]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1432,8 +1460,8 @@ jobs:
 
   apache-el8-build-hosted:
     name: Apache EL8 Build (glibc 2.28, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [event-guard, version, vendor-ready]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *apache-el8-env
@@ -1441,8 +1469,8 @@ jobs:
 
   el8-ready:
     name: EL8 build ready
-    needs: [apache-el8-build, apache-el8-build-hosted]
-    if: ${{ !cancelled() }}
+    needs: [event-guard, apache-el8-build, apache-el8-build-hosted]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1467,8 +1495,8 @@ jobs:
 
   apache-el10-build-hosted:
     name: Apache EL10 Build (glibc 2.39, native, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [event-guard, version, vendor-ready]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *apache-el10-env
@@ -1476,8 +1504,8 @@ jobs:
 
   el10-ready:
     name: EL10 build ready
-    needs: [apache-el10-build, apache-el10-build-hosted]
-    if: ${{ !cancelled() }}
+    needs: [event-guard, apache-el10-build, apache-el10-build-hosted]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
