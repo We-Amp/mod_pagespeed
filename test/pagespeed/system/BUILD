@@ -251,12 +251,9 @@ pagespeed_cc_test(
 # Backward-compatible aggregate test target
 # =============================================================================
 
-# system_caches_test.cc is deliberately absent: CI runs every target in
-# //test/pagespeed/system/... in one job against one memcached and one redis,
-# so building the file here as well as in :system_caches_test ran the suite
-# twice in parallel, both processes writing the same cache keys (issue #204).
-# Its keys are prefixed per test and process now, but running it once is
-# enough.
+# system_caches_test.cc must run only once per job because its tests share the
+# job's memcached and redis servers, so it is not part of this aggregate
+# target (issue #204).
 
 pagespeed_cc_test(
     name = "system",
