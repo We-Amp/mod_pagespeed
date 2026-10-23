@@ -21,7 +21,7 @@ MODULE_BAZEL = os.path.join(REPO_ROOT, "MODULE.bazel")
 MODULE_LOCK = os.path.join(REPO_ROOT, "MODULE.bazel.lock")
 
 _SOURCE_JSON = re.compile(r"/modules/(?P<name>[^/]+)/(?P<version>[^/]+)/source\.json$")
-_BCR_SUFFIX = re.compile(r"\.bcr\.\d+$")
+_BCR_SUFFIX = re.compile(r"\.bcr\.(\d+|envoy)$")
 
 
 class VersionError(Exception):
@@ -29,7 +29,11 @@ class VersionError(Exception):
 
 
 def upstream_version(version):
-    """`2.3.3.bcr.2` -> `2.3.3`: a BCR patch release builds the upstream release."""
+    """`2.3.3.bcr.2` -> `2.3.3`: a BCR patch release builds the upstream release.
+
+    Envoy's registry marks its patched releases the same way: `35.1.bcr.envoy`
+    -> `35.1`.
+    """
     return _BCR_SUFFIX.sub("", version)
 
 

@@ -9,10 +9,10 @@
 # clang-tidy-20. Must be run inside the development Docker container where
 # clang-tidy-20 is available.
 #
-# pagespeed/envoy is excluded via --deleted_packages: its BUILD file loads
-# Envoy repositories that are not declared until the Envoy 1.40 step. The
-# envoy source files are still linted via the header-filter, but only when
-# included by other translation units.
+# pagespeed/envoy is excluded via --deleted_packages: generating its
+# compilation database would build Envoy's generated sources. The envoy source
+# files are still linted via the header-filter, but only when included by other
+# translation units.
 #
 # Options:
 #   --fix    Apply auto-fixes in-place

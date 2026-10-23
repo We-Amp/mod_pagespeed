@@ -23,6 +23,20 @@ startup --host_jvm_args=-Xmx3g
 # from MODULE.bazel: BCR modules plus the non_bcr_deps extension in
 # bazel/extensions.bzl. WORKSPACE support is off.
 common --enable_bzlmod
+# Module registries, searched in this order. The BCR comes first and is named
+# explicitly because a --registry flag replaces the default. Envoy's own
+# registry follows it: Envoy 1.40 depends on modules that only exist there
+# (the *.envoy versions, e.g. protobuf 35.1.bcr.envoy and googleurl). It is
+# pinned to the commit Envoy v1.40.0's own .bazelrc names, so the module files
+# it serves cannot change under us; move it together with the Envoy pin.
+common --registry=https://bcr.bazel.build
+common --registry=https://raw.githubusercontent.com/envoyproxy/bazel-registry/8ef390e133ec41491e397681c91c30e9cda1395a
+# protoc comes from proto toolchain resolution: protobuf registers a prebuilt
+# protoc (its release binary, sha256-pinned in protobuf's own tool_integrity
+# table) and prefers it, as Envoy does. protoc is then never compiled. That is
+# faster everywhere, and on Windows it is required: protobuf 35.1's protoc
+# sources (compiler/java/full) fail clang-cl's include check there.
+common --incompatible_enable_proto_toolchain_resolution
 # CI (Linux) asserts MODULE.bazel.lock is current. Extension results are
 # per-platform in the lock, so Windows/macOS stay in the default update mode.
 common:ci_lock --lockfile_mode=error
@@ -300,9 +314,6 @@ build:coverage --test_timeout=390,750,1500,5700
 build:coverage --define=dynamic_link_tests=true
 build:coverage --define=ENVOY_CONFIG_COVERAGE=1
 build:coverage --cxxopt="-DENVOY_CONFIG_COVERAGE=1"
-# Envoy-only: needs the @envoy repository (not declared until the Envoy 1.40 step)
-# build:coverage --coverage_support=@envoy//bazel/coverage:coverage_support
-# build:coverage --test_env=CC_CODE_COVERAGE_SCRIPT=external/envoy/bazel/coverage/collect_cc_coverage.sh
 build:coverage --test_env=HEAPCHECK=
 build:coverage --combined_report=lcov
 build:coverage --strategy=TestRunner=sandboxed,local
@@ -314,8 +325,7 @@ build:coverage --instrumentation_filter="//source(?!/common/quic/platform)[/:],/
 build:test-coverage --test_arg="-l trace"
 build:test-coverage --test_arg="--log-path /dev/null"
 build:fuzz-coverage --config=plain-fuzzer
-# Envoy-only: needs the @envoy repository (not declared until the Envoy 1.40 step)
-# build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
+build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
 
 # CI configurations
 # Note this config is used by mobile CI also.
@@ -509,11 +519,13 @@ build:zig-windows --copt=-DPAGESPEED_SUPPORT_POSIX_SHARED_MEM=0
 # Disable POSIX-only memcached backend
 build:zig-windows --define=enable_memcached=false
 
-# Envoy filter builds (pagespeed/envoy; not buildable until the Envoy 1.40 step
-# declares the Envoy repositories). googleurl's ICU IDNA variant needs system
-# ICU headers the dev images lack.
+# Envoy filter builds (//pagespeed/envoy/..., //test/pagespeed/envoy/...)
+# against Envoy 1.40 from MODULE.bazel.
 build:envoy-filter --config=clang-libstdcxx13
-build:envoy-filter --@googleurl//build_config:system_icu=0
+# Envoy's io_uring support (liburing) needs Linux 5.6+ UAPI headers
+# (linux/openat2.h) that the dev image's Ubuntu 20.04 lacks; the filter does
+# not use io_uring.
+build:envoy-filter --@envoy//bazel:enable_liburing=false
 
 try-import %workspace%/clang.bazelrc
 try-import %workspace%/local_tsan.bazelrc

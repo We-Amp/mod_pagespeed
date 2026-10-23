@@ -4,7 +4,7 @@
 """Drift and supply-chain guard for the C++ libraries taken from the BCR.
 
 For every tracked module (abseil-cpp, zlib-ng, boringssl, re2, googletest,
-protobuf) it asserts, without running Bazel:
+protobuf, fmt, spdlog) it asserts, without running Bazel:
 
   1. the module is a root `bazel_dep` and MODULE.bazel.lock selects a registry
      version of it;
@@ -53,6 +53,8 @@ TRACKED = [
     ("re2", "_RE2_VERSION", "re2"),
     ("googletest", "GOOGLETEST_VERSION", None),
     ("protobuf", None, "protobuf"),
+    ("fmt", "FMT_VERSION", "fmt"),
+    ("spdlog", "SPDLOG_VERSION", "spdlog"),
 ]
 # Modules whose version must be pinned by a single_version_override.
 MUST_OVERRIDE = ["boringssl"]
@@ -166,17 +168,21 @@ def check(declared, overrides, resolved, consts, sbom, graph=None):
 
 def self_test():
     declared = {"abseil-cpp": "1.0", "zlib-ng": "2.3.3.bcr.2", "boringssl": "0.1",
-                "re2": "r1", "googletest": "1.17.0.bcr.2", "protobuf": "31.1"}
+                "re2": "r1", "googletest": "1.17.0.bcr.2", "protobuf": "35.1.bcr.envoy",
+                "fmt": "12.2.0", "spdlog": "1.17.0"}
     overrides = {"abseil-cpp": "1.0", "boringssl": "0.1"}
     resolved = dict(declared)
     consts = {"_ABSEIL_VERSION": "1.0", "ZLIB_NG_VERSION": "2.3.3",
               "BORINGSSL_VERSION": "0.1", "_RE2_VERSION": "r1",
-              "GOOGLETEST_VERSION": "1.17.0"}
+              "GOOGLETEST_VERSION": "1.17.0", "FMT_VERSION": "12.2.0",
+              "SPDLOG_VERSION": "1.17.0"}
     sbom = {"abseil-cpp": ("1.0", "pkg:github/a/a@1.0"),
             "zlib-ng": ("2.3.3", "pkg:github/z/z@2.3.3"),
             "boringssl": ("0.1", "pkg:github/b/b@0.1"),
             "re2": ("r1", "pkg:github/r/r@r1"),
-            "protobuf": ("abc123", "pkg:github/p/p@v31.1")}
+            "protobuf": ("abc123", "pkg:github/p/p@v35.1"),
+            "fmt": ("12.2.0", "pkg:github/f/f@12.2.0"),
+            "spdlog": ("1.17.0", "pkg:github/s/s@v1.17.0")}
     graph = {"key": "<root>", "dependencies": [
         {"key": f"{m}@{v}", "dependencies": []} for m, v in resolved.items()]}
     cases = [
@@ -186,6 +192,9 @@ def self_test():
         ("mirror constant drift", {"consts": dict(consts, ZLIB_NG_VERSION="2.3.2")}, 1),
         ("SBOM drift", {"sbom": dict(sbom, boringssl=("0.0", ""))}, 1),
         ("protobuf purl drift", {"sbom": dict(sbom, protobuf=("abc123", "pkg:github/p/p@v30.0"))}, 1),
+        ("protobuf purl keeps the .bcr.envoy suffix",
+         {"sbom": dict(sbom, protobuf=("abc123", "pkg:github/p/p@v35.1.bcr.envoy"))}, 1),
+        ("fmt mirror constant drift", {"consts": dict(consts, FMT_VERSION="12.1.0")}, 1),
         ("boringssl override missing", {"overrides": {"abseil-cpp": "1.0"}}, 1),
         ("graph disagrees with lock", {"graph": {"key": "<root>", "dependencies": [
             {"key": "re2@r9", "dependencies": []}]}}, 1),

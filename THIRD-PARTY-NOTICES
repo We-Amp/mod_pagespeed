@@ -19,7 +19,7 @@ C++ DEPENDENCIES (declared in bazel/repositories.bzl, statically linked into
 the shipped modules)
 ===============================================================================
 
-abseil-cpp 20260107.1
+abseil-cpp 20260817.0
   License: Apache-2.0
   Copyright (c) Google Inc.
   https://github.com/abseil/abseil-cpp
@@ -51,7 +51,7 @@ zlib-ng 2.3.3
 
     3. This notice may not be removed or altered from any source distribution.
 
-boringssl 0.20260508.0
+boringssl 0.20260929.0
   License: OpenSSL
   Copyright (c) Google Inc.
   https://github.com/google/boringssl
@@ -402,7 +402,7 @@ libevent 2.1.12-stable
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-protobuf 74211c0dfc (v31.1)
+protobuf 35cd01f9fe (v35.1)
   License: BSD-3-Clause
   Copyright (c) The Protocol Buffers Authors
   https://github.com/protocolbuffers/protobuf
@@ -475,7 +475,7 @@ re2 2025-11-05
     // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
     // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-fmt 12.1.0
+fmt 12.2.0
   License: MIT
   Copyright (c) Victor Zverovich
   https://github.com/fmtlib/fmt
@@ -541,7 +541,7 @@ spdlog 1.17.0
     This software depends on the fmt lib (MIT License),
     and users must comply to its license: https://raw.githubusercontent.com/fmtlib/fmt/master/LICENSE
 
-envoy cf413bdb37 (v1.37.6)
+envoy 9e55809337 (v1.40.0)
   License: Apache-2.0
   Copyright (c) The Envoy Project Authors
   https://github.com/envoyproxy/envoy

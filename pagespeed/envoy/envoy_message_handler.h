@@ -21,12 +21,12 @@
 
 #include <cstdarg>
 
-#include "external/envoy/source/common/common/logger.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/system_message_handler.h"
+#include "source/common/common/logger.h"
 
 namespace net_instaweb {
 

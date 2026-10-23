@@ -225,7 +225,7 @@ cc_library(
         ":scoped_memory_pool",
         ":std_timer",
         "@jsoncpp",
-        "@com_google_protobuf//:protobuf",
+        "@protobuf//:protobuf",
     ] + select({
         # On Windows: no boringssl, no posix_timer
         "@platforms//os:windows": [],

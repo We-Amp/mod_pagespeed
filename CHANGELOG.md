@@ -31,14 +31,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency is declared in `MODULE.bazel` (Bazel Central Registry modules
   plus a module extension for the rest), with a committed
   `MODULE.bazel.lock`. The `WORKSPACE` files and
-  `scripts/use-envoy-workspace.sh` are removed. The Envoy filter cannot be
-  built from source at this revision. The packages and images are
+  `scripts/use-envoy-workspace.sh` are removed. The packages and images are
   unchanged.
 - **Building from source: the Closure Compiler is no longer a build
   dependency.** The rewriter's client scripts are built with a pinned
   esbuild, so building from source no longer needs Java or the Closure
   Compiler. The shipped scripts behave the same and keep their public names; the
   deferred-JavaScript script is larger (about 8 KB raw, 1 KB gzipped).
+- **Building the Envoy filter from source works again, against Envoy 1.40.**
+  Build it with `bazel build --config=envoy-filter
+  //pagespeed/envoy:envoy_pagespeed //pagespeed/envoy:pagespeed_filter.so`.
+  The filter remains experimental and ships in no package; it is built and
+  tested nightly, not on every change.
+- **Updated bundled libraries.** The Apache, nginx and IIS modules are built
+  with BoringSSL 0.20260929.0 (was 0.20260508.0), Abseil 20260817.0 (was
+  20260107.1), Protocol Buffers 35.1 (was 31.1), GoogleTest 1.18.0 (was
+  1.17.0, tests only) and fmt 12.2.0 (was 12.1.0).
 
 ### Fixed
 

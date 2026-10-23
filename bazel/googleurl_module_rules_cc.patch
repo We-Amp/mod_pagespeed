@@ -1,0 +1,12 @@
+googleurl as a Bazel module: its BUILD files load @rules_cc, which its
+MODULE.bazel does not declare (it built as a plain http_archive before).
+
+diff --git a/MODULE.bazel b/MODULE.bazel
+index ad815e2..fc4eb87 100644
+--- a/MODULE.bazel
++++ b/MODULE.bazel
+@@ -6,3 +6,4 @@ module(name = "googleurl")
+ 
+ bazel_dep(name = "bazel_skylib", version = "1.7.1")
+ bazel_dep(name = "abseil-cpp", version = "20240722.0", repo_name = "com_google_absl")
++bazel_dep(name = "rules_cc", version = "0.2.26")

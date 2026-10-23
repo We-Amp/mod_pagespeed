@@ -19,10 +19,10 @@ the slot leaks and thread-local state dangles.
 
 --- a/crypto/thread_win.cc
 +++ b/crypto/thread_win.cc
-@@ -68,6 +68,20 @@ static void thread_local_init(void) {
+@@ -55,6 +55,20 @@ static void thread_local_init() {
    g_thread_local_failed = (g_thread_local_key == TLS_OUT_OF_INDEXES);
  }
-
+ 
 +// Release the process-wide TLS slot allocated lazily by thread_local_init.
 +// Intended for hosts that load BoringSSL inside a DLL that gets unloaded
 +// before process exit (e.g. an IIS native module). After this call, the
@@ -39,4 +39,4 @@ the slot leaks and thread-local state dangles.
 +
  static void NTAPI thread_local_destructor(PVOID module, DWORD reason,
                                            PVOID reserved) {
-   // Only free memory on |DLL_THREAD_DETACH|, not |DLL_PROCESS_DETACH|. In
+   // Only free memory on `DLL_THREAD_DETACH`, not `DLL_PROCESS_DETACH`. In

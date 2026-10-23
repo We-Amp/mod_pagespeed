@@ -198,7 +198,7 @@ pagespeed_cc_test(
         "//pagespeed/kernel/packs:planner_common",
         "//pagespeed/kernel/packs:url_norm",
         "@com_google_absl//absl/strings",
-        "@com_googlesource_code_re2//:re2",
+        "@re2//:re2",
     ],
 )
 

@@ -97,18 +97,22 @@ bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so
 # Nginx module
 bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so
 
-# Envoy filter (not buildable at the moment, see below)
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed      # Standalone binary (~212MB)
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:pagespeed_filter.so  # Shared library (~113MB)
+# Envoy filter (against Envoy 1.40; see below)
+bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed      # Standalone binary
+bazel build --config=envoy-filter //pagespeed/envoy:pagespeed_filter.so  # Shared library
 
 # IIS module (Windows only — see Windows/IIS Development)
 bazel build --config=windows --config=clang-cl //pagespeed/iis:pagespeed_iis.dll
 ```
 
-The Envoy targets cannot be built at the moment: the Envoy dependency graph is
-not declared in `MODULE.bazel` yet (it returns with the move to Envoy 1.40, as
-Envoy modules). `pagespeed/envoy` and `test/pagespeed/envoy` stay in
-`.bazelignore` until then.
+Envoy 1.40 is a module in `MODULE.bazel` (an `archive_override` of the
+release commit, with Envoy's registry after the BCR in `.bazelrc`), so the
+whole tree, the shipped modules included, resolves one dependency graph with
+Envoy: abseil, BoringSSL, protobuf, fmt, spdlog and googleurl are the versions
+Envoy uses. No package or image contains the filter, and its targets are tagged
+manual, so `//...` leaves it out; name the targets as above. CI builds it and
+runs its tests in the nightly tier only (job `envoy-filter`). A cold build
+compiles all of Envoy: about an hour on 8 cores.
 
 ## Two Source Trees
 
@@ -527,7 +531,7 @@ which is gitignored):
 
 1. **googleurl requires clang-cl** - LLVM installed automatically by provisioning
 2. **Git Bash path conversion** - When running pytest from Git Bash, paths like `/` get converted to Windows paths. Use `cmd /c` to run tests with environment variables
-3. **yq symlink on Windows** - Fixed via `bazel/envoy_repo_yq_windows.patch`. Windows CreateProcessW cannot execute symlinks, so the patch uses the direct path to `@yq_windows_amd64//:yq.exe`
+3. **yq symlink on Windows** - No longer applies: Envoy 1.40's repository rules do not run yq, so `bazel/envoy_repo_yq_windows.patch` is gone
 4. **Winsock header ordering** - On Windows, `winsock2.h` must be included BEFORE `windows.h` and `httpserv.h` to avoid redefinition errors (fd_set, timeval, hostent)
 5. **clang-cl defines `_WIN32` not `WIN32`** - Use `#if defined(_WIN32) || defined(WIN32)` for Windows-specific code
 6. **IIS static files lack Cache-Control** - IIS serves static CSS/JS without Cache-Control headers by default; IPRO-processed resources get proper cache headers

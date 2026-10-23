@@ -30,8 +30,8 @@
 #ifndef PAGESPEED_ENVOY_ENVOY_DISPATCHER_ADAPTER_H_
 #define PAGESPEED_ENVOY_ENVOY_DISPATCHER_ADAPTER_H_
 
-#include "external/envoy/envoy/event/dispatcher.h"
-#include "external/envoy/envoy/event/timer.h"
+#include "envoy/event/dispatcher.h"
+#include "envoy/event/timer.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/thread/event_dispatcher.h"
 

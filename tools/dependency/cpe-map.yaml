@@ -56,7 +56,7 @@
 deps:
   abseil-cpp:
     cpe: "cpe:2.3:a:abseil:common_libraries"   # NVD: 1 CVE
-    release_date: "2026-02-11"                  # 20260107.1 — GitHub release published 2026-02-11 (the .1 patch on the 20260107 LTS branch); NOT the Jan-07 branch-cut date encoded in the version string
+    release_date: "2026-08-18"                  # 20260817.0 (the version Envoy 1.40 uses) - GitHub release published 2026-08-18
 
   zlib-ng:
     cpe: "N/A"
@@ -75,7 +75,7 @@ deps:
     # BoringSSL rarely gets its own CVEs (Google fixes in-tree, no advisories);
     # OpenSSL CVEs do NOT apply (forked, divergent). The single NVD entry is
     # tracked here; the OS/dynamic libssl path is image-scanned instead.
-    release_date: "2026-05-08"                  # 0.20260508.0 — GitHub release + annotated tag both 2026-05-08
+    release_date: "2026-09-29"                  # 0.20260929.0 (Envoy 1.40's pin) - GitHub release published 2026-09-29
 
   libevent:
     cpe: "cpe:2.3:a:libevent_project:libevent"  # NVD: 5 CVEs
@@ -83,7 +83,7 @@ deps:
 
   protobuf:
     cpe: "cpe:2.3:a:google:protobuf"          # NVD: 5 CVEs (was previously pulled transitively via gRPC)
-    release_date: "2025-05-28"                  # v31.1 release commit (74211c0) — tag commit dated 2025-05-28
+    release_date: "2026-06-11"                  # v35.1 release commit (35cd01f), as Envoy 1.40's 35.1.bcr.envoy - tag commit and GitHub release 2026-06-11
 
   re2:
     cpe: "N/A"
@@ -95,7 +95,7 @@ deps:
 
   fmt:
     cpe: "cpe:2.3:a:fmt:fmt"                    # NVD: 1 CVE
-    release_date: "2025-10-29"                  # 12.1.0 (header-only) — GitHub release published 2025-10-29
+    release_date: "2026-06-16"                  # 12.2.0 (the BCR module Envoy 1.40 uses) - GitHub release published 2026-06-16
 
   spdlog:
     cpe: "cpe:2.3:a:gabime:spdlog"             # NVD: 1 CVE
@@ -103,7 +103,7 @@ deps:
 
   envoy:
     cpe: "cpe:2.3:a:envoyproxy:envoy"          # NVD: 95 CVEs
-    release_date: "2026-08-26"                  # commit cf413bdb == v1.37.6 tag (GitHub release published 2026-08-26). Bumped from v1.37.5.
+    release_date: "2026-10-13"                  # commit 9e558093 == v1.40.0 tag (GitHub release published 2026-10-13). Bumped from v1.37.6.
 
   hiredis:
     cpe: "cpe:2.3:a:redislabs:hiredis"         # NVD: 1 CVE

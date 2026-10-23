@@ -30,7 +30,6 @@ EnvoyAdminFetch::EnvoyAdminFetch(
     EnvoyServerContext* server_context,
     Envoy::Http::HttpPageSpeedDecoderFilter* decoder)
     : AsyncFetch(RequestContextPtr(server_context->NewRequestContext())),
-      server_context_(server_context),
       decoder_(decoder) {
   // Set HTTP options on request context - required before accessing options()
   request_context()->set_options(

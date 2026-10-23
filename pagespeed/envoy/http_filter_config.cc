@@ -48,7 +48,8 @@ std::string SerializeConfigDeterministic(
     google::protobuf::io::StringOutputStream string_stream(&out);
     google::protobuf::io::CodedOutputStream coded_stream(&string_stream);
     coded_stream.SetSerializationDeterministic(true);
-    proto_config.SerializeToCodedStream(&coded_stream);
+    // Serializing an in-memory message into a string stream cannot fail.
+    static_cast<void>(proto_config.SerializeToCodedStream(&coded_stream));
   }
   return out;
 }

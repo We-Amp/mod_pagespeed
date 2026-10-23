@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-21T22:01:20Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-23T05:56:06Z",
   "creationInfo": {
-    "created": "2026-10-21T22:01:20Z",
+    "created": "2026-10-23T05:56:06Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -37,12 +37,12 @@
       "licenseDeclared": "Apache-2.0",
       "copyrightText": "Copyright (c) 2024-2026 We-Amp B.V.",
       "externalRefs": [],
-      "comment": "Source-only: the Envoy filter port (pagespeed/envoy/) is carried by the signed source tarball and is excluded from every shipped binary build (.bazelignore). Its dependencies (Envoy) are not contained in any binary artefact of pagespeed-1.1."
+      "comment": "Source-only: the Envoy filter port (pagespeed/envoy/) is carried by the signed source tarball and is not part of any shipped binary build (users build it from source). Its dependencies (Envoy) are not contained in any binary artefact of pagespeed-1.1."
     },
     {
       "SPDXID": "SPDXRef-Package-abseil-cpp",
       "name": "abseil-cpp",
-      "versionInfo": "20260107.1",
+      "versionInfo": "20260817.0",
       "supplier": "Organization: Google Inc.",
       "downloadLocation": "https://github.com/abseil/abseil-cpp",
       "filesAnalyzed": false,
@@ -53,7 +53,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/abseil/abseil-cpp@20260107.1"
+          "referenceLocator": "pkg:github/abseil/abseil-cpp@20260817.0"
         }
       ]
     },
@@ -78,7 +78,7 @@
     {
       "SPDXID": "SPDXRef-Package-boringssl",
       "name": "boringssl",
-      "versionInfo": "0.20260508.0",
+      "versionInfo": "0.20260929.0",
       "supplier": "Organization: Google Inc.",
       "downloadLocation": "https://github.com/google/boringssl",
       "filesAnalyzed": false,
@@ -89,7 +89,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/google/boringssl@0.20260508.0"
+          "referenceLocator": "pkg:github/google/boringssl@0.20260929.0"
         }
       ]
     },
@@ -114,7 +114,7 @@
     {
       "SPDXID": "SPDXRef-Package-protobuf",
       "name": "protobuf",
-      "versionInfo": "74211c0dfc2777318ab53c2cd2c317a2ef9012de",
+      "versionInfo": "35cd01f9fe9afbeea38cc7b979a3b6bfcde82c03",
       "supplier": "Organization: The Protocol Buffers Authors",
       "downloadLocation": "https://github.com/protocolbuffers/protobuf",
       "filesAnalyzed": false,
@@ -125,7 +125,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/protocolbuffers/protobuf@v31.1"
+          "referenceLocator": "pkg:github/protocolbuffers/protobuf@v35.1"
         }
       ]
     },
@@ -150,7 +150,7 @@
     {
       "SPDXID": "SPDXRef-Package-fmt",
       "name": "fmt",
-      "versionInfo": "12.1.0",
+      "versionInfo": "12.2.0",
       "supplier": "Organization: Victor Zverovich",
       "downloadLocation": "https://github.com/fmtlib/fmt",
       "filesAnalyzed": false,
@@ -161,7 +161,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/fmtlib/fmt@12.1.0"
+          "referenceLocator": "pkg:github/fmtlib/fmt@12.2.0"
         }
       ]
     },
@@ -186,7 +186,7 @@
     {
       "SPDXID": "SPDXRef-Package-envoy",
       "name": "envoy",
-      "versionInfo": "cf413bdb37b36d3ffbe570b8a48760abe2b588f5",
+      "versionInfo": "9e5580933739775e8bce696a57a2e1bc99368f23",
       "supplier": "Organization: The Envoy Project Authors",
       "downloadLocation": "https://github.com/envoyproxy/envoy",
       "filesAnalyzed": false,
@@ -197,7 +197,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.37.6"
+          "referenceLocator": "pkg:github/envoyproxy/envoy@v1.40.0"
         }
       ],
       "comment": "Required only by the source-only Envoy filter; not contained in any binary artefact."

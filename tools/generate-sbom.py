@@ -82,9 +82,9 @@ def read_product_version():
 #   repo         github "owner/repo" for the PURL, or None (no github PURL)
 #   purl_version explicit PURL/tag version; None → use the resolved version
 #   source_only  optional; True for a dep that only the SOURCE tree needs
-#                (Envoy: pagespeed/envoy/ is .bazelignore'd out of every
-#                shipped build). It stays a package (same name and purl, so the
-#                notices, CPE/NVD matcher and VEX statements keep matching) but
+#                (Envoy: no shipped build contains pagespeed/envoy/). It
+#                stays a package (same name and purl, so the notices,
+#                CPE/NVD matcher and VEX statements keep matching) but
 #                is NOT a dependency of the product: it hangs off the
 #                source-only filter package, see ENVOY_FILTER_SOURCE.
 # downloadLocation is derived from repo (github) or `url` (non-github).
@@ -108,7 +108,7 @@ CPP_DEPS = [
     {"name": "spdlog", "version": {"key": "SPDLOG_VERSION"}, "license": "MIT",
      "holder": "Gabi Melman", "repo": "gabime/spdlog", "purl_version": "v1.17.0"},
     {"name": "envoy", "version": {"key": "ENVOY_COMMIT"}, "license": "Apache-2.0",
-     "holder": "The Envoy Project Authors", "repo": "envoyproxy/envoy", "purl_version": "v1.37.6",
+     "holder": "The Envoy Project Authors", "repo": "envoyproxy/envoy", "purl_version": "v1.40.0",
      "source_only": True},
     {"name": "hiredis", "version": {"key": "HIREDIS_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "Salvatore Sanfilippo and contributors", "repo": "redis/hiredis", "purl_version": "v1.3.0"},
@@ -185,8 +185,9 @@ CPP_DEPS = [
 ENVOY_FILTER_SOURCE = "pagespeed-envoy-filter-source"
 ENVOY_FILTER_COMMENT = (
     "Source-only: the Envoy filter port (pagespeed/envoy/) is carried by the "
-    "signed source tarball and is excluded from every shipped binary build "
-    "(.bazelignore). Its dependencies (Envoy) are not contained in any "
+    "signed source tarball and is not part of any shipped binary build "
+    "(users build it from source). Its dependencies (Envoy) are not "
+    "contained in any "
     "binary artefact of pagespeed-1.1."
 )
 SOURCE_ONLY_DEP_COMMENT = (
