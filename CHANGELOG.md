@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Debian and RPM package build scripts now stop with an error when
   `pagespeed_libraries.conf` is missing, instead of silently producing a
   package without it.
+- The admin console no longer lists the `inserted_ga_snippets` statistic.
+  The counter could only ever be increased by `insert_ga`, which is now a
+  no-op, so it would have stayed at zero forever.
 
 ## [2.5.2] - 2026-10-22
 
