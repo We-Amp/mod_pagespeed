@@ -70,7 +70,7 @@ class FakeContext : public StubHttpContext {
   VOID* AllocateRequestMemory(DWORD size) override {
     ++calls_;
     if (budget_ <= 0) {
-      return NULL;
+      return nullptr;
     }
     --budget_;
     void* p = malloc(size);
