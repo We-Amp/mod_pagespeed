@@ -146,6 +146,16 @@ bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     "${OVERRIDE_FLAGS[@]}" \
     //:libmod_pagespeed.so
 
+# Fetch the nginx module's deps. ed25519 (webbotauth) is used only by the nginx
+# module, so the Apache fetch above never reaches it; without this fetch an
+# offline nginx build fails on @ed25519. Not tolerated to fail: unlike the IIS
+# target, the nginx module is a normal Linux target.
+bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
+    --repository_cache="$REPO_CACHE" \
+    --repo_contents_cache= \
+    "${OVERRIDE_FLAGS[@]}" \
+    //pagespeed/nginx:ngx_pagespeed_module.so
+
 # Fetch IIS module deps (may fail analysis on non-Windows due to target_compatible_with,
 # but all external repos are still cached during loading).
 bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
@@ -208,6 +218,8 @@ check_dep "boringssl" "$(sha_of BORINGSSL_SHA)"
 check_dep "abseil"    "$(sha_of _ABSEIL_SHA)"
 check_dep "protobuf"  "$(sha_of PROTOBUF_SHA)"
 check_dep "libpng"    "$(sha_of LIBPNG_SHA)"
+# ed25519 is pinned inline in its http_archive (nginx module only).
+check_dep "ed25519"   "$(grep -A6 'name = "ed25519"' bazel/repositories.bzl | grep sha256 | head -1 | sed 's/.*"\([0-9a-f]\{64\}\)".*/\1/')"
 # The four prebuilt protoc repos: Bazel checks each archive against the sha256
 # in protobuf's integrity table when it fetches, so a repo that exists here was
 # downloaded and verified (and its archive is in the repository cache).
