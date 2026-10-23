@@ -196,27 +196,32 @@ public class InverseModeIntegrationTests
         // The first response can legitimately carry the rewritten ".pagespeed." URL when
         // the loopback stylesheet fetch misses the rewrite deadline on a loaded runner.
         // Poll (bounded) until the stylesheet is inlined, then assert the steady state.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
-        HttpResponseMessage resp;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        HttpResponseMessage? resp = null;
         string body;
         while (true)
         {
+            resp?.Dispose();
             resp = await client.GetAsync("/");
             resp.StatusCode.Should().Be(HttpStatusCode.OK);
+            resp.Headers.Contains("X-Page-Speed").Should().BeTrue("the optimized top-level HTML must carry X-Page-Speed");
+            // mod_pagespeed 2.1 has no licensing: no optimized response carries the old
+            // evaluation-mode warning header. (Requires a bundled module without licensing.)
+            resp.Headers.Contains("X-PageSpeed-Warn").Should().BeFalse(
+                "no X-PageSpeed-Warn header may appear on any optimized response");
             body = await resp.Content.ReadAsStringAsync();
-            if (!body.Contains(".pagespeed.") || DateTime.UtcNow >= deadline) break;
+            if (!body.Contains(".pagespeed.") || sw.Elapsed >= TimeSpan.FromSeconds(15)) break;
             await Task.Delay(250);
         }
+        resp.Dispose();
 
-        resp.Headers.Contains("X-Page-Speed").Should().BeTrue("the optimized top-level HTML must carry X-Page-Speed");
-        // mod_pagespeed 2.1 has no licensing: no optimized response carries the old
-        // evaluation-mode warning header. (Requires a bundled module without licensing.)
-        resp.Headers.Contains("X-PageSpeed-Warn").Should().BeFalse(
-            "no X-PageSpeed-Warn header may appear on any optimized response");
         // The IsHtmlLike gate optimizes the non-browser loopback sub-request: the
         // external <link> should be inlined/minified into a <style>, NEVER a literal
         // ".pagespeed." substring in the top-level HTML once the fetch has completed.
-        body.Should().NotContain(".pagespeed.");
+        body.Should().NotContain(".pagespeed.",
+            "the stylesheet should be inlined within the 15 s polling window; the last body is shown");
+        body.Should().NotContain("<link", "the external stylesheet should be inlined");
+        body.Should().Contain("<style", "the external stylesheet should be inlined into a <style>");
 
         await host.StopAsync();
     }
