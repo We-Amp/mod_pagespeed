@@ -162,14 +162,14 @@ TEST_F(EnvoyVHostConfigTest, CombinedWildcards) {
 // #886) defaults to the daemon's packaged path and is settable per options.
 TEST_F(EnvoyVHostConfigTest, DaemonApiSocketPathDefaultAndParse) {
   auto options = std::make_unique<EnvoyRewriteOptions>(&thread_system_);
-  EXPECT_STREQ("/run/pagespeed-optimizer/api.sock",
-               options->daemon_api_socket_path());
+  EXPECT_EQ("/run/pagespeed-optimizer/api.sock",
+            options->daemon_api_socket_path());
   GoogleString msg;
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options->ParseAndSetOptionFromName1(
                 "DaemonApiSocketPath", "/run/custom/api.sock", &msg,
                 &handler_));
-  EXPECT_STREQ("/run/custom/api.sock", options->daemon_api_socket_path());
+  EXPECT_EQ("/run/custom/api.sock", options->daemon_api_socket_path());
 }
 
 // The rule_packs options parse, merge and clone on the Envoy options class.

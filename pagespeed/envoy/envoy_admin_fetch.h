@@ -50,7 +50,6 @@ class EnvoyAdminFetch : public AsyncFetch {
   void HandleDone(bool success) override;
 
  private:
-  EnvoyServerContext* server_context_;
   Envoy::Http::HttpPageSpeedDecoderFilter* decoder_;
   GoogleString buffer_;
 

@@ -18,6 +18,9 @@ licenses(["notice"])  # Apache 2
 pagespeed_cc_test_library(
     name = "envoy_mocks",
     hdrs = ["mocks.h"],
+    # Manual like the tests that use it: a //test/... wildcard must not pull
+    # in Envoy's test mocks (and with them a large part of Envoy).
+    tags = ["manual"],
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         "//net/instaweb/http:http",
@@ -44,7 +47,6 @@ envoy_cc_test(
     name = "envoy_vhost_config_test",
     srcs = ["envoy_vhost_config_test.cc"],
     copts = _PAGESPEED_TEST_COPTS,
-    repository = "@envoy",
     tags = ["manual"],
     deps = [
         "//pagespeed/envoy:http_filter_lib",
@@ -56,7 +58,6 @@ envoy_cc_test(
     name = "envoy_html_rewriter_test",
     srcs = ["envoy_html_rewriter_test.cc"],
     copts = _PAGESPEED_TEST_COPTS,
-    repository = "@envoy",
     tags = ["manual"],
     deps = [
         "//pagespeed/envoy:http_filter_lib",
@@ -68,7 +69,6 @@ envoy_cc_test(
     name = "envoy_server_context_test",
     srcs = ["envoy_server_context_test.cc"],
     copts = _PAGESPEED_TEST_COPTS,
-    repository = "@envoy",
     tags = ["manual"],
     deps = [
         "//pagespeed/envoy:http_filter_lib",
@@ -80,7 +80,6 @@ envoy_cc_test(
     name = "http_filter_test",
     srcs = ["http_filter_test.cc"],
     copts = _PAGESPEED_TEST_COPTS,
-    repository = "@envoy",
     tags = ["manual"],
     deps = [
         ":envoy_mocks",

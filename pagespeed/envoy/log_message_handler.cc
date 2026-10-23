@@ -26,9 +26,9 @@
 
 #include "absl/strings/strip.h"
 #include "base/logging.h"
-#include "external/envoy/source/common/common/logger.h"
 #include "net/instaweb/public/version.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "source/common/common/logger.h"
 
 namespace {
 class Logger : public Envoy::Logger::Loggable<Envoy::Logger::Id::main> {
