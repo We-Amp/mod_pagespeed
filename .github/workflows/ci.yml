@@ -126,6 +126,8 @@ jobs:
           tools/ci/test_prune_vendor_dir.sh
       - name: Bazel disk cache prune
         run: tools/ci/test_prune_bazel_disk_cache.sh
+      - name: Bazel repository cache prune
+        run: tools/ci/test_prune_bazel_repository_cache.sh
       - name: Slot budget helper
         run: tools/ci/test_slot_budget.sh
       - name: Nightly schedule

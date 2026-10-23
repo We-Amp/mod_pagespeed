@@ -109,6 +109,12 @@ oldest until `ac/` and `cas/` fit in 12G). Bazel's own disk cache collection
 never runs there, because a step's container ends right after its last Bazel
 command.
 
+The per-runner Bazel repository cache of the nightly `envoy-filter` job is
+pruned the same way at the start of that job
+(`tools/ci/prune-bazel-repository-cache.sh`: files under
+`content_addressable/` older than 30 days go, then the oldest until the rest
+fit in 4G). Bazel's `--repository_cache` has no eviction of its own.
+
 ### Path-filtered hosted guards
 
 The `changes` job diffs a pull request against its base and publishes one
@@ -389,7 +395,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `fuzz-css`, `fuzz-html`, `fuzz-packs`, `fuzz-js` | fleet-heavy | an ASan replay floor plus a bounded libFuzzer campaign per surface; corpora persist across nights in `actions/cache`; the JS lane classifies its artifacts and fails only on needs-triage ones |
 | `iis-asan-systest` | fleet-iis | ASan build of the IIS module under recycle-under-load stress |
 | `iis-appverif-matrix` | fleet-iis | the zero-copy merge gate, then the Application Verifier provider matrix (`arms` input) |
-| `envoy-filter` | fleet-heavy, fleet only | builds the Envoy filter against Envoy 1.40 and runs its four unit tests (`tools/ci/envoy-filter-build.sh`), every night. The filter is an experimental port that no package ships and its build is long, so this is its only CI job (not in the PR or full tier). No hosted twin; it fetches into a per-runner repository cache (pruning: issue #187). A cold run is about an hour on 8 cores |
+| `envoy-filter` | fleet-heavy, fleet only | builds the Envoy filter against Envoy 1.40 and runs its four unit tests (`tools/ci/envoy-filter-build.sh`), every night. The filter is an experimental port that no package ships and its build is long, so this is its only CI job (not in the PR or full tier). No hosted twin; it fetches into a per-runner repository cache, pruned at job start. A cold run is about an hour on 8 cores |
 | `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
 | `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
 | `sidecar-pair-weekly`, `sidecar-pair-weekly-arm64` | hosted | the Sunday 21:30 UTC run (the `30 21 * * 0` schedule string, compared in `sidecar-weekly` against `github.event.schedule` so the choice does not depend on when the run starts) and on a manual dispatch: vendor fresh and run `tools/ci/release_sidecar.sh check` for the ASP.NET Core sidecar's native pair, x64 and arm64, to catch drift the path-filtered pull request jobs cannot see (see "The sidecar native pair") |
