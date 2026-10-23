@@ -3,8 +3,8 @@
 
 // Browser integration tests for the add_instrumentation CWV collector.
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
-// net/instaweb/rewriter/generated/add_instrumentation_opt.cc — in headless
+// Drives the SHIPPED asset, the compiled bytes embedded in
+// net/instaweb/rewriter/generated/add_instrumentation_opt.cc, in headless
 // Chromium against a real local HTTP server (navigator.sendBeacon requests
 // are not reliably interceptable via page.route), and asserts on the actual
 // beacon the browser sends:

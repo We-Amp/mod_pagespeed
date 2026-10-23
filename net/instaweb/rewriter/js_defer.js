@@ -42,9 +42,8 @@ import * as pagespeedutils from '../js/js_utils.js';
  * 5) Onload of high priority scripts.
  * 6) Onload of low priority scripts.
  *
- * Exporting functions using quoted attributes to prevent js compiler from
- * renaming them.
- * See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
+ * Functions are exported with quoted attributes: these names are how pages
+ * and the server-emitted markup reach this script.
  */
 window['pagespeed'] = window['pagespeed'] || {};
 var pagespeed = window['pagespeed'];

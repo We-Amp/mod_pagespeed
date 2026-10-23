@@ -3,7 +3,7 @@
 
 // Browser integration tests for the js_defer (defer_javascript) client JS.
 //
-// Drives the SHIPPED asset, the closure-compiled bytes embedded in
+// Drives the SHIPPED asset, the compiled bytes embedded in
 // net/instaweb/rewriter/generated/js_defer_opt.cc, in headless Chromium
 // against markup shaped like JsDisableFilter + JsDeferDisabledFilter output:
 // every deferrable script re-typed to text/psajs (or text/prioritypsajs)
@@ -146,14 +146,14 @@ const DONE = `window.addEventListener('load', function() {
   check(finished, 'ordering: deferred scripts completed and onload fired');
   check(log[0] === 'nodefer', `ordering: no-defer script runs first (got ${log[0]})`);
   // KNOWN-QUIRK: 'i0:interactive' pins existing behaviour, not a contract
-  // (see the readyState note below); the Closure-removal rewrite may fix it
+  // (see the readyState note below); a fix may change it
   // and should then update this assertion deliberately.
   check(eq(log.slice(1, 6), ['i0:interactive', 'slow-e1', 'i2', 'e3', 'i4']),
         `ordering: deferred scripts in document order despite slow external ` +
         `(got ${log.slice(1, 6).join(',')})`);
-  // KNOWN-QUIRK: this pins existing behaviour, not a contract. The
-  // Closure-removal rewrite may fix it ('loading' during psajs scripts) and
-  // should then update these assertions deliberately.
+  // KNOWN-QUIRK: this pins existing behaviour, not a contract. A
+  // fix ('loading' during psajs scripts) should update these assertions
+  // deliberately.
   // Current behaviour: the readyState getter installed by setUp() belongs to
   // the high-priority instance, which has already finished by the time the
   // (low-priority) text/psajs scripts run, so they see 'interactive', not

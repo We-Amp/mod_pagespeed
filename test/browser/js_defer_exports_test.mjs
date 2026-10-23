@@ -68,6 +68,7 @@ async function surface(js, preamble) {
       methods: {},
       addOnload: typeof ps.addOnload,
       startDeferJs: typeof (ps.deferJsNs && ps.deferJsNs.startDeferJs),
+      bothNamed: !!ps.highPriorityDeferJs && !!ps.lowPriorityDeferJs,
       current: ps.deferJs === ps.highPriorityDeferJs ||
                ps.deferJs === ps.lowPriorityDeferJs,
       lowDistinct: !!ps.lowPriorityDeferJs &&
@@ -95,6 +96,8 @@ for (const kind of ['opt', 'dbg']) {
           `${kind}: pagespeed.addOnload is a function`);
     check(info.startDeferJs === 'function',
           `${kind}: pagespeed.deferJsNs.startDeferJs is a function`);
+    check(info.bothNamed,
+          `${kind}: highPriorityDeferJs and lowPriorityDeferJs exist`);
     check(info.current,
           `${kind}: pagespeed.deferJs is one of the two priority instances`);
     check(info.lowDistinct,

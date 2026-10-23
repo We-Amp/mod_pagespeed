@@ -3,8 +3,8 @@
 
 // Browser integration tests for the critical images beacon client JS.
 //
-// Drives the SHIPPED asset — the closure-compiled bytes embedded in
-// net/instaweb/rewriter/generated/critical_images_beacon_opt.cc — in headless
+// Drives the SHIPPED asset, the compiled bytes embedded in
+// net/instaweb/rewriter/generated/critical_images_beacon_opt.cc, in headless
 // Chromium, and asserts on the actual beacon XHR the browser sends:
 //
 //   1. A srcset-only image reports the hash of the candidate the browser

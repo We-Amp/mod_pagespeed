@@ -4,28 +4,23 @@
 
 # regenerate-rewriter-js.sh — Rebuild pre-compiled JS from source.
 #
-# This script re-runs the JS compiler and data2c pipeline that was
+# This script re-runs the JS bundler and data2c pipeline that was
 # previously executed at build time via Bazel genrules.  The outputs are
 # checked into net/instaweb/rewriter/generated/ so that normal builds do
-# NOT require Node.js, npx, esbuild or the Closure Compiler.
+# NOT require Node.js, npx or esbuild.
 #
-# Assets are being moved from the Closure Compiler to esbuild one at a time:
-# ESBUILD_FILES below go through the pinned esbuild in tools/js/ (config in
-# tools/js/build-rewriter-js.mjs), every other file still goes through the
-# Closure Compiler.
+# Every source goes through the pinned esbuild in tools/js/ (config in
+# tools/js/build-rewriter-js.mjs).
 #
 # Prerequisites:
-#   - Node.js 22 / npm / npx on PATH
-#   - npm package: google-closure-compiler (npx fetches the pinned version)
+#   - Node.js 22 / npm on PATH
 #   - tools/js/node_modules (installed with `npm ci` on first use)
 #   - A Bazel build of //net/instaweb/js:data2c (or pass DATA2C= to override)
 #
 # Usage:
 #   tools/regenerate-rewriter-js.sh               # regenerate and show diff
-#   tools/regenerate-rewriter-js.sh --check       # full regen + diff (needs npx)
+#   tools/regenerate-rewriter-js.sh --check       # full regen + diff (needs node)
 #   tools/regenerate-rewriter-js.sh --check-hash  # fast hash-only staleness check
-#   tools/regenerate-rewriter-js.sh --esbuild-only [--check]
-#                                  # only the esbuild assets (no Closure)
 
 set -euo pipefail
 
@@ -36,32 +31,21 @@ REWRITER_DIR="$REPO_ROOT/net/instaweb/rewriter"
 GEN_DIR="$REWRITER_DIR/generated"
 JS_UTILS="$REPO_ROOT/net/instaweb/js/js_utils.js"
 CLIENT_COMPAT="$REPO_ROOT/net/instaweb/js/client_compat.js"
-EXTERNS="$REPO_ROOT/net/instaweb/js/externs.js"
 JS_TOOLS_DIR="$REPO_ROOT/tools/js"
 
 CHECK_ONLY=false
 CHECK_HASH_ONLY=false
-ESBUILD_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --check)         CHECK_ONLY=true ;;
         --check-hash)    CHECK_HASH_ONLY=true ;;
-        --esbuild-only)  ESBUILD_ONLY=true ;;
+        --esbuild-only)  ;;  # no-op, kept for older callers
         *) echo "ERROR: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
 
-# Every rewriter source, by base name (the same set compute_source_hash
-# reads).
-SOURCE_NAMES=(
-    add_instrumentation client_domain_rewriter critical_css_beacon
-    critical_css_loader critical_images_beacon dedup_inlined_images
-    defer_iframe delay_images delay_images_inline deterministic
-    extended_instrumentation js_defer lazyload_images local_storage_cache
-    responsive_js
-)
-
-# Sources compiled with esbuild instead of the Closure Compiler.
+# The rewriter sources, each built into a _dbg and an _opt asset (the same
+# set compute_source_hash reads).
 ESBUILD_FILES=(
     add_instrumentation.js
     client_domain_rewriter.js
@@ -100,7 +84,6 @@ compute_source_hash() {
         "$REWRITER_DIR/responsive_js.js" \
         "$JS_UTILS" \
         "$CLIENT_COMPAT" \
-        "$EXTERNS" \
         "$JS_TOOLS_DIR/build-rewriter-js.mjs" \
         "$JS_TOOLS_DIR/package-lock.json" \
         "$SCRIPT_DIR/regenerate-rewriter-js.sh" \
@@ -111,7 +94,7 @@ compute_source_hash() {
     fi
 }
 
-# Fast hash-only check: no Node.js/Closure Compiler needed
+# Fast hash-only check: no Node.js needed
 if [[ "$CHECK_HASH_ONLY" == true ]]; then
     ACTUAL=$(compute_source_hash)
     EXPECTED=$(tr -d '[:space:]' < "$GEN_DIR/.source-hash" 2>/dev/null || echo "MISSING")
@@ -127,9 +110,9 @@ if [[ "$CHECK_HASH_ONLY" == true ]]; then
     fi
 fi
 
-# Full regeneration requires node and npx (esbuild, Closure Compiler)
-if ! command -v node >/dev/null 2>&1 || ! command -v npx >/dev/null 2>&1; then
-    echo "ERROR: node/npx not found. Install Node.js to regenerate JS files." >&2
+# Full regeneration requires node and npm (esbuild)
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo "ERROR: node/npm not found. Install Node.js to regenerate JS files." >&2
     exit 1
 fi
 
@@ -150,161 +133,31 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 # --------------------------------------------------------------------------
-# Closure Compiler helpers
+# Stage 1: esbuild, source JS to compiled JS
 # --------------------------------------------------------------------------
-# The compiler is pinned so that regeneration is deterministic: an unpinned
-# npx resolves whatever is latest, which rewrites every generated asset on
-# each regen. Bump deliberately, adopting the full diff.
-CLOSURE_COMPILER_VERSION="20260311.0.0"
-
-closure_compile() {
-    local src="$1" output="$2" level="$3"
-    shift 3
-    local extra_flags=("$@")
-
-    local format_flag=""
-    if [[ "$level" == "SIMPLE" ]]; then
-        format_flag="--formatting=PRETTY_PRINT"
-    fi
-
-    npx --yes "google-closure-compiler@$CLOSURE_COMPILER_VERSION" \
-        --js "$src" \
-        --js_output_file "$output" \
-        "${extra_flags[@]}" \
-        --compilation_level "$level" \
-        --jscomp_off=checkVars \
-        --generate_exports \
-        "--output_wrapper=(function(){%output%})();" \
-        $format_flag
-    strip_closure_license "$output"
-}
-
-# js_utils.js is an ES module, imported by the esbuild assets. The files
-# still compiled with the Closure Compiler goog.require('pagespeedutils'), so
-# they get a derived copy instead: goog.provide('pagespeedutils') first, each
-# `export const name = ` turned into `pagespeedutils.name = `, and each bare
-# use of an exported name inside the file qualified as pagespeedutils.name.
-# That is the form the file had before it became a module, so the Closure
-# outputs stay the same. Fails if the module uses any other export form.
-closure_js_utils() {
-    local out="$1"
-    if grep -n '^[[:space:]]*export' "$JS_UTILS" | \
-       grep -v '^[0-9]*:export const [A-Za-z_][A-Za-z0-9_]* = ' >&2; then
-        echo "ERROR: $JS_UTILS: use only 'export const name = ...;'" \
-             "exports (see closure_js_utils)." >&2
-        exit 1
-    fi
-    perl -0777 -ne '
-        my @names = /^export const (\w+) = /mg;
-        s/^export const (\w+) = /pagespeedutils.$1 = /mg;
-        for my $n (@names) {
-            s/(?<![\w.\$])\Q$n\E(?![\w\$])/pagespeedutils.$n/g;
-        }
-        print "goog.provide(\x27pagespeedutils\x27);\n\n", $_;
-    ' "$JS_UTILS" > "$out"
-}
-
-# The compiler can preserve an @license header from its inputs into the
-# output. Shipped assets must stay comment-free (StaticAssetManagerTest
-# asserts this), so such a header is stripped.
-strip_closure_license() {
-    perl -0777 -pi -e \
-        's{/\*\s*Copyright The Closure Library Authors\.\s*SPDX-License-Identifier: Apache-2\.0\s*\*/\n?}{}g' \
-        "$1"
-}
-
-# --------------------------------------------------------------------------
-# Stage 1a: esbuild, source JS to compiled JS
-# --------------------------------------------------------------------------
-# ${arr[@]+...} guard: macOS ships bash 3.2, where expanding an empty array
-# under `set -u` is an unbound-variable error.
 ESBUILD_NAMES=()
-if [[ ${#ESBUILD_FILES[@]} -gt 0 ]]; then
-    echo "==> Compiling JS with esbuild..."
-    if [[ ! -d "$JS_TOOLS_DIR/node_modules/esbuild" ]]; then
-        echo "==> Installing the pinned esbuild (npm ci in tools/js)..."
-        npm ci --prefix "$JS_TOOLS_DIR" --no-fund --no-audit >/dev/null
-    fi
-    for src_file in "${ESBUILD_FILES[@]}"; do
-        base="${src_file%.js}"
-        echo "  $base (dbg + opt, esbuild)"
-        node "$JS_TOOLS_DIR/build-rewriter-js.mjs" \
-            "$REWRITER_DIR/$src_file" "$TMPDIR" "$base"
-        ESBUILD_NAMES+=("$base")
-    done
+echo "==> Compiling JS with esbuild..."
+if [[ ! -d "$JS_TOOLS_DIR/node_modules/esbuild" ]]; then
+    echo "==> Installing the pinned esbuild (npm ci in tools/js)..."
+    npm ci --prefix "$JS_TOOLS_DIR" --no-fund --no-audit >/dev/null
 fi
-
-# Tests whether $1 is one of ESBUILD_FILES.
-is_esbuild_file() {
-    local f
-    for f in ${ESBUILD_FILES[@]+"${ESBUILD_FILES[@]}"}; do
-        [[ "$f" == "$1" ]] && return 0
-    done
-    return 1
-}
-
-if [[ "$ESBUILD_ONLY" != true ]]; then
-# --------------------------------------------------------------------------
-# Stage 1b: Closure Compiler — source JS → compiled JS
-# --------------------------------------------------------------------------
-echo "==> Compiling JS with Closure Compiler..."
-
-CLOSURE_JS_UTILS="$TMPDIR/closure/js_utils.js"
-mkdir -p "$TMPDIR/closure"
-closure_js_utils "$CLOSURE_JS_UTILS"
-
-# --- closure_compiler_without_dependency_mode files ---
-WITHOUT_DEP_FILES=(
-)
-WITH_DEP_FILES=(
-)
-
-for src_file in ${WITHOUT_DEP_FILES[@]+"${WITHOUT_DEP_FILES[@]}"}; do
-    if is_esbuild_file "$src_file"; then
-        echo "ERROR: $src_file is listed for both esbuild and Closure" >&2
-        exit 1
-    fi
+for src_file in "${ESBUILD_FILES[@]}"; do
     base="${src_file%.js}"
-    src="$REWRITER_DIR/$src_file"
     echo "  $base (dbg + opt)"
-    closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
-        --externs "$EXTERNS"
-    closure_compile "$src" "$TMPDIR/${base}_opt.js" ADVANCED \
-        --externs "$EXTERNS"
+    node "$JS_TOOLS_DIR/build-rewriter-js.mjs" \
+        "$REWRITER_DIR/$src_file" "$TMPDIR" "$base"
+    ESBUILD_NAMES+=("$base")
 done
-
-for src_file in ${WITH_DEP_FILES[@]+"${WITH_DEP_FILES[@]}"}; do
-    if is_esbuild_file "$src_file"; then
-        echo "ERROR: $src_file is listed for both esbuild and Closure" >&2
-        exit 1
-    fi
-    base="${src_file%.js}"
-    src="$REWRITER_DIR/$src_file"
-    echo "  $base (dbg + opt, with includes)"
-    closure_compile "$src" "$TMPDIR/${base}_dbg.js" SIMPLE \
-        --js "$CLOSURE_JS_UTILS" --externs "$EXTERNS"
-    closure_compile "$src" "$TMPDIR/${base}_opt.js" ADVANCED \
-        --js "$CLOSURE_JS_UTILS" --externs "$EXTERNS"
-done
-fi  # ESBUILD_ONLY
 
 # --------------------------------------------------------------------------
 # Stage 2: data2c — compiled JS → C++ string constants
 # --------------------------------------------------------------------------
-ALL_NAMES=("${SOURCE_NAMES[@]}")
-if [[ "$ESBUILD_ONLY" == true ]]; then
-    if [[ ${#ESBUILD_NAMES[@]} -eq 0 ]]; then
-        echo "==> No esbuild assets configured; nothing to do."
-        exit 0
-    fi
-    ALL_NAMES=("${ESBUILD_NAMES[@]}")
-fi
 echo "==> Running data2c..."
 
 # Run data2c from inside TMPDIR with relative paths: it embeds the input
 # path in a header comment, and an absolute mktemp path there would make
 # every .cc differ on every regen.
-for name in "${ALL_NAMES[@]}"; do
+for name in "${ESBUILD_NAMES[@]}"; do
     (cd "$TMPDIR" && \
      "$DATA2C" --data_file="${name}_dbg.js" \
                --c_file="${name}.cc" \
@@ -337,33 +190,6 @@ fi
 if [[ "$CHECK_ONLY" == true ]]; then
     echo "==> Generated files are out of date. Run without --check to update."
     exit 1
-fi
-
-# Guard for --esbuild-only: .source-hash covers every input, but this mode
-# rebuilds only the esbuild assets. Installing a new hash after a
-# Closure-side input changed (a Closure-compiled source, js_utils.js,
-# externs.js or this script, which drives the Closure Compiler and derives
-# the Closure copy of js_utils.js) would mark the stale Closure outputs as fresh and defeat the
-# verify_generated_js genrule and --check-hash. So the new hash is only
-# installed when those inputs are unchanged since the commit that last
-# wrote .source-hash; otherwise the full regeneration is required.
-if [[ "$ESBUILD_ONLY" == true ]] && \
-   ! diff -q "$TMPDIR/.source-hash" "$GEN_DIR/.source-hash" >/dev/null 2>&1; then
-    closure_inputs=("$JS_UTILS" "$EXTERNS" "$SCRIPT_DIR/regenerate-rewriter-js.sh")
-    for name in "${SOURCE_NAMES[@]}"; do
-        is_esbuild_file "$name.js" || closure_inputs+=("$REWRITER_DIR/$name.js")
-    done
-    hash_commit="$(git -C "$REPO_ROOT" log -1 --format=%H -- \
-        "$GEN_DIR/.source-hash" 2>/dev/null || true)"
-    if [[ -z "$hash_commit" ]] || \
-       ! git -C "$REPO_ROOT" diff --quiet "$hash_commit" -- \
-           "${closure_inputs[@]}"; then
-        echo "ERROR: a Closure-compiled input changed since .source-hash was" >&2
-        echo "  last written (or that could not be checked with git)." >&2
-        echo "  --esbuild-only cannot refresh those outputs; run the full" >&2
-        echo "  regeneration: tools/regenerate-rewriter-js.sh" >&2
-        exit 1
-    fi
 fi
 
 echo "==> Installing updated files..."

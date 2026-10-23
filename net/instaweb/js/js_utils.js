@@ -19,10 +19,7 @@
  * static JS files. This is an ES module: import it with
  *   import * as pagespeedutils from '../js/js_utils.js';
  * and tools/regenerate-rewriter-js.sh bundles the parts a file uses into its
- * asset. The files still compiled with the Closure Compiler use
- * goog.require('pagespeedutils') instead: for them the script derives a
- * goog.provide('pagespeedutils') copy of this file, so every export here must
- * keep the `export const name = ...;` form.
+ * asset.
  */
 
 

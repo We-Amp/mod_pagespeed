@@ -93,7 +93,6 @@ sudo apt-get install -y \
     clang \
     lld \
     python3 \
-    default-jre-headless \
     apache2-dev \
     libmemcached-dev \
     redis-tools \
@@ -141,7 +140,7 @@ mod_pagespeed/
 │   ├── htmlparse/          # Legacy HTML-parse support
 │   ├── http/               # Legacy HTTP support
 │   ├── util/               # Legacy util support
-│   └── rewriter/generated/ # Generated Closure JS outputs (do NOT hand-edit)
+│   └── rewriter/generated/ # Generated client JS outputs (do NOT hand-edit)
 ├── pagespeed/              # Modern subsystems
 │   ├── kernel/             # Core utilities and abstractions
 │   │   ├── base/           # Strings, threading, statistics
@@ -280,10 +279,6 @@ libpng NEON optimizations are disabled via `PNG_ARM_NEON_OPT=0` in `bazel/libpng
 ### Python 3 required
 
 The `drp` (domain registry provider) uses Python 3 scripts. Ensure `python3` is installed.
-
-### Java required
-
-The Closure Compiler requires Java. Ensure `default-jre-headless` or equivalent is installed.
 
 ### SerfUrlAsyncFetcherTest failures
 
