@@ -72,7 +72,7 @@ set -euo pipefail
 # Crypto provider libraries (assertion 1)
 # ---------------------------------------------------------------------------
 # The only crypto the modules link is BoringSSL's libcrypto and libssl (see
-# @boringssl in bazel/repositories.bzl; curl and the cache library use the
+# @boringssl in MODULE.bazel; curl and the cache library use the
 # same copy). Those are the two sonames the system OpenSSL, LibreSSL and
 # BoringSSL packages all install, so those are the two to refuse. "libcrypt"
 # (the password-hashing library that libc-based servers link) is unrelated

@@ -38,6 +38,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/lld-20 /opt/llvm/bin/lld \
     && rm -rf /var/lib/apt/lists/*
 
+# Bazelisk 1.19.0 or newer: the base image's /usr/local/bin/bazel is Bazelisk
+# 1.18.0, which finds the workspace root (and so .bazelversion) only through a
+# WORKSPACE file. Without one it runs the latest Bazel instead of the pinned
+# version; 1.19.0 and later also recognise MODULE.bazel and REPO.bazel. Same
+# version and checksums as install/nginx/build_module_in_container.sh; bump
+# them together.
+ENV BAZELISK_VERSION=1.29.0
+ENV BAZELISK_SHA256_AMD64=5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992
+ENV BAZELISK_SHA256_ARM64=e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010
+RUN arch="$(dpkg --print-architecture)" \
+    && case "${arch}" in \
+         amd64) sha="${BAZELISK_SHA256_AMD64}" ;; \
+         arm64) sha="${BAZELISK_SHA256_ARM64}" ;; \
+         *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-${arch}" -o /tmp/bazelisk \
+    && echo "${sha}  /tmp/bazelisk" | sha256sum -c - \
+    && install -m 0755 /tmp/bazelisk /usr/local/bin/bazel \
+    && rm /tmp/bazelisk
+
 # Build and test dependencies of the modules: Apache httpd headers (mod_pagespeed.so
 # and the Apache system tests), flex/bison (libmemcached), the AV1 stack's build
 # tools (nasm for libaom, meson + ninja for dav1d), gperf, uuid, Java for the

@@ -16,7 +16,8 @@
 #   1. No `serf` token in any linker version script (*.lds). A serf_* export
 #      there resolves to nothing (dead) or, worse, would re-expose serf symbols.
 #   2. No third_party/serf/ vendored tree.
-#   3. No Serf repository_rule / http_archive in WORKSPACE or MODULE.bazel.
+#   3. No Serf repository_rule / http_archive in MODULE.bazel or the
+#      non_bcr_deps extension (bazel/extensions.bzl, bazel/repositories.bzl).
 #
 # Run from the repo root. Used by both developers and the serf-removal-guard CI
 # job. Needs only grep + a POSIX shell.
@@ -48,7 +49,7 @@ fi
 # Match a repo-rule declaration whose name is serf, e.g.
 #   http_archive(name = "serf", ...)  /  native.new_local_repository(name="serf")
 REPO_HITS=$(grep -rniE 'name[[:space:]]*=[[:space:]]*"serf"' \
-  WORKSPACE WORKSPACE.bzlmod MODULE.bazel bazel/repositories.bzl 2>/dev/null || true)
+  MODULE.bazel bazel/repositories.bzl bazel/extensions.bzl 2>/dev/null || true)
 if [ -n "${REPO_HITS}" ]; then
   echo "FAIL: a Bazel repository named 'serf' is declared — serf is removed:" >&2
   echo "${REPO_HITS}" | sed 's/^/   /' >&2

@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# Hybrid mode while the bzlmod migration is in progress: dependencies move from
-# WORKSPACE to here commit by commit, and WORKSPACE is deleted at the end. A
-# bazel_dep shadows a same-named WORKSPACE repo for the main repository. Keep
-# the module name so @mod_pagespeed//... labels used by patches keep resolving.
+# Every dependency is declared here: BCR modules below, everything else through
+# the non_bcr_deps extension (bazel/extensions.bzl). Keep the module name so
+# @mod_pagespeed//... labels used by patches keep resolving.
 module(name = "mod_pagespeed")
 
 # ---- toolchain rulesets (each registers its own toolchains) ----
@@ -33,8 +32,7 @@ python.toolchain(
 )
 
 # ---- C++ libraries from the BCR ----
-# repo_names keep the apparent names our BUILD files and the WORKSPACE
-# protobuf's repo_mapping use. Version constants are mirrored in
+# repo_names keep the apparent names our BUILD files have always used. Version constants are mirrored in
 # bazel/repositories.bzl for the SBOM/notices/CVE tooling.
 bazel_dep(name = "abseil-cpp", version = "20260107.1", repo_name = "com_google_absl")
 single_version_override(
@@ -50,18 +48,64 @@ bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 bazel_dep(name = "re2", version = "2025-11-05", repo_name = "com_googlesource_code_re2")
 bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
 bazel_dep(name = "rules_proto", version = "7.0.2")
-# Hybrid mode only (drop when boringssl becomes a bazel_dep): the WORKSPACE
-# boringssl loads @rules_license, which protobuf_deps() used to declare.
-bazel_dep(name = "rules_license", version = "1.0.0")
+
+# BoringSSL with our two patches. single_version_override pins the exact
+# version, so no other module in the graph can float it.
+bazel_dep(name = "boringssl", version = "0.20260508.0")
+single_version_override(
+    module_name = "boringssl",
+    patch_strip = 1,
+    patches = [
+        # Add CRYPTO_thread_local_cleanup() so pagespeed_iis.dll can release
+        # the BoringSSL TLS slot on DLL unload.
+        "//bazel:boringssl_dll_unload_tls_cleanup.patch",
+        # Make the allocator-override hooks null by construction instead of
+        # weak external references: a module loaded into a server process
+        # must not leave crypto symbols for that process to satisfy.
+        "//bazel:boringssl_no_weak_alloc_hooks.patch",
+    ],
+    version = "0.20260508.0",
+)
 
 # ---- one deflate: module "zlib" is a local alias onto zlib-ng ----
 # zlib-ng is built in ZLIB_COMPAT mode, so it exports the zlib API. Every module
 # that asks for zlib (protobuf, ...) gets the alias module instead of madler
 # zlib, so a single deflate is linked (the two-deflate ODR hazard that
-# bazel/zlib_compat.bzl used to close in WORKSPACE).
+# bazel/zlib_compat.bzl used to close).
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2", repo_name = "zlib_ng")
 bazel_dep(name = "zlib", version = "1.3.2.bcr.2")
 local_path_override(
     module_name = "zlib",
     path = "third_party/zlib_alias_module",
+)
+
+# ---- everything else: our own module extension (bazel/extensions.bzl) ----
+non_bcr_deps = use_extension("//bazel:extensions.bzl", "non_bcr_deps")
+use_repo(
+    non_bcr_deps,
+    "aom_src",
+    "apr",
+    "aprutil",
+    "bazel_compdb",
+    "com_github_gflags_gflags",
+    "com_github_libevent_libevent",
+    "com_googlesource_googleurl",
+    "curl_src",
+    "cyclone",
+    "dav1d_src",
+    "ed25519",
+    "fmt",
+    "giflib",
+    "google_sparsehash",
+    "hiredis",
+    "jsoncpp",
+    "libavif_src",
+    "libjpeg_turbo",
+    "libmemcached_src",
+    "libpng",
+    "libpsl",
+    "libwebp",
+    "nginx",
+    "optipng",
+    "spdlog",
 )

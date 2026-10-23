@@ -42,6 +42,10 @@ cc_library(
             ":copy_prebuild_header",
     ],
     includes = ["."],
+    # Our sources include these headers as "external/libpng/...". Under bzlmod
+    # the repo directory carries a canonical name, so serve the headers at the
+    # old spelling through _virtual_includes.
+    include_prefix = "external/libpng",
     deps = ["@zlib_ng//:zlib-ng"],
     defines = [
               # We end up including setjmp.h directly, but libpng

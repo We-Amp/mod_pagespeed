@@ -282,7 +282,7 @@ jobs:
       - &v-bazel
         name: Ensure bazel
         run: |
-          if command -v bazel >/dev/null 2>&1; then bazel --version; exit 0; fi
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
           if command -v npm >/dev/null 2>&1; then
             npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
           fi
@@ -291,6 +291,7 @@ jobs:
             exit 1
           }
           bazel --version
+          bash tools/ci/check-bazel-version.sh
 
       # The dependency sources are public and fetched over https. The vendor
       # script names one of them with an ssh-style address, so the rewrite
@@ -2454,6 +2455,8 @@ jobs:
             Write-Host "::error::stale or missing GIT_COMMIT stamp in the extracted tree"
             exit 1
           }
+          # The bazel launcher picked earlier must run the version in .bazelversion.
+          & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Check-BazelVersion.ps1') -Launcher $env:BAZEL_CMD -Root $env:GITHUB_WORKSPACE
 
       - name: Set up the MSVC environment
         run: |
@@ -2512,6 +2515,10 @@ jobs:
           }
           # Shut down a stale server so it picks up the vcvars-enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel @startup shutdown 2>$null } *>$null
+          # Build-tool runfiles trees with junctions that an earlier job left in this
+          # output base break rules_foreign_cc's tool copy; drop them first.
+          $outputBase = "$(& $bazel @startup info output_base 2>$null)".Trim()
+          if ($outputBase) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Remove-StaleToolRunfiles.ps1') -OutputBase $outputBase }
           & $bazel @startup build @common -- //pagespeed/iis:pagespeed_iis.dll
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # bazel-bin is a convenience link that a runner without link

@@ -121,44 +121,36 @@ else:
 }
 
 # -----------------------------------------------------------------------
-# 2. Fetch all http_archive deps into the repository cache.
+# 2. Fetch all external deps (BCR modules, their registry files and the
+#    non_bcr_deps extension repos) into the repository cache.
 #    Use --override_repository for the git_repository deps we just vendored
 #    so bazel doesn't try to git-clone them (which would fail without SSH).
-#
-#    We skip the envoy target because envoy's macros reference @rules_fuzzing
-#    which isn't declared — this causes a loading error that aborts the fetch
-#    before all deps are cached. The envoy http_archive itself is declared
-#    in bazel/repositories.bzl and fetched below via 'bazel sync --only'.
+#    They are extension repos, so the override takes the canonical name.
 # -----------------------------------------------------------------------
 
 echo "==> Fetching dependencies into repository cache..."
 
 OVERRIDE_FLAGS=(
-    --override_repository=cyclone="$CYCLONE_DIR"
-    --override_repository=aom_src="$AOM_DIR"
+    --override_repository=+non_bcr_deps+cyclone="$CYCLONE_DIR"
+    --override_repository=+non_bcr_deps+aom_src="$AOM_DIR"
 )
 
-# Fetch deps for the Apache module — this pulls in the bulk of http_archive deps
-# including boringssl, abseil, protobuf, and all transitive deps from
-# protobuf_deps() (loaded unconditionally in WORKSPACE).
+# Fetch deps for the Apache module: boringssl, abseil, protobuf and the bulk
+# of the extension repos, plus the module resolution itself.
+# --repo_contents_cache= : the repository cache is inside the source tree, and
+# Bazel 9 would otherwise put its repo contents cache under it (it refuses a
+# contents cache inside the main repo). A no-op on 8.8.1.
 bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     --repository_cache="$REPO_CACHE" \
+    --repo_contents_cache= \
     "${OVERRIDE_FLAGS[@]}" \
     //:libmod_pagespeed.so
-
-# Fetch repos not reachable from the main target's build graph.
-# The envoy http_archive is only needed by //pagespeed/envoy:envoy_pagespeed,
-# but we can't fetch that target (envoy's macros reference @rules_fuzzing which
-# isn't declared). Use 'bazel sync --only' to fetch just the repo rule.
-bazel --output_base="$VENDOR_OUTPUT_BASE" sync \
-    --repository_cache="$REPO_CACHE" \
-    "${OVERRIDE_FLAGS[@]}" \
-    --only=envoy
 
 # Fetch IIS module deps (may fail analysis on non-Windows due to target_compatible_with,
 # but all external repos are still cached during loading).
 bazel --output_base="$VENDOR_OUTPUT_BASE" fetch \
     --repository_cache="$REPO_CACHE" \
+    --repo_contents_cache= \
     "${OVERRIDE_FLAGS[@]}" \
     //pagespeed/iis:pagespeed_iis.dll \
     || true
@@ -194,7 +186,6 @@ check_dep "boringssl" "$(sha_of BORINGSSL_SHA)"
 check_dep "abseil"    "$(sha_of _ABSEIL_SHA)"
 check_dep "protobuf"  "$(sha_of PROTOBUF_SHA)"
 check_dep "libpng"    "$(sha_of LIBPNG_SHA)"
-check_dep "envoy"     "$(sha_of ENVOY_SHA)"
 
 if [ "$MISSING" -gt 0 ]; then
     echo "ERROR: $MISSING critical deps missing from repository cache." >&2

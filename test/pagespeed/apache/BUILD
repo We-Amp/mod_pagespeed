@@ -12,9 +12,6 @@ pagespeed_cc_test_library(
     hdrs = ["mock_apache.h"],
     copts = [
         "-I/usr/include/apache2/",
-        "-Iexternal/aprutil/include/",
-        "-Iexternal/aprutil/include/arch/unix/",
-        "-Iexternal/aprutil/",
     ] + select({
         "//bazel:linux_arm64": [
             "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
@@ -24,11 +21,7 @@ pagespeed_cc_test_library(
             "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
             "-Ithird_party/apr/gen/arch/linux/x64/include/",
         ],
-    }) + [
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
-        "-Iexternal/apr/",
-    ],
+    }),
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         # Use apache_core instead of apache to avoid the static
@@ -60,9 +53,6 @@ pagespeed_cc_test(
     ],
     copts = [
         "-I/usr/include/apache2/",
-        "-Iexternal/aprutil/include/",
-        "-Iexternal/aprutil/include/arch/unix/",
-        "-Iexternal/aprutil/",
     ] + select({
         "//bazel:linux_arm64": [
             "-Ithird_party/aprutil/gen/arch/linux/arm64/include/",
@@ -72,11 +62,7 @@ pagespeed_cc_test(
             "-Ithird_party/aprutil/gen/arch/linux/x64/include/",
             "-Ithird_party/apr/gen/arch/linux/x64/include/",
         ],
-    }) + [
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
-        "-Iexternal/apr/",
-    ],
+    }),
     data = [
         # apache_mpm_detection_test.cc reads this source to pin the
         # FinalizeThreadCounts() call site in the post-config hook.

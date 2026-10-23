@@ -102,7 +102,8 @@ NGX_PAGESPEED_INCS="
 # drift from the build.
 #
 # All harvested paths are relative to the Bazel execution_root, so we resolve
-# that and absolutize. We deliberately DROP every `external/nginx/...` entry:
+# that and absolutize. We deliberately DROP every `external/nginx/...` entry
+# (`external/+non_bcr_deps+nginx/...` under bzlmod):
 # those are Bazel's pinned nginx headers (a different version), and for an
 # --add-dynamic-module build the glue MUST compile against the TARGET nginx's
 # own headers (added first by nginx's configure). Letting Bazel's nginx headers
@@ -131,7 +132,7 @@ if [ -n "$BAZEL_EXECROOT" ] && command -v bazel >/dev/null 2>&1; then
         | sed 's/\\$//' | tr '\n' ' ' \
         | grep -oE '\-I[^ ]+|-iquote +[^ ]+|-isystem +[^ ]+' \
         | sed -E 's/^-I//; s/^-(iquote|isystem) +//' \
-        | grep -vE '(^|/)external/nginx(/|$)' \
+        | grep -vE '(^|/)external/[^/]*nginx(/|$)' \
         | sort -u)
     for _d in $_ps_incs; do
         case "$_d" in

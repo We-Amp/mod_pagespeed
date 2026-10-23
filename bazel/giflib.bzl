@@ -14,6 +14,10 @@ cc_library(
         'gif_lib_private.h',
         'gif_hash.h',
     ],
+    # Our sources include these headers as "external/giflib/...". Under bzlmod
+    # the repo directory carries a canonical name, so serve the headers at the
+    # old spelling through _virtual_includes.
+    include_prefix = "external/giflib",
     visibility = ["//visibility:public"],
 )
 

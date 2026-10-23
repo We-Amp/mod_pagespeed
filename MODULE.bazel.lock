@@ -50,8 +50,12 @@
     "https://bcr.bazel.build/modules/bazel_skylib/1.9.0/MODULE.bazel": "72997b29dfd95c3fa0d0c48322d05590418edef451f8db8db5509c57875fb4b7",
     "https://bcr.bazel.build/modules/bazel_skylib/1.9.2/MODULE.bazel": "8c51259b0f4481475586dbfede7591e57b75702e637f840f6138eec80c34b270",
     "https://bcr.bazel.build/modules/bazel_skylib/1.9.2/source.json": "41cbde7546542dee2f26e3f10bf1c4ac57909943194b7ac48cc5238a01893aa8",
+    "https://bcr.bazel.build/modules/boringssl/0.20260508.0/MODULE.bazel": "9a64e0d941ae836940d7274f50712e2082cca4d3c67bb9f792295e01d439a62f",
+    "https://bcr.bazel.build/modules/boringssl/0.20260508.0/source.json": "76dafdaec2029448001273ae185297d3d46284977790c082c1bd0bdff7350246",
     "https://bcr.bazel.build/modules/buildozer/7.1.2/MODULE.bazel": "2e8dd40ede9c454042645fd8d8d0cd1527966aa5c919de86661e62953cd73d84",
     "https://bcr.bazel.build/modules/buildozer/7.1.2/source.json": "c9028a501d2db85793a6996205c8de120944f50a0d570438fcae0457a5f9d1f8",
+    "https://bcr.bazel.build/modules/google_benchmark/1.9.5/MODULE.bazel": "8a85cfd90b1e45e6e68f1aa2aa9efce3c04add57df732571d7fd54c07e7c5143",
+    "https://bcr.bazel.build/modules/google_benchmark/1.9.5/source.json": "0bd357fd9db30ee31d5eb4c78b1086ce3d79b4423ce76de19e8a2fa7b2fa2e10",
     "https://bcr.bazel.build/modules/googletest/1.11.0/MODULE.bazel": "3a83f095183f66345ca86aa13c58b59f9f94a2f81999c093d4eeaa2d262d12f4",
     "https://bcr.bazel.build/modules/googletest/1.17.0.bcr.2/MODULE.bazel": "827f54f492a3ce549c940106d73de332c2b30cebd0c20c0bc5d786aba7f116cb",
     "https://bcr.bazel.build/modules/googletest/1.17.0.bcr.2/source.json": "3664514073a819992320ffbce5825e4238459df344d8b01748af2208f8d2e1eb",
@@ -59,6 +63,8 @@
     "https://bcr.bazel.build/modules/jsoncpp/1.9.5/MODULE.bazel": "31271aedc59e815656f5736f282bb7509a97c7ecb43e927ac1a37966e0578075",
     "https://bcr.bazel.build/modules/jsoncpp/1.9.6/MODULE.bazel": "2f8d20d3b7d54143213c4dfc3d98225c42de7d666011528dc8fe91591e2e17b0",
     "https://bcr.bazel.build/modules/jsoncpp/1.9.6/source.json": "a04756d367a2126c3541682864ecec52f92cdee80a35735a3cb249ce015ca000",
+    "https://bcr.bazel.build/modules/libpfm/4.11.0.bcr.1/MODULE.bazel": "e5362dadc90aab6724c83a2cc1e67cbed9c89a05d97fb1f90053c8deb1e445c8",
+    "https://bcr.bazel.build/modules/libpfm/4.11.0.bcr.1/source.json": "0646414d9037f8aad148781dd760bec90b0b25ac12fda5e03f8aadbd6b9c61e6",
     "https://bcr.bazel.build/modules/m4/1.4.21.bcr.4/MODULE.bazel": "40fef4b9091aea8e97b76a5706b3490b8d731ba008b02a883751ee2abf84daf4",
     "https://bcr.bazel.build/modules/m4/1.4.21.bcr.4/source.json": "c4add456cedd43c0c0d1329bd52120f8eedb6191c6d8299448bce1ed81be60a4",
     "https://bcr.bazel.build/modules/make/4.4.1.bcr.1/MODULE.bazel": "8ade2c4f2ebfc6389f8192d031d5702e84780069a096761aa2e502089fbb30f2",
@@ -115,6 +121,7 @@
     "https://bcr.bazel.build/modules/rules_cc/0.1.1/MODULE.bazel": "2f0222a6f229f0bf44cd711dc13c858dad98c62d52bd51d8fc3a764a83125513",
     "https://bcr.bazel.build/modules/rules_cc/0.1.4/MODULE.bazel": "bb03a452a7527ac25a7518fb86a946ef63df860b9657d8323a0c50f8504fb0b9",
     "https://bcr.bazel.build/modules/rules_cc/0.1.5/MODULE.bazel": "88dfc9361e8b5ae1008ac38f7cdfd45ad738e4fa676a3ad67d19204f045a1fd8",
+    "https://bcr.bazel.build/modules/rules_cc/0.2.17/MODULE.bazel": "1849602c86cb60da8613d2de887f9566a6d354a6df6d7009f9d04a14402f9a84",
     "https://bcr.bazel.build/modules/rules_cc/0.2.18/MODULE.bazel": "4460ec36adc8f722a6a2a4ac9374cb91f2acebadaa93fc37966129afb3dece87",
     "https://bcr.bazel.build/modules/rules_cc/0.2.20/MODULE.bazel": "f5c07bce5ddcb99be21a0812ff5aadb439e688b7449c6542152363b2fd859c1a",
     "https://bcr.bazel.build/modules/rules_cc/0.2.25/MODULE.bazel": "4a3d4f3606d3b3190be495dbc497acca552807d1d5540661ef0d1658472882e3",
@@ -206,6 +213,263 @@
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
+    "//bazel:extensions.bzl%non_bcr_deps": {
+      "general": {
+        "bzlTransitiveDigest": "MHSbz0kMLN7hf00UBPh4jREicxywVnojzcZ5rjbE6og=",
+        "usagesDigest": "Ba3C/QSRWx/cj/SHNe4MyHopX+FuysaxdGMyG9CHa7E=",
+        "recordedInputs": [
+          "REPO_MAPPING:,bazel_tools bazel_tools"
+        ],
+        "generatedRepoSpecs": {
+          "com_github_libevent_libevent": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "libevent-2.1.12-stable",
+              "url": "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz",
+              "sha256": "92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb",
+              "build_file_content": "\nfilegroup(\n    name = \"all_srcs\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\nfilegroup(\n    name = \"all\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "fmt": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "fmt-12.1.0",
+              "url": "https://github.com/fmtlib/fmt/releases/download/12.1.0/fmt-12.1.0.zip",
+              "sha256": "695fd197fa5aff8fc67b5f2bbc110490a875cdf7a41686ac8512fb480fa8ada7",
+              "build_file_content": "\ncc_library(\n    name = \"fmt\",\n    hdrs = glob([\"include/fmt/*.h\"]),\n    includes = [\"include\"],\n    defines = [\"FMT_HEADER_ONLY\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "spdlog": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "spdlog-1.17.0",
+              "url": "https://github.com/gabime/spdlog/archive/v1.17.0.tar.gz",
+              "sha256": "d8862955c6d74e5846b3f580b1605d2428b11d97a410d86e2fb13e857cd3a744",
+              "build_file_content": "\ncc_library(\n    name = \"spdlog\",\n    hdrs = glob([\"include/**/*.h\"]),\n    includes = [\"include\"],\n    defines = [\"SPDLOG_FMT_EXTERNAL\", \"SPDLOG_NO_EXCEPTIONS\", \"FMT_HEADER_ONLY\"],\n    deps = [\"@fmt\"],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "hiredis": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "hiredis-1.3.0",
+              "url": "https://github.com/redis/hiredis/archive/v1.3.0.tar.gz",
+              "build_file_content": "\ncc_library(\n    name = \"hiredis\",\n    srcs = [\n        \"async.c\",\n        \"hiredis.c\",\n        \"net.c\",\n        \"read.c\",\n        \"sds.c\",\n        \"alloc.c\",\n        \"sockcompat.c\",\n    ],\n    hdrs = [\n        # adding dict.c here since async.c includes it\n        \"dict.c\",\n        \"async.h\",\n        \"async_private.h\",\n        \"dict.h\",\n        \"hiredis.h\",\n        \"net.h\",\n        \"read.h\",\n        \"sds.h\",\n        \"alloc.h\",\n        \"sdsalloc.h\",\n        \"fmacros.h\",\n        \"sockcompat.h\",\n        \"win32.h\",\n    ],\n    # Our sources include these headers as \"external/hiredis/...\". Under bzlmod\n    # the repo directory carries a canonical name, so serve the headers at the\n    # old spelling through _virtual_includes.\n    include_prefix = \"external/hiredis\",\n    linkopts = select({\n        \"@platforms//os:windows\": [\"ws2_32.lib\"],\n        \"//conditions:default\": [],\n    }),\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "25cee4500f359cf5cad3b51ed62059aadfc0939b05150c1f19c7e2829123631c"
+            }
+          },
+          "jsoncpp": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "jsoncpp-1.9.6",
+              "url": "https://github.com/open-source-parsers/jsoncpp/archive/1.9.6.tar.gz",
+              "build_file_content": "\ncc_library(\n    name = \"jsoncpp\",\n    srcs = [\n        \"src/lib_json/json_reader.cpp\",\n        \"src/lib_json/json_value.cpp\",\n        \"src/lib_json/json_valueiterator.inl\",\n        \"src/lib_json/json_writer.cpp\",\n    ],\n    hdrs = [\n        \"include/json/allocator.h\",\n        \"src/lib_json/json_tool.h\",\n        \"include/json/assertions.h\",\n        \"include/json/config.h\",\n        \"include/json/value.h\",\n        \"include/json/writer.h\",\n        \"include/json/reader.h\",\n        \"include/json/forwards.h\",\n        \"include/json/json_features.h\",\n        \"include/json/json.h\",\n        \"include/json/version.h\",\n    ],\n    includes = [\"include\"],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "f93b6dd7ce796b13d02c108bc9f79812245a82e577581c4c9aabe57075c90ea2"
+            }
+          },
+          "libpng": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "libpng-1.6.58",
+              "url": "https://github.com/glennrp/libpng/archive/v1.6.58.tar.gz",
+              "build_file_content": "\n\n# TODO(oschaaf): we need to revisit this for linking against the system library\n# later on.\n\ngenrule(\n  name = \"copy_prebuild_header\",\n  srcs = [\"scripts/pnglibconf.h.prebuilt\"],\n  outs = [\"pnglibconf.h\"],\n  cmd = \"cp $< $@\",\n)\n\ncc_library(\n    name = \"libpng\",\n    srcs = [\n            \"png.c\",\n            \"pngerror.c\",\n            \"pngget.c\",\n            \"pngmem.c\",\n            \"pngpread.c\",\n            \"pngread.c\",\n            \"pngrio.c\",\n            \"pngrtran.c\",\n            \"pngrutil.c\",\n            \"pngset.c\",\n            \"pngtrans.c\",\n            \"pngwio.c\",\n            \"pngwrite.c\",\n            \"pngwtran.c\",\n            \"pngwutil.c\",\n    ],\n    hdrs = [\n            \"pngpriv.h\",\n            \"pnginfo.h\",\n            \"png.h\",\n            \"pngconf.h\",\n            \"pngdebug.h\",\n            \"pngstruct.h\",\n            \":copy_prebuild_header\",\n    ],\n    includes = [\".\"],\n    # Our sources include these headers as \"external/libpng/...\". Under bzlmod\n    # the repo directory carries a canonical name, so serve the headers at the\n    # old spelling through _virtual_includes.\n    include_prefix = \"external/libpng\",\n    deps = [\"@zlib_ng//:zlib-ng\"],\n    defines = [\n              # We end up including setjmp.h directly, but libpng\n              # doesn't like that. This define tells libpng to not\n              # complain about our inclusion of setjmp.h.\n              'PNG_SKIP_SETJMP_CHECK',\n\n              # The PNG_FREE_ME_SUPPORTED define was dropped in libpng\n              # 1.4.0beta78, with its behavior becoming the default\n              # behavior.\n              # Hence, we define it ourselves for version >= 1.4.0\n              'PNG_FREE_ME_SUPPORTED',\n\n              # Disable ARM NEON optimizations since we don't compile\n              # the NEON assembly files\n              'PNG_ARM_NEON_OPT=0',\n            ],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf"
+            }
+          },
+          "libwebp": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "urls": [
+                "https://github.com/webmproject/libwebp/archive/v1.5.0.tar.gz"
+              ],
+              "sha256": "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37",
+              "strip_prefix": "libwebp-1.5.0",
+              "build_file_content": "\n# Description:\n#   WebP codec library\n\nlicenses([\"notice\"])  # WebM license\n\nexports_files([\"COPYING\"])\n\n# Config setting for x86/x64 platforms where SSE is available\nconfig_setting(\n    name = \"is_x86\",\n    constraint_values = [\"@platforms//cpu:x86_64\"],\n)\n\nconfig_setting(\n    name = \"is_x86_32\",\n    constraint_values = [\"@platforms//cpu:x86_32\"],\n)\n\n# SSE intrinsics - only built on x86 platforms\ncc_library(\n    name = \"libwebp_sse\",\n    srcs = select({\n        \":is_x86\": glob([\n            \"src/dsp/*_sse2.c\",\n            \"src/dsp/*_sse41.c\",\n        ]) + [\"sharpyuv/sharpyuv_sse2.c\"],\n        \":is_x86_32\": glob([\n            \"src/dsp/*_sse2.c\",\n            \"src/dsp/*_sse41.c\",\n        ]) + [\"sharpyuv/sharpyuv_sse2.c\"],\n        \"//conditions:default\": [],\n    }),\n    hdrs = glob([\n        \"src/dsp/*.h\",\n        \"src/webp/*.h\",\n        \"src/dec/*.h\",\n        \"src/enc/*.h\",\n        \"src/utils/*.h\",\n        \"sharpyuv/*.h\",\n    ]),\n    copts = select({\n        \":is_x86\": [\"-mssse3\", \"-msse4.1\"],\n        \":is_x86_32\": [\"-mssse3\", \"-msse4.1\"],\n        \"//conditions:default\": [],\n    }),\n    includes = [\".\"],\n    visibility = [\"//visibility:private\"],\n)\n\n# SharpYUV CPU info - compiles cpu.c with VP8GetCPUInfo renamed to\n# SharpYuvGetCPUInfo, providing the symbol that sharpyuv.c expects.\ncc_library(\n    name = \"sharpyuv_cpu\",\n    srcs = [\"src/dsp/cpu.c\"],\n    hdrs = [\n        \"src/dsp/cpu.h\",\n        \"src/webp/types.h\",\n    ],\n    includes = [\".\"],\n    local_defines = [\"VP8GetCPUInfo=SharpYuvGetCPUInfo\"],\n    visibility = [\"//visibility:private\"],\n)\n\ncc_library(\n    name = \"libwebp\",\n    srcs = glob([\n        \"src/dsp/*.c\",\n        \"src/dsp/*.h\",\n        \"src/utils/*.c\",\n        \"src/utils/*.h\",\n        \"src/dec/*.c\",\n        \"src/dec/*.h\",\n        \"src/mux/*.c\",\n        \"src/mux/*.h\",\n        \"src/demux/*.c\",\n        \"src/demux/*.h\",\n        \"src/enc/*.c\",\n        \"src/enc/*.h\",\n        \"sharpyuv/*.c\",\n        \"sharpyuv/*.h\",\n    ], exclude = [\n        \"src/dsp/*_sse2.c\",\n        \"src/dsp/*_sse41.c\",\n        \"sharpyuv/sharpyuv_sse2.c\",\n        \"sharpyuv/sharpyuv_cpu.c\",\n    ]) + [\n        \"imageio/imageio_util.c\",\n        \"imageio/webpdec.c\",\n        \"imageio/metadata.c\",\n    ],\n    hdrs = glob([\n        \"src/webp/*.h\",\n        \"examples/unicode.h\",\n    ]) + [\n        \"imageio/webpdec.h\",\n        \"imageio/metadata.h\",\n        \"imageio/imageio_util.h\",\n    ],\n    copts = [],\n    defines = [],\n    includes = [\n        \".\",\n        \"src\",\n    ],\n    # Our sources include these headers as \"external/libwebp/...\". Under bzlmod\n    # the repo directory carries a canonical name, so serve the headers at the\n    # old spelling through _virtual_includes.\n    include_prefix = \"external/libwebp\",\n    linkopts = [],\n    visibility = [\"//visibility:public\"],\n    deps = [\n        \":libwebp_sse\",\n        \":sharpyuv_cpu\",\n    ],\n)\n"
+            }
+          },
+          "google_sparsehash": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "sparsehash-6ff8809259d2408cb48ae4fa694e80b15b151af3",
+              "url": "https://github.com/sparsehash/sparsehash/archive/6ff8809259d2408cb48ae4fa694e80b15b151af3.tar.gz",
+              "build_file_content": "\ncc_library(\n    name = \"google_sparsehash\",\n    hdrs = [\n        \"src/google/dense_hash_map\",\n        \"src/google/dense_hash_set\",\n        \"src/google/sparse_hash_map\",\n        \"src/google/sparse_hash_set\",\n        \"src/google/sparsetable\",\n        \"src/google/sparsehash/libc_allocator_with_realloc.h\",\n        \"src/google/sparsehash/densehashtable.h\",\n        \"src/google/sparsehash/sparsehashtable.h\",\n        \"src/google/type_traits.h\",\n    ],\n    # Add cstring include for memset/memcpy - newer GCC requires explicit include\n    copts = select({\n        \"@platforms//os:windows\": [],\n        \"//conditions:default\": [\"-include\", \"cstring\"],\n    }),\n    visibility = [\"//visibility:public\"],\n    strip_include_prefix = \"src/\",\n\n)\n",
+              "sha256": "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3",
+              "patches": [
+                "@@//bazel:sparsehash_cstring.patch"
+              ],
+              "patch_args": [
+                "-p1"
+              ]
+            }
+          },
+          "com_googlesource_googleurl": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "sha256": "9b998fea702bfcfa7d8e763389e56a1e889f718a11ada6b7c4e8c77b43d5a999",
+              "strip_prefix": "gurl-e6c272102e0554e02c1bb317edff927ee56c7d0b",
+              "urls": [
+                "https://github.com/google/gurl/archive/e6c272102e0554e02c1bb317edff927ee56c7d0b.tar.gz"
+              ],
+              "patches": [
+                "@@//bazel:googleurl_visibility.patch"
+              ],
+              "patch_args": [
+                "-p1"
+              ]
+            }
+          },
+          "com_github_gflags_gflags": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "gflags-de1b8d3daa40b5b07208ec9e82f223d430e2ecc1",
+              "url": "https://github.com/gflags/gflags/archive/de1b8d3daa40b5b07208ec9e82f223d430e2ecc1.tar.gz",
+              "sha256": "b563851a60342abc35281fa9c684de7e9604a2bf1982c85035180b9ce3afa774"
+            }
+          },
+          "libpsl": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "url": "https://github.com/rockdaboot/libpsl/releases/download/0.21.5/libpsl-0.21.5.tar.gz",
+              "build_file_content": "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n# Generate the compiled-in DAFSA from the bundled Public Suffix List, exactly\n# as upstream's meson/automake build does:\n#   python psl-make-dafsa --output-format=cxx+ <psl-file> suffixes_dafsa.h\ngenrule(\n    name = \"suffixes_dafsa_h\",\n    srcs = [\n        \"src/psl-make-dafsa\",\n        \"list/public_suffix_list.dat\",\n    ],\n    outs = [\"src/suffixes_dafsa.h\"],\n    # PYTHONUTF8=1 so the PSL .dat (UTF-8, IDN names) reads on every platform;\n    # genrules run through bash on all platforms.\n    cmd = select({\n        \"@bazel_tools//src/conditions:windows\": \"PYTHONUTF8=1 python3 ./$(location src/psl-make-dafsa) --output-format=cxx+ ./$(location list/public_suffix_list.dat) $@\",\n        \"//conditions:default\": \"python3 ./$(location src/psl-make-dafsa) --output-format=cxx+ ./$(location list/public_suffix_list.dat) $@\",\n    }),\n)\n\n# Minimal config.h. We deliberately enable ONLY the builtin PSL and the\n# standard-header HAVE_* flags that are true on every toolchain we ship\n# (glibc, musl, macOS, clang-cl). No WITH_LIB* (no IDNA runtime), no gettext.\ngenrule(\n    name = \"config_h\",\n    outs = [\"src/config.h\"],\n    cmd = (\n        \"{ \" +\n        \"echo '#ifndef LIBPSL_CONFIG_H'; \" +\n        \"echo '#define LIBPSL_CONFIG_H'; \" +\n        \"echo '#define ENABLE_BUILTIN 1'; \" +\n        \"echo '#define PACKAGE_VERSION \\\"0.21.5\\\"'; \" +\n        \"echo '#define HAVE_STDIO_H 1'; \" +\n        \"echo '#define HAVE_STDLIB_H 1'; \" +\n        \"echo '#define HAVE_STRING_H 1'; \" +\n        \"echo '#define HAVE_STDINT_H 1'; \" +\n        \"echo '#define HAVE_INTTYPES_H 1'; \" +\n        \"echo '#define STDC_HEADERS 1'; \" +\n        \"echo '#endif'; \" +\n        \"} > $@\"\n    ),\n)\n\ncc_library(\n    name = \"libpsl\",\n    srcs = [\n        \"src/psl.c\",\n        \"src/lookup_string_in_fixed_set.c\",\n        \":suffixes_dafsa_h\",\n        \":config_h\",\n    ],\n    hdrs = [\n        \"include/libpsl.h\",\n        \":suffixes_dafsa_h\",\n        \":config_h\",\n    ],\n    # `includes` (NOT raw -I copts) so the search paths cover BOTH the source\n    # tree (src/psl.c, include/libpsl.h) AND the bazel-out genfiles tree where\n    # the generated config.h + suffixes_dafsa.h land. Bazel's `includes`\n    # attribute emits an -isystem (or /I) for each of {<pkg>/src, <pkg>/include}\n    # under the exec-root AND under the genfiles root, so psl.c's\n    # `#include <config.h>` and `#include \"suffixes_dafsa.h\"` resolve to the\n    # genrule outputs while the checked-in sources resolve from source. Raw\n    # -I copts on the source tree only cover the source variant; that is the\n    # build break this fixes.\n    includes = [\n        \"src\",\n        \"include\",\n    ],\n    # PSL_STATIC must also be visible to every CONSUMER of libpsl.h (e.g.\n    # domain_registry.cc) so the API is declared without __declspec(dllimport);\n    # otherwise lld-link looks for an import library and fails with\n    # \"undefined symbol: __declspec(dllimport) psl_builtin\". `defines`\n    # (unlike copts) propagate transitively to dependents. Windows-only.\n    defines = select({\n        \"@bazel_tools//src/conditions:windows\": [\"PSL_STATIC\"],\n        \"//conditions:default\": [],\n    }),\n    # psl.c's isip() helper calls WSAStringToAddressW (Winsock) on Windows to\n    # detect IP-literal hostnames; that symbol lives in ws2_32.lib. Static\n    # libpsl.lib references it but does not pull it in, so any executable\n    # linking @libpsl (the http_test, and downstream the nginx/IIS module)\n    # fails with \"undefined symbol __declspec(dllimport) WSAStringToAddressW\".\n    # linkopts propagate to dependents. Windows-only.\n    linkopts = select({\n        \"@bazel_tools//src/conditions:windows\": [\"ws2_32.lib\"],\n        \"//conditions:default\": [],\n    }),\n    # -DHAVE_CONFIG_H so psl.c picks up our generated config.h.\n    copts = select({\n        \"@bazel_tools//src/conditions:windows\": [\n            \"/DHAVE_CONFIG_H\",\n            # libpsl is linked statically (libpsl.lib), so neutralize libpsl.h's\n            # MSVC PSL_API __declspec(dllexport/dllimport) dance: with PSL_STATIC\n            # defined, PSL_API collapses to empty and psl.c emits plain static\n            # symbols (no dllexport). The matching consumer-side define lives in\n            # `defines` below so domain_registry.cc imports them as static too.\n            \"/DPSL_STATIC\",\n        ],\n        \"//conditions:default\": [\n            \"-DHAVE_CONFIG_H\",\n            # Upstream src is warning-clean under its own build but we compile\n            # with the project's stricter flags; keep third-party warnings\n            # non-fatal here (matches how other vendored C deps are treated).\n            \"-w\",\n        ],\n    }),\n    # The wrapper includes \"external/libpsl/include/libpsl.h\" (the same\n    # external/<repo>/... convention drp used). Under bzlmod the repo\n    # directory carries a canonical name, so serve the headers at that\n    # spelling through _virtual_includes.\n    include_prefix = \"external/libpsl\",\n    visibility = [\"//visibility:public\"],\n)\n",
+              "strip_prefix": "libpsl-0.21.5",
+              "sha256": "1dcc9ceae8b128f3c0b3f654decd0e1e891afc6ff81098f227ef260449dae208"
+            }
+          },
+          "giflib": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "giflib-5.2.2",
+              "url": "https://sourceforge.net/projects/giflib/files/giflib-5.x/giflib-5.2.2.tar.gz/download",
+              "type": "tar.gz",
+              "build_file_content": "\ncc_library(\n    name = \"giflib_core\",\n    srcs = [\n        'gifalloc.c',\n        'gif_err.c',\n        'openbsd-reallocarray.c'\n    ],\n    hdrs = [\n        'gif_lib.h',\n        'gif_lib_private.h',\n        'gif_hash.h',\n    ],\n    # Our sources include these headers as \"external/giflib/...\". Under bzlmod\n    # the repo directory carries a canonical name, so serve the headers at the\n    # old spelling through _virtual_includes.\n    include_prefix = \"external/giflib\",\n    visibility = [\"//visibility:public\"],\n)\n\ncc_library(\n    name = \"dgiflib\",\n    srcs = [\n        'dgif_lib.c',\n    ],\n    defines = select({\n        \"@platforms//os:windows\": [\n            '_GBA_NO_FILEIO',\n        ],\n        \"//conditions:default\": [\n            'UINT32=\\\"unsigned int\\\"',\n            '_GBA_NO_FILEIO',\n        ],\n    }),\n    copts = select({\n        \"@platforms//os:windows\": ['/DUINT32=unsigned'],\n        \"//conditions:default\": ['-Wno-pointer-sign'],\n    }),\n    deps = ['@giflib//:giflib_core',],\n    visibility = [\"//visibility:public\"],\n)\n\ncc_library(\n    name = \"egiflib\",\n    srcs = [\n        'egif_lib.c',\n        'gif_hash.c'\n    ],\n    defines = select({\n        \"@platforms//os:windows\": [\n            '_GBA_NO_FILEIO',\n            'HAVE_FCNTL_H',\n        ],\n        \"//conditions:default\": [\n            'UINT32=\\\"unsigned int\\\"',\n            '_GBA_NO_FILEIO',\n            'HAVE_FCNTL_H',\n        ],\n    }),\n    copts = select({\n        \"@platforms//os:windows\": ['/DUINT32=unsigned'],\n        \"//conditions:default\": ['-Wno-pointer-sign'],\n    }),\n    deps = ['@giflib//:giflib_core',],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
+            }
+          },
+          "optipng": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "optipng-0.7.8",
+              "url": "https://prdownloads.sourceforge.net/optipng/optipng-0.7.8.tar.gz?download",
+              "build_file_content": "\ncc_library(\n    name = \"opngreduc\",\n    srcs = [\n        \"src/opngreduc/opngreduc.c\",\n    ],\n    hdrs = [\n        \"src/opngreduc/opngreduc.h\"\n    ],\n    # Our sources include these headers as \"external/optipng/...\". Under bzlmod\n    # the repo directory carries a canonical name, so serve the headers at the\n    # old spelling through _virtual_includes.\n    include_prefix = \"external/optipng\",\n    # NOTE:export_dependent_settings not included.\n    deps = [\"@libpng//:libpng\",],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "25a3bd68481f21502ccaa0f4c13f84dcf6b20338e4c4e8c51f2cefbd8513398c"
+            }
+          },
+          "libjpeg_turbo": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "libjpeg-turbo-3.1.4.1",
+              "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.1.4.1.tar.gz",
+              "build_file": "@@//bazel:libjpeg_turbo.BUILD",
+              "sha256": "a7da42b640377c2a9a9665e2c4b0ea60cd5599afb48c2521e6df0c9dc9d15a25"
+            }
+          },
+          "apr": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "apr-d7a4f5be56969ebb5d2f9d093e17eb39dd016693",
+              "url": "https://github.com/apache/apr/archive/d7a4f5be56969ebb5d2f9d093e17eb39dd016693.tar.gz",
+              "build_file_content": "\n\n# Linux/arm64 selector for the arm64 pre-generated APR headers. Defined inline\n# (like //third_party/libwebp's is_x86) so it is visible inside the @apr repo.\nconfig_setting(\n    name = \"linux_arm64\",\n    constraint_values = [\n        \"@platforms//os:linux\",\n        \"@platforms//cpu:arm64\",\n    ],\n)\n\ncc_library(\n    name = \"apr\",\n    srcs = [\n        'atomic/unix/builtins.c',\n        'atomic/unix/ia32.c',\n        'atomic/unix/mutex.c',\n        'atomic/unix/mutex64.c',\n        'dso/unix/dso.c',\n        'file_io/unix/buffer.c',\n        'file_io/unix/copy.c',\n        'file_io/unix/dir.c',\n        'file_io/unix/fileacc.c',\n        'file_io/unix/filedup.c',\n        'file_io/unix/filepath.c',\n        'file_io/unix/filepath_util.c',\n        'file_io/unix/filestat.c',\n        'file_io/unix/flock.c',\n        'file_io/unix/fullrw.c',\n        'file_io/unix/mktemp.c',\n        'file_io/unix/open.c',\n        'file_io/unix/pipe.c',\n        'file_io/unix/readwrite.c',\n        'file_io/unix/seek.c',\n        'file_io/unix/tempdir.c',\n        'locks/unix/global_mutex.c',\n        'locks/unix/proc_mutex.c',\n        'locks/unix/thread_cond.c',\n        'locks/unix/thread_mutex.c',\n        'locks/unix/thread_rwlock.c',\n        'memory/unix/apr_pools.c',\n        'misc/unix/charset.c',\n        'misc/unix/env.c',\n        'misc/unix/errorcodes.c',\n        'misc/unix/getopt.c',\n        'misc/unix/otherchild.c',\n        'misc/unix/rand.c',\n        'misc/unix/start.c',\n        'misc/unix/version.c',\n        'mmap/unix/common.c',\n        'mmap/unix/mmap.c',\n        'network_io/unix/inet_ntop.c',\n        'network_io/unix/inet_pton.c',\n        'network_io/unix/multicast.c',\n        'network_io/unix/sendrecv.c',\n        'network_io/unix/sockaddr.c',\n        'network_io/unix/socket_util.c',\n        'network_io/unix/sockets.c',\n        'network_io/unix/sockopt.c',\n        'passwd/apr_getpass.c',\n        'poll/unix/epoll.c',\n        'poll/unix/kqueue.c',\n        'poll/unix/poll.c',\n        'poll/unix/pollcb.c',\n        'poll/unix/pollset.c',\n        'poll/unix/port.c',\n        'poll/unix/select.c',\n        'poll/unix/wakeup.c',\n        'random/unix/apr_random.c',\n        'random/unix/sha2.c',\n        'random/unix/sha2_glue.c',\n        'shmem/unix/shm.c',\n        'strings/apr_cpystrn.c',\n        'strings/apr_fnmatch.c',\n        'strings/apr_snprintf.c',\n        'strings/apr_strings.c',\n        'strings/apr_strnatcmp.c',\n        'strings/apr_strtok.c',\n        'support/unix/waitio.c',\n        'tables/apr_hash.c',\n        'tables/apr_tables.c',\n        'threadproc/unix/proc.c',\n        'threadproc/unix/procsup.c',\n        'threadproc/unix/signals.c',\n        'threadproc/unix/thread.c',\n        'threadproc/unix/threadpriv.c',\n        'time/unix/time.c',\n        'time/unix/timestr.c',\n        'user/unix/groupinfo.c',\n        'user/unix/userinfo.c',\n    ],\n    hdrs = [\n        \"@mod_pagespeed//third_party/apr:apr_pagespeed\",\n        \"random/unix/sha2.h\",\n        \"include/apr_ring.h\",\n        \"include/apr_hash.h\",\n        \"include/apr_inherit.h\",\n        \"include/apr_network_io.h\",\n        \"include/apr_atomic.h\",\n        \"include/apr_fnmatch.h\",\n        \"include/apr_escape.h\",\n        \"include/apr_allocator.h\",\n        \"include/apr_thread_mutex.h\",\n        \"include/apr_errno.h\",\n        \"include/apr_portable.h\",\n        \"include/apr_mmap.h\",\n        \"include/apr_skiplist.h\",\n        \"include/apr_shm.h\",\n        \"include/apr_tables.h\",\n        \"include/apr_support.h\",\n        \"include/apr_file_info.h\",\n        \"include/apr_thread_cond.h\",\n        \"include/apr_proc_mutex.h\",\n        \"include/apr_signal.h\",\n        \"include/apr_general.h\",\n        \"include/apr_version.h\",\n        \"include/apr_thread_proc.h\",\n        \"include/apr_perms_set.h\",\n        \"include/apr_cstr.h\",\n        \"include/apr_file_io.h\",\n        \"include/apr_poll.h\",\n        \"include/apr_want.h\",\n        \"include/apr_user.h\",\n        \"include/apr_env.h\",\n        \"include/apr_time.h\",\n        \"include/apr_pools.h\",\n        \"include/arch/unix/apr_arch_thread_rwlock.h\",\n        \"include/arch/unix/apr_arch_internal_time.h\",\n        \"include/arch/unix/apr_arch_poll_private.h\",\n        \"include/arch/unix/apr_arch_proc_mutex.h\",\n        \"include/arch/unix/apr_arch_networkio.h\",\n        \"include/arch/unix/apr_arch_shm.h\",\n        \"include/arch/unix/apr_arch_thread_cond.h\",\n        \"include/arch/unix/apr_arch_threadproc.h\",\n        \"include/arch/unix/apr_arch_global_mutex.h\",\n        \"include/arch/unix/apr_arch_thread_mutex.h\",\n        \"include/arch/unix/apr_arch_atomic.h\",\n        \"include/arch/unix/apr_arch_inherit.h\",\n        \"include/arch/unix/apr_arch_file_io.h\",\n        \"include/arch/unix/apr_arch_misc.h\",\n        \"include/arch/unix/apr_arch_dso.h\",\n        \"include/arch/apr_private_common.h\",\n        \"include/apr_dso.h\",\n        \"include/apr_global_mutex.h\",\n        \"include/apr_getopt.h\",\n        \"include/apr_lib.h\",\n        \"include/apr_thread_rwlock.h\",\n        \"include/apr_strings.h\",\n        \"include/apr_random.h\",\n    ],\n    copts = select({\n        \"@platforms//os:macos\": [\"-Ithird_party/apr/gen/arch/mac/x64/include/\"],\n        \":linux_arm64\": [\"-Ithird_party/apr/gen/arch/linux/arm64/include/\"],\n        \"//conditions:default\": [\"-Ithird_party/apr/gen/arch/linux/x64/include/\"],\n    }) + [\n        # Private to this library. The repo directory name is canonical under\n        # bzlmod, so derive it instead of spelling external/apr.\n        \"-Iexternal/%s/random/unix\" % repo_name(),\n        \"-Wno-int-conversion\",\n        \"-Wno-implicit-function-declaration\",\n    ] + select({\n        \"@platforms//os:macos\": [],\n        \"//conditions:default\": [\n            \"-Dpthread_mutexattr_setrobust_np=pthread_mutexattr_setrobust\",\n            \"-Dpthread_mutex_consistent_np=pthread_mutex_consistent\",\n        ],\n    }),\n    # Propagate to dependents (pagespeed/apache, @aprutil) as well.\n    includes = [\n        \"include\",\n        \"include/arch/unix\",\n        \".\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "5c56af0a8ad7dee32dc381620496f6ebbaa9bf64a470a4ad4fdb0eed84e87fc7"
+            }
+          },
+          "aprutil": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "apr-util-eb1f0c8ebd4f9633c327f595746933da6349dded",
+              "url": "https://github.com/apache/apr-util/archive/eb1f0c8ebd4f9633c327f595746933da6349dded.tar.gz",
+              "build_file_content": "\n\n# Linux/arm64 selector for the arm64 pre-generated apr-util headers. Defined\n# inline (like //third_party/libwebp's is_x86) so it is visible inside the\n# @aprutil repo.\nconfig_setting(\n    name = \"linux_arm64\",\n    constraint_values = [\n        \"@platforms//os:linux\",\n        \"@platforms//cpu:arm64\",\n    ],\n)\n\ncc_library(\n    name = \"aprutil\",\n    srcs = [\n        'buckets/apr_brigade.c',\n        'buckets/apr_buckets.c',\n        'buckets/apr_buckets_alloc.c',\n        'buckets/apr_buckets_eos.c',\n        'buckets/apr_buckets_file.c',\n        'buckets/apr_buckets_flush.c',\n        'buckets/apr_buckets_heap.c',\n        'buckets/apr_buckets_mmap.c',\n        'buckets/apr_buckets_pipe.c',\n        'buckets/apr_buckets_pool.c',\n        'buckets/apr_buckets_refcount.c',\n        'buckets/apr_buckets_simple.c',\n        'buckets/apr_buckets_socket.c',\n        'crypto/apr_md5.c',\n        'crypto/getuuid.c',\n        'crypto/uuid.c',\n        #'dbm/apr_dbm.c',\n        #'dbm/apr_dbm_sdbm.c',\n        #'dbm/sdbm/sdbm.c',\n        #'dbm/sdbm/sdbm_hash.c',\n        #'dbm/sdbm/sdbm_lock.c',\n        #'dbm/sdbm/sdbm_pair.c',\n        'encoding/apr_base64.c',\n        'hooks/apr_hooks.c',\n        #'ldap/apr_ldap_stub.c',\n        #'ldap/apr_ldap_url.c',\n        # memcache/apr_memcache.c removed: mod_pagespeed's memcached path uses\n        # libmemcached (//pagespeed/system MemcachedCache), not apr-util memcache.\n        'misc/apr_date.c',\n        'misc/apr_queue.c',\n        'misc/apr_reslist.c',\n        'misc/apr_rmm.c',\n        'misc/apr_thread_pool.c',\n        'misc/apu_dso.c',\n        'misc/apu_version.c',\n        'strmatch/apr_strmatch.c',\n        'uri/apr_uri.c',\n        'xlate/xlate.c',\n    ],\n    hdrs = [\n        \"@mod_pagespeed//third_party/aprutil:aprutil_pagespeed\",\n        \"crypto/crypt_blowfish.h\",\n        #\"test/test_apu.h\",\n        #\"test/abts_tests.h\",\n        #\"test/testutil.h\",\n        #\"test/abts.h\",\n        \"dbm/sdbm/sdbm_private.h\",\n        \"dbm/sdbm/sdbm_pair.h\",\n        \"dbm/sdbm/sdbm_tune.h\",\n        \"include/apr_siphash.h\",\n        \"include/apr_dbm.h\",\n        \"include/apr_xlate.h\",\n        \"include/apr_ldap_url.h\",\n        \"include/apu_version.h\",\n        \"include/apr_redis.h\",\n        \"include/private/apr_dbd_odbc_v2.h\",\n        \"include/private/apr_dbm_private.h\",\n        \"include/private/apu_internal.h\",\n        \"include/private/apr_dbd_internal.h\",\n        \"include/private/apr_crypto_internal.h\",\n        \"include/apr_md5.h\",\n        \"include/apu_errno.h\",\n        \"include/apr_xml.h\",\n        \"include/apr_sdbm.h\",\n        \"include/apr_md4.h\",\n        \"include/apr_hooks.h\",\n        \"include/apr_date.h\",\n        \"include/apr_reslist.h\",\n        \"include/apr_uuid.h\",\n        \"include/apr_base64.h\",\n        \"include/apr_sha1.h\",\n        \"include/apr_uri.h\",\n        \"include/apr_queue.h\",\n        \"include/apr_ldap_option.h\",\n        \"include/apr_optional.h\",\n        \"include/apr_dbd.h\",\n        \"include/apr_anylock.h\",\n        \"include/apr_strmatch.h\",\n        \"include/apr_optional_hooks.h\",\n        \"include/apr_thread_pool.h\",\n        \"include/apr_buckets.h\",\n        \"include/apr_rmm.h\",\n        \"include/apr_ldap_rebind.h\",\n        \"include/apr_ldap_init.h\",\n        \"include/apr_crypto.h\",\n    ],\n    copts = select({\n        \"@platforms//os:macos\": [\n            \"-Ithird_party/aprutil/gen/arch/mac/x64/include/\",\n            \"-Ithird_party/aprutil/gen/arch/mac/x64/include/private\",\n            \"-Ithird_party/apr/gen/arch/mac/x64/include/\",\n        ],\n        \":linux_arm64\": [\n            \"-Ithird_party/aprutil/gen/arch/linux/arm64/include/\",\n            \"-Ithird_party/aprutil/gen/arch/linux/arm64/include/private\",\n            \"-Ithird_party/apr/gen/arch/linux/arm64/include/\",\n        ],\n        \"//conditions:default\": [\n            \"-Ithird_party/aprutil/gen/arch/linux/x64/include/\",\n            \"-Ithird_party/aprutil/gen/arch/linux/x64/include/private\",\n            \"-Ithird_party/apr/gen/arch/linux/x64/include/\",\n        ],\n    }),\n    # Propagate to dependents (pagespeed/apache) as well; the @apr include\n    # directories come from @apr's own includes.\n    includes = [\n        \"include\",\n        \"include/private\",\n        \"include/arch/unix\",\n        \".\",\n    ],\n    deps = [\n        \"@apr//:apr\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
+            }
+          },
+          "cyclone": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:git.bzl%git_repository",
+            "attributes": {
+              "remote": "https://github.com/We-Amp/cyclone-cache.git",
+              "commit": "22f65531115913ab7ce836639823df6c07281219",
+              "build_file_content": "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n# Core Cyclone library (C++23)\n# This library contains the actual cache implementation.\n#\n# IMPORTANT: Cyclone requires C++23. The per_file_copt in pagespeed.bazelrc\n# overrides the default standard for cyclone source files. We also include\n# -std=c++23 in copts as a fallback.\ncc_library(\n    name = \"cyclone\",\n    srcs = glob([\n        \"src/core/*.cpp\",\n        \"src/io/*.cpp\",\n        \"src/ram_cache/*.cpp\",\n        \"src/plugin/*.cpp\",\n        \"src/optimization/*.cpp\",\n    ], exclude = [\n        \"src/**/*_test.cpp\",\n        \"src/**/*_benchmark.cpp\",\n    ]),\n    hdrs = glob([\n        \"include/cyclone/*.hpp\",\n        \"include/cyclone/detail/*.hpp\",\n        \"include/cyclone/plugin/*.hpp\",\n        \"src/core/*.hpp\",\n        \"src/io/*.hpp\",\n        \"src/ram_cache/*.hpp\",\n        \"src/optimization/*.hpp\",\n    ]),\n    includes = [\"include\", \"src\"],\n    copts = select({\n        \"@platforms//os:windows\": [\n            \"/std:c++latest\",\n            \"/FImutex\",\n            \"/FIshared_mutex\",\n            \"/FIexpected\",\n            \"/FIalgorithm\",  # For std::clamp\n        ],\n        \"//conditions:default\": [\n            \"-std=c++23\",\n            \"-Wno-deprecated-declarations\",\n            # Force-include standard library headers that cyclone relies on via\n            # indirect includes. The Bazel build order differs from CMake.\n            \"-include\", \"mutex\",\n            \"-include\", \"shared_mutex\",\n            \"-include\", \"expected\",\n        ],\n    }),\n    local_defines = select({\n        \"@platforms//os:windows\": [\n            \"CYCLONE_PLATFORM_WINDOWS\",\n        ],\n        \"//conditions:default\": [],\n    }),\n    linkopts = select({\n        \"@platforms//os:linux\": [\"-lpthread\"],\n        \"//conditions:default\": [],\n    }),\n    deps = [\n        # BoringSSL provides OpenSSL-compatible API for SHA-256\n        \"@boringssl//:crypto\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "curl_src": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "curl-curl-8_22_0",
+              "url": "https://github.com/curl/curl/archive/refs/tags/curl-8_22_0.tar.gz",
+              "sha256": "222c6b5c1f368ac63aed59bce2774eb5def9e8e67e46e800be182e684d2845a3",
+              "build_file_content": "\nfilegroup(\n    name = \"all_srcs\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\n",
+              "patches": [
+                "@@//bazel:curl_boringssl_ssl_connect_8_20.patch"
+              ],
+              "patch_args": [
+                "-p1"
+              ]
+            }
+          },
+          "libmemcached_src": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "libmemcached-1.1.4",
+              "url": "https://github.com/awesomized/libmemcached/archive/refs/tags/1.1.4.tar.gz",
+              "sha256": "c477e1f6510e1dc698e84f3717ce690a8f65b94c616ecaa62306cce0f5e3116a",
+              "build_file_content": "\nfilegroup(\n    name = \"all_srcs\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "libavif_src": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "libavif-1.4.2",
+              "url": "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v1.4.2.tar.gz",
+              "sha256": "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d",
+              "build_file_content": "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\nfilegroup(\n    name = \"all_srcs\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\n\ncc_library(\n    name = \"source_headers\",\n    hdrs = glob([\"include/avif/*.h\"]),\n    includes = [\"include\"],\n    visibility = [\"//visibility:public\"],\n)\n",
+              "patches": [
+                "@@//bazel:libavif_merge_static_libs_clang_cl.patch"
+              ],
+              "patch_args": [
+                "-p1"
+              ]
+            }
+          },
+          "dav1d_src": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "dav1d-1.5.1",
+              "url": "https://github.com/videolan/dav1d/archive/refs/tags/1.5.1.tar.gz",
+              "sha256": "fa635e2bdb25147b1384007c83e15de44c589582bb3b9a53fc1579cb9d74b695",
+              "build_file_content": "\nfilegroup(\n    name = \"all_srcs\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "aom_src": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:git.bzl%git_repository",
+            "attributes": {
+              "remote": "https://aomedia.googlesource.com/aom",
+              "commit": "3b624af45b86646a20b11a9ff803aeae588cdee6",
+              "build_file_content": "\nfilegroup(\n    name = \"all_srcs\",\n    srcs = glob([\"**\"]),\n    visibility = [\"//visibility:public\"],\n)\n"
+            }
+          },
+          "ed25519": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "strip_prefix": "ed25519-b1f19fab4aebe607805620d25a5e42566ce46a0e",
+              "url": "https://github.com/orlp/ed25519/archive/b1f19fab4aebe607805620d25a5e42566ce46a0e.tar.gz",
+              "build_file_content": "\ncc_library(\n    name = \"ed25519\",\n    srcs = [\n        \"src/add_scalar.c\",\n        \"src/fe.c\",\n        \"src/ge.c\",\n        \"src/key_exchange.c\",\n        \"src/keypair.c\",\n        \"src/sc.c\",\n        \"src/seed.c\",\n        \"src/sha512.c\",\n        \"src/sign.c\",\n        \"src/verify.c\",\n    ],\n    hdrs = [\n        \"src/ed25519.h\",\n        \"src/fe.h\",\n        \"src/fixedint.h\",\n        \"src/ge.h\",\n        \"src/precomp_data.h\",\n        \"src/sc.h\",\n        \"src/sha512.h\",\n    ],\n    includes = [\"src\"],\n    copts = select({\n        \"@platforms//os:windows\": [],\n        \"//conditions:default\": [\n            \"-Wno-unused-parameter\",\n            \"-fno-sanitize=shift\",\n        ],\n    }),\n    visibility = [\"//visibility:public\"],\n)\n",
+              "sha256": "aedb26c46d3dc3b721ab37c5248d5c923142e4d56009a9605c470383f32ce77a"
+            }
+          },
+          "bazel_compdb": {
+            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
+            "attributes": {
+              "sha256": "d32835b26dd35aad8fd0ba0d712265df6565a3ad860d39e4c01ad41059ea7eda",
+              "strip_prefix": "bazel-compilation-database-0.5.2",
+              "urls": [
+                "https://github.com/grailbio/bazel-compilation-database/archive/refs/tags/0.5.2.tar.gz"
+              ]
+            }
+          },
+          "nginx": {
+            "repoRuleId": "@@//bazel:nginx.bzl%nginx_repository",
+            "attributes": {}
+          }
+        }
+      }
+    },
     "@@pybind11_bazel+//:internal_configure.bzl%internal_configure_extension": {
       "general": {
         "bzlTransitiveDigest": "qQEChI+4ZOV4xn6LulonXjQy5+Z0z1gELJDmBl1ePy4=",

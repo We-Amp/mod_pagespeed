@@ -1197,7 +1197,8 @@ echo "    merged archive: $(du -h "${MERGED}" | cut -f1)"
 # 5. Harvest the PSOL include dirs from the archive's CppCompile actions and
 #    pass them to nginx's configure via --with-cc-opt. (Journal: the config's
 #    in-configure harvest silently yields empty under vendored builds, so the
-#    build script must do it where bazel is reliable.) Drop external/nginx/* so
+#    build script must do it where bazel is reliable.) Drop external/nginx/* (the
+#    canonical external/+non_bcr_deps+nginx/* under bzlmod) so
 #    the glue compiles against the TARGET nginx headers, not Bazel's pinned set.
 # ---------------------------------------------------------------------------
 echo "==> harvest PSOL include dirs"
@@ -1206,7 +1207,7 @@ echo "==> harvest PSOL include dirs"
   | sed 's/\\$//' | tr '\n' ' ' \
   | grep -oE '\-I[^ ]+|-iquote +[^ ]+|-isystem +[^ ]+' \
   | sed -E 's/^-I//; s/^-(iquote|isystem) +//' \
-  | grep -vE '(^|/)external/nginx(/|$)' \
+  | grep -vE '(^|/)external/[^/]*nginx(/|$)' \
   | sort -u > "${WORK}/incdirs_raw.txt"
 
 CC_OPT=""

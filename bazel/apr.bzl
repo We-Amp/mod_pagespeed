@@ -157,10 +157,9 @@ cc_library(
         ":linux_arm64": ["-Ithird_party/apr/gen/arch/linux/arm64/include/"],
         "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
     }) + [
-        "-Iexternal/apr/random/unix",
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
-        "-Iexternal/apr/",
+        # Private to this library. The repo directory name is canonical under
+        # bzlmod, so derive it instead of spelling external/apr.
+        "-Iexternal/%s/random/unix" % repo_name(),
         "-Wno-int-conversion",
         "-Wno-implicit-function-declaration",
     ] + select({
@@ -170,6 +169,12 @@ cc_library(
             "-Dpthread_mutex_consistent_np=pthread_mutex_consistent",
         ],
     }),
+    # Propagate to dependents (pagespeed/apache, @aprutil) as well.
+    includes = [
+        "include",
+        "include/arch/unix",
+        ".",
+    ],
     visibility = ["//visibility:public"],
 )
 """

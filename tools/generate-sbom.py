@@ -6,17 +6,22 @@
 Mirrors pagespeed-optimizer/tools/generate-sbom.py so both products emit
 byte-comparable SPDX documents and feed the same grype + OpenVEX gate.
 
-Unlike 2.0 (which is Bzlmod and parses MODULE.bazel), 1.1 is a
-WORKSPACE-era project: external C++ deps are declared in
-`bazel/repositories.bzl` via http_archive/git_repository, with versions
-held in `*_VERSION` / `*_COMMIT` constants. This script parses those
-constants for versions and pairs them with a curated license/PURL map
-(CPP_DEPS) — versions auto-track repositories.bzl, metadata is reviewed.
+Dependencies come from two places. The C++ libraries taken from the Bazel
+Central Registry (abseil-cpp, zlib-ng, boringssl, protobuf, re2) are
+`bazel_dep`s in MODULE.bazel; their versions are read from MODULE.bazel.lock,
+i.e. the versions the module resolution actually selected (a `.bcr.N` patch
+release maps to its upstream version). Everything else is declared in
+`bazel/repositories.bzl` (the non_bcr_deps module extension) via
+http_archive/git_repository, with versions held in `*_VERSION` / `*_COMMIT`
+constants. This script pairs those versions with a curated license/PURL map
+(CPP_DEPS): versions auto-track the build, metadata is reviewed.
+tools/check-module-versions.py keeps the repositories.bzl mirror constants of
+the BCR libraries equal to the resolved versions.
 
 Scope: the directly-declared runtime/library deps. Intentionally excluded:
   - build/test-only: googletest, rules_cc, rules_proto, rules_foreign_cc,
     bazel_compdb
-  - protobuf-transitive tooling pulled by protobuf_deps() (rules_java,
+  - rulesets and modules that other modules pull in (rules_java,
     rules_python, etc.): not pinned directly by 1.1.
 The committed JS deps are the two bundled into admin_console.html
 (svelte, uplot); the rest of pagespeed/system/console/ is build tooling.
@@ -34,6 +39,8 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
+
+import bzlmod_versions
 
 UTC = timezone.utc
 
@@ -65,8 +72,11 @@ def read_product_version():
 #
 # Each entry:
 #   name         SPDX package name
-#   version      either {"key": "<CONST>"} resolved from repositories.bzl,
+#   version      {"module": "<bcr module>"} resolved from MODULE.bazel.lock,
+#                {"key": "<CONST>"} resolved from repositories.bzl,
 #                or {"literal": "<value>"} for deps pinned inline
+#   purl_module  optional; derive purl_version as "v<resolved version>" of
+#                this BCR module (protobuf: versionInfo stays the tag commit)
 #   license      SPDX license expression
 #   holder       copyright holder (free text)
 #   repo         github "owner/repo" for the PURL, or None (no github PURL)
@@ -80,17 +90,18 @@ def read_product_version():
 # downloadLocation is derived from repo (github) or `url` (non-github).
 # ---------------------------------------------------------------------------
 CPP_DEPS = [
-    {"name": "abseil-cpp", "version": {"key": "_ABSEIL_VERSION"}, "license": "Apache-2.0",
+    {"name": "abseil-cpp", "version": {"module": "abseil-cpp"}, "license": "Apache-2.0",
      "holder": "Google Inc.", "repo": "abseil/abseil-cpp", "purl_version": None},
-    {"name": "zlib-ng", "version": {"key": "ZLIB_NG_VERSION"}, "license": "Zlib",
+    {"name": "zlib-ng", "version": {"module": "zlib-ng"}, "license": "Zlib",
      "holder": "zlib-ng contributors", "repo": "zlib-ng/zlib-ng", "purl_version": None},
-    {"name": "boringssl", "version": {"key": "BORINGSSL_VERSION"}, "license": "OpenSSL",
+    {"name": "boringssl", "version": {"module": "boringssl"}, "license": "OpenSSL",
      "holder": "Google Inc.", "repo": "google/boringssl", "purl_version": None},
     {"name": "libevent", "version": {"key": "LIBEVENT_VERSION"}, "license": "BSD-3-Clause",
      "holder": "Niels Provos and Nick Mathewson", "repo": "libevent/libevent", "purl_version": None},
     {"name": "protobuf", "version": {"key": "PROTOBUF_COMMIT"}, "license": "BSD-3-Clause",
-     "holder": "The Protocol Buffers Authors", "repo": "protocolbuffers/protobuf", "purl_version": "v31.1"},
-    {"name": "re2", "version": {"key": "_RE2_VERSION"}, "license": "BSD-3-Clause",
+     "holder": "The Protocol Buffers Authors", "repo": "protocolbuffers/protobuf", "purl_version": None,
+     "purl_module": "protobuf"},
+    {"name": "re2", "version": {"module": "re2"}, "license": "BSD-3-Clause",
      "holder": "Google Inc.", "repo": "google/re2", "purl_version": None},
     {"name": "fmt", "version": {"key": "FMT_VERSION"}, "license": "MIT",
      "holder": "Victor Zverovich", "repo": "fmtlib/fmt", "purl_version": None},
@@ -211,10 +222,35 @@ def parse_bzl_constants():
     return consts
 
 
-def resolve_version(dep, consts):
+def resolved_module_version(module, resolved):
+    if module not in resolved:
+        print(f"ERROR: {bzlmod_versions.MODULE_LOCK} selects no registry version "
+              f"of module {module!r}", file=sys.stderr)
+        sys.exit(1)
+    return bzlmod_versions.upstream_version(resolved[module])
+
+
+def load_resolved():
+    try:
+        return bzlmod_versions.load_resolved()
+    except bzlmod_versions.VersionError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def resolve_version(dep, consts, resolved=None):
+    """Version of one CPP_DEPS entry.
+
+    `resolved` is the {module: version} map from MODULE.bazel.lock; callers
+    that resolve a single dep (tools/dependency/cve_scan.py) may omit it.
+    """
     spec = dep["version"]
     if "literal" in spec:
         return spec["literal"]
+    if "module" in spec:
+        if resolved is None:
+            resolved = load_resolved()
+        return resolved_module_version(spec["module"], resolved)
     key = spec["key"]
     if key not in consts:
         print(f"ERROR: {REPOSITORIES_BZL} has no constant {key!r} for "
@@ -259,6 +295,7 @@ def generate_sbom():
     """Generate the full SPDX 2.3 JSON document."""
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     consts = parse_bzl_constants()
+    resolved = load_resolved()
 
     root_pkg = {
         "SPDXID": "SPDXRef-Package-pagespeed-1.1",
@@ -294,9 +331,9 @@ def generate_sbom():
             "relatedSpdxElement": pkg["SPDXID"],
         })
 
-    # --- C++ dependencies from bazel/repositories.bzl ---
+    # --- C++ dependencies (MODULE.bazel.lock and bazel/repositories.bzl) ---
     for dep in CPP_DEPS:
-        version = resolve_version(dep, consts)
+        version = resolve_version(dep, consts, resolved)
         repo = dep.get("repo")
         # An explicit "purl" (deps without a github locator, e.g. aom on
         # googlesource) wins over the derived github form.
@@ -304,6 +341,8 @@ def generate_sbom():
         download = dep.get("download", "")
         if repo:
             purl_ver = dep.get("purl_version") or version
+            if dep.get("purl_module"):
+                purl_ver = "v" + resolved_module_version(dep["purl_module"], resolved)
             purl = f"pkg:github/{repo}@{purl_ver}"
             download = download or f"https://github.com/{repo}"
         pkg = make_package(dep["name"], version, dep["license"], dep["holder"],

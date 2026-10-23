@@ -20,7 +20,7 @@
     "*.cc": "cpp",
     "*.inc": "cpp",
     "BUILD": "starlark",
-    "WORKSPACE": "starlark",
+    "MODULE.bazel": "starlark",
     "*.bzl": "starlark",
     "*.bazelrc": "shellscript"
   },

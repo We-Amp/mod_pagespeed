@@ -422,7 +422,7 @@ SELF_TEST_CASES = [
      True),
     # Must NOT fire.
     ("per_file_copt scoped to .cpp",
-     "build:linux --per_file_copt=external/cyclone/.*\\.cpp@-std=c++23", False),
+     "build:linux --per_file_copt=external/.*cyclone/.*\\.cpp@-std=c++23", False),
     ("per_file_copt scoped to .cc",
      "build:linux --per_file_copt=pagespeed/.*\\.cc@-nostdinc++", False),
     ("per_file_copt comma-list, every element C++",
@@ -430,7 +430,7 @@ SELF_TEST_CASES = [
     ("correct cxxopt spelling",
      "build:linux --cxxopt=-Wno-dangling-reference", False),
     ("agnostic define",      'build:linux --copt="-DFOO=1"', False),
-    ("agnostic include",     'build:linux --copt="-Iexternal/apr/"', False),
+    ("agnostic include",     'build:linux --copt="-Ithird_party/apr/gen/arch/linux/x64/include/"', False),
     ("comma inside one flag's value",
      "build:asan --copt -fno-sanitize=vptr,function", False),
     ("agnostic per_file_copt over a broad comma-list",

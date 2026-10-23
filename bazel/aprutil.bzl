@@ -119,13 +119,14 @@ cc_library(
             "-Ithird_party/aprutil/gen/arch/linux/x64/include/private",
             "-Ithird_party/apr/gen/arch/linux/x64/include/",
         ],
-    }) + [
-        "-Iexternal/aprutil/include/",
-        "-Iexternal/aprutil/include/private/",
-        "-Iexternal/aprutil/include/arch/unix/",
-        "-Iexternal/aprutil/",
-        "-Iexternal/apr/include/",
-        "-Iexternal/apr/include/arch/unix/",
+    }),
+    # Propagate to dependents (pagespeed/apache) as well; the @apr include
+    # directories come from @apr's own includes.
+    includes = [
+        "include",
+        "include/private",
+        "include/arch/unix",
+        ".",
     ],
     deps = [
         "@apr//:apr",
