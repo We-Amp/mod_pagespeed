@@ -30,6 +30,7 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/mock_critical_images_finder.h"
@@ -54,6 +55,21 @@ class NoDataYetCriticalImagesFinder : public MockCriticalImagesFinder {
   NoDataYetCriticalImagesFinder(const NoDataYetCriticalImagesFinder&) = delete;
   NoDataYetCriticalImagesFinder& operator=(
       const NoDataYetCriticalImagesFinder&) = delete;
+};
+
+// A finder reporting that critical-image data will never arrive, the state
+// configuration produces when critical-image reporting is turned off or the
+// factory does not use beacon results.
+class DisabledCriticalImagesFinder : public MockCriticalImagesFinder {
+ public:
+  explicit DisabledCriticalImagesFinder(Statistics* stats)
+      : MockCriticalImagesFinder(stats) {}
+  Availability Available(RewriteDriver* driver) override { return kDisabled; }
+
+ private:
+  DisabledCriticalImagesFinder(const DisabledCriticalImagesFinder&) = delete;
+  DisabledCriticalImagesFinder& operator=(
+      const DisabledCriticalImagesFinder&) = delete;
 };
 
 }  // namespace
@@ -103,6 +119,37 @@ class PrioritizeCriticalImagesFilterTest : public RewriteTestBase {
 
   int64 StatValue(const char* name) {
     return statistics()->GetVariable(name)->Get();
+  }
+
+  // All Vary values of the last parse, comma-joined in order, so tests can
+  // compare complete Vary sets across parses.
+  GoogleString VaryValues() {
+    ConstStringStarVector values;
+    response_headers_.Lookup(HttpAttributes::kVary, &values);
+    GoogleString joined;
+    for (const GoogleString* value : values) {
+      if (!joined.empty()) {
+        StrAppend(&joined, ",");
+      }
+      StrAppend(&joined, *value);
+    }
+    return joined;
+  }
+
+  // Resets the harness (fresh driver, cleared response headers), optionally
+  // sends a Save-Data request header, parses html with the expected output,
+  // and stores the Vary the parse produced.
+  void ParseAndCollectVary(StringPiece case_id, StringPiece html,
+                           bool with_save_data, StringPiece expected,
+                           GoogleString* vary) {
+    ClearRewriteDriver();
+    response_headers_.Clear();
+    SetHtmlMimetype();
+    if (with_save_data) {
+      AddRequestAttribute(HttpAttributes::kSaveData, "on");
+    }
+    ValidateExpected(case_id, html, expected);
+    *vary = VaryValues();
   }
 
   std::unique_ptr<PrioritizeCriticalImagesFilter>
@@ -372,7 +419,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataVariantsCarryVaryHeader) {
                                          HttpAttributes::kSaveData));
 
   // Without beacon data the filter is a strict no-op regardless of Save-Data,
-  // so its output does not depend on the header and no Vary is emitted.
+  // but the page still carries the Vary: it describes how the resource is
+  // selected over its lifetime, not how this one response was produced, so it
+  // must not depend on whether a beacon has landed yet (#27).
   ClearRewriteDriver();
   response_headers_.Clear();
   SetHtmlMimetype();
@@ -383,7 +432,8 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataVariantsCarryVaryHeader) {
                     "<body>"
                     "<img src=\"critical.jpg\"/>"
                     "</body>");
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
+  EXPECT_TRUE(response_headers_.HasValue(HttpAttributes::kVary,
+                                         HttpAttributes::kSaveData));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataUnsupportedEmitsNoVary) {
@@ -411,6 +461,101 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataUnsupportedEmitsNoVary) {
                    "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
                    "</body>");
   EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
+}
+
+TEST_F(PrioritizeCriticalImagesFilterTest, VaryIsIndependentOfBeaconData) {
+  InitPrioritizeCriticalImagesFilter();
+
+  const char kHtml[] = "<head></head>"
+                       "<body>"
+                       "<img src=\"critical.jpg\"/>"
+                       "</body>";
+  const char kAnnotatedHtml[] =
+      "<head></head>"
+      "<body>"
+      "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
+      "</body>";
+
+  // The issue's matrix: the same page under three finder states (cold: no
+  // beacon data yet; warm with a critical set; warm with an empty set), each
+  // with and without a Save-Data request header. Vary keys the resource's
+  // selection over its lifetime, so all six parses must carry the identical
+  // Vary, with Save-Data in it exactly once: neither cache warmth nor the
+  // request's own Save-Data header may move it (#27).
+  GoogleString vary_values[3][2];
+
+  server_context()->set_critical_images_finder(
+      new NoDataYetCriticalImagesFinder(statistics()));
+  ParseAndCollectVary("vary_no_data_yet", kHtml, false, kHtml,
+                      &vary_values[0][0]);
+  ParseAndCollectVary("vary_no_data_yet_save_data", kHtml, true, kHtml,
+                      &vary_values[0][1]);
+
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/critical.jpg");
+  SetCriticalImages(critical_images);
+  ParseAndCollectVary("vary_warm_critical", kHtml, false, kAnnotatedHtml,
+                      &vary_values[1][0]);
+  ParseAndCollectVary("vary_warm_critical_save_data", kHtml, true, kHtml,
+                      &vary_values[1][1]);
+
+  SetCriticalImages(nullptr);
+  ParseAndCollectVary("vary_warm_empty", kHtml, false, kHtml,
+                      &vary_values[2][0]);
+  ParseAndCollectVary("vary_warm_empty_save_data", kHtml, true, kHtml,
+                      &vary_values[2][1]);
+
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 2; ++j) {
+      EXPECT_EQ(vary_values[0][0], vary_values[i][j]);
+      EXPECT_EQ(GoogleString(HttpAttributes::kSaveData), vary_values[i][j]);
+    }
+  }
+}
+
+TEST_F(PrioritizeCriticalImagesFilterTest, BeaconDisabledEmitsNoVary) {
+  InitPrioritizeCriticalImagesFilter();
+  server_context()->set_critical_images_finder(
+      new DisabledCriticalImagesFinder(statistics()));
+
+  // kDisabled is configuration state: critical-image reporting is off, so
+  // the filter's output never depends on Save-Data and no Vary is emitted,
+  // with or without the request header.
+  ValidateNoChanges("beacon_disabled_no_save_data",
+                    "<head></head>"
+                    "<body>"
+                    "<img src=\"critical.jpg\"/>"
+                    "</body>");
+  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
+
+  ClearRewriteDriver();
+  response_headers_.Clear();
+  SetHtmlMimetype();
+  AddRequestAttribute(HttpAttributes::kSaveData, "on");
+  ValidateNoChanges("beacon_disabled_save_data",
+                    "<head></head>"
+                    "<body>"
+                    "<img src=\"critical.jpg\"/>"
+                    "</body>");
+  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kVary));
+}
+
+TEST_F(PrioritizeCriticalImagesFilterTest, VaryWithoutImages) {
+  InitPrioritizeCriticalImagesFilter();
+  SetCriticalImages(nullptr);
+
+  // The Vary rule is configuration-level, not content-level: a page with no
+  // <img> at all still carries "Vary: Save-Data" while the filter and
+  // critical-image reporting are enabled. Deciding the header from the page's
+  // content would need the whole page buffered before the first flush, and
+  // would flip with flush-window boundaries.
+  ValidateNoChanges("vary_without_images",
+                    "<head></head>"
+                    "<body>"
+                    "<p>nothing to prioritize here</p>"
+                    "</body>");
+  EXPECT_TRUE(response_headers_.HasValue(HttpAttributes::kVary,
+                                         HttpAttributes::kSaveData));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, SkipsDataUrlMissingSrcAndNoscript) {

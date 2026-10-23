@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
+  on cache state.** With Save-Data image qualities in effect, pages handled by
+  this filter carried `Vary: Save-Data` only once browsers had reported which
+  images are critical. Right after a cache purge the same page went out
+  without it, so a shared cache could key the page inconsistently. The page
+  now carries `Vary: Save-Data` whenever the filter and critical-image
+  reporting are enabled, whatever the cache state.
 - **`resize_rendered_image_dimensions` now uses the largest size of an image
   that appears more than once on a page, as documented.** Previously the size
   of its first appearance was used even when a later one was larger, so the

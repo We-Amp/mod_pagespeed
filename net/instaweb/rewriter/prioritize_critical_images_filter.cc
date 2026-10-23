@@ -63,7 +63,30 @@ void PrioritizeCriticalImagesFilter::DetermineEnabled(
   RewriterHtmlApplication::Status status = RewriterHtmlApplication::ACTIVE;
   CriticalImagesFinder* finder =
       driver()->server_context()->critical_images_finder();
-  if (finder->Available(driver()) != CriticalImagesFinder::kAvailable) {
+  CriticalImagesFinder::Availability availability = finder->Available(driver());
+  // The filter's output depends on the request's Save-Data header, so both
+  // variants must carry "Vary: Save-Data"; otherwise shared/browser caches
+  // can serve the prioritized variant to a Save-Data client, or the
+  // untouched variant to everyone else. Vary describes how the resource is
+  // selected over its lifetime, so it must be a function of configuration
+  // alone and never of beacon or property-cache state: emitting it only once
+  // beacon data is present flipped the header on the same URL between a
+  // cold and a warm cache, keying shared caches inconsistently (#27). It is
+  // therefore added whenever the Save-Data qualities are in effect and the
+  // finder is not kDisabled (critical-image reporting turned off in
+  // configuration), whatever the cache state and the request's own Save-Data
+  // header; the beacon data below still decides whether the filter acts.
+  // DetermineEnabled runs before the first flush, so the response headers
+  // are still mutable; they may be unwired entirely for non-HTML rewrites.
+  if (availability != CriticalImagesFinder::kDisabled &&
+      driver()->options()->SupportSaveData()) {
+    ResponseHeaders* headers = driver()->mutable_response_headers();
+    if (headers != nullptr &&
+        !headers->HasValue(HttpAttributes::kVary, HttpAttributes::kSaveData)) {
+      headers->Add(HttpAttributes::kVary, HttpAttributes::kSaveData);
+    }
+  }
+  if (availability != CriticalImagesFinder::kAvailable) {
     // Strict no-op without beacon data. This covers both kDisabled (data will
     // never come, e.g. beaconing off or unsupported by the platform) and
     // kNoDataYet (the page is instrumented but no beacon has landed).
@@ -74,25 +97,13 @@ void PrioritizeCriticalImagesFilter::DetermineEnabled(
     if (disabled_reason != nullptr) {
       *disabled_reason = "no critical images data available";
     }
-  } else if (driver()->options()->SupportSaveData()) {
-    // The filter's output depends on the request's Save-Data header, so both
-    // variants must carry "Vary: Save-Data"; otherwise shared/browser caches
-    // can serve the prioritized variant to a Save-Data client, or the
-    // untouched variant to everyone else. DetermineEnabled runs before the
-    // first flush, so the response headers are still mutable; they may be
-    // unwired entirely for non-HTML rewrites.
-    ResponseHeaders* headers = driver()->mutable_response_headers();
-    if (headers != nullptr &&
-        !headers->HasValue(HttpAttributes::kVary, HttpAttributes::kSaveData)) {
-      headers->Add(HttpAttributes::kVary, HttpAttributes::kSaveData);
-    }
-    if (driver()->request_properties()->RequestsSaveData()) {
-      // A Save-Data client asked us to conserve bytes; frontloading image
-      // fetches works against that request, so stay out of the way.
-      status = RewriterHtmlApplication::DISABLED;
-      if (disabled_reason != nullptr) {
-        *disabled_reason = "request has Save-Data enabled";
-      }
+  } else if (driver()->options()->SupportSaveData() &&
+             driver()->request_properties()->RequestsSaveData()) {
+    // A Save-Data client asked us to conserve bytes; frontloading image
+    // fetches works against that request, so stay out of the way.
+    status = RewriterHtmlApplication::DISABLED;
+    if (disabled_reason != nullptr) {
+      *disabled_reason = "request has Save-Data enabled";
     }
   }
   set_is_enabled(status == RewriterHtmlApplication::ACTIVE);
