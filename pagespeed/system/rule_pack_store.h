@@ -91,6 +91,13 @@ class RulePackStore : public RulePackProvider {
     refresh_hook_ = std::move(hook);
   }
 
+  // Lowers the bound on the record of announced loads (at least 3), so a
+  // test can cross its wraparound without loading kMaxAnnounced / 2 packs.
+  void set_max_announced_for_testing(size_t max_announced) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    max_announced_ = max_announced;
+  }
+
   size_t announced_size_for_testing() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return announced_.size();
@@ -153,6 +160,7 @@ class RulePackStore : public RulePackProvider {
   std::map<std::string, Alias> aliases_;  // configured path -> canonical
   std::map<std::string, Entry> entries_;  // canonical path -> pack
   std::set<std::string> announced_;       // what was logged, once each
+  size_t max_announced_ = kMaxAnnounced;  // guarded by mutex_
   // Signature verdicts per (pack hash, sidecar hash, trust configuration).
   std::map<std::string, Verdict> verdicts_;
   std::set<std::string> reported_;  // verdict keys already logged/counted
