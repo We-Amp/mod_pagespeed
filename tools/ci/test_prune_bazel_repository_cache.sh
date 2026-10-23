@@ -12,7 +12,12 @@
 #      symlinked content_addressable/ is left alone.
 #   6. hash directories left empty are removed, others are kept.
 #   7. id-* markers survive while their `file` does, and go with it.
-#   8. malformed age or size arguments are refused (status 2), nothing deleted.
+#   8. malformed age or size arguments are refused (status 2), nothing
+#      deleted; an age with more than five digits or a size with more than
+#      six digits is refused, a six-digit size cap is applied.
+#   9. a candidate name containing a newline is removed as one file and never
+#      yields a delete path outside the cache.
+#  10. numbers with leading zeros are read base 10 (08d is 8 days, 02500 bytes).
 #
 # Run: tools/ci/test_prune_bazel_repository_cache.sh
 
@@ -96,11 +101,37 @@ if exists "$D/$CA/keep/file" && exists "$D/$CA/keep/id-abc" \
 
 # 8. malformed arguments are refused with status 2 and delete nothing
 D="$T/bad"; mk "$D/$CA/x/file" 100 90
-for args in "30 8G" "30d 8g" "30d 8X" "30d 8GB" "1xd 8G" "30d 1.5G" "30d G"; do
+for args in "30 8G" "30d 8g" "30d 8X" "30d 8GB" "1xd 8G" "30d 1.5G" "30d G" "30d 1000000" \
+            "30d 1000000G" "1000000d 8G" "9223372036854775807d 8G"; do
   # shellcheck disable=SC2086
   "$PRUNE" "$D" $args >/dev/null 2>&1; rc=$?
   if [ "$rc" -eq 2 ] && exists "$D/$CA/x/file"; then pass "arguments '$args' refused"; else fail "arguments '$args' (rc=$rc)"; fi
 done
+# the size digit cap rejects the seventh digit, not the sixth; the files are
+# recent, so only the size cap can remove the one over it
+D="$T/six"; mk "$D/$CA/big/file" 300000 1; mk "$D/$CA/small/file" 100 1
+"$PRUNE" "$D" 30d 250000 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && ! exists "$D/$CA/big/file" && exists "$D/$CA/small/file"; then
+  pass "a six-digit size cap is applied"; else fail "six-digit size cap (rc=$rc)"; fi
+
+# 9. a name containing a newline: the name's second line must not be parsed
+#    as its own list record and delete a path outside the cache
+D="$T/newline"; OUT="$T/newline-outside"; mkdir -p "$D/$CA" "$OUT"
+mk "$OUT/innocent" 100 1; mk "$D/$CA/keep/file" 100 1
+EVIL="$D/$CA/hx/file
+1000000000 0 $OUT/innocent"
+mk "$EVIL" 100 40
+"$PRUNE" "$D" 30d 1G >/dev/null
+if ! exists "$EVIL" && exists "$D/$CA/keep/file" && exists "$OUT/innocent"; then
+  pass "a name with a newline is removed whole, nothing outside is touched"; else fail "newline in file name"; fi
+
+# 10. leading zeros are decimal: 08d means eight days, 02500 means 2500 bytes
+D="$T/zeros"
+mk "$D/$CA/h1/file" 1000 5; mk "$D/$CA/h2/file" 1000 4; mk "$D/$CA/h3/file" 1000 3; mk "$D/$CA/h4/file" 1000 2
+"$PRUNE" "$D" 08d 02500 >/dev/null 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && ! exists "$D/$CA/h1/file" && ! exists "$D/$CA/h2/file" \
+   && exists "$D/$CA/h3/file" && exists "$D/$CA/h4/file"; then
+  pass "leading zeros are read base 10 for age and size"; else fail "leading zeros (rc=$rc)"; fi
 
 if [ "$FAILS" -ne 0 ]; then echo "$FAILS failure(s)"; exit 1; fi
 echo "All prune-bazel-repository-cache cases passed"
