@@ -108,8 +108,11 @@ class IisInPlaceResourceHandler {
   static void SetCacheHeaders(IHttpResponse* response,
                               int64 cache_ttl_ms);
 
-  // Handle conditional request (If-None-Match, If-Modified-Since).
-  // Returns true if 304 response was sent.
+  // Sends the 304 response for a conditional request. The caller
+  // (HandleRequest) has already matched If-None-Match; this handler does
+  // not evaluate If-Modified-Since, and last_modified_time_ms is unused.
+  // The shared serve arm on the daemon path evaluates both headers (see
+  // daemon_serve_arm.cc). Returns true if the 304 response was sent.
   static bool HandleConditionalRequest(IHttpContext* context,
                                        const GoogleString& etag,
                                        int64 last_modified_time_ms);
