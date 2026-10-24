@@ -1844,13 +1844,25 @@ RewriteOptions* ps_determine_remote_options(ps_srv_conf_t* cfg_s) {
       !cfg_s->server_context->global_options()) {
     return nullptr;
   }
-  if (!cfg_s->server_context->global_options()
-           ->remote_configuration_url()
-           .empty()) {
-    RewriteOptions* remote_options =
-        cfg_s->server_context->global_options()->Clone();
+  NgxServerContext* server_context = cfg_s->server_context;
+  if (!server_context->global_options()->remote_configuration_url().empty()) {
+    RewriteOptions* remote_options = server_context->global_options()->Clone();
+    // With the native fetcher a remote configuration fetch only makes
+    // progress on the nginx event loop, which is the very thread the wait in
+    // GetRemoteOptions below blocks: every expired cache entry would stall
+    // this worker for the full timeout and still not apply the
+    // configuration.  Don't wait in that case.  The HTTP cache answers
+    // synchronously, so a cached copy is still applied, and the refresh
+    // completes on the free event loop for later requests.  A non-blocking
+    // cache backend (external memcached or redis) keeps the configured
+    // wait, because a timeout of 0 would never apply even a cached copy.
+    if (server_context->ngx_rewrite_driver_factory()->use_native_fetcher() &&
+        server_context->http_cache() != nullptr &&
+        server_context->http_cache()->cache()->IsBlocking()) {
+      remote_options->set_remote_configuration_timeout_ms(0);
+    }
     // This fetch is blocking for up to remote_configuration_timeout_ms ms.
-    cfg_s->server_context->GetRemoteOptions(remote_options, false);
+    server_context->GetRemoteOptions(remote_options, false);
     return remote_options;
   }
   return nullptr;
@@ -4828,6 +4840,55 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
 
     cfg_m->driver_factory->LoggingInit(cycle->log, true);
     cfg_m->driver_factory->RootInit();
+
+    // Interim mitigation for the native fetcher (#301): a remote
+    // configuration refresh can only progress on the nginx event loop, so
+    // waiting for it on the request path holds up every connection on the
+    // worker for the full RemoteConfigurationTimeoutMs.  With a blocking
+    // HTTP cache the request path does not wait (see
+    // ps_determine_remote_options); on a non-blocking (external) cache
+    // backend the configured wait is kept, because a timeout of 0 would
+    // never apply even a cached copy.  One warning per affected server.
+    // This runs in the master, where the per-server message handler and
+    // the caches are wired only later, at ChildInit in the workers: log
+    // through the main conf's handler (as the resolver check above does)
+    // and decide the cache case from configuration, with the same
+    // external-cache condition SystemCaches::NewExternalCache applies.
+    for (SystemServerContext* server_context : server_contexts) {
+      const RewriteOptions* options = server_context->global_options();
+      if (!cfg_m->driver_factory->use_native_fetcher() || options == nullptr ||
+          options->remote_configuration_url().empty()) {
+        continue;
+      }
+      const SystemRewriteOptions* system_options =
+          SystemRewriteOptions::DynamicCast(options);
+      bool external_cache = false;
+      if (system_options != nullptr) {
+        external_cache = !system_options->redis_server().empty();
+#if PAGESPEED_ENABLE_MEMCACHED
+        // Memcached with zero threads answers synchronously as well;
+        // warning conservatively in that corner costs one needless line.
+        external_cache =
+            external_cache || !system_options->memcached_servers().empty();
+#endif
+      }
+      if (external_cache) {
+        cfg_m->handler->Message(
+            kWarning,
+            "RemoteConfigurationUrl %s is set and UseNativeFetcher is on: "
+            "requests may stall up to RemoteConfigurationTimeoutMs while "
+            "the remote configuration refreshes.",
+            options->remote_configuration_url().c_str());
+      } else {
+        cfg_m->handler->Message(
+            kWarning,
+            "RemoteConfigurationUrl %s is set and UseNativeFetcher is on: "
+            "pagespeed will not wait for a remote configuration refresh on "
+            "the request path; requests during a refresh are served with "
+            "the local configuration.",
+            options->remote_configuration_url().c_str());
+      }
+    }
 
     // Opt-in counter (experimental): map (or create on first run)
     // the shared counter file HERE in the master, before workers fork, so the

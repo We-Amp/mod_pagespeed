@@ -91,6 +91,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **nginx: a remote configuration refresh no longer pauses the worker when
+  the native fetcher is in use.** With `RemoteConfigurationUrl` and
+  `UseNativeFetcher on`, each refresh used to hold up every connection on
+  the worker for the full `RemoteConfigurationTimeoutMs`. With the default
+  file cache, requests during a refresh now use the local configuration
+  and later requests the refreshed copy; with an external cache
+  (memcached or redis) the module still waits up to the timeout and warns
+  about the combination at startup. With the default fetcher a refresh
+  can still delay requests by up to the timeout.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
