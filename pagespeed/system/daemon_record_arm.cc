@@ -97,16 +97,8 @@ uint32_t ClampToUint32(int64 value) {
 // D6.4 rule 6's allowlist, verbatim.  `Vary` is not here: it is allowlisted
 // conditionally, on its tokens, below.
 const char* const kReproducibleHeaders[] = {
-    "cache-control",
-    "content-type",
-    "content-length",
-    "etag",
-    "last-modified",
-    "expires",
-    // One port's header table names the entity tag "E-Tag"; the same
-    // header under its port spelling, so the alias.  It goes when that
-    // port's table is corrected.
-    "e-tag",
+    "cache-control", "content-type",  "content-length",
+    "etag",          "last-modified", "expires",
 };
 
 // Stamped per response by whatever serves it, on BOTH paths, so never a
@@ -151,7 +143,7 @@ const char* const kServeGeneratedHeaders[] = {
 // fail-closed, because a name this list does not know is a bookmark some
 // port minted for a reason this predicate cannot see.
 const char* const kPortCopiedHeaders[] = {
-    "__x_expires",       "__x_e-tag",         "__x_content-md5",
+    "__x_expires",       "__x_etag",          "__x_content-md5",
     "__x_last-modified", "__x_accept_ranges", "__x_cache-control",
     "__x_accept-ranges",
 };

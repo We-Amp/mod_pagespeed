@@ -189,39 +189,6 @@ TEST_F(DaemonIproRecorderTest, RecordsAndNotifiesAnEligibleResponse) {
   EXPECT_NE(GoogleString::npos, log.find("notify ")) << log;
 }
 
-TEST_F(DaemonIproRecorderTest, AnEntityTagUnderAPortsOwnSpellingIsStillCarried) {
-  // One port's header table names the entity tag "E-Tag", so the origin's
-  // validator arrives under that spelling and the canonical lookup finds
-  // nothing. It must still reach the peer: an entry without the origin's
-  // validator cannot be revalidated against the origin later.
-  ResponseHeaders headers;
-  MakeOkHeaders(&headers);
-  headers.RemoveAll(HttpAttributes::kEtag);
-  headers.Add("E-Tag", "\"xyz\"");
-  headers.ComputeCaching();
-
-  const DaemonRecordOutcome outcome = Run(&headers, kBody);
-
-  EXPECT_EQ(DaemonRecordVerdict::kStoreAndNotify, outcome.verdict);
-  EXPECT_TRUE(outcome.stored);
-  const GoogleString log = CallLog();
-  EXPECT_NE(GoogleString::npos, log.find("etag=\"xyz\"")) << log;
-}
-
-TEST_F(DaemonIproRecorderTest, TheCanonicalEntityTagWinsOverThePortsSpelling) {
-  // Both present: the canonical name is the one that is carried.
-  ResponseHeaders headers;
-  MakeOkHeaders(&headers);
-  headers.Add("E-Tag", "\"other\"");
-  headers.ComputeCaching();
-
-  Run(&headers, kBody);
-
-  const GoogleString log = CallLog();
-  EXPECT_NE(GoogleString::npos, log.find("etag=\"abc\"")) << log;
-  EXPECT_EQ(GoogleString::npos, log.find("etag=\"other\"")) << log;
-}
-
 TEST_F(DaemonIproRecorderTest, TheRecorderDeletesItself) {
   const int64 before = DaemonIproRecorder::num_constructed();
   ResponseHeaders headers;
