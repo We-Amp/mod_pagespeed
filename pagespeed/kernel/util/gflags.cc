@@ -19,12 +19,25 @@
 
 #include "pagespeed/kernel/util/gflags.h"
 
-#include "gflags/gflags.h"
+#include <vector>
+
+#include "absl/flags/parse.h"
 
 namespace net_instaweb {
 
 void ParseGflags(const char* progname, int* argc, char*** argv) {
-  google::ParseCommandLineFlags(argc, argv, true);
+  // absl::ParseCommandLine strips the flags it recognizes and returns the
+  // remaining positional arguments, with the program name first.  Copy them
+  // back into the caller's argv, which always has room for at least as many
+  // entries as the parser was given.
+  std::vector<char*> positional = absl::ParseCommandLine(*argc, *argv);
+  *argc = static_cast<int>(positional.size());
+  for (int i = 0; i < *argc; ++i) {
+    (*argv)[i] = positional[i];
+  }
+  // Keep argv null-terminated, as it was on entry; *argc never grows, so
+  // this slot is within the caller's original array.
+  (*argv)[*argc] = nullptr;
 }
 
 }  // namespace net_instaweb

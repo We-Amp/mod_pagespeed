@@ -1226,7 +1226,7 @@ RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
 void RewriteOptions::AddProperties() {
   // TODO(jmarantz): move the help text to #defines or maybe const char[] in
   // .h file so that rewrite_gflags.cc can reference the same strings in
-  // DEFINE_xxx directives.
+  // ABSL_FLAG declarations.
   //
   //
   // Note: there are two functions used for registering properties here,

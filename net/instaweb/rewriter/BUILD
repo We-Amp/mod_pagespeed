@@ -365,6 +365,9 @@ cc_library(
         # out under ENABLE_URL_SIGNATURES=0 and returns zeros, which would
         # collapse every option context into one.
         "@boringssl//:crypto",
+        # rewrite_gflags.cc defines and reads absl flags.
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/flags:parse",
     ],
 )
 

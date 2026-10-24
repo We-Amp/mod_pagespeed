@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
   //   URL:               The URL of HTML to rewrite.
   if (argc != 4) {
     fprintf(stderr, "Usage: [options] %s input_dir output_dir url.\n", argv[0]);
-    fprintf(stderr, "Type '%s --help' to see the options\n", argv[0]);
+    fprintf(stderr, "Type '%s --helpfull' to see the options\n", argv[0]);
     return 1;
   }
   const char* input_dir = argv[1];
