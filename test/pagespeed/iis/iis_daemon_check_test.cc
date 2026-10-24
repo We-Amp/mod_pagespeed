@@ -481,7 +481,16 @@ TEST_F(IisDaemonCheckTest, OneOptionAloneIsUnavailableWithOneLineAndNoLoad) {
   EXPECT_EQ(EventLogLevel::kWarning, last_level);
   EXPECT_NE(GoogleString::npos, last_message.find(pipe_name))
       << last_message;
-  EXPECT_NE(GoogleString::npos, last_message.find("DaemonVolumePath"))
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("DaemonVolumePath (not set)"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("The check reported: "))
+      << last_message;
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("must be set"))
+      << last_message;
+  EXPECT_EQ(GoogleString::npos, last_message.find("reported below"))
       << last_message;
   EXPECT_NE(GoogleString::npos,
             last_message.find("does not check again"))
@@ -505,6 +514,50 @@ TEST_F(IisDaemonCheckTest, OneOptionAloneIsUnavailableWithOneLineAndNoLoad) {
   EXPECT_EQ(2, log_count.load());
   EXPECT_EQ(EventLogLevel::kWarning, last_level);
   EXPECT_NE(GoogleString::npos, last_message.find(StrCat(dir_, "/half")))
+      << last_message;
+  // The socket is empty here: the entry says so, and still carries the
+  // cause the adapter announced once for the first configuration.
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("DaemonSocketPath (not set)"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos, last_message.find("The check reported:"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos, last_message.find("must be set"))
+      << last_message;
+}
+
+TEST_F(IisDaemonCheckTest, ARepeatedCauseIsNeverReplacedByAnotherConfigurations) {
+  // The adapter announces a distinct message once per process, so the
+  // second half configuration captures nothing. Its entry must still carry
+  // ITS OWN cause (half a configuration), not the missing-library cause a
+  // different configuration produced in between.
+  RecordingHandler site;
+
+  // First half configuration: announces the half-configuration cause.
+  IisDaemonCheckRegistry::Result first =
+      CheckSite("", StrCat(dir_, "/half-one"), &site);
+  ASSERT_NE(nullptr, first.adapter);
+  // A different configuration, with the real binder and no client library
+  // beside the test binary: a different cause, announced and captured last.
+  IisDaemonCheckRegistry::Result library =
+      CheckSite(UniquePipeName(), StrCat(dir_, "/no-library"), &site);
+  ASSERT_NE(nullptr, library.adapter);
+  EXPECT_TRUE(site.SawContaining(DefaultDaemonLibraryPath())) << site.Dump();
+  const int before = log_count.load();
+
+  // Second half configuration, another volume: its cause text was already
+  // announced, so nothing is captured for it.
+  IisDaemonCheckRegistry::Result second =
+      CheckSite("", StrCat(dir_, "/half-two"), &site);
+  ASSERT_NE(nullptr, second.adapter);
+  EXPECT_EQ(DaemonHealth::kUnavailable, second.adapter->health());
+  EXPECT_EQ(before + 1, log_count.load());
+  EXPECT_NE(GoogleString::npos, last_message.find(StrCat(dir_, "/half-two")))
+      << last_message;
+  EXPECT_NE(GoogleString::npos, last_message.find("must be set"))
+      << last_message;
+  EXPECT_EQ(GoogleString::npos,
+            last_message.find(DefaultDaemonLibraryPath()))
       << last_message;
 }
 
