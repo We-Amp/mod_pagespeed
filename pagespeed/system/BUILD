@@ -218,6 +218,9 @@ cc_library(
         "//net/instaweb/rewriter",
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
+        # GzipInflater::HasGzipMagicBytes: the recorder's backstop for a
+        # capture-time view that missed the origin's own coding.
+        "//pagespeed/kernel/util",
     ],
 )
 

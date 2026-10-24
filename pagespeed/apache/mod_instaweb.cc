@@ -774,6 +774,13 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
           response_headers.Replace(HttpAttributes::kContentType,
                                    request->content_type);
         }
+        // The content-type is not the only fact that reaches headers_out
+        // only at AP_FTYPE_PROTOCOL: the origin's own Content-Encoding can
+        // sit in err_headers_out or request->content_encoding at this point,
+        // and an encoded origin response must be refused from THESE headers,
+        // before the body is buffered, rather than recorded as the identity
+        // original its bytes are not.
+        AddOriginContentEncoding(*request, &response_headers);
 
         recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
                                           &response_headers);

@@ -434,6 +434,17 @@ TEST_F(DaemonRecordArmTest, TheReproducibleSetIsWhatAServeCanPutBack) {
       Headers({"Content-Type", "text/css", "Age", "42"})));
   EXPECT_TRUE(OriginHeadersAreReproducible(
       Headers({"Content-Type", "text/css", "accept-ranges", "bytes"})));
+  // `Content-Encoding` here is the server's own compressor, which runs after
+  // the recording seam captured the body and stamps its coding on the
+  // finalized headers; it stamps the same header on every serve of the entry.
+  // An origin that encoded the resource itself never reaches this predicate
+  // with a stored entry: the recorder refuses a non-identity capture before
+  // the gate, and the gate refuses a finalized encoding the capture never
+  // saw.  Classed as origin content this marked every stylesheet and script a
+  // browser requested on a stock Apache lane, and a marked entry is declined
+  // on every serve.
+  EXPECT_TRUE(OriginHeadersAreReproducible(
+      Headers({"Content-Type", "text/css", "Content-Encoding", "gzip"})));
 
   // A port's own copies of headers that are present under their real names
   // in the same set: the IIS port bookmarks cache-related headers under
@@ -475,8 +486,7 @@ TEST_F(DaemonRecordArmTest, TheReproducibleSetIsWhatAServeCanPutBack) {
       Headers({"Content-Type", "text/css", "__x_something-else", "1"})));
 
   // Not reproducible.  An arbitrary header, the CORS grant, a security policy,
-  // a personalised response, and a representation-level header the entry does
-  // not store.
+  // and a personalised response.
   EXPECT_FALSE(OriginHeadersAreReproducible(
       Headers({"Content-Type", "text/css", "X-Custom", "1"})));
   EXPECT_FALSE(OriginHeadersAreReproducible(Headers(
@@ -486,8 +496,6 @@ TEST_F(DaemonRecordArmTest, TheReproducibleSetIsWhatAServeCanPutBack) {
                "default-src 'self'"})));
   EXPECT_FALSE(OriginHeadersAreReproducible(
       Headers({"Content-Type", "text/css", "Set-Cookie", "a=b"})));
-  EXPECT_FALSE(OriginHeadersAreReproducible(
-      Headers({"Content-Type", "text/css", "Content-Encoding", "gzip"})));
   // A near neighbour of a member is not a member: the set is a closed list of
   // exact names.
   EXPECT_FALSE(OriginHeadersAreReproducible(

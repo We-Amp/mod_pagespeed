@@ -49,6 +49,13 @@ from pagespeed_test_framework import (
 
 PACK_DIR = "/mod_pagespeed_test/rule_packs"
 DAEMON_CSS_PATH = "/daemon_lane/lane.css"
+# The stylesheet the mod_deflate case fetches: used by no other case, so its
+# entry is only ever recorded by a request that advertises Accept-Encoding.
+DAEMON_DEFLATE_CSS_PATH = "/daemon_lane/deflate.css"
+# The stylesheet the origin-encoded case fetches: shipped as .css.gz with
+# AddEncoding gzip .gz, so the origin compressed it, not the lane's filter
+# chain. Used by no other case, so nothing else can record or serve it.
+DAEMON_PRECOMPRESSED_CSS_PATH = "/daemon_lane/precompressed.css.gz"
 # How long the optimizer worker gets to optimize a stylesheet after it was recorded.
 WORKER_DEADLINE_S = 60.0
 # An image takes longer: the worker searches for the smallest acceptable encoding.
@@ -811,6 +818,93 @@ class TestDaemonServing:
         # A stylesheet is stored at one device class: no device axes in Vary.
         tokens = {t.strip().lower() for t in response.header("Vary").split(",") if t.strip()}
         assert not tokens & {"user-agent", "save-data"}, dict(response.headers)
+
+    def test_a_stylesheet_compressed_by_mod_deflate_is_served_by_the_daemon(
+        self, pack_site, pack_stats
+    ):
+        """A browser's request advertises Accept-Encoding, so the lane's
+        mod_deflate compresses the stylesheet. The recorder captures the bytes
+        before the compressor runs and reads the finalized headers after it,
+        which carry the compressor's Content-Encoding: the record must carry
+        no encoding -- the captured bytes are the uncompressed ones -- or the
+        stylesheet is never recorded and the daemon never serves it.
+
+        The sibling on the classic in-place path is TestIproWithModDeflate in
+        automatic/test_ipro.py.
+        """
+        site = pack_site(DAEMON_HOST)
+        before = pack_stats(DAEMON_HOST)
+        counter = "ipro_daemon_served_css"
+        saw_gzip = False
+        deadline = time.time() + WORKER_DEADLINE_S
+        while True:
+            response = site.get_gzip(DAEMON_DEFLATE_CSS_PATH)
+            require_status_ok(response, f"{DAEMON_HOST}{DAEMON_DEFLATE_CSS_PATH}")
+            # The precondition, on whichever leg answered: the compressor is
+            # compressing this stylesheet, or the case proves nothing. The
+            # counter below is HOST-WIDE, so any stylesheet the daemon serves
+            # while this loop runs satisfies it; this URL's own proof is the
+            # Age and body assertions after the loop.
+            saw_gzip = saw_gzip or response.header("Content-Encoding") == "gzip"
+            if pack_stats(DAEMON_HOST).get(counter, 0) - before.get(counter, 0) >= 1:
+                break
+            if time.time() >= deadline:
+                pytest.fail(
+                    "no deflate-compressed stylesheet was served by the daemon "
+                    f"({counter}) within {WORKER_DEADLINE_S}s"
+                )
+            time.sleep(1.0)
+        assert saw_gzip, (
+            "the lane's mod_deflate no longer compresses text/css; this "
+            "case's precondition is gone"
+        )
+        # The daemon's hit leg, same marks as the uncompressed sibling.
+        assert response.header("Age"), dict(response.headers)
+        assert not response.header("X-Mod-Pagespeed") and not response.header(
+            "X-Page-Speed"
+        ), dict(response.headers)
+        # get_gzip handed back the decompressed body: what was recorded and
+        # served is the stylesheet, not the gzip bytes verbatim.
+        assert b"#13579b" in response.body, response.body[:120]
+
+    def test_a_pre_compressed_stylesheet_is_never_served_as_plain(
+        self, pack_site, pack_stats
+    ):
+        """An AddEncoding gzip .gz asset is compressed by the ORIGIN, and
+        mod_mime states that coding in r->content_encoding, which reaches
+        the response headers only after the recorder's capture. The
+        capture-time snapshot must state it too, so the entry is refused
+        rather than stored as a plain original whose gzip bytes the serve
+        arm would hand out as CSS. The gzip magic bytes in the body are the
+        second refusal, for a view that still misses the coding.
+
+        Refetching proves the negative: a wrongly stored entry has origin
+        freshness (the lane states max-age for it) and would be served with
+        an Age header on the second fetch, and its bytes would not
+        decompress to the stylesheet.
+        """
+        site = pack_site(DAEMON_HOST)
+        before = pack_stats(DAEMON_HOST)
+        for _ in range(2):
+            response = site.get_gzip(DAEMON_PRECOMPRESSED_CSS_PATH)
+            require_status_ok(
+                response, f"{DAEMON_HOST}{DAEMON_PRECOMPRESSED_CSS_PATH}"
+            )
+            assert response.header("Content-Type").startswith(
+                "text/css"
+            ), dict(response.headers)
+            assert response.header("Content-Encoding") == "gzip", dict(
+                response.headers
+            )
+            # The origin's own gzip every time: decompressed by get_gzip.
+            assert b".precompressed" in response.body, response.body[:120]
+            assert not response.header("Age"), dict(response.headers)
+        # HOST-WIDE counter, read only as a cross-check beside this URL's
+        # own marks above: no stylesheet serve may happen while this case
+        # runs, since the case's fetches are the only ones being made.
+        assert pack_stats(DAEMON_HOST).get("ipro_daemon_served_css", 0) == (
+            before.get("ipro_daemon_served_css", 0)
+        )
 
     def test_an_image_variant_names_every_header_it_was_chosen_by(self, pack_site):
         """The image variant is chosen by the format in Accept, the device
