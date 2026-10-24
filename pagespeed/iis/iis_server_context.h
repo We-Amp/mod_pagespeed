@@ -5,6 +5,8 @@
 #define IIS_SERVER_CONTEXT_H_
 
 #include "pagespeed/system/system_server_context.h"
+
+#include <atomic>
 #include <memory>
 
 #include "pagespeed/system/daemon_adapter.h"
@@ -43,15 +45,22 @@ namespace net_instaweb {
 		// no adapter is attached.  Asked through ServingHealth(): a
 		// daemon that was not running when the check ran is looked for
 		// again here, at most once per retry interval, so a worker
-		// process picks it up without a pool recycle.
-		DaemonHealth daemon_health() const {
-			return daemon_adapter_ == nullptr
-			           ? DaemonHealth::kNotConfigured
-			           : daemon_adapter_->ServingHealth();
-		}
+		// process picks it up without a pool recycle.  The one transition
+		// an operator must hear about -- a recheck reattached a service
+		// this worker started without -- becomes one informational
+		// event-log entry; the registry de-duplicates it across every
+		// site sharing the adapter.
+		DaemonHealth daemon_health() const;
 		DaemonAdapter* daemon_adapter() { return daemon_adapter_; }
 		void set_daemon_adapter(DaemonAdapter* adapter) {
 			daemon_adapter_ = adapter;
+			// Seed the transition memory with the start-up verdict: a
+			// context attached to an adapter that has already recovered
+			// must not announce a recovery it never saw the start of.
+			last_daemon_health_.store(
+				adapter == nullptr ? DaemonHealth::kNotConfigured
+				                   : adapter->health(),
+				std::memory_order_relaxed);
 			// The peer's serve-stats mapping, opened and never created: the
 			// serve arm records exactly one class per response through it,
 			// and without it "the daemon was not usable" and "this serve was
@@ -74,6 +83,13 @@ namespace net_instaweb {
 		ProxyFetchFactory* fetch_factory_;
 		IisRewriteDriverFactory* iis_factory_;
 		DaemonAdapter* daemon_adapter_ = nullptr;
+		// The verdict this context last handed out, so the one transition
+		// that matters (unavailable to ready, a serving recheck
+		// reattaching the service) is noticed exactly once per context
+		// however many threads read it.  Mutable: daemon_health() is
+		// const, and what it records is process state, not context state.
+		mutable std::atomic<DaemonHealth> last_daemon_health_{
+			DaemonHealth::kNotConfigured};
 		std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
  		IisServerContext(const IisServerContext&) = delete;
  		IisServerContext& operator=(const IisServerContext&) = delete;

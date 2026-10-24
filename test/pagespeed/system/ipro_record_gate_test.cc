@@ -90,6 +90,17 @@ TEST_F(IproRecordGateTest, AnUnavailableDaemonTurnsIproOff) {
             IproDispositionFor(DaemonHealth::kUnavailable));
 }
 
+// --- the init-status token --------------------------------------------------
+
+TEST_F(IproRecordGateTest, TheInitStatusTokenNamesOnlyTheUnavailableVerdict) {
+  // The one degraded state a working site can be in: a configured daemon
+  // that is not usable.  A ready or unconfigured site carries no header.
+  EXPECT_STREQ("daemon-unavailable",
+               DaemonInitStatusToken(DaemonHealth::kUnavailable));
+  EXPECT_EQ(nullptr, DaemonInitStatusToken(DaemonHealth::kReady));
+  EXPECT_EQ(nullptr, DaemonInitStatusToken(DaemonHealth::kNotConfigured));
+}
+
 // --- non-instantiation ------------------------------------------------------
 
 TEST_F(IproRecordGateTest, DaemonAbsentConstructsNoRecorder) {

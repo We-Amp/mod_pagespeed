@@ -180,18 +180,112 @@ IisDaemonCheckRegistry::Result IisDaemonCheckRegistry::GetOrCreate(
 			// follow it only in the entry: they come through the adapter's
 			// once-per-process announcement, so a second adapter over the
 			// same volume would bring none and must not add a second entry.
-			if (split_logged_.insert(message).second) {
+			std::lock_guard<std::mutex> event_lock(event_mu_);
+			if (event_logged_.insert(message).second) {
 				if (!check_error.empty()) {
 					StrAppend(&message, " The check reported: ", check_error);
 				}
 				InitEventLog();
 				LogEvent(EventLogLevel::kError, message.c_str());
 			}
+		} else if (entry.adapter->health() == DaemonHealth::kUnavailable &&
+				entry.adapter->unavailable_is_retryable()) {
+			// The one degraded verdict a working site can carry: the service
+			// was configured and was not running when this worker started.
+			// ONE warning per distinct text per process, and -- like the
+			// split entry above, and for the same reason: a setup fault an
+			// operator has to see, not per-request volume -- written
+			// whatever the UseEventLog directive says.  This entry covers
+			// only the verdict the serving recheck retries, because only
+			// its text can promise that the module looks again; the final
+			// verdicts get their own entry below.  The socket joins
+			// warned_sockets_ so the recovery note can answer this entry.
+			GoogleString message = StrCat(
+			    "The pagespeed module started without the optimizer service "
+			    "it is configured to use (DaemonSocketPath ", socket_path,
+			    "): in-place optimization through the service is off for "
+			    "every site configured with this socket. Start the optimizer "
+			    "service, or correct DaemonSocketPath / DaemonVolumePath if "
+			    "they do not name the service's. The module checks for the "
+			    "service again every ",
+			    Integer64ToString(
+			        DaemonAdapter::kUnavailableRetryIntervalMs / 1000),
+			    " seconds and turns it on when the service answers; no IIS "
+			    "restart is needed.");
+			// De-duplicated on the fixed text above, and the check's own
+			// words appended only to the entry, exactly as for the split.
+			std::lock_guard<std::mutex> event_lock(event_mu_);
+			if (event_logged_.insert(message).second) {
+				warned_sockets_.insert(socket_path);
+				if (!check_error.empty()) {
+					StrAppend(&message, " The check reported: ", check_error);
+				}
+				InitEventLog();
+				LogEvent(EventLogLevel::kWarning, message.c_str());
+			}
+		} else if (entry.adapter->health() == DaemonHealth::kUnavailable) {
+			// Every OTHER unavailable verdict: half a configuration (one of
+			// the two directives missing), a missing or old client library,
+			// a generation mismatch, permission denied, an open failure.
+			// Each is final for the process -- no recheck retries it, so
+			// the entry above and its promise to look again would be false
+			// for it -- but without an entry these verdicts keep the exact
+			// symptom this module exists to remove: configured, not
+			// working, and invisible outside the message history (their
+			// kError announcement reaches the event log only with
+			// UseEventLog).  ONE warning per configuration, with its own
+			// text.  BOTH paths are named: with half a configuration one
+			// of them is empty, and the socket alone says nothing then.
+			// The socket does NOT join warned_sockets_: these verdicts can
+			// never recover, so no recovery note can follow anyway.
+			GoogleString message = StrCat(
+			    "The pagespeed module is configured to use the optimizer "
+			    "service (DaemonSocketPath ", socket_path,
+			    ", DaemonVolumePath ", volume_path,
+			    ") but cannot use it: in-place optimization through the "
+			    "service is off for every site configured with these paths "
+			    "until the application pool recycles. The module does not "
+			    "check again; correct the cause reported below, then "
+			    "recycle the application pool.");
+			std::lock_guard<std::mutex> event_lock(event_mu_);
+			if (event_logged_.insert(message).second) {
+				if (!check_error.empty()) {
+					StrAppend(&message, " The check reported: ", check_error);
+				}
+				InitEventLog();
+				LogEvent(EventLogLevel::kWarning, message.c_str());
+			}
 		}
 	}
 	result.adapter = entry.adapter.get();
 	result.split = entry.split;
 	return result;
+}
+
+void IisDaemonCheckRegistry::NoteDaemonRecovered(
+    const DaemonAdapter* adapter) {
+	// ONE informational entry when a serving recheck reattached a service a
+	// worker had started without: the warning GetOrCreate wrote for that
+	// start promised the module would look again, and this closes the loop
+	// where the operator read the promise.  Event-log INFO is otherwise
+	// never written on this port; this entry is process-lifetime rare, not
+	// per-request volume, and like the warning it ignores UseEventLog.
+	GoogleString message = StrCat(
+	    "The pagespeed module attached to the optimizer service it is "
+	    "configured to use (DaemonSocketPath ", adapter->socket_path(),
+	    "): the service answered a later check, in-place optimization "
+	    "through it is on again, and no restart was needed.");
+	std::lock_guard<std::mutex> lock(event_mu_);
+	// The note answers the warning: an adapter this process never warned
+	// about, because it was ready from the start, gets no entry.
+	if (warned_sockets_.find(adapter->socket_path()) ==
+	    warned_sockets_.end()) {
+		return;
+	}
+	if (event_logged_.insert(message).second) {
+		InitEventLog();
+		LogEvent(EventLogLevel::kInfo, message.c_str());
+	}
 }
 
 void IisDaemonCheckRegistry::RegisterSiteHandler(MessageHandler* handler) {
@@ -205,7 +299,14 @@ void IisDaemonCheckRegistry::UnregisterSiteHandler(MessageHandler* handler) {
 void IisDaemonCheckRegistry::ResetForTesting() {
 	std::lock_guard<std::mutex> lock(mu_);
 	entries_.clear();
-	split_logged_.clear();
+	// The event-log sets are guarded by event_mu_ (a request-thread
+	// recovery note must never wait behind a start-up probe); clear them
+	// under that lock too, in the registry's lock order.
+	{
+		std::lock_guard<std::mutex> event_lock(event_mu_);
+		event_logged_.clear();
+		warned_sockets_.clear();
+	}
 	binder_calls_ = 0;
 	// Restore the production binder: a previous test's lambda holds a
 	// reference to that test's dead stack object, and a later test that

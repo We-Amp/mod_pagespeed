@@ -37,6 +37,19 @@ IproDisposition IproDispositionFor(DaemonHealth health) {
   return IproDisposition::kOff;
 }
 
+const char* DaemonInitStatusToken(DaemonHealth health) {
+  switch (health) {
+    case DaemonHealth::kUnavailable:
+      return "daemon-unavailable";
+    case DaemonHealth::kNotConfigured:
+    case DaemonHealth::kReady:
+      return nullptr;
+  }
+  // Unreachable for a well-formed enum, and the safe answer if it ever
+  // grows: no header rather than a wrong one.
+  return nullptr;
+}
+
 InPlaceResourceRecorder* MakeIproRecorderIfClassic(
     IproDisposition disposition, const RequestContextPtr& request_context,
     StringPiece url, StringPiece fragment,
