@@ -13,9 +13,11 @@
 
 namespace pagespeed::packs {
 
-// Number of kinds in kind_table.inc.
+// Number of kinds in kind_table.inc. Each row contributes '+1' to the sum;
+// parenthesizing the replacement list would turn '0 (+1)' into a call
+// expression, so the fold is suppressed instead.
 inline constexpr size_t kKindCount = 0
-#define RULE_KIND(name, cls, header) +1
+#define RULE_KIND(name, cls, header) +1  // NOLINT(bugprone-macro-parentheses)
 #include "pagespeed/kernel/packs/kind_table.inc"
 #undef RULE_KIND
     ;

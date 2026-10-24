@@ -37,13 +37,14 @@ class PoolElement {
  public:
   using Position = typename std::list<T*>::iterator;
 
-  PoolElement() {}
-
   // Returns a pointer to a mutable location holding the position of
   // the element in any containing pool.
   Position* pool_position() { return &pool_position_; }
 
  private:
+  friend T;  // Only the CRTP-derived class constructs this base.
+  PoolElement() {}
+
   Position pool_position_;
 
   PoolElement(const PoolElement&) = delete;
