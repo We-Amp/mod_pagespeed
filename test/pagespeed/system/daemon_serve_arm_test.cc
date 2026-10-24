@@ -1732,6 +1732,59 @@ TEST_F(DaemonServeArmTest, IfModifiedSinceIsHonouredOnTheOriginPlaneOnly) {
   unsetenv("PS_STUB_ORIGIN_LM");
 }
 
+TEST_F(DaemonServeArmTest, IfModifiedSinceYieldsToIfNoneMatch) {
+  // RFC 9110 section 13.2.2: when a request carries `If-None-Match`, the
+  // entity-tag comparison decides alone and `If-Modified-Since` is ignored.
+  // The two conditionals can reach each other only on the durable original,
+  // the one serve that carries the origin's `ETag` and `Last-Modified`
+  // alike, so they are pinned against each other there.  The yield is to a
+  // NAMED validator only: `*` is not one on any plane, so a request whose
+  // `If-None-Match` holds only `*` keeps the date's pre-existing say, a
+  // deviation from the RFC that is deliberate and out of scope here.
+  setenv("PS_STUB_ORIGIN_LM", "1000000000", 1);  // 2001-09-09T01:46:40Z
+  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
+  const char kAtTheStamp[] = "Sun, 09 Sep 2001 01:46:40 GMT";
+  const char kBeforeIt[] = "Sat, 08 Sep 2001 01:46:40 GMT";
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision first = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, first.verdict);
+  EXPECT_EQ("W/\"origin-tag\"", first.etag);
+  // A MATCHING TAG WINS OVER A STALE DATE.  The client names the validator
+  // this arm emits but holds a copy dated before the origin's stamp: the
+  // tag says not modified, and the 304 stands whatever the date would say.
+  DaemonServeRequest matched_tag = Request("image/webp");
+  matched_tag.if_none_match = first.etag;
+  matched_tag.if_modified_since = kBeforeIt;
+  const DaemonServeDecision by_tag = Serve(matched_tag);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, by_tag.verdict);
+  EXPECT_TRUE(by_tag.not_modified);
+  // A REFUSING TAG WINS OVER A FRESH DATE.  The client names some other
+  // validator, one this arm never issued, and the date alone would have
+  // said 304; the tag is authoritative, so the response is served in full.
+  DaemonServeRequest refusing_tag = Request("image/webp");
+  refusing_tag.if_none_match = "\"another-tag\"";
+  refusing_tag.if_modified_since = kAtTheStamp;
+  const DaemonServeDecision refused = Serve(refusing_tag);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, refused.verdict);
+  EXPECT_FALSE(refused.not_modified);
+  // `*` IS NOT A VALIDATOR on any plane (see ServeDerivedValidatorMatches)
+  // and names no entity-tag, so it does not make the date yield: a request
+  // whose `If-None-Match` holds only `*` keeps the date's pre-existing say.
+  DaemonServeRequest star_current = Request("image/webp");
+  star_current.if_none_match = "*";
+  star_current.if_modified_since = kAtTheStamp;
+  EXPECT_TRUE(Serve(star_current).not_modified);
+  DaemonServeRequest star_older = Request("image/webp");
+  star_older.if_none_match = "*";
+  star_older.if_modified_since = kBeforeIt;
+  EXPECT_FALSE(Serve(star_older).not_modified);
+  // AND WITH NO TAG AT ALL the date answers alone, exactly as before.
+  DaemonServeRequest date_only = Request("image/webp");
+  date_only.if_modified_since = kAtTheStamp;
+  EXPECT_TRUE(Serve(date_only).not_modified);
+  unsetenv("PS_STUB_ORIGIN_LM");
+}
+
 TEST_F(DaemonServeArmTest, ADeadSubstrateIsSkewRatherThanCold) {
   DaemonServeReader reader(abi_.get(), nullptr /* cache */);
   const DaemonServeDecision decision =
