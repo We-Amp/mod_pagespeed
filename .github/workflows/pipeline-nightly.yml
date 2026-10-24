@@ -9,7 +9,8 @@
 #
 # Jobs by class:
 #   fleet-heavy   nightly-vendor (the vendored tree for every Linux job),
-#                 apache-asan-stress, apache-daemon-lane, shared-cache-vary,
+#                 linux-offline-build, apache-asan-stress, apache-daemon-lane,
+#                 shared-cache-vary,
 #                 nginx-asan-stress,
 #                 nginx-protocol-matrix, full-tree-lint (3 shards), fuzz-css, fuzz-html,
 #                 fuzz-packs, fuzz-js
@@ -277,6 +278,177 @@ jobs:
       - name: Stamp outputs
         id: stamp
         run: echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+  # ---------------------------------------------------------------------
+  # Offline vendored build (#197). The release tarball promises a build
+  # with no network, so a nightly lane proves that stays true: the vendored
+  # tree is staged in a fresh directory and both server modules are rebuilt
+  # inside the dev image with --network none and the release lane's build
+  # flags, reading only the vendored repository cache. A dependency that
+  # silently stops being vendored fails here, on its own lane, and not on a
+  # release day. The build is always cold, so it runs nightly only, like
+  # envoy-filter.
+  # ---------------------------------------------------------------------
+  linux-offline-build:
+    name: Linux Offline Build
+    needs: nightly-vendor
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 120
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+          STAMPED=$(tr -d '[:space:]' < GIT_COMMIT)
+          [ "${STAMPED}" = "${GITHUB_SHA}" ] || { echo "::error::stale vendored workspace: expected ${GITHUB_SHA}, got ${STAMPED}"; exit 1; }
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Container identity
+        run: |
+          echo "dev:x:$(id -u):$(id -g)::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      # The offline build must not lean on anything the CI workspace holds
+      # around the vendored tree: the whole tree (the source plus vendor/)
+      # goes to a directory that starts empty, the way a release tarball
+      # extracts. .git and the bazel-* convenience links are not part of
+      # what ships, and the vendor job's tarball leaves them out too.
+      - name: Stage the vendored tree in a fresh directory
+        run: |
+          OFFLINE_SRC="${RUNNER_TEMP}/offline-src"
+          rm -rf "${OFFLINE_SRC}"
+          mkdir -p "${OFFLINE_SRC}"
+          tar -C "${GITHUB_WORKSPACE}" \
+            --dereference --mode=u+w \
+            --exclude=.git \
+            --exclude='bazel-*' \
+            -cf - . | tar -C "${OFFLINE_SRC}" -xf -
+          echo "OFFLINE_SRC=${OFFLINE_SRC}" >> "$GITHUB_ENV"
+          echo "Offline tree: $(du -sh "${OFFLINE_SRC}" | cut -f1)"
+
+      - name: Fetch the pinned Bazel for the offline container
+        run: |
+          # The dev image ships Bazelisk, not Bazel: the first bazel call
+          # downloads the pinned version (from .bazelversion) into
+          # BAZELISK_HOME, which cannot happen inside --network none. Fetch
+          # it once here, with the network on, into a directory the offline
+          # step mounts as its BAZELISK_HOME. Getting the Bazel binary this
+          # way is fine: the release tarball ships no Bazel either, only
+          # the dependency archives.
+          BAZELISK_DIR="${RUNNER_TEMP}/bazelisk"
+          rm -rf "${BAZELISK_DIR}"
+          mkdir -p "${BAZELISK_DIR}"
+          PINNED="$(tr -d '[:space:]' < "${OFFLINE_SRC}/.bazelversion")"
+          WARM="nightly-linux-offline-warm-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${WARM}" 2>/dev/null || true
+          GOT="$(docker run --rm --name "${WARM}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZELISK_HOME=/bazelisk \
+            -v "${BAZELISK_DIR}:/bazelisk" \
+            -v "${OFFLINE_SRC}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bazel --version)"
+          echo "Warmed: ${GOT}"
+          [ "${GOT}" = "bazel ${PINNED}" ] || {
+            echo "::error::the warmed Bazel is not the pinned one (expected bazel ${PINNED})"
+            exit 1
+          }
+
+      - name: Build both modules with no network
+        run: |
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 55g || exit 1
+          NAME="nightly-linux-offline-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          # --network none: no routes and no DNS, so a dependency that is not
+          # vendored fails here instead of downloading; the Bazel binary
+          # itself comes from the BAZELISK_HOME the previous step warmed.
+          # --repository_disable_download serves repository-cache hits and
+          # refuses every download, so a repository that is not vendored
+          # fails loudly and by name, and --lockfile_mode=error makes a
+          # stale MODULE.bazel.lock fail instead of re-resolving. The remote
+          # cache of build:ci is switched off: it names a host this container
+          # cannot reach, and a hit served from outside would only postpone
+          # the failure to link time.
+          docker run --rm --init \
+            --name "${NAME}" \
+            --network none \
+            --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
+            --user "$(id -u):$(id -g)" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            -e HOME=/workspace -e USER=dev \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e BAZELISK_HOME=/bazelisk \
+            -e BAZEL_CONFIG="--config=ci --config=hardening --config=hardening-cet -c opt --remote_cache= --jobs=${SLOT_JOBS}" \
+            -v "${RUNNER_TEMP}/bazelisk:/bazelisk" \
+            -v "${OFFLINE_SRC}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -u -o pipefail
+              LOG=/tmp/offline-build.log
+              rc=0
+              # BAZEL_CONFIG is an intentional flag list -> word-splitting.
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out-offline \
+                build ${BAZEL_CONFIG} --repository_disable_download \
+                --lockfile_mode=error \
+                --action_env=CC=clang --action_env=CXX=clang++ \
+                -- //:libmod_pagespeed.so //pagespeed/nginx:ngx_pagespeed_module.so \
+                2>&1 | tee "${LOG}" || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo
+                echo "===== repositories and URLs the offline build tried to reach ====="
+                grep -E "ERROR:|repository|registry|fetch|downloa|https?://" "${LOG}" | sort -u | head -80 || true
+                echo "==================================================================="
+                exit "${rc}"
+              fi
+              ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+            '
+
+      - name: Remove the build container
+        if: always()
+        run: |
+          # Only this job's own containers (job, run and attempt in the name).
+          docker rm -f "nightly-linux-offline-warm-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            "nightly-linux-offline-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 2>/dev/null || true
+
 
   # ---------------------------------------------------------------------
   # Sanitizer stress rigs. Each builds the ASan module in the dev image and
