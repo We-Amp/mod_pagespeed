@@ -3115,6 +3115,21 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --optimizer-tag "$OPTIMIZER_TAG" \
             --profile part-b
 
+      # The commit stamp is what ties a shipped module to the release commit.
+      # Every Linux module (Apache deb, rpm, el10 rpm and standalone .so; nginx
+      # tarballs, deb and rpm; cPanel rpm; x64 and arm64) must hold the full
+      # commit hash, so a build that was not stamped can
+      # never be published. This asserts a property of the build, so it also
+      # fails a dry run.
+      - name: Every Linux module carries the release commit
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm2cpio cpio >/dev/null
+          pre=()
+          [ "$IS_PRERELEASE" = "true" ] && pre=(--prerelease)
+          bash tools/ci/assert_release_stamp.sh --require-families "${pre[@]+"${pre[@]}"}" "${RUNNER_TEMP}/release-assets" "$RELEASE_SHA"
+
       # What the names promise, the packages must contain: the version of
       # every package, and the serving pair (the module packages require the
       # optimizer at exactly the pair version, and the optimizer packages
@@ -3122,7 +3137,6 @@ jobs:
       - name: Package contents match the tag
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends rpm >/dev/null
           cd "${RUNNER_TEMP}/release-assets"
           shopt -s nullglob
