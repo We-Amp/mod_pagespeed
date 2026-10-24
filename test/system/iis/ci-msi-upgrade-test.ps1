@@ -235,11 +235,11 @@ if ($OldMsiPath) {
 #     assertions tested the obsolete pre-Cyclone file-cache). logdir keeps its
 #     positive LogDir auto-create contract; its log-dir-create-failed negative is
 #     RETIRED (a denied LogDir is non-fatal on v1.15.0 - VM-verified).
-#   - test_iis_config_fallback.ps1: still NON-GATING. It tests the
-#     ProgramData canonical->legacy FACTORY fallback, but request-time options
-#     come from FindConfigFile(<wwwroot>) - entangled with the config-resolution
-#     duality between the ProgramData base and the per-site override; re-gate
-#     once it is settled which config governs what.
+#   - test_iis_config_fallback.ps1: still NON-GATING. Rewritten to pin the
+#     full config layering on its own throwaway sites (base tier governs an
+#     engage-only site, per-site override wins, legacy IISWebSpeed location
+#     reached when the canonical tier is absent). Stays non-gating until it
+#     has a green run on the day-2 upgrade VM.
 $portFixtures = @(
     'test_iis_cache_diagnostic.ps1',
     'test_iis_cache_autocreate.ps1',
@@ -557,8 +557,8 @@ $portFixtureScript = {
     }
 }
 # The cache-diagnostic and auto-create fixtures are GATING (fixed +
-# VM-validated). config_fallback
-# stays non-gating pending the config-resolution duality question.
+# VM-validated). config_fallback stays non-gating pending its first green
+# run on the day-2 upgrade VM.
 $gatingFixtures    = @(
     'test_iis_cache_diagnostic.ps1',
     'test_iis_cache_autocreate.ps1',
