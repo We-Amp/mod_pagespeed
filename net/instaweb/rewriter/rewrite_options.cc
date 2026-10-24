@@ -2131,7 +2131,7 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
             {kInPlaceOptimizeForBrowser,
              "Filter 'in_place_optimize_for_browser' is deprecated and has "
              "no effect; image format negotiation at the original URL is "
-             "controlled by the optimizer daemon, not this filter."},
+             "controlled by the optimizer worker, not this filter."},
             {kMobilize, "Filter 'mobilize' is deprecated and has no effect."},
             {kMobilizePrecomputeDeprecated,
              "Filter 'mobilize_precompute' is deprecated and has no "

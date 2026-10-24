@@ -196,7 +196,7 @@ constexpr int64_t kSocketVerdictLatchMs = 10000;
 // verdict report byte-identically.
 void AppendDaemonDeadlineMessage(GoogleString* error,
                                  const GoogleString& spelled) {
-  StrAppend(error, "the optimizer daemon did not accept a connection at ",
+  StrAppend(error, "the optimizer worker did not accept a connection at ",
             spelled, " within ", kSocketConnectDeadlineMs / 1000,
             " seconds -- it may be stopped or overloaded.");
 }
@@ -386,14 +386,14 @@ DaemonAdapter::DirAccess ProbeDir(const GoogleString& dir) {
 #ifdef _WIN32
 const char kGroupMembershipHint[] =
     " The web server's worker identity probably has no access grant on the "
-    "optimizer daemon's cache directory. Grant it Modify on that directory, "
+    "optimizer worker's cache directory. Grant it Modify on that directory, "
     "inherited by the files below (for the built-in application-pool "
     "identities, `icacls \"<cache directory>\" /grant "
     "\"IIS_IUSRS:(OI)(CI)M\"`), and restart the web server.";
 #else
 const char kGroupMembershipHint[] =
     " The web-server user is probably not in the `pagespeed` group, which "
-    "owns the optimizer daemon's cache and socket since the daemon's "
+    "owns the optimizer worker's cache and socket since the worker's "
     "privilege drop. Add it (for example `usermod -a -G pagespeed www-data`, "
     "or `apache`/`nginx` on an RPM host) and restart the web server.";
 #endif
@@ -457,7 +457,7 @@ RemoveOutcome RemoveVolumeFile(const GoogleString& volume_path,
 #endif
               name,
               " was left in place; remove it by hand only if it is not "
-              "the optimizer daemon's own volume");
+              "the optimizer worker's own volume");
     return RemoveOutcome::kFailed;
   }
   GoogleString parent;
@@ -507,7 +507,7 @@ RemoveOutcome RemoveVolumeFile(const GoogleString& volume_path,
     // Same advice as the POSIX owner refusal -- leave it in place.
     StrAppend(why, full,
               " was left in place: another process holds it open, most "
-              "likely the optimizer daemon's new volume");
+              "likely the optimizer worker's new volume");
     return RemoveOutcome::kHeldByOtherUser;
   }
   StrAppend(why, full, ": ", os_text);
@@ -527,7 +527,7 @@ RemoveOutcome RemoveVolumeFile(const GoogleString& volume_path,
     // volume.)
     StrAppend(why, full,
               " was left in place: it is owned by another user, most "
-              "likely the optimizer daemon's new volume");
+              "likely the optimizer worker's new volume");
     return RemoveOutcome::kHeldByOtherUser;
   }
   if (unlink(full.c_str()) == 0) {
@@ -674,10 +674,10 @@ void AppendCreatedVolumeCleanupSentences(const CreatedVolumeCleanup& cleanup,
       StrAppend(out, why, ". ");
     }
     StrAppend(out,
-              "Do not remove it while the optimizer daemon is running; "
+              "Do not remove it while the optimizer worker is running; "
               "once it is running on it, the next start of this server "
-              "attaches to it. If no optimizer daemon is running on it, "
-              "remove it while the daemon is stopped. ");
+              "attaches to it. If no optimizer worker is running on it, "
+              "remove it while the worker is stopped. ");
     if (!cleanup.removed.empty()) {
       StrAppend(out, actor, " removed ", JoinCollection(cleanup.removed, ", "),
                 ". ");
@@ -1120,7 +1120,7 @@ void* DaemonAdapter::RecordCache() {
         if (handler_ != nullptr) {
           const GoogleString message = StrCat(
               "nothing will be recorded for in-place optimization: the "
-              "optimizer daemon's cache volume at ",
+              "optimizer worker's cache volume at ",
               volume_path_, " has been replaced more than ",
               IntegerToString(kMaxVolumeReplacements),
               " times since this process started, and each replaced volume "
@@ -1134,7 +1134,7 @@ void* DaemonAdapter::RecordCache() {
         }
       } else if (handler_ != nullptr) {
         const GoogleString message = StrCat(
-            "the optimizer daemon replaced its cache volume at ", volume_path_,
+            "the optimizer worker replaced its cache volume at ", volume_path_,
             " (generation ", Integer64ToString(static_cast<int64>(generation)),
             "); opening the new volume");
         if (ShouldAnnounce(message)) {
@@ -1171,7 +1171,7 @@ void* DaemonAdapter::RecordCache() {
     if (handler_ != nullptr) {
       GoogleString message = StrCat(
           "nothing will be recorded for in-place optimization: the optimizer "
-          "daemon's cache volume at ",
+          "worker's cache volume at ",
           volume_path_, " cannot be used yet: ", reason, " (attempt ",
           IntegerToString(record_cache_attempts_), " of ",
           IntegerToString(kRecordCacheMaxAttempts), ")");
@@ -1194,7 +1194,7 @@ void* DaemonAdapter::RecordCache() {
     if (handler_ != nullptr) {
       const GoogleString message = StrCat(
           "nothing will be recorded for in-place optimization: the optimizer "
-          "daemon's cache volume at ",
+          "worker's cache volume at ",
           volume_path_, " is not used: ", reason,
           ". In-place optimization stays off in this process until the web "
           "server is restarted or its worker processes are recycled.");
@@ -1233,15 +1233,15 @@ void* DaemonAdapter::RecordCache() {
   const bool checked_open = !VolumePathIsDirectory(volume_path_);
   if (!checked_open && record_cache_reopening_) {
     return stop_for_good(
-        "the daemon replaced it, and the configured path is a directory, "
-        "where the daemon's volume file cannot be told from the other files "
+        "the worker replaced it, and the configured path is a directory, "
+        "where the worker's volume file cannot be told from the other files "
         "in it, so the new volume is not opened");
   }
   if (checked_open) {
     volume_size = abi_->SharedConfigVolumeSize(volume_path_.c_str());
     if (volume_size == 0) {
       return not_yet(
-          "the daemon does not publish the size of its cache volume at the "
+          "the worker does not publish the size of its cache volume at the "
           "moment");
     }
     volume_files_before = VolumeFiles(volume_path_);
@@ -1249,17 +1249,17 @@ void* DaemonAdapter::RecordCache() {
         CurrentFormatVolumeFiles(volume_path_, volume_files_before);
     if (candidates.empty()) {
       return not_yet(
-          "the daemon has not created its volume file yet, and this module "
+          "the worker has not created its volume file yet, and this module "
           "does not create it");
     }
     if (record_cache_reopening_ && candidates.size() > 1) {
       return not_yet(StrCat(
-          "after the daemon replaced its volume there is more than one "
+          "after the worker replaced its volume there is more than one "
           "volume file of the current cache format (",
           JoinCollection(candidates, ", "),
-          "), and this module cannot tell which one the daemon uses. The "
-          "daemon has exactly one of them open; any other was not created "
-          "by the daemon"));
+          "), and this module cannot tell which one the worker uses. The "
+          "worker has exactly one of them open; any other was not created "
+          "by the worker"));
     }
     for (const GoogleString& name : volume_files_before) {
       VolumeFileIdentity identity;
@@ -1291,7 +1291,7 @@ void* DaemonAdapter::RecordCache() {
   uint64_t generation_before_open = 0;
   if (!ReadVolumeGeneration(volume_path_, &generation_before_open)) {
     return not_yet(
-        "the generation the daemon publishes beside it cannot be read");
+        "the generation the worker publishes beside it cannot be read");
   }
   void* cache = nullptr;
   const int open_error = abi_->CacheOpen(config, &cache);
@@ -1310,7 +1310,7 @@ void* DaemonAdapter::RecordCache() {
     if (handler_ != nullptr) {
       GoogleString message = StrCat(
           "nothing will be recorded for in-place optimization: cannot open "
-          "the optimizer daemon's cache volume at ",
+          "the optimizer worker's cache volume at ",
           volume_path_, ": ", reason);
       // This open runs in the request-serving process, which is the one that
       // carries the web-server user's group memberships -- so a permission
@@ -1377,19 +1377,19 @@ void* DaemonAdapter::RecordCache() {
           JoinCollection(volume_files_before, ", "),
           "; after: ", JoinCollection(volume_files_after, ", "),
           "), so the open may have created a volume file of its own "
-          "instead of using the daemon's");
+          "instead of using the worker's");
       if (cleanup.removed.empty() && cleanup.held.empty() &&
           cleanup.stuck.empty() && cleanup.unverified.empty()) {
         StrAppend(&reason,
                   ". No file was removed. Compare the volume files beside "
-                  "that path with the one the daemon has open");
+                  "that path with the one the worker has open");
       } else {
         AppendCreatedVolumeCleanupSentences(
             cleanup, "This process", "this open",
             "before this server or its worker processes restart", &reason);
         StrAppend(&reason,
                   "Compare the volume files beside that path with the one "
-                  "the daemon has open");
+                  "the worker has open");
       }
       return stop_for_good(reason);
     }
@@ -1402,7 +1402,7 @@ void* DaemonAdapter::RecordCache() {
       generation_after_open != generation_before_open) {
     abi_->CacheClose(cache);
     return not_yet(
-        "the generation the daemon publishes beside it changed, or could "
+        "the generation the worker publishes beside it changed, or could "
         "not be read, while the volume was being opened");
   }
   record_cache_generation_.store(generation_before_open,
@@ -1604,10 +1604,11 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
   }
   std::wstring wide_spelled;
   if (!Utf8ToWide(spelled, &wide_spelled)) {
-    StrAppend(error,
-              "the daemon socket path is not valid UTF-8 and cannot name a "
-              "pipe: ",
-              configured);
+    StrAppend(
+        error,
+        "the optimizer's socket path is not valid UTF-8 and cannot name a "
+        "pipe: ",
+        configured);
     return false;
   }
 
@@ -1698,7 +1699,7 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     AppendDaemonDeadlineMessage(error, spelled);
     RecordSocketDeadline(spelled, MonotonicNowMs());
   } else if (!connected) {
-    StrAppend(error, "the optimizer daemon does not answer at ", spelled, ": ",
+    StrAppend(error, "the optimizer worker does not answer at ", spelled, ": ",
               WindowsErrorText(last_error));
     // Distinguish the two causes an operator can act on: a refused open
     // says who refused and why no grant here can fix it; an absent pipe
@@ -1708,13 +1709,13 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
       // a refused open here, because the optimizer daemon decides who may
       // open its pipe.  The sentence says what happened and to whom.
       StrAppend(error,
-                " The optimizer daemon refused the web server's worker "
-                "identity access to that pipe; the daemon decides who may "
-                "open it.");
+                " The optimizer worker refused the web server's worker "
+                "identity access to that pipe; the optimizer decides who "
+                "may open it.");
     } else if (not_found) {
       StrAppend(error,
                 " The named pipe does not exist -- start the optimizer "
-                "daemon.");
+                "worker.");
     }
   }
   return connected;
@@ -1724,8 +1725,9 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
   memset(&address, 0, sizeof(address));
   address.sun_family = AF_UNIX;
   if (spelled.size() >= sizeof(address.sun_path)) {
-    StrAppend(error, "the daemon socket path is too long for this platform: ",
-              spelled);
+    StrAppend(
+        error,
+        "the optimizer's socket path is too long for this platform: ", spelled);
     return false;
   }
   memcpy(address.sun_path, spelled.data(), spelled.size());
@@ -1760,7 +1762,7 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
   }
 #endif
   if (fd < 0) {
-    StrAppend(error, "cannot create a socket to reach the optimizer daemon: ",
+    StrAppend(error, "cannot create a socket to reach the optimizer worker: ",
               strerror(errno));
     return false;
   }
@@ -1856,7 +1858,7 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     AppendDaemonDeadlineMessage(error, spelled);
     RecordSocketDeadline(spelled, MonotonicNowMs());
   } else if (!connected) {
-    StrAppend(error, "the optimizer daemon does not answer at ", spelled, ": ",
+    StrAppend(error, "the optimizer worker does not answer at ", spelled, ": ",
               strerror(connect_errno));
     // Distinguish the two causes an operator can act on.  After H2/H3 a
     // permission failure means the group join is missing; an absent socket
@@ -1865,8 +1867,8 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
       StrAppend(error, kGroupMembershipHint);
     } else if (connect_errno == ENOENT) {
       StrAppend(error,
-                " The socket does not exist -- start the pagespeed-optimizer "
-                "daemon (for example `systemctl start pagespeed-optimizer`).");
+                " The socket does not exist -- start the optimizer "
+                "worker (for example `systemctl start pagespeed-optimizer`).");
     }
   }
   close(fd);
@@ -1890,9 +1892,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // Half a configuration is a configuration mistake, and a loud one already
     // — the operator sees this the first time they start.  Deliberately not a
     // refusal: refusing belongs to the failures that are silent.
-    StrAppend(error,
-              "in-place optimization is OFF: both the daemon socket path and "
-              "the daemon volume path must be set, and only one of them is");
+    StrAppend(
+        error,
+        "in-place optimization is OFF: both the optimizer's socket path and "
+        "the optimizer's volume path must be set, and only one of them is");
     return DaemonStartupStatus::kOk;
   }
 
@@ -1909,10 +1912,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // out-of-step package pair is not a reason to refuse a start — and, above
     // all, do not open anything.  Guessing the size here is the split-brain.
     StrAppend(error,
-              "in-place optimization is OFF: the installed optimizer daemon "
+              "in-place optimization is OFF: the installed optimizer worker "
               "does not publish the size of its cache volume, so this module "
               "cannot open that volume without risking a second, separate "
-              "cache. Install a daemon package matching this module.");
+              "cache. Install an optimizer package matching this module.");
     return DaemonStartupStatus::kOk;
   }
 
@@ -1958,7 +1961,7 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
       // pagespeed:pagespeed), so this is the group join that did not happen.
       StrAppend(error,
                 "in-place optimization is OFF: cannot read the optimizer "
-                "daemon's shared configuration beside ",
+                "worker's shared configuration beside ",
                 volume_path_, ": permission denied.", kGroupMembershipHint);
       return DaemonStartupStatus::kOk;
     }
@@ -1967,11 +1970,11 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // recheck retries.
     unavailable_is_retryable_ = true;
     StrAppend(error,
-              "in-place optimization is OFF: the optimizer daemon has not "
+              "in-place optimization is OFF: the optimizer worker has not "
               "published the size of its cache volume at ",
               volume_path_,
               " (it may not be running yet). This module will not open that "
-              "volume without knowing the size the daemon uses.");
+              "volume without knowing the size the worker uses.");
     return DaemonStartupStatus::kOk;
   }
 
@@ -1984,7 +1987,7 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
       // "start the daemon" is the wrong fix for this one.
       StrAppend(error,
                 "in-place optimization is OFF: cannot look inside the "
-                "optimizer daemon's cache directory at ",
+                "optimizer worker's cache directory at ",
                 volume_path_, ": permission denied.", kGroupMembershipHint);
       return DaemonStartupStatus::kOk;
     }
@@ -1995,10 +1998,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // retries this exit too.
     unavailable_is_retryable_ = true;
     StrAppend(error,
-              "in-place optimization is OFF: the optimizer daemon's cache "
+              "in-place optimization is OFF: the optimizer worker's cache "
               "volume does not exist yet at ",
               volume_path_,
-              ". This module never creates it — start the daemon first.");
+              ". This module never creates it — start the worker first.");
     return DaemonStartupStatus::kOk;
   }
   if (before.size() > 1) {
@@ -2020,12 +2023,12 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // start does not add to this state unless its removal fails, and then
     // its message says so.)
     extra_volume_warning_ = StrCat(
-        "the optimizer daemon's cache directory holds more than one cache "
+        "the optimizer worker's cache directory holds more than one cache "
         "volume (",
         JoinCollection(before, ", "),
-        "). Only the one matching the size the daemon publishes is in use; "
+        "). Only the one matching the size the worker publishes is in use; "
         "the others are left over from an earlier cache size and are just "
-        "occupying disk. They can be removed while the daemon is stopped.");
+        "occupying disk. They can be removed while the worker is stopped.");
   }
 
   // Only now, with a known size and exactly one volume on disk, is it safe to
@@ -2036,7 +2039,7 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   abi_->CacheConfigInit(config);
   if (!ApplyInheritedSizing(config, inherited)) {
     StrAppend(error,
-              "in-place optimization is OFF: the optimizer daemon reported an "
+              "in-place optimization is OFF: the optimizer worker reported an "
               "unusable cache volume size");
     return DaemonStartupStatus::kOk;
   }
@@ -2047,7 +2050,7 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   if (open_error != kPsOk) {
     StrAppend(error,
               "in-place optimization is OFF: cannot open the optimizer "
-              "daemon's cache volume at ",
+              "worker's cache volume at ",
               volume_path_, ": ", DescribeDaemonError(abi_.get(), open_error));
     return DaemonStartupStatus::kOk;
   }
@@ -2077,11 +2080,11 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     const CreatedVolumeCleanup cleanup =
         RemoveCreatedVolumeFiles(volume_path_, created, before);
     StrAppend(error,
-              "refusing to start: opening the optimizer daemon's cache volume "
-              "at the size the daemon published (",
+              "refusing to start: opening the optimizer worker's cache volume "
+              "at the size the worker published (",
               Integer64ToString(static_cast<int64>(inherited)),
               " bytes) created a SECOND volume file (",
-              JoinCollection(created, ", "), ") beside the daemon's (",
+              JoinCollection(created, ", "), ") beside the worker's (",
               JoinCollection(before, ", "),
               ") instead of attaching to it. The two would share nothing and "
               "each run a permanently cold cache, with no error to show for "
@@ -2091,12 +2094,12 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
                                         error);
     StrAppend(error,
               "The usual cause is start order during an upgrade: the "
-              "optimizer daemon has a new on-disk cache format and has not "
+              "optimizer worker has a new on-disk cache format and has not "
               "restarted onto it yet, so its new volume does not exist for "
               "this server to attach to. Start or restart the optimizer "
-              "daemon, let it create its volume, then start this server. If "
+              "worker, let it create its volume, then start this server. If "
               "this server still refuses after that, the sizes genuinely "
-              "disagree: install a module and daemon package pair that "
+              "disagree: install a module and optimizer package pair that "
               "agree.");
     return DaemonStartupStatus::kRefuseToStart;
   }
@@ -2115,12 +2118,13 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     // deliberate, working state, and one loud line is what keeps it from
     // being mistaken for the generation handshake having passed.  The same
     // latch keeps it to one line per process.
-    StrAppend(error,
-              "the optimizer daemon does not publish a cache directory "
-              "generation (cache_dir_generation): treating it as the legacy, "
-              "pre-privilege-drop layout and using the configured paths "
-              "as-is. This is expected with a daemon package from before the "
-              "privilege drop and disappears when the daemon is upgraded.");
+    StrAppend(
+        error,
+        "the optimizer worker does not publish a cache directory "
+        "generation (cache_dir_generation): treating it as the legacy, "
+        "pre-privilege-drop layout and using the configured paths "
+        "as-is. This is expected with an optimizer package from before the "
+        "privilege drop and disappears when the worker is upgraded.");
   }
   if (!extra_volume_warning_.empty()) {
     // Reported even though the server is healthy: nothing else will ever
@@ -2209,7 +2213,7 @@ DaemonHealth DaemonAdapter::ServingHealth() const {
   startup_refusal_.clear();
   if (handler_ != nullptr) {
     const GoogleString message =
-        StrCat("the optimizer daemon at ", socket_path_,
+        StrCat("the optimizer worker at ", socket_path_,
                " answers again: in-place optimization is on");
     if (ShouldAnnounce(message)) {
       handler_->Message(kInfo, "%s", message.c_str());

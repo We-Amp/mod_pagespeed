@@ -443,7 +443,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
     // be indistinguishable from no traffic.
     server_context->message_handler()->Message(
         kInfo,
-        "in-place serve: no usable handle on the optimizer daemon's cache "
+        "in-place serve: no usable handle on the optimizer's cache "
         "volume in this worker process: %s",
         request_context->gurl()->spec_c_str());
     if (serve_stats != nullptr) {
@@ -474,7 +474,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
         decision.reason != daemon_serve_reason::kNoEntry) {
       server_context->message_handler()->Message(
           kInfo,
-          "in-place serve: the optimizer daemon's cache had no answer (serve "
+          "in-place serve: the optimizer worker's cache had no answer (serve "
           "class %d) for %s",
           decision.serve_class, request_context->gurl()->spec_c_str());
     }
@@ -852,15 +852,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				case IisProcessContext::InitFailureKind::kDaemonVolumeSplit:
 					init_status = "daemon-volume-split";
 					writer.Write(StrCat(
-						"IISpeed is not running: opening the optimizer daemon's cache"
+						"IISpeed is not running: opening the optimizer worker's cache"
 						" volume created a second volume file instead of attaching to"
-						" the daemon's, so the site engages no PageSpeed at all rather"
+						" the worker's, so the site engages no PageSpeed at all rather"
 						" than risk two separate caches.\n\n",
 						"Volume path: ", cache_path, "\n\n",
 						"The usual cause is start order during an upgrade: the"
-						" optimizer daemon has a new on-disk cache format and has not"
+						" optimizer worker has a new on-disk cache format and has not"
 						" restarted onto it yet, so its new volume did not exist for"
-						" this site to attach to. Start the optimizer daemon if it is"
+						" this site to attach to. Start the optimizer worker if it is"
 						" not running and let it create its volume; the check's"
 						" report says what became of the volume file its own open"
 						" created -- removed, still there, not confirmed gone, or"
@@ -868,8 +868,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						" and the Application event log entry from the source"
 						" PageSpeed carries it. Then recycle the application"
 						" pool.\n\n",
-						"If the optimizer daemon is already running on its current"
-						" volume, the module and the daemon disagree about the volume:"
+						"If the optimizer worker is already running on its current"
+						" volume, the module and the worker disagree about the volume:"
 						" install a module and optimizer package pair that agree.\n"),
 						&handler);
 					break;

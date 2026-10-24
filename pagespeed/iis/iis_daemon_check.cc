@@ -163,18 +163,18 @@ IisDaemonCheckRegistry::Result IisDaemonCheckRegistry::GetOrCreate(
 			// idempotent, and this is the module's one writer.
 			GoogleString message = StrCat(
 			    "The pagespeed module refused to engage for a site: opening "
-			    "the optimizer daemon's cache volume at ",
+			    "the optimizer worker's cache volume at ",
 			    volume_path,
 			    " created a second volume file instead of attaching to the "
-			    "daemon's, so the site engages no PageSpeed at all rather "
+			    "worker's, so the site engages no PageSpeed at all rather "
 			    "than risk two separate caches. Start or restart the "
-			    "optimizer daemon and let it create its volume, then recycle "
+			    "optimizer worker and let it create its volume, then recycle "
 			    "the application pool; the check's report, when it "
 			    "follows, says what became of the volume file its open "
 			    "created -- removed, still there, not confirmed gone, or "
 			    "left in place because another user or process holds it. "
 			    "If it still refuses after that, "
-			    "the module and the daemon disagree about the volume: "
+			    "the module and the worker disagree about the volume: "
 			    "install a module and optimizer package pair that agree.");
 			// De-duplicated on the fixed text above.  The check's own words
 			// follow it only in the entry: they come through the adapter's

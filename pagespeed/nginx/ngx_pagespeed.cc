@@ -4795,7 +4795,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
         }
         cfg_m->handler->Message(
             kError,
-            "the optimizer daemon startup check refused this configuration; "
+            "the optimizer startup check refused this configuration; "
             "this reload keeps running with in-place optimization off");
       }
     }

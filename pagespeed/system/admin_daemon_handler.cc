@@ -514,7 +514,7 @@ AdminDaemonHandler::~AdminDaemonHandler() {
       // down during process shutdown, causing a use-after-free crash.
       fprintf(stderr,
               "AdminDaemonHandler: timed out waiting for in-flight "
-              "daemon fetches to complete during shutdown\n");
+              "optimizer fetches to complete during shutdown\n");
       return;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
@@ -549,7 +549,7 @@ bool AdminDaemonHandler::HandleRequest(StringPiece leaf,
   if (method != RequestHeaders::kGet && method != RequestHeaders::kHead) {
     fetch->response_headers()->Add(HttpAttributes::kAllow, "GET, HEAD");
     WriteError(fetch, HttpStatus::kMethodNotAllowed,
-               "method not allowed; daemon endpoints are read-only",
+               "method not allowed; optimizer endpoints are read-only",
                endpoint.serves_content);
     return true;
   }
@@ -753,7 +753,7 @@ bool AdminDaemonHandler::HandleRequest(StringPiece leaf,
   // the per-handler counter stays, for the destructor's drain.
   if (!TryAcquireSlot(&in_flight_[index], endpoint.max_in_flight)) {
     WriteError(fetch, 429,
-               "a request for this daemon endpoint is already in flight",
+               "a request for this optimizer endpoint is already in flight",
                endpoint.serves_content);
     return true;
   }
@@ -761,7 +761,7 @@ bool AdminDaemonHandler::HandleRequest(StringPiece leaf,
       !TryAcquireSlot(&g_content_reads_in_flight, endpoint.max_in_flight)) {
     in_flight_[index].fetch_sub(1, std::memory_order_release);
     WriteError(fetch, 429,
-               "a request for this daemon endpoint is already in flight",
+               "a request for this optimizer endpoint is already in flight",
                endpoint.serves_content);
     return true;
   }

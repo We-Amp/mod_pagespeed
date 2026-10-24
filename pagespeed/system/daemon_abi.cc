@@ -146,20 +146,20 @@ struct NativeOps {
   // scope here.)
   static void* Load(const GoogleString& path, GoogleString* error) {
     if (path.empty()) {
-      StrAppend(error, "the optimizer daemon library path is empty");
+      StrAppend(error, "the optimizer library path is empty");
       return nullptr;
     }
     std::wstring wide;
     if (!Utf8ToWide(path, &wide)) {
       StrAppend(error,
-                "the optimizer daemon library path is not valid "
+                "the optimizer library path is not valid "
                 "UTF-8: ",
                 path);
       return nullptr;
     }
     if (!PathIsFullyQualified(path)) {
       StrAppend(error,
-                "the optimizer daemon library path must be absolute "
+                "the optimizer library path must be absolute "
                 "on this platform (the loader searches no "
                 "directories): ",
                 path);
@@ -180,7 +180,7 @@ struct NativeOps {
       SetThreadErrorMode(previous_mode, nullptr);
     }
     if (handle == nullptr) {
-      StrAppend(error, "cannot load the optimizer daemon library ", path, ": ",
+      StrAppend(error, "cannot load the optimizer library ", path, ": ",
                 LastErrorText(why));
     }
     return handle;
@@ -192,8 +192,8 @@ struct NativeOps {
         GetProcAddress(static_cast<HMODULE>(handle), symbol));
     if (address == nullptr) {
       const DWORD why = GetLastError();
-      StrAppend(error, "the optimizer daemon library does not export ", symbol,
-                ": ", LastErrorText(why));
+      StrAppend(error, "the optimizer library does not export ", symbol, ": ",
+                LastErrorText(why));
     }
     return address;
   }
@@ -227,7 +227,7 @@ struct NativeOps {
     void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
       const char* why = dlerror();
-      StrAppend(error, "cannot load the optimizer daemon library ", path,
+      StrAppend(error, "cannot load the optimizer library ", path,
                 why == nullptr ? "" : ": ", why == nullptr ? "" : why);
     }
     return handle;
@@ -238,7 +238,7 @@ struct NativeOps {
     void* address = dlsym(handle, symbol);
     if (address == nullptr) {
       const char* why = dlerror();
-      StrAppend(error, "the optimizer daemon library does not export ", symbol,
+      StrAppend(error, "the optimizer library does not export ", symbol,
                 why == nullptr ? "" : ": ", why == nullptr ? "" : why);
     }
     return address;
@@ -768,7 +768,7 @@ bool ParamsHandshakeOk(const InitFn& init, const char* what,
   init(probe);
 
   if (probe->struct_size != sizeof(Params)) {
-    StrAppend(error, "the optimizer daemon library at ", library_path,
+    StrAppend(error, "the optimizer library at ", library_path,
               " does not honour the size it is given for ", what,
               " (it reports ",
               Integer64ToString(static_cast<int64>(probe->struct_size)),
@@ -779,7 +779,7 @@ bool ParamsHandshakeOk(const InitFn& init, const char* what,
   }
   for (size_t i = sizeof(Params); i < sizeof(storage); ++i) {
     if (storage[i] != kCacheConfigProbeCanary) {
-      StrAppend(error, "the optimizer daemon library at ", library_path,
+      StrAppend(error, "the optimizer library at ", library_path,
                 " wrote past the size it was given while initialising ", what,
                 "; refusing to use it");
       return false;
@@ -797,7 +797,7 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
   // compiled out there, so binding would mis-marshal silently.  Refuse
   // instead, with the same sentence this platform has always had.
   StrAppend(error,
-            "run-time binding of the optimizer daemon library is not "
+            "run-time binding of the optimizer library is not "
             "implemented on this platform (a 32-bit process: the peer's "
             "layout is 64-bit only; requested: ",
             library_path, ")");
@@ -835,7 +835,7 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
   const int major = abi->VersionMajor();
   const int minor = abi->VersionMinor();
   if (major != kRequiredAbiMajor || minor < kRequiredAbiMinor) {
-    StrAppend(error, "the optimizer daemon library at ", path, " reports API ",
+    StrAppend(error, "the optimizer library at ", path, " reports API ",
               IntegerToString(major), ".", IntegerToString(minor),
               ", which this build cannot use (needs ",
               IntegerToString(kRequiredAbiMajor), ".",
@@ -866,7 +866,7 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
     // place -- that it writes nothing past the size it was told.
     for (size_t i = sizeof(PsCacheConfig); i < sizeof(probe_storage); ++i) {
       if (probe_storage[i] != kCacheConfigProbeCanary) {
-        StrAppend(error, "the optimizer daemon library at ", path,
+        StrAppend(error, "the optimizer library at ", path,
                   " wrote past the size it was given while initialising a "
                   "cache configuration; refusing to use it");
         return reject();
@@ -875,7 +875,7 @@ DaemonAbi* LoadDaemonAbi(StringPiece library_path, GoogleString* error) {
   } else if (probe->struct_size != sizeof(PsCacheConfig)) {
     // Size-unaware path: the peer stamped ITS OWN sizeof, so a mismatch is a
     // real layout disagreement rather than an echo.
-    StrAppend(error, "the optimizer daemon library at ", path,
+    StrAppend(error, "the optimizer library at ", path,
               " uses a cache-configuration layout this build does not know "
               "(peer reports ",
               Integer64ToString(static_cast<int64>(probe->struct_size)),

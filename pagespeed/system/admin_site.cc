@@ -1056,11 +1056,11 @@ void AdminSite::AdminPage(
         headers->Add(HttpAttributes::kContentType,
                      kContentTypeJson.mime_type());
         AdminDaemonHandler::AddProxyResponseHeaders(headers);
-        fetch->Write(
-            StrCat("{\"success\":false,\"error\":\"",
-                   JsonEscape(StrCat("Unknown daemon endpoint: ", daemon_leaf)),
-                   "\"}"),
-            message_handler_);
+        fetch->Write(StrCat("{\"success\":false,\"error\":\"",
+                            JsonEscape(StrCat("Unknown optimizer endpoint: ",
+                                              daemon_leaf)),
+                            "\"}"),
+                     message_handler_);
         fetch->Done(true);
       }
       return;

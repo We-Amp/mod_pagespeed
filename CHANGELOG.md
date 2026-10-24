@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Module log and error messages name the optimizer rather than "the
+  daemon".** The refuse-to-start message for a split cache volume (with
+  its IIS event-log and error-page counterparts), the volume-open
+  messages, the socket reachability messages, the in-place serve log
+  lines and the admin proxy's error bodies now say "the optimizer
+  worker", "the optimizer" or a "module and optimizer package pair",
+  the wording the admin console already uses. Directives
+  (`DaemonSocketPath`, `DaemonVolumePath`, ...), statistics, the
+  `/v1/daemon/*` endpoints and their error codes are unchanged.
 - **The ASP.NET Core sidecar package's user-visible strings name the product
   mod_pagespeed.** The NuGet package description, the options validator's
   error message for using the sidecar off Linux, and the build warning for

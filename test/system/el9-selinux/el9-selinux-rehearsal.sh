@@ -988,7 +988,7 @@ for _ in $(seq 1 12); do
   sleep 1
 done
 tail -c +$((LOG_OFFSET + 1)) "$ERROR_LOG" > "$ARTIFACTS/error-log-after-upgrade.log" 2>/dev/null || true
-SIG_RE='nothing will be recorded for in-place optimization|cannot open the optimizer daemon.s cache volume|not being in the .pagespeed. group|Giving up: in-place optimization stays off'
+SIG_RE='nothing will be recorded for in-place optimization|cannot open the optimizer (daemon|worker).s cache volume|not being in the .pagespeed. group|Giving up: in-place optimization stays off'
 sig_hits="$(grep -c -E "$SIG_RE" "$ARTIFACTS/error-log-after-upgrade.log" || true)"
 check "daemon-startup signature lines in the error log after the upgrade restart" "0" "$sig_hits"
 if [[ "$sig_hits" != "0" ]]; then grep -E "$SIG_RE" "$ARTIFACTS/error-log-after-upgrade.log" | head -5 | sed 's/^/  /'; fi
