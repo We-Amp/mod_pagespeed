@@ -1219,7 +1219,8 @@ bool IsLoopbackClientIp(StringPiece client_ip) {
 void WarnIfNonLoopbackAdminAccess(StringPiece client_ip,
                                   AdminHandlerFamily family,
                                   StringPiece handler_name,
-                                  MessageHandler* message_handler) {
+                                  MessageHandler* message_handler,
+                                  bool console_public) {
   if (IsLoopbackClientIp(client_ip)) {
     return;
   }
@@ -1234,6 +1235,16 @@ void WarnIfNonLoopbackAdminAccess(StringPiece client_ip,
     return;
   }
   if (message_handler == nullptr) {
+    return;
+  }
+  if (console_public) {
+    // The operator declared the exposure on purpose: no warning. One fixed
+    // line (no client address, no handler name) so the console can recognise
+    // it and report it as information.
+    message_handler->Message(
+        kInfo,
+        "mod_pagespeed: This console is public by configuration "
+        "(PublicAdminAccess on).");
     return;
   }
   // Display "(unknown)" if the port couldn't supply a client IP — still useful

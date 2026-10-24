@@ -343,6 +343,42 @@ TEST_F(SystemRewriteOptionsTest, StrictAdminAccessDefaultsOff) {
   EXPECT_FALSE(options_.strict_admin_access());
 }
 
+// Process scope (like StrictAdminAccess) is what makes the option agree with
+// the process-wide warning latch; pin it so it cannot drift to server scope.
+TEST_F(SystemRewriteOptionsTest, PublicAdminAccessIsProcessScope) {
+  const RewriteOptions::PropertyBase* property =
+      RewriteOptions::LookupOptionByName("PublicAdminAccess");
+  ASSERT_NE(nullptr, property);
+  EXPECT_EQ(RewriteOptions::kProcessScopeStrict, property->scope());
+  const RewriteOptions::PropertyBase* strict =
+      RewriteOptions::LookupOptionByName("StrictAdminAccess");
+  ASSERT_NE(nullptr, strict);
+  EXPECT_EQ(strict->scope(), property->scope());
+}
+
+// PublicAdminAccess (opt-in, default off) only declares intent; it parses
+// and round-trips, and leaves every access check as it was.
+TEST_F(SystemRewriteOptionsTest, PublicAdminAccessDefaultsOff) {
+  EXPECT_FALSE(options_.public_admin_access());
+
+  GoogleString msg;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("PublicAdminAccess", "on",
+                                                &msg, &handler_));
+  EXPECT_TRUE(options_.public_admin_access());
+  EXPECT_EQ("", msg);
+
+  GoogleUrl gurl("http://evil.example.com/pagespeed_admin/");
+  ASSERT_TRUE(gurl.IsWebValid());
+  EXPECT_TRUE(options_.AdminAccessAllowed(gurl));
+  EXPECT_FALSE(options_.strict_admin_access());
+
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            options_.ParseAndSetOptionFromName1("PublicAdminAccess", "off",
+                                                &msg, &handler_));
+  EXPECT_FALSE(options_.public_admin_access());
+}
+
 // With strict mode OFF (the default) the three-argument AllowDomain() and the
 // two-argument AdminAccessAllowed() must behave exactly like the legacy forms:
 // default-OPEN when no allowlist is configured, regardless of client IP.

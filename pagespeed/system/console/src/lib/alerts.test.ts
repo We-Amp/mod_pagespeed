@@ -75,7 +75,7 @@ describe("ALERT_RULES", () => {
       expect(rule.fix.length, rule.id).toBeGreaterThan(0);
       if (rule.doc !== undefined) expect(rule.doc).toMatch(/^https:\/\/modpagespeed\.com\/1\.1\/docs\//);
     }
-    expect(seen.size).toBe(16);
+    expect(seen.size).toBe(17);
   });
 
   it("fix texts name the pages the sidebar has", () => {
@@ -462,6 +462,26 @@ describe("findings from the module's message log", () => {
     quiet(group("upstream said: mod_pagespeed: admin handler 'x' received request from N; intended for loopback."));
     // The phrases out of order.
     quiet(group("mod_pagespeed: admin handler 'x' intended for loopback; received request from N.N.N.N"));
+  });
+
+  const PUBLIC_LINE = "mod_pagespeed: This console is public by configuration (PublicAdminAccess on).";
+
+  it("admin-public: the configured-public line is an info finding that replaces the exposure warning", () => {
+    const out = new AlertTracker().evaluate(withLog([group(PUBLIC_LINE, { level: "info" })]), T1);
+    expect(ids(out)).toEqual(["admin-public"]);
+    expect(out[0].severity).toBe("info");
+    expect(out[0].message).toBe("This console is public by configuration.");
+    // A warning logged before the option was turned on does not raise the exposure finding beside it.
+    const both = new AlertTracker().evaluate(withLog([group(ACL), group(PUBLIC_LINE, { level: "info" })]), T1);
+    expect(ids(both)).toEqual(["admin-public"]);
+  });
+
+  it("admin-public: only the module's own info line", () => {
+    const quiet = (g: MessageGroup): void => {
+      expect(ids(new AlertTracker().evaluate(withLog([g]), T1)), g.level).toEqual([]);
+    };
+    quiet(group(PUBLIC_LINE, { level: "warning" }));
+    quiet(group("This console is public by configuration", { level: "info" }));
   });
 
   it("log rules have no data without a log read, and stay clear when the log lacks their templates", () => {

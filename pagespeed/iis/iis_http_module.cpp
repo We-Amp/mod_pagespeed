@@ -1075,7 +1075,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				AdminHandlerFamily family = AdminFamilyFor(response_category, &handler_name);
 				WarnIfNonLoopbackAdminAccess(
 					GetIPString(pHttpContext->GetRequest()->GetRemoteAddress()),
-					family, handler_name, server_context->message_handler());
+					family, handler_name, server_context->message_handler(),
+					server_context->config()->public_admin_access());
 			}
 			QueryParams query_params;
 			query_params.ParseFromUrl(*ctx->GetInnerContext()->gurl());

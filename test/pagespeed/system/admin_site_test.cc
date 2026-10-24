@@ -1140,6 +1140,50 @@ TEST_F(AdminExposureWarningTest, WarningMentionsHandlerAndIp) {
   EXPECT_THAT(dump, ::testing::HasSubstr("loopback"));
 }
 
+TEST_F(AdminExposureWarningTest, ConsolePublicOffStillWarns) {
+  WarnIfNonLoopbackAdminAccess("192.168.1.5", AdminHandlerFamily::kAdmin,
+                               "pagespeed_admin", handler_.get(),
+                               /*console_public=*/false);
+  EXPECT_EQ(1, WarningCount());
+  EXPECT_EQ(0, handler_->MessagesOfType(kInfo));
+}
+
+TEST_F(AdminExposureWarningTest, ConsolePublicOnLogsInfoInsteadOfWarning) {
+  WarnIfNonLoopbackAdminAccess("192.168.1.5", AdminHandlerFamily::kAdmin,
+                               "pagespeed_admin", handler_.get(),
+                               /*console_public=*/true);
+  EXPECT_EQ(0, WarningCount());
+  EXPECT_EQ(1, handler_->MessagesOfType(kInfo));
+  GoogleString dump;
+  StringWriter writer(&dump);
+  handler_->Dump(&writer);
+  EXPECT_THAT(dump,
+              ::testing::HasSubstr("This console is public by configuration"));
+  EXPECT_THAT(dump, ::testing::Not(::testing::HasSubstr("192.168.1.5")));
+  // Once per family, like the warning.
+  WarnIfNonLoopbackAdminAccess("192.168.1.6", AdminHandlerFamily::kAdmin,
+                               "pagespeed_admin", handler_.get(), true);
+  EXPECT_EQ(1, handler_->MessagesOfType(kInfo));
+}
+
+// The latch is process-wide, which is why the option is process scope: the
+// first non-loopback request of a family decides what is logged for it.
+TEST_F(AdminExposureWarningTest, ConsolePublicFollowsTheProcessWideLatch) {
+  WarnIfNonLoopbackAdminAccess("192.168.1.5", AdminHandlerFamily::kAdmin,
+                               "pagespeed_admin", handler_.get(), true);
+  WarnIfNonLoopbackAdminAccess("192.168.1.5", AdminHandlerFamily::kAdmin,
+                               "pagespeed_admin", handler_.get(), false);
+  EXPECT_EQ(1, handler_->MessagesOfType(kInfo));
+  EXPECT_EQ(0, WarningCount());
+}
+
+TEST_F(AdminExposureWarningTest, ConsolePublicOnLoopbackLogsNothing) {
+  WarnIfNonLoopbackAdminAccess("127.0.0.1", AdminHandlerFamily::kAdmin,
+                               "pagespeed_admin", handler_.get(), true);
+  EXPECT_EQ(0, WarningCount());
+  EXPECT_EQ(0, handler_->MessagesOfType(kInfo));
+}
+
 TEST_F(AdminExposureWarningTest, NullHandlerIsSafe) {
   // Don't crash if the caller can't supply a handler (unusual but harmless).
   WarnIfNonLoopbackAdminAccess("192.168.1.5", AdminHandlerFamily::kAdmin,
