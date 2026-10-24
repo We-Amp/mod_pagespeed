@@ -21,6 +21,7 @@
 
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <memory>
@@ -123,12 +124,31 @@ class CycloneCacheTest : public CacheTestBase {
     CycloneCache::InitStats(stats_.get());
   }
 
+  // Root directory for this test's volume files.  Bazel's TEST_TMPDIR is
+  // unique per test and per shard, so concurrent runs never collide on a
+  // volume path, and it is the directory a job-level tmpfs would land on:
+  // Cyclone's volume create and teardown fsync/msync once per stripe, and on
+  // a busy disk every such flush waits behind unrelated writers (#321).
+  // Fall back to the shared gtest temp dir when the binary runs outside
+  // Bazel.  Both roots exist on entry; Cyclone creates the leaf directory.
+  static GoogleString VolumeRoot() {
+    const char* test_tmpdir = getenv("TEST_TMPDIR");
+    if (test_tmpdir != nullptr && *test_tmpdir != '\0') {
+      GoogleString dir = test_tmpdir;
+      // Bazel on Windows hands out backslash paths; normalize like
+      // GTestTempDir() does so the volume code sees forward slashes.
+      std::replace(dir.begin(), dir.end(), '\\', '/');
+      return dir;
+    }
+    return GTestTempDir();
+  }
+
   void SetUp() override {
     // Create a unique cache path for each test to avoid conflicts
     GoogleString test_name = ::testing::UnitTest::GetInstance()
                                  ->current_test_info()
                                  ->name();
-    cache_path_ = StrCat(GTestTempDir(), "/cyclone_cache_test_", test_name);
+    cache_path_ = StrCat(VolumeRoot(), "/cyclone_cache_test_", test_name);
 
     CycloneCache::Config config;
     config.cache_path = cache_path_;
@@ -1020,8 +1040,7 @@ TEST_F(CycloneCacheTest, DataLostWithoutPersistDirectory) {
   cache_.reset();
 
   // Create a cache with persist_directory disabled.
-  GoogleString volatile_path = StrCat(GTestTempDir(),
-                                      "/cyclone_volatile_test");
+  GoogleString volatile_path = StrCat(cache_path_, "_volatile");
 
   CycloneCache::Config config;
   config.cache_path = volatile_path;
@@ -1250,9 +1269,13 @@ TEST_F(CycloneCacheTest, SmallTierRetentionAtScale) {
   if (!IsHealthyTest()) {
     GTEST_SKIP() << "CycloneCache not available";
   }
-  // 1 GB total -> ~128 MB small volume (well above the ~10 MB we write).
+  // 320 MiB total -> one 128 MiB small-tier stripe (65,536 directory slots),
+  // still far above the ~10 MB this test writes, so the ring never wraps.
+  // The default tier drops from 16 stripes to 6 with it: this test never
+  // writes the default tier, and every stripe costs an fsync on create and
+  // an msync on teardown (#235).
   std::unique_ptr<CycloneCache> cache = MakeTieredCache(
-      static_cast<int64>(1024) * 1024 * 1024, 10, "retention_scale");
+      static_cast<int64>(320) * 1024 * 1024, 10, "retention_scale");
   ASSERT_TRUE(cache->IsHealthy());
   ASSERT_TRUE(cache->small_tier_active())
       << "small tier must be active for this test to be meaningful";
@@ -1286,12 +1309,30 @@ TEST_F(CycloneCacheTest, SmallTierRetentionAtScale) {
 }
 
 #ifndef _WIN32  // fork()/waitpid(): POSIX-only cross-process tests
+// A wait status a human can read in a failure message.  The raw integer hid
+// the cause in the #321 runs: "wait status 14" was the writer's own watchdog
+// (SIGALRM) firing on a starved disk, and was being read as an exit code.
+static GoogleString DescribeWaitStatus(int status) {
+  if (WIFEXITED(status)) {
+    return StrCat("exited with code ", IntegerToString(WEXITSTATUS(status)));
+  }
+  if (WIFSIGNALED(status)) {
+    const int sig = WTERMSIG(status);
+    if (sig == SIGALRM) {
+      return StrCat("killed by SIGALRM (signal ", IntegerToString(sig),
+                    ", the writer watchdog)");
+    }
+    return StrCat("killed by signal ", IntegerToString(sig));
+  }
+  return StrCat("unusual wait status ", IntegerToString(status));
+}
+
 // The production topology: N independent "worker" processes, each with its own
 // CycloneCache attached to the SAME on-disk volume (exactly how Apache
 // MPM-event workers share cyclone.dat/.small).  The adapter hardcodes
 // multi_process_config.total_processes = 1 for every instance, so no worker
 // knows the others exist.  All writes target the small-object tier, which the
-// volume dwarfs (~13 MB written into ~128 MB, no eviction), so any loss here
+// volume dwarfs (~7 MB written into 128 MB, no eviction), so any loss here
 // would be cross-process incoherence and not eviction.
 //
 // Retention is ~100%: writes from unrelated processes ARE coherent even with
@@ -1314,10 +1355,13 @@ TEST_F(CycloneCacheTest, SmallTierRetentionMultiProcess) {
   auto make_cfg = [&]() {
     CycloneCache::Config config;
     config.cache_path = mp_path;
-    // 10 GB -> ~1 GB small tier -> ~512K dir slots.  Kept deliberately BELOW
-    // the bucket-saturation regime so any loss here is cross-process
-    // incoherence, not hash-bucket saturation.
-    config.cache_size_bytes = static_cast<int64>(10) * 1024 * 1024 * 1024;
+    // 320 MiB -> one 128 MiB small-tier stripe (16,384 four-slot buckets,
+    // 65,536 slots), clearing the 256 MiB + 128 B floor below which the
+    // small tier goes inactive (see the visibility test below).  At 10 GiB
+    // this volume was 23 stripes, and every stripe costs an fsync on create
+    // and an msync on teardown -- that per-stripe cost, on a contended
+    // runner disk, is what timed the shard out (#235).
+    config.cache_size_bytes = static_cast<int64>(320) * 1024 * 1024;
     config.ram_cache_size_bytes = 0;
     config.enable_checksum = true;
     config.num_segments = 0;
@@ -1331,20 +1375,47 @@ TEST_F(CycloneCacheTest, SmallTierRetentionMultiProcess) {
     CycloneCache seed(make_cfg(), stats_.get(), handler_.get());
     ASSERT_TRUE(seed.IsHealthy());
     ASSERT_TRUE(seed.small_tier_active())
-        << "1 GB cache must host an active small tier";
+        << "320 MiB cache must host an active small tier";
     seed.ShutDown();
   }
 
   const int kProcs = 8;
-  const int kPerProc = 2000;  // 16k entries total, far below the small
-                              // tier's slot count (no saturation).
+  // 8 x 1000 = 8,000 entries over 16,384 four-slot buckets: a mean of 0.49
+  // keys per bucket, so the expected count of buckets overflowing their
+  // four slots is under 4 (Poisson) -- under 0.05% of the keys, well inside
+  // the 1% tolerance below.  A larger loss points at cross-process
+  // incoherence rather than hash-bucket saturation, which is the property
+  // the old 10 GiB volume bought (#235).  One more source of loss remains:
+  // at 320 MiB all eight writers share one small-tier stripe and its
+  // cross-process write lock, and a Put that waits more than 250 ms for
+  // that lock is dropped as busy; on a starved host such drops count
+  // against the same tolerance.
+  const int kPerProc = 1000;
 
   std::vector<pid_t> kids;
   for (int p = 0; p < kProcs; ++p) {
     pid_t pid = fork();
-    ASSERT_NE(-1, pid) << "fork failed";
+    if (pid == -1) {
+      // A bare ASSERT would return from the test body with the children
+      // already started still running against the volume, into the next
+      // test.  Reap them first, then fail (#321).
+      for (pid_t kid : kids) {
+        int status = 0;
+        waitpid(kid, &status, 0);
+      }
+      ASSERT_NE(-1, pid) << "fork failed at child " << p << " of " << kProcs;
+    }
     if (pid == 0) {
-      // CHILD == one Apache worker process.
+      // CHILD == one Apache worker process.  The same watchdog as the
+      // visibility test below: a wedged child must be killed by SIGALRM and
+      // named in the parent's failure message, not hang its waitpid() until
+      // the shard timeout.  600 s covers the sanitizer configs' 900 s
+      // timeouts, 120 s fits the plain build's.
+#ifdef CYCLONE_CACHE_TEST_SANITIZERS
+      alarm(600);
+#else
+      alarm(120);
+#endif
       CycloneCache child(make_cfg(), stats_.get(), handler_.get());
       if (!child.IsHealthy()) {
         _exit(2);
@@ -1363,16 +1434,20 @@ TEST_F(CycloneCacheTest, SmallTierRetentionMultiProcess) {
   }
 
   int write_failures = 0;
+  GoogleString failure_notes;
   for (pid_t pid : kids) {
     int status = 0;
     waitpid(pid, &status, 0);
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
       ++write_failures;
+      StrAppend(&failure_notes, failure_notes.empty() ? "" : "; ", "pid ",
+                IntegerToString(pid), ": ", DescribeWaitStatus(status));
     }
   }
   ASSERT_EQ(0, write_failures)
       << write_failures << " of " << kProcs << " writer processes failed to "
-         "open/attach the shared cache (a distinct fault from write loss)";
+         "open/attach the shared cache (a distinct fault from write loss): "
+      << failure_notes;
 
   // Parent reopens and reads back every key written by every worker.
   CycloneCache reader(make_cfg(), stats_.get(), handler_.get());
@@ -1395,8 +1470,8 @@ TEST_F(CycloneCacheTest, SmallTierRetentionMultiProcess) {
 
   EXPECT_GE(hits, static_cast<int>(0.99 * kTotal))
       << "cross-process small-tier retention " << hits << "/" << kTotal
-      << " -- " << kProcs << " workers wrote a shared small volume only ~13 MB "
-         "/ ~128 MB full (no eviction); loss here is the total_processes=1 "
+      << " -- " << kProcs << " workers wrote a shared small volume only ~7 MB "
+         "/ 128 MB full (no eviction); loss here is the total_processes=1 "
          "directory-coherence fault (cyclone_wrapper.cc hardcodes "
          "multi_process_config.total_processes = 1 while Apache runs many "
          "worker processes on the same volume)";
@@ -1560,8 +1635,8 @@ TEST_F(CycloneCacheTest, SmallTierCrossProcessReadVisibility) {
   ASSERT_EQ(1, static_cast<int>(written)) << "failed to release the writer";
   ASSERT_EQ(pid, reaped) << "waitpid failed for the writer";
   ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0)
-      << "writer process failed to write the keys (wait status " << status
-      << ")";
+      << "writer process failed to write the keys ("
+      << DescribeWaitStatus(status) << ")";
 
   // The SAME long-lived reader instance now GETs every key again.  The writes
   // succeeded in another process; a coherent shared cache must surface them.
