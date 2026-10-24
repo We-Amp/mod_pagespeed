@@ -391,7 +391,7 @@ IproRecorder* MakeDaemonIproRecorderIfReady(DaemonAdapter* adapter,
   // then throw it away, once per request.
   return MakeDaemonIproRecorderWithHandle(adapter, request, http_options, timer,
                                           handler, stats,
-                                          adapter->RecordCache());
+                                          adapter->RecordCacheForRequest());
 }
 
 IproRecorder* MakeDaemonIproRecorderIfOpen(DaemonAdapter* adapter,

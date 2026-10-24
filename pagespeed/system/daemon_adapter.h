@@ -329,6 +329,16 @@ class DaemonAdapter {
   // request thread.
   void* RecordCache();
 
+  // RecordCache() for a request thread (the Apache and IIS serve and record
+  // factories).  Same result in steady state, but without taking the lock:
+  // the published handle is returned directly.  When nothing usable is
+  // published it performs the open on the calling thread as RecordCache()
+  // does, EXCEPT that if another thread is already inside an open (or
+  // closing), it returns nullptr at once instead of waiting, so the request
+  // goes to the origin.  RecordCache() keeps its blocking contract for
+  // callers that are not request threads and want the open to happen.
+  void* RecordCacheForRequest();
+
   // Closes this process's volume handle if one is open, and clears it.  For
   // a port that tears workers down and wants the close -- and the storage
   // layer's background-thread joins that come with it -- to happen inside
@@ -572,7 +582,14 @@ class DaemonAdapter {
   static void SetSocketVerdictLatchMsForTesting(int64_t latch_ms);
 
  private:
-  static bool SocketAnswers(StringPiece path, GoogleString* error);
+  // `deadline_budget_ms` bounds the wait on a backlogged listener or a busy
+  // pipe.  Only a probe given the full kSocketConnectDeadlineMs records the
+  // deadline latch.
+  static bool SocketAnswers(StringPiece path, GoogleString* error,
+                            int64_t deadline_budget_ms = 2000);
+
+  // The body of RecordCache(); the caller holds record_cache_mutex_.
+  void* RecordCacheLocked();
 
   DaemonStartupStatus Resolve(GoogleString* error);
 
