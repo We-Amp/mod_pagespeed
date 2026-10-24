@@ -38,7 +38,15 @@ class FileKeyDirectoryCacheTest : public testing::Test {
   }
 
   KeyLookupResult::Status Lookup(StringPiece kid) {
-    return cache_.Get(&fs_, kPath, &handler_)->GetKey("", kid, 0).status;
+    return Get()->GetKey("", kid, 0).status;
+  }
+
+  std::shared_ptr<StaticKeyDirectory> Get() {
+    return cache_.Get(&fs_, timer_.NowMs(), kPath, &handler_);
+  }
+
+  void AdvancePastRecheckInterval() {
+    timer_.AdvanceMs(FileKeyDirectoryCache::kRecheckIntervalMs);
   }
 
   NullThreadSystem threads_;
@@ -57,11 +65,47 @@ TEST_F(FileKeyDirectoryCacheTest, UnchangedFileIsReadOnce) {
   EXPECT_EQ(1, fs_.num_input_file_opens());
 }
 
+TEST_F(FileKeyDirectoryCacheTest, UnchangedFileIsStattedOnlyAfterInterval) {
+  // Between changes the stat is the only cost left, so it is also skipped
+  // until the recheck interval has passed.
+  WriteKeys(kKeyA);
+  EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
+  fs_.ClearStats();
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
+  }
+  EXPECT_EQ(0, fs_.num_input_file_stats());
+  EXPECT_EQ(0, fs_.num_input_file_opens());
+
+  AdvancePastRecheckInterval();
+  EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
+  EXPECT_EQ(1, fs_.num_input_file_stats());
+  EXPECT_EQ(0, fs_.num_input_file_opens());
+}
+
+TEST_F(FileKeyDirectoryCacheTest, ChangeWithinIntervalIsNotSeenUntilItPasses) {
+  WriteKeys(kKeyA);
+  EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
+
+  // The change lands inside the recheck interval, with one millisecond left
+  // on it: the lookup reuses the last result without touching the file, so
+  // the change is invisible.
+  timer_.AdvanceMs(FileKeyDirectoryCache::kRecheckIntervalMs - 1);
+  WriteKeys(kKeyB);
+  EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
+
+  // One millisecond later the interval has passed, the file is stat'ed
+  // again, and the new modification time is seen.
+  timer_.AdvanceMs(1);
+  EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
+  EXPECT_EQ(KeyLookupResult::kFound, Lookup("b"));
+}
+
 TEST_F(FileKeyDirectoryCacheTest, ChangedFileIsReadAgain) {
   WriteKeys(kKeyA);
   EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
   // Same size, later modification time.
-  timer_.AdvanceMs(2000);
+  AdvancePastRecheckInterval();
   WriteKeys(kKeyB);
   fs_.ClearStats();
   EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
@@ -72,8 +116,10 @@ TEST_F(FileKeyDirectoryCacheTest, ChangedFileIsReadAgain) {
 TEST_F(FileKeyDirectoryCacheTest, ResizedFileIsReadAgain) {
   WriteKeys(kKeyA);
   EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
-  // Same modification time (the clock did not move), different size.
+  // Same modification time (the file was rewritten at the same instant),
+  // different size.
   WriteKeys("{}");
+  AdvancePastRecheckInterval();
   fs_.ClearStats();
   EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
   EXPECT_EQ(1, fs_.num_input_file_opens());
@@ -83,9 +129,22 @@ TEST_F(FileKeyDirectoryCacheTest, RemovedFileYieldsEmptyDirectory) {
   WriteKeys(kKeyA);
   EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
   ASSERT_TRUE(fs_.RemoveFile(kPath, &handler_));
+  AdvancePastRecheckInterval();
   EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
-  // And it is picked up again once it is back.
+  // And it is picked up again once it is back and the interval has passed.
   WriteKeys(kKeyA);
+  EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
+  AdvancePastRecheckInterval();
+  EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
+}
+
+TEST_F(FileKeyDirectoryCacheTest, MissingFileIsRememberedForTheInterval) {
+  // A file that never existed fails closed, and within the recheck interval
+  // the absence itself is remembered rather than stat'ed again.
+  EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
+  WriteKeys(kKeyA);
+  EXPECT_EQ(KeyLookupResult::kNotFound, Lookup("a"));
+  AdvancePastRecheckInterval();
   EXPECT_EQ(KeyLookupResult::kFound, Lookup("a"));
 }
 
@@ -93,14 +152,20 @@ TEST_F(FileKeyDirectoryCacheTest, OversizedFileYieldsEmptyDirectory) {
   FileKeyDirectoryCache small_cache(16);
   WriteKeys(kKeyA);
   EXPECT_EQ(KeyLookupResult::kNotFound,
-            small_cache.Get(&fs_, kPath, &handler_)->GetKey("", "a", 0).status);
+            small_cache.Get(&fs_, timer_.NowMs(), kPath, &handler_)
+                ->GetKey("", "a", 0)
+                .status);
 }
 
 TEST_F(FileKeyDirectoryCacheTest, NoPathOrFileSystemYieldsEmptyDirectory) {
   EXPECT_EQ(KeyLookupResult::kNotFound,
-            cache_.Get(&fs_, "", &handler_)->GetKey("", "a", 0).status);
+            cache_.Get(&fs_, timer_.NowMs(), "", &handler_)
+                ->GetKey("", "a", 0)
+                .status);
   EXPECT_EQ(KeyLookupResult::kNotFound,
-            cache_.Get(nullptr, kPath, &handler_)->GetKey("", "a", 0).status);
+            cache_.Get(nullptr, timer_.NowMs(), kPath, &handler_)
+                ->GetKey("", "a", 0)
+                .status);
 }
 
 }  // namespace

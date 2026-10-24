@@ -6,10 +6,13 @@
 // The request path resolves keys from an operator-configured JWKS file. That
 // file changes rarely, so instead of reading it on every request this keeps
 // the loaded StaticKeyDirectory per path and reuses it until the file's
-// modification time or size changes. Checking costs one stat; the read
-// (bounded by max_file_bytes) happens only on the first use and after a
-// change. A file that cannot be stat'ed or read yields an empty directory
-// (every lookup kNotFound), the same fail-closed result as before.
+// modification time or size changes. The stat that detects a change still
+// costs a syscall on the request path, so it too is skipped until
+// kRecheckIntervalMs has passed since the last look at the file: a change is
+// picked up at the first lookup after the interval. The read (bounded by
+// max_file_bytes) happens only on the first use and after a change. A file
+// that cannot be stat'ed or read yields an empty directory (every lookup
+// kNotFound), remembered like any other result for the interval.
 //
 // Paths come only from operator configuration, so the number of entries is
 // bounded by the configuration. Safe to call from several threads.
@@ -35,9 +38,17 @@ class FileKeyDirectoryCache {
   explicit FileKeyDirectoryCache(int64_t max_file_bytes)
       : max_file_bytes_(max_file_bytes) {}
 
+  // How long a lookup reuses the last look at the file without touching the
+  // file system at all. No option is wired to this cache, so this is a fixed
+  // interval chosen to match the cache-flush poll's five seconds
+  // (PurgeContext::kCheckCacheIntervalMs).
+  static constexpr int64_t kRecheckIntervalMs = 5 * 1000;
+
   // The directory loaded from `path`, re-read only when the file's
-  // modification time or size differs from the last read. Never null.
-  std::shared_ptr<StaticKeyDirectory> Get(FileSystem* fs,
+  // modification time or size differs from the last read. Within
+  // kRecheckIntervalMs of the last look the file system is not touched at
+  // all. Never null.
+  std::shared_ptr<StaticKeyDirectory> Get(FileSystem* fs, int64 now_ms,
                                           const GoogleString& path,
                                           MessageHandler* handler);
 
@@ -45,6 +56,7 @@ class FileKeyDirectoryCache {
   struct Entry {
     int64 mtime_sec;
     int64 size;
+    int64 last_check_ms;
     std::shared_ptr<StaticKeyDirectory> directory;
   };
 

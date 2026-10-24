@@ -47,7 +47,7 @@ const char kHeadersComplete = 'H';
 const char kFlush = 'F';
 const char kDone = 'D';
 
-NgxEventConnection* NgxBaseFetch::event_connection = nullptr;
+std::atomic<NgxEventConnection*> NgxBaseFetch::event_connection{nullptr};
 int NgxBaseFetch::active_base_fetches = 0;
 
 namespace {
@@ -179,12 +179,16 @@ NgxBaseFetch::~NgxBaseFetch() {
 
 bool NgxBaseFetch::Initialize(ngx_cycle_t* cycle) {
   CHECK(event_connection == nullptr) << "event connection already set";
-  event_connection = new NgxEventConnection(ReadCallback);
-  return event_connection->Init(cycle);
+  NgxEventConnection* connection = new NgxEventConnection(ReadCallback);
+  event_connection.store(connection, std::memory_order_release);
+  return connection->Init(cycle);
 }
 
 void NgxBaseFetch::Terminate() {
-  if (event_connection != nullptr) {
+  // Terminate runs on the nginx main thread, the only writer of the global,
+  // so a plain load suffices here.
+  NgxEventConnection* connection = event_connection.load();
+  if (connection != nullptr) {
     GoogleMessageHandler handler;
     PosixTimer timer;
     int64 timeout_us = Timer::kSecondUs * 30;
@@ -199,7 +203,7 @@ void NgxBaseFetch::Terminate() {
     // until the timeout expires.
     // TODO(oschaaf): This needs more work.
     while (NgxBaseFetch::active_base_fetches > 0 && end_us > timer.NowUs()) {
-      event_connection->Drain();
+      connection->Drain();
       usleep(sleep_microseconds);
     }
 
@@ -210,10 +214,21 @@ void NgxBaseFetch::Terminate() {
           NgxBaseFetch::active_base_fetches);
     }
 
-    // Close down the named pipe.
-    event_connection->Shutdown();
-    delete event_connection;
-    event_connection = nullptr;
+    // Detach the event connection first so a completion arriving after this
+    // point finds a null connection and does nothing (RequestCollection),
+    // then close the pipe. The NgxEventConnection itself is deliberately
+    // not deleted: a rewrite thread that outlived the drain may already
+    // have loaded the non-null pointer and still call WriteEvent() on it.
+    // That call is safe because Shutdown() refuses writes on the kept-alive
+    // object: it marks the connection closed under the write mutex, so the
+    // late WriteEvent() is dropped instead of reaching the closed fd
+    // number, which worker-exit teardown (factory shutdown, cache cleanup)
+    // may already have reopened for another file or socket. Freeing the
+    // object would turn the same call into a use-after-free. This is the
+    // worker exit path: one small object per process is leaked, and
+    // nothing collects its output anyway.
+    event_connection.store(nullptr, std::memory_order_release);
+    connection->Shutdown();
   }
 }
 
@@ -767,13 +782,27 @@ void NgxBaseFetch::RequestCollection(char type) {
     return;
   }
 
+  // Read the pointer once and use the local for the rest of the function:
+  // checking the global and then dereferencing it would let Terminate()
+  // null it in between (the refcount increment below is a full barrier, so
+  // the compiler cannot fuse the two reads either).
+  NgxEventConnection* connection =
+      event_connection.load(std::memory_order_acquire);
+  // After Terminate() tears the event channel down, a completion from a
+  // rewrite thread that outlived the shutdown drain has no channel left to
+  // notify: drop it. The worker is exiting, so nobody would collect the
+  // output anyway.
+  if (connection == nullptr) {
+    return;
+  }
+
   // We must optimistically increment the refcount, and decrement it
   // when we conclude we failed. If we only increment on a successfull write,
   // there's a small chance that between writing and adding to the refcount
   // both pagespeed and nginx will release their refcount -- destructing
   // this NgxBaseFetch instance.
   IncrementRefCount();
-  if (!event_connection->WriteEvent(type, this)) {
+  if (!connection->WriteEvent(type, this)) {
     DecrementRefCount();
   }
 }

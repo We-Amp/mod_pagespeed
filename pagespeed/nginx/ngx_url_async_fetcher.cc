@@ -288,22 +288,36 @@ bool NgxUrlAsyncFetcher::Init(ngx_cycle_t* cycle) {
 }
 
 void NgxUrlAsyncFetcher::ShutDown() {
-  shutdown_ = true;
-  if (!pending_fetches_.empty()) {
+  std::vector<NgxFetch*> fetches_to_cancel;
+  {
+    // Publish the shutdown under the same lock Fetch queues fetches under,
+    // and tear the event channel down inside it: a Fetch that rechecks
+    // shutdown_ under this lock cannot add to the pool or write an event
+    // once this is done.
+    ScopedMutex lock(mutex_);
+    shutdown_ = true;
     for (auto fetch : pending_fetches_) {
-      fetch->CallbackDone(false);
+      fetches_to_cancel.push_back(fetch);
     }
-    pending_fetches_.DeleteAll();
+    pending_fetches_.Clear();
+    if (event_connection_ != nullptr) {
+      event_connection_->Shutdown();
+      delete event_connection_;
+      event_connection_ = nullptr;
+    }
+  }
+  // Complete the fetches outside the lock: CallbackDone runs the fetch
+  // callbacks, which reenter the fetcher through FetchComplete() and so
+  // must not run with mutex_ held. The pending fetches were never started
+  // and are deleted here (as pending_fetches_.DeleteAll() did).
+  for (NgxFetch* fetch : fetches_to_cancel) {
+    fetch->CallbackDone(false);
+    delete fetch;
   }
 
   if (!active_fetches_.empty()) {
     CancelActiveFetches();
     active_fetches_.Clear();
-  }
-  if (event_connection_ != nullptr) {
-    event_connection_->Shutdown();
-    delete event_connection_;
-    event_connection_ = nullptr;
   }
 }
 
@@ -332,13 +346,18 @@ void NgxUrlAsyncFetcher::Fetch(const GoogleString& url,
   async_fetch = EnableInflation(async_fetch);
   NgxFetch* fetch = new NgxFetch(url, async_fetch, message_handler, log_);
   ScopedMutex lock(mutex_);
+  // ShutDown may have completed while the fetch was being built: recheck
+  // under the lock it tears the event channel down under, so we never queue
+  // a fetch or touch a deleted event connection.
+  if (shutdown_) {
+    lock.Release();
+    delete fetch;
+    async_fetch->Done(false);
+    return;
+  }
   pending_fetches_.Add(fetch);
-
-  // TODO(oschaaf): thread safety on written vs shutdown.
-  // It is possible that shutdown() is called after writing an event? In that
-  // case, this could (rarely) fail when it shouldn't.
   bool written = event_connection_->WriteEvent(this);
-  CHECK(written || shutdown_) << "NgxUrlAsyncFetcher: event write failure";
+  CHECK(written) << "NgxUrlAsyncFetcher: event write failure";
 }
 
 // This is the read event which is called in the main thread.

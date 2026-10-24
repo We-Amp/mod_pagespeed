@@ -2858,6 +2858,17 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
   ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 
+  // This cycle's server contexts were never child-initialized: a reload in
+  // single-process mode (master_process off), which ps_init_module refuses.
+  // Decline so nginx serves the request itself instead of dereferencing the
+  // unset proxy fetch factory.
+  if (cfg_s->proxy_fetch_factory == nullptr) {
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                  "pagespeed: proxy fetch factory is not initialized for "
+                  "this configuration; serving request without optimization");
+    return NGX_DECLINED;
+  }
+
   if (ctx != nullptr) {
     // A request that comes through here again (internal redirect, or the
     // html pass after the resource pass) starts the disposition over: a
@@ -3512,8 +3523,12 @@ ngx_int_t ps_html_rewrite_header_filter(ngx_http_request_t* r) {
     // Don't handle subrequests.
     return ngx_http_next_header_filter(r);
   }
-  // Poll for cache flush on every request (polls are rate-limited).
-  cfg_s->server_context->FlushCacheIfNecessary();
+  // Poll for cache flush on every request (polls are rate-limited).  A
+  // context that was never child-initialized has no timer or cache path to
+  // poll with.
+  if (cfg_s->server_context->initialized()) {
+    cfg_s->server_context->FlushCacheIfNecessary();
+  }
 
   ps_request_ctx_t* ctx = ps_get_request_context(r);
 
@@ -4345,6 +4360,15 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
     return NGX_DECLINED;
   }
 
+  // A server context that was never child-initialized (the new cycle of a
+  // reload in single-process mode, which ps_init_module refuses) cannot
+  // serve any pagespeed route: its statistics, timers and caches were never
+  // set up.  Decline everything, beacons and admin paths included, before
+  // touching that state.
+  if (!cfg_s->server_context->initialized()) {
+    return NGX_DECLINED;
+  }
+
   // Poll for cache flush on every request (polls are rate-limited).
   cfg_s->server_context->FlushCacheIfNecessary();
 
@@ -4727,6 +4751,26 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     return NGX_OK;
   }
 
+  const bool initial_cycle =
+      (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);
+
+  // nginx reconfigures a reload in the same process, but in single-process
+  // mode (master_process off) it never re-runs the init_process hooks for
+  // the new cycle: ngx_single_process_cycle only calls ngx_init_cycle.  The
+  // server contexts built for this cycle would then never be
+  // child-initialized, and the first HTML request would reach
+  // ps_resource_handler with an unset ProxyFetchFactory.  Refuse to bring
+  // the module up for such a cycle instead: requests are served unoptimized
+  // (ps_resource_handler declines on the unset factory) until nginx is
+  // restarted.
+  if (!initial_cycle && ngx_process == NGX_PROCESS_SINGLE) {
+    ngx_log_error(NGX_LOG_ERR, cycle->log, 0,
+                  "ngx_pagespeed: reload with master_process off is not "
+                  "supported; optimization will stay off until nginx is "
+                  "restarted");
+    return NGX_OK;
+  }
+
   ngx_http_core_main_conf_t* cmcf = static_cast<ngx_http_core_main_conf_t*>(
       ngx_http_cycle_get_module_main_conf(cycle, ngx_http_core_module));
   ngx_http_core_srv_conf_t** cscfp =
@@ -4783,8 +4827,6 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     // running.  The adapter announces each distinct condition once per
     // process, so a refusal repeated across reloads would be silent; the
     // module therefore says so itself, every time.
-    const bool initial_cycle =
-        (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);
     for (SystemServerContext* system_server_context : server_contexts) {
       NgxServerContext* server_context =
           dynamic_cast<NgxServerContext*>(system_server_context);

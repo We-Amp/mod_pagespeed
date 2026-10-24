@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **nginx: reload, worker exit and Web Bot Auth key-file robustness.**
+  Reloading with `master_process off` no longer crashes: the reload is
+  refused with an error and pagespeed stays off until nginx is restarted; a
+  worker exiting with work outstanding no longer crashes; the Web Bot Auth
+  key file is rechecked at most every 5 seconds instead of on every signed
+  request.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

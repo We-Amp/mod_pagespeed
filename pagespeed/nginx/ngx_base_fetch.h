@@ -58,6 +58,8 @@ extern "C" {
 
 #include <pthread.h>
 
+#include <atomic>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "ngx_event_connection.h"
@@ -181,7 +183,12 @@ class NgxBaseFetch : public AsyncFetch {
   // it's zero we delete ourself.
   int DecrefAndDeleteIfUnreferenced();
 
-  static NgxEventConnection* event_connection;
+  // The event connection pointer, handed to rewrite threads by
+  // RequestCollection. Terminate() nulls it (release) on the nginx main
+  // thread, so readers must load it once (acquire) into a local and use that
+  // local throughout: reading the global twice could observe nullptr in
+  // between the check and the use.
+  static std::atomic<NgxEventConnection*> event_connection;
 
   // Live count of NgxBaseFetch instances that are currently in use.
   static int active_base_fetches;

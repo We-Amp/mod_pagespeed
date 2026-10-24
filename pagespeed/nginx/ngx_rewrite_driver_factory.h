@@ -64,7 +64,6 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   MessageHandler* DefaultMessageHandler() override;
   FileSystem* DefaultFileSystem() override;
   Timer* DefaultTimer() override;
-  NamedLockManager* DefaultLockManager() override;
   // Create a new RewriteOptions.  In this implementation it will be an
   // NgxRewriteOptions, and it will have CoreFilters explicitly set.
   RewriteOptions* NewRewriteOptions() override;
