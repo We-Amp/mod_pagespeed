@@ -74,6 +74,12 @@ inline std::vector<std::string> tokenize(const std::string& s,
 // diagnostic pointing at where the file _should_ live.
 std::string ResolveProgramDataConfig(bool* exists);
 
+// Test seam. When |root| is non-empty it replaces the %ProgramData% folder
+// (as returned by the shell) for ResolveProgramDataConfig, so a unit test can
+// point the resolver at a temporary directory tree. |root| has no trailing
+// backslash. An empty string (the default) restores the real folder.
+void SetProgramDataRootForTesting(const std::string& root);
+
 // True iff the site's per-site override (tier 3) exists on disk. This is the
 // engage-gate primitive: a site engages when it has its own config file.
 bool SiteConfigExists(const std::string& site_physical_path);
