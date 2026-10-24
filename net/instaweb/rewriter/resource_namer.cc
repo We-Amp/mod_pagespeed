@@ -172,8 +172,7 @@ bool ResourceNamer::LegacyDecode(const StringPiece& encoded_string) {
       if (hash_.size() != 32) {
         return false;
       }
-      for (int i = 0, n = hash_.size(); i < n; ++i) {
-        char ch = hash_[i];
+      for (char ch : hash_) {
         if (!isdigit(ch)) {
           ch = UpperChar(ch);
           if ((ch < 'A') || (ch > 'F')) {

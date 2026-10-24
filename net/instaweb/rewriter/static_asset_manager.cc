@@ -244,10 +244,9 @@ void StaticAssetManager::ApplyGStaticConfigurationImpl(
 void StaticAssetManager::InitializeAssetStrings() {
   ScopedMutex write_lock(lock_.get());
   assets_.resize(StaticAssetEnum::StaticAsset_ARRAYSIZE);
-  for (std::vector<Asset*>::iterator it = assets_.begin(); it != assets_.end();
-       ++it) {
-    *it = new Asset;
-    (*it)->content_type = kContentTypeJavascript;
+  for (auto& asset : assets_) {
+    asset = new Asset;
+    asset->content_type = kContentTypeJavascript;
   }
   // Initialize JS
   // Initialize file names.
@@ -373,9 +372,7 @@ void StaticAssetManager::InitializeAssetStrings() {
 }
 
 void StaticAssetManager::InitializeAssetUrls() {
-  for (std::vector<Asset*>::iterator it = assets_.begin(); it != assets_.end();
-       ++it) {
-    Asset* asset = *it;
+  for (auto asset : assets_) {
     // Generated urls are in the format "<filename>.<md5>.<extension>".
     asset->opt_url =
         StrCat(static_asset_base_, library_url_prefix_,

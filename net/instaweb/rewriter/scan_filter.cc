@@ -164,13 +164,13 @@ void ScanFilter::StartElement(HtmlElement* element) {
   } else {
     resource_tag_scanner::UrlCategoryVector attributes;
     resource_tag_scanner::ScanElement(element, driver_->options(), &attributes);
-    for (int i = 0, n = attributes.size(); i < n; ++i) {
+    for (auto& attribute : attributes) {
       // Don't count <html manifest=...> as a ref for the purpose of determining
       // if there are refs before base.  It's also important not to count <head
       // profile=...> but ScanElement skips that.
       if (!seen_refs_ && !seen_base_ &&
           !(element->keyword() == HtmlName::kHtml &&
-            attributes[i].url->keyword() == HtmlName::kManifest)) {
+            attribute.url->keyword() == HtmlName::kManifest)) {
         seen_refs_ = true;
       }
     }

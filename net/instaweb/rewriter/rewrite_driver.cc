@@ -636,16 +636,12 @@ void RewriteDriver::FlushAsync(Function* callback) {
   // can modify urls.
   DetermineFiltersBehavior();
 
-  for (FilterList::iterator it = early_pre_render_filters_.begin();
-       it != early_pre_render_filters_.end(); ++it) {
-    HtmlFilter* filter = *it;
+  for (auto filter : early_pre_render_filters_) {
     if (filter->is_enabled()) {
       ApplyFilter(filter);
     }
   }
-  for (FilterList::iterator it = pre_render_filters_.begin();
-       it != pre_render_filters_.end(); ++it) {
-    HtmlFilter* filter = *it;
+  for (auto filter : pre_render_filters_) {
     if (filter->is_enabled()) {
       ApplyFilter(filter);
     }
@@ -759,11 +755,7 @@ void RewriteDriver::FlushAsyncDone(int num_rewrites, Function* callback) {
     // Detach all rewrites that are still outstanding, by moving them from
     // initiated_rewrites_ to detached_rewrites_; also notify them that they
     // will not be rendered.
-    for (RewriteContextSet::iterator p = initiated_rewrites_.begin(),
-                                     e = initiated_rewrites_.end();
-         p != e; ++p) {
-      RewriteContext* rewrite_context = *p;
-
+    for (auto rewrite_context : initiated_rewrites_) {
       // If debugging is enabled, annotate that we have missed our rewrite
       // deadline.
       if (options()->Enabled(RewriteOptions::kDebug)) {
@@ -803,16 +795,12 @@ void RewriteDriver::FlushAsyncDone(int num_rewrites, Function* callback) {
     debug_filter_->RenderDone();
   }
 
-  for (FilterList::iterator it = early_pre_render_filters_.begin();
-       it != early_pre_render_filters_.end(); ++it) {
-    HtmlFilter* filter = *it;
+  for (auto filter : early_pre_render_filters_) {
     if (filter->is_enabled()) {
       filter->RenderDone();
     }
   }
-  for (FilterList::iterator it = pre_render_filters_.begin();
-       it != pre_render_filters_.end(); ++it) {
-    HtmlFilter* filter = *it;
+  for (auto filter : pre_render_filters_) {
     if (filter->is_enabled()) {
       filter->RenderDone();
     }
@@ -1178,9 +1166,9 @@ bool RewriteDriver::DecodeUrlGivenOptions(const GoogleUrl& url,
       url, options, url_namer, &namer, &kind, &filter, &url_base, decoded_urls);
   if (is_decoded) {
     GoogleUrl gurl_base(url_base);
-    for (int i = 0, n = decoded_urls->size(); i < n; ++i) {
-      GoogleUrl full_url(gurl_base, (*decoded_urls)[i]);
-      (*decoded_urls)[i] = full_url.Spec().as_string();
+    for (auto& decoded_url : *decoded_urls) {
+      GoogleUrl full_url(gurl_base, decoded_url);
+      decoded_url = full_url.Spec().as_string();
     }
   }
   return is_decoded;
@@ -1749,9 +1737,9 @@ ResourcePtr RewriteDriver::CreateInputResourceUnchecked(
 }
 
 bool RewriteDriver::IsResourceUrlClaimed(const GoogleUrl& url) const {
-  for (int i = 0, n = resource_claimants_.size(); i < n; ++i) {
+  for (auto resource_claimant : resource_claimants_) {
     bool claims = false;
-    resource_claimants_[i]->Run(url, &claims);
+    resource_claimant->Run(url, &claims);
     if (claims) {
       return true;
     }
@@ -2060,10 +2048,7 @@ GoogleString RewriteDriver::ToStringLockHeld(
             IntegerToString(detached_rewrites_.size()), "\n");
 
   if (show_detached_contexts) {
-    for (RewriteContextSet::iterator p = detached_rewrites_.begin(),
-                                     e = detached_rewrites_.end();
-         p != e; ++p) {
-      RewriteContext* detached_rewrite = *p;
+    for (auto detached_rewrite : detached_rewrites_) {
       StrAppend(&out, "  Detached Rewrite:\n",
                 detached_rewrite->ToStringWithPrefix("  "));
     }
@@ -2881,11 +2866,9 @@ void RewriteDriver::InsertDebugComments(
     HtmlElement* element) {
   if (DebugMode() && element != nullptr && IsRewritable(element)) {
     HtmlNode* preceding_node = element;
-    for (protobuf::RepeatedPtrField<GoogleString>::const_iterator unescaped =
-             unescaped_messages.begin();
-         unescaped != unescaped_messages.end(); ++unescaped) {
+    for (const auto& unescaped_message : unescaped_messages) {
       GoogleString escaped;
-      HtmlKeywords::Escape(*unescaped, &escaped);
+      HtmlKeywords::Escape(unescaped_message, &escaped);
 
       HtmlNode* comment_node =
           NewCommentNode(preceding_node->parent(), escaped);

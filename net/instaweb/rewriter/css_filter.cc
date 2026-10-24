@@ -431,8 +431,7 @@ bool CssFilter::Context::RewriteCssText(const GoogleUrl& css_base_gurl,
 
     // Report all parse errors (Note: Some of these are errors we recovered
     // from by passing through unparsed sections of text).
-    for (int i = 0, n = parser.errors_seen().size(); i < n; ++i) {
-      Css::Parser::ErrorInfo error = parser.errors_seen()[i];
+    for (const auto& error : parser.errors_seen()) {
       Driver()->server_context()->usage_data_reporter()->ReportWarning(
           css_base_gurl, error.error_num, error.message);
     }
@@ -539,14 +538,13 @@ bool CssFilter::Context::FallbackRewriteUrls(const GoogleUrl& css_base_gurl,
         driver->message_handler());
 
     const StringIntMap& url_counts = url_counter.url_counts();
-    for (StringIntMap::const_iterator it = url_counts.begin();
-         it != url_counts.end(); ++it) {
-      const GoogleUrl url(it->first);
+    for (const auto& url_count : url_counts) {
+      const GoogleUrl url(url_count.first);
       // TODO(sligocki): Use count of occurrences to decide which URLs to
       // inline. it->second has the count of how many occurrences of this
       // URL there were.
       // This is guaranteed by CssUrlCounter.
-      CHECK(url.IsAnyValid()) << it->first;
+      CHECK(url.IsAnyValid()) << url_count.first;
       // Add slot.
       bool is_authorized;
       // This can be both an image or CSS at very least, so have to be

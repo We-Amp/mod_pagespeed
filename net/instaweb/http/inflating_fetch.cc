@@ -43,9 +43,9 @@ bool InflatingFetch::IsCompressionAllowedInRequest() {
     request_checked_for_accept_encoding_ = true;
     ConstStringStarVector v;
     if (request_headers()->Lookup(HttpAttributes::kAcceptEncoding, &v)) {
-      for (int i = 0, n = v.size(); i < n; ++i) {
-        if (v[i] != nullptr) {
-          StringPiece value = *v[i];
+      for (auto& accept_encoding : v) {
+        if (accept_encoding != nullptr) {
+          StringPiece value = *accept_encoding;
           if (StringCaseEqual(value, HttpAttributes::kGzip) ||
               StringCaseEqual(value, HttpAttributes::kDeflate)) {
             // TODO(jmarantz): what if we want only deflate, but get gzip?

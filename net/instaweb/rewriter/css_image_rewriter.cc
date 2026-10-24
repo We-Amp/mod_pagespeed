@@ -183,11 +183,9 @@ void CssImageRewriter::InheritChildImageInfo(RewriteContext* context) {
     }
   }
 
-  for (AssociatedImageInfoMap::iterator i = child_image_info.begin(),
-                                        e = child_image_info.end();
-       i != e; ++i) {
+  for (auto& entry : child_image_info) {
     *context->mutable_output_partition(0)->add_associated_image_info() =
-        i->second;
+        entry.second;
   }
 }
 
@@ -198,9 +196,7 @@ void CssImageRewriter::RewriteRulesets(Css::Rulesets* rulesets,
                                        bool* spriting_ok,
                                        MessageHandler* handler) {
   const RewriteOptions* options = driver()->options();
-  for (Css::Rulesets::iterator ruleset_iter = rulesets->begin();
-       ruleset_iter != rulesets->end(); ++ruleset_iter) {
-    Css::Ruleset* ruleset = *ruleset_iter;
+  for (auto ruleset : *rulesets) {
     if (ruleset->type() == Css::Ruleset::GROUP_RULE) {
       // Rulesets inside @supports/@layer/@container are parsed structure
       // owned by the group node; images inside are only reached through this

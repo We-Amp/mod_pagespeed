@@ -105,8 +105,8 @@ JavascriptCodeBlock::~JavascriptCodeBlock() {}
 
 // Is this URL sanitary to be appended (in a line comment) to the JS doc?
 bool JavascriptCodeBlock::IsSanitarySourceMapUrl(StringPiece url) {
-  for (int i = 0, n = url.size(); i < n; ++i) {
-    if (!IsNonControlAscii(url[i])) {
+  for (char ch : url) {
+    if (!IsNonControlAscii(ch)) {
       // This is a bit broader than necessary. JS line comments can only be
       // terminated by Unicode line/paragraph separators (Zl/Zp). Instead of
       // searching for all of these, we simply check any non-standard chars.

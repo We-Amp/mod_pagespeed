@@ -183,11 +183,11 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
 
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
+  for (auto& attribute : attributes) {
     bool may_load = false;
     RewriteDriver::InputRole input_role = RewriteDriver::InputRole::kUnknown;
 
-    switch (attributes[i].category) {
+    switch (attribute.category) {
       case semantic_type::kStylesheet:
         may_load = driver()->MayCacheExtendCss();
         input_role = RewriteDriver::InputRole::kStyle;
@@ -208,11 +208,11 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
         // override it, and the slot would still render the new URL.
         HtmlElement::Attribute* script_src;
         ScriptTagScanner scanner(driver());
-        if (may_load && attributes[i].url->DecodedValueOrNull() != nullptr &&
+        if (may_load && attribute.url->DecodedValueOrNull() != nullptr &&
             scanner.ParseScriptElement(element, &script_src) ==
                 ScriptTagScanner::kJavaScriptModule) {
           GoogleUrl script_gurl(driver()->base_url(),
-                                attributes[i].url->DecodedValueOrNull());
+                                attribute.url->DecodedValueOrNull());
           if (driver()->options()->domain_lawyer()->WillDomainChange(
                   script_gurl)) {
             driver()->InsertDebugComment(kModuleCrossHostMessage, element);
@@ -223,10 +223,10 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
       }
       default:
         // Does the url in the attribute end in .pdf, ignoring query params?
-        if (attributes[i].url->DecodedValueOrNull() != nullptr &&
+        if (attribute.url->DecodedValueOrNull() != nullptr &&
             driver()->MayCacheExtendPdfs()) {
           GoogleUrl url(driver()->base_url(),
-                        attributes[i].url->DecodedValueOrNull());
+                        attribute.url->DecodedValueOrNull());
           if (url.IsWebValid() &&
               StringCaseEndsWith(url.LeafSansQuery(),
                                  kContentTypePdf.file_extension())) {
@@ -243,12 +243,12 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
     // enforced — even when the bytes match. Leave a resource carrying
     // integrity= on its origin host. (Modules are handled above: their
     // fetches are CORS-mode and break for the inverse reason.)
-    if (may_load && attributes[i].url->DecodedValueOrNull() != nullptr &&
-        (attributes[i].category == semantic_type::kScript ||
-         attributes[i].category == semantic_type::kStylesheet) &&
+    if (may_load && attribute.url->DecodedValueOrNull() != nullptr &&
+        (attribute.category == semantic_type::kScript ||
+         attribute.category == semantic_type::kStylesheet) &&
         ScriptTagScanner::HasIntegrityAttribute(element)) {
       GoogleUrl integrity_gurl(driver()->base_url(),
-                               attributes[i].url->DecodedValueOrNull());
+                               attribute.url->DecodedValueOrNull());
       if (driver()->options()->domain_lawyer()->WillDomainChange(
               integrity_gurl)) {
         driver()->InsertDebugComment(kIntegrityCrossHostMessage, element);
@@ -262,7 +262,7 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
     // TODO(jmarantz): We ought to be able to domain-shard even if the
     // resources are non-cacheable or privately cacheable.
     if (driver()->IsRewritable(element)) {
-      const char* url_str = attributes[i].url->DecodedValueOrNull();
+      const char* url_str = attribute.url->DecodedValueOrNull();
       ResourcePtr input_resource(CreateInputResourceOrInsertDebugComment(
           url_str, input_role, element));
       if (input_resource.get() == nullptr) {
@@ -275,7 +275,7 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
       }
 
       ResourceSlotPtr slot(
-          driver()->GetSlot(input_resource, element, attributes[i].url));
+          driver()->GetSlot(input_resource, element, attribute.url));
       Context* context =
           new Context(input_role, this, driver(), nullptr /* not nested */);
       context->AddSlot(slot);

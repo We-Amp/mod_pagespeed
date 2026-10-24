@@ -127,9 +127,8 @@ StringSet* CommaSeparatedStringToSet(StringPiece str) {
   // http://en.wikipedia.org/wiki/Query_string#URL_encoding.
   SplitStringPieceToVector(str, ",", &str_values, true);
   StringSet* set = new StringSet();
-  for (StringPieceVector::const_iterator it = str_values.begin();
-       it != str_values.end(); ++it) {
-    set->insert(it->as_string());
+  for (auto str_value : str_values) {
+    set->insert(str_value.as_string());
   }
   return set;
 }
@@ -308,10 +307,9 @@ ServerContext::~ServerContext() {
 
     // Actually release anything that got deferred above.
     trying_to_cleanup_rewrite_drivers_ = false;
-    for (RewriteDriverSet::iterator i =
-             deferred_release_rewrite_drivers_.begin();
-         i != deferred_release_rewrite_drivers_.end(); ++i) {
-      ReleaseRewriteDriverImpl(*i);
+    for (auto deferred_release_rewrite_driver :
+         deferred_release_rewrite_drivers_) {
+      ReleaseRewriteDriverImpl(deferred_release_rewrite_driver);
     }
     deferred_release_rewrite_drivers_.clear();
   }
@@ -330,10 +328,7 @@ ServerContext::~ServerContext() {
         "ServerContext: %d leaked_rewrite_drivers on destruction",
         static_cast<int>(active_rewrite_drivers_.size()));
 #ifndef NDEBUG
-    for (RewriteDriverSet::iterator p = active_rewrite_drivers_.begin(),
-                                    e = active_rewrite_drivers_.end();
-         p != e; ++p) {
-      RewriteDriver* driver = *p;
+    for (auto driver : active_rewrite_drivers_) {
       // During load-test, print some detail about leaked drivers.  It
       // appears that looking deep into the leaked driver's detached
       // contexts crashes during shutdown, however, so disable that.
@@ -446,8 +441,7 @@ void ServerContext::ApplyInputCacheControl(const ResourceVector& inputs,
   bool is_public = true;  // Only used if we see a non-empty resource.
   bool saw_nonempty_resource = false;
   int64 max_age = headers->cache_ttl_ms();
-  for (int i = 0, n = inputs.size(); i < n; ++i) {
-    const ResourcePtr& input_resource(inputs[i]);
+  for (const auto& input_resource : inputs) {
     if (input_resource.get() != nullptr && input_resource->HttpStatusOk()) {
       ResponseHeaders* input_headers = input_resource->response_headers();
       input_headers->ComputeCaching();
@@ -523,8 +517,7 @@ void ServerContext::AddOriginalContentLengthHeader(const ResourceVector& inputs,
   // use this to set the X-Original-Content-Length header in the output.
   int64 input_size = 0;
   bool all_known = !inputs.empty();
-  for (int i = 0, n = inputs.size(); i < n; ++i) {
-    const ResourcePtr& input_resource(inputs[i]);
+  for (const auto& input_resource : inputs) {
     ResponseHeaders* input_headers = input_resource->response_headers();
     const char* original_content_length_header =
         input_headers->Lookup1(HttpAttributes::kXOriginalContentLength);

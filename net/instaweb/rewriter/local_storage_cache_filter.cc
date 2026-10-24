@@ -309,18 +309,17 @@ bool LocalStorageCacheFilter::IsHashInCookie(const RewriteDriver* driver,
     if (driver->request_headers()->Lookup(HttpAttributes::kCookie, &v)) {
       GoogleString prefix;
       StrAppend(&prefix, cookie_name, "=");
-      for (int i = 0, nv = v.size(); i < nv; ++i) {
+      for (auto& cookie_header : v) {
         StringPieceVector cookie_vector;
-        SplitStringPieceToVector(*(v[i]), ";", &cookie_vector, true);
-        for (int j = 0, nc = cookie_vector.size(); j < nc; ++j) {
-          StringPiece cookie(cookie_vector[j]);
+        SplitStringPieceToVector(*cookie_header, ";", &cookie_vector, true);
+        for (auto cookie : cookie_vector) {
           TrimQuote(&cookie);
           if (StringCaseStartsWith(cookie, prefix)) {
             cookie.remove_prefix(prefix.length());
             StringPieceVector hashes;
             SplitStringPieceToVector(cookie, "!", &hashes, true /*omit empty*/);
-            for (int k = 0, nh = hashes.size(); k < nh; ++k) {
-              hash_set->insert(hashes[k]);
+            for (auto hash : hashes) {
+              hash_set->insert(hash);
             }
             break;
           }
@@ -343,9 +342,7 @@ GoogleString LocalStorageCacheFilter::ExtractOtherImgAttributes(
   // data-pagespeed-no-defer, pagespeed_no_defer, and src.
   GoogleString result;
   const HtmlElement::AttributeList& attrs = element->attributes();
-  for (HtmlElement::AttributeConstIterator i(attrs.begin()); i != attrs.end();
-       ++i) {
-    const HtmlElement::Attribute& attr = *i;
+  for (const auto& attr : attrs) {
     HtmlName::Keyword keyword = attr.keyword();
     if (keyword != HtmlName::kDataPagespeedLscUrl &&
         keyword != HtmlName::kDataPagespeedLscHash &&

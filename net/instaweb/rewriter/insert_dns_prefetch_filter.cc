@@ -189,15 +189,15 @@ void InsertDnsPrefetchFilter::StartElementImpl(HtmlElement* element) {
   }
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
-    switch (attributes[i].category) {
+  for (auto& attribute : attributes) {
+    switch (attribute.category) {
       // The categories below are downloaded by the browser to display the page.
       // So DNS prefetch hints are useful.
       case semantic_type::kImage:
       case semantic_type::kScript:
       case semantic_type::kStylesheet:
       case semantic_type::kOtherResource:
-        MarkAlreadyInHead(attributes[i].url);
+        MarkAlreadyInHead(attribute.url);
         break;
 
       case semantic_type::kPrefetch:
@@ -217,11 +217,11 @@ void InsertDnsPrefetchFilter::StartElementImpl(HtmlElement* element) {
                                      &rel_tokens, true /* skip empty */);
             bool has_prefetch = false;
             bool has_conn_warmup = false;
-            for (int j = 0, m = rel_tokens.size(); j < m; ++j) {
-              if (StringCaseEqual(rel_tokens[j], kRelPrefetch)) {
+            for (auto rel_token : rel_tokens) {
+              if (StringCaseEqual(rel_token, kRelPrefetch)) {
                 has_prefetch = true;
-              } else if (StringCaseEqual(rel_tokens[j], kRelDnsPrefetch) ||
-                         StringCaseEqual(rel_tokens[j], kRelPreconnect)) {
+              } else if (StringCaseEqual(rel_token, kRelDnsPrefetch) ||
+                         StringCaseEqual(rel_token, kRelPreconnect)) {
                 has_conn_warmup = true;
               }
             }
@@ -234,8 +234,8 @@ void InsertDnsPrefetchFilter::StartElementImpl(HtmlElement* element) {
                 // we emit hints for: the author's tag already does the job.
                 GoogleString domain;
                 GoogleString origin;
-                if (ExtractDomain(driver()->base_url(), attributes[i].url,
-                                  &domain, &origin)) {
+                if (ExtractDomain(driver()->base_url(), attribute.url, &domain,
+                                  &origin)) {
                   domains_to_ignore_.insert(domain);
                 }
               }
@@ -245,7 +245,7 @@ void InsertDnsPrefetchFilter::StartElementImpl(HtmlElement* element) {
               // hint found in BODY is already doing its job, and recording
               // its domain would only make us emit a duplicate, so those
               // tokens never reach MarkAlreadyInHead from here.
-              MarkAlreadyInHead(attributes[i].url);
+              MarkAlreadyInHead(attribute.url);
             }
           }
         }

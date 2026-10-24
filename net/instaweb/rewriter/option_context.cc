@@ -82,8 +82,8 @@ GoogleString ToHex(const uint8_t* bytes, size_t len) {
 // payload is a thing an operator may end up looking at.  '=' needs no escape:
 // a record splits at its FIRST '=', and keys are checked to contain none.
 void AppendEscaped(StringPiece value, GoogleString* out) {
-  for (size_t i = 0; i < value.size(); ++i) {
-    const auto byte = static_cast<uint8_t>(value[i]);
+  for (char ch : value) {
+    const auto byte = static_cast<uint8_t>(ch);
     if (byte == '\\') {
       out->append("\\\\");
     } else if (byte < 0x20 || byte > 0x7E) {
@@ -102,8 +102,8 @@ bool KeyIsSerializable(StringPiece key) {
   if (key.empty()) {
     return false;
   }
-  for (size_t i = 0; i < key.size(); ++i) {
-    const auto byte = static_cast<uint8_t>(key[i]);
+  for (char ch : key) {
+    const auto byte = static_cast<uint8_t>(ch);
     if (byte <= 0x20 || byte >= 0x7F || byte == '=') {
       return false;
     }
@@ -158,8 +158,7 @@ OptionContextStatus OptionContext::Serialize(const RewriteOptions& options,
   // computation AND was explicitly set — for the reason given in the header:
   // it is what makes a payload survive a release that adds options.
   const RewriteOptions::OptionBaseVector& all = options.all_options();
-  for (size_t i = 0; i < all.size(); ++i) {
-    const RewriteOptions::OptionBase* option = all[i];
+  for (auto option : all) {
     if (!option->is_used_for_signature_computation() || !option->was_set()) {
       continue;
     }
@@ -201,8 +200,8 @@ OptionContextStatus OptionContext::Serialize(const RewriteOptions& options,
   std::sort(records.begin(), records.end());
 
   size_t total = strlen(kOptionContextFormatVersion) + 1;
-  for (size_t i = 0; i < records.size(); ++i) {
-    total += records[i].size() + 1;
+  for (const auto& record : records) {
+    total += record.size() + 1;
   }
   // Checked BEFORE the payload is assembled, so an oversized context costs a
   // size computation rather than a 16 KB string nobody will use.
@@ -213,8 +212,8 @@ OptionContextStatus OptionContext::Serialize(const RewriteOptions& options,
   payload->reserve(total);
   payload->append(kOptionContextFormatVersion);
   payload->push_back('\n');
-  for (size_t i = 0; i < records.size(); ++i) {
-    payload->append(records[i]);
+  for (const auto& record : records) {
+    payload->append(record);
     payload->push_back('\n');
   }
   return OptionContextStatus::kOk;

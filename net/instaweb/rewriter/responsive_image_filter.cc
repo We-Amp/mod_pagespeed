@@ -149,10 +149,10 @@ void ResponsiveImageFirstFilter::AddHiResImages(HtmlElement* element) {
     virtual_images.width = orig_width;
     virtual_images.height = orig_height;
 
-    for (size_t i = 0, n = densities_.size(); i < n; ++i) {
+    for (double density : densities_) {
       virtual_images.non_inlinable_candidates.push_back(
           AddHiResVersion(element, *src_attr, orig_width, orig_height,
-                          kNonInlinableVirtualImage, densities_[i]));
+                          kNonInlinableVirtualImage, density));
     }
 
     // Highest quality version.
@@ -318,8 +318,8 @@ void ResponsiveImageSecondFilter::CombineHiResImages(
   ImageDim last_dims = ActualDims(orig_element);
   bool added_hi_res = false;
 
-  for (int i = 0, n = candidates.size(); i < n; ++i) {
-    const char* src = candidates[i].element->AttributeValue(HtmlName::kSrc);
+  for (auto& candidate : candidates) {
+    const char* src = candidate.element->AttributeValue(HtmlName::kSrc);
 
     if (src == nullptr) {
       // Should not happen. We explicitly created a src= attribute in
@@ -341,12 +341,12 @@ void ResponsiveImageSecondFilter::CombineHiResImages(
       return;
     }
 
-    ImageDim dims = ActualDims(candidates[i].element);
+    ImageDim dims = ActualDims(candidate.element);
     if (src == last_src) {
       if (driver()->DebugMode()) {
         driver()->InsertDebugComment(
             StrCat("ResponsiveImageFilter: Not adding ",
-                   ResolutionToString(candidates[i].resolution),
+                   ResolutionToString(candidate.resolution),
                    "x candidate to "
                    "srcset because it is the same as previous candidate."),
             orig_element);
@@ -360,7 +360,7 @@ void ResponsiveImageSecondFilter::CombineHiResImages(
         driver()->InsertDebugComment(
             StrCat(
                 "ResponsiveImageFilter: Not adding ",
-                ResolutionToString(candidates[i].resolution),
+                ResolutionToString(candidate.resolution),
                 "x candidate to "
                 "srcset because native image was not high enough resolution."),
             orig_element);
@@ -393,8 +393,7 @@ void ResponsiveImageSecondFilter::CombineHiResImages(
       // Otherwise srcset parsing would be ambiguous.
       GoogleString src_escaped = GoogleUrl::Sanitize(src);
 
-      GoogleString resolution_string =
-          ResolutionToString(candidates[i].resolution);
+      GoogleString resolution_string = ResolutionToString(candidate.resolution);
       StrAppend(&srcset_value, src_escaped, " ", resolution_string, "x");
 
       last_src = src;
@@ -450,11 +449,9 @@ void ResponsiveImageSecondFilter::InsertPlaceholderDebugComment(
 
 void ResponsiveImageSecondFilter::Cleanup(
     HtmlElement* orig_element, const ResponsiveVirtualImages& virtual_images) {
-  for (int i = 0, n = virtual_images.non_inlinable_candidates.size(); i < n;
-       ++i) {
-    InsertPlaceholderDebugComment(virtual_images.non_inlinable_candidates[i],
-                                  "");
-    driver()->DeleteNode(virtual_images.non_inlinable_candidates[i].element);
+  for (auto non_inlinable_candidate : virtual_images.non_inlinable_candidates) {
+    InsertPlaceholderDebugComment(non_inlinable_candidate, "");
+    driver()->DeleteNode(non_inlinable_candidate.element);
   }
 
   InsertPlaceholderDebugComment(virtual_images.inlinable_candidate,

@@ -253,9 +253,7 @@ void CssInlineImportToLinkFilter::InlineImportToLinkStyle() {
         driver_->AddAttribute(link_element, HtmlName::kHref, url);
         // Add all of the style attributes to the link.
         const HtmlElement::AttributeList& attrs(style_element_->attributes());
-        for (HtmlElement::AttributeConstIterator j(attrs.begin());
-             j != attrs.end(); ++j) {
-          const HtmlElement::Attribute& attr = *j;
+        for (const auto& attr : attrs) {
           // If there's a media attribute, forget our remembered one so that we
           // copy over the import's rather than the style's; although they're
           // equivalent it's best to keep the "original".

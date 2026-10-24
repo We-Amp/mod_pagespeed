@@ -327,8 +327,7 @@ bool JsReplacer::HandleCandidate(const GoogleString& object,
   value.remove_suffix(1);
 
   // Check patterns.
-  for (int i = 0, n = patterns_.size(); i < n; ++i) {
-    const Pattern& pat = patterns_[i];
+  for (const auto& pat : patterns_) {
     if (pat.object == object && pat.field == field) {
       // The candidate is the raw source lexeme with inner escapes intact.
       // Decode it to its logical value, run the rewriter on that, then

@@ -61,8 +61,8 @@ void UrlLeftTrimFilter::StartElementImpl(HtmlElement* element) {
     resource_tag_scanner::UrlCategoryVector attributes;
     resource_tag_scanner::ScanElement(element, driver()->options(),
                                       &attributes);
-    for (int i = 0, n = attributes.size(); i < n; ++i) {
-      TrimAttribute(attributes[i].url);
+    for (auto& attribute : attributes) {
+      TrimAttribute(attribute.url);
     }
   }
 }

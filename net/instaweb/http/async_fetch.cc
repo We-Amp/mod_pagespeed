@@ -293,7 +293,7 @@ void SharedAsyncFetch::HandleHeadersComplete() {
 void AsyncFetch::FixCacheControlForGoogleCache() {
   ConstStringStarVector values;
   if (request_headers()->Lookup(HttpAttributes::kVia, &values)) {
-    for (int i = 0, n = values.size(); i < n; ++i) {
+    for (auto& value : values) {
       // See https://github.com/apache/incubator-pagespeed-ngx/issues/1149
       // In general, it is not necessary to include a specific 'public'
       // in a cache-control entry to allow a proxy-cache to cache it;
@@ -316,7 +316,7 @@ void AsyncFetch::FixCacheControlForGoogleCache() {
       // a "Via: 1.1 google" header.  As there's only a small cost
       // in bytes, we'll just scan the via value for 'google', so
       // that a future HTTP rev won't break caching.
-      if (IsGoogleCacheVia(*values[i])) {
+      if (IsGoogleCacheVia(*value)) {
         response_headers()->SetCacheControlPublic();
         break;
       }

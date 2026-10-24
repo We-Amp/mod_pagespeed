@@ -192,9 +192,8 @@ bool ScriptTagScanner::IsKnownNonJsScriptType(StringPiece type) {
 
 bool ScriptTagScanner::HasIntegrityAttribute(const HtmlElement* element) {
   const HtmlElement::AttributeList& attrs = element->attributes();
-  for (HtmlElement::AttributeConstIterator i(attrs.begin()), e(attrs.end());
-       i != e; ++i) {
-    if (StringCaseEqual((*i).name_str(), "integrity")) {
+  for (const auto& attr : attrs) {
+    if (StringCaseEqual(attr.name_str(), "integrity")) {
       return true;
     }
   }

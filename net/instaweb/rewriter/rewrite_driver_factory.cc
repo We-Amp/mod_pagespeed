@@ -134,8 +134,8 @@ RewriteDriverFactory::~RewriteDriverFactory() {
   }
   url_async_fetcher_ = nullptr;
 
-  for (int i = 0, n = deferred_cleanups_.size(); i < n; ++i) {
-    deferred_cleanups_[i]->CallRun();
+  for (auto& deferred_cleanup : deferred_cleanups_) {
+    deferred_cleanup->CallRun();
   }
 
   // Delete the lock-manager before we delete the scheduler.
@@ -633,18 +633,15 @@ void RewriteDriverFactory::StopCacheActivity() {
   //
   // Note that we also cannot access our own http_cache_ since it may be
   // NULL in case like Apache where server contexts get their own.
-  for (ServerContextSet::iterator p = server_contexts_.begin();
-       p != server_contexts_.end(); ++p) {
-    HTTPCache* cache = (*p)->http_cache();
+  for (auto server_context : server_contexts_) {
+    HTTPCache* cache = server_context->http_cache();
     if (cache != nullptr) {
       cache->SetIgnoreFailurePuts();
     }
   }
 
   // Similarly stop metadata cache writes.
-  for (ServerContextSet::iterator p = server_contexts_.begin();
-       p != server_contexts_.end(); ++p) {
-    ServerContext* server_context = *p;
+  for (auto server_context : server_contexts_) {
     server_context->set_shutting_down();
   }
 }
@@ -670,9 +667,7 @@ void RewriteDriverFactory::ShutDown() {
   int64 cutoff_time_ms =
       timer_->NowMonotonicMs() + timeout_secs * Timer::kSecondMs;
 
-  for (ServerContextSet::iterator p = server_contexts_.begin();
-       p != server_contexts_.end(); ++p) {
-    ServerContext* server_context = *p;
+  for (auto server_context : server_contexts_) {
     server_context->schedule_rewrite_controller()->ShutDown();
     server_context->ShutDownDrivers(cutoff_time_ms);
   }
@@ -681,8 +676,7 @@ void RewriteDriverFactory::ShutDown() {
   // leaving the QueuedWorkerPool & QueuedWorkerPool::Sequence objects
   // live.  The QueuedWorkerPools will be deleted when the ServerContext
   // is destructed.
-  for (int i = 0, n = worker_pools_.size(); i < n; ++i) {
-    QueuedWorkerPool* worker_pool = worker_pools_[i];
+  for (auto worker_pool : worker_pools_) {
     if (worker_pool != nullptr) {
       worker_pool->ShutDown();
     }
@@ -691,9 +685,7 @@ void RewriteDriverFactory::ShutDown() {
   // Make sure we destroy the decoding driver here, before any of the
   // server contexts get destroyed, since it's tied to one. Also clear
   // all of the references to it.
-  for (ServerContextSet::iterator p = server_contexts_.begin();
-       p != server_contexts_.end(); ++p) {
-    ServerContext* server_context = *p;
+  for (auto server_context : server_contexts_) {
     server_context->set_decoding_driver(nullptr);
   }
   decoding_driver_.reset(nullptr);

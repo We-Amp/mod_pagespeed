@@ -45,11 +45,10 @@ bool GetExperimentCookieState(const RequestHeaders& headers, int* value) {
   bool found_cookie = false;
   *value = kExperimentNotSet;
   if (headers.Lookup(HttpAttributes::kCookie, &v)) {
-    for (int i = 0, nv = v.size(); i < nv; ++i) {
+    for (auto& cookie_header : v) {
       StringPieceVector cookies;
-      SplitStringPieceToVector(*(v[i]), ";", &cookies, true);
-      for (int j = 0, ncookies = cookies.size(); j < ncookies; ++j) {
-        StringPiece cookie(cookies[j]);
+      SplitStringPieceToVector(*cookie_header, ";", &cookies, true);
+      for (auto cookie : cookies) {
         TrimWhitespace(&cookie);
         if (StringCaseStartsWith(cookie, kExperimentCookiePrefix)) {
           found_cookie = true;

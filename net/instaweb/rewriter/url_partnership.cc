@@ -152,8 +152,7 @@ void UrlPartnership::IncrementalResolve(int index) {
     SplitStringPieceToVector(base, "/", &components, omit_empty);
     components.pop_back();            // base ends with "/"
     CHECK_LE(3U, components.size());  // expect {"http:", "", "x"...}
-    for (size_t i = 0; i < components.size(); ++i) {
-      const StringPiece& sp = components[i];
+    for (auto sp : components) {
       common_components_.push_back(GoogleString(sp.data(), sp.size()));
     }
   } else {
@@ -179,8 +178,7 @@ void UrlPartnership::IncrementalResolve(int index) {
 GoogleString UrlPartnership::ResolvedBase() const {
   GoogleString ret;
   if (!common_components_.empty()) {
-    for (size_t c = 0; c < common_components_.size(); ++c) {
-      const GoogleString& component = common_components_[c];
+    for (const auto& component : common_components_) {
       ret += component;
       ret += "/";  // initial segment is "http" with no leading /
     }

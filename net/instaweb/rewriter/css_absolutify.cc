@@ -78,9 +78,7 @@ bool CssAbsolutify::AbsolutifyStylesheet(
   bool urls_modified = false;
 
   Css::FontFaces& font_faces = stylesheet->mutable_font_faces();
-  for (Css::FontFaces::iterator font_face_iter = font_faces.begin();
-       font_face_iter != font_faces.end(); ++font_face_iter) {
-    Css::FontFace* font_face = *font_face_iter;
+  for (auto font_face : font_faces) {
     if (AbsolutifyDeclarations(
             &font_face->mutable_declarations(), transformer,
             true, /* Must handle parseable sections in @font-face. */
@@ -91,9 +89,7 @@ bool CssAbsolutify::AbsolutifyStylesheet(
 
   // Absolutify URLs in unparseable selectors and declarations.
   Css::Rulesets& rulesets = stylesheet->mutable_rulesets();
-  for (Css::Rulesets::iterator ruleset_iter = rulesets.begin();
-       ruleset_iter != rulesets.end(); ++ruleset_iter) {
-    Css::Ruleset* ruleset = *ruleset_iter;
+  for (auto ruleset : rulesets) {
     // Check any unparseable sections for any URLs and absolutify as required.
     if (handle_unparseable_sections) {
       switch (ruleset->type()) {
@@ -176,9 +172,7 @@ bool CssAbsolutify::AbsolutifyDeclarations(
     bool handle_parseable_sections, bool handle_unparseable_sections,
     MessageHandler* handler) {
   bool urls_modified = false;
-  for (Css::Declarations::iterator decl_iter = decls->begin();
-       decl_iter != decls->end(); ++decl_iter) {
-    Css::Declaration* decl = *decl_iter;
+  for (auto decl : *decls) {
     if (decl->prop() == Css::Property::UNPARSEABLE) {
       if (handle_unparseable_sections) {
         // XXX(oschaaf): css
@@ -194,16 +188,15 @@ bool CssAbsolutify::AbsolutifyDeclarations(
       }
     } else if (handle_parseable_sections) {
       Css::Values* values = decl->mutable_values();
-      for (size_t value_index = 0; value_index < values->size();
-           ++value_index) {
-        Css::Value* value = values->at(value_index);
+      for (auto& value_slot : *values) {
+        Css::Value* value = value_slot;
         if (value->GetLexicalUnitType() == Css::Value::URI) {
           urls_modified = true;
           GoogleString url = UnicodeTextToUTF8(value->GetStringValue());
           if (transformer->Transform(&url) ==
               CssTagScanner::Transformer::kSuccess) {
-            delete (*values)[value_index];
-            (*values)[value_index] =
+            delete value_slot;
+            value_slot =
                 new Css::Value(Css::Value::URI, UTF8ToUnicodeText(url));
           }
         }

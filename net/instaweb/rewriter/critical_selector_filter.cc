@@ -84,14 +84,12 @@ void Compact(VectorType* cl) {
 // RULESET's; only what the caller does with the verdict differs.
 bool FilterMediaQueriesForScreen(Css::MediaQueries* media_queries) {
   bool any_media_apply = media_queries->empty();
-  for (int mediaquery_index = 0, num_mediaquery = media_queries->size();
-       mediaquery_index < num_mediaquery; ++mediaquery_index) {
-    Css::MediaQuery* mq = media_queries->at(mediaquery_index);
-    if (css_util::CanMediaAffectScreen(mq->ToString())) {
+  for (auto& media_query : *media_queries) {
+    if (css_util::CanMediaAffectScreen(media_query->ToString())) {
       any_media_apply = true;
     } else {
-      delete mq;
-      (*media_queries)[mediaquery_index] = nullptr;
+      delete media_query;
+      media_query = nullptr;
     }
   }
   return any_media_apply;
@@ -289,8 +287,8 @@ ImportRegionDisposition ClassifyImportRegion(StringPiece bytes,
   StringPiece name = bytes.substr(0, close);
   TrimWhitespace(&name);
   bool valid = !name.empty();
-  for (int i = 0, n = name.size(); i < n; ++i) {
-    if (name[i] != '.' && !IsCssIdentChar(name[i])) {
+  for (char ch : name) {
+    if (ch != '.' && !IsCssIdentChar(ch)) {
       valid = false;  // Not a single (possibly dotted) layer name.
       break;
     }
@@ -337,8 +335,8 @@ ImportRegionDisposition ClassifyImportRegion(StringPiece bytes,
 void RewriteLayeredImportRegions(Css::Stylesheet* stylesheet) {
   bool imports_valid = true;  // Nothing but statements/imports seen so far.
   Css::Rulesets& rulesets = stylesheet->mutable_rulesets();
-  for (int i = 0, n = rulesets.size(); i < n; ++i) {
-    Css::Ruleset* r = rulesets.at(i);
+  for (auto& ruleset : rulesets) {
+    Css::Ruleset* r = ruleset;
     if (r->type() == Css::Ruleset::RULESET ||
         r->type() == Css::Ruleset::GROUP_RULE) {
       imports_valid = false;
@@ -356,7 +354,7 @@ void RewriteLayeredImportRegions(Css::Stylesheet* stylesheet) {
     if (disposition == kDropImportRegion ||
         (disposition == kRetainLayerDeclaration && !imports_valid)) {
       delete r;
-      rulesets[i] = nullptr;
+      ruleset = nullptr;
     } else if (disposition == kRetainLayerDeclaration) {
       r->mutable_unparsed_region()->set_bytes_in_original_buffer(
           StrCat("@layer ", layer_name, ";"));
@@ -401,8 +399,7 @@ bool HasLiveImport(const Css::Stylesheet& stylesheet) {
   }
   bool imports_valid = true;  // Nothing but statements/imports seen so far.
   const Css::Rulesets& rulesets = stylesheet.rulesets();
-  for (int i = 0, n = rulesets.size(); i < n; ++i) {
-    const Css::Ruleset* r = rulesets.at(i);
+  for (auto r : rulesets) {
     if (r->type() != Css::Ruleset::UNPARSED_REGION) {
       return false;  // An import past a rule or group is not honoured.
     }
@@ -634,9 +631,7 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
   // run when the preload arrives and again when the stylesheet applies, the
   // first time before the styles are there; leave such a link alone.
   const HtmlElement::AttributeList& own_attrs = element->attributes();
-  for (HtmlElement::AttributeConstIterator i(own_attrs.begin());
-       i != own_attrs.end(); ++i) {
-    const HtmlElement::Attribute& attr = *i;
+  for (const auto& attr : own_attrs) {
     if (StringCaseStartsWith(attr.name_str(), "on")) {
       return;
     }
@@ -646,8 +641,7 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
   StringVector all_media;
   css_util::VectorizeMediaAttribute(summary.media_from_html, &all_media);
   StringVector relevant_media;
-  for (int i = 0, n = all_media.size(); i < n; ++i) {
-    const GoogleString& medium = all_media[i];
+  for (const auto& medium : all_media) {
     if (css_util::CanMediaAffectScreen(medium)) {
       relevant_media.push_back(medium);
     }
@@ -691,8 +685,8 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
   if (summary.charset.empty() ||
       !StringCaseEqual(driver()->containing_charset(), summary.charset)) {
     bool has_non_ascii = false;
-    for (int i = 0, n = css_to_use->size(); i < n; ++i) {
-      if (static_cast<unsigned char>((*css_to_use)[i]) >= 0x80) {
+    for (char ch : *css_to_use) {
+      if (static_cast<unsigned char>(ch) >= 0x80) {
         has_non_ascii = true;
         break;
       }
@@ -725,9 +719,7 @@ void CriticalSelectorFilter::RenderSummary(int pos, HtmlElement* element,
     // by script) and data-*. media is reconstructed below; the link-specific
     // attributes (href, rel, type, charset) don't apply to a style element.
     const HtmlElement::AttributeList& link_attrs = element->attributes();
-    for (HtmlElement::AttributeConstIterator i(link_attrs.begin());
-         i != link_attrs.end(); ++i) {
-      const HtmlElement::Attribute& attr = *i;
+    for (const auto& attr : link_attrs) {
       if (attr.keyword() == HtmlName::kId ||
           StringCaseStartsWith(attr.name_str(), "data-")) {
         style_element->AddAttribute(attr);

@@ -57,8 +57,8 @@ void FlushHtmlFilter::Flush() { score_ = 0; }
 void FlushHtmlFilter::StartElementImpl(HtmlElement* element) {
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
-    switch (attributes[i].category) {
+  for (auto& attribute : attributes) {
+    switch (attribute.category) {
       case semantic_type::kStylesheet:
         score_ += kFlushCssScore;
         break;

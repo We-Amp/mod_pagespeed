@@ -602,13 +602,13 @@ bool LazyloadImagesFilter::HasCriticalSrcsetCandidate(
   }
   std::vector<SrcSetSlotCollection::ImageCandidate> candidates;
   SrcSetSlotCollection::ParseSrcSet(srcset->DecodedValueOrNull(), &candidates);
-  for (int i = 0, n = candidates.size(); i < n; ++i) {
-    if (candidates[i].url.empty()) {
+  for (auto& candidate : candidates) {
+    if (candidate.url.empty()) {
       continue;
     }
     // Decode the url since the critical images in the finder are not
     // rewritten.
-    GoogleUrl gurl(base_url(), candidates[i].url);
+    GoogleUrl gurl(base_url(), candidate.url);
     StringVector decoded_url_vector;
     if (driver()->DecodeUrl(gurl, &decoded_url_vector) &&
         decoded_url_vector.size() == 1) {

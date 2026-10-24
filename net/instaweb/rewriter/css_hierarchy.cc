@@ -50,8 +50,8 @@ namespace {
 // suffices.
 bool HasGroupRules(const Css::Stylesheet& stylesheet) {
   const Css::Rulesets& rulesets = stylesheet.rulesets();
-  for (int i = 0, n = rulesets.size(); i < n; ++i) {
-    if (rulesets[i]->type() == Css::Ruleset::GROUP_RULE) {
+  for (auto ruleset : rulesets) {
+    if (ruleset->type() == Css::Ruleset::GROUP_RULE) {
       return true;
     }
   }

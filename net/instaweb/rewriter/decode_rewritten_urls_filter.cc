@@ -38,8 +38,8 @@ DecodeRewrittenUrlsFilter::~DecodeRewrittenUrlsFilter() {}
 void DecodeRewrittenUrlsFilter::StartElement(HtmlElement* element) {
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver_->options(), &attributes);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
-    StringPiece url(attributes[i].url->DecodedValueOrNull());
+  for (auto& attribute : attributes) {
+    StringPiece url(attribute.url->DecodedValueOrNull());
     if (url.empty() || IsDataUrl(url)) {
       continue;
     }
@@ -53,7 +53,7 @@ void DecodeRewrittenUrlsFilter::StartElement(HtmlElement* element) {
               RewriteOptions::FilterId(RewriteOptions::kDecodeRewrittenUrls),
               RewriterApplication::APPLIED_OK);
           // Replace attribute's url with the decoded one.
-          attributes[i].url->SetValue(decoded_url.at(0));
+          attribute.url->SetValue(decoded_url.at(0));
         } else {
           // A combined encoded URL.
           // TODO(sriharis):  What can we do?  Creating elements for each

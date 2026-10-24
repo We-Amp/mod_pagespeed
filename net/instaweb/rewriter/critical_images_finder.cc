@@ -401,8 +401,7 @@ RenderedImages* CriticalImagesFinder::JsonMapToRenderedImagesMap(
     std::unique_ptr<RenderedImages> rendered_images =
         std::make_unique<RenderedImages>();
     Json::Value::Members imgs = json_rendered_image_map.getMemberNames();
-    for (int i = 0, n = imgs.size(); i < n; ++i) {
-      const GoogleString& img_src = imgs[i];
+    for (const auto& img_src : imgs) {
       int original_width = json_rendered_image_map[img_src]
                                .get(kOriginalImageJsonWidthKey, 0)
                                .asInt();

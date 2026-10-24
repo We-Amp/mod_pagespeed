@@ -40,9 +40,7 @@ namespace css_util {
 // Extract the numerical value from a values vector.
 // TODO(nforman): Allow specification what what style of numbers we can handle.
 int GetValueDimension(const Css::Values* values) {
-  for (Css::Values::const_iterator value_iter = values->begin();
-       value_iter != values->end(); ++value_iter) {
-    Css::Value* value = *value_iter;
+  for (auto value : *values) {
     if ((value->GetLexicalUnitType() == Css::Value::NUMBER) &&
         (value->GetDimension() == Css::Value::PX)) {
       return value->GetIntegerValue();
@@ -227,8 +225,7 @@ bool CanMediaAffectScreen(const StringPiece& media) {
   }
   StringPieceVector media_vector;
   SplitStringPieceToVector(media, ",", &media_vector, true);
-  for (int i = 0, n = media_vector.size(); i < n; ++i) {
-    StringPiece current(media_vector[i]);
+  for (auto current : media_vector) {
     TrimLeadingWhitespace(&current);
     // Recognize a CSS3 media query.  We are generous in our recognition here:
     // we'll take anything that contains "screen" or "all" as a token.  Compare
@@ -268,12 +265,10 @@ GoogleString JsDetectableSelector(const Css::Selector& selector) {
   // isn't copyable without about another page of code.  We're only creating
   // this AST fragment locally and throwing it away.
   Css::Selector trimmed;
-  for (int i = 0, n = selector.size(); i < n; ++i) {
-    Css::SimpleSelectors* simple_selectors = selector[i];
+  for (auto simple_selectors : selector) {
     std::unique_ptr<Css::SimpleSelectors> trimmed_selectors(
         new Css::SimpleSelectors(simple_selectors->combinator()));
-    for (int j = 0, m = simple_selectors->size(); j < m; ++j) {
-      Css::SimpleSelector* simple_selector = (*simple_selectors)[j];
+    for (auto simple_selector : *simple_selectors) {
       // For now we simply discard all pseudoclass attributes.
       // TODO(jmaessen): Only discard pseudoclass attributes that
       // refer to UI elements or dynamic pseudo-classes; see
@@ -294,10 +289,10 @@ GoogleString JsDetectableSelector(const Css::Selector& selector) {
     trimmed.push_back(trimmed_selectors.release());
   }
   GoogleString result(trimmed.ToString());
-  for (int i = 0, n = trimmed.size(); i < n; ++i) {
+  for (auto& trimmed_selectors : trimmed) {
     // Remove the SimpleSelector objects without cleaning them up, since we
     // don't own them.
-    trimmed[i]->clear();
+    trimmed_selectors->clear();
   }
   return result;
 }

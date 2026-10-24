@@ -384,8 +384,7 @@ void CssSummarizerBase::RenderDone() {
   {
     ScopedMutex hold(progress_lock_.get());
     // Transfer from canceled_summaries_ to summaries_.
-    for (int i = 0, n = canceled_summaries_.size(); i < n; ++i) {
-      int pos = canceled_summaries_[i];
+    for (int pos : canceled_summaries_) {
       summaries_[pos].state = kSummarySlotRemoved;
     }
 
@@ -438,8 +437,8 @@ void CssSummarizerBase::ReportSummariesDone() {
     HtmlKeywords::Escape(comment, &escaped);
     InsertNodeAtBodyEnd(driver()->NewCommentNode(nullptr, escaped));
   }
-  for (int i = 0, n = summaries_.size(); i < n; ++i) {
-    if (summaries_[i].state == kSummaryOk) {
+  for (auto& summary : summaries_) {
+    if (summary.state == kSummaryOk) {
       num_css_used_for_critical_css_computation_->Add(1);
     } else {
       num_css_not_used_for_critical_css_computation_->Add(1);

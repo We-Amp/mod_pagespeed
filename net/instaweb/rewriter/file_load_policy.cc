@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 
 #include <list>
+#include <ranges>
 
 #include "net/instaweb/rewriter/public/file_load_mapping.h"
 #include "net/instaweb/rewriter/public/file_load_rule.h"
@@ -54,10 +55,9 @@ bool FileLoadPolicy::ShouldLoadFromFileHelper(const GoogleUrl& url,
   if (!url_string.empty()) {
     // TODO(sligocki): Consider layering a cache over this lookup.
     // Note: Later associations take precedence over earlier ones.
-    for (FileLoadMappings::const_reverse_iterator mappings_iter =
-             file_load_mappings_.rbegin();
-         mappings_iter != file_load_mappings_.rend(); ++mappings_iter) {
-      if ((*mappings_iter)->Substitute(url_string, filename)) {
+    for (auto file_load_mapping :
+         std::ranges::reverse_view(file_load_mappings_)) {
+      if (file_load_mapping->Substitute(url_string, filename)) {
         // GoogleUrl will decode most %XX escapes, but it does not convert
         // "%20" -> " " which has come up often.
         GlobalReplaceSubstring("%20", " ", filename);
@@ -67,11 +67,10 @@ bool FileLoadPolicy::ShouldLoadFromFileHelper(const GoogleUrl& url,
         // off and load through HTTP.  By default a mapping set up with
         // Associate() permits direct loading of anything it applies to, but
         // AddRule() lets people add exceptions.  See if any exceptions apply.
-        for (FileLoadRules::const_reverse_iterator rules_iter =
-                 file_load_rules_.rbegin();
-             rules_iter != file_load_rules_.rend(); ++rules_iter) {
+        for (auto file_load_rule :
+             std::ranges::reverse_view(file_load_rules_)) {
           const FileLoadRule::Classification classification =
-              (*rules_iter)->Classify(*filename);
+              file_load_rule->Classify(*filename);
           if (classification == FileLoadRule::kAllowed) {
             return true;  // Whitelist entry: load directly.
           } else if (classification == FileLoadRule::kDisallowed) {
@@ -164,18 +163,16 @@ void FileLoadPolicy::Associate(StringPiece url_prefix_in,
 }
 
 void FileLoadPolicy::Merge(const FileLoadPolicy& other) {
-  for (FileLoadMappings::const_iterator it = other.file_load_mappings_.begin();
-       it != other.file_load_mappings_.end(); ++it) {
+  for (auto file_load_mapping : other.file_load_mappings_) {
     // Copy associations over.
-    (*it)->IncrementRefs();
-    file_load_mappings_.push_back(*it);
+    file_load_mapping->IncrementRefs();
+    file_load_mappings_.push_back(file_load_mapping);
   }
 
-  for (FileLoadRules::const_iterator it = other.file_load_rules_.begin();
-       it != other.file_load_rules_.end(); ++it) {
+  for (auto file_load_rule : other.file_load_rules_) {
     // Copy rules over.
-    (*it)->IncrementRefs();
-    file_load_rules_.push_back(*it);
+    file_load_rule->IncrementRefs();
+    file_load_rules_.push_back(file_load_rule);
   }
 }
 

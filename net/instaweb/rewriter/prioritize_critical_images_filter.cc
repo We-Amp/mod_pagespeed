@@ -194,8 +194,8 @@ bool PrioritizeCriticalImagesFilter::HasCriticalSrcsetCandidate(
   }
   std::vector<SrcSetSlotCollection::ImageCandidate> candidates;
   SrcSetSlotCollection::ParseSrcSet(srcset->DecodedValueOrNull(), &candidates);
-  for (int i = 0, n = candidates.size(); i < n; ++i) {
-    if (!candidates[i].url.empty() && IsCriticalImageUrl(candidates[i].url)) {
+  for (auto& candidate : candidates) {
+    if (!candidate.url.empty() && IsCriticalImageUrl(candidate.url)) {
       return true;
     }
   }

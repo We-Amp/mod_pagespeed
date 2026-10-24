@@ -179,10 +179,8 @@ void CriticalCssBeaconFilter::SummariesDone() {
         StringPieceVector temp;
         SplitStringPieceToVector(summary_info.data, ",", &temp,
                                  true /* omit_empty_strings */);
-        for (StringPieceVector::const_iterator i = temp.begin(),
-                                               end = temp.end();
-             i != end; ++i) {
-          selectors.insert(i->as_string());
+        for (auto selector : temp) {
+          selectors.insert(selector.as_string());
         }
         break;
       }
@@ -253,8 +251,8 @@ void CriticalCssBeaconFilter::DetermineEnabled(GoogleString* disabled_reason) {
 void CriticalCssBeaconFilter::FindSelectorsFromRuleset(const Ruleset& ruleset,
                                                        StringSet* selectors) {
   const Selectors& rule_selectors = ruleset.selectors();
-  for (int i = 0, n = rule_selectors.size(); i < n; ++i) {
-    GoogleString trimmed(css_util::JsDetectableSelector(*rule_selectors[i]));
+  for (auto rule_selector : rule_selectors) {
+    GoogleString trimmed(css_util::JsDetectableSelector(*rule_selector));
     if (!trimmed.empty()) {
       // Non-empty trimmed selector.  An empty trimmed selector (eg :hover,
       // which gets stripped away as it's not JS detectable) is *automatically*
@@ -271,8 +269,7 @@ void CriticalCssBeaconFilter::FindSelectorsFromRuleset(const Ruleset& ruleset,
 void CriticalCssBeaconFilter::FindSelectorsFromStylesheet(
     const Stylesheet& css, StringSet* selectors) {
   const Rulesets& rulesets = css.rulesets();
-  for (int i = 0, n = rulesets.size(); i < n; ++i) {
-    Ruleset* ruleset = rulesets[i];
+  for (auto ruleset : rulesets) {
     if (ruleset->type() == Ruleset::GROUP_RULE) {
       // The group node's own media annotation (from an enclosing top-level
       // @media) gates everything in its body, and body rulesets may carry

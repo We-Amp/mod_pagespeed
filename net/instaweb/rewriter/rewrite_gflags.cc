@@ -476,13 +476,13 @@ bool AddDomainMap(const StringPiece& flag_value, DomainLawyer* lawyer,
   StringPieceVector maps;
   // split "a=b,c,d=e:g,f" by semicolons.
   SplitStringPieceToVector(flag_value, ";", &maps, true);
-  for (int i = 0, n = maps.size(); i < n; ++i) {
+  for (auto map : maps) {
     // parse "a=b,c,d" into "a" and "b,c,d"
     StringPieceVector name_values;
-    SplitStringPieceToVector(maps[i], "=", &name_values, true);
+    SplitStringPieceToVector(map, "=", &name_values, true);
     if (name_values.size() != 2) {
       message_handler->Message(kError, "Invalid rewrite_domain_map: %s",
-                               maps[i].as_string().c_str());
+                               map.as_string().c_str());
       ret = false;
     } else {
       ret &= (*fn)(lawyer, name_values[0], name_values[1], message_handler);
@@ -754,8 +754,8 @@ bool RewriteGflags::SetupOptionsOnly(RewriteOptions* options,
     StringPieceVector lazyload_disabled_classes;
     SplitStringPieceToVector(lazyload_disabled_classes_string, ",",
                              &lazyload_disabled_classes, true);
-    for (int i = 0, n = lazyload_disabled_classes.size(); i < n; ++i) {
-      options->DisableLazyloadForClassName(lazyload_disabled_classes[i]);
+    for (auto class_name : lazyload_disabled_classes) {
+      options->DisableLazyloadForClassName(class_name);
     }
   }
   if (WasExplicitlySet("max_rewrite_info_log_size")) {
@@ -837,9 +837,9 @@ bool RewriteGflags::SetupOptionsOnly(RewriteOptions* options,
   SplitStringPieceToVector(FLAGS_domains, ",", &domains, true);
   if (!domains.empty()) {
     DomainLawyer* lawyer = options->WriteableDomainLawyer();
-    for (int i = 0, n = domains.size(); i < n; ++i) {
-      if (!lawyer->AddDomain(domains[i], handler)) {
-        LOG(ERROR) << "Invalid domain: " << domains[i];
+    for (auto domain : domains) {
+      if (!lawyer->AddDomain(domain, handler)) {
+        LOG(ERROR) << "Invalid domain: " << domain;
         ret = false;
       }
     }
@@ -905,10 +905,9 @@ bool RewriteGflags::SetupOptionsOnly(RewriteOptions* options,
     StringPieceVector experiment_specs;
     SplitStringPieceToVector(FLAGS_experiment_specs, "+", &experiment_specs,
                              true);
-    for (int i = 0, n = experiment_specs.size(); i < n; ++i) {
-      if (!options->AddExperimentSpec(experiment_specs[i], handler)) {
-        LOG(ERROR) << "Invalid experiment specification: "
-                   << experiment_specs[i];
+    for (auto experiment_spec : experiment_specs) {
+      if (!options->AddExperimentSpec(experiment_spec, handler)) {
+        LOG(ERROR) << "Invalid experiment specification: " << experiment_spec;
         ret = false;
       }
     }
@@ -919,22 +918,22 @@ bool RewriteGflags::SetupOptionsOnly(RewriteOptions* options,
   StringPieceVector option_name_values;
   SplitStringPieceToVector(FLAGS_rewrite_options, ";", &option_name_values,
                            true);
-  for (int i = 0, n = option_name_values.size(); i < n; ++i) {
-    stringpiece_ssize_type pos = option_name_values[i].find('=');
+  for (auto& option_name_value : option_name_values) {
+    stringpiece_ssize_type pos = option_name_value.find('=');
     if (pos == StringPiece::npos) {
       LOG(ERROR) << "Could not find =, expected name=value: "
-                 << option_name_values[i];
+                 << option_name_value;
       ret = false;
     } else {
-      StringPiece name = option_name_values[i].substr(0, pos);
+      StringPiece name = option_name_value.substr(0, pos);
       TrimWhitespace(&name);
-      StringPiece value = option_name_values[i].substr(pos + 1);
+      StringPiece value = option_name_value.substr(pos + 1);
       TrimWhitespace(&value);
       GoogleString errmsg;
       if (options->ParseAndSetOptionFromName1(name, value, &errmsg, handler) !=
           RewriteOptions::kOptionOk) {
-        LOG(ERROR) << "Invalid option name=value: " << option_name_values[i]
-                   << ": " << errmsg;
+        LOG(ERROR) << "Invalid option name=value: " << option_name_value << ": "
+                   << errmsg;
         ret = false;
       }
     }

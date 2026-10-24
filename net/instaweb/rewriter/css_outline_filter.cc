@@ -161,9 +161,7 @@ void CssOutlineFilter::OutlineStyle(HtmlElement* style_element,
                                  output_resource->url());
           // Add all style attributes to link.
           const HtmlElement::AttributeList& attrs = style_element->attributes();
-          for (HtmlElement::AttributeConstIterator i(attrs.begin());
-               i != attrs.end(); ++i) {
-            const HtmlElement::Attribute& attr = *i;
+          for (const auto& attr : attrs) {
             link_element->AddAttribute(attr);
           }
           // Add link to DOM.
