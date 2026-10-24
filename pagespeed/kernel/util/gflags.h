@@ -22,10 +22,10 @@
 #ifndef PAGESPEED_KERNEL_UTIL_GFLAGS_H_
 #define PAGESPEED_KERNEL_UTIL_GFLAGS_H_
 
-#include "gflags/gflags.h"
-
 namespace net_instaweb {
 
+// Parses command-line flags, removing them from argc/argv so that callers
+// see only the program name and the positional arguments.
 void ParseGflags(const char* progname, int* argc, char*** argv);
 
 }  // namespace net_instaweb

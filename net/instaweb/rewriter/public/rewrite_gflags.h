@@ -29,7 +29,7 @@ class RewriteDriverFactory;
 class RewriteOptions;
 
 // Implements rewriter options as command-line options, using the
-// Google "gflags" package.
+// Abseil flags library.
 class RewriteGflags {
  public:
   // The constructor parses the options.
@@ -70,8 +70,8 @@ class RewriteGflags {
                     MessageHandler* handler) const;
 
  private:
-  // There is no data in this class because the underlying gflags
-  // class holds the parsed options in globals.
+  // There is no data in this class because the underlying flags
+  // library holds the parsed options in globals.
 
   RewriteGflags(const RewriteGflags&) = delete;
   RewriteGflags& operator=(const RewriteGflags&) = delete;
