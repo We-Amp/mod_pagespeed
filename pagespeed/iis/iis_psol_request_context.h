@@ -26,7 +26,7 @@ class IisPsolRequestContext : public SystemRequestContext {
 
 
  protected:
-  virtual ~IisPsolRequestContext();
+  ~IisPsolRequestContext() override;
 
  private:
   int local_port_;

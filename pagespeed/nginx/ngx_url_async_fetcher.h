@@ -61,14 +61,14 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
                      ngx_resolver_t* resolver, int max_keepalive_requests,
                      ThreadSystem* thread_system, MessageHandler* handler);
 
-  ~NgxUrlAsyncFetcher();
+  ~NgxUrlAsyncFetcher() override;
 
   // It should be called in the module init_process callback function. Do some
   // intializations which can't be done in the master process
   bool Init(ngx_cycle_t* cycle);
 
   // shutdown all the fetches.
-  virtual void ShutDown();
+  void ShutDown() override;
 
   // the read handler in the main thread
   static void ReadCallback(const ps_event_data& data);
@@ -76,7 +76,7 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
   // True when nginx was built with SSL support and the https options enable
   // https fetching. Mirrors CurlUrlAsyncFetcher's interpretation of the
   // FetchHttps directive.
-  virtual bool SupportsHttps() const {
+  bool SupportsHttps() const override {
 #if (NGX_SSL)
     return allow_https();
 #else
@@ -107,8 +107,8 @@ class NgxUrlAsyncFetcher : public UrlAsyncFetcher {
   ngx_ssl_t* ssl() { return &ssl_; }
 #endif
 
-  virtual void Fetch(const GoogleString& url, MessageHandler* message_handler,
-                     AsyncFetch* callback);
+  void Fetch(const GoogleString& url, MessageHandler* message_handler,
+             AsyncFetch* callback) override;
 
   bool StartFetch(NgxFetch* fetch);
 

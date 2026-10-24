@@ -36,14 +36,14 @@ class NgxCachingHeaders : public CachingHeaders {
   explicit NgxCachingHeaders(ngx_http_request_t* request)
       : CachingHeaders(request->headers_out.status), request_(request) {}
 
-  virtual bool Lookup(const StringPiece& key, StringPieceVector* values);
+  bool Lookup(const StringPiece& key, StringPieceVector* values) override;
 
-  virtual bool IsLikelyStaticResourceType() const {
+  bool IsLikelyStaticResourceType() const override {
     DCHECK(false);  // not called in our use-case.
     return false;
   }
 
-  virtual bool IsCacheableResourceStatusCode() const {
+  bool IsCacheableResourceStatusCode() const override {
     DCHECK(false);  // not called in our use-case.
     return false;
   }

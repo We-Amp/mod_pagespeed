@@ -88,10 +88,9 @@ class BufferingAsyncFetch : public AsyncFetch {
  protected:
   // AsyncFetch interface - these are final to enforce consistent behavior.
   // Subclasses use OnDone() for custom completion handling.
-  bool HandleWrite(const StringPiece& content,
-                   MessageHandler* handler) override final;
-  bool HandleFlush(MessageHandler* handler) override final;
-  void HandleDone(bool success) override final;
+  bool HandleWrite(const StringPiece& content, MessageHandler* handler) final;
+  bool HandleFlush(MessageHandler* handler) final;
+  void HandleDone(bool success) final;
 
   // Subclasses must implement HandleHeadersComplete.
   // void HandleHeadersComplete() override = 0;

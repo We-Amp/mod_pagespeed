@@ -33,13 +33,13 @@ class MyCustomProvider : public ICustomNotificationProvider
 	{
 	public:
 		// Create the method that will identify the custom notification.
-		PCWSTR QueryNotificationType(VOID)
+		PCWSTR QueryNotificationType(VOID) override
 		{
 			// Return the unique identifier string for the custom notification.
 			return MY_CUSTOM_NOTIFICATION;
 		}
 		// Create the method that will process errors.
-		VOID SetErrorStatus(HRESULT hrError)
+		VOID SetErrorStatus(HRESULT hrError) override
 		{
 			return;
 		}
@@ -61,7 +61,7 @@ class IisModuleBaseFetch : public IisBaseFetch {
 
   IisModuleBaseFetch (IHttpContext* http_context, FetchType fetch_type, MessageHandler * handler,const RequestContextPtr &ptr, IisInnerRequestContext* ctx);
 
-  virtual ~IisModuleBaseFetch ();
+  ~IisModuleBaseFetch () override;
   static void PopulateRequestHeaders(IHttpContext* http_context, RequestHeaders* request_headers);
   static void PopulateResponseHeaders(IHttpContext* http_context, ResponseHeaders* response_headers);
 
@@ -111,12 +111,12 @@ class IisModuleBaseFetch : public IisBaseFetch {
   REQUEST_NOTIFICATION_STATUS OnZeroCopyCompletion(HRESULT completion_status);
 
  private:
-  virtual bool HandleWrite(const StringPiece& sp, MessageHandler* handler);
-  virtual bool HandleFlush(MessageHandler* handler);
-  virtual void HandleHeadersComplete();
-  virtual void HandleDone(bool success);
+  bool HandleWrite(const StringPiece& sp, MessageHandler* handler) override;
+  bool HandleFlush(MessageHandler* handler) override;
+  void HandleHeadersComplete() override;
+  void HandleDone(bool success) override;
   void AddChunk(char *data,int len,bool lock=true);
-  virtual void log(const char * msg, ...);
+  void log(const char * msg, ...) override;
 
   // Zero-copy serve internals (see the public section above).
   enum class ZcDrive {

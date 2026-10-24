@@ -57,19 +57,19 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   explicit NgxRewriteDriverFactory(const ProcessContext& process_context,
                                    SystemThreadSystem* system_thread_system,
                                    StringPiece hostname, int port);
-  virtual ~NgxRewriteDriverFactory();
-  virtual Hasher* NewHasher();
-  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config);
-  virtual MessageHandler* DefaultHtmlParseMessageHandler();
-  virtual MessageHandler* DefaultMessageHandler();
-  virtual FileSystem* DefaultFileSystem();
-  virtual Timer* DefaultTimer();
-  virtual NamedLockManager* DefaultLockManager();
+  ~NgxRewriteDriverFactory() override;
+  Hasher* NewHasher() override;
+  UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
+  MessageHandler* DefaultHtmlParseMessageHandler() override;
+  MessageHandler* DefaultMessageHandler() override;
+  FileSystem* DefaultFileSystem() override;
+  Timer* DefaultTimer() override;
+  NamedLockManager* DefaultLockManager() override;
   // Create a new RewriteOptions.  In this implementation it will be an
   // NgxRewriteOptions, and it will have CoreFilters explicitly set.
-  virtual RewriteOptions* NewRewriteOptions();
-  virtual RewriteOptions* NewRewriteOptionsForQuery();
-  virtual ServerContext* NewDecodingServerContext();
+  RewriteOptions* NewRewriteOptions() override;
+  RewriteOptions* NewRewriteOptionsForQuery() override;
+  ServerContext* NewDecodingServerContext() override;
   // Check resolver configured or not.
   bool CheckResolver();
 
@@ -78,8 +78,8 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   // platform-independent statistics.
   static void InitStats(Statistics* statistics);
   NgxServerContext* MakeNgxServerContext(StringPiece hostname, int port);
-  virtual ServerContext* NewServerContext();
-  virtual void ShutDown();
+  ServerContext* NewServerContext() override;
+  void ShutDown() override;
 
   // Starts pagespeed threads if they've not been started already.  Must be
   // called after the caller has finished any forking it intends to do.
@@ -90,7 +90,7 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   NgxMessageHandler* ngx_message_handler() { return ngx_message_handler_; }
 
-  virtual void NonStaticInitStats(Statistics* statistics) {
+  void NonStaticInitStats(Statistics* statistics) override {
     InitStats(statistics);
   }
 
@@ -115,9 +115,9 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   void LoggingInit(ngx_log_t* log, bool may_install_crash_handler);
 
-  virtual void ShutDownMessageHandlers();
+  void ShutDownMessageHandlers() override;
 
-  virtual void SetCircularBuffer(SharedCircularBuffer* buffer);
+  void SetCircularBuffer(SharedCircularBuffer* buffer) override;
 
   bool SetProcessScriptVariables(ProcessScriptVariablesMode mode) {
     if (!process_script_variables_set_) {

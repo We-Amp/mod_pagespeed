@@ -86,7 +86,7 @@ class NgxBaseFetch : public AsyncFetch {
                const RequestContextPtr& request_ctx,
                PreserveCachingHeaders preserve_caching_headers,
                NgxBaseFetchType base_fetch_type, const RewriteOptions* options);
-  virtual ~NgxBaseFetch();
+  ~NgxBaseFetch() override;
 
   // Statically initializes event_connection, require for PSOL and nginx to
   // communicate.
@@ -149,16 +149,16 @@ class NgxBaseFetch : public AsyncFetch {
                    MessageHandler* handler) override;
 
  private:
-  virtual bool HandleWrite(const StringPiece& sp, MessageHandler* handler);
+  bool HandleWrite(const StringPiece& sp, MessageHandler* handler) override;
   // Retains a trimmed refcounted view of 'storage' as a whole segment
   // instead of copying 'content' (large writes only; small writes fall
   // back to the copying HandleWrite).
   bool HandleWriteShared(const StringPiece& content,
                          const SharedString& storage,
                          MessageHandler* handler) override;
-  virtual bool HandleFlush(MessageHandler* handler);
-  virtual void HandleHeadersComplete();
-  virtual void HandleDone(bool success);
+  bool HandleFlush(MessageHandler* handler) override;
+  void HandleHeadersComplete() override;
+  void HandleDone(bool success) override;
 
   // Indicate to nginx that we would like it to call
   // CollectAccumulatedWrites().

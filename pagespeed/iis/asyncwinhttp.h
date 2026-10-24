@@ -42,7 +42,7 @@ class WinHTTPVectorHandler:public WinHTTPEvents
 public:
 	WinHTTPVectorHandler():WinHTTPEvents() {status=WinHTTPStatus::NotStarted;}
 	void Clear() {myBuffer.clear();status=WinHTTPStatus::NotStarted;}
-	virtual void OnData(const char *data,int length,WinHTTPContentType type) // the data
+	void OnData(const char *data,int length,WinHTTPContentType type) override // the data
 	{
 		if (type==Content)
 		{
@@ -50,7 +50,7 @@ public:
 				myBuffer.push_back(*data++);
 		}
 	}
-	virtual void OnCompleted(WinHTTPStatus status) // 
+	void OnCompleted(WinHTTPStatus status) override //
 	{
 		this->status=status;
 	}

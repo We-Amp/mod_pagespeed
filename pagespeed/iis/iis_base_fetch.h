@@ -25,7 +25,7 @@ namespace net_instaweb {
 		public:
 
 		IisBaseFetch(const RequestContextPtr &ptr);
-		virtual ~IisBaseFetch();
+		~IisBaseFetch() override;
   
 		void ReleaseRef();
   

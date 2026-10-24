@@ -28,7 +28,7 @@ namespace net_instaweb {
 	class IisMessageHandler : public SystemMessageHandler {
 	public:                                                             
 		explicit IisMessageHandler(Timer* timer, AbstractMutex* mutex); 
-		virtual ~IisMessageHandler();
+		~IisMessageHandler() override;
 		//void set_buffer(SharedCircularBuffer* buff);
 		// Dump contents of SharedCircularBuffer.
 		//bool Dump(Writer* writer);
@@ -36,10 +36,10 @@ namespace net_instaweb {
 		
 
 	protected:                                                          
-		virtual void MessageSImpl(MessageType type, const GoogleString& message);
+		void MessageSImpl(MessageType type, const GoogleString& message) override;
 
-		virtual void FileMessageSImpl(MessageType type, const char* filename,
-			int line, const GoogleString& message);
+		void FileMessageSImpl(MessageType type, const char* filename,
+		                      int line, const GoogleString& message) override;
 
 	private:             
 		BOOL WriteEventViewerLog(LPCSTR szNotification, MessageType type);

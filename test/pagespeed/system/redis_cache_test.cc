@@ -36,13 +36,13 @@
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
-#include "test/pagespeed/system/tcp_connection_for_testing.h"
-#include "test/pagespeed/system/tcp_server_thread_for_testing.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
+#include "test/pagespeed/system/tcp_connection_for_testing.h"
+#include "test/pagespeed/system/tcp_server_thread_for_testing.h"
 
 namespace net_instaweb {
 
@@ -85,8 +85,7 @@ class RedisScriptedServerThread : public TcpServerThreadForTesting {
       }
       for (size_t sent = 0; sent < reply.size();) {
         apr_size_t chunk = reply.size() - sent;
-        if (apr_socket_send(sock, reply.data() + sent, &chunk) !=
-            APR_SUCCESS) {
+        if (apr_socket_send(sock, reply.data() + sent, &chunk) != APR_SUCCESS) {
           break;
         }
         sent += chunk;
@@ -390,7 +389,7 @@ class RedisGetRespondingServerThread : public TcpServerThreadForTesting {
       : TcpServerThreadForTesting(listen_port, "redis_get_answering_server",
                                   thread_system) {}
 
-  virtual ~RedisGetRespondingServerThread() { ShutDown(); }
+  ~RedisGetRespondingServerThread() override { ShutDown(); }
 
  private:
   void HandleClientConnection(apr_socket_t* sock) override {
@@ -526,7 +525,8 @@ TEST_F(RedisCacheTest, DoesNotReconnectAfterShutdown) {
 
 // One CLUSTER SLOTS entry: slots [start, end] served by host:port.
 GoogleString ClusterSlotsEntry(const GoogleString& start,
-                               const GoogleString& end, const GoogleString& host,
+                               const GoogleString& end,
+                               const GoogleString& host,
                                const GoogleString& port) {
   return StrCat("*3\r\n:", start, "\r\n:", end, "\r\n*2\r\n$",
                 IntegerToString(host.size()), "\r\n", host, "\r\n:", port,
@@ -535,8 +535,7 @@ GoogleString ClusterSlotsEntry(const GoogleString& start,
 
 TEST_F(RedisCacheTest, RedirectionToAnInvalidPortIsIgnored) {
   InitRedisWithCustomServer();
-  ASSERT_TRUE(
-      StartScriptedServer({"+OK\r\n", "-MOVED 1 127.0.0.1:0\r\n"}));
+  ASSERT_TRUE(StartScriptedServer({"+OK\r\n", "-MOVED 1 127.0.0.1:0\r\n"}));
   cache_[0]->StartUp();
   CheckNotFound(kSomeKey);
   EXPECT_EQ(1u, ConnectionCount());
@@ -558,8 +557,8 @@ TEST_F(RedisCacheTest, ClusterSlotsWithAValidRangeIsUsed) {
 
 TEST_F(RedisCacheTest, ClusterSlotsWithAnOversizedSlotIsRejected) {
   // 2^32 + 5 would wrap to 5 in an int.
-  GetRedirectedThenMapped(StrCat(
-      "*1\r\n", ClusterSlotsEntry("0", "4294967301", "127.0.0.1", "2")));
+  GetRedirectedThenMapped(
+      StrCat("*1\r\n", ClusterSlotsEntry("0", "4294967301", "127.0.0.1", "2")));
   EXPECT_EQ(0u, ClusterMappingCount());
 }
 
@@ -614,9 +613,9 @@ TEST_F(RedisCacheTest, RejectedClusterSlotsOpenNoConnections) {
   const GoogleString valid =
       StrCat("*1\r\n", ClusterSlotsEntry("0", "16383", "127.0.0.1", "2"));
   InitRedisWithCustomServer();
-  ASSERT_TRUE(StartScriptedServer({"+OK\r\n", "-MOVED 1 127.0.0.1:1\r\n",
-                                   oversized, "-MOVED 1 127.0.0.1:1\r\n",
-                                   valid}));
+  ASSERT_TRUE(
+      StartScriptedServer({"+OK\r\n", "-MOVED 1 127.0.0.1:1\r\n", oversized,
+                           "-MOVED 1 127.0.0.1:1\r\n", valid}));
   cache_[0]->StartUp();
   CheckNotFound(kSomeKey);
   EXPECT_EQ(0u, ClusterMappingCount());
@@ -642,7 +641,7 @@ class RedisNotRespondingServerThread : public TcpServerThreadForTesting {
                                   thread_system),
         connection_received_(thread_system) {}
 
-  ~RedisNotRespondingServerThread() {
+  ~RedisNotRespondingServerThread() override {
     connection_received_.Wait();
     ShutDown();
   }
@@ -670,7 +669,7 @@ class RedisNotRespondingOperationTimeoutServerThread
                                   thread_system),
         connection_received_(thread_system) {}
 
-  ~RedisNotRespondingOperationTimeoutServerThread() {
+  ~RedisNotRespondingOperationTimeoutServerThread() override {
     connection_received_.Wait();
     ShutDown();
   }
@@ -849,7 +848,7 @@ TEST_F(RedisCacheTest, ShutDownDuringConnection) {
 // correct, the test hangs.
 class RedisCacheOperationTimeoutTest : public RedisCacheTest {
  protected:
-  void SetUp() {
+  void SetUp() override {
     InitRedisWithCustomServer();
     CHECK(StartCustomServer<RedisNotRespondingOperationTimeoutServerThread>());
     cache_[0]->StartUp();
