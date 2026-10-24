@@ -58,10 +58,10 @@ TEST(IisDaemonRecordHeadersTest, EveryKnownHeaderBookmarkPassesTheRule) {
 
 // (b) The REAL name behind every bookmarked known header passes the rule
 // AS THE PORT SPELLS IT, with nothing rewritten anywhere on the port:
-// this is the leg that caught the entity tag, whose port spelling is
-// "E-Tag" while the rule's canonical spelling is "ETag".  Only the
-// bookmarked indices: a known header with no bookmark (Set-Cookie,
-// Location, ...) is origin content the rule rightly fails.
+// this is the leg that caught the entity tag when the port spelled it
+// "E-Tag" and the rule's spelling was "ETag".  Only the bookmarked
+// indices: a known header with no bookmark (Set-Cookie, Location, ...)
+// is origin content the rule rightly fails.
 TEST(IisDaemonRecordHeadersTest, EveryBookmarkedRealHeaderNamePassesTheRule) {
   for (size_t i = 0; i < sizeof(HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE) /
                              sizeof(HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[0]);
@@ -103,13 +103,13 @@ TEST(IisDaemonRecordHeadersTest, ADefaultStaticResponseIsReproducible) {
   headers.push_back(DaemonOriginHeader{"Content-Type", "text/css"});
   headers.push_back(
       DaemonOriginHeader{"Last-Modified", "Mon, 10 Aug 2026 00:00:00 GMT"});
-  headers.push_back(DaemonOriginHeader{"E-Tag", "\"abc\""});
+  headers.push_back(DaemonOriginHeader{"ETag", "\"abc\""});
   headers.push_back(DaemonOriginHeader{"Accept-Ranges", "bytes"});
   headers.push_back(DaemonOriginHeader{"Cache-Control", "max-age=600"});
   // The bookmarks the port mints for the cache-related ones.
   headers.push_back(
       DaemonOriginHeader{"__x_Last-Modified", "Mon, 10 Aug 2026 00:00:00 GMT"});
-  headers.push_back(DaemonOriginHeader{"__x_E-Tag", "\"abc\""});
+  headers.push_back(DaemonOriginHeader{"__x_ETag", "\"abc\""});
   headers.push_back(DaemonOriginHeader{"__x_Accept-Ranges", "bytes"});
   headers.push_back(DaemonOriginHeader{"__x_Cache-Control", "max-age=600"});
   EXPECT_TRUE(OriginHeadersAreReproducible(headers));

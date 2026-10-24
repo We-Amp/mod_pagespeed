@@ -30,8 +30,6 @@
 
 namespace net_instaweb {
 
-volatile LONG IisModuleBaseFetch::fetchount = 0;
-
 IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fetch_type, MessageHandler* handler,const RequestContextPtr &ptr, IisInnerRequestContext* ctx)
     : IisBaseFetch(ptr)
 	,http_context_(http_context)
@@ -786,6 +784,15 @@ int IisModuleBaseFetch::CollectHeaders()
 					"Could not rewrite resource in-place "
 					"because URL is not in cache: %s",
 					ctx_->gurl()->spec_c_str());
+			// A HEAD carries no body, so there is nothing to record.  The
+			// send notification leaves for any method but GET and POST,
+			// so a recorder created here would never see the body and
+			// would be finished as a failed recording at request cleanup;
+			// the daemon arm skips HEAD the same way.
+			PCSTR method = http_context_->GetRequest()->GetHttpMethod();
+			if (method != nullptr && StringCaseEqual(method, "HEAD")) {
+				return 0;
+			}
 			const SystemRewriteOptions* options = (const SystemRewriteOptions*) ctx_->driver()->options();
 			//this->request_context()->set_options(options->ComputeHttpOptions());
 			// The gate is the one construction site for the classic
@@ -868,7 +875,7 @@ int IisModuleBaseFetch::CollectHeaders()
 			&&
 			(lowerHeader == "cache-control" ||
 			lowerHeader == "expires" ||
-			lowerHeader == "e-tag" ||
+			lowerHeader == "etag" ||
 			lowerHeader == "last-modified" 
 			))
 			continue;
@@ -932,7 +939,7 @@ int IisModuleBaseFetch::CollectHeaders()
 
 		if (modify_cache_headers) {
 			r->SetHeader(_HTTP_HEADER_ID::HttpHeaderCacheControl, HttpAttributes::kNoCache, strlen(HttpAttributes::kNoCache), true);
-			r->DeleteHeader("E-Tag");
+			r->DeleteHeader("ETag");
 			r->DeleteHeader("Expires");
 			r->DeleteHeader("Content-MD5");
 			r->DeleteHeader("Last-Modified");
@@ -1141,15 +1148,7 @@ void IisModuleBaseFetch::HandleDone(bool success)
 	}
 
 	log("base fetch -> indicate completion");
-	
-	if ( 0 && success)
-	{
-		IisModuleRequestContext *iisCtx = IisModuleRequestContext::GetRequestContext(http_context_);
-		iisCtx->set_nextsendresponsestatus(next_status);
-		http_context_->PostCompletion(0);
-	}
-	else
-		http_context_->IndicateCompletion(next_status);
+	http_context_->IndicateCompletion(next_status);
 	http_context_=nullptr;
 	//ctx_->set_base_fetch(NULL);
 	ReleaseRef(); 

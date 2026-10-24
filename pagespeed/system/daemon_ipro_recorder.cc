@@ -145,12 +145,6 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
     input->content_encoding = content_encoding;
   }
   const char* etag = response_headers.Lookup1(HttpAttributes::kEtag);
-  if (etag == nullptr) {
-    // One port's header table names the entity tag "E-Tag"; look the
-    // origin validator up under both spellings so that port's entries
-    // keep theirs.  The alias goes when that port's table is corrected.
-    etag = response_headers.Lookup1("E-Tag");
-  }
   if (etag != nullptr) {
     input->etag = etag;
   }

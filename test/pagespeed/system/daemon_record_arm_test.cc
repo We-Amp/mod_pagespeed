@@ -452,7 +452,7 @@ TEST_F(DaemonRecordArmTest, TheReproducibleSetIsWhatAServeCanPutBack) {
                                             "Tue, 11 Aug 2026 00:00:00 GMT",
                                             "ETag",
                                             "\"abc\"",
-                                            "__x_e-tag",
+                                            "__x_etag",
                                             "\"abc\"",
                                             "__x_content-md5",
                                             "dGVzdA==",
@@ -467,9 +467,7 @@ TEST_F(DaemonRecordArmTest, TheReproducibleSetIsWhatAServeCanPutBack) {
                                             "Accept-Ranges",
                                             "bytes",
                                             "__x_Accept-Ranges",
-                                            "bytes",
-                                            "E-Tag",
-                                            "\"abc\""})));
+                                            "bytes"})));
   // ... but a bookmark spelling the list does not know stays fail-closed.
   EXPECT_FALSE(OriginHeadersAreReproducible(
       Headers({"Content-Type", "text/css", "__x_something-else", "1"})));

@@ -161,7 +161,7 @@ static const char *HTTP_HEADER_ID_STRINGS_RESPONSE[] =
     "Last-Modified",
     "Accept-Ranges",
     "Age",
-    "E-Tag",
+    "ETag",
     "Location",
     "Proxy-Authenticate",
     "Retry-After",
@@ -178,7 +178,7 @@ static const char *HTTP_HEADER_ID_STRINGS_RESPONSE[] =
 static const char *UNKNOWN_HEADER_BOOKMARK_NAMES[] =
 {
 	"expires",
-	"e-tag",
+	"etag",
 	"content-md5",
 	"last-modified",
 	"accept_ranges",
@@ -219,7 +219,7 @@ static const char *HTTP_HEADER_ID_STRINGS_RESPONSE_CACHE[] =
 	"__x_Last-Modified",
 	"__x_Accept-Ranges",
 	nullptr,//"Age",
-	"__x_E-Tag",
+	"__x_ETag",
 	nullptr,//"Location",
 	nullptr,//"Proxy-Authenticate",
 	nullptr,//"Retry-After",

@@ -32,7 +32,6 @@ The request lifecycle is controlled by several interdependent flags:
 
 - **`pending`** (`RQ_NOTIFICATION_PENDING`) -- Returned from `OnSendResponse` to defer IIS completion while PSOL rewrites. Module MUST call `IndicateCompletion()` exactly once.
 - **`base_fetch.pending_`** -- Tracks whether IIS is waiting for PSOL output. When true, `HandleFlush` writes data directly; when false, data is buffered.
-- **`end_request_seen`** -- Set when IIS signals request teardown. Prevents double-free of request context.
 - **`http_context_`** -- Nulled immediately after `IndicateCompletion()`. Any post-completion access crashes.
 
 ## AsyncWinHttp

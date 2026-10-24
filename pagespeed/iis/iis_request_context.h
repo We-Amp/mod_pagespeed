@@ -37,7 +37,6 @@ public:
 	    , proxy_fetch_(nullptr)
 		, base_fetch_(nullptr)
 		, leave_(false)
-		, end_request_seen_(false)
 		, send_response_seen_(false)
 		
 		, process_context_(process_context)
@@ -90,8 +89,6 @@ public:
 	const char * url() { return url_;}
 	void set_leave(bool x) { leave_ = x; }
 	bool leave() { return leave_;}
-	void set_end_request_seen(bool x) { end_request_seen_= x; }
-	bool end_request_seen() { return end_request_seen_; }
 	bool send_response_seen() { return  send_response_seen_; }
 	void set_send_response_seen(bool x) { send_response_seen_ = x; }
 	GoogleUrl* gurl() { return gurl_;} 
@@ -121,8 +118,6 @@ protected:
 private:
 	std::string siteConfigFile_;
 	RequestContextPtr pagespeedRequestPointer;
-	PCSTR pRawValueAcceptEncoding;
-	USHORT pRawValueLengthAcceptEncoding;
 	bool is_resource_;
 
 	const char * url_;
@@ -136,7 +131,6 @@ private:
 	ProxyFetch* proxy_fetch_;
 	IisBaseFetch* base_fetch_;
 	bool leave_;
-	bool end_request_seen_;
 	bool send_response_seen_;
 	IisProcessContext* process_context_;
 	bool chunked_;
