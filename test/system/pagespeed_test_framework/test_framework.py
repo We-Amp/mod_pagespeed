@@ -1530,6 +1530,19 @@ class TestSettledStats:
             lambda: next(snapshots), ["a"], interval=0, quiet_samples=2
         )["n"] == 3
 
+    def test_an_image_rewrite_in_flight_is_not_settled(self):
+        # image_ongoing_rewrites rides in settled_stats's in-flight gauges
+        # (issue #236): the quiet run cannot start while a rewrite is still
+        # running, because its counters land when it finishes.
+        snapshots = iter([
+            {"a": 1, "image_ongoing_rewrites": 1, "n": 0},
+            {"a": 1, "image_ongoing_rewrites": 0, "n": 1},
+            {"a": 1, "image_ongoing_rewrites": 0, "n": 2},
+        ])
+        assert settled_stats(
+            lambda: next(snapshots), ["a"], interval=0, quiet_samples=2
+        )["n"] == 2
+
     def test_fails_when_counters_keep_moving(self):
         counter = itertools.count()
         with pytest.raises(AssertionError, match="never settled"):
@@ -1632,6 +1645,18 @@ class TestSettledStats:
         with pytest.raises(AssertionError, match="never settled.*in flight"):
             settled_stats(
                 lambda: {"a": 0, "curl_fetch_active_count": 1},
+                ["a"], interval=0, timeout=0,
+            )
+
+    def test_fails_when_an_image_rewrite_stays_in_flight(self):
+        # A leaked gauge fails the test after the bounded wait instead of
+        # hanging, and the message names the gauge and its value.
+        with pytest.raises(
+            AssertionError,
+            match=r"never settled.*in flight \{'image_ongoing_rewrites': 3\}",
+        ):
+            settled_stats(
+                lambda: {"a": 0, "image_ongoing_rewrites": 3},
                 ["a"], interval=0, timeout=0,
             )
 
