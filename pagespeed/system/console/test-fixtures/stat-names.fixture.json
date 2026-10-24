@@ -136,6 +136,7 @@
   "ipro_daemon_refresh_notified",
   "ipro_daemon_refresh_notify_failed",
   "ipro_daemon_served",
+  "ipro_daemon_served_original",
   "ipro_not_in_cache",
   "ipro_not_rewritable",
   "ipro_recorder_dropped_content_type",

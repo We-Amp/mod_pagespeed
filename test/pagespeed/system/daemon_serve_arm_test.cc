@@ -586,6 +586,27 @@ TEST_F(DaemonServeArmTest, ConditionalIsMatchedOnTheDerivedPlaneOnly) {
   EXPECT_FALSE(ServeDerivedValidatorMatches("", derived));
 }
 
+TEST_F(DaemonServeArmTest, OriginPlaneETagIsAlwaysAWellFormedWeakTag) {
+  // Three spellings of one weak tag: strong, weak, and the lower-case
+  // weakness marker RFC 9110 does not define (it spells it
+  // case-sensitively) all name the same emitted tag.
+  EXPECT_EQ("W/\"abc123\"", ServeOriginPlaneETag("\"abc123\""));
+  EXPECT_EQ("W/\"abc123\"", ServeOriginPlaneETag("W/\"abc123\""));
+  EXPECT_EQ("W/\"abc123\"", ServeOriginPlaneETag("w/\"abc123\""));
+  // Not an entity-tag at all: no validator, never a minted one.  The
+  // quotes are part of the tag, so quoting `abc123` would invent a
+  // validator the origin would not confirm for its own bytes; a half, a
+  // twice-quoted or a spaced-out tag is not one either (etagc is VCHAR
+  // except DQUOTE, plus obs-text).
+  EXPECT_EQ("", ServeOriginPlaneETag(""));
+  EXPECT_EQ("", ServeOriginPlaneETag("abc123"));
+  EXPECT_EQ("", ServeOriginPlaneETag("W/abc123"));
+  EXPECT_EQ("", ServeOriginPlaneETag("\"abc123"));
+  EXPECT_EQ("", ServeOriginPlaneETag("abc123\""));
+  EXPECT_EQ("", ServeOriginPlaneETag("\"a\"b\""));
+  EXPECT_EQ("", ServeOriginPlaneETag("\"a b\""));
+}
+
 // ---------------------------------------------------------------------------
 // Selection, against the real loader and the real stand-in.
 // ---------------------------------------------------------------------------
@@ -771,6 +792,71 @@ TEST_F(DaemonServeArmTest, ReadsTheDurableOriginalByIdWhenNoVariantFits) {
   const GoogleString log = CallLog();
   EXPECT_TRUE(log.find("read_alternate url=/a/photo.png id=12") !=
               GoogleString::npos);
+}
+
+TEST_F(DaemonServeArmTest, ADurableOriginalCarriesTheOriginsValidatorNotADerivedOne) {
+  // ORIGIN BYTES, ORIGIN VALIDATOR.  The durable-original serve used to
+  // carry the derived `W/"ps-` tag: a label that on every other response
+  // means optimizer output, stamped on bytes the optimizer did not produce,
+  // and the one thing that made a down optimizer read as healthy in the
+  // module's own statistics.  The origin's tag, weakly, is what the server
+  // would send with no daemon at all.
+  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_EQ("W/\"origin-tag\"", decision.etag);
+  EXPECT_FALSE(StringCaseStartsWith(decision.etag, "W/\"ps-"));
+
+  // A client holding the ORIGIN's validator -- strong or weak, the
+  // comparison is weak on both planes -- gets its 304.
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = "\"origin-tag\"";
+  const DaemonServeDecision revalidated = Serve(conditional);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, revalidated.verdict);
+  EXPECT_TRUE(revalidated.not_modified);
+
+  // No origin ETag: no validator.  The origin's `Last-Modified` is emitted
+  // on this serve and `If-Modified-Since` answers over it (pinned below),
+  // so the response still has a conditional -- just not a minted one.
+  unsetenv("PS_STUB_ORIGIN_ETAG");
+  const DaemonServeDecision bare = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, bare.verdict);
+  EXPECT_EQ("", bare.etag);
+
+  // A MALFORMED origin tag is dropped, not repaired into one: a lower-case
+  // `w/` names the same weak tag and is normalised, but an unquoted value
+  // is no entity-tag, and the response carries no ETag at all rather than
+  // an invalid header or a minted validator.
+  setenv("PS_STUB_ORIGIN_ETAG", "w/\"origin-tag\"", 1);
+  const DaemonServeDecision lower = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, lower.verdict);
+  EXPECT_EQ("W/\"origin-tag\"", lower.etag);
+  setenv("PS_STUB_ORIGIN_ETAG", "unquoted", 1);
+  const DaemonServeDecision malformed = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, malformed.verdict);
+  EXPECT_EQ("", malformed.etag);
+}
+
+TEST_F(DaemonServeArmTest, AnOriginalsValidatorNeverRevalidatesTheOptimizedVariant) {
+  // The other half of the split planes.  A client that holds the ORIGINAL's
+  // validator and meets a family that has since gained a variant must be
+  // handed the variant, not told its origin bytes are current: the two tags
+  // never match, weak comparison included, so the answer is a 200 with the
+  // variant and its derived tag.
+  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  ASSERT_EQ("W/\"origin-tag\"", original.etag);
+
+  SetAlternates("09:00:1,0c:00:0");
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = original.etag;
+  const DaemonServeDecision variant = Serve(conditional);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
+  EXPECT_FALSE(variant.not_modified);
+  EXPECT_TRUE(StringCaseStartsWith(variant.etag, "W/\"ps-"));
 }
 
 TEST_F(DaemonServeArmTest, TheCurrentPeerSelectsNothingAndTheOriginalIsById) {
@@ -2344,6 +2430,37 @@ TEST_F(DaemonServeArmTest, TheServedClassSplitMovesOnlyKnownClasses) {
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_image")->Get());
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_other")->Get());
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
+}
+
+TEST_F(DaemonServeArmTest, ADurableOriginalServeIsNotCountedAsOptimizerServed) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), nullptr);
+
+  // Only the durable original exists: the arm answers with the ORIGIN's
+  // bytes, and the optimizer-served counter must not claim them.  The
+  // partition counts them separately so that an optimizer producing no
+  // variants -- down, or still working on the URL -- reads as exactly that.
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  RecordDaemonServeCounters(&rewrite_stats, original);
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served")->Get());
+  EXPECT_EQ(0, stats.GetVariable("ipro_daemon_served_image")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_original")->Get());
+
+  // A variant answer moves the optimizer-served total and its per-class
+  // split, and leaves the original counter where it was.
+  SetAlternates("09:00:1");
+  const DaemonServeDecision variant = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
+  RecordDaemonServeCounters(&rewrite_stats, variant);
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_image")->Get());
+  EXPECT_EQ(1, stats.GetVariable("ipro_daemon_served_original")->Get());
+
+  // A null stats pointer (a seam without shared statistics) is a no-op.
+  RecordDaemonServeCounters(nullptr, variant);
 }
 
 // ---------------------------------------------------------------------------

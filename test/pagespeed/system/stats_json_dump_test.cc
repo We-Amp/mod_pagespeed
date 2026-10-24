@@ -51,6 +51,7 @@ TEST(StatsJsonDumpTest, ShapeIsStable) {
   // own filters' InitStats and are NOT in it, so seeding one here would
   // CHECK-abort before the golden comparison ever runs.
   stats.GetVariable("ipro_daemon_served")->Add(1151);
+  stats.GetVariable("ipro_daemon_served_original")->Add(2);
   stats.GetVariable("ipro_daemon_fallthrough")->Add(8847);
   stats.GetVariable("ipro_daemon_served_css")->Add(345);
   stats.GetVariable("ipro_daemon_served_js")->Add(239);

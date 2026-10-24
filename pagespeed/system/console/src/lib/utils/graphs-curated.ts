@@ -8,7 +8,9 @@
  * into the live store's "curated" group; the module's series are also
  * rebuilt from the statistics log, so they have history. Both endpoints
  * are untrusted: a figure that is absent or not a number is a gap (null),
- * never a zero.
+ * never a zero. One exception, stated where it applies: a series the log
+ * cannot have carried (the originals counter is new) reads as zero, because
+ * its absence dates the log, not the datum.
  */
 
 import { num } from "$lib/alerts";
@@ -87,8 +89,14 @@ export function curatedSample(
     return x === undefined ? null : x;
   };
   const served = v("ipro_daemon_served");
+  // Stored-original serves are in-place requests too, and since the counter
+  // split they are no longer inside `served`.  The series is new: a module
+  // that predates it reports nothing, which reads as zero (the same rule
+  // the log history applies), not as a gap.
+  const servedOriginal = v("ipro_daemon_served_original") ?? 0;
   const fallthrough = v("ipro_daemon_fallthrough");
-  const requests = served !== null && fallthrough !== null ? served + fallthrough : null;
+  const requests =
+    served !== null && fallthrough !== null ? served + servedOriginal + fallthrough : null;
   const moduleSaved = vars === null ? null : moduleSavedRaw(vars);
   const hit = vars !== null && served !== null && fallthrough !== null ? optimizedCopyHitRate(vars) : null;
   let optimizerSaved: number | null = null;
@@ -172,14 +180,21 @@ export function curatedFromLog(view: GraphsView | null): CuratedHistory {
   const series = blankSeries(timestamps.length);
   for (let i = 0; i < timestamps.length; i++) {
     const served = at("ipro_daemon_served", i);
+    // Originals are answered in-place requests, and since the counter split
+    // they are no longer inside served.  Their series is new: a log written
+    // before the upgrade cannot carry it, so it reads as zero, never as the
+    // gap a plain sum() would turn into (that would blank the whole
+    // history, outage included).
+    const originals = at("ipro_daemon_served_original", i) ?? 0;
+    const withOriginals = (x: number | null): number | null => (x === null ? null : x + originals);
     const all = sum(["ipro_daemon_served", "ipro_daemon_fallthrough"], i);
-    series.requests[i] = all;
+    series.requests[i] = withOriginals(all);
     // A family the log does not carry counts as nothing saved, as moduleSavedRaw counts it.
     const known = MODULE_SAVINGS_FAMILIES.map((f) => at(f.savedCounter, i)).filter((x): x is number => x !== null);
     series.module_saved[i] = known.length === 0 ? null : known.reduce((acc, x) => acc + Math.max(0, x), 0);
     const classes = sum(CLASS_FALLTHROUGHS, i);
     series.hit_served[i] = served;
-    series.hit_total[i] = served === null ? null : classes !== null ? served + classes : all;
+    series.hit_total[i] = served === null ? null : withOriginals(classes !== null ? served + classes : all);
     series.fetch_failures[i] = at("num_resource_fetch_failures", i);
   }
   return { timestamps, series };

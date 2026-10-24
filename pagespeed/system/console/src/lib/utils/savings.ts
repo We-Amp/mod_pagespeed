@@ -109,8 +109,9 @@ export interface CacheHitRate {
 /** The share of in-place optimizer requests served straight from its cache. */
 export function cacheHitRate(vars: Record<string, unknown>): CacheHitRate {
   const served = Math.max(0, rawCounter(vars, "ipro_daemon_served"));
+  const originalServes = Math.max(0, rawCounter(vars, "ipro_daemon_served_original"));
   const fallthrough = Math.max(0, rawCounter(vars, "ipro_daemon_fallthrough"));
-  const total = served + fallthrough;
+  const total = served + originalServes + fallthrough;
   return { served, total, percent: total > 0 ? clampPercent(served, total) : null };
 }
 
@@ -146,15 +147,20 @@ export interface OptimizedCopyHitRate {
 /** The share of optimizable in-place requests (CSS, JavaScript, images)
  * served from the optimizer's cache — the question "is the optimizer
  * working?" actually asks. Falls back to the all-requests rate, labelled as
- * such, when the per-class counters are absent (an older module). */
+ * such, when the per-class counters are absent (an older module).
+ *
+ * Stored-original serves (ipro_daemon_served_original: origin bytes the
+ * volume answered with before any variant existed) count in the
+ * denominator, not the numerator: the optimizer had no variant to give. */
 export function optimizedCopyHitRate(vars: Record<string, unknown>): OptimizedCopyHitRate {
   const served = Math.max(0, rawCounter(vars, "ipro_daemon_served"));
+  const originalServes = Math.max(0, rawCounter(vars, "ipro_daemon_served_original"));
   const fallthrough = Math.max(0, rawCounter(vars, "ipro_daemon_fallthrough"));
   const css = num(vars, "ipro_daemon_fallthrough_css");
   const js = num(vars, "ipro_daemon_fallthrough_js");
   const image = num(vars, "ipro_daemon_fallthrough_image");
   if (css === undefined || js === undefined || image === undefined) {
-    const total = served + fallthrough;
+    const total = served + originalServes + fallthrough;
     return {
       percent: clampPercent(served, total),
       served,
@@ -164,7 +170,7 @@ export function optimizedCopyHitRate(vars: Record<string, unknown>): OptimizedCo
     };
   }
   const classSum = Math.max(0, css) + Math.max(0, js) + Math.max(0, image);
-  const total = served + classSum;
+  const total = served + originalServes + classSum;
   return {
     percent: clampPercent(served, total),
     served,

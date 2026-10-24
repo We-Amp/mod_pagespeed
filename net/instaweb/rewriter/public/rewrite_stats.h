@@ -115,12 +115,15 @@ class RewriteStats {
   Variable* ipro_not_in_cache() { return ipro_not_in_cache_; }
   Variable* ipro_not_rewritable() { return ipro_not_rewritable_; }
 
-  // The daemon substrate's two serving outcomes; see the comment beside
+  // The daemon substrate's three serving outcomes; see the comment beside
   // their names in rewrite_stats.cc for why they are not the three above.
   Variable* ipro_daemon_served() { return ipro_daemon_served_; }
+  Variable* ipro_daemon_served_original() {
+    return ipro_daemon_served_original_;
+  }
   Variable* ipro_daemon_fallthrough() { return ipro_daemon_fallthrough_; }
 
-  // Per-content-class splits of the two counters above (not partition
+  // Per-content-class splits of served and fallthrough (not partition
   // members; see the comment beside their names in rewrite_stats.cc).
   Variable* ipro_daemon_served_css() { return ipro_daemon_served_css_; }
   Variable* ipro_daemon_served_js() { return ipro_daemon_served_js_; }
@@ -160,7 +163,7 @@ class RewriteStats {
   // Notifications sent after serving a stored original whose optimized copy
   // has gone missing (asks, not heals), and sends that FAILED.  NOT
   // partition members either: every such serve is already counted in
-  // ipro_daemon_served.  Only send
+  // ipro_daemon_served_original.  Only send
   // outcomes move these two -- see the comment beside their names in
   // rewrite_stats.cc.
   Variable* ipro_daemon_heal_notified() { return ipro_daemon_heal_notified_; }
@@ -232,6 +235,7 @@ class RewriteStats {
   Variable* ipro_not_in_cache_;
   Variable* ipro_not_rewritable_;
   Variable* ipro_daemon_served_;
+  Variable* ipro_daemon_served_original_;
   Variable* ipro_daemon_fallthrough_;
   Variable* ipro_daemon_served_css_;
   Variable* ipro_daemon_served_js_;

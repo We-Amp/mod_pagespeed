@@ -53,7 +53,9 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "In-place requests the server could not optimize, either because the URL is already known to be unoptimizable or because the lookup failed; the origin bytes are served unchanged.",
 
   ipro_daemon_served:
-    "In-place requests answered from the optimizer daemon's shared cache, including not-modified revalidations. This is the daemon's hit count.",
+    "In-place requests answered with an optimized variant from the optimizer daemon's shared cache, including not-modified revalidations. This is the daemon's hit count for optimizer output.",
+  ipro_daemon_served_original:
+    "In-place requests answered with the stored original's own bytes: the volume held no optimized variant yet, which is every serve while the optimizer is down or still working on the URL. The response carries the origin's own weak ETag, not the optimizer's.",
   ipro_daemon_fallthrough:
     "In-place requests the daemon declined (nothing cached, or only a stale variant) or could not be asked because this process had no usable handle on its cache volume; the ordinary path serves them.",
   ipro_daemon_served_css:

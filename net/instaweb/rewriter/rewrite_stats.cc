@@ -56,17 +56,21 @@ const char kIproNotRewritable[] = "ipro_not_rewritable";
 // three above.  Those three partition the CLASSIC in-place path -- served
 // from this module's own cache, missing from it, or not rewritable by it --
 // and a substrate that never consults that cache would leave all three at
-// zero however busy it was.  These two partition the other substrate's
-// serves: handed back from the optimizer's shared cache, or declined, in
+// zero however busy it was.  These three partition the other substrate's
+// serves: an optimized variant handed back from the optimizer's shared
+// cache, the stored ORIGINAL's bytes (no variant exists for the URL yet,
+// which is every serve while the optimizer is down), or declined, in
 // which case the request goes out by the plain (non-in-place) path exactly as
 // if this module were not installed.  Their SUM is the number of in-place
 // eligible requests on that substrate, which is what makes them continuous
 // with the classic three rather than a parallel vocabulary.
 const char kIproDaemonServed[] = "ipro_daemon_served";
+const char kIproDaemonServedOriginal[] = "ipro_daemon_served_original";
 const char kIproDaemonFallthrough[] = "ipro_daemon_fallthrough";
 
-// The per-class SPLITS of the two counters above -- not new partition
-// members: every count here is already inside its total.  served_<class>
+// The per-class SPLITS of the served and fallthrough counters above --
+// not new partition members: every count here is already inside its
+// total.  served_<class>
 // moves on the serve leg, from the served entry's stored content class
 // (css, js, image, other; a served entry classed html has no split and
 // stays only in the total).  fallthrough_<class> moves in the record arm,
@@ -126,12 +130,13 @@ const char kIproDaemonRefreshNotifyFailed[] =
 // counts notifications sent after the substrate served a stylesheet's or
 // script's stored original and found that the optimized copy the optimizer
 // had written for it is gone while its compressed copies remain.  Every one
-// of those serves is already inside `ipro_daemon_served`.  It counts ASKS,
-// not heals: how often this server asked for a copy to be made again.  It
-// stays flat for content the optimizer left unoptimized on purpose, and it
-// keeps climbing -- about once per URL per window per process -- for a URL
-// whose copy the optimizer does not write back, for instance because its
-// content type was switched off after the compressed copies were stored.
+// of those serves is already inside `ipro_daemon_served_original`.  It
+// counts ASKS, not heals: how often this server asked for a copy to be made
+// again.  It stays flat for content the optimizer left unoptimized on
+// purpose, and it keeps climbing -- about once per URL per window per
+// process -- for a URL whose copy the optimizer does not write back, for
+// instance because its content type was switched off after the compressed
+// copies were stored.
 const char kIproDaemonHealNotified[] = "ipro_daemon_heal_notified";
 
 // The failure half, on the same terms as the two pairs above: only SEND
@@ -241,6 +246,7 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproNotInCache);
   statistics->AddVariable(kIproNotRewritable);
   statistics->AddVariable(kIproDaemonServed);
+  statistics->AddVariable(kIproDaemonServedOriginal);
   statistics->AddVariable(kIproDaemonFallthrough);
   statistics->AddVariable(kIproDaemonServedCss);
   statistics->AddVariable(kIproDaemonServedJs);
@@ -313,6 +319,8 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
       ipro_not_in_cache_(stats->GetVariable(kIproNotInCache)),
       ipro_not_rewritable_(stats->GetVariable(kIproNotRewritable)),
       ipro_daemon_served_(stats->GetVariable(kIproDaemonServed)),
+      ipro_daemon_served_original_(
+          stats->GetVariable(kIproDaemonServedOriginal)),
       ipro_daemon_fallthrough_(stats->GetVariable(kIproDaemonFallthrough)),
       ipro_daemon_served_css_(stats->GetVariable(kIproDaemonServedCss)),
       ipro_daemon_served_js_(stats->GetVariable(kIproDaemonServedJs)),

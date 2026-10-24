@@ -2764,14 +2764,13 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
   }
 
   // Statistics exactly as Apache sets them: the serve counted once for
-  // every answered request -- 200, 304 and HEAD alike.  It sits BEFORE the
+  // every answered request -- 200, 304 and HEAD alike, by the shared rule
+  // that splits optimized serves from stored originals.  It sits BEFORE the
   // send because the send's early return must not skip it; reachable only
   // after ngx_http_output_filter is exactly where it must not be.  The hit
   // is recorded under Apache's exact condition -- optimized, worker
   // processed, origin length known -- on the 200 leg only, never on a 304.
-  server_context->rewrite_stats()->ipro_daemon_served()->Add(1);
-  RecordDaemonServedClass(server_context->rewrite_stats(),
-                          decision.ps_content_type);
+  RecordDaemonServeCounters(server_context->rewrite_stats(), decision);
   if (serve_stats != nullptr && !decision.not_modified &&
       decision.serve_class == kPsServeClassOptimized &&
       decision.worker_processed && decision.origin_content_length > 0) {

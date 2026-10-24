@@ -1049,9 +1049,9 @@ TEST_F(NgxDaemonSeamTest, TheServedRequestIsNeverMarkedForRecording) {
   // header-only early return (304, HEAD) cannot skip it.  Each needle is
   // searched independently from the start of the function slice, so the
   // ordering assertion can actually fail.
-  EXPECT_EQ(1, CountSubstring(body, "ipro_daemon_served()->Add(1)"))
+  EXPECT_EQ(1, CountSubstring(body, "RecordDaemonServeCounters("))
       << "the served counter must move exactly once per answered request";
-  const size_t served_pos = body.find("ipro_daemon_served()->Add(1)");
+  const size_t served_pos = body.find("RecordDaemonServeCounters(");
   const size_t send_pos = body.find("ngx_http_send_header(r)");
   ASSERT_NE(GoogleString::npos, send_pos);
   EXPECT_LT(served_pos, send_pos)
@@ -1265,7 +1265,7 @@ TEST_F(NgxDaemonSeamTest, TheFallbackPostFollowsTheServeDecision) {
   const GoogleString body = cc.substr(fn, block_end - fn);
   const size_t serve = body.find("reader->Serve(");
   ASSERT_NE(GoogleString::npos, serve);
-  const size_t counted = body.find("ipro_daemon_served()->Add(1)");
+  const size_t counted = body.find("RecordDaemonServeCounters(");
   ASSERT_NE(GoogleString::npos, counted);
   const size_t gate = body.find("if(decision.fallback_hit){");
   ASSERT_NE(GoogleString::npos, gate)
@@ -1309,7 +1309,7 @@ TEST_F(NgxDaemonSeamTest, TheLostCopyPostFollowsTheServeAndPrecedesTheSend) {
   const size_t serve = body.find("reader->Serve(");
   ASSERT_NE(GoogleString::npos, serve);
   EXPECT_LT(opt_in, serve);
-  const size_t counted = body.find("ipro_daemon_served()->Add(1)");
+  const size_t counted = body.find("RecordDaemonServeCounters(");
   ASSERT_NE(GoogleString::npos, counted);
   const size_t gate = body.find("if(decision.lost_optimized_copy){");
   ASSERT_NE(GoogleString::npos, gate)
@@ -1397,11 +1397,18 @@ TEST_F(NgxDaemonSeamTest, TheServerContextInitialisesItsFactoryPointer) {
 
 TEST_F(NgxDaemonSeamTest, TheServeLegMovesThePerClassSplit) {
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
-  const size_t served = cc.find("ipro_daemon_served()->Add(1)");
-  ASSERT_NE(GoogleString::npos, served);
-  EXPECT_NE(GoogleString::npos, cc.find("RecordDaemonServedClass("))
-      << "the per-class split of the serve counter no longer moves on the "
-         "serve leg";
+  // The shared serve-counting rule moves the total and its per-class split
+  // together; the seam must not count the total by hand beside it.
+  const size_t served = cc.find("RecordDaemonServeCounters(");
+  ASSERT_NE(GoogleString::npos, served)
+      << "the serve counters no longer move on the serve leg";
+  // Nothing in the port increments either total directly: a hand-counted
+  // request beside the shared rule would count the same answered request
+  // twice, and the partition's documented sum would silently over-report.
+  EXPECT_EQ(GoogleString::npos, cc.find("ipro_daemon_served()->Add("))
+      << "the optimizer-served total moves outside RecordDaemonServeCounters";
+  EXPECT_EQ(GoogleString::npos, cc.find("ipro_daemon_served_original()->Add("))
+      << "the originals total moves outside RecordDaemonServeCounters";
   // The record side hands the recorder the counters it moves per class.
   const size_t record = cc.find("MakeDaemonIproRecorderIfOpen(");
   ASSERT_NE(GoogleString::npos, record);

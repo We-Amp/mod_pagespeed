@@ -454,6 +454,37 @@ GoogleString ServeDerivedETag(uint32_t full_mask, uint8_t flags,
   return GoogleString(buffer, static_cast<size_t>(written));
 }
 
+GoogleString ServeOriginPlaneETag(StringPiece origin_etag) {
+  if (origin_etag.empty()) {
+    // No origin validator: the serve says so by emitting none, and
+    // Last-Modified remains the one conditional it answers.
+    return GoogleString();
+  }
+  StringPiece tag = origin_etag;
+  TrimWhitespace(&tag);
+  if (tag.size() >= 2 && (tag[0] == 'W' || tag[0] == 'w') && tag[1] == '/') {
+    tag.remove_prefix(2);
+  }
+  // opaque-tag is a quoted string whose interior is etagc (RFC 9110
+  // 8.8.3).  Anything else is not an entity-tag, and the serve says so by
+  // emitting none: the quotes are part of the tag, so quoting `abc` would
+  // mint a validator the origin would not confirm for its own bytes, and
+  // half a tag is a tag for a representation that does not exist.
+  if (tag.size() < 2 || tag[0] != '"' || tag[tag.size() - 1] != '"') {
+    return GoogleString();
+  }
+  for (size_t i = 1; i + 1 < tag.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(tag[i]);
+    // etagc: VCHAR except DQUOTE, plus obs-text.
+    if (c < 0x21 || c == '"' || c == 0x7f) {
+      return GoogleString();
+    }
+  }
+  // Always weak on emission: a lower-case `w/` prefix names the same weak
+  // tag, so it is normalised, not preserved.
+  return StrCat("W/", tag);
+}
+
 bool ServeDerivedValidatorMatches(StringPiece if_none_match,
                                   StringPiece derived) {
   if (if_none_match.empty() || derived.empty()) {
@@ -816,12 +847,24 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
     decision->cache_control.assign(cc_buffer, cc_length);
   }
 
-  // ---- the derived validator ------------------------------------------
+  // ---- the response's validator ----------------------------------------
   const char* origin_etag = abi_->ReadOriginEtag(result_);
-  decision->etag = ServeDerivedETag(
-      stored_mask, stored_flags, abi_->ReadOriginHtmlHash(result_),
-      origin_etag == nullptr ? StringPiece() : StringPiece(origin_etag),
-      decision->origin_last_modified, length);
+  const StringPiece origin_etag_text =
+      origin_etag == nullptr ? StringPiece() : StringPiece(origin_etag);
+  if (!negotiated && decision->content_encoding.empty()) {
+    // THE ORIGIN PLANE.  This serve emits the origin's own bytes, so it
+    // carries the origin's own validator: a client that first got the
+    // response from the origin (a fall-through) now revalidates against it
+    // with a 304, and `W/"ps-` again means optimizer output.  Kept off a
+    // coded original (defensive: the by-id original is identity today) and
+    // off every optimized serve, whose bytes the origin's tag does not
+    // describe.
+    decision->etag = ServeOriginPlaneETag(origin_etag_text);
+  } else {
+    decision->etag = ServeDerivedETag(
+        stored_mask, stored_flags, abi_->ReadOriginHtmlHash(result_),
+        origin_etag_text, decision->origin_last_modified, length);
+  }
   decision->age_seconds = freshness.age_seconds;
   decision->not_modified =
       ServeDerivedValidatorMatches(request.if_none_match, decision->etag);
@@ -1634,6 +1677,17 @@ void RecordDaemonServedClass(RewriteStats* stats, int ps_content_type) {
       break;
     default:
       break;
+  }
+}
+
+void RecordDaemonServeCounters(RewriteStats* stats,
+                               const DaemonServeDecision& decision) {
+  if (stats == nullptr) return;
+  if (decision.verdict == DaemonServeVerdict::kServeOptimized) {
+    stats->ipro_daemon_served()->Add(1);
+    RecordDaemonServedClass(stats, decision.ps_content_type);
+  } else if (decision.verdict == DaemonServeVerdict::kServeOriginal) {
+    stats->ipro_daemon_served_original()->Add(1);
   }
 }
 
