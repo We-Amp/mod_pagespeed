@@ -91,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- nginx: fixed a denial-of-service issue in the admin endpoints; update recommended.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
