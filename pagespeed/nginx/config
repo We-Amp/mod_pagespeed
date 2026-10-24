@@ -208,6 +208,7 @@ NGX_PAGESPEED_LIBS="
     -ldl
     -lrt
     -lz
+    -lm
     -lstdc++
 "
 

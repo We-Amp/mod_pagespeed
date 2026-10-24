@@ -142,7 +142,7 @@ enum PreserveCachingHeaders {
   kDontPreserveHeaders,
 };
 
-using ps_request_ctx_t = struct {
+struct ps_request_ctx_t {
   NgxBaseFetch* base_fetch;
 
   ngx_http_request_t* r;

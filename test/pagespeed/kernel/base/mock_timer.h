@@ -80,7 +80,7 @@ class MockTimer : public Timer {
   void SleepMs(int64 ms) override { AdvanceUs(1000 * ms); }
 
  private:
-  using TimeAndCallback = struct {
+  struct TimeAndCallback {
     int64 time;
     Function* callback;
   };

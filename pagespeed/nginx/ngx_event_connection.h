@@ -45,7 +45,7 @@ class NgxEventConnection;
 // Technically, sender is the only data we need to send. type and connection are
 // included to provide a means to trace the events along with some more
 // info.
-using ps_event_data = struct {
+struct ps_event_data {
   char type;
   void* sender;
   NgxEventConnection* connection;
