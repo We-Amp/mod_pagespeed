@@ -42,6 +42,8 @@ Environment Variables:
     PAGESPEED_DAEMON_LANE: 0 (default), 1 or require; see setup_apache_test.sh.
         Known limit: the lane cannot be restarted within about a minute of
         stopping it (the remote-config server's port is in TIME_WAIT).
+    PAGESPEED_APACHE_MPM: prefork (default) or event; see setup_apache_test.sh
+        and test_mpm_thread_resolution.py (the expected values per MPM)
     PAGESPEED_DAEMON_SOCKET: The optimizer worker's notification socket (lane
         fixture daemon_arm); the fixture is dropped when nothing answers there
 """
@@ -128,6 +130,10 @@ KNOWN_LANE_FIXTURES = frozenset({
     # daemon serving is on); the worker's socket is PAGESPEED_DAEMON_SOCKET
     # and is probed before the fixture is believed
     "daemon_arm",
+    # the fixed sixteen-child prefork pool of setup_apache_test.sh; the
+    # graceful-restart leak test needs prefork's process-per-slot scoreboard
+    # (not provided under PAGESPEED_APACHE_MPM=event)
+    "prefork_pool",
 })
 
 
