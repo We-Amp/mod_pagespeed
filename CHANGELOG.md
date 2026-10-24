@@ -91,6 +91,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A changed optimized resource is no longer answered `304 Not Modified`
+  when its origin sends neither `ETag` nor `Last-Modified`.** Its derived
+  validator was built from the response length alone, so when the content
+  changed to a version of the same optimized length a revalidating browser
+  kept the old script, stylesheet, image or page. Such a response now
+  carries no `ETag` at all, so a stale copy can never be confirmed. After
+  the upgrade clients may download these resources once more, and
+  resources with no validator are revalidated with a full response until
+  the optimizer has processed them again. Applies to Apache, nginx and IIS
+  with the optimizer worker. Update recommended. No configuration change
+  and no cache purge required.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

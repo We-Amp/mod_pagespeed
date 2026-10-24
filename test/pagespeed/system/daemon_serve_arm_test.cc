@@ -204,6 +204,12 @@ class DaemonServeArmTest : public testing::Test {
   void UseStylesheetFamily() {
     setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
     setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+    // A stamped source binding, as the worker writes for every variant it
+    // optimizes, so the family's serves carry a real tier-1 validator.
+    // The uniform 0x01 byte makes every tag's identity field
+    // 0101010101010101; the identity-free residual has its own case
+    // (AnIdentityFreeServeCarriesNoValidatorAtAll).
+    setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
     SetAlternates("08:00:1,48:00:1,88:00:1,0c:00:0");
   }
 
@@ -552,19 +558,40 @@ TEST_F(DaemonServeArmTest, DerivedETagIsWeakAndPerRepresentation) {
                                    1234, 101));
 }
 
-TEST_F(DaemonServeArmTest, DerivedETagFallsBackToTheIdentityFreeShape) {
-  // No source binding and no origin validator: the legacy shape, which is
-  // the one the optimizer emits for the same entry, so those clients keep
-  // their 304s.
-  const GoogleString legacy =
-      ServeDerivedETag(kMaskWebpDesktop, 0, nullptr, "", 0, 100);
-  const GoogleString identity =
+TEST_F(DaemonServeArmTest, DerivedETagLeadsWithTheStampedSourceBinding) {
+  // Tier 1: the stamped source binding outranks the origin's own
+  // validators -- the stamp names the source the variant was derived from,
+  // which is what a re-optimization changes.  The four-field shape is
+  // pinned byte for byte: the optimizer's front end emits the same tag for
+  // the same entry, and the two must not disagree on the wire.
+  const uint8_t hash[32] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
+  const GoogleString tag =
+      ServeDerivedETag(kMaskWebpDesktop, 0, hash, "\"origin\"", 1234, 100);
+  EXPECT_EQ("W/\"ps-0000000900-0123456789abcdef-0000000000000064\"", tag);
+  EXPECT_EQ(3, CountSubstring(tag, "-"));
+  // The identity field is the binding's first 8 bytes, big-endian, so a
+  // different source is a different tag.
+  const uint8_t other[32] = {0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10};
+  EXPECT_NE(tag, ServeDerivedETag(kMaskWebpDesktop, 0, other, "\"origin\"",
+                                  1234, 100));
+}
+
+TEST_F(DaemonServeArmTest, DerivedETagIsEmptyWithoutIdentity) {
+  // No source binding, no origin ETag and no Last-Modified: no tag at all.
+  // The old answer was the identity-free `W/"ps-<mask><flags>-<length>"`,
+  // whose only content signal was the length, so an entry re-optimized to a
+  // same-length body kept answering 304 for bytes that had changed.  A
+  // length is not a validator, so none is minted.
+  EXPECT_TRUE(
+      ServeDerivedETag(kMaskWebpDesktop, 0, nullptr, "", 0, 100).empty());
+  // Either origin validator on its own is an identity, and keeps the
+  // four-field tag: an ETag alone, a Last-Modified alone.
+  const GoogleString by_etag =
       ServeDerivedETag(kMaskWebpDesktop, 0, nullptr, "\"o\"", 0, 100);
-  EXPECT_NE(legacy, identity);
-  // The identity form carries one more field, and therefore one more
-  // separator, than the legacy one.
-  EXPECT_EQ(2, CountSubstring(legacy, "-"));
-  EXPECT_EQ(3, CountSubstring(identity, "-"));
+  const GoogleString by_lm =
+      ServeDerivedETag(kMaskWebpDesktop, 0, nullptr, "", 1, 100);
+  EXPECT_EQ(3, CountSubstring(by_etag, "-"));
+  EXPECT_EQ(3, CountSubstring(by_lm, "-"));
 }
 
 TEST_F(DaemonServeArmTest, ConditionalIsMatchedOnTheDerivedPlaneOnly) {
@@ -861,6 +888,29 @@ TEST_F(DaemonServeArmTest,
   EXPECT_TRUE(StringCaseStartsWith(variant.etag, "W/\"ps-"));
 }
 
+TEST_F(DaemonServeArmTest, AnIdentityFreeServeCarriesNoValidatorAtAll) {
+  // THE RESIDUAL THE OLD FALLBACK EXISTED FOR: an entry recorded with no
+  // source binding and no origin validator.  Its derived tag used to be
+  // minted from the mask, the flags and the length alone, and a client
+  // holding it was answered 304 -- even after a re-optimization to a
+  // same-length body, which is bytes that tag never described.  The serve
+  // now carries no ETag, and the client still holding the old legacy tag
+  // is handed the full response, never a 304.
+  SetAlternates("09:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ("", decision.etag);
+
+  // The tag this entry used to emit: mask 0x09, flags 0, and the stand-in
+  // body's length, 16 + id 9.
+  DaemonServeRequest conditional = Request("image/webp");
+  conditional.if_none_match = "W/\"ps-0000000900-0000000000000019\"";
+  const DaemonServeDecision revalidated = Serve(conditional);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, revalidated.verdict);
+  EXPECT_FALSE(revalidated.not_modified);
+  EXPECT_EQ("", revalidated.etag);
+}
+
 TEST_F(DaemonServeArmTest, TheCurrentPeerSelectsNothingAndTheOriginalIsById) {
   // THE SHAPE A REAL FAMILY NOW PRESENTS, pinned here because it is exactly
   // what stops being observable elsewhere.  A durable original with WebP and
@@ -1154,6 +1204,9 @@ TEST_F(DaemonServeArmTest, ANegotiatedImageServeOwesTheDeviceAxes) {
   // shared cache keyed on `Accept` alone hands one client's variant to
   // another.  Owed on the exact match, on a FALLBACK hit (a variant written
   // for another class, served under the same URL), and on the 304.
+  // A stamped source binding gives the serves a tier-1 validator, without
+  // which the 304 leg below could not happen at all.
+  setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
   SetAlternates("09:00:1,0c:00:0");
   const DaemonServeDecision exact = Serve(Request("image/webp"));
   ASSERT_EQ(DaemonServeVerdict::kServeOptimized, exact.verdict);
@@ -1500,6 +1553,9 @@ TEST_F(DaemonServeArmTest, A304StillCarriesTheRepresentationItRevalidates) {
   // not-modified decision as an "it is not sent anyway" tidy-up and the 304
   // silently stops declaring the axis for every representation, with no
   // test between that change and the wire.
+  // A stamped source binding, so the conditional leg revalidates a real
+  // tier-1 tag rather than being unable to match one at all.
+  setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
   SetAlternates("09:00:1");
   const DaemonServeDecision first = Serve(Request("image/webp"));
   ASSERT_FALSE(first.body.empty());
@@ -1663,6 +1719,11 @@ TEST_F(DaemonServeArmTest, AnAgeExpiredOriginalIsNotMarkedForTheRefresh) {
 }
 
 TEST_F(DaemonServeArmTest, ConditionalOnTheDerivedTagYields304) {
+  // The entry's identity is its origin validator (tier 2): the derived tag
+  // below is minted from it, which is also what makes the closing check
+  // discriminating -- the tag the origin itself would send must not
+  // validate the plane that was derived from it.
+  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
   SetAlternates("09:00:1");
   const DaemonServeDecision first = Serve(Request("image/webp"));
   ASSERT_FALSE(first.etag.empty());
@@ -1675,7 +1736,6 @@ TEST_F(DaemonServeArmTest, ConditionalOnTheDerivedTagYields304) {
   EXPECT_EQ(kPsServeClassOptimized, second.serve_class);
 
   // The origin's own tag does not validate the derived plane.
-  setenv("PS_STUB_ORIGIN_ETAG", "\"origin-tag\"", 1);
   DaemonServeRequest cross = Request("image/webp");
   cross.if_none_match = "\"origin-tag\"";
   EXPECT_FALSE(Serve(cross).not_modified);
@@ -1747,6 +1807,9 @@ TEST_F(DaemonServeArmTest, ADeadSubstrateIsSkewRatherThanCold) {
 // ---------------------------------------------------------------------------
 
 TEST_F(DaemonServeArmTest, TheCapabilityMaskIsAFunctionOfRequestHeadersAlone) {
+  // A stamped source binding, so the serves carry a validator and the
+  // equality pinned at the end compares two real tags, not two empty ones.
+  setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
   SetAlternates("08:00:1,09:00:1,0a:00:1");
 
   // Two requests that differ only in `Accept` must classify differently and
@@ -1769,6 +1832,7 @@ TEST_F(DaemonServeArmTest, TheCapabilityMaskIsAFunctionOfRequestHeadersAlone) {
   const DaemonServeDecision after = Serve(Request("image/webp"));
   EXPECT_EQ(webp.client_mask, after.client_mask);
   EXPECT_EQ(webp.alternate_id, after.alternate_id);
+  ASSERT_FALSE(webp.etag.empty());
   EXPECT_EQ(webp.etag, after.etag);
 }
 
@@ -2492,7 +2556,10 @@ TEST_F(DaemonServeArmTest, ACompressionCapableClientGetsTodaysIdentityServe) {
     EXPECT_EQ(0x08u, decision.stored_mask);
     EXPECT_EQ(24u, decision.body.size());
     EXPECT_EQ("text/css", decision.content_type);
-    EXPECT_EQ("W/\"ps-0000000800-0000000000000018\"", decision.etag);
+    // Tier 1: the stamped binding's identity field, then the copy's own
+    // capability field and the length.
+    EXPECT_EQ("W/\"ps-0000000800-0101010101010101-0000000000000018\"",
+              decision.etag);
     EXPECT_EQ("must-revalidate, max-age=600", decision.cache_control);
     EXPECT_EQ(100u, decision.age_seconds);
     EXPECT_FALSE(decision.not_modified);
@@ -2512,7 +2579,8 @@ TEST_F(DaemonServeArmTest, ACompressionCapableClientGetsTodaysIdentityServe) {
 
   // And the revalidation of that copy, by the same client.
   DaemonServeRequest conditional = CssRequest("gzip, deflate, br");
-  conditional.if_none_match = "W/\"ps-0000000800-0000000000000018\"";
+  conditional.if_none_match =
+      "W/\"ps-0000000800-0101010101010101-0000000000000018\"";
   const DaemonServeDecision revalidated = Serve(conditional);
   EXPECT_TRUE(revalidated.not_modified);
   EXPECT_EQ(0x08, revalidated.alternate_id);
@@ -2674,10 +2742,14 @@ TEST_F(DaemonServeArmTest, OnABrotliClientGetsTheStoredBrotliCopy) {
   EXPECT_EQ(off.client_mask, decision.client_mask);
   // A served coded copy is exact on every axis that matters: no re-notify.
   EXPECT_FALSE(decision.fallback_hit);
-  // The validator is per coding: the brotli copy's own capability field,
-  // and never the suffix the server's compressor appends to tags of the
-  // responses it compresses.
-  EXPECT_EQ("W/\"ps-0000008800-0000000000000098\"", decision.etag);
+  // The validator is per coding: the brotli copy's own capability field
+  // and length -- the identity field is the shared source binding, which
+  // is exactly what must NOT change between the siblings -- and never the
+  // suffix the server's compressor appends to tags of the responses it
+  // compresses.
+  EXPECT_EQ("W/\"ps-0000008800-0101010101010101-0000000000000098\"",
+            decision.etag);
+  ASSERT_FALSE(off.etag.empty());
   EXPECT_NE(off.etag, decision.etag);
   EXPECT_FALSE(strings::EndsWith(decision.etag, "-gzip\""));
 }
@@ -2689,19 +2761,24 @@ TEST_F(DaemonServeArmTest, OnAGzipOnlyClientGetsTheStoredGzipCopy) {
   EXPECT_EQ(0x48, decision.alternate_id);
   EXPECT_EQ("gzip", decision.content_encoding);
   EXPECT_EQ(88u, decision.body.size());
-  EXPECT_EQ("W/\"ps-0000004800-0000000000000058\"", decision.etag);
+  EXPECT_EQ("W/\"ps-0000004800-0101010101010101-0000000000000058\"",
+            decision.etag);
 }
 
 TEST_F(DaemonServeArmTest, OnWithoutACodedCopyTheIdentityCopyIsServedAsToday) {
   setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
   setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  // The same stamped binding as UseStylesheetFamily, so the identity copy's
+  // serve carries the tier-1 validator.
+  setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
   SetAlternates("08:00:1,0c:00:0");
   const DaemonServeRequest request = CssRequest("gzip, deflate, br");
   const DaemonServeDecision decision = ServeEncoded(request);
   ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
   EXPECT_EQ(0x08, decision.alternate_id);
   EXPECT_TRUE(decision.content_encoding.empty());
-  EXPECT_EQ("W/\"ps-0000000800-0000000000000018\"", decision.etag);
+  EXPECT_EQ("W/\"ps-0000000800-0101010101010101-0000000000000018\"",
+            decision.etag);
   // NOT a fallback.  The selection kept brotli and the stored copy is
   // identity, but the worker writes the coded siblings of every variant
   // itself: asking it for one on every request would be permanent traffic
@@ -2838,6 +2915,9 @@ TEST_F(DaemonServeArmTest, TheBrotliCopysTagRevalidatesOnlyTheBrotliCopy) {
   const DaemonServeDecision first =
       ServeEncoded(CssRequest("gzip, deflate, br"));
   ASSERT_EQ("br", first.content_encoding);
+  // The copy carries the tier-1 validator, so the distinctness legs below
+  // name different representations rather than comparing nothing.
+  ASSERT_FALSE(first.etag.empty());
 
   DaemonServeRequest again = CssRequest("gzip, deflate, br");
   again.if_none_match = first.etag;
