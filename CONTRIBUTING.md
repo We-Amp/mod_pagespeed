@@ -43,7 +43,7 @@ docker compose exec dev bash
 # inside the container
 bazel build --config=clang-libstdcxx13 //:libmod_pagespeed.so                   # Apache
 bazel build --config=clang-libstdcxx13 //pagespeed/nginx:ngx_pagespeed_module.so # nginx
-bazel build --config=clang-libstdcxx13 //pagespeed/envoy:envoy_pagespeed         # Envoy (experimental)
+bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed              # Envoy (experimental)
 
 bazel test --config=clang-libstdcxx13 \
   --test_env=REDIS_PORT=6379 --test_env=REDIS_HOST=redis \

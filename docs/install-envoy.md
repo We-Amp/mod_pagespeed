@@ -7,7 +7,7 @@
 The Envoy HTTP filter is **experimental** and **not packaged for external
 install** — no pre-built artifact is published (no apt/dnf package, container
 image, or download). It can be built from the public mod_pagespeed
-source tree (see `DEVELOPER.md`). **Contact us** for setup guidance.
+source tree (see `DEVELOPER.md`). CI builds the filter and runs its unit tests every night; the Envoy system tests below do not run in CI. **Contact us** for setup guidance.
 
 The reference below documents how the filter is configured once a build is in
 place.
@@ -28,14 +28,25 @@ Key configuration sections:
 
 ```yaml
 http_filters:
-  - name: envoy.filters.http.pagespeed
+  - name: pagespeed
     typed_config:
-      "@type": type.googleapis.com/pagespeed.envoy.PagespeedFilterConfig
-      pagespeed_options:
-        - "ModPagespeed on"
-        - "ModPagespeedFileCachePath /var/cache/pagespeed"
-        - "ModPagespeedEnableFilters combine_css,combine_javascript,rewrite_images"
+      "@type": type.googleapis.com/pagespeed.Decoder
+      # Required legacy fields: any non-empty value.
+      key: "placeholder"
+      val: "placeholder"
+      file_cache_path: "/var/cache/pagespeed/files/"
+      log_dir: "/var/log/pagespeed/"
+      virtual_hosts:
+        - host_pattern: "*"
+          options:
+            rewrite_level: "CoreFilters"
+            enabled_filters: "combine_css,combine_javascript,rewrite_images"
+  - name: envoy.filters.http.router
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 ```
+
+The options are the fields of the `pagespeed.Decoder` message in `pagespeed/envoy/http_filter.proto`; other PageSpeed directives go in a virtual host's `custom_options` map.
 
 ## Verification
 
@@ -57,7 +68,7 @@ curl -I http://localhost:8080/
 ./test/system/run_envoy_tests.sh -k sanity  # Quick check
 ```
 
-Expected: 189 pass, 20 skip, 0 fail.
+The Envoy system tests do not run in CI, so no current pass and skip counts are published; the expected skips are listed in [envoy-limitations.md](envoy-limitations.md).
 
 ## Known Limitations
 
