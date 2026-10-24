@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The ASP.NET Core sidecar package's user-visible strings name the product
+  mod_pagespeed.** The NuGet package description, the options validator's
+  error message for using the sidecar off Linux, and the build warning for
+  publishing with an unsupported runtime identifier now say mod_pagespeed
+  where they said "ModPageSpeed 2.0".
 - **Package descriptions name the product mod_pagespeed.** The
   `mod-pagespeed` and `nginx-module-pagespeed` packages now describe
   themselves as "mod_pagespeed web page optimization module for Apache

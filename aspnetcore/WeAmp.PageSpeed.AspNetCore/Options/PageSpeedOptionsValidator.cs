@@ -99,7 +99,7 @@ internal sealed class PageSpeedOptionsValidator : IValidateOptions<PageSpeedOpti
         {
             errors.Add(
                 "PageSpeed:Sidecar:Mode 'Inverse' is Linux-only (the bundled nginx + ngx_pagespeed is a Linux ELF " +
-                "module). On Windows use the IIS module; on macOS/containers without nginx use ModPageSpeed 2.0 " +
+                "module). On Windows use the IIS module; on macOS/containers without nginx use mod_pagespeed " +
                 "(WeAmp.PageSpeed.AspNetCore).");
         }
 

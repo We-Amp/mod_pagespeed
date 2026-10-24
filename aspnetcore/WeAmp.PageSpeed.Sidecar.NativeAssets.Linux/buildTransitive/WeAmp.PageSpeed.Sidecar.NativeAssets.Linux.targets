@@ -42,7 +42,7 @@
        because it ships all four RIDs.) -->
   <Target Name="WeAmpSidecarRidGuard" BeforeTargets="Build;Publish">
     <Error Condition="'$(RuntimeIdentifier)' != '' AND !$(RuntimeIdentifier.StartsWith('linux-'))"
-           Text="WeAmp.PageSpeed.Sidecar bundles a Linux nginx binary and supports only linux-x64 / linux-arm64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported — on Windows use the mod_pagespeed IIS module; on macOS, Windows, or containers use WeAmp.PageSpeed.AspNetCore (ModPageSpeed 2.0)." />
+           Text="WeAmp.PageSpeed.Sidecar bundles a Linux nginx binary and supports only linux-x64 / linux-arm64. RuntimeIdentifier '$(RuntimeIdentifier)' is not supported — on Windows use the mod_pagespeed IIS module; on macOS, Windows, or containers use WeAmp.PageSpeed.AspNetCore (mod_pagespeed)." />
   </Target>
 
 </Project>
