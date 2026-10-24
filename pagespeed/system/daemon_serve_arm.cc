@@ -513,6 +513,24 @@ bool ServeDerivedValidatorMatches(StringPiece if_none_match,
   return false;
 }
 
+bool ServeIfNoneMatchNamesATag(StringPiece if_none_match) {
+  // Parsed exactly as the tag comparison parses the field, so the date
+  // yields precisely when the tag comparison had a validator to speak on.
+  // `*` is not one, and it is the only entry that is not: an unquoted
+  // value names a validator this arm does not recognise, which still
+  // makes the tag comparison -- not the date -- the one that refuses it.
+  StringPieceVector entries;
+  SplitStringPieceToVector(if_none_match, ",", &entries,
+                           true /* omit_empty_strings */);
+  for (StringPiece entry : entries) {
+    TrimWhitespace(&entry);
+    if (entry != "*") {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool ServeOriginDateIsUnmodified(StringPiece if_modified_since,
                                  uint32_t origin_last_modified) {
   if (if_modified_since.empty() || origin_last_modified == 0) {
@@ -872,7 +890,11 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   // origin's own `Last-Modified` -- which is the durable-original serve, the
   // one case `negotiated` is false for.  Asking it on an optimized variant
   // would answer 304 over a validator that response does not carry.
-  if (!negotiated && !decision->not_modified &&
+  // And asked only when the request's `If-None-Match` names no entity-tag:
+  // RFC 9110 section 13.2.2 has the entity-tag comparison decide alone, so
+  // a date must not resurrect a 304 the tag refused.  `*` names no
+  // entity-tag, so it leaves the date its say.
+  if (!negotiated && !ServeIfNoneMatchNamesATag(request.if_none_match) &&
       ServeOriginDateIsUnmodified(request.if_modified_since,
                                   decision->origin_last_modified)) {
     decision->not_modified = true;

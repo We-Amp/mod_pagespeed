@@ -160,7 +160,9 @@ struct DaemonServeRequest {
   //
   // `if_modified_since` is matched ONLY on the ORIGIN plane, and therefore
   // only against a response this arm is emitting the origin's own
-  // `Last-Modified` on -- i.e. a durable-original serve.  An optimized
+  // `Last-Modified` on -- i.e. a durable-original serve -- and only
+  // where the request's `If-None-Match` names no entity-tag, which a
+  // date conditional yields to (RFC 9110 section 13.2.2).  An optimized
   // variant carries no `Last-Modified` (it is not the representation the
   // origin's validator describes), so a client that sends one for a variant
   // is holding a validator for different bytes and gets the full response.
@@ -351,7 +353,8 @@ struct DaemonServeDecision {
   // `not_modified` is set by `If-None-Match` against the derived tag on any
   // serve, and by `If-Modified-Since` against the origin's `Last-Modified` on
   // an ORIGINAL serve -- each on the plane whose validator this response
-  // actually carries.
+  // actually carries, the date conditional only where the request's
+  // `If-None-Match` named no entity-tag (RFC 9110 section 13.2.2).
   GoogleString etag;
   bool not_modified = false;
 
@@ -916,14 +919,25 @@ GoogleString ServeOriginPlaneETag(StringPiece origin_etag);
 bool ServeDerivedValidatorMatches(StringPiece if_none_match,
                                   StringPiece derived);
 
+// True when the client's `If-None-Match` names an entity-tag: at least one
+// list entry other than `*`, parsed entry by entry exactly as the tag
+// comparison parses the field.  This is the precedence question between the
+// two conditionals: a field that names a validator makes the entity-tag
+// comparison decide alone, while `*` -- not a validator on any plane, see
+// ServeDerivedValidatorMatches -- names nothing and leaves
+// `If-Modified-Since` its pre-existing say.
+bool ServeIfNoneMatchNamesATag(StringPiece if_none_match);
+
 // True when the client's `If-Modified-Since` says it already has the
 // representation stored at `origin_last_modified` (a Unix timestamp).
 //
 // ORIGIN PLANE ONLY, and the caller is responsible for asking it only where
-// this arm is emitting `Last-Modified` -- see DaemonServeRequest.  An
-// unparseable date is not a match: RFC 9110 requires an invalid
-// `If-Modified-Since` to be ignored, and ignoring it means serving the
-// response, never a 304.
+// this arm is emitting `Last-Modified` -- see DaemonServeRequest -- and
+// only when the request's `If-None-Match` names no entity-tag, which a
+// date conditional yields to (RFC 9110 section 13.2.2; see
+// ServeIfNoneMatchNamesATag).  An unparseable date is not a match: RFC 9110
+// requires an invalid `If-Modified-Since` to be ignored, and ignoring it
+// means serving the response, never a 304.
 bool ServeOriginDateIsUnmodified(StringPiece if_modified_since,
                                  uint32_t origin_last_modified);
 
