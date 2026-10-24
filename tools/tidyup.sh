@@ -34,10 +34,16 @@ BAZEL_BUILD_OPTIONS="--deleted_packages=pagespeed/envoy" \
   tools/gen_compilation_database.py -- //pagespeed/... //net/...
 
 echo "Running clang-tidy-20 (fix=$([[ -n "$FIX_FLAG" ]] && echo yes || echo no))..."
+# The same anchored roots as the CI lint jobs: run-clang-tidy matches the
+# positional regexes with an unanchored search against the absolute path
+# <output base>/execroot/<workspace>/<file> it rebuilds from each compdb
+# entry, so unanchored roots would also match test/pagespeed/ and test/net/
+# entries that the pull request lint never covers.
 run-clang-tidy-20 $FIX_FLAG \
   -clang-tidy-binary=clang-tidy-20 \
   -p . \
-  -header-filter='^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$' \
-  pagespeed/ net/
+  '(^|/execroot/[^/]+/)base/' \
+  '(^|/execroot/[^/]+/)pagespeed/' \
+  '(^|/execroot/[^/]+/)net/'
 
 echo "done"
