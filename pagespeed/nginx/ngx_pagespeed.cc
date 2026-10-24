@@ -1418,7 +1418,13 @@ void* ps_create_main_conf(ngx_conf_t* cf) {
   if (cfg_m == nullptr) {
     return nullptr;
   }
-  CHECK(!factory_deleted);
+  // factory_deleted is process-global.  It is set by the first server
+  // cleanup of a cycle that deletes the cycle's factory, and cleared by that
+  // same cycle's main-conf cleanup, which is the last cleanup the cycle runs.
+  // A new cycle's main conf is therefore created with the marker clear; the
+  // reset below only makes that explicit.
+  DCHECK(!factory_deleted);
+  factory_deleted = false;
   NgxRewriteOptions::Initialize();
   NgxRewriteDriverFactory::Initialize();
 
@@ -4749,8 +4755,10 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   cfg_m->driver_factory->PostConfig(server_contexts, &error_message,
                                     &error_index, &global_statistics);
   if (error_index != -1) {
-    server_contexts[error_index]->message_handler()->Message(
-        kError, "ngx_pagespeed is enabled. %s", error_message.c_str());
+    // The per-server handler is only created at child init and is null in the
+    // master, so report through the main configuration's handler.
+    cfg_m->handler->Message(kError, "ngx_pagespeed is enabled. %s",
+                            error_message.c_str());
     return NGX_ERROR;
   }
 
