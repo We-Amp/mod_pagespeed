@@ -196,7 +196,7 @@ struct DaemonRecordDecision {
 // on the WRITE side and while the body accumulates, rather than to a finished
 // buffer, because the point is not to hold 16 MB in order to discover it was
 // 16 MB.
-inline constexpr int64 kDaemonOriginalContentCapBytes = 16 * 1024 * 1024;
+inline constexpr int64 kDaemonOriginalContentCapBytes = int64{16} * 1024 * 1024;
 
 // Evaluates the record gate.  `abi` supplies the peer's own predicates; it is
 // borrowed and must outlive the call.

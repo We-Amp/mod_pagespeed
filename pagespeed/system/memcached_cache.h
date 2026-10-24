@@ -46,7 +46,7 @@ class Variable;
 // suitable for wrapping with AsyncCache.
 class MemcachedCache : public CacheInterface {
  public:
-  static const size_t kValueSizeThreshold = 1 * 1000 * 1000;
+  static const size_t kValueSizeThreshold = size_t{1} * 1000 * 1000;
   static const int64 kHealthCheckpointIntervalMs = 30 * Timer::kSecondMs;
   static const int64 kMaxErrorBurst = 4;
 
