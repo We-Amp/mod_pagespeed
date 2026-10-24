@@ -33,16 +33,28 @@ const char* const kProgramDataDirs[] = {
     "\\We-Amp\\IISWebSpeed\\",  // Tier 2: legacy IISpeed fallback (upgrade only)
 };
 
+// Empty in production; see SetProgramDataRootForTesting.
+std::string g_program_data_root_for_test;
+
 }  // namespace
+
+void SetProgramDataRootForTesting(const std::string& root) {
+  g_program_data_root_for_test = root;
+}
 
 std::string ResolveProgramDataConfig(bool* exists) {
   if (exists != nullptr) {
     *exists = false;
   }
   CHAR szPath[MAX_PATH];
-  if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0,
-                                 szPath))) {
-    const std::string pdata(szPath);
+  std::string pdata;
+  if (!g_program_data_root_for_test.empty()) {
+    pdata = g_program_data_root_for_test;
+  } else if (SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_COMMON_APPDATA, nullptr,
+                                        0, szPath))) {
+    pdata = szPath;
+  }
+  if (!pdata.empty()) {
     for (const char* dir : kProgramDataDirs) {
       // Within each directory: pagespeed.config before iiswebspeed.config
       // (the legacy upgrade-from-IISpeed inner fallback).
