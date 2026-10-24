@@ -51,16 +51,15 @@ void CacheInterface::ValidateAndReportResult(const GoogleString& key,
 }
 
 void CacheInterface::MultiGet(MultiGetRequest* request) {
-  for (int i = 0, n = request->size(); i < n; ++i) {
-    KeyCallback* key_callback = &(*request)[i];
+  for (auto& i : *request) {
+    KeyCallback* key_callback = &i;
     Get(key_callback->key, key_callback->callback);
   }
   delete request;
 }
 
 void CacheInterface::ReportMultiGetNotFound(MultiGetRequest* request) {
-  for (int i = 0, n = request->size(); i < n; ++i) {
-    KeyCallback& key_callback = (*request)[i];
+  for (auto& key_callback : *request) {
     ValidateAndReportResult(key_callback.key, kNotFound, key_callback.callback);
   }
   delete request;

@@ -124,9 +124,7 @@ void CloseFetchConnection(ngx_connection_t* c) {
 }  // namespace
 
 void NgxConnection::Terminate() {
-  for (NgxConnectionPool::iterator p = connection_pool.begin();
-       p != connection_pool.end(); ++p) {
-    NgxConnection* nc = *p;
+  for (auto nc : connection_pool) {
     CloseFetchConnection(nc->c_);
     nc->c_ = nullptr;
     delete nc;
@@ -502,11 +500,11 @@ void NgxFetch::CallbackDone(bool success) {
       ConstStringStarVector v;
       if (async_fetch_->response_headers()->Lookup(
               StringPiece(HttpAttributes::kConnection), &v)) {
-        for (size_t i = 0; i < v.size(); i++) {
-          if (*v[i] == "keep-alive") {
+        for (auto& i : v) {
+          if (*i == "keep-alive") {
             keepalive = true;
             break;
-          } else if (*v[i] == "close") {
+          } else if (*i == "close") {
             break;
           }
         }

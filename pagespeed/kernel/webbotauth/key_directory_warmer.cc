@@ -119,11 +119,10 @@ int KeyDirectoryWarmer::RefreshOnce() {
   // preserving D4). Runs only on a successful fetch, so a failed refresh touches
   // nothing.
   if (written > 0) {
-    for (std::set<GoogleString>::const_iterator it = last_kids_.begin();
-         it != last_kids_.end(); ++it) {
-      if (current_kids.find(*it) == current_kids.end()) {
-        cache_->Delete(CachedKeyDirectoryProvider::CacheKey(config_.realm,
-                                                            config_.host, *it));
+    for (const auto& last_kid : last_kids_) {
+      if (current_kids.find(last_kid) == current_kids.end()) {
+        cache_->Delete(CachedKeyDirectoryProvider::CacheKey(
+            config_.realm, config_.host, last_kid));
       }
     }
     last_kids_.swap(current_kids);

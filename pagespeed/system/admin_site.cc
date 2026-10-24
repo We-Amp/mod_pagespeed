@@ -431,8 +431,8 @@ void AdminSite::ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
         dump_for_graphs = false;
         std::vector<StringPiece> variable_names;
         SplitStringPieceToVector(value, ",", &variable_names, true);
-        for (size_t i = 0; i < variable_names.size(); ++i) {
-          var_titles.insert(variable_names[i].as_string());
+        for (auto variable_name : variable_names) {
+          var_titles.insert(variable_name.as_string());
         }
       } else if (name == "granularity") {
         StringToInt64(value, &granularity_ms);
@@ -1254,9 +1254,8 @@ void WarnIfNonLoopbackAdminAccess(StringPiece client_ip,
 }
 
 void ResetAdminExposureWarningsForTesting() {
-  for (size_t i = 0; i < static_cast<size_t>(AdminHandlerFamily::kNumFamilies);
-       ++i) {
-    g_admin_exposure_warned[i].store(false, std::memory_order_relaxed);
+  for (auto& i : g_admin_exposure_warned) {
+    i.store(false, std::memory_order_relaxed);
   }
 }
 

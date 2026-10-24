@@ -227,14 +227,12 @@ const TagAttrValue kDefaultList[] = {
 ElideAttributesFilter::ElideAttributesFilter(HtmlParse* html_parse)
     : html_parse_(html_parse) {
   // Populate one_value_attrs_map_
-  for (size_t i = 0; i < std::size(kBooleanAttrs); ++i) {
-    const TagAttr& entry = kBooleanAttrs[i];
+  for (auto entry : kBooleanAttrs) {
     KeywordSet& keywords = one_value_attrs_map_[entry.tag_name];
     keywords.insert(entry.attr_name);
   }
   // Populate default_value_map_
-  for (size_t i = 0; i < std::size(kDefaultList); ++i) {
-    const TagAttrValue& entry = kDefaultList[i];
+  for (const auto& entry : kDefaultList) {
     AttrValue& value = default_value_map_[entry.tag_name][entry.attr_name];
     value.attr_value = entry.attr_value;
     value.requires_version_5 = entry.requires_version_5;
@@ -257,9 +255,7 @@ void ElideAttributesFilter::StartElement(HtmlElement* element) {
     if (iter != one_value_attrs_map_.end()) {
       const KeywordSet& oneValueAttrs = iter->second;
       HtmlElement::AttributeList* attrs = element->mutable_attributes();
-      for (HtmlElement::AttributeIterator i(attrs->begin()); i != attrs->end();
-           ++i) {
-        HtmlElement::Attribute& attribute = *i;
+      for (auto& attribute : *attrs) {
         if (attribute.escaped_value() != nullptr &&
             oneValueAttrs.count(attribute.keyword()) > 0) {
           attribute.SetEscapedValue(StringPiece());

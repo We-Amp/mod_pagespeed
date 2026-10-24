@@ -94,9 +94,7 @@ void HtmlWriterFilter::StartElement(HtmlElement* element) {
   EmitName(element->name());
 
   const HtmlElement::AttributeList& attrs = element->attributes();
-  for (HtmlElement::AttributeConstIterator i(attrs.begin()); i != attrs.end();
-       ++i) {
-    const HtmlElement::Attribute& attribute = *i;
+  for (const auto& attribute : attrs) {
     // If the column has grown too large, insert a newline.  It's always safe
     // to insert whitespace in the middle of tag parameters.
     int attr_length = 1 + attribute.name_str().size();

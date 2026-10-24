@@ -1316,7 +1316,7 @@ bool PngScanlineWriter::DoBestCompression() {
   opng_reduce_image(png_read.png_ptr(), png_read.info_ptr(), OPNG_REDUCE_ALL);
 
   int min_size = png_image->length();
-  for (size_t i = 0; i < kParamCount; ++i) {
+  for (const auto& kPngCompressionParam : kPngCompressionParams) {
     ScopedPngStruct png_write(ScopedPngStruct::WRITE, message_handler_);
     PngOptimizer::CopyPngStructs(png_read, &png_write);
 
@@ -1330,9 +1330,9 @@ bool PngScanlineWriter::DoBestCompression() {
     png_set_compression_mem_level(png_write.png_ptr(), 8);
     png_set_compression_window_bits(png_write.png_ptr(), 15);
     png_set_compression_strategy(png_write.png_ptr(),
-                                 kPngCompressionParams[i].compression_strategy);
+                                 kPngCompressionParam.compression_strategy);
     png_set_filter(png_write.png_ptr(), PNG_FILTER_TYPE_BASE,
-                   kPngCompressionParams[i].filter_level);
+                   kPngCompressionParam.filter_level);
 
     GoogleString recompressed_image;
     png_set_write_fn(png_write.png_ptr(), &recompressed_image,

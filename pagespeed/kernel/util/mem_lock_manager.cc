@@ -35,10 +35,8 @@ MemLockManager::~MemLockManager() {
   // MemLockState objects.  The MemLockState objects need to outlive
   // all the MemLocks allocated against them, as they are dependent
   // on the MemLockState to know their own name.
-  for (MemLockStateMap::iterator p = lock_state_map_.begin(),
-                                 e = lock_state_map_.end();
-       p != e; ++p) {
-    MemLockState* name_state = p->second;
+  for (auto& p : lock_state_map_) {
+    MemLockState* name_state = p.second;
     name_state->MemLockManagerDestroyed();
   }
 }

@@ -94,8 +94,7 @@ void PropertyPage::AddValueFromProtobuf(
 
 void PropertyPage::SetupCohorts(
     const PropertyCache::CohortVector& cohort_list) {
-  for (int j = 0, n = cohort_list.size(); j < n; ++j) {
-    const PropertyCache::Cohort* cohort = cohort_list[j];
+  for (auto cohort : cohort_list) {
     PropertyMapStruct* pmap_struct = new PropertyMapStruct(log_record());
     cohort_data_map_[cohort] = pmap_struct;
   }
@@ -111,11 +110,11 @@ bool PropertyPage::EncodePropertyCacheValues(
 
   bool ret = false;
   PropertyMap* pmap = &p->second->pmap;
-  for (PropertyMap::iterator p = pmap->begin(), e = pmap->end(); p != e; ++p) {
-    PropertyValue* property = p->second;
+  for (auto& p : *pmap) {
+    PropertyValue* property = p.second;
     PropertyValueProtobuf* pcache_value = property->protobuf();
     if (pcache_value->name().empty()) {
-      pcache_value->set_name(p->first);
+      pcache_value->set_name(p.first);
     }
 
     // Why might the value be empty? If a cache lookup is performed, misses,
@@ -317,9 +316,8 @@ PropertyPage::~PropertyPage() {
     // TODO(jmarantz): Not currently Using STLDeleteValues because
     // ~PropertyValue is private, the syntax for friending template
     // functions eludes me.
-    for (PropertyMap::iterator p = pmap->begin(), e = pmap->end(); p != e;
-         ++p) {
-      PropertyValue* value = p->second;
+    for (auto& p : *pmap) {
+      PropertyValue* value = p.second;
       delete value;
     }
     delete pmap_struct;

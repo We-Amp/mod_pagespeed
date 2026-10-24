@@ -345,8 +345,8 @@ void ProxyFetchPropertyCallbackCollector::RunPostLookupsAndCleanupIfSafe() {
     return;
   }
 
-  for (int i = 0, n = post_lookup_task_vector_.size(); i < n; ++i) {
-    post_lookup_task_vector_[i]->CallRun();
+  for (auto& i : post_lookup_task_vector_) {
+    i->CallRun();
   }
   post_lookup_task_vector_.clear();
 
@@ -452,8 +452,8 @@ void ProxyFetchPropertyCallbackCollector::ExecuteDetach(
   proxy_fetch_ = nullptr;
   status_code_ = status_code;
 
-  for (int i = 0, n = post_lookup_task_vector_.size(); i < n; ++i) {
-    post_lookup_task_vector_[i]->CallCancel();
+  for (auto& i : post_lookup_task_vector_) {
+    i->CallCancel();
   }
   post_lookup_task_vector_.clear();
 
@@ -1112,8 +1112,7 @@ void ProxyFetch::ExecuteQueued() {
   }
 
   // Collect all text received from the fetcher
-  for (int i = 0, n = v.size(); i < n; ++i) {
-    GoogleString* str = v[i];
+  for (auto str : v) {
     driver_->ParseText(*str);
     delete str;
   }

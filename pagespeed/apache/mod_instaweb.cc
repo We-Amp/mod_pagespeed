@@ -979,9 +979,8 @@ bool give_dir_apache_user_permissions(ApacheRewriteDriverFactory* factory,
 bool give_apache_user_permissions(ApacheRewriteDriverFactory* factory) {
   const StringSet& created_dirs = factory->created_directories();
   bool ret = true;
-  for (StringSet::iterator i = created_dirs.begin(); i != created_dirs.end();
-       ++i) {
-    ret &= give_dir_apache_user_permissions(factory, *i);
+  for (const auto& created_dir : created_dirs) {
+    ret &= give_dir_apache_user_permissions(factory, created_dir);
   }
   return ret;
 }
@@ -2118,9 +2117,7 @@ void ApacheProcessContext::InstallCommands() {
          num_cmds * sizeof(*apache_cmds_));
   command_rec* cmd = apache_cmds_ + num_cmds;
 
-  for (int i = 0, n = v.size(); i < n; ++i) {
-    RewriteOptions::OptionBase* option = v[i];
-
+  for (auto option : v) {
     // Skip entries with null documentation -- entries lacking doc
     // are an indication that the option is not available for MPS.
     if (option->help_text() != nullptr) {

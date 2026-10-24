@@ -499,8 +499,7 @@ GoogleString JoinRequestHeaderValues(ngx_http_request_t* r, const char* name,
 void ParseVerifiedBots(StringPiece spec, webbotauth::VerifiedBotRegistry* reg) {
   StringPieceVector pairs;
   SplitStringPieceToVector(spec, ",", &pairs, true /* omit_empty */);
-  for (size_t i = 0; i < pairs.size(); ++i) {
-    StringPiece pair = pairs[i];
+  for (auto pair : pairs) {
     StringPiece::size_type eq = pair.find('=');
     if (eq == StringPiece::npos) {
       continue;

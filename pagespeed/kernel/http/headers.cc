@@ -55,8 +55,8 @@ bool RemoveCookieString(const StringPiece& cookie_name,
   SplitStringPieceToVector(cookie_header, ";", &pieces, false);
   GoogleString cookie_prefix(cookie_name.data(), cookie_name.size());
   cookie_prefix.append("=");
-  for (int i = 0, n = pieces.size(); i < n; ++i) {
-    StringPiece working_cookie = pieces[i];
+  for (auto& piece : pieces) {
+    StringPiece working_cookie = piece;
     TrimLeadingWhitespace(&working_cookie);
     // Cookie names are case-sensitive, so the name= prefix must match
     // exactly: removing "VICTIM" must leave a "Victim=..." cookie alone.
@@ -65,14 +65,14 @@ bool RemoveCookieString(const StringPiece& cookie_name,
     } else {
       // Don't trim the whitespace off the cookie, just in case it actually
       // meant something.
-      if (!pieces[i].empty()) {
+      if (!piece.empty()) {
         if (!new_cookie_header->empty()) {
           new_cookie_header->append(";");
         } else {
           // For the first cookie, trim the whitespace off the front.
-          TrimLeadingWhitespace(&pieces[i]);
+          TrimLeadingWhitespace(&piece);
         }
-        pieces[i].AppendToString(new_cookie_header);
+        piece.AppendToString(new_cookie_header);
       }
     }
   }
@@ -217,18 +217,18 @@ Headers<Proto>::PopulateCookieMap(StringPiece header_name) const {
     if (Lookup(header_name, &cookies)) {
       bool has_attributes = (header_name == HttpAttributes::kSetCookie);
       // Iterate through the cookies.
-      for (int i = 0, n = cookies.size(); i < n; ++i) {
+      for (auto& cookie : cookies) {
         StringPieceVector name_value_pairs;
-        SplitStringPieceToVector(*cookies[i], ";", &name_value_pairs, true);
+        SplitStringPieceToVector(*cookie, ";", &name_value_pairs, true);
         int number_to_add = has_attributes ? 1 : name_value_pairs.size();
         StringPiece all_attributes;  // Defaults to none for no attributes.
         if (has_attributes && name_value_pairs.size() > 1) {
           // We want all the chars from the start of the first attribute to
           // the end of the last attribute.
           const char* start_of_attributes = name_value_pairs[1].data();
-          size_t chars_before_start = start_of_attributes - cookies[i]->data();
+          size_t chars_before_start = start_of_attributes - cookie->data();
           all_attributes = StringPiece(start_of_attributes,
-                                       cookies[i]->size() - chars_before_start);
+                                       cookie->size() - chars_before_start);
         }
         for (int j = 0; j < number_to_add; ++j) {
           StringPiece cookie_name;
@@ -276,9 +276,8 @@ bool Headers<Proto>::HasValue(const StringPiece& name,
                               const StringPiece& value) const {
   ConstStringStarVector values;
   Lookup(name, &values);
-  for (ConstStringStarVector::const_iterator iter = values.begin();
-       iter != values.end(); ++iter) {
-    if (value == **iter) {
+  for (auto iter : values) {
+    if (value == *iter) {
       return true;
     }
   }
@@ -290,9 +289,8 @@ bool Headers<Proto>::HasValueCaseInsensitive(const StringPiece& name,
                                              const StringPiece& value) const {
   ConstStringStarVector values;
   Lookup(name, &values);
-  for (ConstStringStarVector::const_iterator iter = values.begin();
-       iter != values.end(); ++iter) {
-    if (StringCaseEqual(value, **iter)) {
+  for (auto iter : values) {
+    if (StringCaseEqual(value, *iter)) {
       return true;
     }
   }
@@ -328,8 +326,8 @@ void SplitValues(StringPiece name, StringPiece comma_separated_values,
     if (values->empty()) {
       values->push_back(comma_separated_values);
     } else {
-      for (int i = 0, n = values->size(); i < n; ++i) {
-        TrimWhitespace(&((*values)[i]));
+      for (auto& value : *values) {
+        TrimWhitespace(&value);
       }
     }
   } else {
@@ -362,8 +360,8 @@ void Headers<Proto>::AddToMap(const StringPiece& name,
   if (map_.get() != nullptr) {
     StringPieceVector split;
     SplitValues(name, value, &split);
-    for (int i = 0, n = split.size(); i < n; ++i) {
-      map_->Add(name, split[i]);
+    for (auto i : split) {
+      map_->Add(name, i);
     }
     cookies_.reset(nullptr);  // Pessimistically assume this.
   }
@@ -386,9 +384,9 @@ void Headers<Proto>::RemoveCookie(const StringPiece& cookie_name) {
     if (remove_cookie) {
       cookies_.reset(nullptr);
       RemoveAll(HttpAttributes::kCookie);
-      for (int i = 0, n = new_cookie_lines.size(); i < n; ++i) {
-        if (!new_cookie_lines[i].empty()) {
-          Add(HttpAttributes::kCookie, new_cookie_lines[i]);
+      for (auto& new_cookie_line : new_cookie_lines) {
+        if (!new_cookie_line.empty()) {
+          Add(HttpAttributes::kCookie, new_cookie_line);
         }
       }
     }
@@ -440,8 +438,8 @@ bool Headers<Proto>::Remove(const StringPiece& name, const StringPiece& value) {
           Add(name, StringPiece(combined.data(), combined.size()));
         }
       } else {
-        for (int i = 0, n = new_vals.size(); i < n; ++i) {
-          Add(name, new_vals[i]);
+        for (auto& new_val : new_vals) {
+          Add(name, new_val);
         }
       }
       UpdateHook();
@@ -564,8 +562,8 @@ bool Headers<Proto>::RemoveIfNotIn(const Headers& keep) {
       if (keep.Lookup(name, &keep_value_vector)) {
         // Collect keep's values for name in a bag so we can do fast matches
         // and prune the bag to avoid matching a value more than once.
-        for (int v = 0, nv = keep_value_vector.size(); v < nv; ++v) {
-          StringPiece value = *keep_value_vector[v];
+        for (auto& v : keep_value_vector) {
+          StringPiece value = *v;
           int& value_count = keep_value_bag[value];
           ++value_count;
         }
@@ -685,9 +683,9 @@ template <class Proto>
 bool Headers<Proto>::FindValueForName(
     const StringPieceVector& name_equals_value_vec, StringPiece name_to_find,
     StringPiece* optional_retval) {
-  for (int i = 0, n = name_equals_value_vec.size(); i < n; ++i) {
+  for (auto i : name_equals_value_vec) {
     StringPiece name;
-    ExtractNameAndValue(name_equals_value_vec[i], &name, optional_retval);
+    ExtractNameAndValue(i, &name, optional_retval);
     if (StringCaseEqual(name, name_to_find)) {
       return true;
     }

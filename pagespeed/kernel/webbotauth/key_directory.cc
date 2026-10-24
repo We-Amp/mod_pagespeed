@@ -105,9 +105,9 @@ int WarmKeyDirectoryCache(CacheInterface* cache, StringPiece realm,
   webbotauth::ExtractAllEd25519Keys(jwks_body, &keys);
 
   int written = 0;
-  for (size_t i = 0; i < keys.size(); ++i) {
-    const GoogleString& kid = keys[i].first;
-    const GoogleString& raw_key = keys[i].second;
+  for (auto& key : keys) {
+    const GoogleString& kid = key.first;
+    const GoogleString& raw_key = key.second;
     GoogleString blob = SerializeCacheEntry(
         KeyLookupResult::kFound, raw_key, now_unix_sec, now_unix_sec + ttl_sec);
     SharedString sv(blob);

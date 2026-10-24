@@ -265,13 +265,13 @@ void Statistics::RenderHistograms(Writer* writer, MessageHandler* handler) {
   // snapshot of the non-empty ones, because a histogram might become
   // non-empty asynchronously between the next two loops, and that
   // would skew indexing.
-  for (int i = 0, n = hist_names.size(); i < n; ++i) {
-    Histogram* hist = FindHistogram(hist_names[i]);
+  for (const auto& hist_name : hist_names) {
+    Histogram* hist = FindHistogram(hist_name);
 
     // Exclude histograms with zero count.
     if (hist->Count() != 0) {
       populated_histograms.push_back(hist);
-      populated_histogram_names.push_back(hist_names[i]);
+      populated_histogram_names.push_back(hist_name);
     }
   }
 
@@ -356,13 +356,13 @@ void Statistics::RenderTimedVariables(Writer* writer,
         "<th align=right>Hour</th><th align=right>Total</th></tr>");
     writer->Write(begin, message_handler);
     // Write each statistic as a row in the table.
-    for (int i = 0, n = p->second.size(); i < n; ++i) {
-      timedvar = FindTimedVariable(p->second[i]);
+    for (const auto& i : p->second) {
+      timedvar = FindTimedVariable(i);
       const GoogleString content = absl::StrFormat(
           "<tr><td> %s </td>"
           "<td align=right> %s </td><td align=right> %s </td>"
           "<td align=right> %s </td><td align=right> %s </td></tr>",
-          p->second[i].c_str(),
+          i.c_str(),
           Integer64ToString(timedvar->Get(TimedVariable::TENSEC)).c_str(),
           Integer64ToString(timedvar->Get(TimedVariable::MINUTE)).c_str(),
           Integer64ToString(timedvar->Get(TimedVariable::HOUR)).c_str(),

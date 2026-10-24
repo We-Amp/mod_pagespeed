@@ -130,18 +130,16 @@ void SystemCaches::ShutDown(MessageHandler* message_handler) {
 
   if (is_root_process_) {
     // Cleanup per-path shm resources.
-    for (PathCacheMap::iterator p = path_cache_map_.begin(),
-                                e = path_cache_map_.end();
-         p != e; ++p) {
-      p->second->GlobalCleanup(message_handler);
+    for (auto& p : path_cache_map_) {
+      p.second->GlobalCleanup(message_handler);
     }
 
     // And all the SHM caches.
-    for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
-                                       e = metadata_shm_caches_.end();
-         p != e; ++p) {
-      if (p->second->cache_backend != nullptr && p->second->initialized) {
-        MetadataShmCache::GlobalCleanup(shared_mem_runtime_, p->second->segment,
+    for (auto& metadata_shm_cache : metadata_shm_caches_) {
+      if (metadata_shm_cache.second->cache_backend != nullptr &&
+          metadata_shm_cache.second->initialized) {
+        MetadataShmCache::GlobalCleanup(shared_mem_runtime_,
+                                        metadata_shm_cache.second->segment,
                                         message_handler);
       }
     }
@@ -703,10 +701,8 @@ void SystemCaches::RegisterConfig(SystemRewriteOptions* config) {
 }
 
 void SystemCaches::RootInit() {
-  for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
-                                     e = metadata_shm_caches_.end();
-       p != e; ++p) {
-    MetadataShmCacheInfo* cache_info = p->second;
+  for (auto& metadata_shm_cache : metadata_shm_caches_) {
+    MetadataShmCacheInfo* cache_info = metadata_shm_cache.second;
 
     if (cache_info->cache_backend->Initialize()) {
       cache_info->initialized = true;
@@ -717,16 +713,14 @@ void SystemCaches::RootInit() {
     } else {
       factory_->message_handler()->Message(
           kWarning, "Unable to initialize shared memory cache: %s.",
-          p->first.c_str());
+          metadata_shm_cache.first.c_str());
       cache_info->cache_backend = nullptr;
       cache_info->cache_to_use = nullptr;
     }
   }
 
-  for (PathCacheMap::iterator p = path_cache_map_.begin(),
-                              e = path_cache_map_.end();
-       p != e; ++p) {
-    SystemCachePath* cache = p->second;
+  for (auto& p : path_cache_map_) {
+    SystemCachePath* cache = p.second;
     cache->RootInit();
   }
 }
@@ -734,33 +728,28 @@ void SystemCaches::RootInit() {
 void SystemCaches::ChildInit() {
   is_root_process_ = false;
 
-  for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
-                                     e = metadata_shm_caches_.end();
-       p != e; ++p) {
-    MetadataShmCacheInfo* cache_info = p->second;
+  for (auto& metadata_shm_cache : metadata_shm_caches_) {
+    MetadataShmCacheInfo* cache_info = metadata_shm_cache.second;
     if ((cache_info->cache_backend != nullptr) &&
         !cache_info->cache_backend->Attach()) {
       factory_->message_handler()->Message(
           kWarning, "Unable to attach to shared memory cache: %s.",
-          p->first.c_str());
+          metadata_shm_cache.first.c_str());
       delete cache_info->cache_backend;
       cache_info->cache_backend = nullptr;
       cache_info->cache_to_use = nullptr;
     }
   }
 
-  for (PathCacheMap::iterator p = path_cache_map_.begin(),
-                              e = path_cache_map_.end();
-       p != e; ++p) {
-    SystemCachePath* cache = p->second;
+  for (auto& p : path_cache_map_) {
+    SystemCachePath* cache = p.second;
     cache->ChildInit();
   }
 
   // TODO(yeputons): think about moving StartUp() to some base class of
   // RedisCache and MemcachedCache and collapsing these two loops into one.
 #if PAGESPEED_ENABLE_MEMCACHED
-  for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
-    MemcachedCache* mem_cache = memcache_servers_[i];
+  for (auto mem_cache : memcache_servers_) {
     // TODO(yeputons): looks like this line does not really "connect", but just
     // loads list of servers into apr_memcached and connects later. Maybe the
     // name should be fixed.
@@ -833,23 +822,19 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
   // We don't want to print this in per-vhost info since it would leak
   // all the declared caches.
   if (flags & kGlobalView) {
-    for (MetadataShmCacheMap::iterator p = metadata_shm_caches_.begin(),
-                                       e = metadata_shm_caches_.end();
-         p != e; ++p) {
-      MetadataShmCacheInfo* cache_info = p->second;
+    for (auto& metadata_shm_cache : metadata_shm_caches_) {
+      MetadataShmCacheInfo* cache_info = metadata_shm_cache.second;
       if (cache_info->cache_backend != nullptr) {
-        StrAppend(out, "\nShared memory metadata cache '", p->first,
-                  "' statistics:\n");
+        StrAppend(out, "\nShared memory metadata cache '",
+                  metadata_shm_cache.first, "' statistics:\n");
         StringWriter writer(out);
         writer.Write(cache_info->cache_backend->DumpStats(),
                      factory_->message_handler());
       }
     }
 
-    for (PathCacheMap::iterator p = path_cache_map_.begin(),
-                                e = path_cache_map_.end();
-         p != e; ++p) {
-      CycloneCache* cyclone_cache = p->second->cyclone_cache();
+    for (auto& p : path_cache_map_) {
+      CycloneCache* cyclone_cache = p.second->cyclone_cache();
       if (cyclone_cache != nullptr && cyclone_cache->IsHealthy()) {
         StrAppend(out, "\nCyclone cache '", cyclone_cache->config().cache_path,
                   "' statistics:\n");
@@ -860,8 +845,7 @@ void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {
 
 #if PAGESPEED_ENABLE_MEMCACHED
   if (flags & kIncludeMemcached) {
-    for (int i = 0, n = memcache_servers_.size(); i < n; ++i) {
-      MemcachedCache* mem_cache = memcache_servers_[i];
+    for (auto mem_cache : memcache_servers_) {
       if (!mem_cache->GetStatus(out)) {
         StrAppend(out, "\nError getting memcached server status for ",
                   mem_cache->cluster_spec().ToString());

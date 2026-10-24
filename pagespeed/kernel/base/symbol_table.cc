@@ -54,8 +54,8 @@ SymbolTable<CharTransform>::SymbolTable()
 template <class CharTransform>
 void SymbolTable<CharTransform>::Clear() {
   string_map_.clear();
-  for (int i = 0, n = storage_.size(); i < n; ++i) {
-    std::free(storage_[i]);
+  for (auto& i : storage_) {
+    std::free(i);
   }
   storage_.clear();
   pieces_.clear();

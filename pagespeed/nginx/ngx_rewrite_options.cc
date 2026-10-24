@@ -396,9 +396,7 @@ RewriteOptions::OptionScope NgxRewriteOptions::GetOptionScope(
   // This could be made more efficient if RewriteOptions provided a map allowing
   // access of options by their name. It's not too much of a worry at present
   // since this is just during initialization.
-  for (OptionBaseVector::const_iterator it = all_options().begin();
-       it != all_options().end(); ++it) {
-    RewriteOptions::OptionBase* option = *it;
+  for (auto option : all_options()) {
     if (StringCaseEqual(option->option_name(), option_name)) {
       // We treat kLegacyProcessScope as kProcessScopeStrict, failing to start
       // if an option is out of place.

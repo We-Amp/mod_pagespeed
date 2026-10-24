@@ -158,8 +158,8 @@ bool EncodeMappings(const MappingVector& mappings, GoogleString* result) {
 
 GoogleString PercentEncode(StringPiece url) {
   GoogleString result;
-  for (int i = 0, n = url.size(); i < n; ++i) {
-    switch (url[i]) {
+  for (char i : url) {
+    switch (i) {
       case '<':
         result += "%3C";
         break;
@@ -167,7 +167,7 @@ GoogleString PercentEncode(StringPiece url) {
         result += "%3E";
         break;
       default:
-        result.push_back(url[i]);
+        result.push_back(i);
         break;
     }
   }

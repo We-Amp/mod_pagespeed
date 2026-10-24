@@ -211,8 +211,7 @@ void CachePropertyStore::Get(const GoogleString& url,
       new CachePropertyStoreCallbackCollector(property_store_get_callback,
                                               cohort_list.size(),
                                               thread_system_->NewMutex());
-  for (int j = 0, n = cohort_list.size(); j < n; ++j) {
-    const PropertyCache::Cohort* cohort = cohort_list[j];
+  for (auto cohort : cohort_list) {
     CohortCacheMap::iterator cohort_itr =
         cohort_cache_map_.find(cohort->name());
     CHECK(cohort_itr != cohort_cache_map_.end());
@@ -262,10 +261,8 @@ void CachePropertyStore::AddCohortWithCache(const GoogleString& cohort,
 
 GoogleString CachePropertyStore::Name() const {
   GoogleString out;
-  for (CohortCacheMap::const_iterator p = cohort_cache_map_.begin(),
-                                      e = cohort_cache_map_.end();
-       p != e; ++p) {
-    StrAppend(&out, out.empty() ? "" : "\n", p->first, ":", p->second->Name());
+  for (const auto& p : cohort_cache_map_) {
+    StrAppend(&out, out.empty() ? "" : "\n", p.first, ":", p.second->Name());
   }
   return out;
 }

@@ -48,8 +48,8 @@ class StringMultiMap {
   bool empty() const { return vector_.empty(); }
 
   void Clear() {
-    for (int i = 0, n = vector_.size(); i < n; ++i) {
-      delete vector_[i].second;
+    for (auto& i : vector_) {
+      delete i.second;
     }
     set_.clear();
     vector_.clear();
@@ -205,8 +205,7 @@ class StringMultiMap {
                              char value_separator, bool omit_if_no_value) {
     StringPieceVector pairs;
     SplitStringPieceToVector(name_value_list, separators, &pairs, true);
-    for (int i = 0, n = pairs.size(); i < n; ++i) {
-      StringPiece& pair = pairs[i];
+    for (auto& pair : pairs) {
       StringPiece::size_type pos = pair.find(value_separator);
       if (pos != StringPiece::npos) {
         Add(pair.substr(0, pos), pair.substr(pos + 1));

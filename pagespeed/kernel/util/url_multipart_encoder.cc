@@ -72,8 +72,7 @@ void UrlMultipartEncoder::Encode(const StringVector& urls,
       buf += kSeparator;
     }
     const GoogleString& url = urls[i];
-    for (int c = 0, nc = url.size(); c < nc; ++c) {
-      char ch = url[c];
+    for (char ch : url) {
       if (ch == kEscape) {
         buf += kEscapedEscape;
       } else if (ch == kSeparator) {

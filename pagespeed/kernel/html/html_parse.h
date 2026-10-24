@@ -546,8 +546,8 @@ class HtmlParse {
   }
 
   void DetermineFilterListBehavior(const FilterList& list) {
-    for (FilterList::const_iterator i = list.begin(); i != list.end(); ++i) {
-      CheckFilterBehavior(*i);
+    for (auto i : list) {
+      CheckFilterBehavior(i);
     }
   }
 

@@ -206,10 +206,8 @@ void NgxRewriteDriverFactory::ShutDown() {
 void NgxRewriteDriverFactory::ShutDownMessageHandlers() {
   ngx_message_handler_->set_buffer(nullptr);
   ngx_html_parse_message_handler_->set_buffer(nullptr);
-  for (NgxMessageHandlerSet::iterator p =
-           server_context_message_handlers_.begin();
-       p != server_context_message_handlers_.end(); ++p) {
-    (*p)->set_buffer(nullptr);
+  for (auto server_context_message_handler : server_context_message_handlers_) {
+    server_context_message_handler->set_buffer(nullptr);
   }
   server_context_message_handlers_.clear();
 }

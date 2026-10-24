@@ -178,8 +178,7 @@ int Sector<kBlockSize>::AllocBlocksFromFreeList(int goal, BlockVector* blocks) {
 
 template <size_t kBlockSize>
 void Sector<kBlockSize>::ReturnBlocksToFreeList(const BlockVector& blocks) {
-  for (size_t c = 0; c < blocks.size(); ++c) {
-    BlockNum block_num = blocks[c];
+  for (int block_num : blocks) {
     SetBlockSuccessor(block_num, sector_header_->free_list_front);
     sector_header_->free_list_front = block_num;
   }

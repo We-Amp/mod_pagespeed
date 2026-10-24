@@ -290,10 +290,7 @@ bool NgxUrlAsyncFetcher::Init(ngx_cycle_t* cycle) {
 void NgxUrlAsyncFetcher::ShutDown() {
   shutdown_ = true;
   if (!pending_fetches_.empty()) {
-    for (Pool<NgxFetch>::iterator p = pending_fetches_.begin(),
-                                  e = pending_fetches_.end();
-         p != e; p++) {
-      NgxFetch* fetch = *p;
+    for (auto fetch : pending_fetches_) {
       fetch->CallbackDone(false);
     }
     pending_fetches_.DeleteAll();
@@ -354,18 +351,15 @@ void NgxUrlAsyncFetcher::ReadCallback(const ps_event_data& data) {
   fetcher->mutex_->Lock();
   fetcher->completed_fetches_.DeleteAll();
 
-  for (Pool<NgxFetch>::iterator p = fetcher->pending_fetches_.begin(),
-                                e = fetcher->pending_fetches_.end();
-       p != e; p++) {
-    NgxFetch* fetch = *p;
+  for (auto fetch : fetcher->pending_fetches_) {
     to_start.push_back(fetch);
   }
 
   fetcher->pending_fetches_.Clear();
   fetcher->mutex_->Unlock();
 
-  for (size_t i = 0; i < to_start.size(); i++) {
-    fetcher->StartFetch(to_start[i]);
+  for (auto& i : to_start) {
+    fetcher->StartFetch(i);
   }
 
   return;
@@ -404,10 +398,7 @@ void NgxUrlAsyncFetcher::FetchComplete(NgxFetch* fetch) {
 }
 
 void NgxUrlAsyncFetcher::PrintActiveFetches(MessageHandler* handler) const {
-  for (NgxFetchPool::const_iterator p = active_fetches_.begin(),
-                                    e = active_fetches_.end();
-       p != e; ++p) {
-    NgxFetch* fetch = *p;
+  for (auto fetch : active_fetches_) {
     handler->Message(kInfo, "Active fetch: %s", fetch->str_url());
   }
 }

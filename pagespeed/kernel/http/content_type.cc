@@ -213,9 +213,9 @@ const ContentType* NameExtensionToContentType(const StringPiece& name) {
   if (ext_pos != StringPiece::npos) {
     StringPiece ext = name.substr(ext_pos);
     // TODO(jmarantz): convert to a map if the list gets large.
-    for (int i = 0; i < kNumTypes; ++i) {
-      if (StringCaseEqual(ext, kTypes[i].file_extension())) {
-        return &kTypes[i];
+    for (const auto& kType : kTypes) {
+      if (StringCaseEqual(ext, kType.file_extension())) {
+        return &kType;
       }
     }
   }
@@ -239,9 +239,9 @@ const ContentType* MimeTypeToContentType(const StringPiece& mime_type) {
     stripped_mime_type = mime_type.substr(0, semi_colon);
   }
 
-  for (int i = 0; i < kNumTypes; ++i) {
-    if (StringCaseEqual(stripped_mime_type, kTypes[i].mime_type())) {
-      return &kTypes[i];
+  for (const auto& kType : kTypes) {
+    if (StringCaseEqual(stripped_mime_type, kType.mime_type())) {
+      return &kType;
     }
   }
   return nullptr;
@@ -292,12 +292,10 @@ void MimeTypeListToContentTypeSet(const GoogleString& in,
   }
   StringPieceVector strings;
   SplitStringPieceToVector(in, ",", &strings, true /* omit_empty */);
-  for (StringPieceVector::const_iterator i = strings.begin(), e = strings.end();
-       i != e; ++i) {
+  for (auto trimmed : strings) {
     // Mime-type lists are commonly written with whitespace after the
     // commas (e.g. "text/html, application/xhtml+xml"); trim each entry
     // before lookup.
-    StringPiece trimmed(*i);
     TrimWhitespace(&trimmed);
     if (trimmed.empty()) {
       continue;

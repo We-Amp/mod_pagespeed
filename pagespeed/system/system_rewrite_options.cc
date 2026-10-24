@@ -452,8 +452,7 @@ bool SystemRewriteOptions::HttpsOptions::SetFromString(
     StringPiece value, GoogleString* error_detail) {
   StringPieceVector keywords;
   SplitStringPieceToVector(value, ",", &keywords, true);
-  for (int i = 0, n = keywords.size(); i < n; ++i) {
-    StringPiece keyword = keywords[i];
+  for (auto keyword : keywords) {
     if (!StringCaseEqual(keyword, "enable") &&
         !StringCaseEqual(keyword, "disable") &&
         !StringCaseEqual(keyword, "allow_self_signed") &&
@@ -506,9 +505,8 @@ GoogleString SystemRewriteOptions::StaticAssetCDNOptions::Signature(
 
 GoogleString SystemRewriteOptions::StaticAssetCDNOptions::ToString() const {
   GoogleString result = value();
-  for (StaticAssetSet::const_iterator i = static_assets_to_cdn_->begin();
-       i != static_assets_to_cdn_->end(); ++i) {
-    StrAppend(&result, "&", StaticAssetEnum::StaticAsset_Name(*i));
+  for (auto i : *static_assets_to_cdn_) {
+    StrAppend(&result, "&", StaticAssetEnum::StaticAsset_Name(i));
   }
   return result;
 }
@@ -527,10 +525,7 @@ void SystemRewriteOptions::FillInStaticAssetCDNConf(
     StaticAssetConfig* out_conf) const {
   const SystemRewriteOptions::StaticAssetSet& assets_to_enable =
       static_assets_to_cdn();
-  for (SystemRewriteOptions::StaticAssetSet::const_iterator i =
-           assets_to_enable.begin();
-       i != assets_to_enable.end(); ++i) {
-    StaticAssetEnum::StaticAsset role = *i;
+  for (auto role : assets_to_enable) {
     GoogleString name = StaticAssetEnum::StaticAsset_Name(role);
     StaticAssetConfig::Asset* asset_out = out_conf->add_asset();
     asset_out->set_role(role);

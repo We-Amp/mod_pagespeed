@@ -251,12 +251,10 @@ void AbstractLogRecord::PopulateRewriterStatusCounts() {
     RewriterStats* stats_proto = logging_info()->add_rewriter_stats();
     stats_proto->set_id(rewriter_id);
     stats_proto->set_html_status(stats.html_status);
-    for (RewriteStatusCountMap::const_iterator iter =
-             stats.status_counts.begin();
-         iter != stats.status_counts.end(); ++iter) {
-      const RewriterApplication::Status application_status = iter->first;
+    for (auto iter : stats.status_counts) {
+      const RewriterApplication::Status application_status = iter.first;
       DCHECK(RewriterApplication::Status_IsValid(application_status));
-      const int count = iter->second;
+      const int count = iter.second;
       CHECK_GE(count, 1);
       RewriteStatusCount* status_count = stats_proto->add_status_counts();
       status_count->set_application_status(application_status);

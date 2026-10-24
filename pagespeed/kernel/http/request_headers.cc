@@ -203,11 +203,11 @@ bool RequestHeaders::WriteAsHttp(const StringPiece& url, Writer* writer,
 bool RequestHeaders::AcceptsGzip() const {
   ConstStringStarVector v;
   if (Lookup(HttpAttributes::kAcceptEncoding, &v)) {
-    for (int i = 0, nv = v.size(); i < nv; ++i) {
+    for (auto& i : v) {
       StringPieceVector encodings;
-      SplitStringPieceToVector(*(v[i]), ",", &encodings, true);
-      for (int j = 0, nencodings = encodings.size(); j < nencodings; ++j) {
-        if (StringCaseEqual(encodings[j], HttpAttributes::kGzip)) {
+      SplitStringPieceToVector(*i, ",", &encodings, true);
+      for (auto encoding : encodings) {
+        if (StringCaseEqual(encoding, HttpAttributes::kGzip)) {
           return true;
         }
       }

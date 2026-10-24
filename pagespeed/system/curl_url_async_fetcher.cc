@@ -395,8 +395,7 @@ void CurlUrlAsyncFetcher::PrintActiveFetches(MessageHandler* handler) const {
   }
   handler->Message(
       kInfo, "Active fetches (%d):", static_cast<int>(active_fetches_.size()));
-  for (auto it = active_fetches_.begin(); it != active_fetches_.end(); ++it) {
-    CurlFetch* fetch = *it;
+  for (auto fetch : active_fetches_) {
     handler->Message(kInfo, "  %s (started %ldms ago)", fetch->url().c_str(),
                      static_cast<long>(fetch->TimeDuration()));
   }

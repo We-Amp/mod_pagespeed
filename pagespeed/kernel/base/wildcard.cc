@@ -77,8 +77,7 @@ void Wildcard::InitFromSpec(const StringPiece& wildcard_spec) {
   last_block_offset_ = 0;
   is_simple_ = true;
   bool last_was_any = false;
-  for (size_t i = 0; i < wildcard_spec.size(); ++i) {
-    char c = wildcard_spec[i];
+  for (char c : wildcard_spec) {
     if (c == kMatchAny) {
       // Note that this in effect deletes redundant *s
       // (by simply setting last_was_any more than once).

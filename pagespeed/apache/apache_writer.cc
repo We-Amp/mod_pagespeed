@@ -74,8 +74,8 @@ const char* const kVerbatimOutputFilters[] = {
 };
 
 bool IsVerbatimOutputFilter(const char* name) {
-  for (size_t i = 0; i < std::size(kVerbatimOutputFilters); ++i) {
-    if (StringCaseEqual(name, kVerbatimOutputFilters[i])) {
+  for (auto kVerbatimOutputFilter : kVerbatimOutputFilters) {
+    if (StringCaseEqual(name, kVerbatimOutputFilter)) {
       return true;
     }
   }

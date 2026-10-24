@@ -1433,8 +1433,8 @@ uint64 DaemonHealNotifyLimiter::UrlKey(StringPiece scheme, StringPiece hostname,
     if (colon != StringPiece::npos) {
       const StringPiece candidate = hostname.substr(colon + 1);
       bool is_port = !candidate.empty();
-      for (size_t i = 0; i < candidate.size(); ++i) {
-        if (candidate[i] < '0' || candidate[i] > '9') {
+      for (char i : candidate) {
+        if (i < '0' || i > '9') {
           is_port = false;
           break;
         }
@@ -1452,8 +1452,7 @@ uint64 DaemonHealNotifyLimiter::UrlKey(StringPiece scheme, StringPiece hostname,
   SipHash24 hash(key0_, key1_);
   hash.Update(scheme.data(), scheme.size());
   hash.Update("://", 3);
-  for (size_t i = 0; i < host.size(); ++i) {
-    const char c = host[i];
+  for (char c : host) {
     hash.UpdateByte(
         static_cast<unsigned char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c));
   }
