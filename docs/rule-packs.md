@@ -83,8 +83,7 @@ load errors, so a typo cannot quietly become a different rule.
   server; it names the pack's log directory) and `version` (`MAJOR.MINOR.PATCH`, or the pack fails to load) are required. Optional:
   `publisher` (default `local`), `description`, and `engine_min`, a module
   version the pack needs; an older module refuses to load it. `engine_min` is
-  compared against the version the module reports (its module version, for
-  example `1.19.0`), not the product-line number. `publisher` is
+  compared against the version the module reports (for example `2.5.2`). `publisher` is
   also the key id a signed pack is signed with (see [Signed packs](#signed-packs)).
   The `pack` object may also carry a `license` object with an `entitlement` name
   (`a-z`, `0-9` and `-`, up to 64 characters), an `expires` date (`YYYY-MM-DD`)

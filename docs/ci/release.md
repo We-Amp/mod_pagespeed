@@ -77,9 +77,10 @@ mismatch is a warning, shown as an annotation and in the job summary. Once
 the pin names the paired tag, a mismatch fails, a dry run included; such a
 dry run says so in a `::notice::` (the pin is final, so the check is as
 strict as in a real run) and names the way to rehearse an unfinished pair: a
-dry-run dispatch of a `module-v2.5.0-pre.N` tag.
+dry-run dispatch of a `module-vX.Y.Z-pre.N` tag for the version being cut.
 
-Dry-run tags for this line are `module-v2.5.0-pre.N`. Do not cut new
+Dry-run tags are `module-vX.Y.Z-pre.N`, where `X.Y.Z` is the version being
+cut (for example `module-v2.5.2-pre.1`). Do not cut new
 `module-v1.19.1-pre.N` tags: the upgrade rehearsals map 1.19.1 to cache
 generation v2 (`CACHE_GEN3_SINCE=2.5.0`) while `master` ships the v3 drop-in,
 so such a rehearsal checks the wrong directory. The existing
@@ -88,22 +89,15 @@ so such a rehearsal checks the wrong directory. The existing
 pre-release), so from 2.5.0 on it is checked like a release candidate: its
 `X.Y.Z` core must equal `VERSION.txt`.
 
-**The pin-pair check fails on `master` until the 2.5.0 cut.** `master` links
-Cyclone `22f6553` (on-disk format v9, cache generation v3) while
-`install/debian/optimizer-pin.json` still pins `optimizer-v1.19.0`, whose
-optimizer commit builds an older cache library. `check_optimizer_pin_pair.py`
-refuses that pair, and that is intended: it blocks shipping a module and an
-optimizer on different cache formats and generations. Do not "fix" the
-check; the cut fixes the pin. The cut, in this order:
-
-1. On the optimizer's `main`, bump `VERSION.txt` to `2.5.0` (with its
-   changelog heading and chart version, as each product release does).
-2. Tag `optimizer-v2.5.0` on that commit and let its release lane publish
-   (its own guard refuses a tag that is not `VERSION.txt`).
-3. Record the pin here: `install/debian/optimizer-pin.json` gets
-   `optimizer-v2.5.0`, the optimizer commit and the hash of its `SHA256SUMS`;
-   bump `%global mps_version` in `packaging/cpanel` to `2.5.0`.
-4. Tag `module-v2.5.0`.
+**The pin pair must link one cache library.** `check_optimizer_pin_pair.py`
+refuses a module whose cache library commit differs from the one the pinned
+optimizer commit builds, because such a pair disagrees on the cache volume's
+format and the module would not attach to the daemon's volume. Do not weaken
+the check; move the pin. A release that changes the cache library is cut in
+this order: tag the optimizer release (its own lane refuses a tag that is not
+its `VERSION.txt`); record its tag, commit and the hash of its `SHA256SUMS`
+in `install/debian/optimizer-pin.json` and bump `%global mps_version` in
+`packaging/cpanel`; then tag the module.
 
 ## Running it
 
@@ -204,13 +198,11 @@ key is a change to that file, `SECURITY.md` and every consumer's pin together. T
 release itself needs no secret: `create-release` uses the run's own token with
 `contents: write`, which the caller grants and no other job of the lane has.
 
-### First rehearsal checklist
+### Secrets precedence
 
-- [ ] With the secrets entered, run one real rehearsal on a release candidate
-  tag and confirm that the jobs of the `release` environment see the
-  environment's values of the secrets: a called workflow is documented to read
-  the environment's value over the value the caller passed, but that
-  precedence is to be confirmed here, not assumed.
+The jobs of the `release` environment read the environment's values of the
+secrets; the signed `SHA256SUMS.asc` of the 2.5.0 release was the first real
+confirmation.
 
 ### Rerunning a real run
 
@@ -283,8 +275,7 @@ executed. In a real run `validate` requires every gate to have succeeded and
 the installer gate and both cPanel gates (a release, not a pre-release) to have
 reported `ran` true. The gates run only while `FLEET_ENABLED` is `true`, so a
 real release needs the fleet enabled at that moment and the guests provisioned.
-A dry run accepts a skipped gate. A missing `ran` output counts as false, so
-until the gate workflows define it a real run fails at `validate`.
+A dry run accepts a skipped gate. A missing `ran` output counts as false.
 
 Not done here on purpose: the publication of apt and yum repositories (the
 consumer pulls the release assets, see below), the signing of debs and rpms
@@ -348,9 +339,7 @@ commit in which the jobs named `Apache System Tests` and `Nginx System Tests`
 `workflow_dispatch` run count (the dispatch with `full=true` is the release
 candidate run the release checklist requires), and the log line names the event of the
 run that passed. A release commit that never ran those lanes cannot be
-released: run the CI on it first. Until the pipelines of this repository
-contain both lanes the gate cannot pass, so a real run refuses and a dry run
-reports it.
+released: run the CI on it first.
 
 The gate checks the system-test lanes only. It does not assert the full tier:
 that every fleet job of the `full=true` dispatch at the candidate SHA is
