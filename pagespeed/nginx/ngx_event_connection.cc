@@ -47,7 +47,10 @@ const char kWakeMarkerType = 'W';
 }  // namespace
 
 NgxEventConnection::NgxEventConnection(callbackPtr callback)
-    : event_handler_(callback), overflow_mode_(false) {
+    : event_handler_(callback),
+      connection_(nullptr),
+      overflow_mode_(false),
+      closed_(false) {
   pthread_mutex_init(&write_mutex_, nullptr);
 }
 
@@ -92,11 +95,40 @@ bool NgxEventConnection::Init(ngx_cycle_t* cycle) {
 
 bool NgxEventConnection::CreateNgxConnection(ngx_cycle_t* cycle,
                                              ngx_fd_t pipe_fd) {
+  // A copy of nginx's ngx_add_channel_event(), which does not hand the
+  // ngx_connection_t it creates back to its caller: Shutdown() needs that
+  // connection to close the read side through nginx. It matches the vendored
+  // nginx 1.30.6 (see bazel/nginx.bzl) apart from the rc != NGX_OK test,
+  // which is stricter than upstream's rc == NGX_ERROR. c->recv stays unset
+  // exactly as upstream leaves it: only the read event's handler is ever
+  // called for a channel connection, and that handler is ours.
   // pipe_fd (the read side of the pipe will end up as c->fd on the
   // underlying ngx_connection_t that gets created here)
-  ngx_int_t rc = ngx_add_channel_event(cycle, pipe_fd, NGX_READ_EVENT,
-                                       &NgxEventConnection::ReadEventHandler);
-  return rc == NGX_OK;
+  ngx_connection_t* c = ngx_get_connection(pipe_fd, cycle->log);
+  if (c == nullptr) {
+    return false;
+  }
+  c->pool = cycle->pool;
+  ngx_event_t* rev = c->read;
+  ngx_event_t* wev = c->write;
+  rev->log = cycle->log;
+  wev->log = cycle->log;
+  rev->channel = 1;
+  wev->channel = 1;
+  rev->handler = &NgxEventConnection::ReadEventHandler;
+
+  ngx_int_t rc;
+  if (ngx_add_conn && (ngx_event_flags & NGX_USE_EPOLL_EVENT) == 0) {
+    rc = ngx_add_conn(c);
+  } else {
+    rc = ngx_add_event(rev, NGX_READ_EVENT, 0);
+  }
+  if (rc != NGX_OK) {
+    ngx_free_connection(c);
+    return false;
+  }
+  connection_ = c;
+  return true;
 }
 
 void NgxEventConnection::ReadEventHandler(ngx_event_t* ev) {
@@ -111,15 +143,14 @@ void NgxEventConnection::ReadEventHandler(ngx_event_t* ev) {
     return;
   }
 
-  if (!NgxEventConnection::ReadAndNotify(c->fd)) {
-    // This was copied from ngx_channel_handler(): for epoll, we need to call
-    // ngx_del_conn(). Sadly, no documentation as to why.
-    if (ngx_event_flags & NGX_USE_EPOLL_EVENT) {
-      ngx_del_conn(c, 0);
-    }
-    ngx_close_connection(c);
-    ngx_del_event(ev, NGX_READ_EVENT, 0);
-  }
+  // On a read error (EOF or a real error) leave the close to Shutdown():
+  // this static handler cannot reach the owning object to null connection_,
+  // so closing here would let Shutdown() close the same connection object a
+  // second time, after nginx recycled it into an unrelated connection. The
+  // write end is only ever closed by Shutdown(), on this same event-loop
+  // thread, which closes the read side immediately after, so in practice
+  // nothing reaches this path before Shutdown() owns the teardown.
+  (void)NgxEventConnection::ReadAndNotify(c->fd);
 }
 
 // Deserialize ps_event_data's from the pipe as they become available and
@@ -202,7 +233,12 @@ bool NgxEventConnection::WriteEvent(char type, void* sender) {
   // delivered ahead of older queued events.
   pthread_mutex_lock(&write_mutex_);
   bool result;
-  if (overflow_mode_) {
+  if (closed_) {
+    // Shutdown() has closed the pipe: the worker is exiting, nobody would
+    // collect the output, and the fd number may already have been reused.
+    // Drop the event.
+    result = false;
+  } else if (overflow_mode_) {
     overflow_.push_back(data);
     result = true;
   } else {
@@ -274,8 +310,25 @@ void NgxEventConnection::Drain() {
 }
 
 void NgxEventConnection::Shutdown() {
+  // Mark the connection closed and close the write side under write_mutex_,
+  // so a writer either finishes its write before the close or sees closed_
+  // and drops the event. Without this, a rewrite thread that outlived the
+  // shutdown drain could write to the closed fd number after worker-exit
+  // teardown (factory shutdown, record pool shutdown, cache cleanup) reused
+  // it for a new file or socket.
+  pthread_mutex_lock(&write_mutex_);
+  closed_ = true;
   close(pipe_write_fd_);
-  close(pipe_read_fd_);
+  pthread_mutex_unlock(&write_mutex_);
+  // Close the read side through nginx: it is a channel connection registered
+  // with the event loop, and a raw close() would leave the loop's event
+  // bookkeeping pointing at a dead fd.
+  if (connection_ != nullptr) {
+    ngx_close_connection(connection_);
+    connection_ = nullptr;
+  } else {
+    close(pipe_read_fd_);
+  }
 }
 
 }  // namespace net_instaweb
