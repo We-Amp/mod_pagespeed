@@ -111,10 +111,10 @@
       <p class="empty-title">Optimizer unreachable</p>
       <p class="empty-reason">{daemonUnavailableReason(view.unavailableError)}</p>
       <p class="empty-description">
-        The module could not reach the optimizer daemon ({view.unavailableError.message}).
-        The daemon may be stopped or not configured, or this build does not
-        serve the daemon endpoints; the module keeps serving without it.
-        This page populates once the daemon is reachable.
+        The module could not reach the optimizer worker ({view.unavailableError.message}).
+        The worker may be stopped or not configured, or this build does not
+        serve the optimizer endpoints; the module keeps serving without it.
+        This page populates once the worker is reachable.
       </p>
     </div>
   {/if}
@@ -263,7 +263,7 @@
 
       <h3>Cache cooldowns</h3>
       {#if view.cooldowns === null}
-        <p class="empty">The cooldown list is unavailable on this daemon.</p>
+        <p class="empty">The cooldown list is unavailable on this optimizer.</p>
       {:else if cooldownEntries.length === 0}
         <p class="empty">No URLs in cooldown.</p>
       {:else}

@@ -89,7 +89,7 @@ test.describe("Polling", () => {
     await expect.poll(() => mock.calls("stats_json")).toBeGreaterThanOrEqual(before + 1);
   });
 
-  test("another tab's busy read is invisible on Daemon Cache", async ({ page }) => {
+  test("another tab's busy read is invisible on the optimizer's Cache panel", async ({ page }) => {
     let busy = false;
     await mockAdmin(page, "pagespeed_admin", {
       config: F.CONFIG_VHOST,
@@ -117,7 +117,7 @@ test.describe("Polling", () => {
     await expect(page.getByTestId("daemon-unreachable")).toHaveCount(0);
   });
 
-  test("moving from the overview to Daemon Cache mid-read shares the read", async ({ page }) => {
+  test("moving from the overview to the optimizer's Cache panel mid-read shares the read", async ({ page }) => {
     const mock = await mockAdmin(
       page,
       "pagespeed_admin",

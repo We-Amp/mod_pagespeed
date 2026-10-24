@@ -53,11 +53,11 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "In-place requests the server could not optimize, either because the URL is already known to be unoptimizable or because the lookup failed; the origin bytes are served unchanged.",
 
   ipro_daemon_served:
-    "In-place requests answered with an optimized variant from the optimizer daemon's shared cache, including not-modified revalidations. This is the daemon's hit count for optimizer output.",
+    "In-place requests answered with an optimized variant from the optimizer worker's shared cache, including not-modified revalidations. This is the worker's hit count for optimizer output.",
   ipro_daemon_served_original:
     "In-place requests answered with the stored original's own bytes: the volume held no optimized variant yet, which is every serve while the optimizer is down or still working on the URL. The response carries the origin's own weak ETag, not the optimizer's.",
   ipro_daemon_fallthrough:
-    "In-place requests the daemon declined (nothing cached, or only a stale variant) or could not be asked because this process had no usable handle on its cache volume; the ordinary path serves them.",
+    "In-place requests the optimizer worker declined (nothing cached, or only a stale variant) or could not be asked because this process had no usable handle on its cache volume; the ordinary path serves them.",
   ipro_daemon_served_css:
     "In-place CSS requests answered from the optimizer's cache since the module started.",
   ipro_daemon_served_js:
@@ -75,13 +75,13 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   process_start_ms:
     "When the module's shared statistics started counting, in milliseconds since the epoch: the window every module-side number on the console covers.",
   ipro_daemon_refresh_notified:
-    "Refresh signals sent to the optimizer daemon after it offered a variant that was past its freshness lifetime, asking it to discard and rebuild that variant set.",
+    "Refresh signals sent to the optimizer worker after it offered a variant that was past its freshness lifetime, asking it to discard and rebuild that variant set.",
   ipro_daemon_refresh_notify_failed:
-    "Refresh signals that could not be delivered to the optimizer daemon. Sustained growth points at a broken notification socket, leaving stale variants unhealed.",
+    "Refresh signals that could not be delivered to the optimizer worker. Sustained growth points at a broken notification socket, leaving stale variants unhealed.",
   ipro_daemon_fallback_notified:
-    "Notifications sent after serving a near-match variant, asking the daemon to build the exact variant this client asked for (viewport, pixel density, data saving, image format).",
+    "Notifications sent after serving a near-match variant, asking the worker to build the exact variant this client asked for (viewport, pixel density, data saving, image format).",
   ipro_daemon_fallback_notify_failed:
-    "Variant-request notifications that failed to send. Non-zero while near-match serves continue means variant sets will not converge; check the daemon notification socket.",
+    "Variant-request notifications that failed to send. Non-zero while near-match serves continue means variant sets will not converge; check the worker notification socket.",
 
   ipro_recorder_resources:
     "In-place recordings started, that is origin responses the server began capturing for future optimization. Each finished recording also lands in exactly one outcome counter, so the outcomes trail this one by whatever is still in flight.",
@@ -708,11 +708,11 @@ export const STAT_FAMILY_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> 
     ],
     [
       "ipro_daemon_",
-      "In-place optimization on servers where the optimized cache is owned by the optimizer daemon rather than by the serving module. These counters split daemon-eligible requests into served and declined, and count the notifications sent to make the daemon rebuild or add a variant.",
+      "In-place optimization on servers where the optimized cache is owned by the optimizer worker rather than by the serving module. These counters split eligible requests into served and declined, and count the notifications sent to make the worker rebuild or add a variant.",
     ],
     [
       "ipro_recorder_",
-      "The recorder that captures an origin response the first time an in-place URL misses the cache. Each finished recording is counted in exactly one outcome, so the outcomes trail the recordings started by whatever is in flight. Where the optimizer daemon owns the cache it records separately and moves none of these.",
+      "The recorder that captures an origin response the first time an in-place URL misses the cache. Each finished recording is counted in exactly one outcome, so the outcomes trail the recordings started by whatever is in flight. Where the optimizer worker owns the cache it records separately and moves none of these.",
     ],
     [
       "zerocopy_serve_",
