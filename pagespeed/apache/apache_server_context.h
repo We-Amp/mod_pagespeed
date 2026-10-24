@@ -84,10 +84,13 @@ class ApacheServerContext : public SystemServerContext {
 
   // This server's daemon health.  kNotConfigured until
   // RunDaemonStartupCheck() has run, which is also the correct answer for
-  // every path that reaches serving without a daemon configured.
+  // every path that reaches serving without a daemon configured.  Asked
+  // through ServingHealth(): a daemon that was not running when the check
+  // ran is looked for again here, at most once per retry interval, so a
+  // child that starts without the daemon picks it up without a restart.
   DaemonHealth daemon_health() const {
     return daemon_adapter_ == nullptr ? DaemonHealth::kNotConfigured
-                                      : daemon_adapter_->health();
+                                      : daemon_adapter_->ServingHealth();
   }
 
   // This server's daemon adapter, or nullptr before the startup check has

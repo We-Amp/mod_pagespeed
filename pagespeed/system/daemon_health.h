@@ -23,8 +23,11 @@
 namespace net_instaweb {
 
 // How this server relates to the optimizer daemon.  Resolved once, at
-// startup, and read (never recomputed, never logged from) on the serving
-// path.
+// startup, and read (never logged from) on the serving path.  The one
+// verdict that is not final for the process's life is kUnavailable reached
+// only because the daemon was not running: the ports that read the verdict
+// through DaemonAdapter::ServingHealth() recheck that one, at most once per
+// retry interval, and only ever forward (kUnavailable -> kReady).
 //
 // This lives in a header of its own, with no includes, on purpose: the
 // serving seams need the verdict and nothing else.  Routing them through the

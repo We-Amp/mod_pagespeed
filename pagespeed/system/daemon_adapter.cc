@@ -186,8 +186,9 @@ static_assert(kSocketConnectDeadlineMs == 2000, "message says two seconds");
 // long enough to cover one start's pass over all servers, short enough that
 // a later graceful restart or reload in the same process re-probes a daemon
 // that has since recovered.  A daemon that starts accepting inside this
-// window is not noticed by the checks made inside it: the startup verdict
-// is final for the process.
+// window is not noticed by the checks made inside it: only the serving
+// recheck (ServingHealth, on its own longer interval) picks the daemon up
+// again without a restart.
 constexpr int64_t kSocketVerdictLatchMs = 10000;
 
 // The deadline message for a probe that did not get accepted in time,
@@ -535,6 +536,192 @@ RemoveOutcome RemoveVolumeFile(const GoogleString& volume_path,
   StrAppend(why, full, ": ", strerror(errno));
   return RemoveOutcome::kFailed;
 #endif
+}
+
+// The names in `after` that a scan did not see in `before`, in `after`'s
+// order: what appeared between two scans, whoever made it.
+std::vector<GoogleString> NamesThatAppeared(
+    const std::vector<GoogleString>& before,
+    const std::vector<GoogleString>& after) {
+  std::vector<GoogleString> created;
+  for (const GoogleString& name : after) {
+    if (std::find(before.begin(), before.end(), name) == before.end()) {
+      created.push_back(name);
+    }
+  }
+  return created;
+}
+
+// What a cleanup did with the volume files an open's two scans caught
+// appearing beside the configured path.  Every created name lands in
+// exactly one of the four buckets, and the sentences that report a split
+// are composed from them by AppendCreatedVolumeCleanupSentences.
+struct CreatedVolumeCleanup {
+  // Gone, and the verify scan in RemoveCreatedVolumeFiles confirms it.
+  std::vector<GoogleString> removed;
+  // This module's own removal failed; manual removal is safe.
+  std::vector<GoogleString> stuck;
+  std::vector<GoogleString> why_stuck;
+  // POSIX: another user owns it (Windows: another process holds it open);
+  // most likely the optimizer's own new volume, left in place.
+  std::vector<GoogleString> held;
+  std::vector<GoogleString> why_held;
+  // The removal call said gone; the verify scan could not confirm it.
+  std::vector<GoogleString> unverified;
+};
+
+// Removes the volume files an open's two scans caught APPEARING beside
+// `volume_path`, whoever made them.  Most of the time what appeared is the
+// open's own file: the cache library's creating open writes the volume file
+// and nothing beside it while the small tier is off, which is how this
+// module opens it.  It can also be the optimizer daemon's own new volume,
+// which comes to exist in exactly that window whenever the daemon begins
+// running onto a volume that does not exist yet.
+//
+// THE RACE THIS INVITES, both directions.  This open made the file and
+// the daemon attached a moment later: on Linux the unlink lands on an
+// open file -- the daemon keeps its handle, the name is gone, the next
+// start of this server refuses again for the same reason, and a daemon
+// restart recovers onto a fresh volume of its own.  On Windows the delete
+// fails while another process holds the file without delete sharing: the
+// verdict stays refused and the message names the manual step.  The daemon
+// made the file and this open attached to it: the check refuses either
+// way -- it saw a file appear -- and the removal is what must not then
+// take the daemon's volume (the owner refusal in RemoveVolumeFile keeps
+// that one on disk).  No lock is added: coordinating two processes' opens
+// of a volume the daemon owns would invent a protocol neither side has.
+//
+// The claim the caller makes is only as strong as the scan that detected
+// the split, so the scan has the last word -- in BOTH directions.  A name
+// counts as removed only when the removal call said so AND the scan no
+// longer lists it (a transient stat failure must not claim a removal that
+// did not happen), and a name the call FAILED to remove is never reported
+// as removed even if the scan no longer lists it (the optimizer may have
+// taken the name over in between).  A name that fails either test is
+// UNVERIFIED, never silently dropped: the file may still be on disk, and
+// a directory-shaped configured path is the plain case -- the removal
+// looks beside the directory, does not find the name there, and the
+// re-scan still lists it from inside.  A scan that no longer lists the
+// DAEMON's own files either was never readable or lost them, so in that
+// case nothing is verified at all.
+CreatedVolumeCleanup RemoveCreatedVolumeFiles(
+    const GoogleString& volume_path, const std::vector<GoogleString>& created,
+    const std::vector<GoogleString>& before) {
+  CreatedVolumeCleanup out;
+  for (const GoogleString& name : created) {
+    GoogleString why;
+    const RemoveOutcome outcome = RemoveVolumeFile(volume_path, name, &why);
+    if (outcome == RemoveOutcome::kHeldByOtherUser) {
+      out.held.push_back(name);
+      out.why_held.push_back(why);
+    } else if (outcome == RemoveOutcome::kRemoved) {
+      out.removed.push_back(name);
+    } else {
+      out.stuck.push_back(name);
+      out.why_stuck.push_back(why);
+    }
+  }
+  const std::vector<GoogleString> verified =
+      DaemonAdapter::VolumeFiles(volume_path);
+  bool scan_usable = true;
+  for (const GoogleString& name : before) {
+    if (std::find(verified.begin(), verified.end(), name) == verified.end()) {
+      scan_usable = false;
+      break;
+    }
+  }
+  if (scan_usable) {
+    std::vector<GoogleString> confirmed;
+    for (const GoogleString& name : out.removed) {
+      if (std::find(verified.begin(), verified.end(), name) == verified.end()) {
+        confirmed.push_back(name);
+      } else {
+        out.unverified.push_back(name);
+      }
+    }
+    out.removed.swap(confirmed);
+  } else {
+    // Nothing can be verified; every name the calls reported gone is
+    // unverified rather than removed, and the message says so below.
+    out.unverified.insert(out.unverified.end(), out.removed.begin(),
+                          out.removed.end());
+    out.removed.clear();
+  }
+  return out;
+}
+
+// The sentences that report what a cleanup did with the files an open
+// created, shared so a refused start and a serving process's stopped open
+// say it in the same words.  `actor` names who removed ("This start",
+// "This process"); `held_before` completes "the directory holds only what
+// it held before ..."; `restart_deadline` completes the advice about a
+// file that may still be on disk.
+void AppendCreatedVolumeCleanupSentences(const CreatedVolumeCleanup& cleanup,
+                                         StringPiece actor,
+                                         StringPiece held_before,
+                                         StringPiece restart_deadline,
+                                         GoogleString* out) {
+  // The removed sentence never prints with an empty list: a name whose
+  // removal could not be confirmed is unverified, not removed, and every
+  // created name lands in exactly one of the four buckets.
+  if (!cleanup.held.empty()) {
+    // The one case where "do not touch it" is the advice: the file is
+    // most likely the optimizer's own new volume, and attaching to it
+    // on the next start is the CORRECT outcome -- deleting it by hand
+    // would undo exactly the protection this refusal exists for.  Each
+    // held name's reason already spells what happened to which file.
+    for (const GoogleString& why : cleanup.why_held) {
+      StrAppend(out, why, ". ");
+    }
+    StrAppend(out,
+              "Do not remove it while the optimizer daemon is running; "
+              "once it is running on it, the next start of this server "
+              "attaches to it. If no optimizer daemon is running on it, "
+              "remove it while the daemon is stopped. ");
+    if (!cleanup.removed.empty()) {
+      StrAppend(out, actor, " removed ", JoinCollection(cleanup.removed, ", "),
+                ". ");
+    }
+    if (!cleanup.stuck.empty()) {
+      StrAppend(out, actor, " could not remove ",
+                JoinCollection(cleanup.stuck, ", "), ": ",
+                JoinCollection(cleanup.why_stuck, "; "),
+                ". Remove those by hand ", restart_deadline,
+                ": a start that finds them attaches to them without "
+                "refusing. ");
+    }
+    if (!cleanup.unverified.empty()) {
+      StrAppend(out, actor, " could not confirm that the file it created (",
+                JoinCollection(cleanup.unverified, ", "),
+                ") is gone; check the cache directory ", restart_deadline,
+                ". ");
+    }
+  } else if (cleanup.stuck.empty() && cleanup.unverified.empty()) {
+    StrAppend(out, actor, " removed the file it created (",
+              JoinCollection(cleanup.removed, ", "),
+              "), so the directory holds only what it held before ",
+              held_before, ". ");
+  } else {
+    if (!cleanup.stuck.empty()) {
+      StrAppend(out, actor, " could not remove the file it created (",
+                JoinCollection(cleanup.stuck, ", "),
+                "): ", JoinCollection(cleanup.why_stuck, "; "), ". ");
+    }
+    if (!cleanup.unverified.empty()) {
+      StrAppend(out, actor, " could not confirm that the file it created (",
+                JoinCollection(cleanup.unverified, ", "),
+                ") is gone; check the cache directory ", restart_deadline,
+                ": a start that finds it attaches to it without refusing. ");
+    }
+    if (!cleanup.removed.empty()) {
+      StrAppend(out, "It removed ", JoinCollection(cleanup.removed, ", "),
+                ". ");
+    }
+    if (!cleanup.stuck.empty()) {
+      StrAppend(out, "Remove what is still there by hand ", restart_deadline,
+                ": a start that finds it attaches to it without refusing. ");
+    }
+  }
 }
 
 // The cache format number in a volume file's name: the digits that follow
@@ -885,7 +1072,8 @@ bool DaemonAdapter::VolumeWasReplaced() const {
 }
 
 void* DaemonAdapter::RecordCache() {
-  if (health_ != DaemonHealth::kReady || abi_ == nullptr) {
+  if (health_.load(std::memory_order_acquire) != DaemonHealth::kReady ||
+      abi_ == nullptr) {
     return nullptr;
   }
   std::lock_guard<std::mutex> lock(record_cache_mutex_);
@@ -1155,8 +1343,7 @@ void* DaemonAdapter::RecordCache() {
     // Did the open land on a file that was there, or make one?  The same
     // names, and the same file under each, or the handle is not used.  It
     // was never handed out, so closing it here cannot pull a mapping out
-    // from under a request.  Whatever appeared stays on disk: this module
-    // deletes nothing.
+    // from under a request.
     const std::vector<GoogleString> volume_files_after =
         VolumeFiles(volume_path_);
     bool unchanged = volume_files_after == volume_files_before;
@@ -1168,14 +1355,43 @@ void* DaemonAdapter::RecordCache() {
     }
     if (!unchanged) {
       abi_->CacheClose(cache);
-      return stop_for_good(StrCat(
+      // What appeared is removed only when no start-up mirror ever ran:
+      // the server started while the daemon was not running, the serving
+      // recheck recovered the arm, and THIS open is the one that must
+      // clean up after itself, exactly the way a refusing start does --
+      // nothing else is watching, and a stray file left beside the
+      // daemon's is one a later pool recycle or restart would attach to
+      // quietly, the silent split the checks exist to prevent.  After a
+      // start whose mirror ran, every file stays where it is, as it
+      // always has: that mirror is this adapter's cleanup.
+      const std::vector<GoogleString> created =
+          NamesThatAppeared(volume_files_before, volume_files_after);
+      CreatedVolumeCleanup cleanup;
+      if (!created.empty() && !startup_mirror_ran_) {
+        cleanup = RemoveCreatedVolumeFiles(volume_path_, created,
+                                           volume_files_before);
+      }
+      GoogleString reason = StrCat(
           "while this process was opening it, a volume file appeared, "
           "disappeared or was replaced (before: ",
           JoinCollection(volume_files_before, ", "),
           "; after: ", JoinCollection(volume_files_after, ", "),
           "), so the open may have created a volume file of its own "
-          "instead of using the daemon's. No file was removed. Compare the "
-          "volume files beside that path with the one the daemon has open"));
+          "instead of using the daemon's");
+      if (cleanup.removed.empty() && cleanup.held.empty() &&
+          cleanup.stuck.empty() && cleanup.unverified.empty()) {
+        StrAppend(&reason,
+                  ". No file was removed. Compare the volume files beside "
+                  "that path with the one the daemon has open");
+      } else {
+        AppendCreatedVolumeCleanupSentences(
+            cleanup, "This process", "this open",
+            "before this server or its worker processes restart", &reason);
+        StrAppend(&reason,
+                  "Compare the volume files beside that path with the one "
+                  "the daemon has open");
+      }
+      return stop_for_good(reason);
     }
   }
   // Read again AFTER the open.  Only a handle whose number was known before
@@ -1659,12 +1875,15 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
 }
 
 DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
-  health_ = DaemonHealth::kUnavailable;
+  health_.store(DaemonHealth::kUnavailable, std::memory_order_release);
+  // Only the exits below that mean "the daemon was not running yet" turn
+  // this back on; everything else is final for the process.
+  unavailable_is_retryable_ = false;
   extra_volume_warning_.clear();
   legacy_generation_layout_ = false;
 
   if (socket_path_.empty() && volume_path_.empty()) {
-    health_ = DaemonHealth::kNotConfigured;
+    health_.store(DaemonHealth::kNotConfigured, std::memory_order_release);
     return DaemonStartupStatus::kOk;
   }
   if (!configured()) {
@@ -1743,6 +1962,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
                 volume_path_, ": permission denied.", kGroupMembershipHint);
       return DaemonStartupStatus::kOk;
     }
+    // The daemon has never published its size, in the way time can fix: it
+    // may simply not be running yet.  This is one of the exits the serving
+    // recheck retries.
+    unavailable_is_retryable_ = true;
     StrAppend(error,
               "in-place optimization is OFF: the optimizer daemon has not "
               "published the size of its cache volume at ",
@@ -1767,7 +1990,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     }
     // The daemon published a size but its volume file is not there.  Creating
     // it is exactly what must not happen: the daemon is the volume's owner and
-    // a volume we invent is one nothing else reads.
+    // a volume we invent is one nothing else reads.  Also a race time can fix
+    // -- the daemon may not have finished starting -- so the serving recheck
+    // retries this exit too.
+    unavailable_is_retryable_ = true;
     StrAppend(error,
               "in-place optimization is OFF: the optimizer daemon's cache "
               "volume does not exist yet at ",
@@ -1825,6 +2051,10 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
               volume_path_, ": ", DescribeDaemonError(abi_.get(), open_error));
     return DaemonStartupStatus::kOk;
   }
+  // The mirror's open has run, so this adapter's own start-up check is the
+  // cleanup that owns the files its opens create: a serving process's
+  // checked open leaves what appears where it is (see RecordCache).
+  startup_mirror_ran_ = true;
   // The probe is all this check needs the volume for.  Holding it open across
   // the server's fork into worker processes would hand every child a handle it
   // never asked for.
@@ -1837,94 +2067,15 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   // daemon publishes.
   const std::vector<GoogleString> after = VolumeFiles(volume_path_);
   if (after.size() > before.size()) {
-    std::vector<GoogleString> created;
-    for (const GoogleString& name : after) {
-      if (std::find(before.begin(), before.end(), name) == before.end()) {
-        created.push_back(name);
-      }
-    }
-    // A refused start removes what APPEARED between its two scans, whoever
-    // made it.  Left in place, that file would let the next start of this
-    // server attach to it and come up healthy on a cache the daemon never
-    // reads -- the silent split this refusal exists to prevent.  Most of
-    // the time what appeared is this open's own file: the cache library's
-    // creating open writes the volume file and nothing beside it while the
-    // small tier is off, which is how this module opens it.  It can also be
-    // the daemon's own new volume (see the race below), and on POSIX the
-    // owner refusal in RemoveVolumeFile keeps that one on disk.
-    //
-    // THE RACE THIS INVITES, both directions.  This open made the file and
-    // the daemon attached a moment later: on Linux the unlink lands on an
-    // open file -- the daemon keeps its handle, the name is gone, the next
-    // start of this server refuses again for the same reason, and a daemon
-    // restart recovers onto a fresh volume of its own; before this removal
-    // existed, that same overlap healed itself, the retry taking the
-    // left-over-files branch and attaching to the very file the daemon was
-    // using.  On Windows the delete fails while another process holds the
-    // file without delete sharing: the verdict stays refused and the
-    // message below names the manual step.  The daemon made the file and
-    // this open attached to it: the check refuses either way -- it saw a
-    // file appear -- and the removal is what must not then take the
-    // daemon's volume.  No lock is added: coordinating two processes' opens
-    // of a volume the daemon owns would invent a protocol neither side has.
-    std::vector<GoogleString> removed;
-    std::vector<GoogleString> stuck;
-    std::vector<GoogleString> held;
-    std::vector<GoogleString> unverified;
-    std::vector<GoogleString> why_stuck;
-    std::vector<GoogleString> why_held;
-    for (const GoogleString& name : created) {
-      GoogleString why;
-      const RemoveOutcome outcome = RemoveVolumeFile(volume_path_, name, &why);
-      if (outcome == RemoveOutcome::kHeldByOtherUser) {
-        held.push_back(name);
-        why_held.push_back(why);
-      } else if (outcome == RemoveOutcome::kRemoved) {
-        removed.push_back(name);
-      } else {
-        stuck.push_back(name);
-        why_stuck.push_back(why);
-      }
-    }
-    // The claim below is only as strong as the scan that detected the
-    // split, so the scan has the last word -- in BOTH directions.  A name
-    // counts as removed only when the removal call said so AND the scan
-    // no longer lists it (a transient stat failure must not claim a
-    // removal that did not happen), and a name the call FAILED to remove
-    // is never reported as removed even if the scan no longer lists it
-    // (the optimizer may have taken the name over in between).  A name
-    // that fails either test is UNVERIFIED, never silently dropped: the
-    // file may still be on disk, and a directory-shaped configured path
-    // is the plain case -- the removal looks beside the directory, does
-    // not find the name there, and the re-scan still lists it from
-    // inside.  A scan that no longer lists the DAEMON's own files either
-    // was never readable or lost them, so in that case nothing is
-    // verified at all.
-    const std::vector<GoogleString> verified = VolumeFiles(volume_path_);
-    bool scan_usable = true;
-    for (const GoogleString& name : before) {
-      if (std::find(verified.begin(), verified.end(), name) == verified.end()) {
-        scan_usable = false;
-        break;
-      }
-    }
-    if (scan_usable) {
-      std::vector<GoogleString> confirmed;
-      for (const GoogleString& name : removed) {
-        if (std::find(verified.begin(), verified.end(), name) ==
-            verified.end()) {
-          confirmed.push_back(name);
-        } else {
-          unverified.push_back(name);
-        }
-      }
-      removed.swap(confirmed);
-    } else {
-      // Nothing can be verified; every name the calls reported gone is
-      // unverified rather than removed, and the message says so below.
-      unverified.insert(unverified.end(), removed.begin(), removed.end());
-      removed.clear();
-    }
+    // A refused start removes what APPEARED between its two scans: left in
+    // place, that file would let the next start of this server attach to
+    // it and come up healthy on a cache the daemon never reads -- the
+    // silent split this refusal exists to prevent.  RemoveCreatedVolumeFiles
+    // owns the how (and the POSIX owner refusal that keeps the daemon's own
+    // new volume on disk).
+    const std::vector<GoogleString> created = NamesThatAppeared(before, after);
+    const CreatedVolumeCleanup cleanup =
+        RemoveCreatedVolumeFiles(volume_path_, created, before);
     StrAppend(error,
               "refusing to start: opening the optimizer daemon's cache volume "
               "at the size the daemon published (",
@@ -1935,71 +2086,9 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
               ") instead of attaching to it. The two would share nothing and "
               "each run a permanently cold cache, with no error to show for "
               "it. ");
-    // The removed sentence never prints with an empty list: a name whose
-    // removal could not be confirmed is unverified, not removed, and every
-    // created name lands in exactly one of the four buckets.
-    if (!held.empty()) {
-      // The one case where "do not touch it" is the advice: the file is
-      // most likely the optimizer's own new volume, and attaching to it
-      // on the next start is the CORRECT outcome -- deleting it by hand
-      // would undo exactly the protection this refusal exists for.  Each
-      // held name's reason already spells what happened to which file.
-      for (const GoogleString& why : why_held) {
-        StrAppend(error, why, ". ");
-      }
-      StrAppend(error,
-                "Do not remove it while the optimizer daemon is running; "
-                "once it is running on it, the next start of this server "
-                "attaches to it. If no optimizer daemon is running on it, "
-                "remove it while the daemon is stopped. ");
-      if (!removed.empty()) {
-        StrAppend(error, "This start removed ", JoinCollection(removed, ", "),
-                  ". ");
-      }
-      if (!stuck.empty()) {
-        StrAppend(error, "This start could not remove ",
-                  JoinCollection(stuck, ", "), ": ",
-                  JoinCollection(why_stuck, "; "),
-                  ". Remove those by hand before this server starts "
-                  "again: a start that finds them attaches to them "
-                  "without refusing. ");
-      }
-      if (!unverified.empty()) {
-        StrAppend(error,
-                  "This start could not confirm that the file it created (",
-                  JoinCollection(unverified, ", "),
-                  ") is gone; check the cache directory before this "
-                  "server starts again. ");
-      }
-    } else if (stuck.empty() && unverified.empty()) {
-      StrAppend(error, "This start removed the file it created (",
-                JoinCollection(removed, ", "),
-                "), so the directory holds only what it held before this "
-                "start. ");
-    } else {
-      if (!stuck.empty()) {
-        StrAppend(error, "This start could not remove the file it created (",
-                  JoinCollection(stuck, ", "),
-                  "): ", JoinCollection(why_stuck, "; "), ". ");
-      }
-      if (!unverified.empty()) {
-        StrAppend(error,
-                  "This start could not confirm that the file it created (",
-                  JoinCollection(unverified, ", "),
-                  ") is gone; check the cache directory before this "
-                  "server starts again: a start that finds it attaches to "
-                  "it without refusing. ");
-      }
-      if (!removed.empty()) {
-        StrAppend(error, "It removed ", JoinCollection(removed, ", "), ". ");
-      }
-      if (!stuck.empty()) {
-        StrAppend(error,
-                  "Remove what is still there by hand before this server "
-                  "starts again: a start that finds it attaches to it "
-                  "without refusing. ");
-      }
-    }
+    AppendCreatedVolumeCleanupSentences(cleanup, "This start", "this start",
+                                        "before this server starts again",
+                                        error);
     StrAppend(error,
               "The usual cause is start order during an upgrade: the "
               "optimizer daemon has a new on-disk cache format and has not "
@@ -2013,11 +2102,14 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
   }
 
   if (!SocketAnswers(socket_path_, &why)) {
+    // The daemon was not running when the check ran -- the one verdict the
+    // serving recheck looks for again.
+    unavailable_is_retryable_ = true;
     StrAppend(error, "in-place optimization is OFF: ", why);
     return DaemonStartupStatus::kOk;
   }
 
-  health_ = DaemonHealth::kReady;
+  health_.store(DaemonHealth::kReady, std::memory_order_release);
   if (legacy_generation_layout_) {
     // Reported even though the server is healthy: the tolerance is a
     // deliberate, working state, and one loud line is what keeps it from
@@ -2041,14 +2133,89 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
 DaemonStartupStatus DaemonAdapter::StartupCheck() {
   GoogleString error;
   const DaemonStartupStatus status = Resolve(&error);
+  if (unavailable_is_retryable_) {
+    // The first retry of the "not running" verdict is due one interval after
+    // the check that produced it, not immediately.
+    unavailable_retry_due_ms_.store(
+        monotonic_clock_() + kUnavailableRetryIntervalMs,
+        std::memory_order_release);
+  }
   // Kept so a serving child can repeat it once its message history exists.
   // Only a verdict that leaves the arm off is a refusal: the healthy-path
   // notes (legacy layout, left-over volumes) are not repeated.
-  startup_refusal_ = health_ == DaemonHealth::kReady ? GoogleString() : error;
+  startup_refusal_ =
+      health_.load(std::memory_order_acquire) == DaemonHealth::kReady
+          ? GoogleString()
+          : error;
   if (!error.empty() && handler_ != nullptr && ShouldAnnounce(error)) {
     handler_->Message(kError, "%s", error.c_str());
   }
   return status;
+}
+
+DaemonHealth DaemonAdapter::ServingHealth() const {
+  const DaemonHealth verdict = health_.load(std::memory_order_acquire);
+  if (verdict != DaemonHealth::kUnavailable || !unavailable_is_retryable_) {
+    // Ready, unconfigured, or one of the verdicts that are final for the
+    // process: the serving seam takes the answer as it stands.
+    return verdict;
+  }
+  const int64_t now_ms = monotonic_clock_();
+  int64_t due_ms = unavailable_retry_due_ms_.load(std::memory_order_relaxed);
+  if (now_ms < due_ms) {
+    return verdict;
+  }
+  // One thread per interval probes; the rest answer from the verdict, the
+  // same claim idiom as the generation check.
+  if (!unavailable_retry_due_ms_.compare_exchange_strong(
+          due_ms, now_ms + kUnavailableRetryIntervalMs,
+          std::memory_order_relaxed)) {
+    return verdict;
+  }
+  // The re-check, deliberately without opening anything and without
+  // reloading the library: abi() is borrowed by the serve arms, and
+  // RecordCache() is the one that performs the checked open.  Any failure
+  // returns silently -- the start-up line already said why, and a repeat of
+  // it every thirty seconds would be noise.
+  GoogleString why;
+  if (abi_ == nullptr) {
+    return verdict;
+  }
+  const uint32_t generation =
+      abi_->SharedConfigGeneration(volume_path_.c_str());
+  if (generation != 0 && generation != kCacheDirGeneration) {
+    return verdict;
+  }
+  const uint64_t published = abi_->SharedConfigVolumeSize(volume_path_.c_str());
+  if (published == 0) {
+    return verdict;
+  }
+  if (CurrentFormatVolumeFiles(volume_path_, VolumeFiles(volume_path_))
+          .empty()) {
+    return verdict;
+  }
+  if (!SocketAnswers(socket_path_, &why)) {
+    return verdict;
+  }
+  // Stored only on the success path, immediately before the verdict flips:
+  // RecordCache()'s directory-path branch reads it after seeing kReady, so
+  // the release store below orders it, and a retry that fails a later gate
+  // no longer writes it at all (successive intervals can claim different
+  // threads, and a plain write per claim was a formal race).
+  inherited_volume_size_ = published;
+  health_.store(DaemonHealth::kReady, std::memory_order_release);
+  // A refusal that is no longer true must not be repeated into any message
+  // history attached later.
+  startup_refusal_.clear();
+  if (handler_ != nullptr) {
+    const GoogleString message =
+        StrCat("the optimizer daemon at ", socket_path_,
+               " answers again: in-place optimization is on");
+    if (ShouldAnnounce(message)) {
+      handler_->Message(kInfo, "%s", message.c_str());
+    }
+  }
+  return DaemonHealth::kReady;
 }
 
 void DaemonAdapter::ReannounceStartupRefusal() {

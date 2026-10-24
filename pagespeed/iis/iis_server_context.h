@@ -32,7 +32,7 @@ namespace net_instaweb {
 		void set_fetch_factory(ProxyFetchFactory* x) { fetch_factory_ = x; }
 		IisRewriteOptions* config();
 
-		// The daemon startup verdict for this site, when the site
+		// The daemon verdict for this site, when the site
 		// configured a daemon option.  BORROWED: the process-wide
 		// registry owns the adapter for the life of the process, so a
 		// configuration rebuild that drops this context leaves the
@@ -40,11 +40,14 @@ namespace net_instaweb {
 		// context with the same (library, socket, volume) triple: no
 		// caller may CloseRecordCache() it, because one context's close
 		// would close the handle for all of them.  kNotConfigured while
-		// no adapter is attached.
+		// no adapter is attached.  Asked through ServingHealth(): a
+		// daemon that was not running when the check ran is looked for
+		// again here, at most once per retry interval, so a worker
+		// process picks it up without a pool recycle.
 		DaemonHealth daemon_health() const {
 			return daemon_adapter_ == nullptr
 			           ? DaemonHealth::kNotConfigured
-			           : daemon_adapter_->health();
+			           : daemon_adapter_->ServingHealth();
 		}
 		DaemonAdapter* daemon_adapter() { return daemon_adapter_; }
 		void set_daemon_adapter(DaemonAdapter* adapter) {

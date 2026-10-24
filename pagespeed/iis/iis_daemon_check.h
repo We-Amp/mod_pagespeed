@@ -44,15 +44,19 @@ class MessageHandler;
 // process per distinct triple and reusing the adapter keeps the loader
 // reference count and the handle count flat across rebuilds.
 //
-// A VERDICT LIVES UNTIL THE PROCESS ENDS.  A configuration edit that leaves
-// the paths unchanged does not re-probe, and that holds for every verdict,
-// the split included: a daemon that is not answering when the first site
-// with this configuration starts in a worker process leaves in-place
-// optimization off for those sites until the application pool recycles.
-// That is this platform's equivalent of the fix-and-restart the other ports
-// state (they need a web-server restart for the same).  Every verdict other
-// than the split leaves the site serving normally (in-place optimization
-// simply stays off).
+// A VERDICT LIVES UNTIL THE PROCESS ENDS, with one exception: a daemon that
+// was merely not running when the first site with this configuration started
+// in a worker process is looked for again on the serving path (the site's
+// daemon_health() accessor, at most once per retry interval), so the worker
+// process picks it up without a pool recycle once it answers.  A
+// configuration edit that leaves the paths unchanged does not re-probe, and
+// that holds for every verdict, the split included: the split and every
+// other configuration or package fault leave in-place optimization off for
+// those sites until the application pool recycles, which is this platform's
+// equivalent of the fix-and-restart the other ports state (they need a
+// web-server restart for the same).  Every verdict other than the split
+// leaves the site serving normally (in-place optimization simply stays
+// off).
 class IisDaemonCheckRegistry {
  public:
 	// The outcome of asking for a triple.  The adapter is borrowed: the
