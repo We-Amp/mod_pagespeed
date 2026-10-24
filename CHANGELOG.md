@@ -91,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **IIS: requests no longer stall for one second when another module
+  raises a custom notification.** The module subscribed to custom
+  notifications and its handler slept one second on every one another
+  module raised, although it never raises a custom notification itself;
+  the subscription and the handler are gone.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

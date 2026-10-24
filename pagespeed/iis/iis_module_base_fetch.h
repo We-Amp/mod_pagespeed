@@ -28,24 +28,6 @@ extern "C" {
 
 namespace net_instaweb {
 
-	#define MY_CUSTOM_NOTIFICATION L"MyCustomNotification"
-class MyCustomProvider : public ICustomNotificationProvider
-	{
-	public:
-		// Create the method that will identify the custom notification.
-		PCWSTR QueryNotificationType(VOID) override
-		{
-			// Return the unique identifier string for the custom notification.
-			return MY_CUSTOM_NOTIFICATION;
-		}
-		// Create the method that will process errors.
-		VOID SetErrorStatus(HRESULT hrError) override
-		{
-			return;
-		}
-	};
-
-
 enum FetchType {
  kUnknown = 0,
  kHtml = 1,
