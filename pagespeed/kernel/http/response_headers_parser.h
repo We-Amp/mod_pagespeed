@@ -38,7 +38,7 @@ class ResponseHeadersParser {
   // remaining headers of the response still parse.  A response that had
   // a line dropped is marked uncacheable when its headers complete: the
   // parsed set no longer represents the origin's caching directives.
-  static const size_t kMaxHeaderLineBytes = 64 * 1024;
+  static const size_t kMaxHeaderLineBytes = size_t{64} * 1024;
 
   explicit ResponseHeadersParser(ResponseHeaders* rh) : response_headers_(rh) {
     Clear();

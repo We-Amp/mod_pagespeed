@@ -60,7 +60,7 @@ class NgxSegmentBuffer {
   // may re-copy on reallocation, and is a small multiple of the typical
   // ngx_pagesize (the drain splits segments into page-sized ngx_buf_t's
   // anyway, so segment boundaries need not align with pages).
-  static constexpr size_t kCoalesceThresholdBytes = 16 * 1024;
+  static constexpr size_t kCoalesceThresholdBytes = size_t{16} * 1024;
 
   NgxSegmentBuffer() {}
 

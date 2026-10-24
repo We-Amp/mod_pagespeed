@@ -41,7 +41,7 @@ class MessageHandler;
 // Thread-safe.
 class RulePackDecisionLog {
  public:
-  static constexpr int64_t kMaxBytesPerDay = 50 * 1024 * 1024;
+  static constexpr int64_t kMaxBytesPerDay = int64_t{50} * 1024 * 1024;
   static constexpr int kStatEveryLines = 256;
   static constexpr size_t kMaxDedupKeys = 65536;
   static constexpr int kRetentionDays = 14;

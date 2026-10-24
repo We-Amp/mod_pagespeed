@@ -56,8 +56,8 @@ class NetFetchKeyDirectory : public KeyDirectoryProvider {
   struct Options {
     std::set<GoogleString> host_allowlist;  // operator https origins
     std::map<GoogleString, GoogleString>
-        host_to_directory_url;               // host->JWKS url
-    size_t max_response_bytes = 256 * 1024;  // 256 KiB
+        host_to_directory_url;                       // host->JWKS url
+    size_t max_response_bytes = size_t{256} * 1024;  // 256 KiB
   };
 
   // Does NOT take ownership of fetcher or handler.

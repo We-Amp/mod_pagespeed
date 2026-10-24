@@ -108,8 +108,8 @@ class CycloneCache : public CacheInterface {
     int small_tier_percent;
 
     Config()
-        : cache_size_bytes(100 * 1024 * 1024),  // 100 MB default
-          ram_cache_size_bytes(0),              // No RAM cache by default
+        : cache_size_bytes(int64{100} * 1024 * 1024),  // 100 MB default
+          ram_cache_size_bytes(0),  // No RAM cache by default
           enable_checksum(true),
           num_segments(0),
           persist_directory(true),

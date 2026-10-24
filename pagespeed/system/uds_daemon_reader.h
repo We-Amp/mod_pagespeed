@@ -48,7 +48,7 @@ class UdsDaemonReader : public DaemonReader {
   // curl's largest write chunk (16 KiB) -- so an over-cap body always
   // delivers bytes past the cap to the reader's counter before the
   // transport stops it: "too large" is observed, not inferred.
-  static constexpr size_t kTransportCapSlackBytes = 64 * 1024;
+  static constexpr size_t kTransportCapSlackBytes = size_t{64} * 1024;
   // Fallback for a failed read that curl did not report as timed out: one
   // that ran this close to kUpstreamTimeoutMs is still reported as a timeout.
   static constexpr int64 kTimeoutClassificationSlackMs = 250;
