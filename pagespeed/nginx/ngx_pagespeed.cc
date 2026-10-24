@@ -1061,12 +1061,12 @@ ngx_int_t copy_response_headers_to_ngx(
 
 namespace {
 
-using ps_main_conf_t = struct {
+struct ps_main_conf_t {
   NgxRewriteDriverFactory* driver_factory;
   MessageHandler* handler;
 };
 
-using ps_srv_conf_t = struct {
+struct ps_srv_conf_t {
   // If pagespeed is configured in some server block but not this one our
   // per-request code will be invoked but server context will be null.  In those
   // cases we need to short circuit, not changing anything.  Currently our
@@ -1088,7 +1088,7 @@ using ps_srv_conf_t = struct {
   ConfiguredHostNames* host_names;
 };
 
-using ps_loc_conf_t = struct {
+struct ps_loc_conf_t {
   NgxRewriteOptions* options;
   MessageHandler* handler;
 };

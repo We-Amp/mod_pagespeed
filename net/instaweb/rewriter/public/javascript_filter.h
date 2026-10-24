@@ -84,7 +84,7 @@ class JavascriptFilter : public RewriteFilter {
  private:
   class Context;
 
-  using ScriptType = enum { kNoScript, kExternalScript, kInlineScript };
+  enum ScriptType { kNoScript, kExternalScript, kInlineScript };
 
   inline void RewriteInlineScript(HtmlCharactersNode* body_node);
   inline void RewriteExternalScript(HtmlElement* script_in_progress,
