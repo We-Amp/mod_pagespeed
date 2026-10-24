@@ -54,7 +54,7 @@ TEST_F(IisRecorderGateSeamTest, TheIisPortConstructsNoRecorderOutsideTheGate) {
   // port rather than the one file the seam happens to live in today -- a
   // construction site added next door is exactly the regression worth
   // catching, and a one-file check would have called that green.
-  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis");
+  const GoogleString dir = RunfilePath("pagespeed/iis");
 
   StringVector files;
   ASSERT_TRUE(file_system_.ListContents(dir, &files, &handler_)) << dir;
@@ -86,7 +86,7 @@ TEST_F(IisRecorderGateSeamTest, TheDispositionComesFromTheSitesDaemonHealth) {
   // literal: the startup check's verdict (not configured, unavailable, ready)
   // is what decides classic versus daemon substrate.  Read as text, like the
   // pin above -- the construction site sits behind the IIS runtime headers.
-  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis");
+  const GoogleString dir = RunfilePath("pagespeed/iis");
   const GoogleString source_path = dir + "/iis_module_base_fetch.cpp";
   GoogleString source;
   ASSERT_TRUE(file_system_.ReadFile(source_path.c_str(), &source, &handler_))
@@ -105,7 +105,7 @@ TEST_F(IisRecorderGateSeamTest, TheDaemonRecorderHasOneConstructionSite) {
   // construct it from, in ONE place in this port -- the counterpart of the
   // classic gate's single-construction-site rule.  A second site would be a
   // second disposition decision, and the two could disagree.
-  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis");
+  const GoogleString dir = RunfilePath("pagespeed/iis");
 
   StringVector files;
   ASSERT_TRUE(file_system_.ListContents(dir, &files, &handler_)) << dir;
@@ -136,7 +136,7 @@ TEST_F(IisRecorderGateSeamTest, TheAuthorizationFactIsRetakenAfterAuth) {
   // follow-up requests on one keep-alive connection, so the record decision
   // must re-take the authorization fact at the response site, where IIS
   // authentication has run.  Read as text, like the pins above.
-  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis");
+  const GoogleString dir = RunfilePath("pagespeed/iis");
   const GoogleString source_path = dir + "/iis_http_module.cpp";
   GoogleString source;
   ASSERT_TRUE(file_system_.ReadFile(source_path.c_str(), &source, &handler_))
@@ -173,8 +173,7 @@ TEST_F(IisRecorderGateSeamTest, TheServeHitIsRecordedWithoutAHost) {
   // host-less call (pinned behaviourally in daemon_serve_arm_test.cc, which
   // runs on every platform).  Read as text, like the pins above: the call
   // site sits behind the IIS runtime headers.
-  const GoogleString path =
-      StrCat(GTestSrcDir(), "/pagespeed/iis/iis_http_module.cpp");
+  const GoogleString path = RunfilePath("pagespeed/iis/iis_http_module.cpp");
   GoogleString source;
   ASSERT_TRUE(file_system_.ReadFile(path.c_str(), &source, &handler_))
       << path;
@@ -212,9 +211,9 @@ TEST_F(IisRecorderGateSeamTest, TheIisPortDoesNotAskForLostCopies) {
   // and an opt-in without the ask would pay for the look and drop the
   // answer.  On IIS a lost copy is healed when the stored original expires.
   // Both files of the port that touch the serve path.
-  for (const char* file : {"/pagespeed/iis/iis_http_module.cpp",
-                           "/pagespeed/iis/iis_daemon_serve.cc"}) {
-    const GoogleString path = StrCat(GTestSrcDir(), file);
+  for (const char* file : {"pagespeed/iis/iis_http_module.cpp",
+                           "pagespeed/iis/iis_daemon_serve.cc"}) {
+    const GoogleString path = RunfilePath(file);
     GoogleString source;
     ASSERT_TRUE(file_system_.ReadFile(path.c_str(), &source, &handler_))
         << path;
@@ -232,7 +231,7 @@ TEST_F(IisRecorderGateSeamTest, TheIisPortDoesNotAskForLostCopies) {
 // pinned as text: dropping any one link makes the Vary list name a header the
 // selection no longer reads.
 TEST_F(IisRecorderGateSeamTest, TheDensityHintReachesBothArms) {
-  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis");
+  const GoogleString dir = RunfilePath("pagespeed/iis");
   GoogleString record, serve;
   const GoogleString record_path = dir + "/iis_daemon_record.cc";
   const GoogleString serve_path = dir + "/iis_daemon_serve.cc";

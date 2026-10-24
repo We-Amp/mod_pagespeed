@@ -30,6 +30,8 @@ pagespeed_cc_test_library(
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:reflection",
         "@googletest//:gtest",
+        # RunfilePath in gtest.cc resolves data dependencies through Rlocation.
+        "@rules_cc//cc/runfiles",
     ],
 )
 
