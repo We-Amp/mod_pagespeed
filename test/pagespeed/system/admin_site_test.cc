@@ -71,7 +71,7 @@ class SystemServerContextNoProxyHtml : public SystemServerContext {
   explicit SystemServerContextNoProxyHtml(RewriteDriverFactory* factory)
       : SystemServerContext(factory, "fake_hostname", 80 /* fake port */) {}
 
-  virtual bool ProxiesHtml() const { return false; }
+  bool ProxiesHtml() const override { return false; }
 
  private:
   SystemServerContextNoProxyHtml(const SystemServerContextNoProxyHtml&) =
@@ -155,14 +155,14 @@ class AdminSiteTest : public CustomRewriteTestBase<SystemRewriteOptions> {
       : thread_system_(Platform::CreateThreadSystem()),
         options_(new SystemRewriteOptions(thread_system_.get())) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     CustomRewriteTestBase<SystemRewriteOptions>::SetUp();
     server_context_.reset(SetupServerContext(options_.release()));
     admin_site_ = std::make_unique<AdminSite>(timer(), message_handler(),
                                               nullptr /* daemon_reader */);
   }
 
-  virtual void TearDown() { RewriteTestBase::TearDown(); }
+  void TearDown() override { RewriteTestBase::TearDown(); }
 
   ServerContext* SetupServerContext(SystemRewriteOptions* config) {
     std::unique_ptr<SystemServerContext> server_context(
@@ -488,8 +488,9 @@ namespace {
 std::string TestPackJson(const std::string& id, const std::string& site_mode,
                          const std::string& extra_info) {
   return absl::StrCat(R"({"pack":{"id":")", id, R"(","version":"0.1.0")",
-                      extra_info, R"(},"sites":[{"host":"example.com","mode":")",
-                      site_mode, R"("}],"rules":[{"id":"t","kind":"title",)",
+                      extra_info,
+                      R"(},"sites":[{"host":"example.com","mode":")", site_mode,
+                      R"("}],"rules":[{"id":"t","kind":"title",)",
                       R"("enforce":true,"value":{"template":"T"}}]})");
 }
 
@@ -532,10 +533,10 @@ class RulePacksSeveralTest : public AdminSiteTest {
   void WriteLog(const std::string& id, const std::string& path) {
     const std::filesystem::path day_dir = log_dir_ / "packs" / id;
     std::filesystem::create_directories(day_dir);
-    std::ofstream out(day_dir / RulePackDecisionLog::FileName(
-                                    RulePackDecisionLog::UtcDate(
-                                        timer()->NowMs())),
-                      std::ios::app);
+    std::ofstream out(
+        day_dir / RulePackDecisionLog::FileName(
+                      RulePackDecisionLog::UtcDate(timer()->NowMs())),
+        std::ios::app);
     out << "{\"ts\":" << timer()->NowMs() << ",\"pack\":\"" << id
         << "@0.1.0\",\"host\":\"example.com\",\"path\":\"" << path
         << "\",\"rule\":\"t\",\"action\":\"insert\"}\n";
@@ -561,9 +562,8 @@ class RulePacksSeveralTest : public AdminSiteTest {
                     "");
     EXPECT_EQ(200, fetch.response_headers()->status_code());
     if (content_type != nullptr) {
-      *content_type =
-          std::string(fetch.response_headers()->Lookup1(
-              HttpAttributes::kContentType));
+      *content_type = std::string(
+          fetch.response_headers()->Lookup1(HttpAttributes::kContentType));
     }
     return body;
   }
@@ -758,12 +758,17 @@ TEST(MessageTemplateTest, WhitespaceAndNonAsciiBytes) {
   EXPECT_EQ("", MessageTemplate(""));
   EXPECT_EQ("  lead", MessageTemplate("  lead"));
   // Non-ASCII bytes are copied; only ASCII digits count as digits.
-  EXPECT_EQ("Gr\xC3\xB6\xC3\x9F" "e N", MessageTemplate("Gr\xC3\xB6\xC3\x9F" "e 42"));
+  EXPECT_EQ(
+      "Gr\xC3\xB6\xC3\x9F"
+      "e N",
+      MessageTemplate("Gr\xC3\xB6\xC3\x9F"
+                      "e 42"));
 }
 
 TEST(MessageTemplateTest, MessageLineBodyStripsTheHeader) {
-  EXPECT_EQ("hello",
-            MessageLineBody("[Fri, 02 Oct 2026 10:25:51 GMT] [Warning] [531] hello"));
+  EXPECT_EQ(
+      "hello",
+      MessageLineBody("[Fri, 02 Oct 2026 10:25:51 GMT] [Warning] [531] hello"));
   EXPECT_EQ("hello",
             MessageLineBody("[Wed Jan 01 00:00:00 2014] [Info] [00000] hello"));
   EXPECT_EQ("parse", MessageLineBody("[Fri, 02 Oct 2026 10:25:51 GMT] [Error] "
@@ -846,8 +851,8 @@ class AdminSiteGroupedMessagesTest : public AdminSiteTest {
 TEST_F(AdminSiteGroupedMessagesTest, GroupsByLevelAndTemplate) {
   SetTimeMs(kMockMessageTimeMs + 60 * 1000);
   message_handler()->Message(kInfo, "Ignore the first line.");
-  message_handler()->Message(kWarning,
-                             "Fetch of https://a.test/x.css failed after 12 ms");
+  message_handler()->Message(
+      kWarning, "Fetch of https://a.test/x.css failed after 12 ms");
   message_handler()->Message(
       kWarning, "Fetch of https://b.test/y.css failed after 900 ms");
   message_handler()->Message(kError, "boom 1");
@@ -909,7 +914,8 @@ TEST_F(AdminSiteGroupedMessagesTest, GroupedHonorsTheSinceCursor) {
   message_handler()->Message(kWarning, "new 1");
   message_handler()->Message(kWarning, "new 2");
   const Answer a = Ask(StrCat("grouped=1&since=", Integer64ToString(next)));
-  EXPECT_THAT(a.body, ::testing::HasSubstr("\"template\":\"new N\",\"count\":2"));
+  EXPECT_THAT(a.body,
+              ::testing::HasSubstr("\"template\":\"new N\",\"count\":2"));
   EXPECT_THAT(a.body, ::testing::Not(::testing::HasSubstr("old N")));
   EXPECT_THAT(a.body, ::testing::HasSubstr("\"next\":4,"));
 }
@@ -1285,7 +1291,7 @@ class FakeDaemonReader : public DaemonReader {
   explicit FakeDaemonReader(MessageHandler* handler) : handler_(handler) {}
 
   void Get(StringPiece daemon_path, size_t max_response_bytes,
-          AsyncFetch* fetch, DaemonReadFailure* failure) override {
+           AsyncFetch* fetch, DaemonReadFailure* failure) override {
     ++call_count_;
     daemon_path.CopyToString(&last_daemon_path_);
     last_max_bytes_ = max_response_bytes;
@@ -1611,16 +1617,16 @@ TEST_F(AdminSiteDaemonTest, QueryParamOnLeafWithoutAllowListIsRejected) {
   };
   for (const auto& c : cases) {
     GoogleString buffer;
-    auto fetch =
-        FetchAdminPage(daemon_site_.get(), c.url, RequestHeaders::kGet, &buffer);
+    auto fetch = FetchAdminPage(daemon_site_.get(), c.url, RequestHeaders::kGet,
+                                &buffer);
     ASSERT_TRUE(fetch->done()) << c.url;
     EXPECT_EQ(HttpStatus::kBadRequest, fetch->response_headers()->status_code())
         << c.url;
     EXPECT_THAT(buffer,
                 ::testing::HasSubstr(StrCat("\"error\":\"", c.code, "\"")))
         << c.url;
-    EXPECT_THAT(buffer, ::testing::HasSubstr(
-                            StrCat("\"parameter\":\"", c.param, "\"")))
+    EXPECT_THAT(buffer,
+                ::testing::HasSubstr(StrCat("\"parameter\":\"", c.param, "\"")))
         << c.url;
     EXPECT_EQ("no-store, private", fetch->response_headers()->LookupJoined(
                                        HttpAttributes::kCacheControl));
@@ -1630,14 +1636,13 @@ TEST_F(AdminSiteDaemonTest, QueryParamOnLeafWithoutAllowListIsRejected) {
 
 TEST_F(AdminSiteDaemonTest, UnknownQueryParamIsRejected) {
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_admin/v1/daemon/health?evil=1",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/health?evil=1",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kBadRequest, fetch->response_headers()->status_code());
-  EXPECT_THAT(buffer,
-              ::testing::HasSubstr("\"error\":\"unknown_parameter\""));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("\"error\":\"unknown_parameter\""));
   EXPECT_THAT(buffer, ::testing::HasSubstr("\"parameter\":\"evil\""));
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
@@ -1706,10 +1711,10 @@ TEST_F(AdminSiteDaemonTest, MultiSegmentDaemonLeafReachesTheTable) {
   // must 404 as an unknown DAEMON endpoint and never fall through to the
   // module's leaf dispatch.
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_admin/v1/daemon/cache/select",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_admin/v1/daemon/cache/select",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code());
   EXPECT_THAT(buffer,
@@ -1719,10 +1724,10 @@ TEST_F(AdminSiteDaemonTest, MultiSegmentDaemonLeafReachesTheTable) {
 
 TEST_F(AdminSiteDaemonTest, NestedMountReachesMultiSegmentDaemonLeaf) {
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://example.com/alt/admin/path/v1/daemon/cache/select",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://example.com/alt/admin/path/v1/daemon/cache/select",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code());
   EXPECT_THAT(buffer,
@@ -1770,7 +1775,8 @@ TEST_F(AdminSiteDaemonTest, DaemonMultiSegmentLeafConfusionIs404NeverProxied) {
         EXPECT_TRUE(buffer.empty()) << c.suffix;
       } else {
         EXPECT_THAT(buffer, ::testing::HasSubstr(c.body)) << c.suffix;
-        EXPECT_THAT(buffer, ::testing::Not(::testing::HasSubstr("\"config\":\"")))
+        EXPECT_THAT(buffer,
+                    ::testing::Not(::testing::HasSubstr("\"config\":\"")))
             << c.suffix;
       }
     }
@@ -1780,10 +1786,10 @@ TEST_F(AdminSiteDaemonTest, DaemonMultiSegmentLeafConfusionIs404NeverProxied) {
 
 TEST_F(AdminSiteDaemonTest, DaemonTrailingSlashServesTheShellNotTheProxy) {
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/cache/",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/cache/",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   EXPECT_STREQ("text/html; charset=utf-8", fetch->response_headers()->Lookup1(
@@ -1930,8 +1936,8 @@ TEST_F(AdminSiteDaemonTest, UrlsRejectsBadHostname) {
            "hostname=ex%20ample", "hostname=ex+ample", "hostname=ex%0aample",
            "hostname=ex%00ample", "hostname=ex%7Fample",
            "hostname=ex%C0%AEample", "hostname=ex%26a%3Db",
-           "hostname=example.com*", "hostname=",
-           StrCat("hostname=", GoogleString(254, 'a'))}) {
+           "hostname=example.com*",
+           "hostname=", StrCat("hostname=", GoogleString(254, 'a'))}) {
     GoogleString buffer;
     auto fetch = FetchAdminPage(
         daemon_site_.get(),
@@ -2090,10 +2096,10 @@ constexpr char kLogsGoldenPage[] =
 TEST_F(AdminSiteDaemonTest, LogsHappyPathPassthrough) {
   fake_reader_->body_ = kLogsGoldenPage;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   // The body passes through byte-for-byte: log lines are data for the
@@ -2110,10 +2116,10 @@ TEST_F(AdminSiteDaemonTest, LogsHappyPathPassthrough) {
 
 TEST_F(AdminSiteDaemonTest, LogsWithoutParamsForwardsNoQuery) {
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   EXPECT_EQ("/v1/logs", fake_reader_->last_daemon_path_);
@@ -2124,11 +2130,11 @@ TEST_F(AdminSiteDaemonTest, LogsRebuildsTheQueryInCanonicalOrder) {
   // fixed order from the validated values.  The exact upstream path string
   // is the proof that no raw client bytes pass through.
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs"
-      "?limit=50&since=123",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs"
+                     "?limit=50&since=123",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   EXPECT_EQ("/v1/logs?since=123&limit=50", fake_reader_->last_daemon_path_);
@@ -2141,7 +2147,7 @@ TEST_F(AdminSiteDaemonTest, LogsSinceAndLimitBounds) {
   } cases[] = {
       {"since=0", 200},
       {"since=9223372036854775807", 200},   // INT64_MAX
-      {"since=%31", 200},                    // decoded once: "1"
+      {"since=%31", 200},                   // decoded once: "1"
       {"since=9223372036854775808", 400},   // INT64_MAX + 1
       {"since=9999999999999999999", 400},   // 19 digits, above int64
       {"since=12345678901234567890", 400},  // 20 digits
@@ -2205,10 +2211,10 @@ TEST_F(AdminSiteDaemonTest, LogsRejectsUnknownDuplicateAndUnlistedParams) {
 
 TEST_F(AdminSiteDaemonTest, LogsPostIs405) {
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kPost, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kPost, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kMethodNotAllowed,
             fetch->response_headers()->status_code());
@@ -2220,9 +2226,8 @@ TEST_F(AdminSiteDaemonTest, LogsIsWholeServerConsoleOnly) {
        {RequestHeaders::kGet, RequestHeaders::kHead}) {
     GoogleString buffer;
     auto fetch = FetchAdminPage(
-        daemon_site_.get(),
-        "http://example.com/pagespeed_admin/v1/daemon/logs", method, &buffer,
-        false /* vhost */);
+        daemon_site_.get(), "http://example.com/pagespeed_admin/v1/daemon/logs",
+        method, &buffer, false /* vhost */);
     ASSERT_TRUE(fetch->done());
     EXPECT_EQ(HttpStatus::kForbidden, fetch->response_headers()->status_code())
         << static_cast<int>(method);
@@ -2260,23 +2265,22 @@ TEST_F(AdminSiteDaemonTest, LogsCrossSiteRequestIsRefused) {
   // Whole-server leaves refuse a cross-site browser request outright; a
   // request without the header (monitoring) or a same-origin one is fine.
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &buffer, true /* global */,
-      nullptr /* x_requested_with */, "cross-site");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &buffer, true /* global */,
+                     nullptr /* x_requested_with */, "cross-site");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kForbidden, fetch->response_headers()->status_code());
-  EXPECT_THAT(buffer,
-              ::testing::HasSubstr("\"error\":\"cross_site_request\""));
+  EXPECT_THAT(buffer, ::testing::HasSubstr("\"error\":\"cross_site_request\""));
   EXPECT_EQ(0, fake_reader_->call_count_);
 
   GoogleString ok_buffer;
-  auto ok = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &ok_buffer, true /* global */,
-      nullptr /* x_requested_with */, "same-origin");
+  auto ok =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &ok_buffer, true /* global */,
+                     nullptr /* x_requested_with */, "same-origin");
   ASSERT_TRUE(ok->done());
   EXPECT_EQ(HttpStatus::kOK, ok->response_headers()->status_code());
   EXPECT_EQ(1, fake_reader_->call_count_);
@@ -2287,10 +2291,10 @@ TEST_F(AdminSiteDaemonTest, LogsUpstream404BecomesEndpointUnsupported) {
   // upstream means the running optimizer predates the route.
   fake_reader_->hold_path_ = "/v1/logs";
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_FALSE(fetch->done());  // held upstream
   ASSERT_TRUE(fake_reader_->held_fetch_ != nullptr);
   fake_reader_->CompleteWithStatus(404, "{\"error\":\"not found\"}");
@@ -2306,10 +2310,10 @@ TEST_F(AdminSiteDaemonTest, LogsOverCapReadIsResponseTooLarge) {
   fake_reader_->fail_ = true;
   fake_reader_->fail_reason_ = DaemonReadFailure::kTooLarge;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &buffer);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kBadGateway, fetch->response_headers()->status_code());
   EXPECT_EQ("{\"error\":\"response_too_large\"}", buffer);
@@ -2322,10 +2326,10 @@ TEST_F(AdminSiteDaemonTest, LogsOverCapReadIsResponseTooLarge) {
         DaemonReadFailure::kDisconnected}) {
     fake_reader_->fail_reason_ = reason;
     GoogleString other;
-    auto f = FetchAdminPage(
-        daemon_site_.get(),
-        "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-        RequestHeaders::kGet, &other);
+    auto f =
+        FetchAdminPage(daemon_site_.get(),
+                       "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                       RequestHeaders::kGet, &other);
     ASSERT_TRUE(f->done());
     EXPECT_EQ(HttpStatus::kBadGateway, f->response_headers()->status_code())
         << static_cast<int>(reason);
@@ -2349,15 +2353,15 @@ TEST_F(AdminSiteDaemonTest, LogsHeadRequestSendsNoBody) {
 TEST_F(AdminSiteDaemonTest, LogsAdmitsOneConcurrentReadSecondIs429) {
   fake_reader_->hold_path_ = "/v1/logs";
   GoogleString b1, b2;
-  auto first = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &b1);
+  auto first =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &b1);
   ASSERT_FALSE(first->done());  // held upstream
-  auto second = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &b2);
+  auto second =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &b2);
   ASSERT_TRUE(second->done());
   EXPECT_EQ(429, second->response_headers()->status_code());
   EXPECT_EQ(1, fake_reader_->call_count_);
@@ -2368,10 +2372,10 @@ TEST_F(AdminSiteDaemonTest, LogsAdmitsOneConcurrentReadSecondIs429) {
   EXPECT_EQ(HttpStatus::kOK, first->response_headers()->status_code());
   fake_reader_->hold_path_.clear();
   GoogleString b3;
-  auto third = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &b3);
+  auto third =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &b3);
   ASSERT_TRUE(third->done());
   EXPECT_EQ(HttpStatus::kOK, third->response_headers()->status_code());
 }
@@ -2381,10 +2385,10 @@ TEST_F(AdminSiteDaemonTest, LogsTransportFailureReleasesTheSlot) {
   // every later poll would be a 429.
   fake_reader_->hold_path_ = "/v1/logs";
   GoogleString b1;
-  auto first = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &b1);
+  auto first =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &b1);
   ASSERT_FALSE(first->done());  // held upstream
   fake_reader_->Fail(DaemonReadFailure::kDisconnected);
   ASSERT_TRUE(first->done());
@@ -2393,10 +2397,10 @@ TEST_F(AdminSiteDaemonTest, LogsTransportFailureReleasesTheSlot) {
 
   fake_reader_->hold_path_.clear();
   GoogleString b2;
-  auto second = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/logs",
-      RequestHeaders::kGet, &b2);
+  auto second =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/logs",
+                     RequestHeaders::kGet, &b2);
   ASSERT_TRUE(second->done());
   EXPECT_EQ(HttpStatus::kOK, second->response_headers()->status_code());
   EXPECT_EQ(2, fake_reader_->call_count_);
@@ -2404,8 +2408,7 @@ TEST_F(AdminSiteDaemonTest, LogsTransportFailureReleasesTheSlot) {
 
 // The query suffix naming the realistic entry every test below uses:
 // https://www.example.test/hero.png, as the module records it.
-constexpr char kHeroEntry[] =
-    "&hostname=www.example.test&scheme=https";
+constexpr char kHeroEntry[] = "&hostname=www.example.test&scheme=https";
 
 TEST_F(AdminSiteDaemonTest, AlternatesUrlIsOriginFormPathReEncoded) {
   // The url is the recorded path + query.  Characters that are structure
@@ -2455,9 +2458,10 @@ TEST_F(AdminSiteDaemonTest, AlternatesCanonicalOrderWithAllParams) {
       RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
-  EXPECT_EQ("/v1/cache/alternates?url=%2fapp.js%3fv%3d2"
-            "&hostname=cdn.example.test&scheme=http",
-            fake_reader_->last_daemon_path_);
+  EXPECT_EQ(
+      "/v1/cache/alternates?url=%2fapp.js%3fv%3d2"
+      "&hostname=cdn.example.test&scheme=http",
+      fake_reader_->last_daemon_path_);
 }
 
 TEST_F(AdminSiteDaemonTest, AlternatesRequiresUrlHostnameAndScheme) {
@@ -2496,17 +2500,17 @@ TEST_F(AdminSiteDaemonTest, AlternatesRequiresUrlHostnameAndScheme) {
 TEST_F(AdminSiteDaemonTest, AlternatesRejectsSmuggledUrlValues) {
   const GoogleString cases[] = {
       "https%3A%2F%2Fwww.example.test%2Fhero.png",  // absolute, not a path
-      "hero.png",                                    // no leading '/'
-      "%2Fa%20b",                                     // space
-      "%2Fa+b",                                       // '+' decodes to space
-      "%2Fa%00",                                       // NUL
-      "%2Fa%0Ab",                                      // control byte
-      "%2Fa%7F",                                       // DEL
-      "%2Fa%C0%AE",                                    // overlong UTF-8
-      "%2Fa%E2%80%8B",                                 // non-ASCII
-      "%2Fa%23f",                                      // '#'
-      "",                                              // empty
-      StrCat("%2F", GoogleString(2048, 'a')),          // 2049 bytes decoded
+      "hero.png",                                   // no leading '/'
+      "%2Fa%20b",                                   // space
+      "%2Fa+b",                                     // '+' decodes to space
+      "%2Fa%00",                                    // NUL
+      "%2Fa%0Ab",                                   // control byte
+      "%2Fa%7F",                                    // DEL
+      "%2Fa%C0%AE",                                 // overlong UTF-8
+      "%2Fa%E2%80%8B",                              // non-ASCII
+      "%2Fa%23f",                                   // '#'
+      "",                                           // empty
+      StrCat("%2F", GoogleString(2048, 'a')),       // 2049 bytes decoded
   };
   for (const GoogleString& url_param : cases) {
     GoogleString buffer;
@@ -2517,8 +2521,7 @@ TEST_F(AdminSiteDaemonTest, AlternatesRejectsSmuggledUrlValues) {
                url_param, kHeroEntry),
         RequestHeaders::kGet, &buffer);
     ASSERT_TRUE(fetch->done()) << url_param;
-    EXPECT_EQ(HttpStatus::kBadRequest,
-              fetch->response_headers()->status_code())
+    EXPECT_EQ(HttpStatus::kBadRequest, fetch->response_headers()->status_code())
         << url_param;
     EXPECT_THAT(buffer, ::testing::HasSubstr("\"error\":\"invalid_parameter\""))
         << url_param;
@@ -2572,18 +2575,17 @@ TEST_F(AdminSiteDaemonTest, AlternatesSchemeMustBeHttpOrHttps) {
                scheme),
         RequestHeaders::kGet, &buffer);
     ASSERT_TRUE(fetch->done()) << scheme;
-    EXPECT_EQ(HttpStatus::kBadRequest,
-              fetch->response_headers()->status_code())
+    EXPECT_EQ(HttpStatus::kBadRequest, fetch->response_headers()->status_code())
         << scheme;
   }
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
 
 TEST_F(AdminSiteDaemonTest, AlternatesIsWholeServerConsoleOnly) {
-  const GoogleString url =
-      StrCat("http://example.com/pagespeed_admin/v1/daemon/cache/"
-             "alternates?url=%2Fhero.png",
-             kHeroEntry);
+  const GoogleString url = StrCat(
+      "http://example.com/pagespeed_admin/v1/daemon/cache/"
+      "alternates?url=%2Fhero.png",
+      kHeroEntry);
   for (RequestHeaders::Method method :
        {RequestHeaders::kGet, RequestHeaders::kHead}) {
     GoogleString buffer;
@@ -2648,12 +2650,10 @@ TEST_F(AdminSiteDaemonTest, EveryReadFailureIsDaemonUnreachableOnJsonLeaves) {
     fake_reader_->fail_reason_ = reason;
     GoogleString buffer;
     auto fetch = FetchAdminPage(
-        daemon_site_.get(),
-        "http://localhost/pagespeed_admin/v1/daemon/stats",
+        daemon_site_.get(), "http://localhost/pagespeed_admin/v1/daemon/stats",
         RequestHeaders::kGet, &buffer);
     ASSERT_TRUE(fetch->done());
-    EXPECT_EQ(HttpStatus::kBadGateway,
-              fetch->response_headers()->status_code())
+    EXPECT_EQ(HttpStatus::kBadGateway, fetch->response_headers()->status_code())
         << static_cast<int>(reason);
     EXPECT_EQ("{\"error\":\"daemon_unreachable\"}", buffer)
         << static_cast<int>(reason);
@@ -2679,8 +2679,7 @@ void ExpectContentHardening(StringAsyncFetch& fetch,
   EXPECT_STREQ("nosniff", h->Lookup1("X-Content-Type-Options")) << label;
   EXPECT_STREQ("same-origin", h->Lookup1("Cross-Origin-Resource-Policy"))
       << label;
-  EXPECT_EQ("no-store, private",
-            h->LookupJoined(HttpAttributes::kCacheControl))
+  EXPECT_EQ("no-store, private", h->LookupJoined(HttpAttributes::kCacheControl))
       << label;
 }
 
@@ -2695,9 +2694,10 @@ TEST_F(AdminSiteDaemonTest, ContentRebuildsTheQuery) {
       RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
-  EXPECT_EQ("/v1/cache/content?url=%2fhero.png%3fv%3d2"
-            "&hostname=www.example.test&scheme=https&alternate_id=3",
-            fake_reader_->last_daemon_path_);
+  EXPECT_EQ(
+      "/v1/cache/content?url=%2fhero.png%3fv%3d2"
+      "&hostname=www.example.test&scheme=https&alternate_id=3",
+      fake_reader_->last_daemon_path_);
 }
 
 TEST_F(AdminSiteDaemonTest, ContentRequiresUrlHostnameSchemeAndAlternateId) {
@@ -2708,8 +2708,7 @@ TEST_F(AdminSiteDaemonTest, ContentRequiresUrlHostnameSchemeAndAlternateId) {
       {"", "url"},
       {"?url=%2Fhero.png&hostname=www.example.test&scheme=https",
        "alternate_id"},
-      {"?alternate_id=3&url=%2Fhero.png&hostname=www.example.test",
-       "scheme"},
+      {"?alternate_id=3&url=%2Fhero.png&hostname=www.example.test", "scheme"},
   };
   for (const auto& c : cases) {
     GoogleString buffer;
@@ -2720,8 +2719,7 @@ TEST_F(AdminSiteDaemonTest, ContentRequiresUrlHostnameSchemeAndAlternateId) {
                c.query),
         RequestHeaders::kGet, &buffer);
     ASSERT_TRUE(fetch->done()) << c.query;
-    EXPECT_EQ(HttpStatus::kBadRequest,
-              fetch->response_headers()->status_code())
+    EXPECT_EQ(HttpStatus::kBadRequest, fetch->response_headers()->status_code())
         << c.query;
     EXPECT_THAT(buffer, ::testing::HasSubstr(
                             StrCat("\"parameter\":\"", c.missing, "\"")))
@@ -2777,7 +2775,7 @@ TEST_F(AdminSiteDaemonTest, ContentServesAllowedImageTypes) {
     const char* media_type;
     const char* ext;
   } cases[] = {
-      {"image/png", "png"},   {"image/jpeg", "jpg"}, {"image/gif", "gif"},
+      {"image/png", "png"},   {"image/jpeg", "jpg"},  {"image/gif", "gif"},
       {"image/webp", "webp"}, {"image/avif", "avif"},
   };
   for (const auto& c : cases) {
@@ -2928,7 +2926,8 @@ TEST_F(AdminSiteDaemonTest, ContentErrorResponsesCarryHardeningHeaders) {
   GoogleString buffer404;
   auto not_found = FetchAdminPage(daemon_site_.get(), kHeroContent,
                                   RequestHeaders::kGet, &buffer404);
-  EXPECT_EQ(HttpStatus::kNotFound, not_found->response_headers()->status_code());
+  EXPECT_EQ(HttpStatus::kNotFound,
+            not_found->response_headers()->status_code());
   EXPECT_EQ("{\"error\":\"not_in_index\"}", buffer404);
   ExpectContentHardening(*not_found, "404");
 
@@ -2975,8 +2974,8 @@ TEST_F(AdminSiteDaemonTest, ContentOrdinaryFailuresStayDaemonUnreachable) {
   // the reader's observed kTooLarge means "too large".
   struct {
     DaemonReadFailure reason;
-    int status;          // set before the failure (0: none)
-    const char* bytes;   // written before the failure
+    int status;         // set before the failure (0: none)
+    const char* bytes;  // written before the failure
   } cases[] = {
       {DaemonReadFailure::kTimeout, HttpStatus::kOK, "partial-bytes"},
       {DaemonReadFailure::kDisconnected, HttpStatus::kOK, "partial-bytes"},
@@ -3112,8 +3111,8 @@ TEST_F(AdminSiteDaemonTest, ContentSlotsAreSharedAcrossAdminSites) {
   // The other site's own handler has no read in flight, yet the process
   // has no content slot left.
   GoogleString b3;
-  auto other = FetchAdminPage(&other_site, kHeroContent,
-                              RequestHeaders::kGet, &b3);
+  auto other =
+      FetchAdminPage(&other_site, kHeroContent, RequestHeaders::kGet, &b3);
   ASSERT_TRUE(other->done());
   EXPECT_EQ(429, other->response_headers()->status_code());
   ExpectContentHardening(*other, "429 other site");
@@ -3144,10 +3143,10 @@ TEST_F(AdminSiteDaemonTest, ContentSlotsAreSharedAcrossAdminSites) {
   // one of these two reads would be admitted.
   other_reader->hold_path_ = kHeroContentUpstream;
   GoogleString b4, b5;
-  auto again = FetchAdminPage(&other_site, kHeroContent,
-                              RequestHeaders::kGet, &b4);
-  auto again2 = FetchAdminPage(&other_site, kHeroContent,
-                               RequestHeaders::kGet, &b5);
+  auto again =
+      FetchAdminPage(&other_site, kHeroContent, RequestHeaders::kGet, &b4);
+  auto again2 =
+      FetchAdminPage(&other_site, kHeroContent, RequestHeaders::kGet, &b5);
   // EXPECT, not ASSERT: even if a slot leaked and one of these came back
   // 429 immediately, CompleteAllHeld() below must still run so the held
   // one (if any) does not linger into later tests' leak checks.
@@ -3206,8 +3205,9 @@ TEST_F(AdminSiteDaemonTest, CrossSiteSecFetchSiteIsRefusedOnWholeServerLeaves) {
         if (leaf.content_leaf) {
           ExpectContentHardening(*fetch, label);
         } else {
-          EXPECT_EQ("no-store, private", fetch->response_headers()->LookupJoined(
-                                             HttpAttributes::kCacheControl))
+          EXPECT_EQ("no-store, private",
+                    fetch->response_headers()->LookupJoined(
+                        HttpAttributes::kCacheControl))
               << label;
           EXPECT_STREQ("nosniff", fetch->response_headers()->Lookup1(
                                       "X-Content-Type-Options"))
@@ -3621,10 +3621,10 @@ TEST_F(AdminSiteDaemonTest, StatsJsonCarriesScopeHostTimestampAndGauges) {
   EXPECT_THAT(body, ::testing::HasSubstr("\"gauges\": ["));
 
   body.clear();
-  auto global = FetchAdminPage(
-      daemon_site_.get(),
-      "http://example.com/pagespeed_global_admin/stats_json",
-      RequestHeaders::kGet, &body, true /* global */);
+  auto global =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://example.com/pagespeed_global_admin/stats_json",
+                     RequestHeaders::kGet, &body, true /* global */);
   EXPECT_THAT(body, ::testing::HasSubstr("\"scope\": \"global\""));
 }
 
@@ -3892,11 +3892,11 @@ constexpr char kOwnRowOnly[] =
 TEST_F(AdminSiteDaemonTest, PerSiteStatsCarriesOnlyItsOwnHostRow) {
   fake_reader_->body_ = kTwoSiteStats;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://www.example.test/pagespeed_admin/v1/daemon/stats",
-      RequestHeaders::kGet, &buffer, false /* is_global */, nullptr, nullptr,
-      "www.example.test");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://www.example.test/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer, false /* is_global */,
+                     nullptr, nullptr, "www.example.test");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ("/v1/stats", fake_reader_->last_daemon_path_);
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
@@ -3912,10 +3912,10 @@ TEST_F(AdminSiteDaemonTest, PerSiteStatsWithoutAnOwnHostCarriesNoRow) {
   // usable name): every row is folded, none is shown.
   fake_reader_->body_ = kTwoSiteStats;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://www.example.test/pagespeed_admin/v1/daemon/stats",
-      RequestHeaders::kGet, &buffer, false /* is_global */);
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://www.example.test/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer, false /* is_global */);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   EXPECT_THAT(buffer, ::testing::HasSubstr("\"hosts\":[]"));
@@ -3933,11 +3933,11 @@ TEST_F(AdminSiteDaemonTest, WholeServerStatsAnswerIsTheUpstreamBytes) {
       "\"original_bytes\":0,\"optimized_bytes\":0}} , \"alpha\" :2 }";
   fake_reader_->body_ = kOddlySpaced;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://localhost/pagespeed_global_admin/v1/daemon/stats",
-      RequestHeaders::kGet, &buffer, true /* is_global */, nullptr, nullptr,
-      "www.example.test");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://localhost/pagespeed_global_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer, true /* is_global */,
+                     nullptr, nullptr, "www.example.test");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   EXPECT_EQ(kOddlySpaced, buffer);
@@ -3947,11 +3947,11 @@ TEST_F(AdminSiteDaemonTest, PerSiteHealthIsTheUpstreamBytes) {
   // Only the leaves that name other sites are narrowed.
   fake_reader_->body_ = "{ \"status\" : \"ok\" }";
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://www.example.test/pagespeed_admin/v1/daemon/health",
-      RequestHeaders::kGet, &buffer, false /* is_global */, nullptr, nullptr,
-      "www.example.test");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://www.example.test/pagespeed_admin/v1/daemon/health",
+                     RequestHeaders::kGet, &buffer, false /* is_global */,
+                     nullptr, nullptr, "www.example.test");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ("{ \"status\" : \"ok\" }", buffer);
 }
@@ -3968,11 +3968,10 @@ TEST_F(AdminSiteDaemonTest, PerSiteStatsAnswerThatIsNotAnObjectIsUnreachable) {
     auto fetch = FetchAdminPage(
         daemon_site_.get(),
         "http://www.example.test/pagespeed_admin/v1/daemon/stats",
-        RequestHeaders::kGet, &buffer, false /* is_global */, nullptr,
-        nullptr, "www.example.test");
+        RequestHeaders::kGet, &buffer, false /* is_global */, nullptr, nullptr,
+        "www.example.test");
     ASSERT_TRUE(fetch->done()) << body;
-    EXPECT_EQ(HttpStatus::kBadGateway,
-              fetch->response_headers()->status_code())
+    EXPECT_EQ(HttpStatus::kBadGateway, fetch->response_headers()->status_code())
         << body;
     EXPECT_EQ("{\"error\":\"daemon_unreachable\"}", buffer) << body;
   }
@@ -3982,11 +3981,11 @@ TEST_F(AdminSiteDaemonTest, PerSiteStatsErrorStatusCarriesNoUpstreamBody) {
   fake_reader_->status_ = 503;
   fake_reader_->body_ = "{\"error\":\"busy\",\"host\":\"static.example.test\"}";
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://www.example.test/pagespeed_admin/v1/daemon/stats",
-      RequestHeaders::kGet, &buffer, false /* is_global */, nullptr, nullptr,
-      "www.example.test");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://www.example.test/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer, false /* is_global */,
+                     nullptr, nullptr, "www.example.test");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(503, fetch->response_headers()->status_code());
   EXPECT_EQ("{\"error\":\"daemon_error\"}", buffer);
@@ -3995,11 +3994,11 @@ TEST_F(AdminSiteDaemonTest, PerSiteStatsErrorStatusCarriesNoUpstreamBody) {
 TEST_F(AdminSiteDaemonTest, PerSiteStatsHeadSendsNoBody) {
   fake_reader_->body_ = kTwoSiteStats;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://www.example.test/pagespeed_admin/v1/daemon/stats",
-      RequestHeaders::kHead, &buffer, false /* is_global */, nullptr, nullptr,
-      "www.example.test");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://www.example.test/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kHead, &buffer, false /* is_global */,
+                     nullptr, nullptr, "www.example.test");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
   EXPECT_EQ("", buffer);
@@ -4009,11 +4008,11 @@ TEST_F(AdminSiteDaemonTest, PerSiteStatsOverCapIsUnreachable) {
   fake_reader_->fail_ = true;
   fake_reader_->fail_reason_ = DaemonReadFailure::kTooLarge;
   GoogleString buffer;
-  auto fetch = FetchAdminPage(
-      daemon_site_.get(),
-      "http://www.example.test/pagespeed_admin/v1/daemon/stats",
-      RequestHeaders::kGet, &buffer, false /* is_global */, nullptr, nullptr,
-      "www.example.test");
+  auto fetch =
+      FetchAdminPage(daemon_site_.get(),
+                     "http://www.example.test/pagespeed_admin/v1/daemon/stats",
+                     RequestHeaders::kGet, &buffer, false /* is_global */,
+                     nullptr, nullptr, "www.example.test");
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kBadGateway, fetch->response_headers()->status_code());
   EXPECT_EQ("{\"error\":\"daemon_unreachable\"}", buffer);

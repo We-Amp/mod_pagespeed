@@ -71,7 +71,7 @@ class ConfigurationFile:public ReferenceCounter
 
 	string path;
 
-	virtual ~ConfigurationFile()
+	~ConfigurationFile() override
 	{
 		for(list<ConfigLine*>::iterator it=matchLines.begin();it!=matchLines.end();it++)
 		{

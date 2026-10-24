@@ -27,7 +27,7 @@ namespace net_instaweb
 						, IisProcessContext* process_context, IisServerContext* server_context, int local_port, GoogleString local_ip_address);
 		IisModuleRequestContext();
 		virtual ~IisModuleRequestContext();
-		virtual void CleanupStoredContext();
+		void CleanupStoredContext() override;
 
 		void set_base_fetch(IisModuleBaseFetch *base_fetcher);
 		IisModuleBaseFetch* base_fetch();

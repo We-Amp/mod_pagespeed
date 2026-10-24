@@ -27,7 +27,7 @@ namespace {
 
 class ShowAdsSnippetParserTest : public ::testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ::testing::Test::SetUp();
     parsed_attributes_.clear();
   }

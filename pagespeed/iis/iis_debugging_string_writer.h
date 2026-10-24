@@ -17,16 +17,16 @@ DebuggingStringWriter::DebuggingStringWriter(std::string* s) : Writer()
 	s_ = s;
 }
 
-DebuggingStringWriter::~DebuggingStringWriter() {}
+DebuggingStringWriter::~DebuggingStringWriter() override {}
 
-bool DebuggingStringWriter::Write(const StringPiece& str, MessageHandler* handler) {
+bool DebuggingStringWriter::Write(const StringPiece& str, MessageHandler* handler) override {
 	//handler->Message(MessageType::kInfo, "write [%ld] bytes: [%.*s]"
 	//	, str.size(), str.size(), str.data());
 	s_->append(str.data(), str.size());		
 	return true;
 }
 
-bool DebuggingStringWriter::Flush(MessageHandler* message_handler) {
+bool DebuggingStringWriter::Flush(MessageHandler* message_handler) override {
   return true;
 }
 

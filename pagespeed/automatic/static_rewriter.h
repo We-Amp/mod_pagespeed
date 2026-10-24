@@ -49,19 +49,19 @@ class FileRewriter : public RewriteDriverFactory {
  public:
   FileRewriter(const ProcessContext& process_context,
                const RewriteGflags* gflags, bool echo_errors_to_stdout);
-  virtual ~FileRewriter();
-  virtual NamedLockManager* DefaultLockManager();
-  virtual RewriteOptions* NewRewriteOptions();
-  virtual Hasher* NewHasher();
-  virtual UrlAsyncFetcher* DefaultAsyncUrlFetcher();
-  virtual MessageHandler* DefaultHtmlParseMessageHandler();
-  virtual MessageHandler* DefaultMessageHandler();
-  virtual FileSystem* DefaultFileSystem();
-  virtual void SetupCaches(ServerContext* server_context);
+  ~FileRewriter() override;
+  NamedLockManager* DefaultLockManager() override;
+  RewriteOptions* NewRewriteOptions() override;
+  Hasher* NewHasher() override;
+  UrlAsyncFetcher* DefaultAsyncUrlFetcher() override;
+  MessageHandler* DefaultHtmlParseMessageHandler() override;
+  MessageHandler* DefaultMessageHandler() override;
+  FileSystem* DefaultFileSystem() override;
+  void SetupCaches(ServerContext* server_context) override;
   virtual Statistics* statistics();
-  virtual ServerContext* NewServerContext();
-  virtual ServerContext* NewDecodingServerContext();
-  virtual bool UseBeaconResultsInFilters() const { return false; }
+  ServerContext* NewServerContext() override;
+  ServerContext* NewDecodingServerContext() override;
+  bool UseBeaconResultsInFilters() const override { return false; }
 
  private:
   const RewriteGflags* gflags_;

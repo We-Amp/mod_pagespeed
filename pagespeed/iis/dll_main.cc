@@ -95,7 +95,7 @@ class MyGlobalModule : public CGlobalModule {
   ~MyGlobalModule() {}
 
   GLOBAL_NOTIFICATION_STATUS
-  OnGlobalPreBeginRequest(IN IPreBeginRequestProvider* pProvider) {
+  OnGlobalPreBeginRequest(IN IPreBeginRequestProvider* pProvider) override {
     UNREFERENCED_PARAMETER(pProvider);
     auto rq = pProvider->GetHttpContext()->GetRequest();
 
@@ -112,7 +112,7 @@ class MyGlobalModule : public CGlobalModule {
     return GL_NOTIFICATION_CONTINUE;
   }
 
-  VOID Terminate() {
+  VOID Terminate() override {
     delete this;
   }
 };

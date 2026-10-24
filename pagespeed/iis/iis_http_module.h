@@ -33,143 +33,143 @@ public:
     OnCustomRequestNotification(
         IN IHttpContext * pHttpContext,
         IN ICustomNotificationProvider * pProvider
-    );
+    ) override;
 
 
-	REQUEST_NOTIFICATION_STATUS OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider);
+	REQUEST_NOTIFICATION_STATUS OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider) override;
 	REQUEST_NOTIFICATION_STATUS OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider);
-	REQUEST_NOTIFICATION_STATUS OnPostBeginRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider);
+	REQUEST_NOTIFICATION_STATUS OnPostBeginRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override;
 
 	
-	REQUEST_NOTIFICATION_STATUS OnSendResponse(IN IHttpContext * pHttpContext, IN ISendResponseProvider * pProvider);
+	REQUEST_NOTIFICATION_STATUS OnSendResponse(IN IHttpContext * pHttpContext, IN ISendResponseProvider * pProvider) override;
 	
 
-	REQUEST_NOTIFICATION_STATUS OnEndRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider  * pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnEndRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider  * pProvider) override {
 		log(pHttpContext,"OnEndRequest");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostEndRequest(IN IHttpContext* pHttpContext, IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostEndRequest(IN IHttpContext* pHttpContext, IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostEndRequest");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 
 	// RQ_AUTHENTICATE_REQUEST
-	REQUEST_NOTIFICATION_STATUS OnAuthenticateRequest(IN IHttpContext* pHttpContext,IN IAuthenticationProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnAuthenticateRequest(IN IHttpContext* pHttpContext,IN IAuthenticationProvider* pProvider) override {
 		log(pHttpContext,"OnAuthenticateRequest");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostAuthenticateRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostAuthenticateRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostAuthenticateRequest");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 	
 	//RQ_AUTHORIZE_REQUEST
-	REQUEST_NOTIFICATION_STATUS OnAuthorizeRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnAuthorizeRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnAuthorizeRequest");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostAuthorizeRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostAuthorizeRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostAuthorizeRequest");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_RESOLVE_REQUEST_CACHE
-	REQUEST_NOTIFICATION_STATUS OnResolveRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) 
+	REQUEST_NOTIFICATION_STATUS OnResolveRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override 
 	{
 		log(pHttpContext,"OnResolveRequestCache");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
-	REQUEST_NOTIFICATION_STATUS OnPostResolveRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostResolveRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostResolveRequestCache");
 		//RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 
 	//RQ_MAP_REQUEST_HANDLER
-	REQUEST_NOTIFICATION_STATUS OnMapRequestHandler(IN IHttpContext* pHttpContext,IN IMapHandlerProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnMapRequestHandler(IN IHttpContext* pHttpContext,IN IMapHandlerProvider* pProvider) override {
 		log(pHttpContext,"OnMapRequestHandler");
 		//HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostMapRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostMapRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostMapRequestHandler");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_ACQUIRE_REQUEST_STATE
-	REQUEST_NOTIFICATION_STATUS OnAcquireRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnAcquireRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnAcquireRequestState");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostAcquireRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostAcquireRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostAcquireRequestState");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_PRE_EXECUTE_REQUEST_HANDLER
-	REQUEST_NOTIFICATION_STATUS OnPreExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPreExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPreExecuteRequestHandler");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
-	REQUEST_NOTIFICATION_STATUS OnPostPreExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostPreExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostPreExecuteRequestHandler");
 		//RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_EXECUTE_REQUEST_HANDLER
-	REQUEST_NOTIFICATION_STATUS OnExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) 
+	REQUEST_NOTIFICATION_STATUS OnExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override 
 	{
 		log(pHttpContext,"OnExecuteRequestHandler");
 		//HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
-	REQUEST_NOTIFICATION_STATUS OnPostExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostExecuteRequestHandler(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostExecuteRequestHandler");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_RELEASE_REQUEST_STATE
-	REQUEST_NOTIFICATION_STATUS OnReleaseRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnReleaseRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnReleaseRequestState");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostReleaseRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostReleaseRequestState(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostReleaseRequestState");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_UPDATE_REQUEST_CACHE
-	REQUEST_NOTIFICATION_STATUS OnUpdateRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnUpdateRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnUpdateRequestCache");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
-	REQUEST_NOTIFICATION_STATUS OnPostUpdateRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostUpdateRequestCache(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostUpdateRequestCache");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 
 	//RQ_LOG_REQUEST
-	REQUEST_NOTIFICATION_STATUS OnLogRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnLogRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnLogRequest");
 		HideAcceptEncodingIfNeeded(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
-	REQUEST_NOTIFICATION_STATUS OnPostLogRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnPostLogRequest(IN IHttpContext* pHttpContext,IN IHttpEventProvider* pProvider) override {
 		log(pHttpContext,"OnPostLogRequest");
 		RestoreAcceptEncoding(pHttpContext);
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_READ_ENTITY |
-	REQUEST_NOTIFICATION_STATUS OnReadEntity(IN IHttpContext* pHttpContext,IN IReadEntityProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnReadEntity(IN IHttpContext* pHttpContext,IN IReadEntityProvider* pProvider) override {
 		log(pHttpContext,"OnReadEntity");
 		return RQ_NOTIFICATION_CONTINUE;}
 
 	//RQ_MAP_PATH
-	REQUEST_NOTIFICATION_STATUS OnMapPath(IN IHttpContext* pHttpContext,IN IMapPathProvider* pProvider) {
+	REQUEST_NOTIFICATION_STATUS OnMapPath(IN IHttpContext* pHttpContext,IN IMapPathProvider* pProvider) override {
 		log(pHttpContext,"OnMapPath");
 		return RQ_NOTIFICATION_CONTINUE;}
 
@@ -203,7 +203,7 @@ public:
         IN BOOL fPostNotification,
         IN IHttpEventProvider * pProvider,
         IN IHttpCompletionInfo * pCompletionInfo
-        );
+        ) override;
 
 private:
 	// failed_pc (out): on NULL-return, populated with the IisProcessContext

@@ -30,7 +30,7 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
  public:
 
   IisRewriteDriverFactory(IisProcessContext* process_context, std::wstring app_pool_name, SystemThreadSystem* thread_system, AbstractSharedMem* shm_runtime);
-  virtual ~IisRewriteDriverFactory();
+  ~IisRewriteDriverFactory() override;
 
   // IIS-specific override of the cross-port
   // prefix-scope predicate. Canonicalizes |path| via GetFullPathNameW
@@ -88,44 +88,44 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
   // EnsureDirectoryWritable for the LogDir flow.
   uint32_t LogDirAclMask() const;
 
-  virtual Hasher* NewHasher();
-  virtual UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config);
-  virtual MessageHandler* DefaultHtmlParseMessageHandler();
-  virtual MessageHandler* DefaultMessageHandler();
-  virtual FileSystem* DefaultFileSystem();
-  virtual Timer* DefaultTimer();
+  Hasher* NewHasher() override;
+  UrlAsyncFetcher* AllocateFetcher(SystemRewriteOptions* config) override;
+  MessageHandler* DefaultHtmlParseMessageHandler() override;
+  MessageHandler* DefaultMessageHandler() override;
+  FileSystem* DefaultFileSystem() override;
+  Timer* DefaultTimer() override;
   void StartThreads();
   //virtual QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory name);
-  virtual NamedLockManager* DefaultLockManager();
-  virtual NonceGenerator* DefaultNonceGenerator();
-  virtual RewriteOptions* NewRewriteOptions();
+  NamedLockManager* DefaultLockManager() override;
+  NonceGenerator* DefaultNonceGenerator() override;
+  RewriteOptions* NewRewriteOptions() override;
 
-  ServerContext* NewServerContext();
-  virtual void ShutDown();
+  ServerContext* NewServerContext() override;
+  void ShutDown() override;
 
   // We use a beacon handler to collect data for critical images,
   // css, etc., so filters should be configured accordingly.
-  virtual bool UseBeaconResultsInFilters() const {
+  bool UseBeaconResultsInFilters() const override {
     return true;
   }
 
-  virtual void NonStaticInitStats(Statistics* statistics) {
+  void NonStaticInitStats(Statistics* statistics) override {
     InitStats(statistics);
-  }  
+  }
   // Provides an optional hook for customizing the RewriteDriver object
   // using the options set on it. This is called before
   // RewriteDriver::AddFilters() and AddPlatformSpecificRewritePasses().
-  virtual void ApplyPlatformSpecificConfiguration(RewriteDriver* driver) {;}
+  void ApplyPlatformSpecificConfiguration(RewriteDriver* driver) override {;}
   // Provides an optional hook for adding rewrite passes to the HTML filter
   // chain.  This should be used for filters that are specific to a particular
   // RewriteDriverFactory implementation.
-  virtual void AddPlatformSpecificRewritePasses(RewriteDriver* driver);
+  void AddPlatformSpecificRewritePasses(RewriteDriver* driver) override;
   static void InitStats(Statistics* statistics);
   IisServerContext* MakeIisServerContext(const GoogleString& site_app_id, unsigned int port);
-  virtual void ShutDownMessageHandlers();
-  virtual void SetCircularBuffer(SharedCircularBuffer* buffer);
-  
-  virtual ServerContext* NewDecodingServerContext();
+  void ShutDownMessageHandlers() override;
+  void SetCircularBuffer(SharedCircularBuffer* buffer) override;
+
+  ServerContext* NewDecodingServerContext() override;
 	  
 
   void SetServerContextMessageHandler(ServerContext* server_context);
@@ -145,10 +145,10 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
 	int expires();
 	void reset_expired();
 protected:
-  virtual QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory pool,
-                                             StringPiece name);
+  QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory pool,
+                                     StringPiece name) override;
 
-  virtual void ShutDownFetchers();
+  void ShutDownFetchers() override;
 private:
   // Non-owning back-pointer to the process context that constructed us.
   // Used by EnsureDirectoryWritable to read the cached worker SID

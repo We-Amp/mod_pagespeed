@@ -109,9 +109,7 @@ class CheckOpMessageBuilder {
     *stream_ << " vs. ";
     return stream_;
   }
-  std::string* NewString() {
-    return new std::string(stream_->str());
-  }
+  std::string* NewString() { return new std::string(stream_->str()); }
 
  private:
   std::ostringstream* stream_;
@@ -126,12 +124,12 @@ std::string* MakeCheckOpString(const T1& v1, const T2& v2, const char* expr) {
 }
 
 // Check operation helpers
-#define DEFINE_CHECK_OP(name, op)                                              \
-  template <typename T1, typename T2>                                          \
-  inline std::string* Check##name##Impl(const T1& v1, const T2& v2,            \
-                                        const char* exprtext) {                \
-    if (v1 op v2) return nullptr;                                              \
-    return ::pagespeed_logging::MakeCheckOpString(v1, v2, exprtext);           \
+#define DEFINE_CHECK_OP(name, op)                                    \
+  template <typename T1, typename T2>                                \
+  inline std::string* Check##name##Impl(const T1& v1, const T2& v2,  \
+                                        const char* exprtext) {      \
+    if (v1 op v2) return nullptr;                                    \
+    return ::pagespeed_logging::MakeCheckOpString(v1, v2, exprtext); \
   }
 
 DEFINE_CHECK_OP(EQ, ==)
@@ -150,8 +148,7 @@ class CheckOpResult {
       : msg_(msg), file_(file), line_(line) {}
   ~CheckOpResult() {
     if (msg_) {
-      ::pagespeed_logging::LogMessage(logging::LOG_FATAL, file_, line_)
-          .stream()
+      ::pagespeed_logging::LogMessage(logging::LOG_FATAL, file_, line_).stream()
           << *msg_ << extra_stream_.str();
       delete msg_;
     }
@@ -179,7 +176,7 @@ class CheckOpResult {
 // written to any process logger (see LogMessage::~LogMessage); registered
 // sinks decide whether to keep them, e.g. the Apache module emits them
 // only when its LogLevel is debug.
-#define VLOG(verboselevel)                                                       \
+#define VLOG(verboselevel) \
   ::pagespeed_logging::LogMessage(-(verboselevel), __FILE__, __LINE__).stream()
 
 // VLOG_IS_ON - check if verbose logging is enabled at given level.
@@ -188,27 +185,26 @@ class CheckOpResult {
 #define VLOG_IS_ON(verboselevel) (true)
 
 // LOG_IF - conditional logging
-#define LOG_IF(severity, condition)                                            \
-  !(condition)                                                                 \
-      ? (void)0                                                                \
-      : ::pagespeed_logging::LogMessageVoidify() &                             \
-            ::pagespeed_logging::LogMessage(logging::LOG_##severity, __FILE__, \
-                                            __LINE__)                          \
-                .stream()
+#define LOG_IF(severity, condition)                                           \
+  !(condition) ? (void)0                                                      \
+               : ::pagespeed_logging::LogMessageVoidify() &                   \
+                     ::pagespeed_logging::LogMessage(logging::LOG_##severity, \
+                                                     __FILE__, __LINE__)      \
+                         .stream()
 
 // DLOG - debug logging (compiles to nothing in release builds)
 #ifdef NDEBUG
-#define DLOG(severity)                                                         \
-  true ? (void)0                                                               \
-       : ::pagespeed_logging::LogMessageVoidify() &                            \
-             ::pagespeed_logging::LogMessage(logging::LOG_##severity,          \
-                                             __FILE__, __LINE__)               \
+#define DLOG(severity)                                                \
+  true ? (void)0                                                      \
+       : ::pagespeed_logging::LogMessageVoidify() &                   \
+             ::pagespeed_logging::LogMessage(logging::LOG_##severity, \
+                                             __FILE__, __LINE__)      \
                  .stream()
-#define DVLOG(verboselevel)                                                    \
-  true ? (void)0                                                               \
-       : ::pagespeed_logging::LogMessageVoidify() &                            \
-             ::pagespeed_logging::LogMessage(logging::LOG_INFO, __FILE__,      \
-                                             __LINE__)                         \
+#define DVLOG(verboselevel)                                               \
+  true ? (void)0                                                          \
+       : ::pagespeed_logging::LogMessageVoidify() &                       \
+             ::pagespeed_logging::LogMessage(logging::LOG_INFO, __FILE__, \
+                                             __LINE__)                    \
                  .stream()
 #else
 #define DLOG(severity) LOG(severity)
@@ -219,15 +215,15 @@ class CheckOpResult {
 // DFATAL = fatal in debug builds, error in release builds.
 
 // CHECK macros - always active
-#define CHECK(condition)                                                       \
+#define CHECK(condition) \
   LOG_IF(FATAL, !(condition)) << "Check failed: " #condition " "
 
-#define CHECK_OP(name, op, val1, val2)                                         \
-  if (::pagespeed_logging::CheckOpResult _result{                              \
-          ::pagespeed_logging::Check##name##Impl(                              \
-              (val1), (val2), #val1 " " #op " " #val2),                         \
-          __FILE__, __LINE__};                                                 \
-      _result)                                                                 \
+#define CHECK_OP(name, op, val1, val2)                                     \
+  if (::pagespeed_logging::CheckOpResult _result{                          \
+          ::pagespeed_logging::Check##name##Impl((val1), (val2),           \
+                                                 #val1 " " #op " " #val2), \
+          __FILE__, __LINE__};                                             \
+      _result)                                                             \
   _result.stream()
 
 #define CHECK_EQ(val1, val2) CHECK_OP(EQ, ==, val1, val2)
@@ -239,19 +235,19 @@ class CheckOpResult {
 
 // DCHECK macros - only active in debug builds
 #ifdef NDEBUG
-#define DCHECK(condition)                                                      \
+#define DCHECK(condition) \
   while (false) CHECK(condition)
-#define DCHECK_EQ(val1, val2)                                                  \
+#define DCHECK_EQ(val1, val2) \
   while (false) CHECK_EQ(val1, val2)
-#define DCHECK_NE(val1, val2)                                                  \
+#define DCHECK_NE(val1, val2) \
   while (false) CHECK_NE(val1, val2)
-#define DCHECK_LT(val1, val2)                                                  \
+#define DCHECK_LT(val1, val2) \
   while (false) CHECK_LT(val1, val2)
-#define DCHECK_LE(val1, val2)                                                  \
+#define DCHECK_LE(val1, val2) \
   while (false) CHECK_LE(val1, val2)
-#define DCHECK_GT(val1, val2)                                                  \
+#define DCHECK_GT(val1, val2) \
   while (false) CHECK_GT(val1, val2)
-#define DCHECK_GE(val1, val2)                                                  \
+#define DCHECK_GE(val1, val2) \
   while (false) CHECK_GE(val1, val2)
 #else
 #define DCHECK(condition) CHECK(condition)
@@ -273,8 +269,7 @@ T* CheckNotNull(const char* file, int line, const char* expr, T* ptr) {
   return ptr;
 }
 
-#define CHECK_NOTNULL(val)                                                     \
-  ::CheckNotNull(__FILE__, __LINE__, #val, (val))
+#define CHECK_NOTNULL(val) ::CheckNotNull(__FILE__, __LINE__, #val, (val))
 
 // COMPILE_ASSERT - static assertion (use static_assert in C++11+)
 // Only define if not already defined (basictypes.h may define it first)
@@ -289,7 +284,7 @@ namespace net_instaweb {
 class PageSpeedLogSink : public ::pagespeed_logging::LogSink {
  public:
   PageSpeedLogSink();
-  virtual ~PageSpeedLogSink();
+  ~PageSpeedLogSink() override;
 
   void send(int severity, const char* full_filename, const char* base_filename,
             int line, const char* message, size_t message_len) override;

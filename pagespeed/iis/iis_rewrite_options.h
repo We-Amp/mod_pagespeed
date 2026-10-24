@@ -28,7 +28,7 @@ class IisRewriteOptions : public SystemRewriteOptions {
   static void Terminate();
 
   IisRewriteOptions(ThreadSystem* thread_system);
-  virtual ~IisRewriteOptions() {
+  ~IisRewriteOptions() override {
   }
 
   const char* ParseAndSetOptions(
@@ -41,7 +41,7 @@ class IisRewriteOptions : public SystemRewriteOptions {
   // config blocks.
   RewriteOptions::OptionScope GetOptionScope(StringPiece option_name);
 
-  virtual IisRewriteOptions* Clone() const;
+  IisRewriteOptions* Clone() const override;
   const GoogleString& statistics_path() const {
 	  return statistics_path_.value();
   }
@@ -95,9 +95,9 @@ class IisRewriteOptions : public SystemRewriteOptions {
   OptionSettingResult ParseAndSetOptions0(
       StringPiece directive, GoogleString* msg, MessageHandler* handler);
 
-  virtual OptionSettingResult ParseAndSetOptionFromName1(
+  OptionSettingResult ParseAndSetOptionFromName1(
       StringPiece name, StringPiece arg,
-      GoogleString* msg, MessageHandler* handler);
+      GoogleString* msg, MessageHandler* handler) override;
 
   bool SetBoolFlag(bool* v, StringPiece arg);
   static Properties* iis_properties_;

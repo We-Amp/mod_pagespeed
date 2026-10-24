@@ -43,17 +43,17 @@ class NgxServerContext : public SystemServerContext {
  public:
   NgxServerContext(NgxRewriteDriverFactory* factory, StringPiece hostname,
                    int port);
-  virtual ~NgxServerContext();
+  ~NgxServerContext() override;
 
   // We don't allow ProxyFetch to fetch HTML via MapProxyDomain. We will call
   // set_trusted_input() on any ProxyFetches we use to transform internal HTML.
-  virtual bool ProxiesHtml() const { return false; }
+  bool ProxiesHtml() const override { return false; }
 
   // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
   // endpoints, from this server block's DaemonApiSocketPath, or
   // nullptr when that path is empty (daemon API disabled).  See
   // SystemServerContext::NewDaemonReader().
-  virtual DaemonReader* NewDaemonReader();
+  DaemonReader* NewDaemonReader() override;
 
   // Builds this server's optimizer-daemon adapter from its configuration and
   // resolves its health, exactly once, at module-init time.  Returns false
@@ -97,7 +97,7 @@ class NgxServerContext : public SystemServerContext {
     return dynamic_cast<NgxMessageHandler*>(message_handler());
   }
 
-  virtual GoogleString FormatOption(StringPiece option_name, StringPiece args);
+  GoogleString FormatOption(StringPiece option_name, StringPiece args) override;
 
   void set_ngx_http2_variable_index(ngx_int_t idx) {
     ngx_http2_variable_index_ = idx;

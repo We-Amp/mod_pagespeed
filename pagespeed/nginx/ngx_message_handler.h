@@ -56,10 +56,10 @@ class NgxMessageHandler : public SystemMessageHandler {
   ngx_log_t* log() { return log_; }
 
  protected:
-  virtual void MessageSImpl(MessageType type, const GoogleString& message);
+  void MessageSImpl(MessageType type, const GoogleString& message) override;
 
-  virtual void FileMessageSImpl(MessageType type, const char* file, int line,
-                                const GoogleString& message);
+  void FileMessageSImpl(MessageType type, const char* file, int line,
+                        const GoogleString& message) override;
 
  private:
   ngx_uint_t GetNgxLogLevel(MessageType type);

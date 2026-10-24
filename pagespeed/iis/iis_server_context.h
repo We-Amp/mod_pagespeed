@@ -26,8 +26,8 @@ namespace net_instaweb {
 	class IisServerContext : public SystemServerContext {
 	public:
 		IisServerContext(IisRewriteDriverFactory* factory, const GoogleString& site_app_id, unsigned int port);
-		virtual ~IisServerContext();
-		virtual bool ProxiesHtml() const { return true; }
+		~IisServerContext() override;
+		bool ProxiesHtml() const override { return true; }
 
 		const GoogleString& site_app_id() { return site_app_id_; }
 		ProxyFetchFactory* fetch_factory() { return fetch_factory_; }

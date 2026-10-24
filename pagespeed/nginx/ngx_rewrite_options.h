@@ -110,7 +110,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   NgxRewriteOptions(const StringPiece& description,
                     ThreadSystem* thread_system);
   explicit NgxRewriteOptions(ThreadSystem* thread_system);
-  virtual ~NgxRewriteOptions() {}
+  ~NgxRewriteOptions() override {}
 
   // args is an array of n_args StringPieces together representing a directive.
   // For example:
@@ -138,7 +138,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
   void AppendScriptLinesTo(NgxRewriteOptions* destination) const;
 
   // Make an identical copy of these options and return it.
-  virtual NgxRewriteOptions* Clone() const;
+  NgxRewriteOptions* Clone() const override;
 
   // Returns a suitably down cast version of 'instance' if it is an instance
   // of this class, NULL if not.
@@ -288,9 +288,9 @@ class NgxRewriteOptions : public SystemRewriteOptions {
                                           GoogleString* msg,
                                           MessageHandler* handler);
 
-  virtual OptionSettingResult ParseAndSetOptionFromName1(
+  OptionSettingResult ParseAndSetOptionFromName1(
       StringPiece name, StringPiece arg, GoogleString* msg,
-      MessageHandler* handler);
+      MessageHandler* handler) override;
 
   // We may want to override 2- and 3-argument versions as well in the future,
   // but they are not needed yet.

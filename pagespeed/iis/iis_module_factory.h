@@ -18,8 +18,8 @@ class IisModuleFactory : public IHttpModuleFactory
 {
 public:
 	IisModuleFactory(std::string module_path,PCWSTR app_pool_name, IisMessageHandler* handler);
-	HRESULT GetHttpModule(OUT CHttpModule ** ppModule, IN IModuleAllocator * pAllocator);
-	void Terminate();
+	HRESULT GetHttpModule(OUT CHttpModule ** ppModule, IN IModuleAllocator * pAllocator) override;
+	void Terminate() override;
 	IisProcessContext* GetProcessContext(const GoogleString& site_app_id,std::string site_root, const GoogleString& app_url_base);
 	
 	MessageHandler *message_handler() {return message_handler_;}

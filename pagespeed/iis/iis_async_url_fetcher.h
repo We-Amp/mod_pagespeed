@@ -28,11 +28,11 @@ class IisAsyncUrlFetcher: public UrlAsyncFetcher
 public:
 	IisAsyncUrlFetcher();
 	void StopFetch(IisAsyncWorker *worker);
-	virtual ~IisAsyncUrlFetcher();
-	virtual bool SupportsHttps() const { return fetcher_supports_https_; }
-	virtual void Fetch(const GoogleString& url,
-                     MessageHandler* message_handler,
-                     AsyncFetch* fetch);
+	~IisAsyncUrlFetcher() override;
+	bool SupportsHttps() const override { return fetcher_supports_https_; }
+	void Fetch(const GoogleString& url,
+	           MessageHandler* message_handler,
+	           AsyncFetch* fetch) override;
 
 	// Derive the host string used for the outbound WinHTTP request.
 	// Returns explicit_host_header if non-null; otherwise extracts
@@ -57,7 +57,7 @@ public:
 	void set_allow_self_signed(bool val) { allow_self_signed_ = val; }
 
 	bool shutting_down_;
-	virtual void ShutDown();
+	void ShutDown() override;
 
 
 };
@@ -88,8 +88,8 @@ class IisAsyncWorker :public ASyncWinHTTP::WinHTTPEvents
 	bool deferred_stop_;
 public:
 	IisAsyncWorker(net_instaweb::IisAsyncUrlFetcher * fetcher, AsyncFetch *fetch, MessageHandler* messagehandler);
-	virtual void OnData(const char *data, int length, WinHTTPContentType type);// the data
-	virtual void OnCompleted(WinHTTPStatus status);
+	void OnData(const char *data, int length, WinHTTPContentType type) override;// the data
+	void OnCompleted(WinHTTPStatus status) override;
 	void Cancel();
 	// Deferred-deletion handshake; call only under the fetcher's critical
 	// section (see the member comment).
