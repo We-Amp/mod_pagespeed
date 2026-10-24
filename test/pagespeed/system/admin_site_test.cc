@@ -1490,7 +1490,7 @@ TEST_F(AdminSiteDaemonTest, UnknownLeafIs404AndNotProxied) {
     ASSERT_TRUE(fetch->done()) << suffix;
     EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code())
         << suffix;
-    EXPECT_THAT(buffer, ::testing::HasSubstr("Unknown daemon endpoint"));
+    EXPECT_THAT(buffer, ::testing::HasSubstr("Unknown optimizer endpoint"));
   }
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
@@ -1547,7 +1547,7 @@ TEST_F(AdminSiteDaemonTest, DaemonConfigNeverServesModuleConfig) {
       daemon_site_.get(), "http://example.com/pagespeed_admin/v1/daemon/config",
       RequestHeaders::kGet, &body);
   EXPECT_EQ(404, fetch->response_headers()->status_code());
-  EXPECT_THAT(body, ::testing::HasSubstr("Unknown daemon endpoint"));
+  EXPECT_THAT(body, ::testing::HasSubstr("Unknown optimizer endpoint"));
   EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr("\"config\":\"")));
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
@@ -1713,7 +1713,7 @@ TEST_F(AdminSiteDaemonTest, MultiSegmentDaemonLeafReachesTheTable) {
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code());
   EXPECT_THAT(buffer,
-              ::testing::HasSubstr("Unknown daemon endpoint: cache/select"));
+              ::testing::HasSubstr("Unknown optimizer endpoint: cache/select"));
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
 
@@ -1726,7 +1726,7 @@ TEST_F(AdminSiteDaemonTest, NestedMountReachesMultiSegmentDaemonLeaf) {
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kNotFound, fetch->response_headers()->status_code());
   EXPECT_THAT(buffer,
-              ::testing::HasSubstr("Unknown daemon endpoint: cache/select"));
+              ::testing::HasSubstr("Unknown optimizer endpoint: cache/select"));
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
 
@@ -1742,14 +1742,14 @@ TEST_F(AdminSiteDaemonTest, DaemonMultiSegmentLeafConfusionIs404NeverProxied) {
     const char* suffix;
     const char* body;  // expected body substring on GET/POST
   } cases[] = {
-      {"cache/purge", "Unknown daemon endpoint: cache/purge"},
-      {"cache/reprocess", "Unknown daemon endpoint: cache/reprocess"},
-      {"cache/cooldowns", "Unknown daemon endpoint: cache/cooldowns"},
+      {"cache/purge", "Unknown optimizer endpoint: cache/purge"},
+      {"cache/reprocess", "Unknown optimizer endpoint: cache/reprocess"},
+      {"cache/cooldowns", "Unknown optimizer endpoint: cache/cooldowns"},
       // A real daemon route this proxy deliberately does not expose.
-      {"cache/select", "Unknown daemon endpoint: cache/select"},
-      {"cache", "Unknown daemon endpoint: cache"},
-      {"Cache/urls", "Unknown daemon endpoint: Cache/urls"},
-      {"cache%2Furls", "Unknown daemon endpoint: cache%2Furls"},
+      {"cache/select", "Unknown optimizer endpoint: cache/select"},
+      {"cache", "Unknown optimizer endpoint: cache"},
+      {"Cache/urls", "Unknown optimizer endpoint: Cache/urls"},
+      {"cache%2Furls", "Unknown optimizer endpoint: cache%2Furls"},
       {"cache//urls", "Unknown admin page: urls"},
       {"cache/urls/extra", "Unknown admin page: extra"},
       {"cache/urls/extra/more", "Unknown admin page: more"},
@@ -1863,7 +1863,7 @@ TEST_F(AdminSiteDaemonTest, UnknownDaemonLeafCarriesProxyResponseHeaders) {
         EXPECT_TRUE(buffer.empty()) << leaf;
       } else {
         EXPECT_THAT(buffer, ::testing::HasSubstr(
-                                StrCat("Unknown daemon endpoint: ", leaf)))
+                                StrCat("Unknown optimizer endpoint: ", leaf)))
             << leaf;
       }
     }

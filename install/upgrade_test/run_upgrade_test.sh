@@ -1187,7 +1187,7 @@ esac
 # logged before the scan.
 in_ctr "for i in \$(seq 1 12); do curl -s -o /dev/null '${BASE_URL}/index.html'; curl -s -o /dev/null '${BASE_URL}/${IMAGE_NAME}'; curl -s -o /dev/null '${BASE_URL}/${IMAGE_AFTER}'; curl -s -o /dev/null '${BASE_URL}/style.css'; sleep 1; done" || true
 in_ctr "tail -c +$((LOG_OFFSET + 1)) ${ERROR_LOG}" > "$WORK/logs/error-log-after-upgrade.log" || true
-SIG_RE='nothing will be recorded for in-place optimization|cannot open the optimizer daemon.s cache volume|not being in the .pagespeed. group|Giving up: in-place optimization stays off'
+SIG_RE='nothing will be recorded for in-place optimization|cannot open the optimizer (daemon|worker).s cache volume|not being in the .pagespeed. group|Giving up: in-place optimization stays off'
 sig_hits="$(grep -c -E "$SIG_RE" "$WORK/logs/error-log-after-upgrade.log" || true)"
 check "silent-degrade signature lines in the error log after the upgrade restart" "0" "$sig_hits"
 if [[ "$sig_hits" != "0" ]]; then grep -E "$SIG_RE" "$WORK/logs/error-log-after-upgrade.log" | head -5 | sed 's/^/  /'; fi

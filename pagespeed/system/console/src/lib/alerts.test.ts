@@ -402,7 +402,7 @@ const VOLUME =
   "and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing " +
   "was created. Install a module and optimizer package pair that agree.";
 const OPEN_FAILED =
-  "nothing will be recorded for in-place optimization: cannot open the optimizer daemon's cache volume at " +
+  "nothing will be recorded for in-place optimization: cannot open the optimizer worker's cache volume at " +
   "/var/cache/pagespeed-optimizer/vN: permission denied (attempt N of N)";
 
 const group = (template: string, over: Partial<MessageGroup> = {}): MessageGroup => ({
@@ -498,9 +498,9 @@ describe("findings from the module's message log", () => {
 
   it("volume-not-opened: the start-up race, other refusals, an info line and an old refusal are not a trigger", () => {
     const notPublished =
-      "in-place optimization is OFF: the optimizer daemon has not published the size of its cache volume at " +
+      "in-place optimization is OFF: the optimizer worker has not published the size of its cache volume at " +
       "/var/cache/pagespeed-optimizer/vN (it may not be running yet). This module will not open that volume without " +
-      "knowing the size the daemon uses.";
+      "knowing the size the worker uses.";
     for (const g of [
       group(OPEN_FAILED, { level: "warning", recent: 1 }), // attempt 1 of 5: may heal on the next attempt
       group(OPEN_FAILED, { level: "error", recent: 1 }),

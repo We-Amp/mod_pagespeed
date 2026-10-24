@@ -470,7 +470,7 @@ TEST_F(IisDaemonCheckTest, OneOptionAloneIsUnavailableWithOneLineAndNoLoad) {
   EXPECT_EQ(0, binder.calls());
   EXPECT_EQ(1, site.count());
   EXPECT_TRUE(site.SawContaining(
-      "both the daemon socket path and the daemon volume path must be set"))
+      "both the optimizer's socket path and the optimizer's volume path must be set"))
       << site.Dump();
 
   // The verdict is final for the process, so it gets its OWN warning,

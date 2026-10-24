@@ -626,17 +626,17 @@ class BacklogFillGuard {
 // platform: the error spelling is the OS's, and the start line is generic
 // on Windows (it names no unit to start).
 const char kNotFoundText[] = "cannot find the file specified";
-const char kStartDaemonFragment[] = "start the optimizer daemon";
+const char kStartDaemonFragment[] = "start the optimizer worker";
 const char kNotExistsStartFragment[] =
-    "The named pipe does not exist -- start the optimizer daemon";
-// The pipe-permission fragment: the daemon decides who may open its pipe,
-// so the sentence names that and the refusal -- no grant.
-const char kPipeAccessFragment[] = "the daemon decides who may open it";
+    "The named pipe does not exist -- start the optimizer worker";
+// The pipe-permission fragment: the optimizer decides who may open its
+// pipe, so the sentence names that and the refusal -- no grant.
+const char kPipeAccessFragment[] = "the optimizer decides who may open it";
 #else
 const char kNotFoundText[] = "No such file or directory";
-const char kStartDaemonFragment[] = "start the pagespeed-optimizer daemon";
+const char kStartDaemonFragment[] = "start the optimizer worker";
 const char kNotExistsStartFragment[] =
-    "The socket does not exist -- start the pagespeed-optimizer daemon";
+    "The socket does not exist -- start the optimizer worker";
 #endif
 
 #ifdef _WIN32
@@ -1339,7 +1339,7 @@ TEST_F(DaemonAdapterTest, AnAbsentSocketAnswersAtOnceWithTheSameText) {
   // can run to seconds.
   EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
   EXPECT_NE(GoogleString::npos,
-            Messages().find("the optimizer daemon does not answer at "))
+            Messages().find("the optimizer worker does not answer at "))
       << Messages();
   EXPECT_NE(GoogleString::npos, Messages().find(kNotFoundText)) << Messages();
   EXPECT_NE(GoogleString::npos, Messages().find(kStartDaemonFragment))
@@ -1855,13 +1855,13 @@ TEST_F(DaemonAdapterTest, OnlyDaemonNotRunningVerdictsAreRetried) {
   const std::vector<std::pair<const char*, std::function<void()>>> faults = {
       {"the client library is absent",
        [this] { library_available_ = false; }},
-      {"the daemon package publishes no size",
+      {"the optimizer package publishes no size",
        [this] { publishes_size_ = false; }},
-      {"the daemon publishes another cache directory generation",
+      {"the worker publishes another cache directory generation",
        [this] {
          published_generation_ = DaemonAdapter::kCacheDirGeneration + 1;
        }},
-      {"the daemon's volume cannot be opened",
+      {"the worker's volume cannot be opened",
        [this] { fake_open_error_ = kPsErrNoSpace; }},
   };
   for (size_t i = 0; i < faults.size(); ++i) {
@@ -2060,7 +2060,7 @@ TEST_F(DaemonAdapterTest, AnUnlistableCacheDirectoryNamesTheGroup) {
   // And the volume scan must not have misread the refused listing as "no
   // volume yet" -- the absent message would have sent the operator to start
   // the daemon.
-  EXPECT_EQ(GoogleString::npos, Messages().find("start the daemon first"))
+  EXPECT_EQ(GoogleString::npos, Messages().find("start the worker first"))
       << Messages();
 #else
   if (geteuid() == 0) {
@@ -2080,7 +2080,7 @@ TEST_F(DaemonAdapterTest, AnUnlistableCacheDirectoryNamesTheGroup) {
   EXPECT_NE(GoogleString::npos, Messages().find(kHintFragment)) << Messages();
   // And the volume scan must not have misread EACCES as "no volume yet" --
   // the absent message would have sent the operator to start the daemon.
-  EXPECT_EQ(GoogleString::npos, Messages().find("start the daemon first"))
+  EXPECT_EQ(GoogleString::npos, Messages().find("start the worker first"))
       << Messages();
 #endif
 }
@@ -2176,7 +2176,7 @@ TEST_F(DaemonAdapterTest, APermissionDeniedSocketNamesTheGroup) {
   EXPECT_EQ(1, handler_.MessagesOfType(kError));
   EXPECT_NE(GoogleString::npos, Messages().find(kHintFragment)) << Messages();
   EXPECT_EQ(GoogleString::npos,
-            Messages().find("start the pagespeed-optimizer daemon"))
+            Messages().find("start the optimizer worker"))
       << Messages();
   // The listener's destructor unlinks the socket at scope exit, after this --
   // so remove it explicitly, or the rmdir below fails on a non-empty dir.
@@ -2383,7 +2383,7 @@ TEST_F(DaemonAdapterTest, AnUnknownSizeNeverGuessesAgainstAnExistingVolume) {
   ASSERT_TRUE(last_abi_ != nullptr);
   EXPECT_EQ(0, last_abi_->opens) << "the volume was opened at a guessed size";
   EXPECT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size())
-      << "a second volume file was created beside the daemon's";
+      << "a second volume file was created beside the worker's";
 }
 
 TEST_F(DaemonAdapterTest, AnOlderDaemonNeverGuessesAgainstAnExistingVolume) {
@@ -2449,7 +2449,7 @@ TEST_F(DaemonAdapterTest, AuthoringASecondVolumeRefusesToStart) {
       FakeDaemonAbi::VolumeFileFor(volume_, 64ULL << 20);
   FILE* daemon_bytes = fopen(daemon_file_name.c_str(), "a");
   ASSERT_TRUE(daemon_bytes != nullptr);
-  ASSERT_NE(EOF, fputs("the daemon's volume, with content", daemon_bytes));
+  ASSERT_NE(EOF, fputs("the worker's volume, with content", daemon_bytes));
   fclose(daemon_bytes);
   const std::vector<GoogleString> before = DaemonAdapter::VolumeFiles(volume_);
   struct stat daemon_file;
@@ -2533,7 +2533,7 @@ TEST_F(DaemonAdapterTest, ExtensionedStemFindsTheDaemonsVolume) {
 
   const std::vector<GoogleString> files = DaemonAdapter::VolumeFiles(volume_);
   ASSERT_EQ(1u, files.size())
-      << "the daemon's volume is unfindable under an extensioned stem";
+      << "the worker's volume is unfindable under an extensioned stem";
   EXPECT_EQ(FakeDaemonAbi::VolumeFileFor("cache.vol", kDaemonSize), files[0]);
 }
 
@@ -2721,7 +2721,7 @@ TEST_F(DaemonAdapterTest, ARefusalWhoseRemovalFailsStillRefuses) {
       << dumped;
 #endif
   EXPECT_NE(GoogleString::npos,
-            dumped.find("Start or restart the optimizer daemon"))
+            dumped.find("Start or restart the optimizer worker"))
       << dumped;
 #ifdef _WIN32
   if (held != INVALID_HANDLE_VALUE) {
@@ -2761,7 +2761,7 @@ TEST_F(DaemonAdapterTest, ARefusalLeavesAnotherUsersVolumeInPlace) {
   const GoogleString dumped = DumpedMessages();
   EXPECT_NE(GoogleString::npos, dumped.find("owned by another user")) << dumped;
   EXPECT_NE(GoogleString::npos,
-            dumped.find("most likely the optimizer daemon's new volume"))
+            dumped.find("most likely the optimizer worker's new volume"))
       << dumped;
   EXPECT_NE(GoogleString::npos, dumped.find("was left in place")) << dumped;
   EXPECT_NE(GoogleString::npos, dumped.find("Do not remove it")) << dumped;
@@ -2962,7 +2962,7 @@ TEST_F(DaemonAdapterTest, TrailingDotStemFindsTheDaemonsVolume) {
 
   const std::vector<GoogleString> files = DaemonAdapter::VolumeFiles(volume_);
   ASSERT_EQ(1u, files.size())
-      << "the daemon's volume is unfindable under a trailing-dot stem";
+      << "the worker's volume is unfindable under a trailing-dot stem";
   EXPECT_EQ(FakeDaemonAbi::VolumeFileFor("cache.", kDaemonSize), files[0]);
 #endif
 }
@@ -3003,7 +3003,7 @@ TEST_F(DaemonAdapterTest, LeadingDotStemFindsTheDaemonsVolume) {
 
   const std::vector<GoogleString> files = DaemonAdapter::VolumeFiles(volume_);
   ASSERT_EQ(1u, files.size())
-      << "the daemon's volume is unfindable under a leading-dot stem";
+      << "the worker's volume is unfindable under a leading-dot stem";
   EXPECT_EQ(FakeDaemonAbi::VolumeFileFor(".vol", kDaemonSize), files[0]);
 }
 

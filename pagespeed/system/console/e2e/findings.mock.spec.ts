@@ -89,7 +89,7 @@ test.describe("Overview findings", () => {
         {
           level: "warning",
           template:
-            "nothing will be recorded for in-place optimization: cannot open the optimizer daemon's cache volume at " +
+            "nothing will be recorded for in-place optimization: cannot open the optimizer worker's cache volume at " +
             "/var/cache/pagespeed-optimizer/vN: permission denied (attempt N of N)",
           count: 1,
           recent: 1,
