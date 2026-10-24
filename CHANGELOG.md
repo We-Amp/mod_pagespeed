@@ -91,6 +91,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Apache with the optimizer: stylesheets and scripts compressed by
+  mod_deflate or mod_brotli are now recorded and optimized.** The body
+  capture runs before the server's compressor, so it records the
+  uncompressed bytes, but the finalized headers it reads afterwards carry
+  the compressor's `Content-Encoding`, and the record was refused as
+  content-encoded. On a stock Apache lane every stylesheet and script a
+  browser requested met that refusal, so browser traffic never fed the
+  optimizer. The record now carries the encoding the bytes were captured
+  under (none), and the optimizer serves the stylesheet or script optimized;
+  the compressor still compresses the response on the way out.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

@@ -2400,6 +2400,9 @@ apply_daemon_directives() {
             echo '    Header always unset X-Test-Vhost'
         fi
         echo '  </FilesMatch>'
+        echo '  <FilesMatch "\.css\.gz$">'
+        echo '    Header set Cache-Control "max-age=3600"'
+        echo '  </FilesMatch>'
     } > "$block"
     sudo sed -i -e "/#@@DAEMON@@/{r $block" -e 'd}' "$conf"
     rm -f "$block"
@@ -2412,6 +2415,31 @@ write_daemon_content() {
     sudo mkdir -p /var/www/html/daemon_lane
     printf 'body {\n  background: lightblue;\n}\n\n.lane { color: red; }\n' \
         | sudo tee /var/www/html/daemon_lane/lane.css > /dev/null
+    # The stylesheet the mod_deflate daemon case fetches with
+    # Accept-Encoding: gzip, so the lane's compressor compresses it and the
+    # recorder sees the compressor's Content-Encoding on the finalized
+    # headers. Repetitive on purpose, like ipro/mod_deflate/big.css, so the
+    # compressor has something to compress; used by no other case, so its
+    # cache entry is only ever recorded by a gzip request.
+    printf '%s\n' \
+        '/* Repetitive so the compressor has something to compress. */' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        | sudo tee /var/www/html/daemon_lane/deflate.css > /dev/null
+    # The stylesheet the origin-encoded case fetches: shipped compressed
+    # by the ORIGIN itself, .css.gz with AddEncoding gzip .gz below, so the
+    # coding is stated by mod_mime rather than by a compressor in the filter
+    # chain. gzip -n so the file is byte-identical on every lane; used by no
+    # other case, so its cache entry is only ever this case's to make.
+    printf '.precompressed { color: #2468ac; padding: 1px 2px 3px; }\n' \
+        | gzip -n \
+        | sudo tee /var/www/html/daemon_lane/precompressed.css.gz > /dev/null
     # The page the daemon cases fetch to show the daemon serves no HTML: the
     # comment is removed only by the module's own HTML rewriting.
     printf '<!doctype html>\n<html><head><title>lane</title></head>\n<body>\n<!-- lane-comment -->\n<p>daemon lane page</p>\n</body></html>\n' \
@@ -2442,6 +2470,13 @@ configure_daemon_vhost() {
   ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
   ModPagespeedRewriteLevel PassThrough
   ModPagespeedInPlaceResourceOptimization on
+  # The pre-compressed stylesheet fixture: RemoveType keeps .gz an
+  # encoding-only extension even where /etc/mime.types also maps a type to
+  # it, so the response stays text/css with Content-Encoding: gzip.
+  <Directory /var/www/html/daemon_lane>
+    AddEncoding gzip .gz
+    RemoveType .gz
+  </Directory>
   #@@DAEMON@@
 </VirtualHost>
 EOF

@@ -111,6 +111,29 @@ void ApacheRequestToResponseHeaders(const request_rec& request,
   }
 }
 
+void AddOriginContentEncoding(const request_rec& request,
+                              ResponseHeaders* headers) {
+  if (headers->Has(HttpAttributes::kContentEncoding)) {
+    // headers_out already states one, and nothing between here and the
+    // protocol filters adds a second.
+    return;
+  }
+  // Before the protocol filters merge them, the origin's own coding sits in
+  // either of two places headers_out does not show: a script origin's
+  // headers (err_headers_out -- CGI, FastCGI, PHP), or the coding mod_mime
+  // derived from the file name's AddEncoding extension
+  // (request->content_encoding -- a pre-compressed asset). A snapshot taken
+  // at a pre-protocol seam states the bytes' encoding only if it looks here.
+  const char* encoding =
+      apr_table_get(request.err_headers_out, HttpAttributes::kContentEncoding);
+  if (encoding == nullptr || *encoding == '\0') {
+    encoding = request.content_encoding;
+  }
+  if (encoding != nullptr && encoding[0] != '\0') {
+    headers->Replace(HttpAttributes::kContentEncoding, encoding);
+  }
+}
+
 void AddResponseHeadersToRequestHelper(const ResponseHeaders& response_headers,
                                        request_rec* request,
                                        apr_table_t* table) {
