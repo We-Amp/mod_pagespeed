@@ -59,10 +59,11 @@ Three checks ride on the one read of the log:
    of it.
    Every child must have been forked within CHILD_START_WINDOW_S of the
    last AH00163 "resuming normal operations" line (or of the master's own
-   start when the log has none). The lane's prefork pool is fixed
-   (setup_apache_test.sh pins StartServers=MinSpareServers=
-   MaxSpareServers=MaxRequestWorkers=16 and MaxConnectionsPerChild=0), so
-   no legitimate fork lands outside that window.
+   start when the log has none). The lane's pool is fixed under
+   either MPM (setup_apache_test.sh pins sixteen prefork children, or two
+   event children of eight threads, with no spare-pool churn and
+   MaxConnectionsPerChild=0), so no legitimate fork lands outside that
+   window.
 
 This module is named to sort last in test/system/system/, the second and
 last directory run_system_tests.sh hands to pytest by default
