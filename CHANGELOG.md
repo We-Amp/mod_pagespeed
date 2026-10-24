@@ -91,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **IIS event-log entries for an unusable optimizer service always name
+  the cause.** A second configuration that hits an already announced cause
+  now gets an entry naming its own cause, and an unset
+  `DaemonSocketPath` or `DaemonVolumePath` is shown as `(not set)`.
+
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

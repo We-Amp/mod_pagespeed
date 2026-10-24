@@ -296,6 +296,13 @@ class DaemonAdapter {
   // serving threads, so a plain read is safe on any thread.
   bool unavailable_is_retryable() const { return unavailable_is_retryable_; }
 
+  // The text StartupCheck() produced when its verdict left in-place
+  // optimization off, whether or not the once-per-process latch let it be
+  // announced; empty when the arm is ready.  Lets a caller name this
+  // adapter's own cause.  Written by StartupCheck() and cleared by
+  // ServingHealth() on a late recovery: read it right after StartupCheck().
+  const GoogleString& startup_refusal() const { return startup_refusal_; }
+
   // Logs the start-up refusal once more, as a warning, through the same
   // handler; nothing when the start-up check left the arm ready or found no
   // daemon configured.  For a serving child process, once its message
