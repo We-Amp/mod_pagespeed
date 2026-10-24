@@ -218,3 +218,21 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# Source pins for the request-body discard before module-answered responses
+# (the port cannot be linked into a test; see above). nginx requires a
+# content handler that does not use the request body to discard it before
+# sending its own response; the test pins that every path where the module
+# answers the request itself discards before its header send, and that the
+# discard is skipped where the request is left to the server's own handler.
+pagespeed_cc_test(
+    name = "ngx_request_body_discard_pin_test",
+    srcs = ["ngx_request_body_discard_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
