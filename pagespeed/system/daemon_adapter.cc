@@ -996,6 +996,36 @@ bool DaemonAdapter::ReadVolumeGeneration(StringPiece volume_path,
                                          uint64_t* generation) {
   *generation = 0;
   const GoogleString path = StrCat(volume_path, ".gen");
+  char buffer[32];
+  size_t length = 0;
+#ifdef _WIN32
+  // Open with every kind of sharing, FILE_SHARE_DELETE included: the daemon
+  // publishes a new generation by renaming a temporary file over this one,
+  // and a plain open (the C runtime's share mode has no delete) would make
+  // that rename fail for as long as this read has the file open.  Wide
+  // path, as everywhere else in this file: the paths are UTF-8 here.
+  std::wstring wide;
+  if (!Utf8ToWide(path, &wide)) {
+    return false;
+  }
+  HANDLE handle =
+      CreateFileW(wide.c_str(), GENERIC_READ,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    // Absent is an answer (generation 0); any other failure is not.
+    const DWORD error = GetLastError();
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+  }
+  DWORD got = 0;
+  const BOOL read_ok = ReadFile(
+      handle, buffer, static_cast<DWORD>(sizeof(buffer)), &got, nullptr);
+  CloseHandle(handle);
+  if (!read_ok) {
+    return false;
+  }
+  length = static_cast<size_t>(got);
+#else
   errno = 0;
   FILE* file = fopen(path.c_str(), "rb");
   if (file == nullptr) {
@@ -1005,9 +1035,9 @@ bool DaemonAdapter::ReadVolumeGeneration(StringPiece volume_path,
     // at all, and must not be read as "generation 0".
     return errno == ENOENT;
   }
-  char buffer[32];
-  const size_t length = fread(buffer, 1, sizeof(buffer), file);
+  length = fread(buffer, 1, sizeof(buffer), file);
   fclose(file);
+#endif
   // The daemon writes a decimal number and a newline, and replaces the file
   // atomically.  Anything else -- nothing at all, no newline after the
   // digits (a file caught half written by some other writer), a leading
