@@ -417,8 +417,11 @@ const char kGroupMembershipHint[] =
 // POSIX refuses to unlink a file another user owns (the daemon runs under
 // its own account): the start still refuses, and `why` says the file is
 // probably the daemon's.  Windows has no owner check in this package --
-// there the delete simply fails while the daemon holds the file open, and
-// the caller's message covers both cases.
+// there an exclusive share-mode probe stands in: a file another process
+// has open (the daemon's live volume) fails the probe, and is left in
+// place, because the cache library's volume handles allow delete sharing
+// and a plain delete would take the name from a live holder.  The caller's
+// message covers both cases.
 // How one removal attempt ended.  The caller composes its message from
 // this, because the two failure kinds need OPPOSITE advice: a name this
 // module could not delete for its own reasons is safe for an operator to
@@ -493,21 +496,42 @@ RemoveOutcome RemoveVolumeFile(const GoogleString& volume_path,
       (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
     return RemoveOutcome::kRemoved;  // no file of this name here
   }
-  if (DeleteFileW(wide.c_str())) {
-    return RemoveOutcome::kRemoved;
+  // Probe: open the file for reading with share mode 0.  Any other process
+  // that has it open, whatever share mode it used, makes this fail with a
+  // sharing or lock violation.  Volume handles allow delete sharing, so the
+  // delete below would not notice a live holder; the probe does.
+  HANDLE probe = CreateFileW(wide.c_str(), GENERIC_READ, 0, nullptr,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  DWORD error = ERROR_SUCCESS;
+  if (probe == INVALID_HANDLE_VALUE) {
+    error = GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+      return RemoveOutcome::kRemoved;  // gone in the meantime
+    }
+  } else {
+    CloseHandle(probe);
+    if (DeleteFileW(wide.c_str())) {
+      return RemoveOutcome::kRemoved;
+    }
+    error = GetLastError();
   }
-  const DWORD error = GetLastError();
+  if (error == ERROR_LOCK_VIOLATION) {
+    error = ERROR_SHARING_VIOLATION;
+  }
   GoogleString os_text = WindowsErrorText(error);
   while (!os_text.empty() && os_text.back() == '.') {
     os_text.pop_back();
   }
   if (error == ERROR_SHARING_VIOLATION) {
-    // A sharing violation on a file this module has itself closed almost
-    // certainly means the optimizer holds it: its live volume, not ours.
+    // A sharing violation on a file this module has itself closed means
+    // another process holds it open: from the probe above whatever share
+    // mode it used, or from the delete itself for a holder (an older
+    // process) that does not allow delete sharing.
     // Same advice as the POSIX owner refusal -- leave it in place.
     StrAppend(why, full,
               " was left in place: another process holds it open, most "
-              "likely the optimizer worker's new volume");
+              "likely the optimizer's own volume or an older process that "
+              "has not been restarted");
     return RemoveOutcome::kHeldByOtherUser;
   }
   StrAppend(why, full, ": ", os_text);
@@ -562,8 +586,9 @@ struct CreatedVolumeCleanup {
   // This module's own removal failed; manual removal is safe.
   std::vector<GoogleString> stuck;
   std::vector<GoogleString> why_stuck;
-  // POSIX: another user owns it (Windows: another process holds it open);
-  // most likely the optimizer's own new volume, left in place.
+  // POSIX: another user owns it (Windows: the share-mode probe found
+  // another process holding it open); most likely the optimizer's own new
+  // volume, left in place.
   std::vector<GoogleString> held;
   std::vector<GoogleString> why_held;
   // The removal call said gone; the verify scan could not confirm it.
@@ -582,9 +607,10 @@ struct CreatedVolumeCleanup {
 // the daemon attached a moment later: on Linux the unlink lands on an
 // open file -- the daemon keeps its handle, the name is gone, the next
 // start of this server refuses again for the same reason, and a daemon
-// restart recovers onto a fresh volume of its own.  On Windows the delete
-// fails while another process holds the file without delete sharing: the
-// verdict stays refused and the message names the manual step.  The daemon
+// restart recovers onto a fresh volume of its own.  On Windows the
+// share-mode probe fails while any other process holds the file open, so
+// the file stays: the verdict stays refused and the message names the
+// manual step.  The daemon
 // made the file and this open attached to it: the check refuses either
 // way -- it saw a file appear -- and the removal is what must not then
 // take the daemon's volume (the owner refusal in RemoveVolumeFile keeps
