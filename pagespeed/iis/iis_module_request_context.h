@@ -42,7 +42,6 @@ namespace net_instaweb
 		void AddStoredAcceptEncoding(IHttpContext *c);
 		GzipInflater* inflater() { return inflater_; }
 		void set_inflater(GzipInflater* x) { inflater_ = x; }
-		void Destroy() {this->CleanupStoredContext();delete this;}
 		bool empty() { return empty_; }
 		void set_nextsendresponsestatus(REQUEST_NOTIFICATION_STATUS status) { hasNextStatus = true; nextsendresponsestatus_ = status; }
 		void reset_nextsendresponsestatus() { hasNextStatus = false; }
