@@ -64,6 +64,8 @@ $ErrorActionPreference = "Stop"
 # Configuration
 $SiteName = "PageSpeedTestSite"
 $AppPoolName = "PageSpeedTestPool"
+# The /aspnet streamed-HTML fixture application's app pool (see New-IISSite)
+$AspNetAppPoolName = "PageSpeedTestAspNetPool"
 $WebRoot = "C:\inetpub\pagespeed_test"
 $CacheDir = "C:\pagespeed_cache"
 $LogDir = "C:\pagespeed_logs"
@@ -102,6 +104,8 @@ if (-not $SourceRoot) {
 $ExampleSource = "$SourceRoot\install\mod_pagespeed_example"
 $TestSource = "$SourceRoot\install\mod_pagespeed_test"
 $DoNotModifySource = "$SourceRoot\install\do_not_modify"
+# ASP.NET streamed-HTML fixtures (stream.aspx), served under /aspnet
+$AspNetFixtureSource = "$SourceRoot\test\system\iis\aspnet"
 
 # Path to built PageSpeed module
 $ModulePath = "$SourceRoot\bazel-bin\pagespeed\iis\pagespeed_iis.dll"
@@ -177,8 +181,10 @@ function Reset-PageSpeedTestCache {
     try {
         Import-Module WebAdministration -ErrorAction SilentlyContinue
         if (Get-Command Restart-WebAppPool -ErrorAction SilentlyContinue) {
-            Restart-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
-            Write-Status "Recycled app pool: $AppPoolName" "Gray"
+            foreach ($pool in @($AppPoolName, $AspNetAppPoolName)) {
+                Restart-WebAppPool -Name $pool -ErrorAction SilentlyContinue
+                Write-Status "Recycled app pool: $pool" "Gray"
+            }
         }
     } catch { }
 
@@ -194,15 +200,19 @@ function Reset-PageSpeedTestCache {
     # Bounded and non-fatal: this purge is a best-effort safety net shared by
     # the PR lanes, and a lingering CROSS-JOB worker must not hard-fail them
     # (the AppVerif matrix does its own stop-wait-purge and fails loud).
-    $wpGone = $false
-    foreach ($wait in 1..30) {
-        $wps = @()
-        try { $wps = Invoke-AppCmd list wp "/apppool.name:$AppPoolName" } catch { }
-        if ("$wps" -notmatch 'WP "\d+"') { $wpGone = $true; break }
-        Start-Sleep -Seconds 1
-    }
-    if (-not $wpGone) {
-        Write-Status "Warning: $AppPoolName worker still draining after 30s; purging around residual locks" "Yellow"
+    # Both pools can hold the cache: the module is global, so the /aspnet
+    # application's worker opens the same cyclone.dat as the main pool's.
+    foreach ($pool in @($AppPoolName, $AspNetAppPoolName)) {
+        $wpGone = $false
+        foreach ($wait in 1..30) {
+            $wps = @()
+            try { $wps = Invoke-AppCmd list wp "/apppool.name:$pool" } catch { }
+            if ("$wps" -notmatch 'WP "\d+"') { $wpGone = $true; break }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $wpGone) {
+            Write-Status "Warning: $pool worker still draining after 30s; purging around residual locks" "Yellow"
+        }
     }
 
     # Step 2: purge stale on-disk cache. Loud on partial failure.
@@ -314,6 +324,15 @@ function Initialize-TestEnvironment {
         Write-Status "Copied do_not_modify content" "Gray"
     }
 
+    if (Test-Path $AspNetFixtureSource) {
+        $destAspNet = "$WebRoot\aspnet"
+        if (Test-Path $destAspNet) { Remove-Item $destAspNet -Recurse -Force }
+        Copy-Item $AspNetFixtureSource $destAspNet -Recurse
+        Write-Status "Copied ASP.NET fixture content to $destAspNet" "Gray"
+    } else {
+        Write-Status "Warning: ASP.NET fixture source not found at $AspNetFixtureSource" "Yellow"
+    }
+
     # Refresh LastWriteTime on all copied fixture files so IIS emits a fresh
     # Last-Modified header. The release tarball / repo checkout can deliver
     # files with stale mtimes (e.g. the build date of a prior release baked
@@ -326,7 +345,7 @@ function Initialize-TestEnvironment {
     # sees origin (file mtime) != extended (now) and fails. Refreshing the
     # mtime to install-time anchors both sides to the same recent timestamp.
     $now = Get-Date
-    foreach ($contentRoot in @("$WebRoot\mod_pagespeed_example", "$WebRoot\mod_pagespeed_test", "$WebRoot\do_not_modify")) {
+    foreach ($contentRoot in @("$WebRoot\mod_pagespeed_example", "$WebRoot\mod_pagespeed_test", "$WebRoot\do_not_modify", "$WebRoot\aspnet")) {
         if (Test-Path $contentRoot) {
             Get-ChildItem -Path $contentRoot -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
                 try { $_.LastWriteTime = $now } catch { }
@@ -405,6 +424,45 @@ function Install-IISComponents {
             }
         } catch {
             Write-Status "Warning: could not enable IIS dynamic compression: $_" "Yellow"
+        }
+    }
+
+    # ASP.NET 4.x hosts the /aspnet streamed-HTML fixture (stream.aspx),
+    # which exercises the module's several-sends-per-response path. On Server
+    # Web-Asp-Net45 pulls Web-Net-Ext45 and the ISAPI features; on client
+    # Windows IIS-ASPNET45 with -All pulls IIS-NetFxExtensibility45 and the
+    # ISAPI features. The first run per host pays the feature install. A
+    # silent miss would drop the streamed-HTML coverage from the lane, so
+    # fail the setup when the feature cannot be enabled.
+    if (Get-Command Get-WindowsFeature -ErrorAction SilentlyContinue) {
+        try {
+            $aspNetFeature = Get-WindowsFeature -Name Web-Asp-Net45 -ErrorAction Stop
+            if (-not $aspNetFeature.Installed) {
+                Write-Status "Installing ASP.NET 4.x (Web-Asp-Net45)..." "Yellow"
+                Install-WindowsFeature -Name Web-Asp-Net45 | Out-Null
+                $aspNetFeature = Get-WindowsFeature -Name Web-Asp-Net45 -ErrorAction Stop
+            }
+            if (-not $aspNetFeature.Installed) {
+                throw "Web-Asp-Net45 still not installed after the install attempt"
+            }
+            Write-Status "ASP.NET 4.x (Web-Asp-Net45): Installed" "Gray"
+        } catch {
+            throw "Failed to enable ASP.NET 4.x (Web-Asp-Net45), required by the /aspnet streamed-HTML fixture: $_"
+        }
+    } else {
+        try {
+            $aspNetFeature = Get-WindowsOptionalFeature -Online -FeatureName IIS-ASPNET45 -ErrorAction Stop
+            if ($aspNetFeature.State -ne 'Enabled') {
+                Write-Status "Enabling ASP.NET 4.x (IIS-ASPNET45)..." "Yellow"
+                Enable-WindowsOptionalFeature -Online -FeatureName IIS-ASPNET45 -All -NoRestart | Out-Null
+                $aspNetFeature = Get-WindowsOptionalFeature -Online -FeatureName IIS-ASPNET45 -ErrorAction Stop
+            }
+            if ($aspNetFeature.State -ne 'Enabled') {
+                throw "IIS-ASPNET45 still not Enabled after the enable attempt"
+            }
+            Write-Status "ASP.NET 4.x (IIS-ASPNET45): $($aspNetFeature.State)" "Gray"
+        } catch {
+            throw "Failed to enable ASP.NET 4.x (IIS-ASPNET45), required by the /aspnet streamed-HTML fixture: $_"
         }
     }
 
@@ -492,6 +550,30 @@ function New-IISSite {
 
     # Assign app pool to site
     Invoke-AppCmd set site $SiteName /applicationDefaults.applicationPool:$AppPoolName | Out-Null
+
+    # /aspnet fixture application: stream.aspx in its own app pool. The main
+    # pool stays no-managed-code; this one runs managed v4.0 so ASP.NET can
+    # flush an HTML page in several sends. The application inherits the
+    # site's web.config, but the module engages only for an application
+    # whose own folder holds pagespeed.config, so New-WebConfig copies the
+    # config into $WebRoot\aspnet; PageSpeed then rewrites its output like
+    # any other page on the site.
+    Write-Status "Removing any pre-existing app pool: $AspNetAppPoolName" "Gray"
+    Invoke-AppCmd delete apppool $AspNetAppPoolName | Out-Null
+
+    Write-Status "Creating application pool: $AspNetAppPoolName" "Gray"
+    Invoke-AppCmd add apppool /name:$AspNetAppPoolName /managedRuntimeVersion:v4.0 /managedPipelineMode:Integrated | Out-Null
+
+    # Same identity / autoStart / idle / recycle / rapid-fail settings as the
+    # main pool (see the rationale above).
+    Invoke-AppCmd set apppool $AspNetAppPoolName /processModel.identityType:ApplicationPoolIdentity | Out-Null
+    Invoke-AppCmd set apppool $AspNetAppPoolName /autoStart:true | Out-Null
+    Invoke-AppCmd set apppool $AspNetAppPoolName /processModel.idleTimeout:00:00:00 | Out-Null
+    Invoke-AppCmd set apppool $AspNetAppPoolName /recycling.periodicRestart.time:00:00:00 | Out-Null
+    Invoke-AppCmd set apppool $AspNetAppPoolName /failure.rapidFailProtection:false | Out-Null
+
+    Write-Status "Creating /aspnet application under $SiteName" "Gray"
+    Invoke-AppCmd add app /site.name:$SiteName /path:/aspnet /physicalPath:"$WebRoot\aspnet" /applicationPool:$AspNetAppPoolName | Out-Null
 
     # The site's MIME types and compression switches live in the site's
     # web.config, which New-WebConfig writes whole. They used to be set here
@@ -814,6 +896,14 @@ pagespeed RulePackFile "$rulePackDir\multi\b.json"
             Write-Status "Copied pagespeed.config to $noCacheDir" "Gray"
         }
 
+        # Same for the /aspnet application: the module engages only when
+        # pagespeed.config sits in the application's own folder.
+        $aspNetDir = "$WebRoot\aspnet"
+        if (Test-Path $aspNetDir) {
+            Copy-Item "$WebRoot\pagespeed.config" "$aspNetDir\pagespeed.config" -Force
+            Write-Status "Copied pagespeed.config to $aspNetDir" "Gray"
+        }
+
         Write-Status "PageSpeed module will be enabled (flat-file config)" "Cyan"
     } else {
         if ($NoModule) {
@@ -913,6 +1003,9 @@ function Start-IISSite {
     # Start app pool. Capture the output (Invoke-AppCmd already merges appcmd's
     # stderr into its output) so we can surface it if the start fails.
     $poolStartOut = Invoke-AppCmd start apppool $AppPoolName
+
+    # The /aspnet fixture pool serves stream.aspx; start it like the main one.
+    Invoke-AppCmd start apppool $AspNetAppPoolName | Out-Null
 
     # Start the site, WITH RETRY. `appcmd start site` intermittently fails with
     # hresult 0x80070020 (ERROR_SHARING_VIOLATION -- "the process cannot access
@@ -1147,6 +1240,11 @@ function Stop-IISSite {
         Write-Status "Stopped app pool: $AppPoolName" "Gray"
     } catch { }
 
+    try {
+        Invoke-AppCmd stop apppool $AspNetAppPoolName 2>$null | Out-Null
+        Write-Status "Stopped app pool: $AspNetAppPoolName" "Gray"
+    } catch { }
+
     Write-Status "IIS site stopped" "Green"
 }
 
@@ -1175,6 +1273,20 @@ function Get-ServerStatus {
         }
     } catch {
         Write-Status "  App pool '$AppPoolName': Error checking status" "Yellow"
+    }
+
+    # The /aspnet fixture application's pool (streamed-HTML fixture)
+    try {
+        $aspNetPoolStatus = Invoke-AppCmd list apppool $AspNetAppPoolName
+        if ($aspNetPoolStatus) {
+            $state = if ($aspNetPoolStatus -match "state:(\w+)") { $matches[1] } else { "Unknown" }
+            $color = if ($state -eq "Started") { "Green" } else { "Yellow" }
+            Write-Status "  App pool '$AspNetAppPoolName': $state" $color
+        } else {
+            Write-Status "  App pool '$AspNetAppPoolName': Not found" "Gray"
+        }
+    } catch {
+        Write-Status "  App pool '$AspNetAppPoolName': Error checking status" "Yellow"
     }
 
     # Check site
@@ -1260,6 +1372,12 @@ function Uninstall-IISSite {
         } catch { }
     }
 
+    # Remove the /aspnet fixture application before the site goes away
+    try {
+        Invoke-AppCmd delete app "$SiteName/aspnet" 2>$null | Out-Null
+        Write-Status "Deleted application: $SiteName/aspnet" "Gray"
+    } catch { }
+
     # Remove site
     try {
         Invoke-AppCmd delete site $SiteName 2>$null | Out-Null
@@ -1271,6 +1389,20 @@ function Uninstall-IISSite {
         Invoke-AppCmd delete apppool $AppPoolName 2>$null | Out-Null
         Write-Status "Deleted app pool: $AppPoolName" "Gray"
     } catch { }
+
+    # Remove the /aspnet fixture pool and its directory
+    try {
+        Invoke-AppCmd delete apppool $AspNetAppPoolName 2>$null | Out-Null
+        Write-Status "Deleted app pool: $AspNetAppPoolName" "Gray"
+    } catch { }
+    try {
+        if (Test-Path "$WebRoot\aspnet") {
+            Remove-Item "$WebRoot\aspnet" -Recurse -Force
+            Write-Status "Removed $WebRoot\aspnet" "Gray"
+        }
+    } catch {
+        Write-Status "Warning: could not remove $WebRoot\aspnet: $_" "Yellow"
+    }
 
     # Uninstall module
     Uninstall-PageSpeedModule
