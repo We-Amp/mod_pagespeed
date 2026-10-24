@@ -265,14 +265,18 @@ TEST_F(RulePackStoreTest, AChangedFileIsReloadedAfterTheRecheckInterval) {
 
 TEST_F(RulePackStoreTest, TheRecordOfAnnouncedLoadsIsBounded) {
   // Every distinct pack version announces its load; a long-lived process
-  // that sees many versions must not remember them all.
-  const size_t kVersions = RulePackStore::kMaxAnnounced / 2 + 16;
+  // that sees many versions must not remember them all. Each unsigned
+  // version adds two keys, so kBound / 2 + 16 versions cross the wraparound
+  // that the production bound (kMaxAnnounced) would reach after 2048.
+  constexpr size_t kBound = 64;
+  store_.set_max_announced_for_testing(kBound);
+  const size_t kVersions = kBound / 2 + 16;
   for (size_t i = 0; i < kVersions; ++i) {
     WritePack(PackJson(absl::StrCat("0.", i, ".0"), "A"));
     PassRecheckInterval();
     ASSERT_NE(nullptr, Get().pack) << i;
   }
-  EXPECT_LE(store_.announced_size_for_testing(), RulePackStore::kMaxAnnounced);
+  EXPECT_LE(store_.announced_size_for_testing(), kBound);
 }
 
 TEST_F(RulePackStoreTest, StatusReportsTheLoadStateWithoutLoading) {
