@@ -3,6 +3,7 @@
 
 #include "pagespeed/iis/iis_process_context.h"
 #include "pagespeed/iis/iis_daemon_check.h"
+#include "pagespeed/iis/iis_deferred_release.h"
 
 #include <sddl.h>      // ConvertSidToStringSidW
 #include <mutex>       // std::once_flag, std::call_once
@@ -536,6 +537,34 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		server_context_ = server_context;
 	}
 	return server_context_;
+}
+
+namespace {
+
+// The process-wide release thread. Deliberately leaked: a static whose
+// destructor joins a thread would run at DLL unload under the loader lock.
+// IisModuleFactory::Terminate drains and joins it explicitly instead.
+DeferredReleaseQueue* ReleaseQueue() {
+	static DeferredReleaseQueue* queue = new DeferredReleaseQueue;
+	return queue;
+}
+
+}  // namespace
+
+// Threading rule (issue 313): the final shutdown of a site state runs on a
+// thread that is not one of its own pool threads and holds no request or
+// factory lock, as the other ports do at process exit.
+void IisProcessContext::ReleaseLast(IisProcessContext* context)
+{
+	ReleaseQueue()->Post([context] {
+		context->Shutdown();
+		delete context;
+	});
+}
+
+void IisProcessContext::DrainDeferredReleases()
+{
+	ReleaseQueue()->StopAndDrain();
 }
 
 void IisProcessContext::Shutdown()

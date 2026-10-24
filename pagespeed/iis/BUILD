@@ -51,6 +51,14 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# Runs the final release of a replaced site state on its own thread
+# (header-only, no IIS/Windows headers).
+cc_library(
+    name = "iis_deferred_release",
+    hdrs = ["iis_deferred_release.h"],
+    visibility = ["//visibility:public"],
+)
+
 # Holder for a reference-counted object's reference until another owner
 # claims it (the per-request module's process context reference).
 # Header-only and free of IIS/Windows headers, like iis_proxy_fetch_completion.
@@ -158,6 +166,7 @@ cc_library(
         ":iis_daemon_check",
         ":iis_daemon_record",
         ":iis_daemon_serve",
+        ":iis_deferred_release",
         ":iis_entity_chunk",
         ":iis_global_constants",
         ":iis_ip_string",
