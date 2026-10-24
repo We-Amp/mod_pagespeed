@@ -111,6 +111,13 @@ class ApacheFetch : public AsyncFetch {
   // sending a 'nosniff' header.
   void set_is_proxy(bool x) { is_proxy_ = x; }
 
+  // Drop the origin's Set-Cookie and the other hop-by-hop headers from the
+  // response.  Only the proxy fetches (MapProxyDomain / TestProxy, set
+  // together with set_is_proxy) want this, so it is off by default: every
+  // other ApacheFetch serves module-generated responses, and the module's
+  // own cookies on proxied HTML ride the proxy fetch itself.
+  void set_strip_cookies(bool x) { apache_writer_->set_strip_cookies(x); }
+
  protected:
   void HandleHeadersComplete() override LOCKS_EXCLUDED(scheduler_->mutex());
   void HandleDone(bool success) override LOCKS_EXCLUDED(scheduler_->mutex());

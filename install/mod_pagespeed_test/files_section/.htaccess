@@ -1,0 +1,8 @@
+# <Files> sections must apply to .pagespeed. resource URLs too: the module's
+# map-to-storage hook runs httpd's file walk against the real resource name.
+# This section names one rewritten URL exactly, so it matches neither the
+# origin file's leaf (Puzzle.jpg) nor a truncated stand-in leaf: only a
+# correct file walk applies it.
+<Files "xPuzzle.jpg.pagespeed.ic.fakehash.jpg">
+  ModPagespeedDisableFilters convert_jpeg_to_progressive
+</Files>

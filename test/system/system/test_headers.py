@@ -266,5 +266,32 @@ class TestResource404:
             f"resource_404_count should not change on 200, was {old_404_count}, now {new_404_count}"
 
 
+CUSTOM_404_MARKER = "psa-custom-error-document"
+
+
+@pytest.mark.apache_only
+class TestResource404UsesErrorDocument:
+    """The module's 404s go through httpd's ap_die, so the site's
+    ErrorDocument applies (module issue #325).
+
+    The tree mod_pagespeed_test/error_document carries an .htaccess with
+    "ErrorDocument 404 /mod_pagespeed_test/error_document/custom_404.html"
+    (setup_apache_test.sh grants AllowOverride All there). An unknown
+    .pagespeed. resource under that tree must be answered with that
+    document, not Apache's built-in error page.
+    """
+
+    def test_unknown_pagespeed_resource_serves_the_error_document(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        bad_url = f"{test_root}/error_document/A.bad.pagespeed.cf.hash.css"
+        response = client.get(bad_url)
+        assert_http_status(response, 404)
+        assert CUSTOM_404_MARKER in response.text, (
+            f"404 body does not carry the ErrorDocument marker: "
+            f"{response.text[:300]}"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

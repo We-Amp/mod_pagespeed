@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <set>
@@ -2019,6 +2020,33 @@ bool RewriteOptions::AdjustFiltersByCommaSeparatedList(
   return ret;
 }
 
+namespace {
+
+// Deprecation warnings for no-op filters fire once per filter name per
+// process.  Server-level configuration is parsed once per process anyway,
+// but .htaccess files and PageSpeedFilters query parameters are re-parsed on
+// every request, and a warning per request would grow the error log and the
+// message history in proportion to traffic.  ResetDeprecatedFilterWarnings()
+// clears the latch when a configuration load completes, so a server-level
+// deprecated filter warns once per load, not only once per process.
+std::mutex* DeprecatedFilterWarningMutex() {
+  static std::mutex* mutex = new std::mutex;
+  return mutex;
+}
+
+std::set<RewriteOptions::Filter>* WarnedDeprecatedFilters() {
+  static auto* warned = new std::set<RewriteOptions::Filter>;
+  return warned;
+}
+
+// True the first time this filter is asked about in this process.
+bool ShouldWarnDeprecatedFilter(RewriteOptions::Filter filter) {
+  std::lock_guard<std::mutex> lock(*DeprecatedFilterWarningMutex());
+  return WarnedDeprecatedFilters()->insert(filter).second;
+}
+
+}  // namespace
+
 bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
                                           FilterSet* set,
                                           MessageHandler* handler,
@@ -2108,10 +2136,12 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
         // anything: DeferIframeFilter is an integral part of
         // defer_javascript and disable_javascript, and enabling it on its
         // own only set a bit that nothing read.
-        handler->Message(
-            kWarning,
-            "Filter 'defer_iframe' is deprecated and has no effect; iframe "
-            "deferral is built into 'defer_javascript'.");
+        if (ShouldWarnDeprecatedFilter(filter)) {
+          handler->Message(
+              kWarning,
+              "Filter 'defer_iframe' is deprecated and has no effect; iframe "
+              "deferral is built into 'defer_javascript'.");
+        }
       } else {
         static const struct {
           Filter filter;
@@ -2143,7 +2173,9 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
         };
         for (auto deprecated : kDeprecatedWarnings) {
           if (deprecated.filter == filter) {
-            handler->Message(kWarning, "%s", deprecated.warning);
+            if (ShouldWarnDeprecatedFilter(filter)) {
+              handler->Message(kWarning, "%s", deprecated.warning);
+            }
             break;
           }
         }
@@ -2158,7 +2190,8 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
     // they are being enabled: disabling or forbidding them is exactly what
     // the warning asks operators to do, so those mentions stay silent.
     if (enabling && handler != nullptr) {
-      if (filter == kMakeGoogleAnalyticsAsyncDeprecated) {
+      if (filter == kMakeGoogleAnalyticsAsyncDeprecated &&
+          ShouldWarnDeprecatedFilter(filter)) {
         handler->Message(
             kWarning,
             "make_google_analytics_async is deprecated and is now a no-op: it "
@@ -2168,6 +2201,13 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
     }
   }
   return ret;
+}
+
+// Forget which deprecated filters have already been warned about: the next
+// configuration load (or the next test) starts from a clean latch.
+void RewriteOptions::ResetDeprecatedFilterWarnings() {
+  std::lock_guard<std::mutex> lock(*DeprecatedFilterWarningMutex());
+  WarnedDeprecatedFilters()->clear();
 }
 
 bool RewriteOptions::AddCommaSeparatedListToOptionSet(
