@@ -66,38 +66,39 @@ TEST_F(StdTimerTest, TimeProgressesMonotonically) {
   }
 }
 
-// Test that SleepUs actually sleeps for approximately the requested time
+// Test that SleepUs does not return before the requested time has elapsed.
 TEST_F(StdTimerTest, SleepUsAccuracy) {
   const int64 sleep_us = 10000;  // 10ms
 
-  int64 start = timer_.NowUs();
+  // Measure on the monotonic clock: the sleep itself runs on that clock
+  // family, and a wall-clock step would break the bounds below.
+  int64 start = timer_.NowMonotonicUs();
   timer_.SleepUs(sleep_us);
-  int64 end = timer_.NowUs();
-
-  int64 elapsed = end - start;
+  int64 elapsed = timer_.NowMonotonicUs() - start;
 
   // Should have slept at least the requested time
   EXPECT_GE(elapsed, sleep_us);
 
-  // Should not have slept too much longer (allow 50ms tolerance for scheduling)
-  EXPECT_LT(elapsed, sleep_us + 50000);
+  // The property under test is "not early": a sleep may legitimately
+  // overrun by any amount on a loaded host, so the upper bound is only a
+  // unit-error guard (it still catches a seconds-for-milliseconds bug).
+  EXPECT_LT(elapsed, sleep_us + 5 * Timer::kSecondUs);
 }
 
-// Test that SleepMs is consistent with SleepUs
+// Test that SleepMs does not return before the requested time has elapsed.
 TEST_F(StdTimerTest, SleepMsAccuracy) {
   const int64 sleep_ms = 10;
 
-  int64 start = timer_.NowMs();
+  int64 start = timer_.NowMonotonicMs();
   timer_.SleepMs(sleep_ms);
-  int64 end = timer_.NowMs();
-
-  int64 elapsed = end - start;
+  int64 elapsed = timer_.NowMonotonicMs() - start;
 
   // Should have slept at least the requested time
   EXPECT_GE(elapsed, sleep_ms);
 
-  // Should not have slept too much longer (allow 50ms tolerance for scheduling)
-  EXPECT_LT(elapsed, sleep_ms + 50);
+  // As in SleepUsAccuracy: no upper bound tighter than a unit-error guard,
+  // since a sleep may legitimately overrun on a loaded host.
+  EXPECT_LT(elapsed, sleep_ms + 5 * Timer::kSecondMs);
 }
 
 // Test microsecond precision by measuring multiple short sleeps
