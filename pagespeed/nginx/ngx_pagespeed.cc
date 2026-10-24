@@ -4648,6 +4648,37 @@ ngx_int_t ps_init(ngx_conf_t* cf) {
     ngx_http_core_main_conf_t* cmcf = static_cast<ngx_http_core_main_conf_t*>(
         ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module));
 
+    // UseNativeFetcher needs a resolver.  Reject the configuration here, as
+    // an ordinary configuration error, rather than in ps_init_module: nginx
+    // exits the process when an init-module hook fails, which on a SIGHUP
+    // sent to the master takes down the running server.  A configuration
+    // error leaves the previous configuration running.  Servers are merged
+    // before this hook runs, so the first server's resolver is settled.
+    if (cmcf->servers.nelts > 0) {
+      ngx_http_core_srv_conf_t** cscfp =
+          static_cast<ngx_http_core_srv_conf_t**>(cmcf->servers.elts);
+      bool any_server_context = false;
+      for (ngx_uint_t i = 0; i < cmcf->servers.nelts; i++) {
+        ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+            cscfp[i]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+        if (cfg_s->server_context != nullptr) {
+          any_server_context = true;
+        }
+      }
+      if (any_server_context) {
+        ngx_http_core_loc_conf_t* clcf = static_cast<ngx_http_core_loc_conf_t*>(
+            ngx_http_conf_get_module_loc_conf(*cscfp, ngx_http_core_module));
+        cfg_m->driver_factory->set_resolver(clcf->resolver);
+        cfg_m->driver_factory->set_resolver_timeout(clcf->resolver_timeout);
+        if (!cfg_m->driver_factory->CheckResolver()) {
+          ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                             "UseNativeFetcher is on, please configure a "
+                             "resolver");
+          return NGX_ERROR;
+        }
+      }
+    }
+
     int phase = NGX_HTTP_PREACCESS_PHASE;
 
     // As of nginx 1.13.4, try_files has changed.

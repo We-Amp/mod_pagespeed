@@ -91,6 +91,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **nginx: a reload into a configuration with `UseNativeFetcher` and no
+  `resolver` no longer takes down the running server.** The missing
+  resolver is now reported while the configuration is loaded, like any other
+  configuration error. A SIGHUP sent directly to the master (or by a
+  service manager that signals it) used to make the master exit; now the
+  error is logged and the running configuration stays in place, still
+  optimizing. Starting nginx, `nginx -t` and `nginx -s reload` refuse the
+  configuration as before.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
