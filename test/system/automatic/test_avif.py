@@ -30,12 +30,14 @@ Two groups of cases:
 """
 
 import re
+import time
 from urllib.parse import urljoin
 
 import pytest
 
 from pagespeed_test_framework import (
     PageSpeedClient,
+    assert_header_contains,
     assert_http_status,
     assert_image_format,
     assert_stat_increased,
@@ -86,6 +88,17 @@ _AVIF_REWRITES = "image_avif_rewrites"
 # here is indistinguishable from a broken AVIF path. Report it on failure.
 _AVIF_JPEG_TIMEOUTS = "image_avif_conversion_jpeg_timeouts"
 
+# In-flight gauge for image rewrites. ImageRewriteFilter brackets every
+# RewriteLoadedResourceImpl with +1/-1 on it, and image_avif_rewrites is
+# only ever incremented inside that bracket, so "AVIF counter quiet AND
+# this gauge at zero" means no AVIF adoption already under way can land
+# later. Residual gap, accepted: a rewrite that has not started yet (still
+# queued, or waiting on its input fetch or the rewrite lock) is invisible
+# to the gauge; serial tests plus the quiet run settled_stats demands make
+# that negligible. A gauge stuck positive makes _idle_stats fail loudly
+# rather than pass falsely.
+_IMAGE_ONGOING = "image_ongoing_rewrites"
+
 
 def _fetch_rewritten_image(
     client: PageSpeedClient,
@@ -127,6 +140,27 @@ def _fetch_rewritten_image(
     image = client.get(image_url, headers={"Accept": accept})
     assert_http_status(image, 200)
     return image
+
+
+def _idle_stats(stats_snapshot, timeout: float = 120.0):
+    """Snapshot once no image rewrite is running and the AVIF counter is quiet.
+
+    settled_stats cannot see a running image rewrite (the gauge is not in
+    its IN_FLIGHT_GAUGES), so keep settling until the gauge also reads
+    zero. Both ends of a zero-delta window must come from here: a rewrite
+    this request started but had not finished when the response arrived is
+    then waited out and counted inside the window, not lost after it.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        snap = settled_stats(stats_snapshot, [_AVIF_REWRITES, _IMAGE_ONGOING])
+        if snap[_IMAGE_ONGOING] == 0:
+            return snap
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"image rewrites still in flight after {timeout}s: "
+                f"{_IMAGE_ONGOING}={snap[_IMAGE_ONGOING]}"
+            )
 
 
 @pytest.mark.requires_stats
@@ -171,16 +205,39 @@ class TestAvifContentNegotiation:
         convert_jpeg_to_avif is enabled here too, so the absence of AVIF is
         attributable to capability detection rather than to the filter simply
         being off.
+
+        The absence of AVIF is proven on two levels. On this request's own
+        resource, whose negotiated format rides in three places: the
+        rewritten URL's extension (OutputResource::SetType stamps the output
+        content type's file extension into it, so an AVIF output would read
+        ".avif"), the response Content-Type, and the body bytes. And by a
+        delta of exactly zero on the server-wide image_avif_rewrites
+        counter, which also covers an AVIF output adopted for other work
+        this request triggered. That counter also ticks for AVIF work
+        belonging to other requests, and a rewrite finishing late on a
+        loaded runner lands inside the delta window (issue #230), so both
+        snapshots come from _idle_stats: the image_ongoing_rewrites gauge
+        brackets every image rewrite, and the counter only ticks inside
+        that bracket, so a window that opens and closes with the gauge at
+        zero cannot admit an adoption that had already started.
         """
-        old_stats = settled_stats(stats_snapshot, [_AVIF_REWRITES])
+        old_stats = _idle_stats(stats_snapshot)
         response = _fetch_rewritten_image(
             client, test_root, _FILTERS_BOTH, _ACCEPT_WEBP
         )
-        new_stats = stats_snapshot()
+        new_stats = _idle_stats(stats_snapshot)
 
         assert_stat_unchanged(
             old_stats, new_stats, _AVIF_REWRITES,
-            "WebP-only request must not drive an AVIF rewrite",
+            "WebP-only request should not adopt an AVIF output",
+        )
+        assert response.url.endswith(".webp"), (
+            "WebP-only request should negotiate a WebP rewrite, "
+            f"got {response.url}"
+        )
+        assert_header_contains(
+            response, "Content-Type", "image/webp",
+            "WebP-capable request should be served as image/webp",
         )
         assert_image_format(
             response, "webp",
@@ -194,16 +251,30 @@ class TestAvifContentNegotiation:
 
         Both conversion filters are enabled here, so capability detection is
         the only thing standing between this request and a converted image.
+
+        Like test_webp_accept_yields_webp, the exclusion of AVIF is proven
+        on this request's own resource and by a delta of exactly zero on
+        image_avif_rewrites, with both snapshots taken by _idle_stats so a
+        rewrite finishing late on a loaded runner cannot land inside the
+        window (issue #230).
         """
-        old_stats = settled_stats(stats_snapshot, [_AVIF_REWRITES])
+        old_stats = _idle_stats(stats_snapshot)
         response = _fetch_rewritten_image(
             client, test_root, _FILTERS_BOTH, _ACCEPT_LEGACY
         )
-        new_stats = stats_snapshot()
+        new_stats = _idle_stats(stats_snapshot)
 
         assert_stat_unchanged(
             old_stats, new_stats, _AVIF_REWRITES,
-            "Legacy request must not drive an AVIF rewrite",
+            "Legacy request should not adopt an AVIF output",
+        )
+        assert response.url.endswith(".jpg"), (
+            "Legacy request should keep a JPEG rewrite, "
+            f"got {response.url}"
+        )
+        assert_header_contains(
+            response, "Content-Type", "image/jpeg",
+            "Legacy request should be served as image/jpeg",
         )
         assert_image_format(
             response, "jpeg",
