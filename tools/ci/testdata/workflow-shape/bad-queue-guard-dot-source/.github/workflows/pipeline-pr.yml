@@ -11,6 +11,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      fleet: ${{ steps.scope.outputs.fleet }}
+      heavy: ${{ steps.scope.outputs.heavy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,6 +51,34 @@ jobs:
           git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
             git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
           git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
+
+      - name: Decide the fleet scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_SCOPE: ${{ vars.CI_SCOPE }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SHA: ${{ github.sha }}
+          FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
+          PR_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}
+        # merge_group and workflow_dispatch always run the full PR tier; the
+        # decision script is read from the default branch, never the tree.
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/fleet-scope.txt"
+          case "${GITHUB_EVENT_NAME}" in
+            merge_group|workflow_dispatch) printf 'fleet=true\nheavy=true\n' > "${out}" ;;
+            *)
+              if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&
+                bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&
+                [ "$(grep -cxE '(fleet|heavy)=(true|false)' "${out}")" = 2 ] && [ "$(wc -l < "${out}")" -eq 2 ]; then
+                :
+              else
+                echo "::warning::fleet scope undecided; running the full PR tier"
+                printf 'fleet=true\nheavy=true\n' > "${out}"
+              fi ;;
+          esac
+          cat "${out}" >> "$GITHUB_OUTPUT"
       - run: . tools/ci/x.sh
   vendor:
     needs: changes

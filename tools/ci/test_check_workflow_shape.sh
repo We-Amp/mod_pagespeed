@@ -37,10 +37,13 @@ expect_bad() { # <fixture-dir> <message substring>
   local dir="$1" want="$2" out
   if out=$(bash "$CHECK" "${FIX}/${dir}" 2>&1); then
     fail "${dir}: passed unexpectedly"
-  elif printf '%s' "$out" | grep -qF "$want"; then
-    pass "${dir} rejected (${want})"
-  else
+  elif ! printf '%s' "$out" | grep -qF "$want"; then
     fail "${dir}: failed but without '${want}': $out"
+  elif [ "${want}" != "fleet-scope" ] && printf '%s' "$out" | grep -qF "(fleet-scope)"; then
+    # Every fixture carries the fleet-scope step, so it fails only for its own defect.
+    fail "${dir}: failed for '${want}' but also for fleet-scope: $out"
+  else
+    pass "${dir} rejected (${want})"
   fi
 }
 
@@ -121,6 +124,23 @@ expect_bad bad-queue-guard-push-step-wide 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-dispatch-step-missing 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-dispatch-step-extra-command 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-steps-misordered 'queue-guard-reads-default-branch'
+# vendor-if-fleet-only: good-queue-guard has vendor with exactly
+# `if: ${{ needs.changes.outputs.fleet == 'true' }}` (accepted above); any other if: is rejected.
+expect_bad bad-queue-guard-vendor-if-always 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-vendor-if-heavy 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-vendor-if-not-false 'queue-guard-reads-default-branch'
+# fleet-scope-step-spec: good-queue-guard and good/ carry the spec step (accepted above).
+expect_bad bad-fleet-scope-extra-command 'fleet-scope'
+expect_bad bad-fleet-scope-renamed 'fleet-scope'
+expect_bad bad-fleet-scope-extra-env 'fleet-scope'
+expect_bad bad-fleet-scope-outputs-missing 'fleet-scope'
+# fleet-scope-reads-default-branch
+expect_bad bad-fleet-scope-reads-tree 'fleet-scope'
+# fleet-scope-short-circuit-removed
+expect_bad bad-fleet-scope-short-circuit-removed 'fleet-scope'
+# fleet-scope-position
+expect_bad bad-fleet-scope-before-fork-guard 'fleet-scope'
+expect_bad bad-fleet-scope-after-diff 'fleet-scope'
 expect_bad bad-event-guard-missing 'event-guard'
 expect_bad bad-event-guard-unreached 'event-guard'
 expect_bad bad-event-guard-extra-command 'event-guard'

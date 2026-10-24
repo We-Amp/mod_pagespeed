@@ -41,10 +41,12 @@ permissions:
 jobs:
   pr:
     # The called pipeline requests pull-requests: read for the release-note
-    # gate, and contents: write for its lock-check job (pushes a regenerated
-    # MODULE.bazel.lock to a same-repository PR branch); a called workflow
+    # gate, contents: write for its lock-check job (pushes a regenerated
+    # MODULE.bazel.lock to a same-repository PR branch) and checks: read for
+    # its fleet scope (reads the commit's check suites); a called workflow
     # cannot exceed what its caller grants.
     permissions:
+      checks: read
       contents: write
       pull-requests: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@master
@@ -113,6 +115,8 @@ jobs:
         run: tools/ci/test_sweep_queued_runs.sh
       - name: Merge-queue fork guard
         run: tools/ci/test_queue_fork_guard.sh
+      - name: PR tier fleet scope
+        run: tools/ci/test_pr_tier_scope.sh
       - name: Post-merge tests never reuse cached results
         run: tools/ci/test_post_merge_nocache.sh --selftest && tools/ci/test_post_merge_nocache.sh
       - name: Artifact staging and bundle validation

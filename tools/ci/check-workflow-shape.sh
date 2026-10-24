@@ -571,7 +571,8 @@ done
 #     find/xargs/source/dot-invocation and no GITHUB_ENV/GITHUB_PATH write;
 #   - BASH_ENV, PATH and GIT_DIR/GIT_WORK_TREE/GIT_CONFIG* are not set at
 #     workflow level or in the `changes` job;
-#   - the `vendor` job has `needs:` containing `changes` and no `if:`.
+#   - the `vendor` job has `needs:` containing `changes` and either no `if:`
+#     or exactly VENDOR_IF (the fleet scope, see the fleet-scope rule).
 QG_STEP="Refuse fork and Dependabot PRs in the merge queue"
 QG_IF="        if: github.event_name == 'merge_group'"
 QG_PAT='(^|[^_A-Za-z0-9])queue_fork_guard\.sh'
@@ -586,6 +587,8 @@ QG_FETCH='  git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:
 QG_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash'
 QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "${QG_SHOW}")"
 QG_BODY_MIN="$(printf '%s\n%s' "${QG_SET}" "${QG_SHOW}")"
+# shellcheck disable=SC2016
+VENDOR_IF='    if: ${{ needs.changes.outputs.fleet == '"'true'"' }}'
 QG_PUSH_STEP="Refuse pushes that are not on the default branch"
 QG_DISP_STEP="Refuse dispatches made with a workflow token"
 # Expected text of the push-ref step and of the dispatch-actor step.
@@ -711,10 +714,100 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
         ! { printf '%s\n' "${vjob}" | grep -qE '^    needs:[[:space:]]*$' && printf '%s\n' "${vjob}" | grep -qxE '      - changes'; }; then
         qg_err "the vendor job must have needs: changes"
       fi
-      if printf '%s\n' "${vjob}" | grep -qE '^    ["'\'']?if["'\'']?:'; then
-        qg_err "the vendor job must not have an if:"
+      # The only if: vendor may carry is the fleet scope of the changes job
+      # (the fleet-scope rule below pins the step that sets it).
+      vifs="$(printf '%s\n' "${vjob}" | grep -E '^    ["'\'']?if["'\'']?[[:space:]]*:' || true)"
+      if [ -n "${vifs}" ] && [ "${vifs}" != "${VENDOR_IF}" ]; then
+        qg_err "the vendor job may have no if: or exactly: ${VENDOR_IF# }"
       fi
     fi
+  fi
+done
+
+# --- fleet-scope ---------------------------------------------------------------
+# The fleet scope of the PR tier (docs/ci/pipelines.md, "CI_SCOPE") decides
+# whether `vendor`, and with it every fleet job, runs. Its decision script must
+# be read from the default branch, never from the tree under test, and
+# merge_group and workflow_dispatch must never reach it. In pipeline-pr.yml (and
+# any workflow that names the script):
+#   - the `changes` job holds exactly one step named FS_STEP, in exactly the
+#     spec form of fs_expected (comment and blank lines aside): no other key,
+#     env key or command, and the inline merge_group|workflow_dispatch branch;
+#   - the step comes right after the merge-queue guard step (so after the
+#     three pinned steps and before the path-filter diff step);
+#   - the `changes` job publishes `fleet` and `heavy` from that step;
+#   - outside that step, no non-comment line names `pr_tier_scope.sh` (the
+#     test script excepted).
+FS_STEP="Decide the fleet scope"
+FS_PAT='(^|[^_A-Za-z0-9])pr_tier_scope\.sh'
+fs_expected() {
+  # shellcheck disable=SC2016  # the text to match carries literal ${...}
+  printf '%s\n' \
+    "      - name: ${FS_STEP}" \
+    '        id: scope' \
+    '        env:' \
+    '          GH_TOKEN: ${{ github.token }}' \
+    '          CI_SCOPE: ${{ vars.CI_SCOPE }}' \
+    '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' \
+    '          SHA: ${{ github.sha }}' \
+    "          FORK_OR_BOT: \${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}" \
+    "          PR_FULL: \${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}" \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          out="${RUNNER_TEMP}/fleet-scope.txt"' \
+    '          case "${GITHUB_EVENT_NAME}" in' \
+    "            merge_group|workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
+    '            *)' \
+    '              if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&' \
+    '                bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&' \
+    "                [ \"\$(grep -cxE '(fleet|heavy)=(true|false)' \"\${out}\")\" = 2 ] && [ \"\$(wc -l < \"\${out}\")\" -eq 2 ]; then" \
+    '                :' \
+    '              else' \
+    '                echo "::warning::fleet scope undecided; running the full PR tier"' \
+    "                printf 'fleet=true\\nheavy=true\\n' > \"\${out}\"" \
+    '              fi ;;' \
+    '          esac' \
+    '          cat "${out}" >> "$GITHUB_OUTPUT"'
+}
+fs_err() { err "${wf}: $1 (fleet-scope)"; }
+
+for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
+  [ -n "${wf}" ] || continue
+  fs_mentions="$(grep -E "${FS_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
+  qg_mentions="$(grep -E "${QG_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
+  if [ "$(basename "${wf}")" != "pipeline-pr.yml" ] && [ "${fs_mentions}" = "0" ] && [ "${qg_mentions}" = "0" ]; then
+    continue
+  fi
+  job="$(job_block "${wf}" changes)"
+  n_steps="$(printf '%s\n' "${job}" | grep -cxF "      - name: ${FS_STEP}" || true)"
+  if [ "${n_steps}" != "1" ]; then
+    fs_err "the changes job must hold exactly one step named '${FS_STEP}' (found ${n_steps})"
+  else
+    sblk="$(printf '%s\n' "${job}" | awk -v n="      - name: ${FS_STEP}" '/^      - / { instep = ($0 == n) } instep { print }' | grep -vE '^[[:space:]]*(#|$)' || true)"
+    if [ "${sblk}" != "$(fs_expected)" ]; then
+      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; merge_group and workflow_dispatch decided inline)"
+    fi
+    # Right after the merge-queue guard step, when the job has one (its own
+    # rule reports a missing guard step).
+    if printf '%s\n' "${job}" | grep -qxF "      - name: ${QG_STEP}"; then
+      next_step="$(printf '%s\n' "${job}" | grep -E '^      - ' | awk -v g="      - name: ${QG_STEP}" 'f { print; exit } $0 == g { f = 1 }')"
+      if [ "${next_step}" != "      - name: ${FS_STEP}" ]; then
+        fs_err "the step '${FS_STEP}' must come right after '${QG_STEP}' (before the path-filter diff)"
+      fi
+    fi
+  fi
+  for o in fleet heavy; do
+    if ! printf '%s\n' "${job}" | grep -qxF "      ${o}: \${{ steps.scope.outputs.${o} }}"; then
+      fs_err "the changes job must publish '${o}: \${{ steps.scope.outputs.${o} }}'"
+    fi
+  done
+  # No other read of the script, in any spelling, outside the scope step.
+  rest="$(awk -v n="      - name: ${FS_STEP}" '
+    $0 == n { skip = 1; next }
+    skip && (/^      - / || /^  [A-Za-z0-9_-]+:/ || /^[A-Za-z]/) { skip = 0 }
+    !skip { print }' "${wf}" | grep -vE '^[[:space:]]*#')"
+  if printf '%s\n' "${rest}" | sed 's/test_pr_tier_scope\.sh//g' | grep -q 'pr_tier_sco'; then
+    fs_err "pr_tier_sco... is named outside the '${FS_STEP}' step; never read the tree's copy"
   fi
 done
 
