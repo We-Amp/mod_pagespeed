@@ -60,7 +60,7 @@ class KeyDirectoryWarmer : public ThreadSystem::Thread {
     int64_t refresh_sec = 3600;       // base refresh interval
     int64_t jitter_sec = 0;           // per-worker spread added to each wait
     int64_t fetch_timeout_ms = 2000;  // bounded blocking-fetch wait
-    size_t max_response_bytes = 256 * 1024;
+    size_t max_response_bytes = size_t{256} * 1024;
     int64_t positive_ttl_sec = 3600;  // cache entry lifetime (clamped in core)
   };
 

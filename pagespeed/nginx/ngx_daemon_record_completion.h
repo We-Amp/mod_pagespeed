@@ -84,7 +84,7 @@ extern const char kIproDaemonNotifyDropped[];
 // half of the cap: a fallback storm on an Accept-negotiating origin can
 // never starve the recordings out of the queue.  A notification refused
 // this way is counted on ipro_daemon_notify_dropped.
-constexpr int64 kDaemonCompletionQueueMaxBytes = 64 * 1024 * 1024;
+constexpr int64 kDaemonCompletionQueueMaxBytes = int64{64} * 1024 * 1024;
 constexpr int kDaemonCompletionQueueMaxItems = 64;
 constexpr int kDaemonNotifyQueueMaxItems = kDaemonCompletionQueueMaxItems / 2;
 

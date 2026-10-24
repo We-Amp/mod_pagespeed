@@ -38,8 +38,8 @@ inline constexpr char kDefaultDaemonApiSocketPath[] =
 // size depends on the endpoint).  JSON management answers are far under
 // 1 MiB; a cached image original can be several MiB.  An over-cap body is a
 // failure (DaemonReadFailure::kTooLarge), never a truncation.
-inline constexpr size_t kMaxJsonResponseBytes = 1024 * 1024;
-inline constexpr size_t kMaxContentResponseBytes = 16 * 1024 * 1024;
+inline constexpr size_t kMaxJsonResponseBytes = size_t{1024} * 1024;
+inline constexpr size_t kMaxContentResponseBytes = size_t{16} * 1024 * 1024;
 
 // Why a daemon read failed, reported by the reader so callers never have to
 // guess from a status code.

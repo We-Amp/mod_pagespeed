@@ -75,7 +75,7 @@ struct PsZeroCopyAlias {
 // the default h2 stream flow-control window (65535), so a well-paced stream
 // always has a full window of bytes in flight between top-filter re-entries
 // and never starves.
-const size_t kRingSlotBytes = 32 * 1024;
+const size_t kRingSlotBytes = size_t{32} * 1024;
 const size_t kRingSlotCount = 2;
 // Bodies at or under this keep the single whole-body copy: the per-window
 // renew + refill bookkeeping isn't worth four windows or fewer.

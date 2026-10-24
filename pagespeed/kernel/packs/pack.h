@@ -27,23 +27,23 @@ namespace pagespeed::packs {
 // Limits. Every bound the loader and the later page pass enforce is named
 // here.
 // ---------------------------------------------------------------------------
-inline constexpr size_t kMaxPackFileBytes = 1024 * 1024;  // 1 MiB
+inline constexpr size_t kMaxPackFileBytes = size_t{1024} * 1024;  // 1 MiB
 inline constexpr size_t kMaxRules = 200;
-inline constexpr size_t kMaxTableEntries = 50000;          // all tables
-inline constexpr size_t kMaxTemplateBytes = 16 * 1024;     // 16 KiB
-inline constexpr int64_t kRegexMaxMemBytes = 1024 * 1024;  // per regex
-inline constexpr size_t kMaxUrlBytes = 2048;               // per value
-inline constexpr size_t kMaxTitleChars = 300;              // per value
-inline constexpr size_t kMaxDescriptionChars = 1000;       // per value
-inline constexpr size_t kMaxJsonLdBytes = 16 * 1024;       // expanded
+inline constexpr size_t kMaxTableEntries = 50000;               // all tables
+inline constexpr size_t kMaxTemplateBytes = size_t{16} * 1024;  // 16 KiB
+inline constexpr int64_t kRegexMaxMemBytes = int64_t{1024} * 1024;  // per regex
+inline constexpr size_t kMaxUrlBytes = 2048;                        // per value
+inline constexpr size_t kMaxTitleChars = 300;                       // per value
+inline constexpr size_t kMaxDescriptionChars = 1000;                // per value
+inline constexpr size_t kMaxJsonLdBytes = size_t{16} * 1024;        // expanded
 // An existing JSON-LD block larger than this is not parsed; the jsonld rule
 // then leaves the page's JSON-LD alone.
-inline constexpr size_t kMaxJsonLdScanBytes = 1024 * 1024;  // per block
+inline constexpr size_t kMaxJsonLdScanBytes = size_t{1024} * 1024;  // per block
 // Deepest [ / { nesting a JSON-LD block or template may have. Deeper blocks
 // are never parsed (parsing and printing recurse per level).
 inline constexpr size_t kMaxJsonLdDepth = 64;
-inline constexpr size_t kMaxAddedBytesPerPage = 64 * 1024;  // per page
-inline constexpr size_t kMaxJsonDepth = 32;                 // pack file
+inline constexpr size_t kMaxAddedBytesPerPage = size_t{64} * 1024;  // per page
+inline constexpr size_t kMaxJsonDepth = 32;                         // pack file
 inline constexpr size_t kMaxRuleIdLength = 64;
 inline constexpr size_t kMaxEntitlementLength = 64;  // pack.license.entitlement
 inline constexpr size_t kMaxTermsUrlBytes = 512;     // pack.license.terms
