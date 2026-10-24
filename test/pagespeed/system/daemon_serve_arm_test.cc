@@ -41,7 +41,6 @@
 // unobservable on the parity rig at this pin precisely because nothing there
 // can any longer hand the module a format the request did not advertise.
 
-#include "pagespeed/system/daemon_record_arm.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 
 #include <atomic>
@@ -61,6 +60,7 @@
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/daemon_record_arm.h"
 #include "pagespeed/system/siphash.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -794,7 +794,8 @@ TEST_F(DaemonServeArmTest, ReadsTheDurableOriginalByIdWhenNoVariantFits) {
               GoogleString::npos);
 }
 
-TEST_F(DaemonServeArmTest, ADurableOriginalCarriesTheOriginsValidatorNotADerivedOne) {
+TEST_F(DaemonServeArmTest,
+       ADurableOriginalCarriesTheOriginsValidatorNotADerivedOne) {
   // ORIGIN BYTES, ORIGIN VALIDATOR.  The durable-original serve used to
   // carry the derived `W/"ps-` tag: a label that on every other response
   // means optimizer output, stamped on bytes the optimizer did not produce,
@@ -838,7 +839,8 @@ TEST_F(DaemonServeArmTest, ADurableOriginalCarriesTheOriginsValidatorNotADerived
   EXPECT_EQ("", malformed.etag);
 }
 
-TEST_F(DaemonServeArmTest, AnOriginalsValidatorNeverRevalidatesTheOptimizedVariant) {
+TEST_F(DaemonServeArmTest,
+       AnOriginalsValidatorNeverRevalidatesTheOptimizedVariant) {
   // The other half of the split planes.  A client that holds the ORIGINAL's
   // validator and meets a family that has since gained a variant must be
   // handed the variant, not told its origin bytes are current: the two tags
@@ -1870,7 +1872,8 @@ TEST_F(DaemonServeArmTest, AServeHitWithoutAHostUsesTheHostlessRecorder) {
   EXPECT_EQ(GoogleString::npos, log.find("serve_hit_host"));
 }
 
-TEST_F(DaemonServeArmTest, AnOptimizerWithoutTheHostRecorderStillRecordsTheHit) {
+TEST_F(DaemonServeArmTest,
+       AnOptimizerWithoutTheHostRecorderStillRecordsTheHit) {
   // An optimizer package from before per-host serve savings: the entry point
   // is absent, the library still loads, and the hit is recorded as before.
   GoogleString error;
@@ -1910,10 +1913,10 @@ TEST_F(DaemonServeArmTest, EveryServedContentClassIsRecordedAsItself) {
     EXPECT_EQ(content_class, decision.ps_content_type);
     stats.RecordHit(decision.ps_content_type, decision.origin_content_length,
                     decision.body.size(), decision.stored_mask);
-    EXPECT_NE(GoogleString::npos,
-              CallLog().find(StrCat("serve_hit type=",
-                                    IntegerToString(content_class),
-                                    " original=4096")));
+    EXPECT_NE(
+        GoogleString::npos,
+        CallLog().find(StrCat("serve_hit type=", IntegerToString(content_class),
+                              " original=4096")));
   }
 }
 
@@ -2588,8 +2591,7 @@ TEST_F(DaemonServeArmTest, OnlyACodingListedByNameWithAWeightCounts) {
       {"gzip", "", false},
   };
   for (const auto& c : cases) {
-    EXPECT_EQ(c.advertised,
-              ServeAcceptEncodingAdvertises(c.header, c.coding))
+    EXPECT_EQ(c.advertised, ServeAcceptEncodingAdvertises(c.header, c.coding))
         << "Accept-Encoding: \"" << c.header << "\", coding \"" << c.coding
         << "\"";
   }
@@ -2936,7 +2938,8 @@ TEST_F(DaemonServeArmTest, WithoutAGzipCopyTheArmDoesNotGuess) {
   EXPECT_FALSE(decision.lost_optimized_copy);
 }
 
-TEST_F(DaemonServeArmTest, ACompressedCopyTheOptimizerDidNotWriteIsNotEvidence) {
+TEST_F(DaemonServeArmTest,
+       ACompressedCopyTheOptimizerDidNotWriteIsNotEvidence) {
   // A gzip-coded entry that is not marked as the optimizer's own output
   // says nothing about what the optimizer did with this URL.
   setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);
@@ -3101,17 +3104,17 @@ TEST_F(DaemonServeArmTest, ALostCopyIsAnsweredWithOneOrdinaryNotification) {
   SimpleStats stats(thread_system_.get());
   Variable* notified = stats.AddVariable("ipro_daemon_heal_notified");
   Variable* failed = stats.AddVariable("ipro_daemon_heal_notify_failed");
-  EXPECT_TRUE(DaemonServeLostCopyNotify(
-      *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
-      default_signature_, notified, failed));
+  EXPECT_TRUE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                        decision, default_context_,
+                                        default_signature_, notified, failed));
   EXPECT_EQ(before + 1, NotifyCount());
   // The stylesheet's own class and the client's raw mask -- a capability
   // vector the classifier produced, never a reserved value.
-  EXPECT_NE(GoogleString::npos,
-            CallLog().find(StrCat("url=", kCssUrl, " host=", kHost,
-                                  " scheme=", kScheme, " content_type=1 mask=",
-                                  static_cast<uint64>(decision.client_mask),
-                                  " ")));
+  EXPECT_NE(
+      GoogleString::npos,
+      CallLog().find(StrCat("url=", kCssUrl, " host=", kHost,
+                            " scheme=", kScheme, " content_type=1 mask=",
+                            static_cast<uint64>(decision.client_mask), " ")));
   EXPECT_EQ(1, notified->Get());
   EXPECT_EQ(0, failed->Get());
 }
@@ -3128,9 +3131,9 @@ TEST_F(DaemonServeArmTest, AFailedHealSendMovesTheFailureCounterOnly) {
   Variable* notified = stats.AddVariable("ipro_daemon_heal_notified");
   Variable* failed = stats.AddVariable("ipro_daemon_heal_notify_failed");
   const int before = NotifyCount();
-  EXPECT_FALSE(DaemonServeLostCopyNotify(
-      *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
-      default_signature_, notified, failed));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         decision, default_context_,
+                                         default_signature_, notified, failed));
   EXPECT_EQ(before + 1, NotifyCount());
   EXPECT_EQ(0, notified->Get());
   EXPECT_EQ(1, failed->Get());
@@ -3147,15 +3150,15 @@ TEST_F(DaemonServeArmTest, NothingIsAskedForWithoutTheFlagOrTheContext) {
   // A decision that does not carry the flag asks for nothing.
   DaemonServeDecision plain = lost;
   plain.lost_optimized_copy = false;
-  EXPECT_FALSE(DaemonServeLostCopyNotify(
-      *abi_, "/tmp/ps-worker.sock", request, plain, default_context_,
-      default_signature_, nullptr, nullptr));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         plain, default_context_,
+                                         default_signature_, nullptr, nullptr));
   // Nor does a flag on anything but a durable-original serve.
   DaemonServeDecision wrong_verdict = lost;
   wrong_verdict.verdict = DaemonServeVerdict::kServeOptimized;
-  EXPECT_FALSE(DaemonServeLostCopyNotify(
-      *abi_, "/tmp/ps-worker.sock", request, wrong_verdict, default_context_,
-      default_signature_, nullptr, nullptr));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         wrong_verdict, default_context_,
+                                         default_signature_, nullptr, nullptr));
   // Both halves of the option context, or nothing.
   EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
                                          lost, "", default_signature_, nullptr,
@@ -3337,8 +3340,8 @@ TEST(DaemonHealNotifyLimiterTest, TheKeyedHashMatchesItsPublishedVectors) {
 // the keyed hash is for.
 uint64_t SeededFnv1aForComparison(uint64_t seed, StringPiece text) {
   uint64_t hash = 14695981039346656037ULL ^ seed;
-  for (size_t i = 0; i < text.size(); ++i) {
-    hash ^= static_cast<unsigned char>(text[i]);
+  for (char i : text) {
+    hash ^= static_cast<unsigned char>(i);
     hash *= 1099511628211ULL;
   }
   return hash;
@@ -3353,7 +3356,8 @@ uint64_t SeededFnv1aForComparison(uint64_t seed, StringPiece text) {
 bool BuildSeedIndependentCollision(unsigned char low_byte, size_t step,
                                    unsigned char low_a, unsigned char low_b,
                                    GoogleString* a, GoogleString* b) {
-  static const int kSteps[12] = {-1, -8, 2, 4, 10, 6, -14, -2, -18, -13, 15, -17};
+  static const int kSteps[12] = {-1,  -8, 2,   4,   10, 6,
+                                 -14, -2, -18, -13, 15, -17};
   static const char kLetters[] = "abcdefghijklmnopqrstuvwxyz0123456789";
   if (step == 0) {
     low_a = low_byte;
@@ -3405,7 +3409,8 @@ TEST(DaemonHealNotifyLimiterTest, UrlsBuiltToCollideWithoutTheKeyDoNot) {
     const GoogleString url_b = StrCat(prefix, b, ".css");
     // The construction is real: the plain hash collides, whatever the rest
     // of the seed.
-    for (uint64_t seed_high : {0ULL, 0x0123456789abcdULL, 0xffffffffffffffULL}) {
+    for (uint64_t seed_high :
+         {0ULL, 0x0123456789abcdULL, 0xffffffffffffffULL}) {
       const uint64_t seed = (seed_high << 8) | static_cast<uint64_t>(seed_low);
       ASSERT_EQ(SeededFnv1aForComparison(seed, url_a),
                 SeededFnv1aForComparison(seed, url_b))
@@ -3485,9 +3490,8 @@ TEST_F(DaemonServeArmTest, ALookRepeatedInsideTheWindowDoesNotAskAgain) {
 
   // A second later the rest of the site passes through the look memo.
   for (int i = 0; i < 20000; ++i) {
-    limiter.ShouldLook(StrCat("http://example.com/other/", IntegerToString(i),
-                              ".css"),
-                       1101);
+    limiter.ShouldLook(
+        StrCat("http://example.com/other/", IntegerToString(i), ".css"), 1101);
   }
   EXPECT_FALSE(ServeWithLimiter(request, &limiter, 1102).lost_optimized_copy)
       << "a second ask inside the window";
@@ -3547,9 +3551,9 @@ TEST_F(DaemonServeArmTest, TheNotifyItselfRefusesAnAcceptNegotiatingOrigin) {
   ASSERT_TRUE(decision.lost_optimized_copy);
   decision.vary_accept_origin_declared = true;
   const int before = NotifyCount();
-  EXPECT_FALSE(DaemonServeLostCopyNotify(
-      *abi_, "/tmp/ps-worker.sock", request, decision, default_context_,
-      default_signature_, nullptr, nullptr));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         decision, default_context_,
+                                         default_signature_, nullptr, nullptr));
   EXPECT_EQ(before, NotifyCount());
 }
 

@@ -167,22 +167,21 @@ class GifReaderTest : public testing::Test {
 
 TEST_F(GifReaderTest, LoadValidGifsWithoutTransforms) {
   GoogleString in, out;
-  for (size_t i = 0; i < kValidOpaqueGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImages[i], "gif", &in);
+  for (auto& kValidOpaqueGifImage : kValidOpaqueGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_TRUE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                      PNG_TRANSFORM_IDENTITY))
-        << kValidOpaqueGifImages[i];
+        << kValidOpaqueGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
-  for (size_t i = 0; i < kValidTransparentGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImages[i], "gif",
-                 &in);
+  for (auto& kValidTransparentGifImage : kValidTransparentGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_TRUE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                      PNG_TRANSFORM_IDENTITY))
-        << kValidTransparentGifImages[i];
+        << kValidTransparentGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
@@ -194,22 +193,21 @@ TEST_F(GifReaderTest, LoadValidGifsWithoutTransforms) {
 
 TEST_F(GifReaderTest, ExpandColorMapForValidGifs) {
   GoogleString in, out;
-  for (size_t i = 0; i < kValidOpaqueGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImages[i], "gif", &in);
+  for (auto& kValidOpaqueGifImage : kValidOpaqueGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_TRUE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                      PNG_TRANSFORM_EXPAND))
-        << kValidOpaqueGifImages[i];
+        << kValidOpaqueGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
-  for (size_t i = 0; i < kValidTransparentGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImages[i], "gif",
-                 &in);
+  for (auto& kValidTransparentGifImage : kValidTransparentGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_TRUE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                      PNG_TRANSFORM_EXPAND))
-        << kValidTransparentGifImages[i];
+        << kValidTransparentGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
@@ -221,22 +219,21 @@ TEST_F(GifReaderTest, ExpandColorMapForValidGifs) {
 
 TEST_F(GifReaderTest, RequireOpaqueForValidGifs) {
   GoogleString in;
-  for (size_t i = 0; i < kValidOpaqueGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImages[i], "gif", &in);
+  for (auto& kValidOpaqueGifImage : kValidOpaqueGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_TRUE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                      PNG_TRANSFORM_IDENTITY, true))
-        << kValidOpaqueGifImages[i];
+        << kValidOpaqueGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
-  for (size_t i = 0; i < kValidTransparentGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImages[i], "gif",
-                 &in);
+  for (auto& kValidTransparentGifImage : kValidTransparentGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_FALSE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                       PNG_TRANSFORM_IDENTITY, true))
-        << kValidTransparentGifImages[i];
+        << kValidTransparentGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
@@ -248,22 +245,21 @@ TEST_F(GifReaderTest, RequireOpaqueForValidGifs) {
 
 TEST_F(GifReaderTest, ExpandColormapAndRequireOpaqueForValidGifs) {
   GoogleString in;
-  for (size_t i = 0; i < kValidOpaqueGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImages[i], "gif", &in);
+  for (auto& kValidOpaqueGifImage : kValidOpaqueGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidOpaqueGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_TRUE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                      PNG_TRANSFORM_EXPAND, true))
-        << kValidOpaqueGifImages[i];
+        << kValidOpaqueGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
-  for (size_t i = 0; i < kValidTransparentGifImageCount; i++) {
-    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImages[i], "gif",
-                 &in);
+  for (auto& kValidTransparentGifImage : kValidTransparentGifImages) {
+    ReadTestFile(kPngSuiteGifTestDir, kValidTransparentGifImage, "gif", &in);
     ASSERT_NE(static_cast<size_t>(0), in.length());
     ASSERT_FALSE(gif_reader_->ReadPng(in, read_.png_ptr(), read_.info_ptr(),
                                       PNG_TRANSFORM_EXPAND, true))
-        << kValidTransparentGifImages[i];
+        << kValidTransparentGifImage;
     ASSERT_TRUE(read_.reset());
   }
 
@@ -327,10 +323,9 @@ TEST_F(GifReaderTest, OversizedScreenRejected) {
   // Four colors: GifSquare derives the color resolution as log2(count)-1,
   // and a two-entry map would make that zero, which giflib shifts while
   // negative.
-  static const GifColorType color_map[] = {GifSquare::kGifWhite,
-                                           GifSquare::kGifBlack,
-                                           GifSquare::kGifRed,
-                                           GifSquare::kGifGreen};
+  static const GifColorType color_map[] = {
+      GifSquare::kGifWhite, GifSquare::kGifBlack, GifSquare::kGifRed,
+      GifSquare::kGifGreen};
   const GoogleString filename =
       StrCat(net_instaweb::GTestTempDir(), "/oversized_screen.gif");
   {
@@ -444,9 +439,9 @@ TEST_F(GifScanlineReaderRawTest, ZeroSizeGif) {
 // Check the accuracy of the reader. Compare the decoded results with the gold
 // data (".gif.rgba"). The test images include transparent and opaque ones.
 TEST_F(GifScanlineReaderRawTest, ValidGifs) {
-  for (size_t i = 0; i < kValidGifImageCount; i++) {
+  for (const auto& kValidGifImage : kValidGifImages) {
     GoogleString rgba_image, gif_image;
-    const char* file_name = kValidGifImages[i].filename;
+    const char* file_name = kValidGifImage.filename;
     ReadTestFile(kPngSuiteGifTestDir, file_name, "gif.rgba", &rgba_image);
     ReadTestFile(kPngSuiteGifTestDir, file_name, "gif", &gif_image);
 
@@ -463,9 +458,9 @@ TEST_F(GifScanlineReaderRawTest, ValidGifs) {
     int num_channels =
         GetNumChannelsFromPixelFormat(pixel_format, &message_handler_);
 
-    EXPECT_EQ(kValidGifImages[i].width, width);
-    EXPECT_EQ(kValidGifImages[i].height, height);
-    if (kValidGifImages[i].transparency) {
+    EXPECT_EQ(kValidGifImage.width, width);
+    EXPECT_EQ(kValidGifImage.height, height);
+    if (kValidGifImage.transparency) {
       EXPECT_EQ(pagespeed::image_compression::RGBA_8888, pixel_format);
       EXPECT_EQ(4, num_channels);
     } else {
@@ -598,7 +593,7 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
 
   // Priming image: a 256-entry global color map entirely filled with
   // 0xA5, pixel index 0.
-  const char priming_header[] = {'G',  'I',  'F',  '8',  '9',  'a', 0x01,
+  const char priming_header[] = {'G',  'I',  'F',  '8',    '9',  'a', 0x01,
                                  0x00, 0x01, 0x00, '\x87', 0x00, 0x00};
   priming.append(priming_header, sizeof(priming_header));
   priming.append(256 * 3, static_cast<char>(0xA5));
@@ -612,7 +607,7 @@ TEST_F(GifReaderTest, OutOfRangePixelIndexDecodesToBlack) {
 
   // Victim image: a two-entry global color map and four pixels whose
   // indices (5, 60, 130, 250) are all out of range for the map.
-  const char victim_header[] = {'G',  'I',  'F',  '8',  '9',  'a', 0x04,
+  const char victim_header[] = {'G',  'I',  'F',  '8',    '9',  'a', 0x04,
                                 0x00, 0x01, 0x00, '\x80', 0x00, 0x00};
   victim.append(victim_header, sizeof(victim_header));
   const char color_map[] = {static_cast<char>(0xFF),
@@ -686,7 +681,7 @@ TEST(GifFrameReaderInvalidInput, EmptyLoopCountSubblock) {
   GoogleString in;
   AppendGifHeaderNoGct(&in);
   const char empty_loop_count[] = {0x21, '\xFF', 0x0B, 'N', 'E', 'T', 'S', 'C',
-                                   'A',  'P',  'E',  '2', '.', '0', 0x00};
+                                   'A',  'P',    'E',  '2', '.', '0', 0x00};
   in.append(empty_loop_count, sizeof(empty_loop_count));
   in.push_back(0x3B);
 
@@ -1464,7 +1459,8 @@ TEST_F(GifAnimationTest, OversizedFrameRejectedByPrepareNextFrame) {
 // after the screen caps were checked, so a first frame past the cap would
 // be published through GetImageSpec() uncapped. Initialization must refuse
 // the enlarged dimensions.
-TEST_F(GifAnimationTest, OversizedFirstFrameInChromeQuirksRejectedByInitialize) {
+TEST_F(GifAnimationTest,
+       OversizedFirstFrameInChromeQuirksRejectedByInitialize) {
   const Frame frame = {16385, 1, false, 0, 0, nullptr, 0, -1, 2, 0, 0};
   synth_frames_.push_back(frame);
 

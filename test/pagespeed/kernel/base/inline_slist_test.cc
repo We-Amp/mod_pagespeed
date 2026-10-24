@@ -52,12 +52,12 @@ class InlineSListTest : public testing::Test {
   GoogleString Dump() {
     GoogleString dump1, dump2, dump3, dump4, dump5, dump6;
 
-    for (IntList::iterator i = ints_.begin(); i != ints_.end(); ++i) {
-      dump1.push_back(i->num() + '0');
+    for (auto& i : ints_) {
+      dump1.push_back(i.num() + '0');
     }
 
-    for (IntList::iterator i = ints_.begin(); i != ints_.end(); ++i) {
-      dump2.push_back((*i).num() + '0');
+    for (auto& i : ints_) {
+      dump2.push_back(i.num() + '0');
     }
 
     for (IntList::iterator i = ints_.begin(); i != ints_.end(); ++i) {
@@ -65,12 +65,12 @@ class InlineSListTest : public testing::Test {
     }
 
     const IntList& cints = const_cast<const IntList&>(ints_);
-    for (IntList::const_iterator i = cints.begin(); i != cints.end(); ++i) {
-      dump4.push_back(i->num() + '0');
+    for (const auto& cint : cints) {
+      dump4.push_back(cint.num() + '0');
     }
 
-    for (IntList::const_iterator i = cints.begin(); i != cints.end(); ++i) {
-      dump5.push_back((*i).num() + '0');
+    for (const auto& cint : cints) {
+      dump5.push_back(cint.num() + '0');
     }
 
     for (IntList::const_iterator i = cints.begin(); i != cints.end(); ++i) {

@@ -265,8 +265,8 @@ TEST_F(RewriteOptionsTest, NumFilterInLevels) {
       RewriteOptions::kMobilizeFilters, RewriteOptions::kTestingCoreFilters,
       RewriteOptions::kAllFilters};
 
-  for (int i = 0; i < std::size(levels); ++i) {
-    options_.SetRewriteLevel(levels[i]);
+  for (auto level : levels) {
+    options_.SetRewriteLevel(level);
     FilterSet s;
     for (RewriteOptions::Filter f = RewriteOptions::kFirstFilter;
          f < RewriteOptions::kEndOfFilters;
@@ -343,8 +343,8 @@ const RewriteOptions::Filter kFiltersWithoutConfigNames[] = {
 };
 
 bool ExpectedToBeUnnameable(RewriteOptions::Filter filter) {
-  for (int i = 0; i < std::size(kFiltersWithoutConfigNames); ++i) {
-    if (kFiltersWithoutConfigNames[i] == filter) {
+  for (auto kFiltersWithoutConfigName : kFiltersWithoutConfigNames) {
+    if (kFiltersWithoutConfigName == filter) {
       return true;
     }
   }
@@ -1456,12 +1456,12 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
 
   // Check that every option can be looked up by name.
   std::set<StringPiece> tested_names;
-  for (int i = 0; i < std::size(option_names); ++i) {
-    EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName(option_names[i]))
-        << option_names[i] << " cannot be looked up by name!";
-    EXPECT_FALSE(RewriteOptions::IsDeprecatedOptionName(option_names[i]))
-        << option_names[i];
-    tested_names.insert(option_names[i]);
+  for (auto option_name : option_names) {
+    EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName(option_name))
+        << option_name << " cannot be looked up by name!";
+    EXPECT_FALSE(RewriteOptions::IsDeprecatedOptionName(option_name))
+        << option_name;
+    tested_names.insert(option_name);
   }
 
   // Now go through the named options in all_properties_ and check that each
@@ -2398,9 +2398,9 @@ TEST_F(RewriteOptionsTest, ExperimentOptionsTestToString) {
   StringPieceVector experiments;
   ;
   SplitStringPieceToVector(options_string, "\n", &lines, true);
-  for (int i = 0, n = lines.size(); i < n; ++i) {
-    if (lines[i].starts_with("Experiment ")) {
-      experiments.push_back(lines[i]);
+  for (auto line : lines) {
+    if (line.starts_with("Experiment ")) {
+      experiments.push_back(line);
     }
   }
   EXPECT_STREQ(
@@ -3300,17 +3300,17 @@ TEST_F(RewriteOptionsTest, DeprecatedDeadFiltersAreInertButAccepted) {
       {"split_html", RewriteOptions::kSplitHtmlDeprecated, "sh"},
       {"split_html_helper", RewriteOptions::kSplitHtmlHelperDeprecated, "se"},
   };
-  for (int i = 0; i < std::size(kDeprecatedFilters); ++i) {
-    SCOPED_TRACE(kDeprecatedFilters[i].name);
+  for (const auto& kDeprecatedFilter : kDeprecatedFilters) {
+    SCOPED_TRACE(kDeprecatedFilter.name);
     RewriteOptions options(&thread_system_);
     NullMessageHandler handler;
     EXPECT_TRUE(options.EnableFiltersByCommaSeparatedList(
-        kDeprecatedFilters[i].name, &handler));
-    EXPECT_TRUE(options.Enabled(kDeprecatedFilters[i].filter));
-    EXPECT_STREQ(kDeprecatedFilters[i].id,
-                 RewriteOptions::FilterId(kDeprecatedFilters[i].filter));
+        kDeprecatedFilter.name, &handler));
+    EXPECT_TRUE(options.Enabled(kDeprecatedFilter.filter));
+    EXPECT_STREQ(kDeprecatedFilter.id,
+                 RewriteOptions::FilterId(kDeprecatedFilter.filter));
     EXPECT_STREQ("Deprecated.",
-                 RewriteOptions::FilterName(kDeprecatedFilters[i].filter));
+                 RewriteOptions::FilterName(kDeprecatedFilter.filter));
 
     // It must not require script execution, so enabling it must not trigger
     // the noscript-redirect machinery for no-JS clients.
@@ -3321,7 +3321,7 @@ TEST_F(RewriteOptionsTest, DeprecatedDeadFiltersAreInertButAccepted) {
     // The AllFilters level must not implicitly enable it.
     RewriteOptions all_options(&thread_system_);
     all_options.SetRewriteLevel(RewriteOptions::kAllFilters);
-    EXPECT_FALSE(all_options.Enabled(kDeprecatedFilters[i].filter));
+    EXPECT_FALSE(all_options.Enabled(kDeprecatedFilter.filter));
   }
 }
 

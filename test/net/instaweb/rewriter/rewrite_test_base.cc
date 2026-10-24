@@ -99,7 +99,8 @@ class RewriteTestBaseProcessContext : public ProcessContext {
 
  private:
   RewriteTestBaseProcessContext(const RewriteTestBaseProcessContext&) = delete;
-  RewriteTestBaseProcessContext& operator=(const RewriteTestBaseProcessContext&) = delete;
+  RewriteTestBaseProcessContext& operator=(
+      const RewriteTestBaseProcessContext&) = delete;
 };
 RewriteTestBaseProcessContext rewrite_test_base_process_context;
 
@@ -654,10 +655,9 @@ void RewriteTestBase::TestServeFiles(const ContentType* content_type,
   if (!filter->ComputeOnTheFly() && lru_cache()->IsHealthy()) {
     HTTPValue value;
     ResponseHeaders response_headers;
-    EXPECT_EQ(kFoundResult,
-              HttpBlockingFindWithFragment(expected_rewritten_path,
-                                          fetch_fragment, http_cache, &value,
-                                          &response_headers));
+    EXPECT_EQ(kFoundResult, HttpBlockingFindWithFragment(
+                                expected_rewritten_path, fetch_fragment,
+                                http_cache, &value, &response_headers));
   }
 }
 
@@ -823,8 +823,8 @@ void RewriteTestBase::CollectCssLinks(const StringPiece& id,
                                       StringVector* css_links) {
   CssLink::Vector v;
   CollectCssLinks(id, html, &v);
-  for (int i = 0, n = v.size(); i < n; ++i) {
-    css_links->push_back(v[i]->url_);
+  for (auto& i : v) {
+    css_links->push_back(i->url_);
   }
 }
 
@@ -868,8 +868,7 @@ void RewriteTestBase::EncodePathAndLeaf(const StringPiece& id,
   //
   // Note that this can only be done for 1-element name_vectors.
   // TODO(jmarantz): Modify this to work with combining across paths.
-  for (int i = 0, n = name_vector.size(); i < n; ++i) {
-    const GoogleString& name = name_vector[i];
+  for (const auto& name : name_vector) {
     CHECK(name.find('/') == GoogleString::npos)
         << "No slashes should be "
            "found in "
@@ -1230,8 +1229,7 @@ HTTPCache::FindResult RewriteTestBase::HttpBlockingFind(
 
 HTTPCache::FindResult RewriteTestBase::HttpBlockingFindWithFragment(
     const GoogleString& key, const GoogleString& fragment,
-    HTTPCache* http_cache, HTTPValue* value_out,
-    ResponseHeaders* headers) {
+    HTTPCache* http_cache, HTTPValue* value_out, ResponseHeaders* headers) {
   HttpCallback callback(CreateRequestContext());
   callback.set_response_headers(headers);
   http_cache->Find(key, fragment, message_handler(), &callback);

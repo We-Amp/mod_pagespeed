@@ -670,10 +670,10 @@ TEST_F(JoinCollectionTest, BasicSequence) {
   StringVector string_vector;
   StringPieceVector stringpiece_vector;
   StringSet string_set;
-  for (int i = 0; i < std::size(kInputs); ++i) {
-    string_vector.push_back(kInputs[i]);
-    stringpiece_vector.push_back(kInputs[i]);
-    string_set.insert(kInputs[i]);
+  for (auto& kInput : kInputs) {
+    string_vector.push_back(kInput);
+    stringpiece_vector.push_back(kInput);
+    string_set.insert(kInput);
   }
   CheckAppendJoinCollection(kExpected, string_vector, ", ");
   CheckAppendJoinCollection(kExpected, stringpiece_vector, ", ");

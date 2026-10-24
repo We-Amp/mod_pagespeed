@@ -29,8 +29,8 @@ namespace {
 class IntVector : public std::vector<int> {
  public:
   void Merge(const IntVector& src) {
-    for (int i = 0, n = src.size(); i < n; ++i) {
-      push_back(src[i]);
+    for (int i : src) {
+      push_back(i);
     }
   }
 

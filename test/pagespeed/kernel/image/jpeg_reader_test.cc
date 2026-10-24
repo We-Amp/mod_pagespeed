@@ -66,10 +66,10 @@ const size_t kInvalidFileCount = std::size(kInvalidFiles);
 // Verify that decoded image is accurate for each pixel.
 TEST(JpegReaderTest, ValidJpegs) {
   MockMessageHandler message_handler(new NullMutex);
-  for (size_t i = 0; i < kValidJpegImageCount; ++i) {
+  for (auto& kValidJpegImage : kValidJpegImages) {
     GoogleString jpeg_image, png_image;
-    ReadTestFile(kJpegTestDir, kValidJpegImages[i], "jpg", &jpeg_image);
-    ReadTestFile(kJpegTestDir, kValidJpegImages[i], "png", &png_image);
+    ReadTestFile(kJpegTestDir, kValidJpegImage, "jpg", &jpeg_image);
+    ReadTestFile(kJpegTestDir, kValidJpegImage, "png", &png_image);
     DecodeAndCompareImages(IMAGE_PNG, png_image.c_str(), png_image.length(),
                            IMAGE_JPEG, jpeg_image.c_str(), jpeg_image.length(),
                            false,  // ignore_transparent_rgb

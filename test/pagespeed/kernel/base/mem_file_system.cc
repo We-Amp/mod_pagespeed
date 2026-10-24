@@ -303,10 +303,8 @@ bool MemFileSystem::ListContents(const StringPiece& dir, StringVector* files,
   // We don't have directories, so we just list everything in the
   // filesystem that matches the prefix and doesn't have another
   // internal slash.
-  for (StringStringMap::iterator it = string_map_.begin(),
-                                 end = string_map_.end();
-       it != end; it++) {
-    const GoogleString& path = (*it).first;
+  for (auto& it : string_map_) {
+    const GoogleString& path = it.first;
     if ((0 == path.compare(0, prefix_length, prefix)) &&
         path.length() > prefix_length) {
       const size_t next_slash = path.find("/", prefix_length + 1);

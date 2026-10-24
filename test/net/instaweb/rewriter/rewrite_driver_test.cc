@@ -1128,11 +1128,11 @@ TEST_F(RewriteDriverTest, CreateOutputResourceTooLong) {
 
   OutputResourcePtr resource;
   GoogleString failure_reason;
-  for (int k = 0; k < std::size(resource_kinds); ++k) {
+  for (auto resource_kind : resource_kinds) {
     failure_reason = "";
     // Short name should always succeed at creating new resource.
     resource.reset(rewrite_driver()->CreateOutputResourceWithPath(
-        short_path, dummy_filter_id, short_name, resource_kinds[k],
+        short_path, dummy_filter_id, short_name, resource_kind,
         &failure_reason));
     EXPECT_TRUE(nullptr != resource.get());
     EXPECT_EQ("", failure_reason);
@@ -1140,7 +1140,7 @@ TEST_F(RewriteDriverTest, CreateOutputResourceTooLong) {
     failure_reason = "";
     // Long leaf-name should always fail at creating new resource.
     resource.reset(rewrite_driver()->CreateOutputResourceWithPath(
-        short_path, dummy_filter_id, long_name, resource_kinds[k],
+        short_path, dummy_filter_id, long_name, resource_kind,
         &failure_reason));
     EXPECT_TRUE(nullptr == resource.get());
     EXPECT_EQ("Rewritten URL segment too long.", failure_reason);
@@ -1148,7 +1148,7 @@ TEST_F(RewriteDriverTest, CreateOutputResourceTooLong) {
     failure_reason = "";
     // Long total URL length should always fail at creating new resource.
     resource.reset(rewrite_driver()->CreateOutputResourceWithPath(
-        long_path, dummy_filter_id, short_name, resource_kinds[k],
+        long_path, dummy_filter_id, short_name, resource_kind,
         &failure_reason));
     EXPECT_TRUE(nullptr == resource.get());
     EXPECT_EQ(StrCat("Rewritten URL too long: ", long_path, short_name,

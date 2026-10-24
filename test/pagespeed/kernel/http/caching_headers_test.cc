@@ -37,8 +37,8 @@ class TestCachingHeaders : public CachingHeaders {
   bool Lookup(const StringPiece& key, StringPieceVector* values) override {
     if (key == HttpAttributes::kCacheControl) {
       SplitStringPieceToVector(cache_control_, ",", values, true);
-      for (int i = 0, n = values->size(); i < n; ++i) {
-        TrimWhitespace(&((*values)[i]));
+      for (auto& value : *values) {
+        TrimWhitespace(&value);
       }
       return true;
     } else if (key == HttpAttributes::kPragma && !pragma_.empty()) {

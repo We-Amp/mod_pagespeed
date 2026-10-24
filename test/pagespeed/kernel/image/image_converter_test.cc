@@ -206,10 +206,10 @@ class ImageConverterTest : public testing::Test {
 TEST_F(ImageConverterTest, OptimizePngOrConvertToJpeg_invalidPngs) {
   png_struct_reader_ = std::make_unique<PngReader>(&message_handler_);
   pagespeed::image_compression::JpegCompressionOptions options;
-  for (size_t i = 0; i < kInvalidFileCount; i++) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString in, out;
     bool is_out_png;
-    ReadTestFile(kPngSuiteTestDir, kInvalidFiles[i], "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kInvalidFile, "png", &in);
     ASSERT_FALSE(ImageConverter::OptimizePngOrConvertToJpeg(
         *png_struct_reader_, in, options, &out, &is_out_png,
         &message_handler_));
@@ -222,22 +222,22 @@ TEST_F(ImageConverterTest, OptimizePngOrConvertToJpeg) {
   // We are using default lossy options for conversion.
   options.lossy = true;
   options.progressive = false;
-  for (size_t i = 0; i < kValidImageCount; i++) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString in, out;
     bool is_out_png;
-    ReadTestFile(kPngSuiteTestDir, kValidImages[i].filename, "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kValidImage.filename, "png", &in);
     ASSERT_TRUE(ImageConverter::OptimizePngOrConvertToJpeg(
         *png_struct_reader_, in, options, &out, &is_out_png,
         &message_handler_));
 
     // Deterministic now that a single deflate (zlib-ng) is linked; assert the
     // exact size again.
-    EXPECT_NEAR(kValidImages[i].compressed_size, out.size(), 20)
-        << "size mismatch for " << kValidImages[i].filename;
+    EXPECT_NEAR(kValidImage.compressed_size, out.size(), 20)
+        << "size mismatch for " << kValidImage.filename;
     // Verify that out put image type matches.
 
-    EXPECT_EQ(kValidImages[i].is_png, is_out_png)
-        << "image type mismatch for " << kValidImages[i].filename;
+    EXPECT_EQ(kValidImage.is_png, is_out_png)
+        << "image type mismatch for " << kValidImage.filename;
   }
 }
 
@@ -245,9 +245,9 @@ TEST_F(ImageConverterTest, ConvertPngToWebp_invalidPngs) {
   png_struct_reader_ = std::make_unique<PngReader>(&message_handler_);
   WebpConfiguration webp_config;
 
-  for (size_t i = 0; i < kInvalidFileCount; i++) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kInvalidFiles[i], "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kInvalidFile, "png", &in);
     bool is_opaque = false;
     ASSERT_FALSE(ImageConverter::ConvertPngToWebp(*png_struct_reader_, in,
                                                   webp_config, &out, &is_opaque,
@@ -257,17 +257,17 @@ TEST_F(ImageConverterTest, ConvertPngToWebp_invalidPngs) {
 
 TEST_F(ImageConverterTest, ConvertOpaqueGifToPng) {
   png_struct_reader_ = std::make_unique<GifReader>(&message_handler_);
-  for (size_t i = 0; i < kValidGifImageCount; i++) {
+  for (auto& kValidGifImage : kValidGifImages) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteGifTestDir, kValidGifImages[i].filename, "gif", &in);
-    EXPECT_EQ(kValidGifImages[i].original_size, in.size())
-        << "input size mismatch for " << kValidGifImages[i].filename;
+    ReadTestFile(kPngSuiteGifTestDir, kValidGifImage.filename, "gif", &in);
+    EXPECT_EQ(kValidGifImage.original_size, in.size())
+        << "input size mismatch for " << kValidGifImage.filename;
     ASSERT_TRUE(PngOptimizer::OptimizePngBestCompression(
         *png_struct_reader_, in, &out, &message_handler_));
     // Deterministic now that a single deflate (zlib-ng) is linked; assert the
     // exact size again.
-    EXPECT_NEAR(kValidGifImages[i].png_size, out.size(), 20)
-        << "output size mismatch for " << kValidGifImages[i].filename;
+    EXPECT_NEAR(kValidGifImage.png_size, out.size(), 20)
+        << "output size mismatch for " << kValidGifImage.filename;
   }
 }
 
@@ -277,35 +277,35 @@ TEST_F(ImageConverterTest, ConvertOpaqueGifToJpeg) {
   options.lossy = true;
   options.progressive = false;
   options.lossy_options.quality = 100;
-  for (size_t i = 0; i < kValidGifImageCount; i++) {
+  for (auto& kValidGifImage : kValidGifImages) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteGifTestDir, kValidGifImages[i].filename, "gif", &in);
-    EXPECT_EQ(kValidGifImages[i].original_size, in.size())
-        << "input size mismatch for " << kValidGifImages[i].filename;
+    ReadTestFile(kPngSuiteGifTestDir, kValidGifImage.filename, "gif", &in);
+    EXPECT_EQ(kValidGifImage.original_size, in.size())
+        << "input size mismatch for " << kValidGifImage.filename;
     ASSERT_TRUE(ImageConverter::ConvertPngToJpeg(
         *png_struct_reader_, in, options, &out, &message_handler_));
     // Verify that the size matches.
-    EXPECT_NEAR(kValidGifImages[i].jpeg_size, out.size(), 20)
-        << "output size mismatch for " << kValidGifImages[i].filename;
+    EXPECT_NEAR(kValidGifImage.jpeg_size, out.size(), 20)
+        << "output size mismatch for " << kValidGifImage.filename;
   }
 }
 
 TEST_F(ImageConverterTest, ConvertOpaqueGifToWebp) {
   png_struct_reader_ = std::make_unique<GifReader>(&message_handler_);
   pagespeed::image_compression::WebpConfiguration options;
-  for (size_t i = 0; i < kValidGifImageCount; i++) {
+  for (auto& kValidGifImage : kValidGifImages) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteGifTestDir, kValidGifImages[i].filename, "gif", &in);
-    EXPECT_EQ(kValidGifImages[i].original_size, in.size())
-        << "input size mismatch for " << kValidGifImages[i].filename;
+    ReadTestFile(kPngSuiteGifTestDir, kValidGifImage.filename, "gif", &in);
+    EXPECT_EQ(kValidGifImage.original_size, in.size())
+        << "input size mismatch for " << kValidGifImage.filename;
     bool is_opaque = false;
     ASSERT_TRUE(ImageConverter::ConvertPngToWebp(
         *png_struct_reader_, in, options, &out, &is_opaque, &message_handler_));
     // Verify that the size matches.
     // TODO(vchudnov): Have a more thorough comparison.
-    EXPECT_LT(kValidGifImages[i].webp_size, in.size())
-        << "webp size is not smaller for " << kValidGifImages[i].filename;
-    EXPECT_TRUE(is_opaque) << kValidGifImages[i].filename;
+    EXPECT_LT(kValidGifImage.webp_size, in.size())
+        << "webp size is not smaller for " << kValidGifImage.filename;
+    EXPECT_TRUE(is_opaque) << kValidGifImage.filename;
   }
 }
 

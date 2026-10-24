@@ -17,11 +17,11 @@
  * under the License.
  */
 
+#include "pagespeed/kernel/image/webp_optimizer.h"
+
 #include <cstdint>
 #include <iterator>
 #include <memory>
-
-#include "pagespeed/kernel/image/webp_optimizer.h"
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -154,7 +154,8 @@ class WebpScanlineOptimizerTest : public testing::Test {
 
  private:
   WebpScanlineOptimizerTest(const WebpScanlineOptimizerTest&) = delete;
-  WebpScanlineOptimizerTest& operator=(const WebpScanlineOptimizerTest&) = delete;
+  WebpScanlineOptimizerTest& operator=(const WebpScanlineOptimizerTest&) =
+      delete;
 };
 
 // Test both WebP writer and reader. It is done by encoding an image to WebP
@@ -165,12 +166,12 @@ TEST_F(WebpScanlineOptimizerTest, ConvertToAndReadLossyWebp) {
   webp_config.lossless = false;
   webp_config.quality = 90;
 
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto kValidImage : kValidImages) {
     GoogleString original_image, gold_image, webp_image;
-    GoogleString file_name = kValidImages[i].original_file;
+    GoogleString file_name = kValidImage.original_file;
     ReadTestFile(kWebpTestDir, file_name.c_str(), "png", &original_image);
     ConvertPngToWebp(original_image, webp_config, &webp_image);
-    ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "png", &gold_image);
+    ReadTestFile(kWebpTestDir, kValidImage.gold_file, "png", &gold_image);
     DecodeAndCompareImagesByPSNR(
         IMAGE_PNG, gold_image.c_str(), gold_image.length(), IMAGE_WEBP,
         webp_image.c_str(), webp_image.length(), kMinPSNR,
@@ -187,12 +188,12 @@ TEST_F(WebpScanlineOptimizerTest, ConvertToAndReadLosslessWebp) {
   WebpConfiguration webp_config;
   webp_config.lossless = true;
 
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto kValidImage : kValidImages) {
     GoogleString original_image, gold_image, webp_image;
-    ReadTestFile(kWebpTestDir, kValidImages[i].original_file, "png",
+    ReadTestFile(kWebpTestDir, kValidImage.original_file, "png",
                  &original_image);
     ConvertPngToWebp(original_image, webp_config, &webp_image);
-    ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "png", &gold_image);
+    ReadTestFile(kWebpTestDir, kValidImage.gold_file, "png", &gold_image);
     DecodeAndCompareImages(IMAGE_PNG, gold_image.c_str(), gold_image.length(),
                            IMAGE_WEBP, webp_image.c_str(), webp_image.length(),
                            true,  // ignore_transparent_rgb
@@ -206,10 +207,10 @@ TEST_F(WebpScanlineOptimizerTest, CompareToWebpGolds) {
   WebpConfiguration webp_config;
   webp_config.lossless = true;
 
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto kValidImage : kValidImages) {
     GoogleString png_image, webp_image;
-    ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "png", &png_image);
-    ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "webp", &webp_image);
+    ReadTestFile(kWebpTestDir, kValidImage.gold_file, "png", &png_image);
+    ReadTestFile(kWebpTestDir, kValidImage.gold_file, "webp", &webp_image);
     DecodeAndCompareImagesByPSNR(IMAGE_PNG, png_image.c_str(),
                                  png_image.length(), IMAGE_WEBP,
                                  webp_image.c_str(), webp_image.length(), 55,
@@ -268,7 +269,8 @@ TEST_F(WebpScanlineOptimizerTest, InvalidWebpBody) {
 // Appends a 32-bit little-endian value to *out.
 void AppendUint32LE(GoogleString* out, uint32_t value) {
   char buf[4] = {static_cast<char>(value), static_cast<char>(value >> 8),
-                 static_cast<char>(value >> 16), static_cast<char>(value >> 24)};
+                 static_cast<char>(value >> 16),
+                 static_cast<char>(value >> 24)};
   out->append(buf, sizeof(buf));
 }
 

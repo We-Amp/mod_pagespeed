@@ -98,14 +98,14 @@ class StdioFileSystemTest : public FileSystemTest {
       // Remove everything inside first.
       StringVector files;
       stdio_file_system_.ListContents(filename, &files, &handler_);
-      for (int i = 0; i < files.size(); ++i) {
+      for (const auto& file : files) {
 #ifdef _WIN32
         // On Windows, paths start with a drive letter (e.g., "C:/...")
-        ASSERT_TRUE(files[i].size() >= 3 && files[i][1] == ':');
+        ASSERT_TRUE(file.size() >= 3 && file[1] == ':');
 #else
-        ASSERT_TRUE(strings::StartsWith(files[i], "/"));
+        ASSERT_TRUE(strings::StartsWith(file, "/"));
 #endif
-        DeleteRecursivelyImpl(files[i]);
+        DeleteRecursivelyImpl(file);
       }
 
       EXPECT_TRUE(stdio_file_system_.RemoveDir(filename.c_str(), &handler_));

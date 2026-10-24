@@ -17,9 +17,9 @@
  * under the License.
  */
 
-#include <memory>
-
 #include "net/instaweb/rewriter/public/rewrite_query.h"
+
+#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/request_context.h"
@@ -67,9 +67,9 @@ class RewriteQueryTest : public RewriteTestBase {
     RequestHeaders request_headers;
     StringPieceVector components;
     SplitStringPieceToVector(in_req_string, ";", &components, true);
-    for (int i = 0, n = components.size(); i < n; ++i) {
+    for (auto component : components) {
       StringPieceVector attr_value;
-      SplitStringPieceToVector(components[i], ":", &attr_value, false);
+      SplitStringPieceToVector(component, ":", &attr_value, false);
       CHECK_EQ(2, attr_value.size());
       request_headers.Add(attr_value[0], attr_value[1]);
     }
@@ -100,16 +100,16 @@ class RewriteQueryTest : public RewriteTestBase {
       GoogleString header_value;
       StringPieceVector cookie_vector;
       SplitStringPieceToVector(in_cookies, ";", &cookie_vector, true);
-      for (int i = 0, nc = cookie_vector.size(); i < nc; ++i) {
+      for (auto& i : cookie_vector) {
         if (header_value.empty() ||
-            (header_value.size() + cookie_vector[i].size()) < kMaxLineLength) {
+            (header_value.size() + i.size()) < kMaxLineLength) {
           if (!header_value.empty()) {
             StrAppend(&header_value, ";");
           }
-          StrAppend(&header_value, cookie_vector[i]);
+          StrAppend(&header_value, i);
         } else {
           request_headers->Add(HttpAttributes::kCookie, header_value);
-          cookie_vector[i].CopyToString(&header_value);
+          i.CopyToString(&header_value);
         }
       }
       if (!header_value.empty()) {

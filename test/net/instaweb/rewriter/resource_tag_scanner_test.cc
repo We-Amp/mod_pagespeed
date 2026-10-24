@@ -57,9 +57,9 @@ class ResourceCollector : public EmptyHtmlFilter {
   void StartElement(HtmlElement* element) override {
     resource_tag_scanner::UrlCategoryVector attributes;
     resource_tag_scanner::ScanElement(element, driver_->options(), &attributes);
-    for (int i = 0, n = attributes.size(); i < n; ++i) {
-      resources_->push_back(attributes[i].url->DecodedValueOrNull());
-      resource_category_->push_back(attributes[i].category);
+    for (auto& attribute : attributes) {
+      resources_->push_back(attribute.url->DecodedValueOrNull());
+      resource_category_->push_back(attribute.category);
     }
   }
 

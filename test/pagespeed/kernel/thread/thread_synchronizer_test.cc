@@ -19,9 +19,9 @@
 
 // Unit-test for ThreadSynchronizer
 
-#include <memory>
-
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
+
+#include <memory>
 
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -56,9 +56,9 @@ class ThreadSynchronizerTest : public testing::Test {
   }
 
   void AppendStringOneCharAtATime(const StringPiece& str) {
-    for (int i = 0, n = str.size(); i < n; ++i) {
+    for (char i : str) {
       sequence_->Add(
-          MakeFunction(this, &ThreadSynchronizerTest::AppendChar, str[i]));
+          MakeFunction(this, &ThreadSynchronizerTest::AppendChar, i));
     }
   }
 

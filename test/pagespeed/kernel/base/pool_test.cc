@@ -117,8 +117,8 @@ class PoolTest : public testing::Test {
   // collections this should not be necessary).
   GoogleString Dump() {
     GoogleString buf;
-    for (IntPool::iterator iter = pool_.begin(); iter != pool_.end(); ++iter) {
-      buf.push_back((*iter)->num() + '0');
+    for (auto& iter : pool_) {
+      buf.push_back(iter->num() + '0');
     }
     return buf;
   }

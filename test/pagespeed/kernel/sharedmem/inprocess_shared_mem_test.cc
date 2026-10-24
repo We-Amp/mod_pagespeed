@@ -24,6 +24,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+
 #include <memory>
 #define usleep(us) Sleep((us) / 1000)
 #else
@@ -80,8 +81,8 @@ class InProcessSharedMemEnv : public SharedMemTestEnv {
   }
 
   void WaitForChildren() override {
-    for (size_t i = 0; i < child_threads_.size(); ++i) {
-      child_threads_[i]->Join();
+    for (auto& child_thread : child_threads_) {
+      child_thread->Join();
     }
     STLDeleteElements(&child_threads_);
   }

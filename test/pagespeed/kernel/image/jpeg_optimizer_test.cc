@@ -43,8 +43,8 @@ using pagespeed::image_compression::GRAY_8;
 using pagespeed::image_compression::JpegCompressionOptions;
 using pagespeed::image_compression::JpegLossyOptions;
 using pagespeed::image_compression::JpegScanlineWriter;
-using pagespeed::image_compression::kScanlineMaxDimension;
 using pagespeed::image_compression::kJpegTestDir;
+using pagespeed::image_compression::kScanlineMaxDimension;
 using pagespeed::image_compression::OptimizeJpeg;
 using pagespeed::image_compression::OptimizeJpegWithOptions;
 using pagespeed::image_compression::ReadTestFileWithExt;
@@ -129,15 +129,15 @@ class JpegOptimizerTest : public testing::Test {
 };
 
 TEST_F(JpegOptimizerTest, ValidJpegs) {
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kValidImages[i].filename, &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kValidImage.filename, &src_data);
     GoogleString dest_data;
     ASSERT_TRUE(OptimizeJpeg(src_data, &dest_data, &message_handler_));
-    EXPECT_EQ(kValidImages[i].original_size, src_data.size())
-        << kValidImages[i].filename;
-    EXPECT_NEAR(kValidImages[i].compressed_size, dest_data.size(), 20)
-        << kValidImages[i].filename;
+    EXPECT_EQ(kValidImage.original_size, src_data.size())
+        << kValidImage.filename;
+    EXPECT_NEAR(kValidImage.compressed_size, dest_data.size(), 20)
+        << kValidImage.filename;
 
     ASSERT_LE(dest_data.size(), src_data.size());
   }
@@ -166,8 +166,8 @@ TEST_F(JpegOptimizerTest, OversizedDimensionsRejectedByLosslessPath) {
     ASSERT_TRUE(writer.InitWithStatus(width, 1, GRAY_8).Success());
     JpegCompressionOptions options;
     options.lossy = true;
-    ASSERT_TRUE(writer.InitializeWriteWithStatus(&options, &src_data)
-                    .Success());
+    ASSERT_TRUE(
+        writer.InitializeWriteWithStatus(&options, &src_data).Success());
     const std::vector<unsigned char> row(width, 0);
     ASSERT_TRUE(writer.WriteNextScanlineWithStatus(row.data()).Success());
     ASSERT_TRUE(writer.FinalizeWriteWithStatus().Success());
@@ -180,19 +180,19 @@ TEST_F(JpegOptimizerTest, OversizedDimensionsRejectedByLosslessPath) {
 }
 
 TEST_F(JpegOptimizerTest, ValidJpegsLossy) {
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kValidImages[i].filename, &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kValidImage.filename, &src_data);
     pagespeed::image_compression::JpegCompressionOptions options;
     options.lossy = true;
     GoogleString dest_data;
     ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
                                         &message_handler_))
-        << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].original_size, src_data.size())
-        << kValidImages[i].filename;
-    EXPECT_NEAR(kValidImages[i].lossy_compressed_size, dest_data.size(), 20)
-        << kValidImages[i].filename;
+        << kValidImage.filename;
+    EXPECT_EQ(kValidImage.original_size, src_data.size())
+        << kValidImage.filename;
+    EXPECT_NEAR(kValidImage.lossy_compressed_size, dest_data.size(), 20)
+        << kValidImage.filename;
   }
 }
 
@@ -418,54 +418,54 @@ TEST_F(JpegOptimizerTest, ValidJpegLossyWithNProgressiveScans) {
 }
 
 TEST_F(JpegOptimizerTest, ValidJpegsProgressive) {
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kValidImages[i].filename, &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kValidImage.filename, &src_data);
     pagespeed::image_compression::JpegCompressionOptions options;
     options.progressive = true;
     GoogleString dest_data;
     ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
                                         &message_handler_))
-        << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].original_size, src_data.size())
-        << kValidImages[i].filename;
-    EXPECT_NEAR(kValidImages[i].progressive_size, dest_data.size(), 20)
-        << kValidImages[i].filename;
+        << kValidImage.filename;
+    EXPECT_EQ(kValidImage.original_size, src_data.size())
+        << kValidImage.filename;
+    EXPECT_NEAR(kValidImage.progressive_size, dest_data.size(), 20)
+        << kValidImage.filename;
   }
 }
 
 TEST_F(JpegOptimizerTest, ValidJpegsProgressiveAndLossy) {
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kValidImages[i].filename, &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kValidImage.filename, &src_data);
     pagespeed::image_compression::JpegCompressionOptions options;
     options.lossy = true;
     options.progressive = true;
     GoogleString dest_data;
     ASSERT_TRUE(OptimizeJpegWithOptions(src_data, &dest_data, options,
                                         &message_handler_))
-        << kValidImages[i].filename;
-    EXPECT_EQ(kValidImages[i].original_size, src_data.size())
-        << kValidImages[i].filename;
-    EXPECT_NEAR(kValidImages[i].progressive_and_lossy_compressed_size,
+        << kValidImage.filename;
+    EXPECT_EQ(kValidImage.original_size, src_data.size())
+        << kValidImage.filename;
+    EXPECT_NEAR(kValidImage.progressive_and_lossy_compressed_size,
                 dest_data.size(), 20)
-        << kValidImages[i].filename;
+        << kValidImage.filename;
   }
 }
 
 TEST_F(JpegOptimizerTest, InvalidJpegs) {
-  for (size_t i = 0; i < kInvalidFileCount; ++i) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kInvalidFiles[i], &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kInvalidFile, &src_data);
     GoogleString dest_data;
     ASSERT_FALSE(OptimizeJpeg(src_data, &dest_data, &message_handler_));
   }
 }
 
 TEST_F(JpegOptimizerTest, InvalidJpegsLossy) {
-  for (size_t i = 0; i < kInvalidFileCount; ++i) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kInvalidFiles[i], &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kInvalidFile, &src_data);
     JpegCompressionOptions options;
     options.lossy = true;
     GoogleString dest_data;
@@ -475,9 +475,9 @@ TEST_F(JpegOptimizerTest, InvalidJpegsLossy) {
 }
 
 TEST_F(JpegOptimizerTest, InvalidJpegsProgressive) {
-  for (size_t i = 0; i < kInvalidFileCount; ++i) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kInvalidFiles[i], &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kInvalidFile, &src_data);
     JpegCompressionOptions options;
     options.progressive = true;
     GoogleString dest_data;
@@ -487,9 +487,9 @@ TEST_F(JpegOptimizerTest, InvalidJpegsProgressive) {
 }
 
 TEST_F(JpegOptimizerTest, InvalidJpegsProgressiveAndLossy) {
-  for (size_t i = 0; i < kInvalidFileCount; ++i) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kInvalidFiles[i], &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kInvalidFile, &src_data);
     JpegCompressionOptions options;
     options.lossy = true;
     options.progressive = true;
@@ -506,9 +506,9 @@ TEST_F(JpegOptimizerTest, CleanupAfterReadingInvalidJpeg) {
   // We will compare these files with the output we get from
   // a JpegOptimizer that had an error.
   std::vector<GoogleString> correctly_compressed;
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString src_data;
-    ReadTestFileWithExt(kJpegTestDir, kValidImages[i].filename, &src_data);
+    ReadTestFileWithExt(kJpegTestDir, kValidImage.filename, &src_data);
     correctly_compressed.emplace_back("");
     GoogleString& dest_data = correctly_compressed.back();
     ASSERT_TRUE(OptimizeJpeg(src_data, &dest_data, &message_handler_));

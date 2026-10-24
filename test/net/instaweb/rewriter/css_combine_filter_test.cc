@@ -264,9 +264,9 @@ class CssCombineFilterTest : public RewriteTestBase {
           "css");
     } else {
       StringVector optimized_css_names;
-      for (int i = 0, size = name_vector.size(); i < size; ++i) {
-        optimized_css_names.push_back(Encode("", RewriteOptions::kCssFilterId,
-                                             "0", name_vector[i], "css"));
+      for (const auto& i : name_vector) {
+        optimized_css_names.push_back(
+            Encode("", RewriteOptions::kCssFilterId, "0", i, "css"));
       }
       return Encode(path, RewriteOptions::kCssCombinerId, "0",
                     optimized_css_names, "css");
@@ -349,8 +349,7 @@ class CssCombineFilterTest : public RewriteTestBase {
     // of SetResponseWithDefaultHeaders.
     GoogleString html_url = StrCat(kTestDomain, id, ".html");
     GoogleString html_input("<head>\n");
-    for (int i = 0, n = input_css_links.size(); i < n; ++i) {
-      const CssLink* link = input_css_links[i];
+    for (auto link : input_css_links) {
       if (!link->url_.empty()) {
         if (link->supply_mock_) {
           // If the css-vector contains a 'true' for this, then we supply the

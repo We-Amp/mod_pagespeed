@@ -53,11 +53,9 @@ using pagespeed::image_compression::AvifConfiguration;
 using pagespeed::image_compression::AvifFrameWriter;
 using pagespeed::image_compression::ComputeImageType;
 using pagespeed::image_compression::FrameSpec;
-using pagespeed::image_compression::ImageSpec;
-using pagespeed::image_compression::RGB_888;
-using pagespeed::image_compression::SCANLINE_STATUS_TIMEOUT_ERROR;
 using pagespeed::image_compression::IMAGE_AVIF;
 using pagespeed::image_compression::IMAGE_PNG;
+using pagespeed::image_compression::ImageSpec;
 using pagespeed::image_compression::kMessagePatternPixelFormat;
 using pagespeed::image_compression::kMessagePatternStats;
 using pagespeed::image_compression::kWebpTestDir;
@@ -65,6 +63,8 @@ using pagespeed::image_compression::PixelFormat;
 using pagespeed::image_compression::PngScanlineReaderRaw;
 using pagespeed::image_compression::ReadImage;
 using pagespeed::image_compression::ReadTestFile;
+using pagespeed::image_compression::RGB_888;
+using pagespeed::image_compression::SCANLINE_STATUS_TIMEOUT_ERROR;
 using pagespeed::image_compression::ScanlineStatus;
 using pagespeed::image_compression::ScanlineWriterInterface;
 
@@ -146,15 +146,15 @@ TEST_F(AvifOptimizerTest, ConvertToAndReadLossyAvif) {
   avif_config.quality = 90;
   avif_config.speed = 8;  // Keep the AV1 encode fast in tests.
 
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto kValidImage : kValidImages) {
     GoogleString original_image, gold_image, avif_image;
-    ReadTestFile(kWebpTestDir, kValidImages[i].original_file, "png",
+    ReadTestFile(kWebpTestDir, kValidImage.original_file, "png",
                  &original_image);
     ConvertPngToAvif(original_image, avif_config, &avif_image);
     ASSERT_FALSE(avif_image.empty());
     // The encoded bytes sniff as a genuine ISO-BMFF AVIF.
     EXPECT_EQ(net_instaweb::IMAGE_AVIF, ComputeImageType(avif_image));
-    ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "png", &gold_image);
+    ReadTestFile(kWebpTestDir, kValidImage.gold_file, "png", &gold_image);
     DecodeAndCompareImagesByPSNR(
         IMAGE_PNG, gold_image.c_str(), gold_image.length(), IMAGE_AVIF,
         avif_image.c_str(), avif_image.length(), kMinPSNR,
@@ -171,14 +171,14 @@ TEST_F(AvifOptimizerTest, ConvertToAndReadLosslessAvif) {
   avif_config.lossless = 1;
   avif_config.speed = 8;  // Keep the AV1 encode fast in tests.
 
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto kValidImage : kValidImages) {
     GoogleString original_image, gold_image, avif_image;
-    ReadTestFile(kWebpTestDir, kValidImages[i].original_file, "png",
+    ReadTestFile(kWebpTestDir, kValidImage.original_file, "png",
                  &original_image);
     ConvertPngToAvif(original_image, avif_config, &avif_image);
     ASSERT_FALSE(avif_image.empty());
     EXPECT_EQ(net_instaweb::IMAGE_AVIF, ComputeImageType(avif_image));
-    ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "png", &gold_image);
+    ReadTestFile(kWebpTestDir, kValidImage.gold_file, "png", &gold_image);
     DecodeAndCompareImages(IMAGE_PNG, gold_image.c_str(), gold_image.length(),
                            IMAGE_AVIF, avif_image.c_str(), avif_image.length(),
                            true,  // ignore_transparent_rgb
@@ -214,7 +214,6 @@ TEST_F(AvifOptimizerTest, InvalidAvifFailsGracefully) {
                          reinterpret_cast<void**>(&pixels), &pixel_format,
                          &width, &height, &stride, &message_handler_));
 }
-
 
 // ---------------------------------------------------------------------------
 // Progress-hook / timeout coverage (the ANIMATED deadline).
@@ -317,8 +316,7 @@ TEST_F(AvifOptimizerTest, AnimatedEncodeAbortsOnProgressHook) {
   hook_state.allow_calls = 1;  // First frame proceeds; the next one aborts.
 
   GoogleString out;
-  ScanlineStatus status =
-      WriteFrames(4, &hook_state, &message_handler_, &out);
+  ScanlineStatus status = WriteFrames(4, &hook_state, &message_handler_, &out);
 
   // The encode failed, and specifically as a TIMEOUT rather than a codec
   // error -- image.cc keys the timeout counter off exactly this status type.
@@ -339,8 +337,7 @@ TEST_F(AvifOptimizerTest, AnimatedEncodeCompletesWhenHookAllows) {
   hook_state.allow_calls = 1000;  // Never refuses.
 
   GoogleString out;
-  ScanlineStatus status =
-      WriteFrames(4, &hook_state, &message_handler_, &out);
+  ScanlineStatus status = WriteFrames(4, &hook_state, &message_handler_, &out);
 
   EXPECT_TRUE(status.Success()) << "Status=" << status.ToString();
   EXPECT_FALSE(out.empty());
@@ -364,8 +361,7 @@ TEST_F(AvifOptimizerTest, StillEncodeIgnoresProgressHook) {
   hook_state.allow_calls = 0;  // Refuses immediately, if ever asked.
 
   GoogleString out;
-  ScanlineStatus status =
-      WriteFrames(1, &hook_state, &message_handler_, &out);
+  ScanlineStatus status = WriteFrames(1, &hook_state, &message_handler_, &out);
 
   EXPECT_TRUE(status.Success()) << "Status=" << status.ToString();
   EXPECT_FALSE(out.empty());

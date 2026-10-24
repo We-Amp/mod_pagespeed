@@ -150,8 +150,8 @@ void LockManagerSpammer::Run() {
         LockVector locks;
         locks.swap(queued_unlocks_);
         mutex_->Unlock();
-        for (int i = 0, n = locks.size(); i < n; ++i) {
-          locks[i]->Unlock();
+        for (auto& lock : locks) {
+          lock->Unlock();
         }
         mutex_->Lock();
       }

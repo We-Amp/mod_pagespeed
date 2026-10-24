@@ -124,8 +124,7 @@ std::vector<GoldenVector> ParseGoldens(StringPiece contents) {
   std::vector<GoldenVector> vectors;
   StringPieceVector lines;
   SplitStringPieceToVector(contents, "\n", &lines, false);
-  for (size_t i = 0; i < lines.size(); ++i) {
-    StringPiece line = lines[i];
+  for (auto line : lines) {
     if (line.empty() || line[0] == '#') {
       continue;
     }
@@ -153,8 +152,7 @@ std::vector<GoldenVector> ParseGoldens(StringPiece contents) {
 bool ParseGoldenBound(StringPiece contents, size_t* out) {
   StringPieceVector lines;
   SplitStringPieceToVector(contents, "\n", &lines, false);
-  for (size_t i = 0; i < lines.size(); ++i) {
-    StringPiece line = lines[i];
+  for (auto line : lines) {
     const StringPiece marker("# bound: ");
     if (!line.starts_with(marker)) {
       continue;
@@ -220,16 +218,16 @@ class OptionContextTest : public RewriteOptionsTestBase<RewriteOptions> {
     StringPieceVector lines;
     SplitStringPieceToVector(payload, "\n", &lines, true);
     GoogleString added;
-    for (size_t i = 0; i < lines.size(); ++i) {
+    for (auto line : lines) {
       bool in_baseline = false;
-      for (size_t j = 0; j < baseline_lines.size(); ++j) {
-        if (baseline_lines[j] == lines[i]) {
+      for (auto baseline_line : baseline_lines) {
+        if (baseline_line == line) {
           in_baseline = true;
           break;
         }
       }
       if (!in_baseline) {
-        StrAppend(&added, lines[i], "\n");
+        StrAppend(&added, line, "\n");
       }
     }
     return added;
@@ -329,26 +327,26 @@ TEST_F(OptionContextTest, GoldenRecipesSerializeToTheRecordedBytes) {
   ASSERT_EQ(kExpectedGoldenVectors, vectors.size());
 
   size_t recipes_checked = 0;
-  for (size_t i = 0; i < vectors.size(); ++i) {
-    if (vectors[i].recipe == "-") {
+  for (const auto& vector : vectors) {
+    if (vector.recipe == "-") {
       continue;
     }
     ++recipes_checked;
-    SCOPED_TRACE(vectors[i].recipe);
+    SCOPED_TRACE(vector.recipe);
     std::unique_ptr<RewriteOptions> options(NewOptions());
-    ApplyRecipe(vectors[i].recipe, options.get());
+    ApplyRecipe(vector.recipe, options.get());
 
     GoogleString payload;
     ASSERT_EQ(OptionContextStatus::kOk,
               OptionContext::Serialize(*options, &payload));
-    EXPECT_STREQ(vectors[i].payload.c_str(), payload.c_str())
-        << "recipe '" << vectors[i].recipe
+    EXPECT_STREQ(vector.payload.c_str(), payload.c_str())
+        << "recipe '" << vector.recipe
         << "' no longer serializes to the recorded bytes. If the change was "
            "deliberate this is a FORMAT change: update the shared golden file "
            "in both places, and consider whether "
            "kOptionContextFormatVersion has to move -- it re-keys every "
            "context everywhere.";
-    EXPECT_STREQ(vectors[i].signature.c_str(),
+    EXPECT_STREQ(vector.signature.c_str(),
                  OptionContext::Signature(payload).c_str());
   }
   EXPECT_EQ(kExpectedGoldenRecipes, recipes_checked)
@@ -453,8 +451,8 @@ TEST_F(OptionContextTest, EnabledFiltersAppearSortedByIdNotByEnumPosition) {
   ASSERT_GE(filter_lines.size(), 4u);
   for (const char* wanted : {"f:ai", "f:ec", "f:ii", "f:jm"}) {
     bool found = false;
-    for (size_t i = 0; i < filter_lines.size(); ++i) {
-      if (filter_lines[i] == StringPiece(wanted)) found = true;
+    for (auto filter_line : filter_lines) {
+      if (filter_line == StringPiece(wanted)) found = true;
     }
     EXPECT_TRUE(found) << "missing " << wanted << " in " << payload;
   }
@@ -801,9 +799,9 @@ TEST_F(OptionContextTest, EveryRegisteredOptionNameIsUnique) {
   // and mean different things.
   const RewriteOptions::OptionBaseVector& all = options_.all_options();
   std::vector<GoogleString> keys;
-  for (size_t i = 0; i < all.size(); ++i) {
-    const StringPiece name = all[i]->option_name();
-    keys.push_back(name.empty() ? StrCat("@", all[i]->id()) : name.as_string());
+  for (auto i : all) {
+    const StringPiece name = i->option_name();
+    keys.push_back(name.empty() ? StrCat("@", i->id()) : name.as_string());
   }
   std::sort(keys.begin(), keys.end());
   for (size_t i = 1; i < keys.size(); ++i) {

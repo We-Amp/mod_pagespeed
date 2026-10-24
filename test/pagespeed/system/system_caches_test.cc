@@ -21,10 +21,11 @@
 
 #include "pagespeed/system/system_caches.h"
 
+#include <unistd.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
-#include <unistd.h>
 #include <vector>
 
 #include "base/logging.h"
@@ -56,8 +57,8 @@
 #include "pagespeed/kernel/cache/cache_key_prepender.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
-#include "pagespeed/kernel/cache/fallback_cache.h"
 #include "pagespeed/kernel/cache/cyclone_cache.h"
+#include "pagespeed/kernel/cache/fallback_cache.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/cache/threadsafe_cache.h"
 #include "pagespeed/kernel/cache/write_through_cache.h"
@@ -67,11 +68,11 @@
 #include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_lock_manager.h"
 #include "pagespeed/kernel/util/platform.h"
-#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/kernel/util/simple_random.h"
+#include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 #include "pagespeed/system/admin_site.h"
-#include "pagespeed/system/memcached_cache.h"
 #include "pagespeed/system/external_server_spec.h"
+#include "pagespeed/system/memcached_cache.h"
 #include "pagespeed/system/system_cache_path.h"
 #include "pagespeed/system/system_rewrite_options.h"
 #include "pagespeed/system/system_server_context.h"
@@ -146,8 +147,10 @@ class SystemServerContextNoProxyHtml : public SystemServerContext {
   bool ProxiesHtml() const override { return false; }
 
  private:
-  SystemServerContextNoProxyHtml(const SystemServerContextNoProxyHtml&) = delete;
-  SystemServerContextNoProxyHtml& operator=(const SystemServerContextNoProxyHtml&) = delete;
+  SystemServerContextNoProxyHtml(const SystemServerContextNoProxyHtml&) =
+      delete;
+  SystemServerContextNoProxyHtml& operator=(
+      const SystemServerContextNoProxyHtml&) = delete;
 };
 
 class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
@@ -874,9 +877,9 @@ void SystemCachesMemCacheTest::TestBasicMemCacheAndNoLru(
 
   GoogleString mem_cache;
   if (num_threads_expected == 0) {
-    mem_cache =
-        Batcher(Stats(SystemCaches::kMemcachedAsync, MemcachedCache::FormatName()),
-                1, 1000);
+    mem_cache = Batcher(
+        Stats(SystemCaches::kMemcachedAsync, MemcachedCache::FormatName()), 1,
+        1000);
   } else {
     mem_cache =
         Batcher(Stats(SystemCaches::kMemcachedAsync,
@@ -1060,9 +1063,10 @@ TEST_F(SystemCachesTest, ShmShare) {
   std::vector<ServerContext*> servers;
   for (int i = 0; i < 3; ++i) {
     servers.push_back(SetupServerContext(configs[i]));
-    EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
-                                         SmallTierFileCacheWithStats())),
-                 servers[i]->metadata_cache()->Name());
+    EXPECT_STREQ(
+        Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                SmallTierFileCacheWithStats())),
+        servers[i]->metadata_cache()->Name());
   }
 
   // This is only about metadata cache.
@@ -1089,9 +1093,9 @@ TEST_F(SystemCachesTest, ShmDefault) {
 
   std::vector<SystemRewriteOptions*> configs;
   const char* kPaths[] = {kCachePath, kAltCachePath, kAltCachePath2};
-  for (int i = 0; i < 3; ++i) {
+  for (auto& kPath : kPaths) {
     SystemRewriteOptions* config = options_->NewOptions();
-    config->set_file_cache_path(kPaths[i]);
+    config->set_file_cache_path(kPath);
     UseFastFileCache(config);
     system_caches_->RegisterConfig(config);
     configs.push_back(config);
@@ -1348,8 +1352,8 @@ TEST_F(SystemCachesTest, CacheSettings) {
   EXPECT_STREQ(Pcache(Compressed(FileCacheWithStats())),
                server_context->page_property_cache()->property_store()->Name());
 
-  CycloneCache* cache =
-      dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
+  CycloneCache* cache = dynamic_cast<CycloneCache*>(
+      SkipWrappers(server_context->metadata_cache()));
   ASSERT_TRUE(cache != nullptr);
   EXPECT_EQ(1024 * 1024, cache->config().cache_size_bytes);
 }
@@ -1366,8 +1370,8 @@ TEST_F(SystemCachesTest, LruCacheSettings) {
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
 
-  CycloneCache* cache =
-      dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
+  CycloneCache* cache = dynamic_cast<CycloneCache*>(
+      SkipWrappers(server_context->metadata_cache()));
   ASSERT_TRUE(cache != nullptr);
   EXPECT_EQ(1024 * 1024, cache->config().ram_cache_size_bytes);
 }
@@ -1384,8 +1388,8 @@ TEST_F(SystemCachesTest, RamTierDefaultsOff) {
   std::unique_ptr<ServerContext> server_context(
       SetupServerContext(options_.release()));
 
-  CycloneCache* cache =
-      dynamic_cast<CycloneCache*>(SkipWrappers(server_context->metadata_cache()));
+  CycloneCache* cache = dynamic_cast<CycloneCache*>(
+      SkipWrappers(server_context->metadata_cache()));
   ASSERT_TRUE(cache != nullptr);
   EXPECT_EQ(0, cache->config().ram_cache_size_bytes);
 }
@@ -1454,10 +1458,10 @@ TEST_F(SystemCachesTest, SmallTierDisabledFallsBackToDefaultWiring) {
   EXPECT_STREQ(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
                                        FileCacheWithStats())),
                server_context->metadata_cache()->Name());
-  EXPECT_STREQ(Pcache(Compressed(WriteThrough(
-                   Stats("shm_cache", "SharedMemCache<64>"),
-                   FileCacheWithStats()))),
-               server_context->page_property_cache()->property_store()->Name());
+  EXPECT_STREQ(
+      Pcache(Compressed(WriteThrough(Stats("shm_cache", "SharedMemCache<64>"),
+                                     FileCacheWithStats()))),
+      server_context->page_property_cache()->property_store()->Name());
   CycloneCache* cache = dynamic_cast<CycloneCache*>(
       system_caches_->GetCache(options)->cache_backend());
   ASSERT_TRUE(cache != nullptr);

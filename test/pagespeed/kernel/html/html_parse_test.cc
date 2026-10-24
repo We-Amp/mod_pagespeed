@@ -185,10 +185,9 @@ class AttrValuesSaverFilter : public EmptyHtmlFilter {
 
   void StartElement(HtmlElement* element) override {
     const HtmlElement::AttributeList& attrs = element->attributes();
-    for (HtmlElement::AttributeConstIterator i(attrs.begin()); i != attrs.end();
-         ++i) {
-      const char* value = i->DecodedValueOrNull();
-      if (i->decoding_error()) {
+    for (const auto& attr : attrs) {
+      const char* value = attr.DecodedValueOrNull();
+      if (attr.decoding_error()) {
         value_ += "<ERROR>";
       } else if (value == nullptr) {
         value_ += "(null)";
@@ -446,9 +445,9 @@ class HtmlParseTestNoBodyNoHtml : public HtmlParseTestNoBody {
       html_parse()->set_size_limit(i);
       html_parse()->StartParse("http://test.com/in.html");
       // Flush after every character.
-      for (int j = 0; j < input.size(); ++j) {
+      for (char j : input) {
         GoogleString x;
-        x.push_back(input[j]);
+        x.push_back(j);
         html_parse()->ParseText(StringPiece(x));
         html_parse()->Flush();
       }
@@ -708,9 +707,7 @@ class AnnotatingHtmlFilter : public EmptyHtmlFilter {
 
     bool first = true;
     const HtmlElement::AttributeList& attrs = element->attributes();
-    for (HtmlElement::AttributeConstIterator i(attrs.begin()); i != attrs.end();
-         ++i) {
-      const HtmlElement::Attribute& attr = *i;
+    for (const auto& attr : attrs) {
       StrAppend(&buffer_, (first ? ":" : ","), attr.name_str());
       const char* value = attr.DecodedValueOrNull();
       if (attr.decoding_error()) {
@@ -2554,8 +2551,7 @@ class DeleteNodesFilter : public CountingCallbacksFilter {
 
  private:
   void DeleteElements() {
-    for (int i = 0, n = pending_deletes_.size(); i < n; ++i) {
-      HtmlElement* element = pending_deletes_[i];
+    for (auto element : pending_deletes_) {
       bool success =
           make_invisible_
               ? html_parse_->MakeElementInvisible(element)

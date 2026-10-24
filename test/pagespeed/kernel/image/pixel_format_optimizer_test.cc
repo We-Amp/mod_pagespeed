@@ -17,10 +17,10 @@
  * under the License.
  */
 
+#include "pagespeed/kernel/image/pixel_format_optimizer.h"
+
 #include <iterator>
 #include <memory>
-
-#include "pagespeed/kernel/image/pixel_format_optimizer.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -37,11 +37,11 @@ using net_instaweb::MockMessageHandler;
 using net_instaweb::NullMutex;
 using pagespeed::image_compression::kMessagePatternUnexpectedEOF;
 using pagespeed::image_compression::kWebpTestDir;
-using pagespeed::image_compression::PixelFormatOptimizer;
 using pagespeed::image_compression::PixelFormat;
+using pagespeed::image_compression::PixelFormatOptimizer;
 using pagespeed::image_compression::PngScanlineReaderRaw;
-using pagespeed::image_compression::RGBA_8888;
 using pagespeed::image_compression::ReadTestFileWithExt;
+using pagespeed::image_compression::RGBA_8888;
 using pagespeed::image_compression::SCANLINE_STATUS_INVOCATION_ERROR;
 using pagespeed::image_compression::SCANLINE_STATUS_SUCCESS;
 using pagespeed::image_compression::ScanlineReaderInterface;
@@ -118,8 +118,8 @@ class FakeRgbaReader : public ScanlineReaderInterface {
                                       size_t /* buffer_length */) override {
     return ScanlineStatus(SCANLINE_STATUS_SUCCESS);
   }
-  ScanlineStatus ReadNextScanlineWithStatus(void** /* out_scanline_bytes */)
-      override {
+  ScanlineStatus ReadNextScanlineWithStatus(
+      void** /* out_scanline_bytes */) override {
     return ScanlineStatus(SCANLINE_STATUS_INVOCATION_ERROR);
   }
   size_t GetImageHeight() override { return height_; }
@@ -141,8 +141,7 @@ TEST_F(PixelFormatOptimizerTest, Optimizable) {
 
 // The un-optimizable images will stay the same after conversion.
 TEST_F(PixelFormatOptimizerTest, Unoptimizable) {
-  for (size_t i = 0; i < kUnoptimizableImageCount; ++i) {
-    const char* file_name = kUnoptimizableImages[i];
+  for (auto file_name : kUnoptimizableImages) {
     ASSERT_TRUE(InitializeOptimizer(file_name));
     ASSERT_TRUE(InitializeGoldReader(file_name));
     CompareImageReaders(&gold_reader_, &optimizer_);
@@ -161,8 +160,8 @@ TEST_F(PixelFormatOptimizerTest, InitializeWithoutRead) {
 TEST_F(PixelFormatOptimizerTest, OversizedImageRejected) {
   message_handler_.AddPatternToSkipPrinting("*dimensions*");
   // Initialize() takes ownership of the reader it accepts.
-  EXPECT_FALSE(optimizer_.Initialize(new FakeRgbaReader(60000, 60000))
-                   .Success());
+  EXPECT_FALSE(
+      optimizer_.Initialize(new FakeRgbaReader(60000, 60000)).Success());
 }
 
 // Test that we don't have memory leakage if we don't read all of the

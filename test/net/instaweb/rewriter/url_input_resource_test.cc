@@ -31,11 +31,11 @@
 #include "pagespeed/kernel/base/string_util.h"  // for StrCat, etc
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/content_type.h"
-#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/mock_resource_callback.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -158,8 +158,7 @@ class UrlInputResourceTest : public RewriteTestBase {
                         expected_cache_key, expected_referer, request_context);
     // The oversized body is treated as un-extractable: the compressed bytes
     // are kept, as for any broken input, and never inflated.
-    EXPECT_EQ(compressed.size(),
-              resource->ExtractUncompressedContents().size())
+    EXPECT_EQ(compressed.size(), resource->ExtractUncompressedContents().size())
         << "A gzip body inflating past the handled size must not be inflated";
   }
 
@@ -360,11 +359,11 @@ TEST_F(UrlInputResourceTest, IntPort) {
       {"https://www.google.com:1234/", 1234, 1234},
   };
 
-  for (int i = 0; i < std::size(port_tests); ++i) {
-    GoogleUrl url(port_tests[i].spec);
+  for (auto port_test : port_tests) {
+    GoogleUrl url(port_test.spec);
     EXPECT_TRUE(url.IsWebValid());
-    EXPECT_EQ(port_tests[i].expected_int_port, url.EffectiveIntPort());
-    EXPECT_EQ(port_tests[i].int_port, url.IntPort());
+    EXPECT_EQ(port_test.expected_int_port, url.EffectiveIntPort());
+    EXPECT_EQ(port_test.int_port, url.IntPort());
   }
 }
 

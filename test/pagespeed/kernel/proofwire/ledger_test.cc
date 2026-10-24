@@ -34,8 +34,8 @@ GoogleString BytesToHex(StringPiece bytes) {
   static const char kHex[] = "0123456789abcdef";
   GoogleString out;
   out.reserve(bytes.size() * 2);
-  for (size_t i = 0; i < bytes.size(); ++i) {
-    const unsigned char c = static_cast<unsigned char>(bytes[i]);
+  for (char byte : bytes) {
+    const unsigned char c = static_cast<unsigned char>(byte);
     out.push_back(kHex[c >> 4]);
     out.push_back(kHex[c & 0x0f]);
   }
