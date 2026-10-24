@@ -2313,29 +2313,29 @@ jobs:
 
       # A vendor tarball on the runner makes the dependency fetch local; without
       # one, Bazel fetches its dependencies (docs/ci/runner-environment.md).
+      # tools/ci/fetch-vendor-tarball.ps1 is the one hardened Windows path: it
+      # stages a private, verified copy, clears the destination of everything
+      # an earlier job left in this persistent workspace (never entering a
+      # link, keeping .git) and only then extracts, so tar never writes over
+      # an existing file (issue #231).
       - name: Use a local vendor tarball when the runner has one
         shell: powershell
         env:
           VENDOR_SHORT_SHA: ${{ needs.nightly-vendor.outputs.short_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $tarball = $null
-          if ($env:CI_WIN_VENDOR_DIR) {
-            $candidate = Join-Path $env:CI_WIN_VENDOR_DIR "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
-            if (Test-Path -LiteralPath $candidate) { $tarball = $candidate }
-          }
-          if (-not $tarball -or -not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+          $dirs = @($env:CI_WIN_VENDOR_DIR) | Where-Object { $_ }
+          & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\fetch-vendor-tarball.ps1') `
+            -Name "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst" `
+            -Dest $env:GITHUB_WORKSPACE `
+            -StageDir (Join-Path $env:RUNNER_TEMP 'vendor-download') `
+            -SearchDirs $dirs -HubSsh $env:CI_HUB_SSH -HubDir $env:CI_HUB_VENDOR_DIR
+          $rc = $LASTEXITCODE
+          if ($rc -eq 4) {
             Write-Host "::notice::no runner-local vendor tarball: Bazel fetches its dependencies (docs/ci/runner-environment.md)"
             exit 0
           }
-          Write-Host "extracting the runner-local vendor tarball"
-          $tmpTar = Join-Path $env:RUNNER_TEMP 'vendor.tar'
-          & zstd -d -f -T0 $tarball -o $tmpTar
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
-          # The Windows tar: the MSYS2 GNU tar reads a drive letter as a remote host.
-          & "$($env:SystemRoot)\System32\tar.exe" xf $tmpTar -C $env:GITHUB_WORKSPACE
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
-          Remove-Item -LiteralPath $tmpTar -ErrorAction SilentlyContinue
+          if ($rc -ne 0) { exit $rc }
 
       - name: Stamp GIT_COMMIT
         shell: bash
@@ -2622,29 +2622,29 @@ jobs:
 
       # A vendor tarball on the runner makes the dependency fetch local; without
       # one, Bazel fetches its dependencies (docs/ci/runner-environment.md).
+      # tools/ci/fetch-vendor-tarball.ps1 is the one hardened Windows path: it
+      # stages a private, verified copy, clears the destination of everything
+      # an earlier job left in this persistent workspace (never entering a
+      # link, keeping .git) and only then extracts, so tar never writes over
+      # an existing file (issue #231).
       - name: Use a local vendor tarball when the runner has one
         shell: powershell
         env:
           VENDOR_SHORT_SHA: ${{ needs.nightly-vendor.outputs.short_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $tarball = $null
-          if ($env:CI_WIN_VENDOR_DIR) {
-            $candidate = Join-Path $env:CI_WIN_VENDOR_DIR "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst"
-            if (Test-Path -LiteralPath $candidate) { $tarball = $candidate }
-          }
-          if (-not $tarball -or -not (Get-Command zstd -ErrorAction SilentlyContinue)) {
+          $dirs = @($env:CI_WIN_VENDOR_DIR) | Where-Object { $_ }
+          & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\fetch-vendor-tarball.ps1') `
+            -Name "mod_pagespeed-$($env:VENDOR_SHORT_SHA).tar.zst" `
+            -Dest $env:GITHUB_WORKSPACE `
+            -StageDir (Join-Path $env:RUNNER_TEMP 'vendor-download') `
+            -SearchDirs $dirs -HubSsh $env:CI_HUB_SSH -HubDir $env:CI_HUB_VENDOR_DIR
+          $rc = $LASTEXITCODE
+          if ($rc -eq 4) {
             Write-Host "::notice::no runner-local vendor tarball: Bazel fetches its dependencies (docs/ci/runner-environment.md)"
             exit 0
           }
-          Write-Host "extracting the runner-local vendor tarball"
-          $tmpTar = Join-Path $env:RUNNER_TEMP 'vendor.tar'
-          & zstd -d -f -T0 $tarball -o $tmpTar
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::zstd decompression failed (exit $LASTEXITCODE)"; exit 1 }
-          # The Windows tar: the MSYS2 GNU tar reads a drive letter as a remote host.
-          & "$($env:SystemRoot)\System32\tar.exe" xf $tmpTar -C $env:GITHUB_WORKSPACE
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar extraction failed (exit $LASTEXITCODE)"; exit 1 }
-          Remove-Item -LiteralPath $tmpTar -ErrorAction SilentlyContinue
+          if ($rc -ne 0) { exit $rc }
 
       - name: Stamp GIT_COMMIT
         shell: bash
