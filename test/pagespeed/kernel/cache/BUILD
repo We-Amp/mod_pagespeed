@@ -22,12 +22,28 @@ pagespeed_cc_test_library(
 
 pagespeed_cc_test(
     name = "cache",
-    srcs = glob(["*_test.cc"]),
+    srcs = glob(
+        ["*_test.cc"],
+        exclude = ["cyclone_cache_test.cc"],
+    ),
+    deps = [
+        # MappedBackendCache, used by the fallback and write-through tests.
+        "//test/net/instaweb/http:http_test_base",
+        "//test/pagespeed/kernel/cache:cache_test_base",
+    ],
+)
+
+# The Cyclone tests create sparse volumes (up to 320 MiB declared) and fork
+# clusters of worker processes against them; under CI disk contention their
+# runtime is set by per-stripe fsync/msync flushes, not by test count (#321).
+# Their own "large" target gives them a 900 s budget that neither they nor
+# the other kernel cache tests deplete for each other.
+pagespeed_cc_test(
+    name = "cyclone_cache",
+    srcs = ["cyclone_cache_test.cc"],
+    size = "large",
     deps = [
         "//pagespeed/kernel/cache:cyclone_cache",
-        # Exports the mprotect-based MappedBackendCache test harness used by
-        # the zero-copy (Cyclone borrow) promotion / marker-strip tests.
-        "//test/net/instaweb/http:http_test_base",
         "//test/pagespeed/kernel/cache:cache_test_base",
     ],
 )
