@@ -35,6 +35,8 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #else
 #include <direct.h>
@@ -237,6 +239,11 @@ const char kHintFragment[] = "IIS_IUSRS";
 #else
 const char kHintFragment[] = "not in the `pagespeed` group";
 #endif
+
+// The volume-open lock's side file, spelled here exactly as the module
+// spells it: the scans must skip this name, and a refusal must never
+// remove it, on both platforms.
+const char kOpenLockFileName[] = ".pagespeed-module-open.lock";
 
 // A daemon that reports whatever the test tells it to, and — crucially —
 // MODELS the one behaviour the mirror is written against: the volume's
@@ -1002,6 +1009,34 @@ class BacklogFillGuard {
 
 const uint64_t kDaemonSize = 2ULL << 30;  // NOT the peer's compiled-in default
 
+// Waits up to `timeout_ms` REAL milliseconds for `flag`.  Bounded like
+// every wait in this file: a case whose witness never fires must fail,
+// not hang the suite.
+bool WaitFor(std::atomic<bool>* flag, int timeout_ms) {
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  while (!flag->load() &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return flag->load();
+}
+
+// Joins a collaborator thread on every way out of a case, releasing its
+// park latch first so a parked collaborator cannot outlive the case (the
+// same destructor contract the gated-open case below established with its
+// FinishAndJoin).
+struct ReleaseAndJoin {
+  ~ReleaseAndJoin() {
+    release->store(true);
+    if (thread->joinable()) {
+      thread->join();
+    }
+  }
+  std::atomic<bool>* release;
+  std::thread* thread;
+};
+
 // The uid the owner guard sees during the seam test, and the plain
 // function handing it back (a capturing lambda cannot become a function
 // pointer).  POSIX-only, like the guard itself; the Windows lane exercises
@@ -1033,6 +1068,7 @@ class DaemonAdapterTest : public testing::Test {
     // Process-wide by design, so each test starts from a clean slate.
     DaemonAdapter::ResetAnnouncementsForTesting();
     DaemonAdapter::ResetSocketVerdictsForTesting();
+    DaemonAdapter::SetVolumeOpenLockDisabledForTesting(false);
   }
 
   ~DaemonAdapterTest() override {
@@ -1245,6 +1281,121 @@ class DaemonAdapterTest : public testing::Test {
     StringWriter writer(&dumped);
     handler_.Dump(&writer);
     return dumped;
+  }
+
+  // The #226 scenario, in the shape the field produces it: two server
+  // processes on one volume, a split state, and a first serving open that
+  // creates a stray.  Adapter A parks between its open and its removal;
+  // adapter B tries to open exactly there.  `disable_lock` replays the
+  // pre-fix behaviour, which is the red proof the green case pins: with
+  // the lock off, B attaches to A's stray (and keeps the handle across
+  // A's removal); with it on, B opens nothing until A is done, then makes
+  // and removes a stray of its own.
+  void RunSiblingStrayScenario(bool disable_lock) {
+    DaemonAdapter::SetVolumeOpenLockDisabledForTesting(disable_lock);
+    // The server starts while the optimizer is down: no size is
+    // published, so neither process runs the start-up mirror (the check
+    // that would otherwise own the cleanup), and each process's first
+    // serving open is one that must clean up after itself.
+    published_size_ = 0;
+    const GoogleString socket_path = SocketPath("sibling-stray.sock");
+    std::unique_ptr<DaemonAdapter> adapter_a(MakeAdapter(socket_path));
+    EXPECT_EQ(DaemonStartupStatus::kOk, adapter_a->StartupCheck());
+    ASSERT_EQ(DaemonHealth::kUnavailable, adapter_a->health());
+    FakeDaemonAbi* abi_a = last_abi_;
+    ASSERT_TRUE(abi_a != nullptr);
+    ASSERT_EQ(0, abi_a->opens);
+    std::unique_ptr<DaemonAdapter> adapter_b(MakeAdapter(socket_path));
+    EXPECT_EQ(DaemonStartupStatus::kOk, adapter_b->StartupCheck());
+    ASSERT_EQ(DaemonHealth::kUnavailable, adapter_b->health());
+    FakeDaemonAbi* abi_b = last_abi_;
+    ASSERT_TRUE(abi_b != nullptr);
+    ASSERT_TRUE(abi_b != abi_a);
+    ASSERT_EQ(0, abi_b->opens);
+    ASSERT_TRUE(DaemonAdapter::VolumeFiles(volume_).empty());
+
+    // The optimizer comes up publishing a size its own volume file does
+    // not match, and both processes' rechecks recover the arm without
+    // opening anything.
+    DaemonCreatedItsVolume(64ULL << 20);
+    ListeningSocket listener(socket_path);
+    ASSERT_TRUE(listener.bound());
+    abi_a->republished_size = kDaemonSize;
+    abi_b->republished_size = kDaemonSize;
+    now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
+    EXPECT_EQ(DaemonHealth::kReady, adapter_a->ServingHealth());
+    EXPECT_EQ(DaemonHealth::kReady, adapter_b->ServingHealth());
+    ASSERT_EQ(0, abi_a->opens);
+    ASSERT_EQ(0, abi_b->opens);
+
+    // A opens on its own thread and parks the moment its stray exists:
+    // from here to A's removal is exactly the window a sibling could
+    // scan, open and attach inside.
+    std::atomic<bool> parked(false);
+    std::atomic<bool> release(false);
+    abi_a->after_open = [&parked, &release](const GoogleString&) {
+      parked.store(true);
+      while (!release.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    };
+    std::thread opener_a(
+        [&]() { EXPECT_TRUE(adapter_a->RecordCache() == nullptr); });
+    ReleaseAndJoin join_a{&release, &opener_a};
+    ASSERT_TRUE(WaitFor(&parked, 5000)) << "A's open never ran";
+    ASSERT_EQ(1, abi_a->opens);
+    const GoogleString daemon_file =
+        FakeDaemonAbi::VolumeFileFor(volume_, 64ULL << 20);
+    const size_t daemon_slash = daemon_file.find_last_of('/');
+    const GoogleString daemon_name = daemon_slash == GoogleString::npos
+                                         ? daemon_file
+                                         : daemon_file.substr(daemon_slash + 1);
+
+    // B's open, exactly inside A's window.
+    if (disable_lock) {
+      // No lock: B's scan sees the stray as an ordinary candidate, its
+      // open ATTACHES to it, and the handle is published.
+      EXPECT_TRUE(adapter_b->RecordCache() != nullptr);
+      EXPECT_EQ(1, abi_b->opens);
+      EXPECT_TRUE(adapter_b->RecordCacheIfOpen() != nullptr);
+      EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+    } else {
+      const GoogleString dump_before = DumpedMessages();
+      EXPECT_TRUE(adapter_b->RecordCache() == nullptr);
+      EXPECT_EQ(0, abi_b->opens) << "B opened while A's stray was on disk";
+      EXPECT_EQ(dump_before.size(), DumpedMessages().size())
+          << "the busy try printed a line";
+      EXPECT_TRUE(adapter_b->RecordCacheIfOpen() == nullptr);
+      // The quiet window, and no attempt spent: an attempt would back off
+      // kRecordCacheFirstBackoffMs (a second of virtual time), a busy lock
+      // only kVolumeOpenLockBusyRetryMs, so an open at +350 ms proves the
+      // attempt counter never moved.
+      now_ms_ += 100;
+      EXPECT_TRUE(adapter_b->RecordCache() == nullptr);
+      EXPECT_EQ(0, abi_b->opens);
+    }
+
+    release.store(true);
+    opener_a.join();
+    // A detected the split, removed its own stray and stopped for good.
+    EXPECT_TRUE(adapter_a->RecordCacheIfOpen() == nullptr);
+
+    if (disable_lock) {
+      // The split this lock exists to prevent: B still holds a published
+      // handle onto the file A removed.
+      EXPECT_TRUE(adapter_b->RecordCacheIfOpen() != nullptr);
+    } else {
+      now_ms_ += 100 + DaemonAdapter::kVolumeOpenLockBusyRetryMs;
+      EXPECT_TRUE(adapter_b->RecordCache() == nullptr);
+      EXPECT_EQ(1, abi_b->opens) << "B's own open never ran";
+      EXPECT_TRUE(adapter_b->RecordCacheIfOpen() == nullptr);
+    }
+
+    // Only the optimizer's own file is left, whatever happened above.
+    const std::vector<GoogleString> files = DaemonAdapter::VolumeFiles(volume_);
+    ASSERT_EQ(1u, files.size()) << JoinCollection(files, ", ");
+    EXPECT_EQ(daemon_name, files[0]);
+    EXPECT_GE(handler_.MessagesOfType(kError), 1) << Messages();
   }
 };
 
@@ -2806,6 +2957,15 @@ void MakeDirLike(const GoogleString& path) {
   mkdir(path.c_str(), 0700);
 #endif
 }
+
+void RemoveDirLike(const GoogleString& path) {
+#ifdef _WIN32
+  _rmdir(path.c_str());
+#else
+  rmdir(path.c_str());
+#endif
+}
+
 
 TEST_F(DaemonAdapterTest, ADirectoryShapedVolumePathTakesTheManualBranch) {
   // A configured path that IS a directory makes the scan count every
@@ -4629,6 +4789,435 @@ TEST_F(DaemonAdapterTest, AGrownPeerStructDoesNotEscapeTheBuffer) {
   EXPECT_GT(last_abi_->observed_write_bytes, sizeof(PsCacheConfig))
       << "the fake did not overrun the bare struct, so this proved nothing";
 }
+
+// --- the volume-open lock (#226) ---------------------------------------------
+//
+// Between one process's checked open and its removal of the stray (split)
+// file that open created, a sibling process of the same web server can
+// scan, list the stray as an ordinary candidate, open it and attach, and
+// then serve from a file nothing else will ever read until it restarts.
+// The lock the adapter now takes around every checked open closes that
+// window; the cases here pin the race itself (green and red), the waiting
+// policy of each caller, the degrades, the cross-process claim, and the
+// lock's side file staying out of every volume scan.
+
+TEST_F(DaemonAdapterTest, ASiblingCannotAttachToAStrayBeingRemoved) {
+  // The green half of the pair; RunSiblingStrayScenario documents the
+  // staging.  With the lock on, B opens nothing while A's stray exists,
+  // spends no attempt of its schedule on the contention, and once A has
+  // removed its stray, B's own open detects the split on a clean
+  // directory, removes its own stray and stops: neither process ever
+  // hands out a handle.
+  RunSiblingStrayScenario(false);
+}
+
+TEST_F(DaemonAdapterTest, WithoutTheOpenLockASiblingAttachesToTheStray) {
+  // The red proof that the case above pins the race: the same scenario
+  // with the lock disabled replays today's behaviour, and B attaches to
+  // the file A is about to remove -- the exact split of #226, down to the
+  // handle that stays published after A's unlink.
+  RunSiblingStrayScenario(true);
+}
+
+TEST_F(DaemonAdapterTest, AConcurrentStartupMirrorWaitsForTheOther) {
+  // The IIS shape: every w3wp runs its own start-up check, so two of them
+  // can run their mirrors at once (web gardens, overlapped recycles).  A's
+  // mirror is parked inside the open that created its stray, holding the
+  // lock from before its first scan; B's mirror on a second thread cannot
+  // reach its own open until A has refused and removed.  B then makes and
+  // removes a stray of its own and refuses as well: the two mirrors never
+  // interleave, and neither process is ever kReady.
+  // The published size (kDaemonSize) disagrees with the file on disk:
+  // the split.
+  DaemonCreatedItsVolume(64ULL << 20);
+  const GoogleString socket_path = SocketPath("twomirrors.sock");
+  std::atomic<bool> parked(false);
+  std::atomic<bool> release(false);
+  fake_after_open_ = [&parked, &release](const GoogleString&) {
+    parked.store(true);
+    while (!release.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  };
+  std::unique_ptr<DaemonAdapter> adapter_a(MakeAdapter(socket_path));
+  std::thread starter_a([&]() {
+    EXPECT_EQ(DaemonStartupStatus::kRefuseToStart, adapter_a->StartupCheck());
+  });
+  ReleaseAndJoin join_a{&release, &starter_a};
+  ASSERT_TRUE(WaitFor(&parked, 5000)) << "A's mirror never reached its open";
+  FakeDaemonAbi* abi_a = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(abi_loader_mutex_);
+    abi_a = last_abi_;
+  }
+  ASSERT_TRUE(abi_a != nullptr);
+  ASSERT_EQ(1, abi_a->opens);
+
+  // B's start-up check runs on a second thread and cannot get past the
+  // lock.  While A is parked, B's opens are zero whatever B's scheduling
+  // (a B that has not reached the lock yet also opens nothing); a B that
+  // got through would be the regression.
+  fake_after_open_ = nullptr;
+  std::unique_ptr<DaemonAdapter> adapter_b(MakeAdapter(socket_path));
+  std::atomic<bool> b_finished(false);
+  DaemonStartupStatus b_status = DaemonStartupStatus::kOk;
+  std::thread starter_b([&]() {
+    b_status = adapter_b->StartupCheck();
+    b_finished.store(true);
+  });
+  ReleaseAndJoin join_b{&release, &starter_b};
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  FakeDaemonAbi* abi_b = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(abi_loader_mutex_);
+    abi_b = last_abi_;
+  }
+  ASSERT_TRUE(abi_b != nullptr);
+  EXPECT_EQ(0, abi_b->opens) << "B's mirror ran beside A's";
+  EXPECT_FALSE(b_finished.load());
+
+  release.store(true);
+  starter_a.join();
+  starter_b.join();
+  EXPECT_EQ(DaemonStartupStatus::kRefuseToStart, b_status);
+  EXPECT_NE(DaemonHealth::kReady, adapter_b->health());
+  EXPECT_EQ(1, abi_b->opens) << "B's own mirror never ran";
+  // Only the optimizer's own file is left: each mirror removed its stray.
+  const GoogleString daemon_file =
+      FakeDaemonAbi::VolumeFileFor(volume_, 64ULL << 20);
+  const size_t daemon_slash = daemon_file.find_last_of('/');
+  const std::vector<GoogleString> files = DaemonAdapter::VolumeFiles(volume_);
+  ASSERT_EQ(1u, files.size()) << JoinCollection(files, ", ");
+  EXPECT_EQ(daemon_slash == GoogleString::npos
+                ? daemon_file
+                : daemon_file.substr(daemon_slash + 1),
+            files[0]);
+}
+
+TEST_F(DaemonAdapterTest, AStartupMirrorThatCannotTakeTheLockIsRetryable) {
+  // The start-up wait is bounded: five seconds, on the injected clock, so
+  // the wait costs the case a few poll intervals rather than five real
+  // seconds.  The verdict is the retryable "not running yet" one, nothing
+  // is opened, and the serving recheck recovers the arm once the holder is
+  // gone.
+  DaemonCreatedItsVolume(64ULL << 20);
+  const GoogleString socket_path = SocketPath("lockwait.sock");
+  std::atomic<bool> parked(false);
+  std::atomic<bool> release(false);
+  fake_after_open_ = [&parked, &release](const GoogleString&) {
+    parked.store(true);
+    while (!release.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  };
+  std::unique_ptr<DaemonAdapter> adapter_a(MakeAdapter(socket_path));
+  std::thread starter_a([&]() {
+    EXPECT_EQ(DaemonStartupStatus::kRefuseToStart, adapter_a->StartupCheck());
+  });
+  ReleaseAndJoin join_a{&release, &starter_a};
+  ASSERT_TRUE(WaitFor(&parked, 5000)) << "A's mirror never reached its open";
+
+  fake_after_open_ = nullptr;
+  std::unique_ptr<DaemonAdapter> adapter_b(MakeAdapter(socket_path));
+  // Each clock read advances the virtual clock by two seconds, so B's
+  // five-second start-up wait ends after three poll intervals.
+  adapter_b->set_monotonic_clock([this]() {
+    now_ms_ += 2000;
+    return now_ms_;
+  });
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter_b->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter_b->health());
+  EXPECT_TRUE(adapter_b->unavailable_is_retryable());
+  {
+    std::lock_guard<std::mutex> lock(abi_loader_mutex_);
+    ASSERT_TRUE(last_abi_ != nullptr);
+    EXPECT_EQ(0, last_abi_->opens) << "B opened while A held the lock";
+  }
+  EXPECT_NE(GoogleString::npos,
+            DumpedMessages().find(
+                "another process of this server is opening"))
+      << DumpedMessages();
+
+  release.store(true);
+  starter_a.join();
+
+  // The retryable promise, kept: once the holder is gone and the interval
+  // elapses, the recheck recovers the arm (RecordCache() then performs the
+  // checked open on the recovered state, under the lock).
+  adapter_b->set_monotonic_clock([this]() { return now_ms_; });
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs + 1000;
+  EXPECT_EQ(DaemonHealth::kReady, adapter_b->ServingHealth());
+}
+
+TEST_F(DaemonAdapterTest, ABusyOpenLockIsQuiet) {
+  // Twenty busy tries: no open, no line, and no attempt of the schedule
+  // spent.  The open that succeeds once the lock is free is the proof the
+  // counter never moved: twenty real attempts would long since have given
+  // up for good (the schedule holds twelve).
+  const GoogleString socket_path = SocketPath("busyquiet.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  const int opens = last_abi_->opens;
+  const GoogleString dump_before = DumpedMessages();
+
+  DaemonAdapter::VolumeOpenLockSlot holder;
+  ASSERT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &holder));
+  for (int i = 0; i < 20; ++i) {
+    EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  }
+  EXPECT_EQ(opens, last_abi_->opens) << "an open ran under a held lock";
+  EXPECT_EQ(dump_before.size(), DumpedMessages().size()) << DumpedMessages();
+
+  holder.reset();
+  now_ms_ += DaemonAdapter::kVolumeOpenLockBusyRetryMs;
+  EXPECT_TRUE(adapter->RecordCache() != nullptr);
+  EXPECT_EQ(opens + 1, last_abi_->opens);
+}
+
+TEST_F(DaemonAdapterTest, AnUnsupportedOpenLockFallsBackToTodaysOpen) {
+  // A filesystem with no usable lock (some NFS mounts; a cache directory
+  // the lock file cannot be created in): the open proceeds exactly as it
+  // did before the lock existed, with one info line per PROCESS -- so a
+  // second adapter's start-up and serving opens say nothing more.
+  DaemonAdapter::SetVolumeOpenLockDisabledForTesting(true);
+  const GoogleString socket_path = SocketPath("nolock.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  EXPECT_TRUE(adapter->RecordCache() != nullptr);
+  EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+  EXPECT_NE(GoogleString::npos, Messages().find("cannot coordinate"))
+      << Messages();
+
+  const GoogleString socket_path_b = SocketPath("nolock2.sock");
+  ListeningSocket listener_b(socket_path_b);
+  ASSERT_TRUE(listener_b.bound());
+  std::unique_ptr<DaemonAdapter> second(ReadyAdapter(socket_path_b));
+  EXPECT_TRUE(second->RecordCache() != nullptr);
+  EXPECT_EQ(1, handler_.MessagesOfType(kInfo))
+      << "the note is once per process, not once per adapter";
+}
+
+TEST_F(DaemonAdapterTest, TheOpenLockConflictsInsideOneProcessAndReleases) {
+  // Unit coverage of the helper and the lock's shape rules.  flock (and
+  // LockFileEx) conflict between two opens of one directory, not only
+  // between processes -- that is what serializes two adapters of one
+  // process.  The lock follows the VOLUME PATH's directory: a stem locks
+  // its parent, a directory-shaped path locks itself.
+  DaemonAdapter::VolumeOpenLockSlot first;
+  ASSERT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &first));
+  DaemonAdapter::VolumeOpenLockSlot second;
+  EXPECT_FALSE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &second))
+      << "a second open in this process took the same lock";
+
+  first.reset();
+  DaemonAdapter::VolumeOpenLockSlot third;
+  EXPECT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &third))
+      << "the lock did not release with its slot";
+
+  // A different directory is a different lock ...
+  const GoogleString shaped = StrCat(dir_, "/shaped");
+  MakeDirLike(shaped);
+  DaemonAdapter::VolumeOpenLockSlot shaped_slot;
+  EXPECT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(shaped,
+                                                          &shaped_slot))
+      << "a directory-shaped path could not lock its own directory";
+  // ... and a stem inside that directory locks the same directory the
+  // directory-shaped path did: its parent.
+  DaemonAdapter::VolumeOpenLockSlot inner;
+  EXPECT_FALSE(DaemonAdapter::HoldVolumeOpenLockForTesting(
+      StrCat(shaped, "/inner"), &inner))
+      << "a stem did not lock its parent directory";
+  RemoveDirLike(shaped);
+}
+
+TEST_F(DaemonAdapterTest, TheLockFileIsNeverAVolumeFile) {
+  // The lock's side file must never count as a volume.  On Windows the
+  // lock itself creates it; on POSIX the lock is the directory and the
+  // file is staged by hand to exercise the same skip.  Two shapes: a
+  // directory-shaped configured path, where every regular file inside
+  // counts and an unskipped lock file would read as a second cache; and
+  // the stem shape, where a refusal's removal must leave it alone.
+  const GoogleString shaped = StrCat(dir_, "/dirvol");
+  MakeDirLike(shaped);
+  const GoogleString shaped_volume =
+      FakeDaemonAbi::VolumeFileFor(shaped, kDaemonSize);
+  FILE* f = fopen(shaped_volume.c_str(), "a");
+  ASSERT_TRUE(f != nullptr);
+  fclose(f);
+  DaemonAdapter::VolumeOpenLockSlot shaped_slot;
+#ifdef _WIN32
+  // Taking the lock creates the file for real on this platform.
+  ASSERT_TRUE(
+      DaemonAdapter::HoldVolumeOpenLockForTesting(shaped, &shaped_slot));
+#else
+  f = fopen(StrCat(shaped, "/", kOpenLockFileName).c_str(), "a");
+  ASSERT_TRUE(f != nullptr);
+  fclose(f);
+#endif
+  const std::vector<GoogleString> shaped_files =
+      DaemonAdapter::VolumeFiles(shaped);
+  ASSERT_EQ(1u, shaped_files.size()) << JoinCollection(shaped_files, ", ");
+  EXPECT_EQ(GoogleString::npos,
+            shaped_files[0].find(kOpenLockFileName))
+      << JoinCollection(shaped_files, ", ");
+#ifdef _WIN32
+  shaped_slot.reset();
+#endif
+
+  // The stem shape: the refusal below removes the file its open created
+  // and never the lock file beside the stem (on Windows the adapter's own
+  // start-up mirror creates the real one; on POSIX it is staged).
+#ifndef _WIN32
+  f = fopen(StrCat(dir_, "/", kOpenLockFileName).c_str(), "a");
+  ASSERT_TRUE(f != nullptr);
+  fclose(f);
+#endif
+  DaemonCreatedItsVolume(64ULL << 20);
+  const GoogleString socket_path = SocketPath("lockfile.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kRefuseToStart, adapter->StartupCheck());
+  const std::vector<GoogleString> files = DaemonAdapter::VolumeFiles(volume_);
+  EXPECT_EQ(1u, files.size()) << JoinCollection(files, ", ");
+  const GoogleString lock_beside = StrCat(dir_, "/", kOpenLockFileName);
+  FILE* lock_file = fopen(lock_beside.c_str(), "r");
+  ASSERT_TRUE(lock_file != nullptr) << "the refusal removed the lock file";
+  fclose(lock_file);
+
+  // Cleanup the fixture's skips do not know about: the lock file beside
+  // the stem is not in any VolumeFiles() listing, and the shaped
+  // directory is not the fixture's own.
+  remove(shaped_volume.c_str());
+  remove(StrCat(shaped, "/", kOpenLockFileName).c_str());
+  RemoveDirLike(shaped);
+  remove(lock_beside.c_str());
+}
+
+#ifndef _WIN32  // fork()/waitpid(): the lock's cross-process claim
+TEST_F(DaemonAdapterTest, TheOpenLockHoldsAcrossProcesses) {
+  // The lock is a flock on the cache directory, so the claim to pin is
+  // between two real processes, not only two threads.  The parent stays
+  // single-threaded and creates no adapter before the fork (the Cyclone
+  // cache tests' rule: nothing live is forked); the child takes the lock
+  // and says so over a pipe; the parent's serving open cannot run until
+  // the child lets go.
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("forkopen.sock");
+  int go[2];
+  int held[2];
+  ASSERT_EQ(0, pipe(go));
+  ASSERT_EQ(0, pipe(held));
+  const pid_t pid = fork();
+  ASSERT_NE(-1, pid);
+  if (pid == 0) {
+    // CHILD: static calls and pipe syscalls only -- no adapter, no
+    // threads, nothing of the fixture.
+    close(go[1]);
+    close(held[0]);
+    char signal = 0;
+    if (read(go[0], &signal, 1) != 1) _exit(3);
+    DaemonAdapter::VolumeOpenLockSlot slot;
+    if (!DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &slot)) {
+      _exit(4);
+    }
+    if (write(held[1], "h", 1) != 1) _exit(5);
+    if (read(go[0], &signal, 1) != 1) _exit(6);
+    slot.reset();
+    _exit(0);
+  }
+  close(go[0]);
+  close(held[1]);
+  // On any early exit of this test, signal the child and reap it: a child
+  // left holding the lock would hang the next test's start-up check.
+  struct ChildGuard {
+    pid_t pid;
+    int* go_write;
+    int* held_read;
+    bool reaped = false;
+    ~ChildGuard() {
+      if (!reaped) {
+        kill(pid, SIGKILL);
+        waitpid(pid, nullptr, 0);
+      }
+      close(*go_write);
+      close(*held_read);
+    }
+  } guard{pid, &go[1], &held[0]};
+
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kReady, adapter->health());
+  ASSERT_TRUE(last_abi_ != nullptr);
+  const int opens = last_abi_->opens;  // the start-up mirror's
+
+  ASSERT_EQ(1, write(go[1], "g", 1));
+  char signal = 0;
+  ASSERT_EQ(1, read(held[0], &signal, 1));  // the child holds the lock
+
+  const GoogleString dump_before = DumpedMessages();
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens, last_abi_->opens)
+      << "the open ran while another process held the lock";
+  EXPECT_EQ(dump_before.size(), DumpedMessages().size())
+      << "the busy try printed a line";
+  // Inside the quiet window: still nothing.
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_EQ(opens, last_abi_->opens);
+
+  ASSERT_EQ(1, write(go[1], "r", 1));
+  int status = 0;
+  ASSERT_EQ(pid, waitpid(pid, &status, 0));
+  guard.reaped = true;
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(0, WEXITSTATUS(status));
+  now_ms_ += DaemonAdapter::kVolumeOpenLockBusyRetryMs;
+  EXPECT_TRUE(adapter->RecordCache() != nullptr);
+  EXPECT_EQ(opens + 1, last_abi_->opens);
+}
+
+TEST_F(DaemonAdapterTest, AReleasedOpenLockCanBeTakenByAForkedChild) {
+  // Acquiring and releasing happen inside one call, so a forked child
+  // never inherits a held lock: a parent that took and released the lock
+  // leaves a child that can take it.
+  DaemonAdapter::VolumeOpenLockSlot slot;
+  ASSERT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &slot));
+  slot.reset();
+
+  int result[2];
+  ASSERT_EQ(0, pipe(result));
+  const pid_t pid = fork();
+  ASSERT_NE(-1, pid);
+  if (pid == 0) {
+    close(result[0]);
+    DaemonAdapter::VolumeOpenLockSlot child_slot;
+    const char took =
+        DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &child_slot) ? 1
+                                                                          : 0;
+    if (write(result[1], &took, 1) != 1) _exit(9);
+    _exit(0);  // the slot releases at exit
+  }
+  close(result[1]);
+  char took = 0;
+  ASSERT_EQ(1, read(result[0], &took, 1));
+  int status = 0;
+  ASSERT_EQ(pid, waitpid(pid, &status, 0));
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(0, WEXITSTATUS(status));
+  EXPECT_EQ(1, took)
+      << "the child could not take the lock the parent released "
+         "before the fork";
+  close(result[0]);
+}
+#endif  // !_WIN32
 
 // --- the REAL loader ---------------------------------------------------------
 //
