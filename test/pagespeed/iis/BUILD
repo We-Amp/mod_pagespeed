@@ -303,18 +303,6 @@ pagespeed_cc_test(
     ],
 )
 
-# IisModuleFactory - Module factory lifecycle, module creation, cleanup
-# Windows-only test (requires IHttpServer and related IIS types)
-pagespeed_cc_test(
-    name = "iis_module_factory_test",
-    tags = ["manual"],  # Old 1.1 API; needs rewrite for IISpeed adoption
-    srcs = ["iis_module_factory_test.cc"],
-    target_compatible_with = ["@platforms//os:windows"],
-    deps = [
-        "//pagespeed/iis:iis_module",
-    ],
-)
-
 # ConfigurationFile parsing tests (Phases 2-5)
 # Tests ParseConfigText extraction, bug exposure, functionality, and edge cases.
 # Windows-only: depends on iis_module which requires Windows headers.
