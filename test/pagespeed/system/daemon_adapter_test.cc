@@ -3511,6 +3511,51 @@ TEST_F(DaemonAdapterTest, TheVolumeGenerationIsKnownOrUnknownNeverGuessed) {
 #endif
 }
 
+#ifdef _WIN32
+TEST_F(DaemonAdapterTest, TheGenerationFileIsReadNextToADeleteAccessHolder) {
+  // The daemon publishes a generation by renaming a temporary file over
+  // "<volume path>.gen".  A reader that opens the file without delete
+  // sharing fails to open it while another party holds a handle with delete
+  // access, and blocks a rename or delete of the file while it reads.
+  const GoogleString gen_path = StrCat(volume_, ".gen");
+  const GoogleString temp_path = StrCat(volume_, ".gen.tmp");
+  DaemonPublishedGeneration(5);
+  uint64_t generation = 99;
+  ASSERT_TRUE(DaemonAdapter::ReadVolumeGeneration(volume_, &generation));
+  ASSERT_EQ(5u, generation);
+
+  const std::wstring wide_gen(gen_path.begin(), gen_path.end());
+  const std::wstring wide_temp(temp_path.begin(), temp_path.end());
+  // A handle with delete access and full sharing, standing in for the
+  // process that replaces the file.  A reader without delete sharing cannot
+  // open the file next to it.
+  HANDLE holder =
+      CreateFileW(wide_gen.c_str(), GENERIC_READ | DELETE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  ASSERT_NE(INVALID_HANDLE_VALUE, holder);
+  generation = 99;
+  EXPECT_TRUE(DaemonAdapter::ReadVolumeGeneration(volume_, &generation));
+  EXPECT_EQ(5u, generation);
+
+  // Close the holder: a classic rename cannot replace a file that another
+  // handle still has open, so the replace below runs once nothing else holds
+  // the file.
+  CloseHandle(holder);
+
+  FILE* f = fopen(temp_path.c_str(), "wb");
+  ASSERT_TRUE(f != nullptr);
+  fputs("6\n", f);
+  fclose(f);
+  EXPECT_TRUE(MoveFileExW(wide_temp.c_str(), wide_gen.c_str(),
+                          MOVEFILE_REPLACE_EXISTING))
+      << "error " << GetLastError();
+  generation = 99;
+  EXPECT_TRUE(DaemonAdapter::ReadVolumeGeneration(volume_, &generation));
+  EXPECT_EQ(6u, generation);
+}
+#endif  // _WIN32
+
 TEST_F(DaemonAdapterTest, AReplacedVolumeIsReopened) {
   // A full cache purge replaced the volume file.  The process must end up
   // on the new file without being restarted.
