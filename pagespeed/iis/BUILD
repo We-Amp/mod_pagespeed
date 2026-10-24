@@ -143,7 +143,6 @@ cc_library(
         "asyncwinhttp.h",
         "dechunker.h",
         "iis_misc.h",
-        "iis_debugging_string_writer.h",
         "iis_config_util.h",
         "util.h",
         "FileCheck.h",
