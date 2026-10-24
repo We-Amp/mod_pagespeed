@@ -268,8 +268,7 @@ bool FastWildcardGroup::Match(const StringPiece& str, bool allow) const {
   // have a smaller index and be overridden by the already-found match).
   // TODO(jmaessen): These patterns all devolve to a string length check (== or
   // >=).  Consider optimizing them.
-  for (int i = 0, sz = wildcard_only_indices_.size(); i < sz; ++i) {
-    int index = wildcard_only_indices_[i];
+  for (int index : wildcard_only_indices_) {
     if (wildcards_[index]->Match(str)) {
       max_effective_index = effective_indices_[index];
       break;

@@ -77,8 +77,8 @@ bool IsAsiKeyword(JsKeywords::Type type) {
 // Note: This only works correctly for ASCII text. If text contains multi-byte
 // UTF-8 chars, our updates will be incorrect.
 void UpdateLineAndCol(StringPiece text, int* line, int* col) {
-  for (int i = 0, n = text.size(); i < n; ++i) {
-    if (text[i] == '\n') {
+  for (char i : text) {
+    if (i == '\n') {
       // TODO(sligocki): We should allow all Unicode newline chars.
       *line += 1;
       *col = 0;

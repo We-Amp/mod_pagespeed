@@ -399,10 +399,7 @@ void StatisticsLogger::ParseDataFromReader(const StringSet& var_titles,
     timestamps->push_back(curr_timestamp);
     // Push all variable values. Note: We only save the variables listed in
     // var_titles, the rest are disregarded.
-    for (StringSet::const_iterator iter = var_titles.begin();
-         iter != var_titles.end(); ++iter) {
-      const GoogleString& var_title = *iter;
-
+    for (const auto& var_title : var_titles) {
       std::map<StringPiece, StringPiece>::const_iterator value_iter =
           parsed_var_data.find(var_title);
       if (value_iter != parsed_var_data.end()) {
@@ -447,16 +444,16 @@ void StatisticsLogger::ParseVarDataIntoMap(
     std::map<StringPiece, StringPiece>* parsed_var_data) {
   std::vector<StringPiece> lines;
   SplitStringPieceToVector(logfile_var_data, "\n", &lines, true);
-  for (size_t i = 0; i < lines.size(); ++i) {
-    size_t end_index_of_name = lines[i].find_first_of(":");
+  for (auto& line : lines) {
+    size_t end_index_of_name = line.find_first_of(":");
     // Skip lines that are not shaped like "name: value", such as a line
     // cut off at or before the separator.
     if (end_index_of_name == StringPiece::npos ||
-        end_index_of_name + 2 > lines[i].size()) {
+        end_index_of_name + 2 > line.size()) {
       continue;
     }
-    StringPiece var_name = lines[i].substr(0, end_index_of_name);
-    StringPiece var_value_string = lines[i].substr(end_index_of_name + 2);
+    StringPiece var_name = line.substr(0, end_index_of_name);
+    StringPiece var_value_string = line.substr(end_index_of_name + 2);
     (*parsed_var_data)[var_name] = var_value_string;
   }
 }

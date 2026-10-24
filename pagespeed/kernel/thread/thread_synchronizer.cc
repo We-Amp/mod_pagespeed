@@ -134,8 +134,8 @@ void ThreadSynchronizer::DoSignal(const char* key) {
 
 bool ThreadSynchronizer::MatchesPrefix(const char* key) const {
   StringPiece key_piece(key);
-  for (int i = 0, n = prefixes_.size(); i < n; ++i) {
-    if (strings::StartsWith(key_piece, prefixes_[i])) {
+  for (const auto& prefix : prefixes_) {
+    if (strings::StartsWith(key_piece, prefix)) {
       return true;
     }
   }

@@ -64,8 +64,7 @@ QueuedWorkerPool::~QueuedWorkerPool() {
 
   // Final shutdown (in case ShutDown was not called) and deletion of
   // sequences.
-  for (int i = 0, n = all_sequences_.size(); i < n; ++i) {
-    Sequence* sequence = all_sequences_[i];
+  for (auto sequence : all_sequences_) {
     sequence->WaitForShutDown();
     delete sequence;
   }
@@ -95,8 +94,7 @@ void QueuedWorkerPool::InitiateShutDown() {
   // Clear out all the sequences, so that no one adds any more runnable
   // functions. We don't need to lock our access to all_sequences_ as
   // that can only be mutated when shutdown_ == false.
-  for (int i = 0, n = all_sequences_.size(); i < n; ++i) {
-    Sequence* sequence = all_sequences_[i];
+  for (auto sequence : all_sequences_) {
     sequence->InitiateShutDown();
     // Do not delete the sequence; just leave it in shutdown-mode so no
     // further tasks will be started in the thread.
@@ -109,8 +107,7 @@ void QueuedWorkerPool::WaitForShutDownComplete() {
   // The sequence shutdown was initiated in ::InitiateShutDown and now
   // we must wait for the sequences to all exit before we can delete
   // the worker object, otherwise segfaults will occur.
-  for (int i = 0, n = all_sequences_.size(); i < n; ++i) {
-    Sequence* sequence = all_sequences_[i];
+  for (auto sequence : all_sequences_) {
     sequence->WaitForShutDown();
     // Do not delete the sequence; just leave it in shutdown-mode so no
     // further tasks will be started in the thread.
@@ -138,8 +135,7 @@ void QueuedWorkerPool::WaitForShutDownComplete() {
 
   // At this point there are no active tasks or workers, so we can stop
   // mutexing.
-  for (int i = 0, n = available_workers_.size(); i < n; ++i) {
-    QueuedWorker* worker = available_workers_[i];
+  for (auto worker : available_workers_) {
     worker->ShutDown();
     delete worker;
   }
@@ -239,20 +235,20 @@ bool QueuedWorkerPool::AreBusy(const SequenceSet& sequences)
   // 2-phase locking, and thus avoid deadlock... With the ordering
   // done for us by SequenceSet already.
 
-  for (SequenceSet::iterator i = sequences.begin(); i != sequences.end(); ++i) {
-    (*i)->sequence_mutex_->Lock();
+  for (auto sequence : sequences) {
+    sequence->sequence_mutex_->Lock();
   }
 
   bool busy = false;
-  for (SequenceSet::iterator i = sequences.begin(); i != sequences.end(); ++i) {
-    if ((*i)->IsBusy()) {
+  for (auto sequence : sequences) {
+    if (sequence->IsBusy()) {
       busy = true;
       break;
     }
   }
 
-  for (SequenceSet::iterator i = sequences.begin(); i != sequences.end(); ++i) {
-    (*i)->sequence_mutex_->Unlock();
+  for (auto sequence : sequences) {
+    sequence->sequence_mutex_->Unlock();
   }
 
   return busy;

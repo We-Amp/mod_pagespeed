@@ -354,11 +354,7 @@ void SystemRewriteDriverFactory::RootInit() {
 
   // Let SystemCaches know about the various paths we have in configuration
   // first, as well as external cache instances.
-  for (SystemServerContextSet::iterator
-           p = uninitialized_server_contexts_.begin(),
-           e = uninitialized_server_contexts_.end();
-       p != e; ++p) {
-    SystemServerContext* server_context = *p;
+  for (auto server_context : uninitialized_server_contexts_) {
     caches_->RegisterConfig(server_context->global_system_rewrite_options());
   }
 
@@ -401,11 +397,7 @@ void SystemRewriteDriverFactory::ChildInit() {
         out_conf, StaticAssetManager::kInitialConfiguration);
   }
 
-  for (SystemServerContextSet::iterator
-           p = uninitialized_server_contexts_.begin(),
-           e = uninitialized_server_contexts_.end();
-       p != e; ++p) {
-    SystemServerContext* server_context = *p;
+  for (auto server_context : uninitialized_server_contexts_) {
     server_context->ChildInit(this);
   }
   uninitialized_server_contexts_.clear();
@@ -619,9 +611,8 @@ void SystemRewriteDriverFactory::ShutDown() {
   // Next, we shutdown the fetchers before killing the workers in
   // RewriteDriverFactory::ShutDown; this is so any rewrite jobs in progress
   // can quickly wrap up.
-  for (FetcherMap::iterator p = fetcher_map_.begin(), e = fetcher_map_.end();
-       p != e; ++p) {
-    UrlAsyncFetcher* fetcher = p->second;
+  for (auto& p : fetcher_map_) {
+    UrlAsyncFetcher* fetcher = p.second;
     fetcher->ShutDown();
     defer_cleanup(new Deleter<UrlAsyncFetcher>(fetcher));
   }
@@ -643,9 +634,10 @@ void SystemRewriteDriverFactory::ShutDown() {
 
     // Likewise for local ones. We no longer have the objects here
     // (since SplitStats destroyed them), but we saved the segment names.
-    for (int i = 0, n = local_shm_stats_segment_names_.size(); i < n; ++i) {
+    for (const auto& local_shm_stats_segment_name :
+         local_shm_stats_segment_names_) {
       SharedMemStatistics::GlobalCleanup(shared_mem_runtime_.get(),
-                                         local_shm_stats_segment_names_[i],
+                                         local_shm_stats_segment_name,
                                          message_handler());
     }
 

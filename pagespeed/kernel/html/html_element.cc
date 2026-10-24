@@ -180,9 +180,7 @@ GoogleString HtmlElement::ToString() const {
   size_t estimated_size = 64;  // Base estimate for small elements
   StringPiece tag_name = data_->name_.value();
   estimated_size += tag_name.size() * 2;  // Tag appears up to twice
-  for (AttributeConstIterator iter = attributes().begin();
-       iter != attributes().end(); ++iter) {
-    const Attribute& attribute = *iter;
+  for (const auto& attribute : attributes()) {
     estimated_size += attribute.name_str().size() + 4;  // name + ' =' + quotes
     const char* escaped = attribute.escaped_value();
     if (escaped != nullptr) {
@@ -193,9 +191,7 @@ GoogleString HtmlElement::ToString() const {
 
   StrAppend(&buf, "<", tag_name);
 
-  for (AttributeConstIterator iter = attributes().begin();
-       iter != attributes().end(); ++iter) {
-    const Attribute& attribute = *iter;
+  for (const auto& attribute : attributes()) {
     const char* value = attribute.DecodedValueOrNull();
     if (attribute.decoding_error()) {
       // This is a debug method; not used in serialization.

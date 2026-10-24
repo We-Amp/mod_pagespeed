@@ -292,8 +292,8 @@ void PurgeContext::UpdateCachePurgeFile() {
       // is not harmful.
       purge_index_->Add(1);
     }
-    for (int i = 0, n = callbacks.size(); i < n; ++i) {
-      callbacks[i]->Run(success, "");
+    for (auto& callback : callbacks) {
+      callback->Run(success, "");
     }
   } else if (lock_and_update) {
     GrabLockAndUpdate();
@@ -424,8 +424,8 @@ void PurgeContext::CancelCachePurgeFile() {
   // All the purges in the queue failed :(.  Maybe the clients
   // will retry.
   cancellations_->Add(callbacks.size());
-  for (int i = 0, n = callbacks.size(); i < n; ++i) {
-    callbacks[i]->Run(false, "timeout");
+  for (auto& callback : callbacks) {
+    callback->Run(false, "timeout");
   }
 }
 

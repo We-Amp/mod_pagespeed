@@ -277,10 +277,9 @@ void CachingHeaders::ParseCacheControlIfNecessary() {
     parsed_cache_control_ = true;
     StringPieceVector values;
     if (Lookup(HttpAttributes::kCacheControl, &values)) {
-      for (int i = 0, n = values.size(); i < n; ++i) {
+      for (auto value : values) {
         // Cache-Control directive names are case-insensitive (RFC 7234 5.2),
         // so "No-Store" must be honored exactly like "no-store".
-        StringPiece value = values[i];
         if (StringCaseEqual(value, "public")) {
           public_ = true;
         } else if (StringCaseStartsWith(value, "private")) {
@@ -350,8 +349,8 @@ bool CachingHeaders::ComputeHasExplicitNoCacheDirective() {
   StringPieceVector pragma, vary;
   if (Lookup(HttpAttributes::kPragma, &pragma)) {
     // The Pragma directive value is case-insensitive, like Cache-Control's.
-    for (int i = 0, n = pragma.size(); i < n; ++i) {
-      if (StringCaseEqual(pragma[i], "no-cache")) {
+    for (auto i : pragma) {
+      if (StringCaseEqual(i, "no-cache")) {
         return true;
       }
     }
@@ -368,9 +367,9 @@ GoogleString CachingHeaders::GenerateDisabledCacheControl() {
   GoogleString new_cache_control(HttpAttributes::kNoCacheMaxAge0);
   StringPieceVector pieces, name_value;
   if (Lookup(HttpAttributes::kCacheControl, &pieces)) {
-    for (int i = 0, n = pieces.size(); i < n; ++i) {
+    for (auto piece : pieces) {
       name_value.clear();
-      SplitStringPieceToVector(pieces[i], "=", &name_value, true);
+      SplitStringPieceToVector(piece, "=", &name_value, true);
       if (!name_value.empty()) {
         StringPiece name = name_value[0];
         TrimWhitespace(&name);
@@ -388,7 +387,7 @@ GoogleString CachingHeaders::GenerateDisabledCacheControl() {
             !StringCaseEqual(name, HttpAttributes::kSMaxAge) &&
             !StringCaseEqual(name, HttpAttributes::kPrivate) &&
             !StringCaseEqual(name, HttpAttributes::kPublic)) {
-          StrAppend(&new_cache_control, ", ", pieces[i]);
+          StrAppend(&new_cache_control, ", ", piece);
         }
       }
     }

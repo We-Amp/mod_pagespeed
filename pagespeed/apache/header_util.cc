@@ -205,8 +205,8 @@ class ApacheCachingHeaders : public CachingHeaders {
       return false;
     }
     SplitStringPieceToVector(value, ",", values, true);
-    for (int i = 0, n = values->size(); i < n; ++i) {
-      TrimWhitespace(&((*values)[i]));
+    for (auto& value : *values) {
+      TrimWhitespace(&value);
     }
     return true;
   }
@@ -240,9 +240,8 @@ void DisableCachingRelatedHeaders(request_rec* request) {
   // HTTP requests.
   const StringPieceVector& response_headers_to_remove =
       HttpAttributes::CachingHeadersToBeRemoved();
-  for (int i = 0, n = response_headers_to_remove.size(); i < n; ++i) {
-    apr_table_unset(request->headers_out,
-                    response_headers_to_remove[i].as_string().c_str());
+  for (auto i : response_headers_to_remove) {
+    apr_table_unset(request->headers_out, i.as_string().c_str());
   }
 }
 

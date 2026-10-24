@@ -42,8 +42,8 @@ bool NgxCachingHeaders::Lookup(const StringPiece& key,
     return false;
   }
 
-  for (int i = 0, n = values->size(); i < n; ++i) {
-    TrimWhitespace(&((*values)[i]));
+  for (auto& value : *values) {
+    TrimWhitespace(&value);
   }
 
   return true;

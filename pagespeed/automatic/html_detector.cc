@@ -36,8 +36,8 @@ HtmlDetector::~HtmlDetector() {}
 bool HtmlDetector::ConsiderInput(const StringPiece& data) {
   DCHECK(!already_decided_);
 
-  for (int i = 0, n = data.size(); i < n; ++i) {
-    unsigned char c = static_cast<unsigned char>(data[i]);
+  for (char i : data) {
+    unsigned char c = static_cast<unsigned char>(i);
     switch (c) {
       // Ignore all leading whitespace and byte order markers.
       // See http://en.wikipedia.org/wiki/Byte_order_mark

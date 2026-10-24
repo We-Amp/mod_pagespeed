@@ -31,16 +31,16 @@ void CollectNodeTypes(const Json::Value& node, bool allow_graph,
     if (t.isString()) {
       out->insert(AsString(t));
     } else if (t.isArray()) {
-      for (Json::ArrayIndex i = 0; i < t.size(); ++i) {
-        if (t[i].isString()) out->insert(AsString(t[i]));
+      for (const auto& i : t) {
+        if (i.isString()) out->insert(AsString(i));
       }
     }
   }
   if (allow_graph && HasMember(node, "@graph")) {
     const Json::Value& g = Member(node, "@graph");
     if (g.isArray()) {
-      for (Json::ArrayIndex i = 0; i < g.size(); ++i) {
-        CollectNodeTypes(g[i], false, out);
+      for (const auto& i : g) {
+        CollectNodeTypes(i, false, out);
       }
     }
   }
@@ -51,8 +51,8 @@ void CollectNodeTypes(const Json::Value& node, bool allow_graph,
 std::set<std::string> TypesOf(const Json::Value& doc) {
   std::set<std::string> out;
   if (doc.isArray()) {
-    for (Json::ArrayIndex i = 0; i < doc.size(); ++i) {
-      CollectNodeTypes(doc[i], true, &out);
+    for (const auto& i : doc) {
+      CollectNodeTypes(i, true, &out);
     }
   } else {
     CollectNodeTypes(doc, true, &out);

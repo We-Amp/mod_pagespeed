@@ -148,8 +148,8 @@ void CacheStats::MultiGet(MultiGetRequest* request) {
     ReportMultiGetNotFound(request);
   } else {
     get_count_histogram_->Add(request->size());
-    for (int i = 0, n = request->size(); i < n; ++i) {
-      KeyCallback* key_callback = &(*request)[i];
+    for (auto& i : *request) {
+      KeyCallback* key_callback = &i;
       key_callback->callback =
           new StatsCallback(this, timer_, key_callback->callback);
     }

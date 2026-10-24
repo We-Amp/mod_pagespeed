@@ -500,8 +500,8 @@ AdminDaemonHandler::~AdminDaemonHandler() {
   int64_t waited_ms = 0;
   for (;;) {
     bool any_in_flight = false;
-    for (int i = 0; i < kNumEndpoints; ++i) {
-      if (in_flight_[i].load(std::memory_order_acquire) != 0) {
+    for (auto& i : in_flight_) {
+      if (i.load(std::memory_order_acquire) != 0) {
         any_in_flight = true;
         break;
       }

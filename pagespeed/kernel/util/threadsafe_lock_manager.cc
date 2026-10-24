@@ -178,8 +178,7 @@ class SCOPED_LOCKABLE
     // ScopedLockRunningDelayedCallbacks.  That's fine because we've
     // moved over the contents of delayed_calls_ and unlocked the
     // mutex.
-    for (size_t i = 0, n = calls.size(); i < n; ++i) {
-      DelayedCall call = calls[i];
+    for (auto call : calls) {
       if (call.second) {
         call.first->CallRun();
       } else {
@@ -321,8 +320,7 @@ void ThreadSafeLockManager::LockHolder::ManagerDestroyed()
   }
   {
     LockHolder::ScopedLockRunningDelayedCallbacks lock(this);
-    for (LockSet::iterator p = locks_.begin(), e = locks_.end(); p != e; ++p) {
-      Lock* lock = *p;
+    for (auto lock : locks_) {
       lock->ManagerDestroyed();
     }
     manager_.reset(nullptr);

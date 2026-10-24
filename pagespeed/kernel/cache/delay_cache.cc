@@ -154,8 +154,8 @@ void DelayCache::Get(const GoogleString& key, Callback* callback) {
 }
 
 void DelayCache::MultiGet(MultiGetRequest* request) {
-  for (int i = 0, n = request->size(); i < n; ++i) {
-    KeyCallback* key_callback = &(*request)[i];
+  for (auto& i : *request) {
+    KeyCallback* key_callback = &i;
     DelayCallback* cb =
         new DelayCallback(key_callback->key, this, key_callback->callback);
     key_callback->callback = cb;

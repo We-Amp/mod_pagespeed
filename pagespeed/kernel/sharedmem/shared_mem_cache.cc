@@ -633,16 +633,16 @@ void SharedMemCache<kBlockSize>::SanityCheck() {
       CacheEntry* entry = sector->EntryAt(e);
       BlockVector blocks;
       sector->BlockListForEntry(entry, &blocks);
-      for (size_t i = 0; i < blocks.size(); ++i) {
-        ++block_occur[blocks[i]];
+      for (int block : blocks) {
+        ++block_occur[block];
       }
     }
 
     // Now from freelist. We re-use the API for convenience.
     BlockVector freelist_blocks;
     sector->AllocBlocksFromFreeList(blocks_per_sector_, &freelist_blocks);
-    for (size_t i = 0; i < freelist_blocks.size(); ++i) {
-      ++block_occur[freelist_blocks[i]];
+    for (int freelist_block : freelist_blocks) {
+      ++block_occur[freelist_block];
     }
     sector->ReturnBlocksToFreeList(freelist_blocks);
 

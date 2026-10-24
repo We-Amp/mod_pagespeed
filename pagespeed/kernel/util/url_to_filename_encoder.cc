@@ -168,8 +168,7 @@ bool UrlToFilenameEncoder::Decode(const StringPiece& encoded_filename,
   };
   State state = kStart;
   char hex_buffer[3] = {'\0', '\0', '\0'};
-  for (int i = 0, n = encoded_filename.size(); i < n; ++i) {
-    char ch = encoded_filename[i];
+  for (char ch : encoded_filename) {
     switch (state) {
       case kStart:
         if (ch == UrlToFilenameEncoder::kEscapeChar) {

@@ -93,9 +93,7 @@ void HtmlAttributeQuoteRemoval::StartElement(HtmlElement* element) {
   }
   int rewritten = 0;
   HtmlElement::AttributeList* attrs = element->mutable_attributes();
-  for (HtmlElement::AttributeIterator i(attrs->begin()); i != attrs->end();
-       ++i) {
-    HtmlElement::Attribute& attr = *i;
+  for (auto& attr : *attrs) {
     if (attr.quote_style() != HtmlElement::NO_QUOTE &&
         !NeedsQuotes(attr.escaped_value())) {
       attr.set_quote_style(HtmlElement::NO_QUOTE);

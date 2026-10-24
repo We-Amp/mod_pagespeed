@@ -478,7 +478,7 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
         if (ring == nullptr || cln == nullptr) {
           return NGX_ERROR;
         }
-        for (size_t i = 0; i < kRingSlotCount; i++) {
+        for (auto& i : ring->slot) {
           u_char* window =
               static_cast<u_char*>(ngx_pnalloc(request_->pool, kRingSlotBytes));
           ngx_buf_t* slot =
@@ -493,7 +493,7 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
           slot->end = window + kRingSlotBytes;
           slot->pos = slot->last = window;
           slot->temporary = 1;
-          ring->slot[i] = slot;
+          i = slot;
         }
         ring->src = borrowed_data_;
         ring->size = borrowed_size_;

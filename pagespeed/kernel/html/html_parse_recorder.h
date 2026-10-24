@@ -59,8 +59,8 @@ inline uint64_t Fnv1a64(const char* data, size_t size) {
 // "\xHH" (lowercase hex).
 inline void AppendEscaped(const StringPiece& in, GoogleString* out) {
   static const char kHex[] = "0123456789abcdef";
-  for (size_t i = 0; i < in.size(); ++i) {
-    const unsigned char b = static_cast<unsigned char>(in[i]);
+  for (char i : in) {
+    const unsigned char b = static_cast<unsigned char>(i);
     if (b == '\\') {
       out->append("\\\\", 2);
     } else if (b < 0x21 || b > 0x7e) {
@@ -162,9 +162,7 @@ class RecordingHtmlFilter : public EmptyHtmlFilter {
     *out_ += ' ';
     AppendSpelling(element->name(), out_);
     const HtmlElement::AttributeList& attrs = element->attributes();
-    for (HtmlElement::AttributeConstIterator i(attrs.begin()); i != attrs.end();
-         ++i) {
-      const HtmlElement::Attribute& attr = *i;
+    for (const auto& attr : attrs) {
       *out_ += ' ';
       AppendKeyword(attr.keyword(), out_);
       *out_ += ':';

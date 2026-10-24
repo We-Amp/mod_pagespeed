@@ -124,9 +124,8 @@ void HtmlParse::AddEvent(HtmlEvent* event) {
   }
   if (!event_listeners_.empty()) {
     running_filters_ = true;
-    for (FilterVector::iterator it = event_listeners_.begin();
-         it != event_listeners_.end(); ++it) {
-      event->Run(it->get());
+    for (auto& event_listener : event_listeners_) {
+      event->Run(event_listener.get());
     }
     running_filters_ = false;
   }
@@ -555,17 +554,15 @@ void HtmlParse::Flush() {
   // determined (Enabled/CanModifyUrls), so we call that here.
   DetermineFiltersBehavior();
 
-  for (FilterVector::iterator it = event_listeners_.begin();
-       it != event_listeners_.end(); ++it) {
-    (*it)->Flush();
+  for (auto& event_listener : event_listeners_) {
+    event_listener->Flush();
   }
 
   DCHECK(url_valid_) << "Invalid to call Flush with invalid url";
   if (url_valid_ && !buffer_events_) {
     ShowProgress("Flush");
 
-    for (FilterList::iterator i = filters_.begin(); i != filters_.end(); ++i) {
-      HtmlFilter* filter = *i;
+    for (auto filter : filters_) {
       if (filter->is_enabled()) {
         ApplyFilter(filter);
       }
@@ -995,9 +992,8 @@ HtmlElement* HtmlParse::CloneElement(HtmlElement* in_element) {
   out_element->set_style(in_element->style());
 
   const HtmlElement::AttributeList& attrs = in_element->attributes();
-  for (HtmlElement::AttributeConstIterator i(attrs.begin()); i != attrs.end();
-       ++i) {
-    out_element->AddAttribute(*i);
+  for (const auto& attr : attrs) {
+    out_element->AddAttribute(attr);
   }
   return out_element;
 }
@@ -1396,11 +1392,9 @@ void HtmlParse::RestoreDeferredNode(HtmlNode* deferred_node) {
 }
 
 void HtmlParse::ClearDeferredNodes() {
-  for (NodeToEventListMap::iterator p = deferred_nodes_.begin(),
-                                    e = deferred_nodes_.end();
-       p != e; ++p) {
-    const HtmlNode* node = p->first;
-    HtmlEventList* events = p->second.get();
+  for (auto& deferred_node : deferred_nodes_) {
+    const HtmlNode* node = deferred_node.first;
+    HtmlEventList* events = deferred_node.second.get();
     if (deferred_deleted_nodes_.find(node) == deferred_deleted_nodes_.end()) {
       message_handler_->Message(kWarning, "Removed node %s never replaced",
                                 node->ToString().c_str());

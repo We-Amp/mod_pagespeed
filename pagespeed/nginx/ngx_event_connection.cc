@@ -251,9 +251,8 @@ void NgxEventConnection::FlushOverflow() {
     }
     batch.swap(overflow_);
     pthread_mutex_unlock(&write_mutex_);
-    for (std::deque<ps_event_data>::const_iterator it = batch.begin();
-         it != batch.end(); ++it) {
-      DispatchEvent(*it);
+    for (const auto& it : batch) {
+      DispatchEvent(it);
     }
   }
   ps_event_data marker;

@@ -319,8 +319,8 @@ bool ResponseHeaders::CombineContentTypes(const StringPiece& orig,
 }
 
 bool ResponseHeaders::MergeContentType(const StringPiece& content_type) {
-  for (size_t i = 0; i < content_type.size(); i++) {
-    if (!IsNonControlAscii(content_type[i])) {
+  for (char i : content_type) {
+    if (!IsNonControlAscii(i)) {
       return false;
     }
   }
@@ -430,8 +430,8 @@ bool ResponseHeaders::IsProxyCacheable(
   ConstStringStarVector values;
   Lookup(HttpAttributes::kVary, &values);
   bool is_html_like = IsHtmlLike();
-  for (int i = 0, n = values.size(); i < n; ++i) {
-    StringPiece val(*values[i]);
+  for (auto& value : values) {
+    StringPiece val(*value);
     if (!val.empty() &&
         !StringCaseEqual(HttpAttributes::kAcceptEncoding, val)) {
       if (StringCaseEqual(HttpAttributes::kCookie, val)) {
@@ -481,8 +481,8 @@ void ResponseHeaders::SetDateAndCaching(
 void ResponseHeaders::SetCacheControlPublic() {
   ConstStringStarVector values;
   if (Lookup(HttpAttributes::kCacheControl, &values)) {
-    for (int i = 0, n = values.size(); i < n; ++i) {
-      StringPiece val = *(values[i]);
+    for (auto& value : values) {
+      StringPiece val = *value;
       if (StringCaseEqual(val, "private") || StringCaseEqual(val, "public") ||
           StringCaseEqual(val, "no-cache") ||
           StringCaseEqual(val, "no-store")) {
@@ -511,8 +511,8 @@ void ResponseHeaders::SetCacheControlImmutable() {
   // headers here would need to strengthen the check first.
   ConstStringStarVector values;
   if (Lookup(HttpAttributes::kCacheControl, &values)) {
-    for (int i = 0, n = values.size(); i < n; ++i) {
-      StringPiece val = *(values[i]);
+    for (auto& value : values) {
+      StringPiece val = *value;
       if (StringCaseEqual(val, HttpAttributes::kImmutable) ||
           StringCaseEqual(val, "private") || StringCaseEqual(val, "no-cache") ||
           StringCaseEqual(val, "no-store")) {
@@ -572,8 +572,8 @@ bool ResponseHeaders::Sanitize() {
 
   // Sanitize any fields marked as hop-by-hop via the Connection: header
   if (Lookup(HttpAttributes::kConnection, &v)) {
-    for (int i = 0, n = v.size(); i < n; ++i) {
-      StringPiece val = *v[i];
+    for (auto& i : v) {
+      StringPiece val = *i;
       if (!IsHopByHopIndication(val)) {
         continue;
       }
@@ -584,7 +584,7 @@ bool ResponseHeaders::Sanitize() {
         continue;
       }
 
-      changed = RemoveAll(*v[i]) || changed;
+      changed = RemoveAll(*i) || changed;
     }
   }
 
@@ -617,8 +617,7 @@ void ResponseHeaders::GetSanitizedProto(HttpResponseHeaders* proto) const {
       }
 
       // Check each value in Connection: val1, val2, ...
-      for (int j = 0, m = split.size(); j < m; ++j) {
-        StringPiece val = split[j];
+      for (auto val : split) {
         TrimWhitespace(&val);
         // Skip values that are connection-tokens, empty, or are defined
         // as being end-to-end.
@@ -885,8 +884,8 @@ bool ResponseHeaders::IsGzipped() const {
   ConstStringStarVector v;
   bool found = Lookup(HttpAttributes::kContentEncoding, &v);
   if (found) {
-    for (int i = 0, n = v.size(); i < n; ++i) {
-      if ((v[i] != nullptr) && StringCaseEqual(*v[i], HttpAttributes::kGzip)) {
+    for (auto& i : v) {
+      if ((i != nullptr) && StringCaseEqual(*i, HttpAttributes::kGzip)) {
         return true;
       }
     }
@@ -1002,9 +1001,9 @@ void ResponseHeaders::SetCacheControlMaxAge(int64 ttl_ms) {
   GoogleString new_cache_control_value =
       StrCat("max-age=", Integer64ToString(ttl_ms / Timer::kSecondMs));
 
-  for (int i = 0, n = values.size(); i < n; ++i) {
-    if (values[i] != nullptr) {
-      StringPiece val(*values[i]);
+  for (auto& value : values) {
+    if (value != nullptr) {
+      StringPiece val(*value);
       if (!val.empty() && !StringCaseStartsWith(val, "max-age")) {
         StrAppend(&new_cache_control_value, ",", val);
       }
@@ -1134,9 +1133,9 @@ bool ResponseHeaders::HasAnyCookiesWithAttribute(StringPiece attribute_name,
   ConstStringStarVector cookies;
   if (Lookup(HttpAttributes::kSetCookie, &cookies)) {
     // Iterate through the cookies.
-    for (int i = 0, n = cookies.size(); i < n; ++i) {
+    for (auto& cookie : cookies) {
       StringPieceVector name_value_pairs;
-      SplitStringPieceToVector(*cookies[i], ";", &name_value_pairs, true);
+      SplitStringPieceToVector(*cookie, ";", &name_value_pairs, true);
       // Ignore the first name=value which sets the actual cookie.
       for (int i = 1, n = name_value_pairs.size(); i < n; ++i) {
         StringPiece name;
@@ -1165,8 +1164,8 @@ bool ResponseHeaders::SetQueryParamsAsCookies(
   for (int i = 0, n = params.size(); i < n; ++i) {
     StringPiece name = params.name(i);
     bool skipit = false;
-    for (int j = 0, n = options_to_exclude.size(); j < n; ++j) {
-      if (name == options_to_exclude[j]) {
+    for (auto j : options_to_exclude) {
+      if (name == j) {
         skipit = true;
         break;
       }
@@ -1205,8 +1204,8 @@ bool ResponseHeaders::ClearOptionCookies(
   for (int i = 0, n = params.size(); i < n; ++i) {
     StringPiece name = params.name(i);
     bool skipit = false;
-    for (int j = 0, n = options_to_exclude.size(); j < n; ++j) {
-      if (name == options_to_exclude[j]) {
+    for (auto j : options_to_exclude) {
+      if (name == j) {
         skipit = true;
         break;
       }
@@ -1230,8 +1229,8 @@ GoogleString ResponseHeaders::RelCanonicalHeaderValue(StringPiece url) {
 bool ResponseHeaders::HasLinkRelCanonical() const {
   ConstStringStarVector links;
   Lookup(HttpAttributes::kLink, &links);
-  for (int i = 0, n = links.size(); i < n; ++i) {
-    StringPiece cand(*links[i]);
+  for (auto& link : links) {
+    StringPiece cand(*link);
     stringpiece_ssize_type rel_pos = cand.find("rel");
     stringpiece_ssize_type can_pos = cand.rfind("canonical");
     if (rel_pos != StringPiece::npos && can_pos != StringPiece::npos &&

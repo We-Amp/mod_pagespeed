@@ -550,8 +550,8 @@ enum UnescapeState : std::uint8_t {
 
 int HexStringToInt(const GoogleString& value) {
   uint32 good_val = 0;
-  for (int c = 0, n = value.size(); c < n; ++c) {
-    bool ok = AccumulateHexValue(value[c], &good_val);
+  for (char c : value) {
+    bool ok = AccumulateHexValue(c, &good_val);
     if (!ok) {
       return -1;
     }

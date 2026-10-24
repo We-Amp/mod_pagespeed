@@ -32,8 +32,8 @@ GoogleString UserAgentNormalizer::NormalizeWithAll(
     const std::vector<const UserAgentNormalizer*>& ua_normalizers,
     const GoogleString& ua_in) {
   GoogleString ua = ua_in;
-  for (int i = 0, n = ua_normalizers.size(); i < n; ++i) {
-    ua = ua_normalizers[i]->Normalize(ua);
+  for (auto ua_normalizer : ua_normalizers) {
+    ua = ua_normalizer->Normalize(ua);
   }
   return ua;
 }
@@ -108,8 +108,7 @@ GoogleString IEUserAgentNormalizer::Normalize(const GoogleString& in) const {
     out.assign(match.data(), match.size());
     StringPieceVector fragments;
     SplitStringUsingSubstr(Re2ToStringPiece(match2), "; ", &fragments);
-    for (int i = 0, n = fragments.size(); i < n; ++i) {
-      StringPiece fragment = fragments[i];
+    for (auto fragment : fragments) {
       if (strings::StartsWith(fragment, "Trident") ||
           strings::StartsWith(fragment, "Windows ") ||
           strings::StartsWith(fragment, "WOW64 ") ||

@@ -145,8 +145,7 @@ void FallbackCache::Get(const GoogleString& key, Callback* callback) {
 }
 
 void FallbackCache::MultiGet(MultiGetRequest* request) {
-  for (int i = 0, n = request->size(); i < n; ++i) {
-    KeyCallback& key_callback = (*request)[i];
+  for (auto& key_callback : *request) {
     key_callback.callback =
         new FallbackCallback(key_callback.callback, large_object_cache_);
   }

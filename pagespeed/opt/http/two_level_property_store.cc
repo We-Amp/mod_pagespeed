@@ -79,8 +79,7 @@ class TwoLevelPropertyStoreGetCallback
         delete_when_done_(false),
         first_level_result_(false),
         secondary_lookup_(false) {
-    for (int j = 0, n = cohort_list.size(); j < n; ++j) {
-      const PropertyCache::Cohort* cohort = cohort_list[j];
+    for (auto cohort : cohort_list) {
       cohort_list_.push_back(cohort);
     }
   }
@@ -138,10 +137,9 @@ class TwoLevelPropertyStoreGetCallback
 
       // Check if it is FastFinishLookup() is called or lookup for any cohort
       // ended up in a miss.
-      for (int j = 0, n = cohort_list_.size(); j < n; ++j) {
+      for (auto cohort : cohort_list_) {
         // Collect all the cohorts which is not present after lookup in
         // primary_property_store is done.
-        const PropertyCache::Cohort* cohort = cohort_list_[j];
         if (!page_->IsCohortPresent(cohort)) {
           secondary_lookup_cohort_list_.push_back(cohort);
         }
@@ -197,8 +195,7 @@ class TwoLevelPropertyStoreGetCallback
       should_delete = ShouldDeleteLocked();
     }
     if (success) {
-      for (int j = 0, n = secondary_lookup_cohort_list_.size(); j < n; ++j) {
-        const PropertyCache::Cohort* cohort = secondary_lookup_cohort_list_[j];
+      for (auto cohort : secondary_lookup_cohort_list_) {
         PropertyCacheValues values;
         if (page_->EncodePropertyCacheValues(cohort, &values)) {
           primary_property_store_->Put(url_, options_signature_hash_,

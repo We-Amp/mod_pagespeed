@@ -4903,8 +4903,8 @@ void ps_exit_child_process(ngx_cycle_t* cycle) {
       ngx_http_cycle_get_module_main_conf(cycle, ngx_pagespeed));
   // Stop+join the warmer threads BEFORE the factory tears down the
   // fetcher/cache they borrow. Each Stop() signals quit and joins.
-  for (size_t i = 0; i < g_key_directory_warmers.size(); ++i) {
-    g_key_directory_warmers[i]->Stop();
+  for (const auto& g_key_directory_warmer : g_key_directory_warmers) {
+    g_key_directory_warmer->Stop();
   }
   g_key_directory_warmers.clear();
   NgxBaseFetch::Terminate();
@@ -4994,8 +4994,7 @@ std::set<GoogleString> ParseWarmAllowlist(StringPiece spec) {
   std::set<GoogleString> out;
   StringPieceVector parts;
   SplitStringPieceToVector(spec, ",", &parts, true /* omit_empty */);
-  for (size_t i = 0; i < parts.size(); ++i) {
-    StringPiece p = parts[i];
+  for (auto p : parts) {
     TrimWhitespace(&p);
     if (!p.empty()) {
       out.insert(GoogleString(p.data(), p.size()));

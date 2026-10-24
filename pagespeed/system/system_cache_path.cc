@@ -312,10 +312,7 @@ void SystemCachePath::RemoveServerContext(SystemServerContext* server_context) {
 void SystemCachePath::UpdateCachePurgeSet(
     const CopyOnWrite<PurgeSet>& purge_set) {
   ScopedMutex lock(mutex_.get());
-  for (ServerContextSet::iterator p = server_context_set_.begin(),
-                                  e = server_context_set_.end();
-       p != e; ++p) {
-    SystemServerContext* server_context = *p;
+  for (auto server_context : server_context_set_) {
     server_context->UpdateCachePurgeSet(purge_set);
   }
 }

@@ -203,6 +203,7 @@
 #include "pagespeed/kernel/js/js_tokenizer.h"
 
 #include <cstddef>
+#include <ranges>
 #include <vector>
 
 #include "base/logging.h"
@@ -641,12 +642,11 @@ JsKeywords::Type JsTokenizer::NextToken(StringPiece* token_out) {
 
 GoogleString JsTokenizer::ParseStackForTest() const {
   GoogleString output;
-  for (std::vector<ParseState>::const_iterator iter = parse_stack_.begin();
-       iter != parse_stack_.end(); ++iter) {
+  for (auto iter : parse_stack_) {
     if (!output.empty()) {
       output.push_back(' ');
     }
-    switch (*iter) {
+    switch (iter) {
       case kStartOfInput:
         output.append("Start");
         break;
@@ -714,7 +714,7 @@ GoogleString JsTokenizer::ParseStackForTest() const {
         output.append("Cls{");
         break;
       default:
-        LOG(DFATAL) << "Unknown parse state: " << *iter;
+        LOG(DFATAL) << "Unknown parse state: " << iter;
         output.append("UNKNOWN");
         break;
     }
@@ -2229,11 +2229,8 @@ JsKeywords::Type JsTokenizer::ConsumeString(StringPiece* token_out) {
 bool JsTokenizer::NearestOpenDelimiterIsTemplateInterp() const {
   // Walk from the top of the stack, skipping expression/operator/keyword
   // states, until we reach an open delimiter (or the bottom of the stack).
-  for (std::vector<ParseState>::const_reverse_iterator
-           iter = parse_stack_.rbegin(),
-           end = parse_stack_.rend();
-       iter != end; ++iter) {
-    switch (*iter) {
+  for (auto iter : std::ranges::reverse_view(parse_stack_)) {
+    switch (iter) {
       case kTemplateInterp:
         return true;
       case kStartOfInput:
@@ -2262,11 +2259,8 @@ bool JsTokenizer::NearestOpenDelimiterIsClassBrace() const {
   // Same walk as the template-interpolation check, for the class body
   // brace.  kClassBrace itself is a delimiter here (a nested class body
   // belongs to the innermost class).
-  for (std::vector<ParseState>::const_reverse_iterator
-           iter = parse_stack_.rbegin(),
-           end = parse_stack_.rend();
-       iter != end; ++iter) {
-    switch (*iter) {
+  for (auto iter : std::ranges::reverse_view(parse_stack_)) {
+    switch (iter) {
       case kClassBrace:
         return true;
       case kStartOfInput:
@@ -2547,11 +2541,7 @@ bool JsTokenizer::TryInsertLinebreakSemicolon() {
     case kExpression:
       // A statement can't end with an unclosed paren or bracket; in
       // particular, semicolons for a for-loop header are never inserted.
-      for (std::vector<ParseState>::const_reverse_iterator
-               iter = parse_stack_.rbegin(),
-               end = parse_stack_.rend();
-           iter != end; ++iter) {
-        const ParseState state = *iter;
+      for (auto state : std::ranges::reverse_view(parse_stack_)) {
         if (state == kOpenParen || state == kOpenBracket ||
             state == kTemplateInterp) {
           return false;

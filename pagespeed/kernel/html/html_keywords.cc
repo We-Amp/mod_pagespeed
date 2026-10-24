@@ -214,9 +214,8 @@ void HtmlKeywords::InitEscapeSequences() {
   escape_map_.set_deleted_key("");
 
   StringSetInsensitive case_sensitive_symbols;
-  for (size_t i = 0; i < std::size(kHtmlKeywordsSequences); ++i) {
+  for (const auto& seq : kHtmlKeywordsSequences) {
     // Put all symbols in the case-sensitive map
-    const HtmlKeywordsSequence& seq = kHtmlKeywordsSequences[i];
     unescape_sensitive_map_[seq.sequence] =
         reinterpret_cast<const char*>(seq.value);
 
@@ -478,8 +477,8 @@ StringPiece HtmlKeywords::EscapeHelper(const StringPiece& unescaped,
   buf->clear();
 
   GoogleString char_to_escape;
-  for (size_t i = 0; i < unescaped.size(); ++i) {
-    int ch = static_cast<unsigned char>(unescaped[i]);
+  for (char i : unescaped) {
+    int ch = static_cast<unsigned char>(i);
     // According to http://www.htmlescape.net/htmlescape_tool.html,
     // single-quote does not need to be escaped.  However, input HTML
     // might have used single-quote to quote attribute values, in
@@ -503,7 +502,7 @@ StringPiece HtmlKeywords::EscapeHelper(const StringPiece& unescaped,
         *buf += ';';
       }
     } else {
-      *buf += unescaped[i];
+      *buf += i;
     }
   }
   return StringPiece(*buf);
@@ -515,12 +514,12 @@ void HtmlKeywords::AddCrossProduct(const StringPiece& k1_list,
   StringPieceVector v1, v2;
   SplitStringPieceToVector(k1_list, " ", &v1, true);
   SplitStringPieceToVector(k2_list, " ", &v2, true);
-  for (int i = 0, n1 = v1.size(); i < n1; ++i) {
-    HtmlName::Keyword k1 = HtmlName::Lookup(v1[i]);
-    DCHECK_NE(HtmlName::kNotAKeyword, k1) << v1[i];
-    for (int j = 0, n2 = v2.size(); j < n2; ++j) {
-      HtmlName::Keyword k2 = HtmlName::Lookup(v2[j]);
-      DCHECK_NE(HtmlName::kNotAKeyword, k2) << v2[j];
+  for (auto i : v1) {
+    HtmlName::Keyword k1 = HtmlName::Lookup(i);
+    DCHECK_NE(HtmlName::kNotAKeyword, k1) << i;
+    for (auto j : v2) {
+      HtmlName::Keyword k2 = HtmlName::Lookup(j);
+      DCHECK_NE(HtmlName::kNotAKeyword, k2) << j;
       KeywordPair k1_k2 = MakeKeywordPair(k1, k2);
       kmap->push_back(k1_k2);
     }
@@ -530,9 +529,9 @@ void HtmlKeywords::AddCrossProduct(const StringPiece& k1_list,
 void HtmlKeywords::AddToSet(const StringPiece& klist, KeywordVec* kset) {
   StringPieceVector v;
   SplitStringPieceToVector(klist, " ", &v, true);
-  for (int i = 0, n = v.size(); i < n; ++i) {
-    HtmlName::Keyword k = HtmlName::Lookup(v[i]);
-    DCHECK_NE(HtmlName::kNotAKeyword, k) << v[i];
+  for (auto i : v) {
+    HtmlName::Keyword k = HtmlName::Lookup(i);
+    DCHECK_NE(HtmlName::kNotAKeyword, k) << i;
     kset->push_back(k);
   }
 }

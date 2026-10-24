@@ -280,19 +280,17 @@ void Scheduler::Signal() {
     // First, mark them all as owned by us, so any concurrent timeouts
     // that happen while we're releasing the lock to run user code
     // do not delete them from under us.
-    for (AlarmSet::iterator i = waiting_alarms_to_dispatch.begin();
-         i != waiting_alarms_to_dispatch.end(); ++i) {
-      (*i)->set_in_wait_dispatch(true);
+    for (auto i : waiting_alarms_to_dispatch) {
+      i->set_in_wait_dispatch(true);
     }
 
     // Now actually signal those that didn't timeout yet.
-    for (AlarmSet::iterator i = waiting_alarms_to_dispatch.begin();
-         i != waiting_alarms_to_dispatch.end(); ++i) {
-      if (!CancelAlarm(*i)) {
+    for (auto i : waiting_alarms_to_dispatch) {
+      if (!CancelAlarm(i)) {
         // If CancelAlarm returned false, this means the alarm actually
         // got run by a timeout. In that case, since we set in_wait_dispatch
         // to true, it deferred the deletion to us, so take care of it.
-        delete *i;
+        delete i;
       }
     }
   }

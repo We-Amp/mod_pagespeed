@@ -571,8 +571,8 @@ bool SplitStringPieceToIntegerVector(StringPiece src, StringPiece separators,
                            true /* omit_empty_strings */);
   ints->clear();
   int v;
-  for (int i = 0, n = values.size(); i < n; ++i) {
-    if (StringToInt(values[i], &v)) {
+  for (auto value : values) {
+    if (StringToInt(value, &v)) {
       ints->push_back(v);
     } else {
       ints->clear();

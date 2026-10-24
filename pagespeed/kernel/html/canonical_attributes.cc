@@ -37,9 +37,7 @@ void CanonicalAttributes::StartDocument() {
 
 void CanonicalAttributes::StartElement(HtmlElement* element) {
   HtmlElement::AttributeList* attrs = element->mutable_attributes();
-  for (HtmlElement::AttributeIterator i(attrs->begin()); i != attrs->end();
-       ++i) {
-    HtmlElement::Attribute& attribute = *i;
+  for (auto& attribute : *attrs) {
     const char* value = attribute.DecodedValueOrNull();
     if (attribute.decoding_error()) {
       ++num_errors_;
