@@ -66,6 +66,14 @@ void ApacheRequestToResponseHeaders(const request_rec& request,
                                     ResponseHeaders* headers,
                                     ResponseHeaders* err_headers);
 
+// Adds to `headers` the Content-Encoding the origin itself applied to the
+// response, which headers_out cannot show before the protocol filters merge
+// it in: a script origin's headers sit in err_headers_out, and the coding
+// mod_mime derived from an AddEncoding extension sits in
+// request->content_encoding. An encoding already in `headers` stands.
+void AddOriginContentEncoding(const request_rec& request,
+                              ResponseHeaders* headers);
+
 // Converts the ResponseHeaders to the output headers.  This function
 // does not alter the status code or the major/minor version of the
 // Apache request.

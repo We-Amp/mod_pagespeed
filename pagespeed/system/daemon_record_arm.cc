@@ -134,13 +134,28 @@ const char* const kReproducibleHeaders[] = {
 //                       essentially every static response the in-place path
 //                       records, so treating it as origin content would take
 //                       the substrate to zero on a default deployment.
+//   content-encoding   the server's own compressor at work (mod_deflate,
+//                       mod_brotli, nginx's gzip filter), which runs AFTER the
+//                       recording seam captured the body and stamps its coding
+//                       on the finalized headers; the same compressor stamps it
+//                       again on every serve of the entry, for the clients that
+//                       can decode it.  An origin that encoded the resource
+//                       itself never gets this far: the recorder refuses it
+//                       before the gate, on the capture-time headers, where
+//                       the seams state the origin's own coding, and on gzip
+//                       magic bytes in the captured body besides, so the only
+//                       stored entries whose header list carries one are those
+//                       captured as identity behind a compressor.  Treating it
+//                       as origin content would mark every stylesheet and
+//                       script a browser requests on a stock Apache lane, and
+//                       a marked entry is declined on every serve.
 //   connection,         hop-by-hop: never forwarded by anything, and not the
 //   keep-alive,         origin's to state end to end.
 //   transfer-encoding
 const char* const kServeGeneratedHeaders[] = {
-    "date",          "server",     "age",
-    "connection",    "keep-alive", "transfer-encoding",
-    "accept-ranges",
+    "date",          "server",           "age",
+    "connection",    "keep-alive",       "transfer-encoding",
+    "accept-ranges", "content-encoding",
 };
 
 // A port's own copies of headers that are present under their real names in

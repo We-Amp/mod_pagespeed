@@ -178,6 +178,17 @@ class DaemonIproRecorder : public IproRecorder {
   RewriteStats* stats_ = nullptr;
 
   GoogleString body_;
+  // The encoding the bytes in `body_` are in, as the PRELIMINARY headers
+  // stated it.  True means those headers were seen and carried no
+  // Content-Encoding (or identity), so what was captured is the origin's own
+  // uncompressed form; a Content-Encoding that appears on the FINAL headers
+  // after that was added by a compressor later in the server's chain
+  // (mod_deflate, mod_brotli, nginx's gzip filter) and describes the bytes
+  // the client receives, not the ones recorded.  DoneAndSetHeaders checks
+  // the same claim against the body itself: gzip bytes captured under it
+  // are refused on their magic, the same sniff the classic recorder uses
+  // to decide what the captured body is.
+  bool captured_identity_ = false;
   // The response's Vary lines, joined.  A MEMBER, not a local: the gate's
   // input borrows it as a StringPiece and reads it after the call that fills
   // it returns, so a temporary here is a read of freed storage as soon as the
