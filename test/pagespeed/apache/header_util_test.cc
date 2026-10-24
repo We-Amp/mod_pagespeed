@@ -38,6 +38,9 @@ class HeaderUtilTest : public testing::Test {
   void SetUp() override {
     MockApache::Initialize();
     MockApache::PrepareRequest(&request_);
+    // httpd always allocates err_headers_out; MockApache::PrepareRequest
+    // does not.
+    request_.err_headers_out = apr_table_make(request_.pool, 10);
   }
 
   void TearDown() override {
@@ -61,6 +64,16 @@ class HeaderUtilTest : public testing::Test {
 
   const char* GetCacheControl() {
     return apr_table_get(request_.headers_out, HttpAttributes::kCacheControl);
+  }
+
+  void SetErrCacheControl(const char* cache_control) {
+    apr_table_set(request_.err_headers_out, HttpAttributes::kCacheControl,
+                  cache_control);
+  }
+
+  const char* GetErrCacheControl() {
+    return apr_table_get(request_.err_headers_out,
+                         HttpAttributes::kCacheControl);
   }
 
   request_rec request_;
@@ -113,6 +126,66 @@ TEST_F(HeaderUtilTest, DisableCachingRelatedHeaders) {
   DisableCachingRelatedHeaders(&request_);
   DisableCacheControlHeader(&request_);
   EXPECT_EQ(nullptr, GetLastModified());
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
+                      HttpAttributes::kNoStore),
+               GetCacheControl());
+}
+
+// php-fpm, CGI scripts and "Header always set" deliver their caching
+// headers in err_headers_out, which httpd merges with headers_out when
+// sending the response.  The disable helpers must cover both tables, or the
+// origin's values survive next to ours.
+TEST_F(HeaderUtilTest, DisableErrCaching) {
+  SetErrCacheControl("max-age=60");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableErrNostore) {
+  SetErrCacheControl("must-revalidate, private, no-store");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
+                      HttpAttributes::kNoStore),
+               GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableErrSMaxAge) {
+  SetErrCacheControl("public, s-maxage=600");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableCachingInBothTables) {
+  SetCacheControl("max-age=60");
+  SetErrCacheControl("no-store");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
+                      HttpAttributes::kNoStore),
+               GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableCachingRelatedHeadersInErrHeaders) {
+  SetCacheControl("no-cache, must-revalidate, private, no-store");
+  SetLastModified("some random string");
+  apr_table_set(request_.err_headers_out, HttpAttributes::kLastModified,
+                "another random string");
+  apr_table_set(request_.err_headers_out, HttpAttributes::kExpires,
+                "sometime in the future");
+  apr_table_set(request_.err_headers_out, HttpAttributes::kEtag, "\"v1\"");
+  DisableCachingRelatedHeaders(&request_);
+  DisableCacheControlHeader(&request_);
+  EXPECT_EQ(nullptr, GetLastModified());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+  EXPECT_EQ(nullptr, apr_table_get(request_.err_headers_out,
+                                   HttpAttributes::kLastModified));
+  EXPECT_EQ(nullptr,
+            apr_table_get(request_.err_headers_out, HttpAttributes::kExpires));
+  EXPECT_EQ(nullptr,
+            apr_table_get(request_.err_headers_out, HttpAttributes::kEtag));
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
                       HttpAttributes::kNoStore),
                GetCacheControl());

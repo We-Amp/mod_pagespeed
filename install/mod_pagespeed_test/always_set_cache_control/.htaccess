@@ -1,0 +1,8 @@
+# Caching headers that arrive in err_headers_out: "Header always set"
+# writes there, the same table httpd's script-header parser fills for
+# php-fpm and CGI origins.
+ModPagespeedModifyCachingHeaders on
+<FilesMatch "\.html$">
+  Header always set Cache-Control "public, max-age=600, s-maxage=600"
+  Header always set Expires "Fri, 21 Oct 2027 07:28:00 GMT"
+</FilesMatch>

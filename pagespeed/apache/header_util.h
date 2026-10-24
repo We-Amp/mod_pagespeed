@@ -90,11 +90,15 @@ GoogleString HeadersOutToString(request_rec* request);
 // Get request->subprocess_env as a string, intended for tests.
 GoogleString SubprocessEnvToString(request_rec* request);
 
-// Updates headers related to caching (but not Cache-Control).
+// Updates headers related to caching (but not Cache-Control).  Unsets them
+// in both headers_out and err_headers_out, which httpd merges when sending
+// the response.
 void DisableCachingRelatedHeaders(request_rec* request);
 
 // Updates caching headers to ensure the resulting response is not cached.
-// Removes any max-age specification, and adds max-age=0, no-cache.
+// Removes any max-age specification, and adds max-age=0, no-cache.  The
+// computed value takes the Cache-Control directives of both headers_out and
+// err_headers_out into account, and is written to headers_out only.
 void DisableCacheControlHeader(request_rec* request);
 
 }  // namespace net_instaweb
