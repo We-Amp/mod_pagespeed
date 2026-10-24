@@ -15,7 +15,7 @@ Apache module. Key differences:
 - **Threading model**: ProxyFetch runs on worker threads; `EnvoyAsyncFetch`
   bridges to Envoy's dispatcher thread via `shared_from_this()` and atomics.
 
-## Skipped Tests (20 total)
+## Skipped Tests
 
 These tests are marked `@pytest.mark.not_envoy` and represent known behavioral
 differences, not bugs:
@@ -65,7 +65,7 @@ show placeholder values. The release builds include the git hash.
 
 ## Test Results
 
-**Latest:** 225 passed, 25 skipped, 0 failed
+The Envoy system tests do not run in CI, so no current counts are published.
 
 Run tests:
 ```bash
