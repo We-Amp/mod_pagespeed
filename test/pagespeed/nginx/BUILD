@@ -218,3 +218,19 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# Source pins for the admin POST request-body handoff: the body post handler
+# must finish the request with a definite result, and the content phase must
+# not arm the body read twice (the port cannot be linked into a test; see
+# above).
+pagespeed_cc_test(
+    name = "ngx_admin_post_pin_test",
+    srcs = ["ngx_admin_post_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
