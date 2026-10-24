@@ -155,7 +155,7 @@ IisProcessContext::IisProcessContext(
 	IisRewriteOptions* root_options,
 	std::wstring app_pool_name,
 	global_settings settings
-	)  
+	)
 	: site_app_id_(site_app_id),
 	module_id_(module_id)
 	, message_handler_( new GoogleMessageHandler() ) // TODO(oschaaf): want IisMessageHandler here.
@@ -163,14 +163,11 @@ IisProcessContext::IisProcessContext(
 	, root_options_(root_options)
 	, app_pool_name_(app_pool_name)
 	, settings_(settings)
-	, server_context_mutex_(nullptr)
 	, ok_(true)
-	, server_context_(nullptr)
 
 {
 	stopped_.set_value(0);
 	reference_count_=1;
-	driver_factory_ = nullptr;
 	// Resolve the IIS worker identity once at construction. It does not
 	// change for the lifetime of the process, and we want it available
 	// even on early init-failure paths that bail before GetServerContext.
