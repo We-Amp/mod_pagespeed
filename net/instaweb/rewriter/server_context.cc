@@ -21,6 +21,7 @@
 
 #include <algorithm>  // for std::binary_search
 #include <cstddef>    // for size_t
+#include <iterator>
 #include <memory>
 #include <set>
 
@@ -294,7 +295,7 @@ ServerContext::ServerContext(RewriteDriverFactory* factory)
   // Make sure the excluded-attributes are in abc order so binary_search works.
   // Make sure to use the same comparator that we pass to the binary_search.
 #ifndef NDEBUG
-  for (int i = 1, n = arraysize(kExcludedAttributes); i < n; ++i) {
+  for (int i = 1, n = std::size(kExcludedAttributes); i < n; ++i) {
     DCHECK(CharStarCompareInsensitive()(kExcludedAttributes[i - 1],
                                         kExcludedAttributes[i]));
   }
@@ -1080,7 +1081,7 @@ void ServerContext::SetRewriteOptionsManager(RewriteOptionsManager* rom) {
 }
 
 bool ServerContext::IsExcludedAttribute(const char* attribute) {
-  const char** end = kExcludedAttributes + arraysize(kExcludedAttributes);
+  const char** end = kExcludedAttributes + std::size(kExcludedAttributes);
   return std::binary_search(kExcludedAttributes, end, attribute,
                             CharStarCompareInsensitive());
 }

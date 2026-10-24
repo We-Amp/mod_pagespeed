@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <vector>
 
 #include "base/logging.h"
@@ -42,7 +43,7 @@ const HtmlName::Keyword kSensitiveTags[] = {HtmlName::kCode, HtmlName::kPre,
                                             HtmlName::kTextarea};
 
 bool IsSensitiveKeyword(HtmlName::Keyword keyword) {
-  const HtmlName::Keyword* end = kSensitiveTags + arraysize(kSensitiveTags);
+  const HtmlName::Keyword* end = kSensitiveTags + std::size(kSensitiveTags);
   return std::binary_search(kSensitiveTags, end, keyword);
 }
 
@@ -50,7 +51,7 @@ bool IsSensitiveKeyword(HtmlName::Keyword keyword) {
 
 CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse)
     : html_parse_(html_parse) {
-  for (size_t i = 1; i < arraysize(kSensitiveTags); ++i) {
+  for (size_t i = 1; i < std::size(kSensitiveTags); ++i) {
     DCHECK(kSensitiveTags[i - 1] < kSensitiveTags[i]);
   }
 }

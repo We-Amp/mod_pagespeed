@@ -31,6 +31,7 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -232,7 +233,7 @@ const RewriteOptions::Filter ImageRewriteFilter::kRelatedFilters[] = {
     RewriteOptions::kResizeImages, RewriteOptions::kResizeMobileImages,
     RewriteOptions::kStripImageColorProfile,
     RewriteOptions::kStripImageMetaData};
-const int ImageRewriteFilter::kRelatedFiltersSize = arraysize(kRelatedFilters);
+const int ImageRewriteFilter::kRelatedFiltersSize = std::size(kRelatedFilters);
 
 StringPieceVector* ImageRewriteFilter::related_options_ = nullptr;
 
@@ -1033,7 +1034,7 @@ void ImageRewriteFilter::Terminate() {
 }
 
 void ImageRewriteFilter::AddRelatedOptions(StringPieceVector* target) {
-  for (int i = 0, n = arraysize(kRelatedOptions); i < n; ++i) {
+  for (int i = 0, n = std::size(kRelatedOptions); i < n; ++i) {
     target->push_back(kRelatedOptions[i]);
   }
 }

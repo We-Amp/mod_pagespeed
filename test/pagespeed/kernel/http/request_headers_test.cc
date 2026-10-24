@@ -21,6 +21,7 @@
 
 #include "pagespeed/kernel/http/request_headers.h"
 
+#include <iterator>
 #include <map>
 #include <utility>
 
@@ -168,8 +169,8 @@ TEST_F(RequestHeadersTest, GetAllCookies) {
       "kk"};
   const char* const kValues[] = {
       "b", "z", "y", "d", "\" f \"", "zomg", "hhhhhhhhhhhhhhh", "llr", "", ""};
-  ASSERT_EQ(arraysize(kNames), cookies.size());
-  ASSERT_EQ(arraysize(kValues), cookies.size());
+  ASSERT_EQ(std::size(kNames), cookies.size());
+  ASSERT_EQ(std::size(kValues), cookies.size());
   RequestHeaders::CookieMultimapConstIter iter = cookies.begin();
   for (int i = 0, n = cookies.size(); i < n; ++i, ++iter) {
     EXPECT_STREQ(kNames[i], iter->first);

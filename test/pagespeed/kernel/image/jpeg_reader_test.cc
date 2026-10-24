@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/image/jpeg_reader.h"
 
+#include <iterator>
+
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/read_image.h"
@@ -58,8 +60,8 @@ const char* kInvalidFiles[] = {
     "corrupt.jpg",    // Invalid huffman code in the image data section.
 };
 
-const size_t kValidJpegImageCount = arraysize(kValidJpegImages);
-const size_t kInvalidFileCount = arraysize(kInvalidFiles);
+const size_t kValidJpegImageCount = std::size(kValidJpegImages);
+const size_t kInvalidFileCount = std::size(kInvalidFiles);
 
 // Verify that decoded image is accurate for each pixel.
 TEST(JpegReaderTest, ValidJpegs) {

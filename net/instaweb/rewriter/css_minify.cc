@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/css_minify.h"
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -364,7 +365,7 @@ const char* kLengths[] = {
 };
 
 bool IsLength(const GoogleString& unit) {
-  return std::binary_search(kLengths, kLengths + arraysize(kLengths), unit);
+  return std::binary_search(kLengths, kLengths + std::size(kLengths), unit);
 }
 
 }  // namespace

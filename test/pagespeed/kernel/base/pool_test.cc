@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/base/pool.h"
 
+#include <iterator>
 #include <list>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -51,7 +52,7 @@ using PoolPosition = PoolElement<IntElement>::Position;
 class PoolTest : public testing::Test {
  protected:
   PoolTest() {
-    for (int i = 0; i < arraysize(elements_); ++i) {
+    for (int i = 0; i < std::size(elements_); ++i) {
       elements_[i].set_num(i);
     }
   }
@@ -182,7 +183,7 @@ TEST_F(PoolTest, TestRemoveAndReinsertMiddle) {
   ExpectContains(0, 3);
   Remove(2);
   const int kMiddleExpected[] = {0, 1, 3};
-  ExpectContainsElements(arraysize(kMiddleExpected), kMiddleExpected);
+  ExpectContainsElements(std::size(kMiddleExpected), kMiddleExpected);
   Add(2);
   ExpectRemoveOldest(0);
   ExpectRemoveOldest(1);

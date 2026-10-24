@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <utility>
 
@@ -123,7 +124,7 @@ const unsigned char GIF_blank[] = {0x47,
                                    0x1,
                                    0x0,
                                    0x3b};
-const int GIF_blank_len = arraysize(GIF_blank);
+const int GIF_blank_len = std::size(GIF_blank);
 
 // The generated file js_defer.js is named in "<hash>-<fileName>" format.
 const char StaticAssetManager::kGStaticBase[] = "//www.gstatic.com/psa/static/";

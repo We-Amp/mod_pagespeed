@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/image/jpeg_optimizer.h"
 
+#include <iterator>
 #include <vector>
 
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -86,8 +87,8 @@ const char* kInvalidFiles[] = {
     "corrupt.jpg",    // Invalid huffman code in the image data section.
 };
 
-const size_t kValidImageCount = arraysize(kValidImages);
-const size_t kInvalidFileCount = arraysize(kInvalidFiles);
+const size_t kValidImageCount = std::size(kValidImages);
+const size_t kInvalidFileCount = std::size(kInvalidFiles);
 
 class JpegOptimizerTest : public testing::Test {
  public:

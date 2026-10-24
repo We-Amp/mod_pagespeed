@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/js/js_keywords.h"
 
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -96,7 +97,7 @@ const KeywordRow kExpectedKeywords[] = {
 
 TEST(JsKeywordsTest, LookupFindsEveryKeywordWithExactTypeAndFlag) {
   EXPECT_EQ(static_cast<int>(JsKeywords::kNotAKeyword),
-            static_cast<int>(arraysize(kExpectedKeywords)));
+            static_cast<int>(std::size(kExpectedKeywords)));
   for (const KeywordRow& row : kExpectedKeywords) {
     JsKeywords::Flag flag = JsKeywords::kNone;
     const JsKeywords::Type type = JsKeywords::Lookup(row.name, &flag);
@@ -115,7 +116,7 @@ TEST(JsKeywordsTest, IteratorWalksExactlyTheKeywordMap) {
     EXPECT_TRUE(iterated.emplace(iter.name(), iter.keyword()).second)
         << "duplicate: " << iter.name();
   }
-  EXPECT_EQ(arraysize(kExpectedKeywords), iterated.size());
+  EXPECT_EQ(std::size(kExpectedKeywords), iterated.size());
   for (const KeywordRow& row : kExpectedKeywords) {
     const auto it = iterated.find(row.name);
     ASSERT_TRUE(it != iterated.end()) << row.name;
@@ -127,7 +128,7 @@ TEST(JsKeywordsTest, NonKeywordsAreRejected) {
   const char* const kFixedProbes[] = {"awai", "awaits", "Await", "yield_",
                                       "off",  "o",      "",      "zzzz"};
   std::vector<std::string> probes(kFixedProbes,
-                                  kFixedProbes + arraysize(kFixedProbes));
+                                  kFixedProbes + std::size(kFixedProbes));
   // Every keyword with one char appended / removed is not a keyword.
   for (const KeywordRow& row : kExpectedKeywords) {
     const std::string name(row.name);

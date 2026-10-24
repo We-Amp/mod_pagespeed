@@ -21,6 +21,7 @@
 #define PAGESPEED_KERNEL_IMAGE_TEST_UTILS_H_
 
 #include <cstddef>
+#include <iterator>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -162,7 +163,7 @@ const GoldImageCompressionInfo kValidGifImages[] = {
     GoldImageCompressionInfo("tr-basn4a08", 467, 239, 316, 32, 32, 8, 3, 8, 3,
                              true),
 };
-const size_t kValidGifImageCount = arraysize(kValidGifImages);
+const size_t kValidGifImageCount = std::size(kValidGifImages);
 
 bool ReadFile(const GoogleString& file_name, GoogleString* content);
 

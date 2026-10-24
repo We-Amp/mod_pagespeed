@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/add_ids_filter.h"
 
 #include <algorithm>
+#include <iterator>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -51,7 +52,7 @@ void CheckKeywordsSorted(const HtmlName::Keyword* list, int len) {
 
 bool IsDivLike(HtmlName::Keyword tag) {
   return std::binary_search(kDivLikeTags,
-                            kDivLikeTags + arraysize(kDivLikeTags), tag);
+                            kDivLikeTags + std::size(kDivLikeTags), tag);
 }
 
 bool NeedsExplicitId(HtmlName::Keyword tag) { return IsDivLike(tag); }
@@ -78,7 +79,7 @@ void AddIdsFilter::StartDocument() {
   div_count_stack_.push_back(0);
   id_stack_.clear();
 #ifndef NDEBUG
-  CheckKeywordsSorted(kDivLikeTags, arraysize(kDivLikeTags));
+  CheckKeywordsSorted(kDivLikeTags, std::size(kDivLikeTags));
 #endif  // #ifndef NDEBUG
 }
 

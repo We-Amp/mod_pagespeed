@@ -19,6 +19,8 @@
 
 #include "pagespeed/apache/apache_writer.h"
 
+#include <iterator>
+
 #include "apr_buckets.h"  // NOLINT
 #include "apr_strings.h"  // for apr_pstrdup    // NOLINT
 #include "base/logging.h"
@@ -72,7 +74,7 @@ const char* const kVerbatimOutputFilters[] = {
 };
 
 bool IsVerbatimOutputFilter(const char* name) {
-  for (size_t i = 0; i < arraysize(kVerbatimOutputFilters); ++i) {
+  for (size_t i = 0; i < std::size(kVerbatimOutputFilters); ++i) {
     if (StringCaseEqual(name, kVerbatimOutputFilters[i])) {
       return true;
     }

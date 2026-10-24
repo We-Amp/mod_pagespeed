@@ -25,6 +25,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include <algorithm>    // std::transform
+#include <iterator>     // std::size
 
 
 namespace net_instaweb {
@@ -103,7 +104,7 @@ void IisModuleBaseFetch::PopulateRequestHeaders(IHttpContext* http_context, Requ
 
 	//WEAMPKS: 1.9 kPassThroughRequestAttributes is now local
 	// TODO(oschaaf): 1.9 -> need to make sure, but I think we should now pass all of them.
-	int n = arraysize(kPassThroughRequestAttributes);                                                                                                                                                 
+	int n = std::size(kPassThroughRequestAttributes);
 	for (int i = 0; i < n; ++i) 
 	{
 		PCSTR val = http_context->GetRequest()->GetHeader( kPassThroughRequestAttributes[i] );

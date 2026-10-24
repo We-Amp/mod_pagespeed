@@ -22,6 +22,8 @@
 
 #include "net/instaweb/http/public/http_cache_failure.h"
 
+#include <iterator>
+
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -68,7 +70,7 @@ const int kRememberTransientFailureTtlSec = 10;
 
 HttpCacheFailurePolicy::HttpCacheFailurePolicy() {
   // Set up compiled-in defaults.
-  for (int i = 0, n = arraysize(ttl_sec_for_status); i < n; ++i) {
+  for (int i = 0, n = std::size(ttl_sec_for_status); i < n; ++i) {
     ttl_sec_for_status[i] = kRememberFetchFailedTtlSec;
   }
 

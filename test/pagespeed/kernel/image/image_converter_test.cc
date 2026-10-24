@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/image/image_converter.h"
 
 #include <cstddef>
+#include <iterator>
 #include <memory>
 
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -175,9 +176,9 @@ GifImageCompressionInfo kValidGifImages[] = {
     {"basn3p01", 138, 96, 793, 56},    {"basn3p02", 186, 115, 1162, 74},
     {"basn3p04", 344, 185, 1002, 136}, {"basn3p08", 1737, 1274, 936, 810}};
 
-const size_t kValidImageCount = arraysize(kValidImages);
-const size_t kValidGifImageCount = arraysize(kValidGifImages);
-const size_t kInvalidFileCount = arraysize(kInvalidFiles);
+const size_t kValidImageCount = std::size(kValidImages);
+const size_t kValidGifImageCount = std::size(kValidGifImages);
+const size_t kInvalidFileCount = std::size(kInvalidFiles);
 
 class ImageConverterTest : public testing::Test {
  public:

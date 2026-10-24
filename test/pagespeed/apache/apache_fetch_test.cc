@@ -20,6 +20,7 @@
 #include "pagespeed/apache/apache_fetch.h"
 
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -758,7 +759,7 @@ class ApacheFetchZeroCopyTest : public ApacheFetchTest {
   void SetUpVerbatimServeChain() {
     static const char* const kNames[] = {"content_length", "http_header",
                                          "core"};
-    SetUpServeChain(kNames, arraysize(kNames));
+    SetUpServeChain(kNames, std::size(kNames));
   }
 
   int64 StatValue(const char* name) {
@@ -834,7 +835,7 @@ TEST_F(ApacheFetchZeroCopyTest, OptInAliasesWithReqtimeoutInChain) {
   memcpy(region_, kMappedBody, STATIC_STRLEN(kMappedBody));
   static const char* const kNames[] = {"content_length", "http_header",
                                        "http_outerror", "reqtimeout", "core"};
-  SetUpServeChain(kNames, arraysize(kNames));
+  SetUpServeChain(kNames, std::size(kNames));
   InitFetchWithOptions(NewOptedInOptions());
   MappedSharedString pin = MakePin();
   EXPECT_TRUE(apache_fetch_->WriteMapped(MappedSpan(), pin, message_handler()));
