@@ -530,14 +530,25 @@ PR lint job does, then runs `run-clang-tidy` with `-checks=-*,<check>` and
   `linux-build` in `pipeline-pr.yml`) to the compilation database, so `test/`
   sources are analysed. The default is `false`.
 
-The header filter is a POSIX extended regular expression that selects the
-project's own roots (`base/`, `net/`, `pagespeed/`, `test/`) positively, with
-an optional execroot or `./` prefix. clang-tidy compiles `-header-filter`
-with LLVM's regex engine, which has no lookahead, so a negated filter such as
-`^(?!...)` is invalid there and silently matches no header. The filter in
-`.clang-tidy`, the PR and nightly lint jobs and `tools/tidyup.sh` is still the
-negated form; those switch to the positive one after the header debt of the
-enforced checks has been cleared.
+The tidy sweep passes its own `-header-filter`, a POSIX extended regular
+expression that selects the project's own roots (`base/`, `net/`, `pagespeed/`,
+`test/`) positively, with an optional execroot or `./` prefix, because
+clang-tidy compiles the pattern with LLVM's regex engine, which has no
+lookahead: a negated filter such as `^(?!...)` is invalid there and silently
+matches no header. The gate itself has one source: `.clang-tidy`. The PR and
+nightly lint jobs and `tools/tidyup.sh` pass no `-header-filter` of their own;
+`.clang-tidy` holds `HeaderFilterRegex: '^$'`, so no header is enforced today.
+It flips to the sweep's positive form, plus an `ExcludeHeaderFilterRegex`,
+once the header debt of the enforced checks has been cleared. In the PR lint
+job, a diff that touches `.clang-tidy`, `tools/ci/lint-scope-expand.sh` or
+`tools/gen_compilation_database.py` forces the full-tree mode instead of the
+pull request scope, because a change to the lint's own plumbing can move
+findings in any translation unit. The dev image recipes
+(`docker/Dockerfile`, `docker/Dockerfile.lint`) no longer force the
+full-tree mode: a full lint runs for well over an hour on a build runner,
+which a hosted dependency-update pull request for the images cannot afford
+inside the job's 120 minute timeout, and the nightly full-tree lint is the
+backstop for image changes.
 
 Census use: dispatch with `fix: false`, `tests: true` and a check list. The
 job fails when it finds diagnostics (it is a gate), but the job summary lists
