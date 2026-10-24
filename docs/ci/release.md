@@ -272,7 +272,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `package-smoke-nginx-packaged` | fleet-heavy, pair | installs each x64 package into its stock nginx and runs the nginx test suite |
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
 | `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
-| `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
+| `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the full release commit hash (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
