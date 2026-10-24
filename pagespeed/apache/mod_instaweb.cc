@@ -835,17 +835,15 @@ apr_status_t instaweb_in_place_fix_headers_filter(ap_filter_t* filter,
       int s_maxage_sec =
           server_context->global_config()->EffectiveInPlaceSMaxAgeSec();
       if (s_maxage_sec != -1) {
-        const char* existing_cache_control =
-            apr_table_get(request->headers_out, HttpAttributes::kCacheControl);
-        GoogleString updated_cache_control;
-        if (ResponseHeaders::ApplySMaxAge(s_maxage_sec, existing_cache_control,
-                                          &updated_cache_control)) {
-          // We're modifing the cache control header; save a copy first.
-          recorder->SaveCacheControl(existing_cache_control);
-
-          // Replace the cache-control with our new s-maxage-including one.
-          apr_table_set(request->headers_out, HttpAttributes::kCacheControl,
-                        updated_cache_control.c_str());
+        bool had_original = false;
+        GoogleString original_cache_control;
+        // Reads Cache-Control from headers_out and err_headers_out, and
+        // leaves a single merged header in headers_out.
+        if (ApplyInPlaceSMaxAge(request, s_maxage_sec, &had_original,
+                                &original_cache_control)) {
+          // We modified the cache control header; save the original first.
+          recorder->SaveCacheControl(
+              had_original ? original_cache_control.c_str() : nullptr);
         }
       }
     }
