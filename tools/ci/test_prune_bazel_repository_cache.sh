@@ -18,6 +18,16 @@
 #   9. a candidate name containing a newline is removed as one file and never
 #      yields a delete path outside the cache.
 #  10. numbers with leading zeros are read base 10 (08d is 8 days, 02500 bytes).
+#  11. a Bazel 9 layout (content_addressable/ and contents/): contents/ is
+#      pruned by whole top-level entry only. An entry is a tree (several files
+#      and subdirectories). Its age is the newest *.recorded_inputs mtime, else
+#      the entry directory's own mtime; the old files inside a recently used
+#      tree do not age it. A surviving tree is intact, a removed tree is gone
+#      entirely, the size cap removes whole entries oldest first and shares one
+#      cap with content_addressable/, plain files directly under contents/ and
+#      siblings of the two directories are untouched, a symlinked contents/
+#      is not followed.
+#  12. a cache with only contents/ (no content_addressable/) is pruned too.
 #
 # Run: tools/ci/test_prune_bazel_repository_cache.sh
 
@@ -132,6 +142,77 @@ mk "$D/$CA/h1/file" 1000 5; mk "$D/$CA/h2/file" 1000 4; mk "$D/$CA/h3/file" 1000
 if [ "$rc" -eq 0 ] && ! exists "$D/$CA/h1/file" && ! exists "$D/$CA/h2/file" \
    && exists "$D/$CA/h3/file" && exists "$D/$CA/h4/file"; then
   pass "leading zeros are read base 10 for age and size"; else fail "leading zeros (rc=$rc)"; fi
+
+# 11. Bazel 9 layout: contents/ pruned by whole entry
+CT=contents
+# mktree <entry> <bytes per file> <file age in days>: a tree with several files
+# and subdirectories, all of the given age
+mktree() {
+  mk "$1/repo/BUILD" "$2" "$3"; mk "$1/repo/src/a.cc" "$2" "$3"
+  mk "$1/repo/src/deep/b.h" "$2" "$3"; mk "$1/repo/third/c.txt" "$2" "$3"
+}
+tree_intact() {
+  exists "$1/repo/BUILD" && exists "$1/repo/src/a.cc" && exists "$1/repo/src/deep/b.h" \
+    && exists "$1/repo/third/c.txt"
+}
+# the entry's marker file decides its age; its files are all ancient
+D="$T/b9age"
+mk "$D/$CA/aa/file" 100 40; mk "$D/$CA/bb/file" 100 1
+mktree "$D/$CT/used" 100 400; mk "$D/$CT/used/u1.recorded_inputs" 10 1
+mktree "$D/$CT/stale" 100 1; mk "$D/$CT/stale/s1.recorded_inputs" 10 40
+mk "$D/$CT/stale/s2.recorded_inputs" 10 50
+mktree "$D/$CT/nomarker" 100 1
+mk "$D/$CT/lockfile" 5 400
+mk "$D/registry/x" 5000 90
+"$PRUNE" "$D" 30d 1G >/dev/null
+if ! exists "$D/$CA/aa/file" && exists "$D/$CA/bb/file" \
+   && tree_intact "$D/$CT/used" && exists "$D/$CT/used/u1.recorded_inputs" \
+   && [ ! -e "$D/$CT/stale" ] \
+   && tree_intact "$D/$CT/nomarker" \
+   && exists "$D/$CT/lockfile" && exists "$D/registry/x"; then
+  pass "Bazel 9 layout: whole entries by marker age, survivors intact, removed entries gone"; else fail "bazel 9 age"; fi
+# an entry without a marker is aged by its own directory mtime
+D="$T/b9dir"
+mktree "$D/$CT/olddir" 100 1; mktree "$D/$CT/newdir" 100 1
+touch -d "@$(( NOW - 40 * 86400 ))" "$D/$CT/olddir" 2>/dev/null \
+  || touch -t "$(date -r $(( NOW - 40 * 86400 )) +%Y%m%d%H%M.%S)" "$D/$CT/olddir"
+"$PRUNE" "$D" 30d 1G >/dev/null
+if [ ! -e "$D/$CT/olddir" ] && tree_intact "$D/$CT/newdir"; then
+  pass "Bazel 9 layout: an entry without a marker is aged by its directory mtime"; else fail "bazel 9 dir mtime"; fi
+# size cap: whole entries, oldest first, one cap across both directories.
+# Each tree is 4 x 250 = 1000 bytes (+ 1 byte marker); content_addressable
+# files are 1000 bytes. Total 4 x ~1000; cap 2500 drops the two oldest.
+D="$T/b9size"
+mk "$D/$CA/h1/file" 1000 5
+mktree "$D/$CT/t2" 250 400; mk "$D/$CT/t2/m.recorded_inputs" 1 4
+mk "$D/$CA/h3/file" 1000 3
+mktree "$D/$CT/t4" 250 400; mk "$D/$CT/t4/m.recorded_inputs" 1 2
+"$PRUNE" "$D" 30d 2500 >/dev/null
+if ! exists "$D/$CA/h1/file" && [ ! -e "$D/$CT/t2" ] \
+   && exists "$D/$CA/h3/file" && tree_intact "$D/$CT/t4"; then
+  pass "Bazel 9 layout: the size cap removes whole entries oldest first across both directories"; else fail "bazel 9 size"; fi
+D="$T/b9link"; mkdir -p "$D"
+mk "$T/ctout/sha/zz" 100 90
+ln -s "$T/ctout" "$D/$CT"
+mk "$D/$CA/aa/file" 100 90
+"$PRUNE" "$D" 30d 1 >/dev/null
+if exists "$T/ctout/sha/zz" && ! exists "$D/$CA/aa/file"; then
+  pass "a symlinked contents/ is not followed"; else fail "symlinked contents"; fi
+# a symlink entry directly under contents/ is neither followed nor removed
+D="$T/b9entlink"; mkdir -p "$D/$CT"
+mktree "$T/entout" 100 90
+ln -s "$T/entout" "$D/$CT/lnk"
+"$PRUNE" "$D" 30d 1 >/dev/null
+if tree_intact "$T/entout" && [ -L "$D/$CT/lnk" ]; then
+  pass "a symlink entry under contents/ is left alone"; else fail "symlink entry"; fi
+
+# 12. only contents/ present
+D="$T/ctonly"
+mktree "$D/$CT/old" 100 1; mk "$D/$CT/old/o.recorded_inputs" 10 90
+mktree "$D/$CT/new" 100 90; mk "$D/$CT/new/n.recorded_inputs" 10 1
+"$PRUNE" "$D" 30d 1G >/dev/null; rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$D/$CT/old" ] && tree_intact "$D/$CT/new"; then
+  pass "a cache with only contents/ is pruned"; else fail "contents only (rc=$rc)"; fi
 
 if [ "$FAILS" -ne 0 ]; then echo "$FAILS failure(s)"; exit 1; fi
 echo "All prune-bazel-repository-cache cases passed"
