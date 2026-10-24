@@ -187,6 +187,26 @@ bazel build --config=clang-libstdcxx13 //...
 bazel test --config=clang-asan //test/...
 ```
 
+## Offline Build
+
+A source tarball built by `tools/vendor-deps.sh` carries what a build needs, so it can run with the network cut:
+
+- `vendor/repo-cache`: the Bazel repository cache, with every archive the build downloads and every registry file (`MODULE.bazel`, `source.json`, `bazel_registry.json`) that `MODULE.bazel.lock` pins, stored by sha256. The vendor step fails if a pinned registry file is missing.
+- `vendor/cyclone` and `vendor/aom`: the two `git_repository` sources.
+
+Build with:
+
+```bash
+bazel build --config=vendored --config=clang-libstdcxx13 \
+    --repository_disable_download --lockfile_mode=error //:libmod_pagespeed.so
+```
+
+- `--lockfile_mode=error` fails the build if resolution would change `MODULE.bazel.lock`. Keep `--registry` as committed: it is part of the lockfile keys.
+- Changing `MODULE.bazel` or the lockfile means vendoring again.
+- The Bazel binary itself is not vendored; provide it (for example a pre-seeded Bazelisk home).
+- Downloads made with `repository_ctx.download` (for example `yq_windows_amd64`) bypass the repository cache and are not vendored.
+- Cutting the network (for example `docker run --network none`) is the proof: with `--repository_disable_download`, anything missing from the tarball fails the build.
+
 ## Code Style
 
 - **C++ Standard**: C++20 (C++23 for Cyclone cache files via `per_file_copt`)
