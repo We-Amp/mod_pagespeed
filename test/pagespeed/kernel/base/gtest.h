@@ -31,6 +31,13 @@ namespace net_instaweb {
 GoogleString GTestSrcDir();
 GoogleString GTestTempDir();
 
+// Resolves a main-repository runfile, i.e. a data-dependency path such as
+// "test/pagespeed/system/libdaemon_stub.so", to the file's real path through
+// the Bazel runfiles library (Rlocation, which reads the runfiles manifest
+// first).  Falls back to the path under GTestSrcDir() when the library
+// cannot resolve it.
+GoogleString RunfilePath(const GoogleString& path);
+
 }  // namespace net_instaweb
 
 namespace testing {

@@ -19,7 +19,6 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
-#include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {
@@ -364,8 +363,7 @@ TEST(IisSendResponseSourceTest, OnSendResponseHasNoCheckFalse) {
   StdioFileSystem file_system;
   NullMessageHandler handler;
   GoogleString source;
-  const GoogleString path =
-      StrCat(GTestSrcDir(), "/pagespeed/iis/iis_http_module.cpp");
+  const GoogleString path = RunfilePath("pagespeed/iis/iis_http_module.cpp");
   ASSERT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
   size_t begin = source.find("IisHttpModule::OnSendResponse(");
   ASSERT_NE(GoogleString::npos, begin);
