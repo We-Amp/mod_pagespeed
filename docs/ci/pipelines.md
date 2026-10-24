@@ -45,7 +45,7 @@ tier.
 | `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
 | `sidecar-tests` | hosted | `changes` | the xunit suite of the ASP.NET Core sidecar (`aspnetcore/`) under .NET 8 and .NET 10 (path-filtered, see "The sidecar native pair") |
 | `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |
-| `vendor` | `fleet-heavy` | | vendors the dependencies; publishes the tarball (hub channel) or caches `vendor/` (cache channel) |
+| `vendor` | `fleet-heavy` | | vendors the dependencies and asserts that every registry file `MODULE.bazel.lock` pins is in the repository cache; publishes the tarball (hub channel) or caches `vendor/` (cache channel) |
 | `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
 | `linux-unit-tests` | `fleet-heavy` | `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
 | `lint` | `fleet-heavy` | `vendor` | clang-tidy (scoped to the pull request) and clang-format |
