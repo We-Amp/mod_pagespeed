@@ -217,6 +217,18 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash tools/ci/check_pytest_exit_status.sh
 
+      # The system-test framework's own unit tests (client, assertions,
+      # stats helpers, the lane-fixture name pin) run against no server, and
+      # nothing else in CI runs them: the Bazel patterns cover
+      # //test/pagespeed/ and //test/net/ only, and the lane runners run
+      # their lane suites. A framework regression must fail the pull request
+      # that causes it. requirements.txt pins the pytest the lanes use.
+      - name: System-test framework unit tests
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m pip install --quiet -r test/system/requirements.txt
+          python3 -m pytest test/system/pagespeed_test_framework -q
+
       # A C++-only (or C-only) compiler flag must never be passed through the
       # language-agnostic --copt. The self-test runs the guard's bypass matrix
       # first: a guard that silently stops detecting a spelling is worse than

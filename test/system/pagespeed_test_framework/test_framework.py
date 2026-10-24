@@ -1248,7 +1248,8 @@ class TestLaneFixtureGate:
             "compressed_metadata_cache", "cache_flush", "doc_root_scratch",
             "secondary_vhosts", "external_origin", "flush_origin",
             "experiment_framework", "remote_config", "option_response_headers",
-            "rule_packs", "rule_pack_log", "rule_pack_signing", "daemon_arm",
+            "rule_packs", "rule_pack_log", "rule_pack_signing",
+            "rule_pack_no_link_header", "rule_pack_multi", "daemon_arm",
         })
 
     def test_daemon_worker_is_only_believed_while_its_socket_answers(self):
