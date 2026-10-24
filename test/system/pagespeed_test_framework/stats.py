@@ -215,8 +215,12 @@ def count_matching_lines(content: str, pattern: str) -> int:
 # While any of them is above zero, a counter that looks quiet can still move:
 # a fetch that has not timed out yet (for example a worker's start-up fetch of
 # a remote configuration that never answers) lands its cache insert seconds
-# after the last visible change.
-IN_FLIGHT_GAUGES = ("curl_fetch_active_count",)
+# after the last visible change, and an image rewrite still computing on a
+# worker thread lands its image_* counters when it finishes.
+IN_FLIGHT_GAUGES = (
+    "curl_fetch_active_count",
+    "image_ongoing_rewrites",
+)
 
 
 def settled_stats(
@@ -249,10 +253,11 @@ def settled_stats(
     is the named counters alone, and a failure says so.
 
     The quiet criterion covers only the counters named and the exposed
-    fetcher gauges. The module exposes no statistic for rewrites in flight, so
-    asynchronous work that moves none of the named counters while it runs (a
-    rewrite still computing on a worker thread) can still land inside a
-    window this function has certified.
+    in-flight gauges. image_ongoing_rewrites brackets every image rewrite,
+    so a settled snapshot implies no image rewrite is running; a rewrite
+    that has not started yet (still queued, or waiting on its input fetch
+    or the rewrite lock) is invisible to the gauges and can still land
+    inside a window this function has certified.
 
     Args:
         capture: Callable returning a fresh statistics snapshot.

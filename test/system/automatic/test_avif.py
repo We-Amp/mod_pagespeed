@@ -30,7 +30,6 @@ Two groups of cases:
 """
 
 import re
-import time
 from urllib.parse import urljoin
 
 import pytest
@@ -88,16 +87,12 @@ _AVIF_REWRITES = "image_avif_rewrites"
 # here is indistinguishable from a broken AVIF path. Report it on failure.
 _AVIF_JPEG_TIMEOUTS = "image_avif_conversion_jpeg_timeouts"
 
-# In-flight gauge for image rewrites. ImageRewriteFilter brackets every
-# RewriteLoadedResourceImpl with +1/-1 on it, and image_avif_rewrites is
-# only ever incremented inside that bracket, so "AVIF counter quiet AND
-# this gauge at zero" means no AVIF adoption already under way can land
-# later. Residual gap, accepted: a rewrite that has not started yet (still
-# queued, or waiting on its input fetch or the rewrite lock) is invisible
-# to the gauge; serial tests plus the quiet run settled_stats demands make
-# that negligible. A gauge stuck positive makes _idle_stats fail loudly
-# rather than pass falsely.
-_IMAGE_ONGOING = "image_ongoing_rewrites"
+# Bound for settling the exact-delta windows in this module. Carried over
+# from the local workaround settled_stats made redundant by waiting on the
+# image_ongoing_rewrites gauge itself (issue #236): a loaded lane can hold
+# an image rewrite for a long time (issue #230), and the default 60s would
+# fail the window while the rewrite is still legitimately running.
+_SETTLE_TIMEOUT = 120.0
 
 
 def _fetch_rewritten_image(
@@ -140,27 +135,6 @@ def _fetch_rewritten_image(
     image = client.get(image_url, headers={"Accept": accept})
     assert_http_status(image, 200)
     return image
-
-
-def _idle_stats(stats_snapshot, timeout: float = 120.0):
-    """Snapshot once no image rewrite is running and the AVIF counter is quiet.
-
-    settled_stats cannot see a running image rewrite (the gauge is not in
-    its IN_FLIGHT_GAUGES), so keep settling until the gauge also reads
-    zero. Both ends of a zero-delta window must come from here: a rewrite
-    this request started but had not finished when the response arrived is
-    then waited out and counted inside the window, not lost after it.
-    """
-    deadline = time.monotonic() + timeout
-    while True:
-        snap = settled_stats(stats_snapshot, [_AVIF_REWRITES, _IMAGE_ONGOING])
-        if snap[_IMAGE_ONGOING] == 0:
-            return snap
-        if time.monotonic() >= deadline:
-            raise AssertionError(
-                f"image rewrites still in flight after {timeout}s: "
-                f"{_IMAGE_ONGOING}={snap[_IMAGE_ONGOING]}"
-            )
 
 
 @pytest.mark.requires_stats
@@ -216,16 +190,21 @@ class TestAvifContentNegotiation:
         this request triggered. That counter also ticks for AVIF work
         belonging to other requests, and a rewrite finishing late on a
         loaded runner lands inside the delta window (issue #230), so both
-        snapshots come from _idle_stats: the image_ongoing_rewrites gauge
-        brackets every image rewrite, and the counter only ticks inside
-        that bracket, so a window that opens and closes with the gauge at
-        zero cannot admit an adoption that had already started.
+        snapshots come from settled_stats: its in-flight gauges include
+        image_ongoing_rewrites (issue #236), the gauge brackets every
+        image rewrite, and the counter only ticks inside that bracket, so
+        a window that opens and closes with the gauge at zero cannot admit
+        an adoption that had already started.
         """
-        old_stats = _idle_stats(stats_snapshot)
+        old_stats = settled_stats(
+            stats_snapshot, [_AVIF_REWRITES], timeout=_SETTLE_TIMEOUT
+        )
         response = _fetch_rewritten_image(
             client, test_root, _FILTERS_BOTH, _ACCEPT_WEBP
         )
-        new_stats = _idle_stats(stats_snapshot)
+        new_stats = settled_stats(
+            stats_snapshot, [_AVIF_REWRITES], timeout=_SETTLE_TIMEOUT
+        )
 
         assert_stat_unchanged(
             old_stats, new_stats, _AVIF_REWRITES,
@@ -254,15 +233,20 @@ class TestAvifContentNegotiation:
 
         Like test_webp_accept_yields_webp, the exclusion of AVIF is proven
         on this request's own resource and by a delta of exactly zero on
-        image_avif_rewrites, with both snapshots taken by _idle_stats so a
+        image_avif_rewrites, with both snapshots taken by settled_stats
+        (which waits out an in-flight image rewrite, issue #236) so a
         rewrite finishing late on a loaded runner cannot land inside the
         window (issue #230).
         """
-        old_stats = _idle_stats(stats_snapshot)
+        old_stats = settled_stats(
+            stats_snapshot, [_AVIF_REWRITES], timeout=_SETTLE_TIMEOUT
+        )
         response = _fetch_rewritten_image(
             client, test_root, _FILTERS_BOTH, _ACCEPT_LEGACY
         )
-        new_stats = _idle_stats(stats_snapshot)
+        new_stats = settled_stats(
+            stats_snapshot, [_AVIF_REWRITES], timeout=_SETTLE_TIMEOUT
+        )
 
         assert_stat_unchanged(
             old_stats, new_stats, _AVIF_REWRITES,
