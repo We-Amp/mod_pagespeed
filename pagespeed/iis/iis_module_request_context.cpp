@@ -97,6 +97,9 @@ namespace net_instaweb
 		return requestContext_;
 	}
 
+	// IHttpStoredContext callback: IIS invokes this on the stored context at
+	// request teardown. This is the only path that frees an
+	// IisModuleRequestContext.
 	void IisModuleRequestContext::CleanupStoredContext()
 	{
 		if (requestContext_) {
