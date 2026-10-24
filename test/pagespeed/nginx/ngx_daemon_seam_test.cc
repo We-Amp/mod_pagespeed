@@ -661,6 +661,47 @@ TEST_F(NgxDaemonSeamTest, TheFiltersNeverOpenTheVolumeHandle) {
       << "the header filter no longer posts the off-thread open attempt";
 }
 
+TEST_F(NgxDaemonSeamTest, TheEventThreadNeverProbesTheDaemon) {
+  // The serving recheck blocks -- a config read, a directory listing, a
+  // connect with a deadline -- so its call may not be spelled anywhere in
+  // ngx_pagespeed.cc: everything there runs on nginx's event thread.  The
+  // recovery recheck is posted to the record pool instead, and the pin
+  // below holds its gate.  Comment-blind on purpose: the file must not even
+  // discuss the call.
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  EXPECT_EQ(GoogleString::npos, cc.find("ServingHealth("))
+      << "ngx_pagespeed.cc names the serving-recheck call; the probe blocks "
+         "and belongs on the record pool, never on the event thread";
+}
+
+TEST_F(NgxDaemonSeamTest, AnUnusableVerdictPostsOneRecheckOffTheEventThread) {
+  // The disposition point is where a request that finds the daemon unusable
+  // pays for the recovery: only the one verdict that is not final -- the
+  // daemon was not running yet when the start-up check ran -- posts a
+  // recheck, and the post is gated on the adapter's own retry window so a
+  // request pays nothing while that window is closed.  The recheck runs on
+  // the record pool (the pin above keeps the probe off the event thread),
+  // and the request that posted it still takes the off path; the flipped
+  // verdict is read by later requests.
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  const size_t fn = cc.find("ps_resource_handler(ngx_http_request_t*r");
+  ASSERT_NE(GoogleString::npos, fn)
+      << "ps_resource_handler was renamed; this pin needs updating";
+  const size_t fn_end = cc.find("voidps_send_to_pagespeed(", fn);
+  ASSERT_NE(GoogleString::npos, fn_end)
+      << "the function after ps_resource_handler moved; this pin needs "
+         "updating";
+  const GoogleString body = cc.substr(fn, fn_end - fn);
+  EXPECT_NE(GoogleString::npos,
+            body.find("if(adapter->health()==DaemonHealth::kUnavailable&&"
+                      "adapter->unavailable_is_retryable()&&adapter->"
+                      "ServingRecheckDue()&&g_daemon_record_sequence!=nullptr&&"
+                      "ShouldPostDaemonRecheck()){PostDaemonRecheck(g_daemon_"
+                      "record_sequence,adapter);}"))
+      << "an unusable verdict no longer posts one recheck, gated on the "
+         "verdict being retryable and on the adapter's retry window";
+}
+
 TEST_F(NgxDaemonSeamTest, TheDaemonCompletionRunsOffTheEventThread) {
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   const size_t fn = cc.find("ps_in_place_body_filter(ngx_http_request_t*r");
@@ -717,7 +758,7 @@ TEST_F(NgxDaemonSeamTest, TheCompletionPoolIsOwnedByTheRecordArm) {
   // The record arm drains its completions on its OWN one-worker pool, not
   // the factory's low-priority rewrite pool: a commit stalled in the daemon
   // must never starve an image rewrite.  The pool exists only where a
-  // serving process has at least one recordable server.
+  // serving process has at least one recordable or recoverable server.
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   const size_t fn = cc.find("ngx_int_tps_init_child_process(");
   ASSERT_NE(GoogleString::npos, fn)
@@ -733,21 +774,32 @@ TEST_F(NgxDaemonSeamTest, TheCompletionPoolIsOwnedByTheRecordArm) {
       << "the completion sequence is not taken from the record arm's own "
          "pool";
   EXPECT_NE(GoogleString::npos,
-            body.find("if(any_daemon_ready){g_daemon_record_pool="))
+            body.find("if(any_daemon_ready||any_daemon_retryable){g_daemon_"
+                      "record_pool="))
       << "the pool is created unconditionally; it must exist only for a "
-         "serving process with at least one recordable server";
-  // The gate itself, not only its spelling: the flag starts false and is set
-  // only under the serving-process-and-ready condition.
+         "serving process with at least one recordable or recoverable "
+         "server";
+  // The gate itself, not only its spelling: each flag starts false and is
+  // set only under the serving-process condition it belongs to.
   EXPECT_NE(GoogleString::npos, body.find("boolany_daemon_ready=false;"))
       << "the pool gate no longer starts closed";
+  EXPECT_NE(GoogleString::npos, body.find("boolany_daemon_retryable=false;"))
+      << "the retryable pool-gate flag no longer starts closed";
   EXPECT_NE(GoogleString::npos,
             body.find("DaemonHealth::kReady){cfg_s->server_context->"
                       "daemon_adapter()->RecordCache();any_daemon_ready="
                       "true;}"))
       << "the pool gate is no longer set under the serving-process, "
          "ready-verdict condition";
+  EXPECT_NE(GoogleString::npos,
+            body.find("daemon_adapter()->unavailable_is_retryable()){any_"
+                      "daemon_retryable=true;}"))
+      << "the retryable pool-gate flag is no longer set under the "
+         "serving-process, retryable-verdict condition";
   EXPECT_EQ(1, CountSubstring(body, "any_daemon_ready=true;"))
       << "the pool gate is set in more than one place";
+  EXPECT_EQ(1, CountSubstring(body, "any_daemon_retryable=true;"))
+      << "the retryable pool gate is set in more than one place";
   EXPECT_EQ(GoogleString::npos, body.find("kLowPriorityRewriteWorkers"))
       << "the completion sequence still comes from the factory's "
          "low-priority rewrite pool, where a stalled commit starves image "

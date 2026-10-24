@@ -125,7 +125,8 @@ bool process_context_cleanup_hooked = false;
 // daemon's volume, so it is carried here and run off the event thread.
 // The pool is this port's OWN, one worker, created in ps_init_child_process
 // only for a serving process with at least one server whose startup verdict
-// lets it record: a commit stalled in the daemon must never starve an image
+// lets it record -- now, or through a recovery recheck while the worker
+// serves: a commit stalled in the daemon must never starve an image
 // rewrite on the factory's pools, and the master and nginx's cache manager
 // and loader -- which serve nothing -- get no pool at all.  ps_exit_child_process
 // shuts it down and deletes it after the factory's ShutDown() and before
@@ -3192,7 +3193,21 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
       }
     } else if (disposition == IproDisposition::kOff) {
       // A daemon was configured and is not usable: in-place optimization is
-      // off, exactly as if in_place_rewriting were disabled.
+      // off, exactly as if in_place_rewriting were disabled.  The one
+      // verdict that is not final for this worker's life -- the daemon was
+      // not running when the start-up check ran -- may recover, so this
+      // request posts one recheck.  The probe blocks, so it runs on the
+      // record pool, never here; this request still takes the off path, and
+      // later requests read the flipped verdict.  The adapter's own retry
+      // window keeps the post to about one per interval per server.  The
+      // off disposition already proved the adapter exists: an off verdict
+      // is never the unconfigured one.
+      DaemonAdapter* adapter = cfg_s->server_context->daemon_adapter();
+      if (adapter->health() == DaemonHealth::kUnavailable &&
+          adapter->unavailable_is_retryable() && adapter->ServingRecheckDue() &&
+          g_daemon_record_sequence != nullptr && ShouldPostDaemonRecheck()) {
+        PostDaemonRecheck(g_daemon_record_sequence, adapter);
+      }
     } else {
       ps_create_base_fetch(url.Spec(), ctx, request_context,
                            request_headers.release(), kIproLookup, options);
@@ -4920,12 +4935,17 @@ void ps_exit_child_process(ngx_cycle_t* cycle) {
   // item, while everything still queued is cancelled and sends nothing.
   // That active item is bounded on every shape it can take: a record
   // completion's volume commit is bounded by the storage layer at tens of
-  // seconds against a stopped peer, and a posted notification is the client
+  // seconds against a stopped peer; a posted notification is the client
   // library's notify call, which does not wait for the daemon: against a
   // stopped daemon it returned in microseconds, and once the daemon's accept
   // queue was full it was refused at once (both measured with the serve
-  // benchmark under tools/parity).  So the join waits out nothing that can
-  // stall.  The sequence is deleted with the pool; no FreeSequence anywhere.
+  // benchmark under tools/parity); a posted open attempt is one RecordCache()
+  // volume open, bounded by the same storage layer; and a posted recheck is
+  // the adapter's probe -- a shared-config read, a cache-directory listing
+  // and a socket connect under its 2 s deadline -- followed, when the daemon
+  // answers, by that same volume open.  So the join waits out nothing that
+  // can stall.  The sequence is deleted with the pool; no FreeSequence
+  // anywhere.
   if (g_daemon_record_pool != nullptr) {
     g_daemon_record_pool->ShutDown();
     delete g_daemon_record_pool;
@@ -5127,6 +5147,7 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   // so we can create and set a ProxyFetchFactory for it.
   std::set<GoogleString> warmer_seen;  // Dedup (host,url) per worker
   bool any_daemon_ready = false;
+  bool any_daemon_retryable = false;
   for (s = 0; s < cmcf->servers.nelts; s++) {
     ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
         cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
@@ -5165,6 +5186,20 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
         any_daemon_ready = true;
       }
 
+      // A server whose start-up verdict was only "the daemon was not
+      // running yet" may recover while this worker serves: requests post
+      // that recheck onto the record pool, so the pool has to exist even
+      // though no volume handle opens here.  Same serving-process gate as
+      // the open above, and an unavailable verdict is never the
+      // unconfigured one, so the adapter exists.
+      if ((ngx_process == NGX_PROCESS_WORKER ||
+           ngx_process == NGX_PROCESS_SINGLE) &&
+          cfg_s->server_context->daemon_health() ==
+              DaemonHealth::kUnavailable &&
+          cfg_s->server_context->daemon_adapter()->unavailable_is_retryable()) {
+        any_daemon_retryable = true;
+      }
+
       // Start the background key-directory warmer(s) for any server
       // whose feature is enabled AND has a remote directory configured. No-op
       // (default-safe) otherwise. The curl fetcher's poll thread is already up
@@ -5189,16 +5224,20 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   }
 
   // The record arm's own one-worker pool, created only for a serving
-  // process with at least one recordable server (any_daemon_ready is set
-  // under exactly that gate above): a commit stalled in the daemon -- a
-  // volume lock, a wedged peer -- must never starve an image rewrite on
-  // the factory's pools, and the master and nginx's cache manager and
-  // loader, which serve nothing, get no pool at all.  ps_exit_child_process
-  // shuts it down and deletes it; the sequence is deleted with the pool.
-  // The pool's single thread is created lazily, on the event thread, by the
-  // first Add -- a completion or an open attempt -- under the pool mutex:
-  // bounded, no I/O, once per pool lifetime.
-  if (any_daemon_ready) {
+  // process that can use the daemon's volume: a server whose start-up
+  // verdict was ready opened its handle above (any_daemon_ready), and one
+  // whose verdict was only "not running yet" can flip to ready while the
+  // worker serves -- requests post that recheck onto this pool
+  // (any_daemon_retryable) -- so the pool exists for either.  A commit
+  // stalled in the daemon -- a volume lock, a wedged peer -- must never
+  // starve an image rewrite on the factory's pools, and the master and
+  // nginx's cache manager and loader, which serve nothing, get no pool at
+  // all.  ps_exit_child_process shuts it down and deletes it; the sequence
+  // is deleted with the pool.  The pool's single thread is created lazily,
+  // on the event thread, by the first Add -- a completion, an open attempt
+  // or a recheck -- under the pool mutex: bounded, no I/O, once per pool
+  // lifetime.
+  if (any_daemon_ready || any_daemon_retryable) {
     g_daemon_record_pool = new QueuedWorkerPool(
         1, "daemon_record", cfg_m->driver_factory->thread_system());
     g_daemon_record_sequence = g_daemon_record_pool->NewSequence();

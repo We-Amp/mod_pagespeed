@@ -43,6 +43,7 @@ struct DaemonCompletionQueue {
   std::atomic<int64> queued_bytes{0};
   std::atomic<int> queued_items{0};
   std::atomic<int64> last_open_attempt_ms{0};
+  std::atomic<int64> last_recheck_ms{0};
 };
 
 // No-destructor function-local singletons: the queue may be touched from a
@@ -76,6 +77,24 @@ class DaemonOpenAttempt : public Function {
  public:
   explicit DaemonOpenAttempt(DaemonAdapter* adapter) : adapter_(adapter) {}
   void Run() override { adapter_->RecordCache(); }
+  void Cancel() override {}
+
+ private:
+  DaemonAdapter* adapter_;
+};
+
+// The recovery recheck posted by PostDaemonRecheck.  The probe blocks, so it
+// runs here, on the pool thread; when it finds the daemon answering, the
+// open it asks for is the same one the start-time path makes.  Cancel is a
+// no-op: nothing was opened, so there is nothing to undo.
+class DaemonRecheckAttempt : public Function {
+ public:
+  explicit DaemonRecheckAttempt(DaemonAdapter* adapter) : adapter_(adapter) {}
+  void Run() override {
+    if (adapter_->ServingHealth() == DaemonHealth::kReady) {
+      adapter_->RecordCache();
+    }
+  }
   void Cancel() override {}
 
  private:
@@ -145,6 +164,23 @@ void PostDaemonOpenAttempt(QueuedWorkerPool::Sequence* sequence,
   sequence->Add(new DaemonOpenAttempt(adapter));
 }
 
+bool ShouldPostDaemonRecheck() {
+  const int64 now = NowMsSlot()();
+  std::atomic<int64>& last = Queue().last_recheck_ms;
+  int64 seen = last.load(std::memory_order_relaxed);
+  while (seen == 0 || now - seen >= kDaemonOpenAttemptIntervalMs) {
+    if (last.compare_exchange_weak(seen, now, std::memory_order_relaxed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void PostDaemonRecheck(QueuedWorkerPool::Sequence* sequence,
+                       DaemonAdapter* adapter) {
+  sequence->Add(new DaemonRecheckAttempt(adapter));
+}
+
 void SetDaemonNowMsForTesting(DaemonNowMsFn fn) {
   NowMsSlot() = (fn == nullptr) ? DaemonNowMsFn(&SteadyNowMs) : std::move(fn);
 }
@@ -154,6 +190,7 @@ void ResetDaemonCompletionQueueForTesting() {
   queue.queued_bytes.store(0, std::memory_order_relaxed);
   queue.queued_items.store(0, std::memory_order_relaxed);
   queue.last_open_attempt_ms.store(0, std::memory_order_relaxed);
+  queue.last_recheck_ms.store(0, std::memory_order_relaxed);
 }
 
 DaemonRecordCompletion::DaemonRecordCompletion(IproRecorder* recorder,

@@ -173,10 +173,12 @@ against the daemon; give it an ordering drop-in
 
 When upgrading, upgrade and start the daemon first, let it create its cache
 volume, then restart nginx. If nginx starts in between, in-place optimization
-is off until nginx is restarted, with the reason in the error log. After an
-update that changes the cache format, a fresh start of nginx in that window can
-fail instead, again with the reason in the error log. Starting the daemon and
-then restarting nginx clears both. See
+is off, with the reason in the error log, and nginx picks the daemon up by
+itself once it answers: with requests arriving, at the latest about 30
+seconds after the daemon starts, one info line per worker process says so.
+After an update that changes the cache format, a fresh start of nginx in
+that window can fail instead, again with the reason in the error log.
+Starting the daemon and then restarting nginx clears both. See
 `docs/daemon-adapter-deployment.md` for the cache-volume details.
 
 ### When the daemon is not available
@@ -187,7 +189,13 @@ files), in-place optimization is off for that server and nginx serves every
 request normally. One error line at startup names the cause and tells a
 missing `pagespeed` group membership apart from a daemon that is not running;
 the same reason appears once in the admin console's message history. The
-classic in-place path does not take over. Fix the cause and restart nginx.
+classic in-place path does not take over. A daemon that was only not
+running needs no restart: with requests arriving, each worker process
+checks for it again at most once every 30 seconds and turns in-place
+optimization back on once the daemon answers. Every other cause -- a
+release this module cannot work with, nginx not being allowed to reach
+its files, or a split cache volume -- still needs the cause fixed and a
+restart.
 
 ### Checking it works
 

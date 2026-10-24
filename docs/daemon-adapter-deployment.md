@@ -589,8 +589,11 @@ Three of those conditions mean only "the daemon was not running yet": no
 published size, no volume on disk, nothing answering on the socket. Apache
 looks for those three again while it serves, at most once every 30 seconds
 per server process, and turns in-place optimization back on by itself when
-the daemon answers; one info line in the error log says so. nginx does not
-recheck: after starting or restarting the optimizer, restart nginx (see
+the daemon answers; one info line in the error log says so. nginx does the
+same, per worker process: a request that finds the daemon unusable asks for
+one recheck at most every 30 seconds, run off the request path, and the
+request after the recheck that finds the daemon answering uses it again;
+one info line per worker process in the error log says so (see
 "Start order and upgrades" in [install-nginx.md](install-nginx.md)).
 
 A version too old to use is a **refusal**, not a partial start, and that is
