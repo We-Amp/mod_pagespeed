@@ -1075,6 +1075,10 @@ struct ps_srv_conf_t {
   // there as well.
   NgxServerContext* server_context;
   ProxyFetchFactory* proxy_fetch_factory;
+  // Set by ps_init_module when a reload's configuration failed a post-config
+  // check.  The server then passes every request through untouched (see
+  // ps_disabled) for the life of that cycle.
+  bool not_ready;
   // Only used while parsing config.  After we merge cfg_s and cfg_m you most
   // likely want cfg_s->server_context->config() as options here will be NULL.
   NgxRewriteOptions* options;
@@ -1148,7 +1152,7 @@ ngx_command_t ps_commands[] = {
     ngx_null_command};
 
 bool ps_disabled(ps_srv_conf_t* cfg_s) {
-  return cfg_s->server_context == nullptr ||
+  return cfg_s->not_ready || cfg_s->server_context == nullptr ||
          cfg_s->server_context->config()->unplugged();
 }
 
@@ -4717,6 +4721,25 @@ ngx_http_module_t ps_module = {ps_pre_init,  // preconfiguration
                                ps_create_loc_conf,
                                ps_merge_loc_conf};
 
+// True when ps_init_module marked this cycle's servers not ready.
+bool ps_cycle_not_ready(ngx_cycle_t* cycle) {
+  ngx_http_core_main_conf_t* cmcf = static_cast<ngx_http_core_main_conf_t*>(
+      ngx_http_cycle_get_module_main_conf(cycle, ngx_http_core_module));
+  if (cmcf == nullptr) {
+    return false;
+  }
+  ngx_http_core_srv_conf_t** cscfp =
+      static_cast<ngx_http_core_srv_conf_t**>(cmcf->servers.elts);
+  for (ngx_uint_t i = 0; i < cmcf->servers.nelts; i++) {
+    ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+        cscfp[i]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+    if (cfg_s->not_ready) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // called after configuration is complete, but before nginx starts forking
 ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   ps_main_conf_t* cfg_m = static_cast<ps_main_conf_t*>(
@@ -4732,6 +4755,29 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   ngx_http_core_srv_conf_t** cscfp =
       static_cast<ngx_http_core_srv_conf_t**>(cmcf->servers.elts);
   ngx_uint_t s;
+
+  // A failed post-config check is only fatal on the initial cycle, where it
+  // refuses to start a broken configuration.  nginx exits the master when an
+  // init-module hook fails, so on a reload that would take down the running
+  // server and orphan its workers; there the error is logged, this cycle's
+  // servers are marked not ready (every request passes through untouched)
+  // and the master stays alive.
+  const bool initial_cycle =
+      (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);
+  auto fail_init = [&]() -> ngx_int_t {
+    if (initial_cycle) {
+      return NGX_ERROR;
+    }
+    for (ngx_uint_t i = 0; i < cmcf->servers.nelts; i++) {
+      ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
+          cscfp[i]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
+      cfg_s->not_ready = true;
+    }
+    cfg_m->handler->Message(
+        kError,
+        "ngx_pagespeed: this reload keeps running with optimization off");
+    return NGX_OK;
+  };
 
   std::vector<SystemServerContext*> server_contexts;
   // Iterate over all configured server{} blocks to collect the server contexts.
@@ -4751,7 +4797,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   if (error_index != -1) {
     server_contexts[error_index]->message_handler()->Message(
         kError, "ngx_pagespeed is enabled. %s", error_message.c_str());
-    return NGX_ERROR;
+    return fail_init();
   }
 
   // Resolve every server's relationship with the optimizer daemon before any
@@ -4783,8 +4829,6 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     // running.  The adapter announces each distinct condition once per
     // process, so a refusal repeated across reloads would be silent; the
     // module therefore says so itself, every time.
-    const bool initial_cycle =
-        (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);
     for (SystemServerContext* system_server_context : server_contexts) {
       NgxServerContext* server_context =
           dynamic_cast<NgxServerContext*>(system_server_context);
@@ -4823,7 +4867,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     if (!cfg_m->driver_factory->CheckResolver()) {
       cfg_m->handler->Message(
           kError, "UseNativeFetcher is on, please configure a resolver.");
-      return NGX_ERROR;
+      return fail_init();
     }
 
     cfg_m->driver_factory->LoggingInit(cycle->log, true);
@@ -5090,6 +5134,12 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   ps_main_conf_t* cfg_m = static_cast<ps_main_conf_t*>(
       ngx_http_cycle_get_module_main_conf(cycle, ngx_pagespeed));
   if (cfg_m == nullptr || cfg_m->driver_factory == nullptr) {
+    return NGX_OK;
+  }
+
+  // A reload that failed its post-config checks (ps_init_module) serves
+  // nothing through this module; leave its factory un-initialised.
+  if (ps_cycle_not_ready(cycle)) {
     return NGX_OK;
   }
 

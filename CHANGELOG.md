@@ -91,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **nginx: a configuration error found on reload no longer takes down the
+  running server.** A configuration that fails the module's start-up checks
+  (for example `UseNativeFetcher` without a `resolver`) is still refused at
+  start. On `nginx -s reload` it used to make the master exit and orphan its
+  workers. The error is now logged and the reload completes with the
+  module passing requests through untouched, so the master and a working
+  server stay up until the configuration is fixed.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
