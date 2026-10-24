@@ -315,6 +315,18 @@ pagespeed_cc_test(
     ],
 )
 
+# pagespeed.config layering: resolver order (canonical, legacy, none) and the
+# base / per-site merge. Windows-only: the resolver uses the Win32 shell and
+# file APIs and the merge runs through iis_module's ConfigFactory.
+pagespeed_cc_test(
+    name = "iis_config_layering_test",
+    srcs = ["iis_config_layering_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+    ],
+)
+
 # Regression test for IisAsyncUrlFetcher::DeriveHost lifetime contract.
 # Windows-only because iis_async_url_fetcher.h pulls in <Windows.h> and
 # <winhttp.h> via asyncwinhttp.h. The test itself exercises only the
