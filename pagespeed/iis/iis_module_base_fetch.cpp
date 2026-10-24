@@ -1000,12 +1000,6 @@ void IisModuleBaseFetch::SendData(MessageHandler* handler, bool flush) {
 	Unlock();
 }
 
-
-
-	// Create the custom notification class.
-	
-net_instaweb::MyCustomProvider cp;
-
 bool IisModuleBaseFetch::HandleFlush(MessageHandler* handler) {
 #ifndef IISPEEDHASFLUSH
 	return true;
@@ -1031,8 +1025,7 @@ bool IisModuleBaseFetch::HandleFlush(MessageHandler* handler) {
 			BOOL completion_expected = false;
 			if (true || (http_context_->GetResponse()->GetRawHttpResponse()->Flags&HTTP_SEND_RESPONSE_FLAG_MORE_DATA))
 			{
-				
-				//http_context_->NotifyCustomNotification(&cp,&completion_expected);
+
 				//http_context_->GetResponse()->WriteEntityChunks(&emptydatachunk,1,true,true, &pcbSent, &completion_expected);
 			}
 			else

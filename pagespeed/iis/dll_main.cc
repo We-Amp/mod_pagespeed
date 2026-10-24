@@ -260,7 +260,7 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
           net_instaweb::modulePath,
           pGlobalInfo->GetAppPoolName(),
           net_instaweb::message_handler),
-      RQ_SEND_RESPONSE | RQ_BEGIN_REQUEST | RQ_CUSTOM_NOTIFICATION,
+      RQ_SEND_RESPONSE | RQ_BEGIN_REQUEST,
       0);
   if (FAILED(hr)) return hr;
 

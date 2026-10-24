@@ -1332,8 +1332,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 
-	MyCustomProvider cp2;
-
 	// Request memory for a response body chunk: lives as long as the request.
 	static void* AllocateResponseChunk(void* context, DWORD size)
 	{
@@ -2219,17 +2217,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 
 
-
-	REQUEST_NOTIFICATION_STATUS
-		IisHttpModule::OnCustomRequestNotification(
-		IN IHttpContext * pHttpContext,
-		IN ICustomNotificationProvider * pProvider
-		)
-	{
-		Sleep(1000);
-		log(pHttpContext, "custom!!");
-		return RQ_NOTIFICATION_CONTINUE;
-	}
 
 	IisModuleRequestContext* IisHttpModule::CreateRequestContext(IHttpContext *pHttpContext, std::string site_root, char *url, int url_len, GoogleUrl *gurl, IisProcessContext** failed_pc)
 	{
