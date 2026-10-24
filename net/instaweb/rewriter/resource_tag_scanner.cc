@@ -79,18 +79,18 @@ semantic_type::Category CategorizeAttributeBySpec(
       SplitStringPieceToVector(rel_attr->DecodedValueOrNull(), " ", &values,
                                true /* skip empty */);
       // Image takes precedence over prefetch, so look for images first.
-      for (int i = 0, n = values.size(); i < n; ++i) {
-        if (StringCaseEqual(values[i], kIcon) ||
-            StringCaseEqual(values[i], kAppleTouchIcon) ||
-            StringCaseEqual(values[i], kAppleTouchIconPrecomposed) ||
-            StringCaseEqual(values[i], kAppleTouchStartupImage)) {
+      for (auto value : values) {
+        if (StringCaseEqual(value, kIcon) ||
+            StringCaseEqual(value, kAppleTouchIcon) ||
+            StringCaseEqual(value, kAppleTouchIconPrecomposed) ||
+            StringCaseEqual(value, kAppleTouchStartupImage)) {
           return semantic_type::kImage;
         }
       }
-      for (int i = 0, n = values.size(); i < n; ++i) {
-        if (StringCaseEqual(values[i], kRelPrefetch) ||
-            StringCaseEqual(values[i], kRelDnsPrefetch) ||
-            StringCaseEqual(values[i], kRelPreconnect)) {
+      for (auto value : values) {
+        if (StringCaseEqual(value, kRelPrefetch) ||
+            StringCaseEqual(value, kRelDnsPrefetch) ||
+            StringCaseEqual(value, kRelPreconnect)) {
           return semantic_type::kPrefetch;
         }
       }

@@ -75,8 +75,7 @@ bool SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() const {
       rewrite_driver_->request_properties();
   RewriteOptions::FilterVector js_filters;
   options->GetEnabledFiltersRequiringScriptExecution(&js_filters);
-  for (int i = 0, n = js_filters.size(); i < n; ++i) {
-    RewriteOptions::Filter filter = js_filters[i];
+  for (auto filter : js_filters) {
     bool filter_enabled = true;
     switch (filter) {
       case RewriteOptions::kDeferJavascript:

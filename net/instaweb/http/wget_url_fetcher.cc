@@ -45,9 +45,8 @@ GoogleString WgetUrlFetcher::ConstructFetchCommand(
               "\"");
   }
 
-  for (StringVector::const_iterator it = escaped_headers.begin();
-       it != escaped_headers.end(); ++it) {
-    StrAppend(&cmd, " --header \"", *it, "\"");
+  for (const auto& escaped_header : escaped_headers) {
+    StrAppend(&cmd, " --header \"", escaped_header, "\"");
   }
 
   StrAppend(&cmd, " \"", escaped_url, "\"");

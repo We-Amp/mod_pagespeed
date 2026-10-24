@@ -182,8 +182,8 @@ bool JsInlineFilter::ShouldInline(const ResourcePtr& resource,
   if (!StringCaseEqual(htmls_charset, script_charset)) {
     StringPiece clean_contents(contents);
     StripUtf8Bom(&clean_contents);
-    for (size_t i = 0; i < clean_contents.size(); ++i) {
-      const unsigned char c = static_cast<unsigned char>(clean_contents[i]);
+    for (char ch : clean_contents) {
+      const unsigned char c = static_cast<unsigned char>(ch);
       if (c == 0 || c >= 0x80) {
         *reason = StrCat(
             "JS not inlined due to apparent charset incompatibility; we think "

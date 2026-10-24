@@ -538,9 +538,9 @@ RewriteQuery::Status RewriteQuery::ScanNameValue(
     StringPieceVector pairs;
     SplitStringPieceToVector(trimmed_value, ",", &pairs,
                              true /* omit_empty_strings */);
-    for (int i = 0, n = pairs.size(); i < n; ++i) {
-      TrimWhitespace(&pairs[i]);
-      if (pairs[i] == "no-transform") {
+    for (auto& pair : pairs) {
+      TrimWhitespace(&pair);
+      if (pair == "no-transform") {
         // TODO(jmarantz): A .pagespeed resource should return un-optimized
         // content with "Cache-Control: no-transform".
         options->set_enabled(RewriteOptions::kEnabledStandby);
@@ -651,10 +651,10 @@ RewriteQuery::Status RewriteQuery::ParseResourceOption(
   const RewriteOptions::Filter* filters = filter->RelatedFilters(&num_filters);
   const StringPieceVector* opts = filter->RelatedOptions();
 
-  for (int i = 0, n = filters_and_options.size(); i < n; ++i) {
+  for (auto filters_and_option : filters_and_options) {
     StringPieceVector name_value;
-    SplitStringPieceToVector(filters_and_options[i],
-                             kResourceOptionValueSeparator, &name_value, true);
+    SplitStringPieceToVector(filters_and_option, kResourceOptionValueSeparator,
+                             &name_value, true);
     switch (name_value.size()) {
       case 1: {
         RewriteOptions::Filter filter_enum =

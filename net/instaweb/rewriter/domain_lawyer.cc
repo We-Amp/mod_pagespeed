@@ -468,8 +468,8 @@ DomainLawyer::Domain* DomainLawyer::FindDomain(const GoogleUrl& gurl) const {
   }
 
   if (domain == nullptr) {
-    for (int i = 0, n = wildcarded_domains_.size(); i < n; ++i) {
-      domain = wildcarded_domains_[i];
+    for (auto wildcarded_domain : wildcarded_domains_) {
+      domain = wildcarded_domain;
       if (domain->Match(domain_path)) {
         break;
       } else {
@@ -492,9 +492,8 @@ void DomainLawyer::FindDomainsRewrittenTo(
   GoogleString domain_name;
   original_url.Origin().CopyToString(&domain_name);
   EnsureEndsInSlash(&domain_name);
-  for (DomainMap::const_iterator p = domain_map_.begin();
-       p != domain_map_.end(); ++p) {
-    Domain* src_domain = p->second;
+  for (const auto& p : domain_map_) {
+    Domain* src_domain = p.second;
     if (!src_domain->IsWildcarded() &&
         (src_domain->rewrite_domain() != nullptr) &&
         domain_name == src_domain->rewrite_domain()->name()) {
@@ -868,8 +867,7 @@ bool DomainLawyer::MapDomainHelper(
     StringPieceVector domains;
     SplitStringPieceToVector(comma_separated_from_domains, ",", &domains, true);
     ret = true;
-    for (int i = 0, n = domains.size(); i < n; ++i) {
-      const StringPiece& domain_name = domains[i];
+    for (auto domain_name : domains) {
       Domain* from_domain = AddDomainHelper(
           domain_name, false, false /* authorize */, false, handler);
       if (from_domain != nullptr) {
@@ -911,10 +909,8 @@ DomainLawyer::Domain* DomainLawyer::CloneAndAdd(const Domain* src) {
 
 void DomainLawyer::Merge(const DomainLawyer& src) {
   int num_existing_wildcards = num_wildcarded_domains();
-  for (DomainMap::const_iterator p = src.domain_map_.begin(),
-                                 e = src.domain_map_.end();
-       p != e; ++p) {
-    Domain* src_domain = p->second;
+  for (const auto& p : src.domain_map_) {
+    Domain* src_domain = p.second;
     Domain* dst_domain = CloneAndAdd(src_domain);
     Domain* src_rewrite_domain = src_domain->rewrite_domain();
     if (src_rewrite_domain != nullptr) {
@@ -936,8 +932,7 @@ void DomainLawyer::Merge(const DomainLawyer& src) {
   wildcarded_domains_.resize(num_existing_wildcards);
   std::set<Domain*> dup_detector(wildcarded_domains_.begin(),
                                  wildcarded_domains_.end());
-  for (int i = 0, n = src.wildcarded_domains_.size(); i < n; ++i) {
-    Domain* src_domain = src.wildcarded_domains_[i];
+  for (auto src_domain : src.wildcarded_domains_) {
     DomainMap::const_iterator p = domain_map_.find(src_domain->name());
     if (p == domain_map_.end()) {
       LOG(DFATAL) << "Domain " << src_domain->name() << " not found in dst";
@@ -1044,9 +1039,8 @@ bool DomainLawyer::DoDomainsServeSameContent(
 GoogleString DomainLawyer::Signature() const {
   GoogleString signature;
 
-  for (DomainMap::const_iterator iterator = domain_map_.begin();
-       iterator != domain_map_.end(); ++iterator) {
-    StrAppend(&signature, "D:", iterator->second->Signature(), "-");
+  for (const auto& entry : domain_map_) {
+    StrAppend(&signature, "D:", entry.second->Signature(), "-");
   }
   if (!proxy_suffix_.empty()) {
     StrAppend(&signature, ",PS:", proxy_suffix_);
@@ -1057,9 +1051,8 @@ GoogleString DomainLawyer::Signature() const {
 
 GoogleString DomainLawyer::ToString(StringPiece line_prefix) const {
   GoogleString output;
-  for (DomainMap::const_iterator iterator = domain_map_.begin();
-       iterator != domain_map_.end(); ++iterator) {
-    StrAppend(&output, line_prefix, iterator->second->ToString(), "\n");
+  for (const auto& entry : domain_map_) {
+    StrAppend(&output, line_prefix, entry.second->ToString(), "\n");
   }
   if (!proxy_suffix_.empty()) {
     StrAppend(&output, "Proxy Suffix: ", proxy_suffix_);

@@ -178,13 +178,13 @@ bool DomainRewriteFilter::UpdateSetCookieHeader(
   // per spec the last one wins.
   bool has_domain = false, has_path = false;
   StringPiece domain, path;
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
-    if (StringCaseEqual(attributes[i].first, kPath)) {
+  for (auto& attribute : attributes) {
+    if (StringCaseEqual(attribute.first, kPath)) {
       has_path = true;
-      path = attributes[i].second;
-    } else if (StringCaseEqual(attributes[i].first, kDomain)) {
+      path = attribute.second;
+    } else if (StringCaseEqual(attribute.first, kDomain)) {
       has_domain = true;
-      domain = attributes[i].second;
+      domain = attribute.second;
     }
   }
 
@@ -235,10 +235,10 @@ bool DomainRewriteFilter::UpdateSetCookieHeader(
   // Now compose the new set-cookie line, updating domain & path as
   // appropriate.
   cookie_string.CopyToString(out);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
+  for (auto& attribute : attributes) {
     out->append("; ");
-    StringPiece key = attributes[i].first;
-    StringPiece val = attributes[i].second;
+    StringPiece key = attribute.first;
+    StringPiece val = attribute.second;
     if (has_path && StringCaseEqual(key, kPath)) {
       val = out_path;
     } else if (has_domain && StringCaseEqual(key, kDomain)) {
@@ -404,31 +404,30 @@ void DomainRewriteFilter::StartElementImpl(HtmlElement* element) {
       (element->keyword() == HtmlName::kEmbed ||
        element->keyword() == HtmlName::kFrame ||
        element->keyword() == HtmlName::kIframe);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
+  for (auto& attribute : attributes) {
     // Only rewrite attributes that are resource-tags.  If hyperlinks
     // is on that's fine too.
-    bool is_resource = (attributes[i].category == semantic_type::kImage ||
-                        attributes[i].category == semantic_type::kScript ||
-                        attributes[i].category == semantic_type::kStylesheet);
+    bool is_resource = (attribute.category == semantic_type::kImage ||
+                        attribute.category == semantic_type::kScript ||
+                        attribute.category == semantic_type::kStylesheet);
     if (options->domain_rewrite_hyperlinks() || is_resource) {
-      StringPiece val(attributes[i].url->DecodedValueOrNull());
+      StringPiece val(attribute.url->DecodedValueOrNull());
       if (!val.empty()) {
         GoogleString rewritten_val;
         // Don't shard hyperlinks, prefetch, embeds, frames, or iframes.
         bool apply_sharding =
             (!element_is_embed_or_frame_or_iframe &&
-             attributes[i].category != semantic_type::kHyperlink &&
-             attributes[i].category != semantic_type::kPrefetch);
+             attribute.category != semantic_type::kHyperlink &&
+             attribute.category != semantic_type::kPrefetch);
         // TODO(jmarantz): Shouldn't we apply the domain suffix in exactly the
         // same circumstances as we apply any other domain rewrite?
         bool apply_domain_suffix =
-            (attributes[i].category == semantic_type::kHyperlink ||
-             is_resource);
+            (attribute.category == semantic_type::kHyperlink || is_resource);
         const GoogleUrl& base_url = driver()->base_url();
         if (Rewrite(val, base_url, driver()->server_context(), options,
                     apply_sharding, apply_domain_suffix,
                     &rewritten_val) == kRewroteDomain) {
-          attributes[i].url->SetValue(rewritten_val);
+          attribute.url->SetValue(rewritten_val);
           rewrite_count_->Add(1);
         }
       }

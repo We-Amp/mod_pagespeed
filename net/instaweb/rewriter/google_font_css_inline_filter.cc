@@ -48,8 +48,8 @@ bool HasRelToken(HtmlElement::Attribute* rel, const char* token) {
   StringPieceVector tokens;
   SplitStringPieceToVector(rel->DecodedValueOrNull(), " ", &tokens,
                            true /* skip empty */);
-  for (int i = 0, n = tokens.size(); i < n; ++i) {
-    if (StringCaseEqual(tokens[i], token)) {
+  for (auto rel_token : tokens) {
+    if (StringCaseEqual(rel_token, token)) {
       return true;
     }
   }

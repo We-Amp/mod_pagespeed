@@ -1059,10 +1059,8 @@ void ImageRewriteFilter::RenderDone() {
   }
   if (!image_info_.empty()) {
     GoogleString code = "psMobStaticImageInfo = {";
-    for (AssociatedImageInfoMap::iterator i = image_info_.begin(),
-                                          e = image_info_.end();
-         i != e; ++i) {
-      const AssociatedImageInfo& image_info = i->second;
+    for (auto& entry : image_info_) {
+      const AssociatedImageInfo& image_info = entry.second;
       EscapeToJsStringLiteral(image_info.url(), true /* want quotes */, &code);
       StrAppend(&code, ":{");
       StrAppend(&code, "w:", IntegerToString(image_info.dimensions().width()),
@@ -2391,27 +2389,27 @@ void ImageRewriteFilter::StartElementImpl(HtmlElement* element) {
   // Rewrite any image-valued attributes we find.
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
-    if (attributes[i].category != semantic_type::kImage ||
-        attributes[i].url->DecodedValueOrNull() == nullptr) {
+  for (auto& attribute : attributes) {
+    if (attribute.category != semantic_type::kImage ||
+        attribute.url->DecodedValueOrNull() == nullptr) {
       continue;
     }
 
     // The LSC filter only knows how to handle the src attribute.
-    if (attributes[i].url->keyword() == HtmlName::kSrc) {
+    if (attribute.url->keyword() == HtmlName::kSrc) {
       // Ask the LSC filter to work out how to handle this element. A return
       // value of true means we don't have to rewrite it so can skip that.
       // The state is carried forward to after we initiate rewriting since
       // we might still have to modify the element.
       LocalStorageCacheFilter::InlineState state;
       if (LocalStorageCacheFilter::AddStorableResource(
-              attributes[i].url->DecodedValueOrNull(), driver(),
+              attribute.url->DecodedValueOrNull(), driver(),
               false /* check cookie */, element, &state)) {
         continue;
       }
     }
 
-    BeginRewriteImageUrl(element, attributes[i].url);
+    BeginRewriteImageUrl(element, attribute.url);
 
     HtmlElement::Attribute* srcset = element->FindAttribute(HtmlName::kSrcset);
     HtmlElement::Attribute* datasrcset =
@@ -2516,8 +2514,8 @@ const RewriteOptions::Filter* ImageRewriteFilter::RelatedFilters(
 }
 
 void ImageRewriteFilter::DisableRelatedFilters(RewriteOptions* options) {
-  for (int i = 0; i < kRelatedFiltersSize; ++i) {
-    options->DisableFilter(kRelatedFilters[i]);
+  for (auto filter : kRelatedFilters) {
+    options->DisableFilter(filter);
   }
 }
 

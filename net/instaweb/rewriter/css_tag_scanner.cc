@@ -64,9 +64,7 @@ bool CssTagScanner::ParseCssElement(HtmlElement* element,
   // there is a type, it must be type='text/css'. These can be in any order.
   HtmlElement::AttributeList* attrs = element->mutable_attributes();
   bool has_href = false, has_rel_stylesheet = false;
-  for (HtmlElement::AttributeIterator i(attrs->begin()); i != attrs->end();
-       ++i) {
-    HtmlElement::Attribute& attr = *i;
+  for (auto& attr : *attrs) {
     switch (attr.keyword()) {
       case HtmlName::kHref:
         if (has_href || attr.decoding_error()) {
@@ -558,8 +556,8 @@ bool CssTagScanner::IsStylesheetOrAlternate(
     const StringPiece& attribute_value) {
   StringPieceVector values;
   SplitStringPieceToVector(attribute_value, " ", &values, true);
-  for (int i = 0, n = values.size(); i < n; ++i) {
-    if (StringCaseEqual(values[i], kStylesheet)) {
+  for (auto value : values) {
+    if (StringCaseEqual(value, kStylesheet)) {
       return true;
     }
   }
@@ -571,10 +569,10 @@ bool CssTagScanner::IsAlternateStylesheet(const StringPiece& attribute_value) {
   bool has_alternate = false;
   StringPieceVector values;
   SplitStringPieceToVector(attribute_value, " ", &values, true);
-  for (int i = 0, n = values.size(); i < n; ++i) {
-    if (StringCaseEqual(values[i], kStylesheet)) {
+  for (auto value : values) {
+    if (StringCaseEqual(value, kStylesheet)) {
       has_stylesheet = true;
-    } else if (StringCaseEqual(values[i], kAlternate)) {
+    } else if (StringCaseEqual(value, kAlternate)) {
       has_alternate = true;
     }
   }

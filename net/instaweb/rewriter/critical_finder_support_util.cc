@@ -75,11 +75,10 @@ void WriteSupportMapToCriticalKeysProto(const SupportMap& support_map,
                                         CriticalKeys* critical_keys) {
   // Clean out the existing evidence and inject the fresh evidence.
   critical_keys->clear_key_evidence();
-  for (SupportMap::const_iterator entry = support_map.begin();
-       entry != support_map.end(); ++entry) {
+  for (const auto& entry : support_map) {
     CriticalKeys::KeyEvidence* evidence = critical_keys->add_key_evidence();
-    evidence->set_key(entry->first);
-    evidence->set_support(entry->second);
+    evidence->set_key(entry.first);
+    evidence->set_support(entry.second);
   }
 }
 
@@ -237,21 +236,19 @@ void UpdateCriticalKeys(bool require_prior_support, const StringSet& new_set,
   critical_keys->set_maximum_possible_support(maximum_support);
   // Actually add the new_set to the support_map.
   if (require_prior_support) {
-    for (StringSet::const_iterator s = new_set.begin(); s != new_set.end();
-         ++s) {
+    for (const auto& s : new_set) {
       // Only add entries that are already in the support_map
       // (critical_css_beacon_filter initializes candidate entries to have
       // support 0).  This avoids a cache-fill DoS with spurious beacon data.
-      SupportMap::iterator entry = support_map.find(*s);
+      SupportMap::iterator entry = support_map.find(s);
       if (entry != support_map.end()) {
         SaturatingAddTo(support_value, &entry->second);
       }
     }
   } else {
     // Unconditionally add entries to support_map.
-    for (StringSet::const_iterator s = new_set.begin(); s != new_set.end();
-         ++s) {
-      SaturatingAddTo(support_value, &support_map[*s]);
+    for (const auto& s : new_set) {
+      SaturatingAddTo(support_value, &support_map[s]);
     }
   }
   critical_keys->set_valid_beacons_received(
@@ -264,9 +261,8 @@ void UpdateCandidateSupport(const StringSet& matched, int support_value,
                             CriticalKeys* critical_keys) {
   DCHECK(critical_keys != nullptr);
   SupportMap support_map = ConvertCriticalKeysProtoToSupportMap(*critical_keys);
-  for (SupportMap::iterator entry = support_map.begin();
-       entry != support_map.end(); ++entry) {
-    entry->second = Decay(support_value, entry->second);
+  for (auto& entry : support_map) {
+    entry.second = Decay(support_value, entry.second);
   }
   int maximum_support =
       critical_keys->has_maximum_possible_support()
@@ -276,8 +272,8 @@ void UpdateCandidateSupport(const StringSet& matched, int support_value,
   critical_keys->set_maximum_possible_support(maximum_support);
 
   bool newly_matching = false;
-  for (StringSet::const_iterator s = matched.begin(); s != matched.end(); ++s) {
-    SupportMap::iterator entry = support_map.find(*s);
+  for (const auto& s : matched) {
+    SupportMap::iterator entry = support_map.find(s);
     if (entry != support_map.end()) {
       if (entry->second == 0) {
         newly_matching = true;
@@ -436,9 +432,8 @@ bool UpdateCandidateKeys(const StringSet& keys, CriticalKeys* proto,
   // candidate keys cause us to re-beacon.
   SupportMap support_map = ConvertCriticalKeysProtoToSupportMap(*proto);
   bool support_map_changed = false;
-  for (StringSet::const_iterator i = keys.begin(), end = keys.end(); i != end;
-       ++i) {
-    if (support_map.insert(std::pair<GoogleString, int>(*i, 0)).second) {
+  for (const auto& key : keys) {
+    if (support_map.insert(std::pair<GoogleString, int>(key, 0)).second) {
       support_map_changed = true;
     }
   }

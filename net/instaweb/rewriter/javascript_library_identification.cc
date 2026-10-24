@@ -37,10 +37,9 @@ JavascriptLibraryIdentification::~JavascriptLibraryIdentification() {}
 bool JavascriptLibraryIdentification::RegisterLibrary(
     SizeInBytes bytes, StringPiece md5_hash, StringPiece canonical_url) {
   // Validate the md5_hash and make sure canonical_url is vaguely sensible.
-  for (StringPiece::const_iterator c = md5_hash.begin(), end = md5_hash.end();
-       c != end; ++c) {
-    if (!(('a' <= *c && *c <= 'z') || ('A' <= *c && *c <= 'Z') ||
-          ('0' <= *c && *c <= '9') || (*c == '-') || (*c == '_'))) {
+  for (char c : md5_hash) {
+    if (!(('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') ||
+          ('0' <= c && c <= '9') || (c == '-') || (c == '_'))) {
       return false;
     }
   }
@@ -82,31 +81,23 @@ StringPiece JavascriptLibraryIdentification::Find(
 
 void JavascriptLibraryIdentification::Merge(
     const JavascriptLibraryIdentification& src) {
-  for (LibraryMap::const_iterator bytes_entry = src.libraries_.begin(),
-                                  bytes_end = src.libraries_.end();
-       bytes_entry != bytes_end; ++bytes_entry) {
-    const MD5ToUrlMap& src_md5_map = bytes_entry->second;
-    MD5ToUrlMap& this_md5_map = libraries_[bytes_entry->first];
-    for (MD5ToUrlMap::const_iterator md5_entry = src_md5_map.begin(),
-                                     md5_end = src_md5_map.end();
-         md5_entry != md5_end; ++md5_entry) {
+  for (const auto& bytes_entry : src.libraries_) {
+    const MD5ToUrlMap& src_md5_map = bytes_entry.second;
+    MD5ToUrlMap& this_md5_map = libraries_[bytes_entry.first];
+    for (const auto& md5_entry : src_md5_map) {
       // Prefer entry in src.
-      this_md5_map[md5_entry->first] = md5_entry->second;
+      this_md5_map[md5_entry.first] = md5_entry.second;
     }
   }
 }
 
 void JavascriptLibraryIdentification::AppendSignature(
     GoogleString* signature) const {
-  for (LibraryMap::const_iterator bytes_entry = libraries_.begin(),
-                                  bytes_end = libraries_.end();
-       bytes_entry != bytes_end; ++bytes_entry) {
-    StrAppend(signature, "S:", Integer64ToString(bytes_entry->first));
-    const MD5ToUrlMap& md5_map = bytes_entry->second;
-    for (MD5ToUrlMap::const_iterator md5_entry = md5_map.begin(),
-                                     md5_end = md5_map.end();
-         md5_entry != md5_end; ++md5_entry) {
-      StrAppend(signature, "_H:", md5_entry->first, "_J:", md5_entry->second);
+  for (const auto& bytes_entry : libraries_) {
+    StrAppend(signature, "S:", Integer64ToString(bytes_entry.first));
+    const MD5ToUrlMap& md5_map = bytes_entry.second;
+    for (const auto& md5_entry : md5_map) {
+      StrAppend(signature, "_H:", md5_entry.first, "_J:", md5_entry.second);
     }
   }
 }

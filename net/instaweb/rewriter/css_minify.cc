@@ -75,8 +75,7 @@ bool CssMinify::ParseStylesheet(StringPiece stylesheet_text) {
           handler_);
     }
     // Report individual errors.
-    for (int i = 0, n = parser.errors_seen().size(); i < n; ++i) {
-      Css::Parser::ErrorInfo error = parser.errors_seen()[i];
+    for (const auto& error : parser.errors_seen()) {
       error_writer_->Write(error.message, handler_);
       error_writer_->Write("\n", handler_);
     }
@@ -204,10 +203,9 @@ void CssMinify::Minify(const Css::Stylesheet& stylesheet) {
 }
 
 void CssMinify::Minify(const Css::Charsets& charsets) {
-  for (Css::Charsets::const_iterator iter = charsets.begin();
-       iter != charsets.end(); ++iter) {
+  for (const auto& charset : charsets) {
     Write("@charset \"");
-    Write(Css::EscapeString(*iter));
+    Write(Css::EscapeString(charset));
     Write("\";");
   }
 }

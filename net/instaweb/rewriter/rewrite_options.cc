@@ -1073,8 +1073,7 @@ bool RewriteOptions::ParseInlineUnauthorizedResourceType(
   // InlineResourcesWithoutExplicitAuthorization off
   StringPieceVector resource_types;
   SplitStringPieceToVector(in, ",", &resource_types, true);
-  for (int i = 0, n = resource_types.size(); i < n; ++i) {
-    StringPiece resource_type = resource_types[i];
+  for (auto resource_type : resource_types) {
     semantic_type::Category category;
     if (StringCaseEqual(resource_type, "off")) {
       out->clear();
@@ -1685,8 +1684,8 @@ void RewriteOptions::InitFixedResourceHeaders() {
   //                      | "/" | "[" | "]" | "?" | "="
   //                      | "{" | "}" | SP | HT
   const GoogleString separators("()<>@,;:\\\"/[]?={} \t");
-  for (int i = 0, n = separators.size(); i < n; ++i) {
-    http_header_separators[static_cast<unsigned char>(separators.at(i))] = true;
+  for (char separator : separators) {
+    http_header_separators[static_cast<unsigned char>(separator)] = true;
   }
 }
 
@@ -1963,8 +1962,8 @@ bool RewriteOptions::AddCommaSeparatedListToFilterSet(
   StringPieceVector names;
   SplitStringPieceToVector(filters, ",", &names, true);
   bool ret = true;
-  for (int i = 0, n = names.size(); i < n; ++i) {
-    ret &= AddByNameToFilterSet(names[i], set, handler, enabling);
+  for (auto name : names) {
+    ret &= AddByNameToFilterSet(name, set, handler, enabling);
   }
   return ret;
 }
@@ -1981,24 +1980,24 @@ bool RewriteOptions::AdjustFiltersByCommaSeparatedList(
   // Default to false unless no filters are specified.
   // "PageSpeedFilters=" -> disable all filters.
   bool non_incremental = names.empty();
-  for (int i = 0, n = names.size(); i < n; ++i) {
-    StringPiece& option = names[i];
+  for (auto& name : names) {
+    StringPiece& option = name;
     TrimWhitespace(&option);
     if (!option.empty()) {
       if (option[0] == '-') {
         option.remove_prefix(1);
-        ret &= AddByNameToFilterSet(names[i], &disabled_filters_, handler,
+        ret &= AddByNameToFilterSet(name, &disabled_filters_, handler,
                                     false /* enabling */);
       } else if (option[0] == '+') {
         option.remove_prefix(1);
-        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler,
+        ret &= AddByNameToFilterSet(name, &enabled_filters_, handler,
                                     true /* enabling */);
       } else {
         // No prefix means: reset to pass-through mode prior to
         // applying any of the filters.  +a,-b,+c" will just add
         // a and c and remove b to current default config, but
         // "+a,-b,+c,d" will just run with filters a, c and d.
-        ret &= AddByNameToFilterSet(names[i], &enabled_filters_, handler,
+        ret &= AddByNameToFilterSet(name, &enabled_filters_, handler,
                                     true /* enabling */);
         non_incremental = true;
       }
@@ -2142,9 +2141,9 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
             {kSplitHtmlHelperDeprecated,
              "Filter 'split_html_helper' is deprecated and has no effect."},
         };
-        for (int i = 0; i < std::size(kDeprecatedWarnings); ++i) {
-          if (kDeprecatedWarnings[i].filter == filter) {
-            handler->Message(kWarning, "%s", kDeprecatedWarnings[i].warning);
+        for (auto deprecated : kDeprecatedWarnings) {
+          if (deprecated.filter == filter) {
+            handler->Message(kWarning, "%s", deprecated.warning);
             break;
           }
         }
@@ -2176,10 +2175,9 @@ bool RewriteOptions::AddCommaSeparatedListToOptionSet(
   StringPieceVector option_vector;
   bool ret = true;
   SplitStringPieceToVector(options, ",", &option_vector, true);
-  for (int i = 0, n = option_vector.size(); i < n; ++i) {
+  for (auto option : option_vector) {
     StringPieceVector single_option_and_value;
-    SplitStringPieceToVector(option_vector[i], "=", &single_option_and_value,
-                             true);
+    SplitStringPieceToVector(option, "=", &single_option_and_value, true);
     if (single_option_and_value.size() == 2) {
       set->insert(OptionStringPair(single_option_and_value[0].as_string(),
                                    single_option_and_value[1].as_string()));
@@ -2263,14 +2261,14 @@ bool RewriteOptions::IsDeprecatedOptionName(StringPiece option_name) {
 bool RewriteOptions::SetOptionsFromName(const OptionSet& option_set,
                                         MessageHandler* handler) {
   bool ret = true;
-  for (RewriteOptions::OptionSet::const_iterator iter = option_set.begin();
-       iter != option_set.end(); ++iter) {
+  for (const auto& name_value : option_set) {
     GoogleString msg;
     OptionSettingResult result =
-        SetOptionFromName(iter->first, iter->second, &msg);
+        SetOptionFromName(name_value.first, name_value.second, &msg);
     if (result != kOptionOk) {
       handler->Message(kWarning, "Failed to set %s to %s (%s)",
-                       iter->first.c_str(), iter->second.c_str(), msg.c_str());
+                       name_value.first.c_str(), name_value.second.c_str(),
+                       msg.c_str());
       ret = false;
     }
   }
@@ -2767,15 +2765,15 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     LOG(ERROR) << "ResponsiveImageDensities: Must not be empty list.";
     return false;
   }
-  for (size_t i = 0, n = density_strs.size(); i < n; ++i) {
+  for (auto density_str : density_strs) {
     double density;
-    if (!ParseFromString(density_strs[i], &density)) {
+    if (!ParseFromString(density_str, &density)) {
       LOG(ERROR) << "ResponsiveImageDensities: Cannot parse number: "
-                 << density_strs[i];
+                 << density_str;
       return false;
     } else if (density <= 0) {
       LOG(ERROR) << "ResponsiveImageDensities: Must be > 0. Invalid number: "
-                 << density_strs[i];
+                 << density_str;
       return false;
     } else {  // Valid
       ret.push_back(density);
@@ -2935,8 +2933,8 @@ bool RewriteOptions::HasRejectedHeader(
     const RequestHeaders* request_headers) const {
   ConstStringStarVector header_values;
   if (request_headers->Lookup(header_name, &header_values)) {
-    for (int i = 0, n = header_values.size(); i < n; ++i) {
-      if (IsRejectedRequest(header_name, *header_values[i])) {
+    for (auto& header_value : header_values) {
+      if (IsRejectedRequest(header_name, *header_value)) {
         return true;
       }
     }
@@ -3092,8 +3090,8 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
   enabled_filters_.EraseSet(forbidden_filters_);
 
   experiment_id_ = src.experiment_id_;
-  for (int i = 0, n = src.experiment_specs_.size(); i < n; ++i) {
-    ExperimentSpec* spec = src.experiment_specs_[i]->Clone();
+  for (auto experiment_spec : src.experiment_specs_) {
+    ExperimentSpec* spec = experiment_spec->Clone();
     InsertExperimentSpecInVector(spec);
   }
 
@@ -3101,12 +3099,10 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
     set_downstream_cache_purge_location_prefix(
         src.downstream_cache_purge_location_prefix());
   }
-  for (int i = 0, n = src.resource_headers_.size(); i < n; ++i) {
-    NameValue* nv = src.resource_headers_[i];
+  for (auto nv : src.resource_headers_) {
     AddResourceHeader(nv->name, nv->value);
   }
-  for (int i = 0, n = src.custom_fetch_headers_.size(); i < n; ++i) {
-    NameValue* nv = src.custom_fetch_headers_[i];
+  for (auto nv : src.custom_fetch_headers_) {
     AddCustomFetchHeader(nv->name, nv->value);
   }
   // A source that set RulePackFile replaces the list here; the generic option
@@ -3187,9 +3183,8 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
   // src.url_cache_invalidation_entries_ are both ordered).
   int original_size = url_cache_invalidation_entries_.size();
   // Append copies of src's url cache invalidation entries to this.
-  for (int i = 0, n = src.url_cache_invalidation_entries_.size(); i < n; ++i) {
-    url_cache_invalidation_entries_.push_back(
-        src.url_cache_invalidation_entries_[i]->Clone());
+  for (auto entry : src.url_cache_invalidation_entries_) {
+    url_cache_invalidation_entries_.push_back(entry->Clone());
   }
   // Now url_cache_invalidation_entries_ consists of two ordered ranges: [begin,
   // begin+original_size) and [begin+original_size, end).  Hence we can use
@@ -3374,8 +3369,8 @@ void RewriteOptions::ComputeSignatureLockHeld() {
   if (!options_uniqueness_checked_) {
     options_uniqueness_checked_ = true;
     StringSet id_set;
-    for (int i = 0, n = all_options_.size(); i < n; ++i) {
-      const char* id = all_options_[i]->id();
+    for (auto& all_option : all_options_) {
+      const char* id = all_option->id();
       std::pair<StringSet::iterator, bool> insertion = id_set.insert(id);
       DCHECK(insertion.second) << "Duplicate RewriteOption option id: " << id;
     }
@@ -3392,10 +3387,9 @@ void RewriteOptions::ComputeSignatureLockHeld() {
     }
   }
   signature_ += "O";
-  for (int i = 0, n = all_options_.size(); i < n; ++i) {
+  for (auto option : all_options_) {
     // Keep the signature relatively short by only including options
     // with values overridden from the default.
-    OptionBase* option = all_options_[i];
     if (option->is_used_for_signature_computation() && option->was_set()) {
       StrAppend(&signature_, option->id(), ":", option->Signature(hasher()),
                 "_");
@@ -3417,11 +3411,9 @@ void RewriteOptions::ComputeSignatureLockHeld() {
   StrAppend(&signature_, "BRRU:", blocking_rewrite_referer_urls_->Signature(),
             "_");
   StrAppend(&signature_, "UCI:");
-  for (int i = 0, n = url_cache_invalidation_entries_.size(); i < n; ++i) {
-    const UrlCacheInvalidationEntry& entry =
-        *url_cache_invalidation_entries_[i];
-    if (!entry.ignores_metadata_and_pcache) {
-      StrAppend(&signature_, entry.ComputeSignature(), "|");
+  for (const auto& entry_ptr : url_cache_invalidation_entries_) {
+    if (!entry_ptr->ignores_metadata_and_pcache) {
+      StrAppend(&signature_, entry_ptr->ComputeSignature(), "|");
     }
   }
 
@@ -3489,9 +3481,8 @@ bool RewriteOptions::IsEqual(const RewriteOptions& that) const {
 GoogleString RewriteOptions::ToString(const ResourceCategorySet& x) {
   GoogleString result = "";
   const char* delim = "";
-  for (ResourceCategorySet::const_iterator entry = x.begin(); entry != x.end();
-       ++entry) {
-    StrAppend(&result, delim, semantic_type::GetCategoryString(*entry));
+  for (auto entry : x) {
+    StrAppend(&result, delim, semantic_type::GetCategoryString(entry));
     delim = ",";
   }
   return result;
@@ -3558,13 +3549,12 @@ GoogleString RewriteOptions::ToString(const Color& color) {
 GoogleString RewriteOptions::ToString(const ResponsiveDensities& densities) {
   GoogleString result = "";
   const char* delim = "";
-  for (ResponsiveDensities::const_iterator iter = densities.begin();
-       iter != densities.end(); ++iter) {
+  for (double density : densities) {
     // 4 digits of precision seems like plenty. Note: hashing doubles is
     // generally not a good idea. But in this case we are only parsing the
     // doubles from config and never performing any arithmetic, so hashing
     // should be alright.
-    StrAppend(&result, delim, absl::StrFormat("%.4g", *iter));
+    StrAppend(&result, delim, absl::StrFormat("%.4g", density));
     delim = ",";
   }
   return result;
@@ -3599,8 +3589,7 @@ GoogleString RewriteOptions::EnabledFiltersToString() const {
 
 GoogleString RewriteOptions::SafeEnabledOptionsToString() const {
   GoogleString output;
-  for (int i = 0, n = all_options_.size(); i < n; ++i) {
-    OptionBase* option = all_options_[i];
+  for (auto option : all_options_) {
     if (option->was_set() && option->property()->safe_to_print()) {
       GoogleString name_and_id =
           StrCat(option->option_name(), " (", option->id(), ") ");
@@ -3641,9 +3630,8 @@ GoogleString RewriteOptions::OptionsToString() const {
   output += "\nOptions\n";
   StringVector names, values;
   int max_width = 0;
-  for (int i = 0, n = all_options_.size(); i < n; ++i) {
+  for (auto option : all_options_) {
     // Only including options with values overridden from the default.
-    OptionBase* option = all_options_[i];
     if (option->was_set()) {
       GoogleString name_and_id =
           StrCat(option->option_name(), " (", option->id(), ")");
@@ -3664,9 +3652,8 @@ GoogleString RewriteOptions::OptionsToString() const {
 
   if (!url_cache_invalidation_entries_.empty()) {
     StrAppend(&output, "\nURL cache invalidation entries\n");
-    for (int i = 0, n = url_cache_invalidation_entries_.size(); i < n; ++i) {
-      StrAppend(&output, "  ", url_cache_invalidation_entries_[i]->ToString(),
-                "\n");
+    for (auto entry : url_cache_invalidation_entries_) {
+      StrAppend(&output, "  ", entry->ToString(), "\n");
     }
   }
 
@@ -3684,8 +3671,7 @@ GoogleString RewriteOptions::OptionsToString() const {
               override_caching_wildcard_string);
   }
 
-  for (int i = 0, n = experiment_specs_.size(); i < n; ++i) {
-    RewriteOptions::ExperimentSpec* spec = experiment_specs_[i];
+  for (auto spec : experiment_specs_) {
     StrAppend(&output, "Experiment ", spec->ToString(), "\n");
   }
 
@@ -3766,10 +3752,8 @@ GoogleString RewriteOptions::ExperimentSpec::ToString() const {
   }
 
   sep = ";options=";
-  for (RewriteOptions::OptionSet::const_iterator p = filter_options_.begin(),
-                                                 e = filter_options_.end();
-       p != e; ++p) {
-    StrAppend(&out, sep, p->first, "=", p->second);
+  for (const auto& filter_option : filter_options_) {
+    StrAppend(&out, sep, filter_option.first, "=", filter_option.second);
     sep = ",";
   }
 
@@ -3790,15 +3774,10 @@ GoogleString RewriteOptions::ExperimentSpec::ToString() const {
     }
   }
 
-  for (AlternateOriginDomains::const_iterator i =
-           alternate_origin_domains_.begin();
-       i != alternate_origin_domains_.end(); ++i) {
-    const AlternateOriginDomainSpec& spec = *i;
-
+  for (const auto& spec : alternate_origin_domains_) {
     StringVector quoted_serving_domains = spec.serving_domains;
-    for (StringVector::iterator i = quoted_serving_domains.begin();
-         i != quoted_serving_domains.end(); ++i) {
-      *i = QuoteHostPort(*i);
+    for (auto& quoted_serving_domain : quoted_serving_domains) {
+      quoted_serving_domain = QuoteHostPort(quoted_serving_domain);
     }
 
     StrAppend(&out, ";alternate_origin_domain=",
@@ -3902,8 +3881,7 @@ bool RewriteOptions::ValidateConfiguredHttpHeader(const GoogleString& name,
     return false;
   }
 
-  for (int i = 0, n = name.size(); i < n; ++i) {
-    char c = name[i];
+  for (char c : name) {
     if (!IsNonControlAscii(c)) {
       *error_message =
           StrCat("Invalid character in field name: ", GoogleString(1, c));
@@ -3916,12 +3894,12 @@ bool RewriteOptions::ValidateConfiguredHttpHeader(const GoogleString& name,
     }
   }
 
-  for (int i = 0, n = value.size(); i < n; ++i) {
+  for (char ch : value) {
     // Formally the value may have any OCTET except CNTL, but including LWS.
     // But in practice I think this is fair enough for our use case:
-    if (!IsNonControlAscii(value[i])) {
-      *error_message = StrCat("Invalid character in field value: ",
-                              GoogleString(1, value[i]));
+    if (!IsNonControlAscii(ch)) {
+      *error_message =
+          StrCat("Invalid character in field value: ", GoogleString(1, ch));
       return false;
     }
   }
@@ -4087,9 +4065,9 @@ bool RewriteOptions::AddRulePackTrustKey(StringPiece key_id, StringPiece base64,
 // so there is no need to optimize this.
 RewriteOptions::ExperimentSpec* RewriteOptions::GetExperimentSpec(
     int id) const {
-  for (int i = 0, n = experiment_specs_.size(); i < n; ++i) {
-    if (experiment_specs_[i]->id() == id) {
-      return experiment_specs_[i];
+  for (auto experiment_spec : experiment_specs_) {
+    if (experiment_spec->id() == id) {
+      return experiment_spec;
     }
   }
   return nullptr;
@@ -4204,9 +4182,8 @@ RewriteOptions::ExperimentSpec::~ExperimentSpec() {}
 void RewriteOptions::ExperimentSpec::Merge(const ExperimentSpec& spec) {
   enabled_filters_.Merge(spec.enabled_filters_);
   disabled_filters_.Merge(spec.disabled_filters_);
-  for (OptionSet::const_iterator iter = spec.filter_options_.begin();
-       iter != spec.filter_options_.end(); ++iter) {
-    filter_options_.insert(*iter);
+  for (const auto& filter_option : spec.filter_options_) {
+    filter_options_.insert(filter_option);
   }
   ga_id_ = spec.ga_id_;
   ga_variable_slot_ = spec.ga_variable_slot_;
@@ -4235,8 +4212,7 @@ void RewriteOptions::ExperimentSpec::Initialize(const StringPiece& spec,
                                                 MessageHandler* handler) {
   StringPieceVector spec_pieces;
   SplitStringPieceToVector(spec, ";", &spec_pieces, true);
-  for (int i = 0, n = spec_pieces.size(); i < n; ++i) {
-    StringPiece piece = spec_pieces[i];
+  for (auto piece : spec_pieces) {
     TrimWhitespace(&piece);
     if (StringCaseStartsWith(piece, "id")) {
       StringPiece id = PieceAfterEquals(piece);
@@ -4437,9 +4413,7 @@ bool RewriteOptions::ExperimentSpec::ParseAlternateOriginDomain(
 
   lawyer.Clear();
 
-  for (StringPieceVector::const_iterator i = serving_domains.begin();
-       i != serving_domains.end(); ++i) {
-    const StringPiece& serving_domain = *i;
+  for (auto serving_domain : serving_domains) {
     if (LooksLikeValidHost(serving_domain) &&
         lawyer.AddTwoProtocolOriginDomainMapping(
             out->origin_domain, serving_domain, out->host_header, handler)) {
@@ -4461,9 +4435,7 @@ bool RewriteOptions::ExperimentSpec::ParseDeviceTypeBitSet(
   StringPieceVector devices;
   SplitStringPieceToVector(in, ",", &devices, true);
 
-  for (int i = 0, n = devices.size(); i < n; ++i) {
-    StringPiece device = devices[i];
-
+  for (auto device : devices) {
     UserAgentMatcher::DeviceType device_type =
         UserAgentMatcher::kEndOfDeviceType;
 
@@ -4507,11 +4479,7 @@ bool RewriteOptions::ExperimentSpec::matches_device_type(
 
 void RewriteOptions::ExperimentSpec::ApplyAlternateOriginsToDomainLawyer(
     DomainLawyer* lawyer, MessageHandler* handler) const {
-  for (AlternateOriginDomains::const_iterator i =
-           alternate_origin_domains_.begin();
-       i != alternate_origin_domains_.end(); ++i) {
-    const AlternateOriginDomainSpec& alt_spec = *i;
-
+  for (const auto& alt_spec : alternate_origin_domains_) {
     for (StringVector::const_iterator j = alt_spec.serving_domains.begin();
          j != alt_spec.serving_domains.end(); ++j) {
       const GoogleString& serving_domain = *j;

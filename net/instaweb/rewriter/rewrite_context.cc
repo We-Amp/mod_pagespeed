@@ -1641,8 +1641,7 @@ void RewriteContext::OutputCacheRevalidate(
   DCHECK(!to_revalidate.empty());
   outstanding_fetches_ = to_revalidate.size();
 
-  for (int i = 0, n = to_revalidate.size(); i < n; ++i) {
-    InputInfo* input_info = to_revalidate[i];
+  for (auto input_info : to_revalidate) {
     ResourcePtr resource = slots_[input_info->index()]->resource();
     resource->LoadAsync(
         Resource::kReportFailureIfNotCacheable, Driver()->request_context(),
@@ -2254,8 +2253,8 @@ void RewriteContext::Propagate(RenderOp render_op) {
   }
 
   if (successors_.empty()) {
-    for (int i = 0, n = slots_.size(); i < n; ++i) {
-      slots_[i]->Finished();
+    for (const auto& slot : slots_) {
+      slot->Finished();
     }
   }
 
@@ -2318,8 +2317,7 @@ void RewriteContext::TracePrintf(const char* fmt, ...) {
 void RewriteContext::RunSuccessors() {
   DetachSlots();
 
-  for (int i = 0, n = successors_.size(); i < n; ++i) {
-    RewriteContext* successor = successors_[i];
+  for (auto successor : successors_) {
     if (--successor->num_predecessors_ == 0) {
       successor->Initiate();
     }
@@ -2394,8 +2392,7 @@ void RewriteContext::MarkSlow() {
   CollectDependentTopLevel(&to_detach);
 
   int num_new_slow = 0;
-  for (ContextSet::iterator i = to_detach.begin(); i != to_detach.end(); ++i) {
-    RewriteContext* c = *i;
+  for (auto c : to_detach) {
     if (!c->slow_) {
       c->slow_ = true;
       ++num_new_slow;
@@ -2419,15 +2416,15 @@ void RewriteContext::CollectDependentTopLevel(ContextSet* contexts) {
     return;
   }
 
-  for (int c = 0, n = successors_.size(); c < n; ++c) {
-    if (!successors_[c]->has_parent()) {
-      successors_[c]->CollectDependentTopLevel(contexts);
+  for (auto& successor : successors_) {
+    if (!successor->has_parent()) {
+      successor->CollectDependentTopLevel(contexts);
     }
   }
 
-  for (int c = 0, n = repeated_.size(); c < n; ++c) {
-    if (!repeated_[c]->has_parent()) {
-      repeated_[c]->CollectDependentTopLevel(contexts);
+  for (auto& c : repeated_) {
+    if (!c->has_parent()) {
+      c->CollectDependentTopLevel(contexts);
     }
   }
 }
@@ -2607,7 +2604,7 @@ bool RewriteContext::DecodeFetchUrls(const OutputResourcePtr& output_resource,
     Driver()->PopulateResourceNamer(id(), encoded_url,
                                     output_resource->mutable_full_name());
 
-    for (int i = 0, n = urls.size(); i < n; ++i) {
+    for (const auto& input_url : urls) {
       // If the decoded name is still encoded (because originally it was
       // rewritten by multiple filters, such as CSS minified then combined),
       // keep the un-decoded base, otherwise use the decoded base.
@@ -2624,14 +2621,14 @@ bool RewriteContext::DecodeFetchUrls(const OutputResourcePtr& output_resource,
 
       if (check_for_multiple_rewrites) {
         std::unique_ptr<GoogleUrl> orig_based_url(
-            new GoogleUrl(original_base, urls[i]));
+            new GoogleUrl(original_base, input_url));
         if (FindServerContext()->IsPagespeedResource(*orig_based_url)) {
           url = orig_based_url.release();
         }
       }
 
       if (url == nullptr) {  // Didn't set one based on original_base
-        url = new GoogleUrl(decoded_base, urls[i]);
+        url = new GoogleUrl(decoded_base, input_url);
       }
       url_vector->push_back(url);
     }
@@ -2665,8 +2662,7 @@ bool RewriteContext::PrepareFetch(const OutputResourcePtr& output_resource,
   }
   if (DecodeFetchUrls(output_resource, message_handler, &url_vector)) {
     bool is_valid = true;
-    for (int i = 0, n = url_vector.size(); i < n; ++i) {
-      GoogleUrl* url = url_vector[i];
+    for (auto url : url_vector) {
       if (!url->IsWebValid()) {
         is_valid = false;
         break;

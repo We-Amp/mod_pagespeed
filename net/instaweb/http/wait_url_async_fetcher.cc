@@ -85,8 +85,8 @@ bool WaitUrlAsyncFetcher::CallCallbacksAndSwitchModesHelper(bool new_mode) {
     prev_mode = pass_through_mode_;
     pass_through_mode_ = new_mode;
   }
-  for (int i = 0, n = fetches.size(); i < n; ++i) {
-    fetches[i]->FetchNow();
+  for (auto& fetch : fetches) {
+    fetch->FetchNow();
   }
   STLDeleteElements(&fetches);
   return prev_mode;

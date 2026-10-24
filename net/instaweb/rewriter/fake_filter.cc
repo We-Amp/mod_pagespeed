@@ -100,16 +100,16 @@ FakeFilter::~FakeFilter() {}
 void FakeFilter::StartElementImpl(HtmlElement* element) {
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, rewrite_options(), &attributes);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
-    if (attributes[i].category == category_) {
+  for (auto& attribute : attributes) {
+    if (attribute.category == category_) {
       ResourcePtr input_resource(CreateInputResourceOrInsertDebugComment(
-          attributes[i].url->DecodedValueOrNull(),
+          attribute.url->DecodedValueOrNull(),
           RewriteDriver::InputRole::kUnknown, element));
       if (input_resource.get() == nullptr) {
         return;
       }
       ResourceSlotPtr slot(
-          driver()->GetSlot(input_resource, element, attributes[i].url));
+          driver()->GetSlot(input_resource, element, attribute.url));
       RewriteContext* context = MakeRewriteContext();
       context->AddSlot(slot);
       driver()->InitiateRewrite(context);

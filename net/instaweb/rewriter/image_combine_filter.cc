@@ -705,8 +705,7 @@ class ImageCombineFilter::Combiner : public ResourceCombiner {
     options->set_output_image_path("sprite");
     options->set_placement_method(spriter::VERTICAL_STRIP);
 
-    for (int i = 0, n = combine_resources.size(); i < n; ++i) {
-      const ResourcePtr& resource = combine_resources[i];
+    for (const auto& resource : combine_resources) {
       input.add_input_image_set()->set_path(resource->url());
     }
 
@@ -1108,8 +1107,7 @@ class ImageCombineFilter::Context : public RewriteContext {
       // in a particular combination due to domain lawyer restrictions,
       // or (perhaps in the future) image type.
       if (!added) {
-        for (int j = 0, m = combinations.size(); j < m; ++j) {
-          ImageCombination* combo = combinations[j];
+        for (auto combo : combinations) {
           if (combo->AddResourceNoFetch(resource, handler).value) {
             combo->AddResourceToPartition(resource.get(), i);
             urls_to_combos[resource_url] = combo;

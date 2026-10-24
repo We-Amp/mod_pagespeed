@@ -129,16 +129,16 @@ void SimulatedDelayFetcher::ParseDelayMap(StringPiece delay_map_path) {
   // tokens ignored.
   StringPieceVector pairs;
   SplitStringUsingSubstr(contents, ";", &pairs);
-  for (int i = 0, n = pairs.size(); i < n; ++i) {
-    TrimWhitespace(&pairs[i]);
-    if (pairs[i].empty()) {
+  for (auto& pair : pairs) {
+    TrimWhitespace(&pair);
+    if (pair.empty()) {
       continue;
     }
     StringPieceVector host_delay;
-    SplitStringUsingSubstr(pairs[i], "=", &host_delay);
+    SplitStringUsingSubstr(pair, "=", &host_delay);
     if (host_delay.size() != 2) {
       message_handler_->Message(kWarning, "Unable to parse host=delay spec:%s",
-                                pairs[i].as_string().c_str());
+                                pair.as_string().c_str());
       continue;
     }
     TrimWhitespace(&host_delay[0]);

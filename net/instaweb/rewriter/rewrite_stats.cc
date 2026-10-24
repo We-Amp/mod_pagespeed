@@ -273,8 +273,8 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kNumResourceFetchSuccesses);
   statistics->AddVariable(kNumResourceFetchFailures);
 
-  for (int i = 0; i < RewriteDriverFactory::kNumWorkerPools; ++i) {
-    statistics->AddUpDownCounter(kWaveFormCounters[i]);
+  for (auto& counter_name : kWaveFormCounters) {
+    statistics->AddUpDownCounter(counter_name);
   }
 }
 
@@ -370,11 +370,11 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
   rewrite_latency_histogram_->EnableNegativeBuckets();
   backend_latency_histogram_->EnableNegativeBuckets();
 
-  for (int i = 0; i < RewriteDriverFactory::kNumWorkerPools; ++i) {
+  for (auto& counter_name : kWaveFormCounters) {
     if (has_waveforms) {
-      thread_queue_depths_.push_back(std::make_unique<Waveform>(
-          thread_system, timer, kNumWaveformSamples,
-          stats->GetUpDownCounter(kWaveFormCounters[i])));
+      thread_queue_depths_.push_back(
+          std::make_unique<Waveform>(thread_system, timer, kNumWaveformSamples,
+                                     stats->GetUpDownCounter(counter_name)));
     } else {
       thread_queue_depths_.push_back(nullptr);
     }

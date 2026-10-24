@@ -712,11 +712,11 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
 
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
-  for (int i = 0, n = attributes.size(); i < n; ++i) {
+  for (auto& attribute : attributes) {
     // We only collect scripts and CSS.
-    if (attributes[i].category == semantic_type::kStylesheet ||
-        attributes[i].category == semantic_type::kScript) {
-      HtmlElement::Attribute* attr = attributes[i].url;
+    if (attribute.category == semantic_type::kStylesheet ||
+        attribute.category == semantic_type::kScript) {
+      HtmlElement::Attribute* attr = attribute.url;
       StringPiece url(attr->DecodedValueOrNull());
       if (url.empty() || IsDataUrl(url)) {
         continue;
@@ -727,7 +727,7 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       // preload-cache slot than the module map fetch, so it would only cause
       // a double fetch.
       bool is_module = false;
-      if (attributes[i].category == semantic_type::kScript) {
+      if (attribute.category == semantic_type::kScript) {
         const HtmlElement::Attribute* type =
             element->FindAttribute(HtmlName::kType);
         is_module = type != nullptr && type->DecodedValueOrNull() != nullptr &&
@@ -739,7 +739,7 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       }
 
       // Check media on standard stylesheets.
-      if (attributes[i].category == semantic_type::kStylesheet &&
+      if (attribute.category == semantic_type::kStylesheet &&
           element->keyword() == HtmlName::kLink &&
           attr->keyword() == HtmlName::kHref) {
         HtmlElement::Attribute* media =
@@ -761,10 +761,10 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       }
 
       // Code below relies on this being the guard here for it to be safe.
-      CHECK(attributes[i].category == semantic_type::kStylesheet ||
-            attributes[i].category == semantic_type::kScript);
+      CHECK(attribute.category == semantic_type::kStylesheet ||
+            attribute.category == semantic_type::kScript);
       RewriteDriver::InputRole role =
-          (attributes[i].category == semantic_type::kStylesheet
+          (attribute.category == semantic_type::kStylesheet
                ? RewriteDriver::InputRole::kStyle
                : RewriteDriver::InputRole::kScript);
       ResourcePtr resource(
@@ -777,7 +777,7 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       ResourceSlotPtr slot(driver()->GetSlot(resource, element, attr));
       slot->set_need_aggregate_input_info(true);
       DependencyType dep_type = DEP_CSS;
-      if (attributes[i].category == semantic_type::kScript) {
+      if (attribute.category == semantic_type::kScript) {
         dep_type = is_module ? DEP_MODULE : DEP_JAVASCRIPT;
       }
       Context* context = new Context(dep_type, driver());

@@ -235,8 +235,8 @@ bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
     StripUtf8Bom(&clean_contents);
 
     bool has_non_ascii = false;
-    for (int i = 0, n = clean_contents.size(); i < n; ++i) {
-      if (static_cast<unsigned char>(clean_contents[i]) >= 0x80) {
+    for (char ch : clean_contents) {
+      if (static_cast<unsigned char>(ch) >= 0x80) {
         has_non_ascii = true;
         break;
       }
@@ -307,9 +307,7 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
   bool has_pagespeed_lsc_url = false;
   bool has_pagespeed_lsc_hash = false;
   const HtmlElement::AttributeList& attrs = element->attributes();
-  for (HtmlElement::AttributeConstIterator i(attrs.begin()), e(attrs.end());
-       i != e; ++i) {
-    const HtmlElement::Attribute& attr = *i;
+  for (const auto& attr : attrs) {
     switch (attr.keyword()) {
       case HtmlName::kHref:
       case HtmlName::kRel:

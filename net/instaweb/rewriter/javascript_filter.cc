@@ -72,8 +72,7 @@ void CleanupWhitespaceScriptBody(RewriteDriver* driver,
   // post-load callback.  As this technique is preferable to storing callbacks
   // in, say, html comments, we support it here.
   const GoogleString& contents = node->contents();
-  for (size_t j = 0; j < contents.size(); ++j) {
-    char c = contents[j];
+  for (char c : contents) {
     if (!IsHtmlSpace(c) && c != 0) {
       driver->InfoHere(
           "Retaining contents of script tag;"
