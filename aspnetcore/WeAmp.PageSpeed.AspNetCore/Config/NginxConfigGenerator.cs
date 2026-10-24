@@ -290,13 +290,21 @@ public class NginxConfigGenerator
         // The GENERATED health stub the sidecar polls (D6) — NOT a stock route.
         sb.AppendLine("    location = /pagespeed/health { return 200 \"pagespeed-sidecar-ok\\n\"; }");
 
-        // ExcludePaths: paths the operator does not want optimized. Emitted as
-        // regex locations with `pagespeed off;` ahead of the catch-all so they
-        // still reverse-proxy but skip optimization. Each pattern is validated
-        // fail-closed (injection class #4).
+        // ExcludePaths: paths the operator does not want optimized. Each entry
+        // is translated from the single prefix/glob definition
+        // (ExcludePathPattern, the same one the middleware matches with) into
+        // an ANCHORED, case-insensitive regex location with `pagespeed off;`,
+        // ahead of the catch-all so the path still reverse-proxies but skips
+        // optimization. The translation escapes PCRE metacharacters and
+        // anchors prefixes, so a glob like "*.json" yields a valid regex
+        // (never the verbatim pattern, which nginx rejected as a regex) and a
+        // prefix like "/admin/*" cannot spill onto /docs/administration. The
+        // admin regexes above stay first, so an exclude location can never
+        // shadow the admin ACL. Invalid entries throw fail-closed (injection
+        // class #4; the options validator reports them at startup).
         foreach (var pattern in options.ExcludePaths)
         {
-            sb.AppendLine($"    location ~ \"{LocationRegex(pattern)}\" {{");
+            sb.AppendLine($"    location ~* \"{ExcludePathPattern.ToNginxLocationRegex(pattern)}\" {{");
             sb.AppendLine("      pagespeed off;");
             sb.AppendLine($"      proxy_pass {proxyTarget};");
             sb.AppendLine("      proxy_set_header Host $host;");
@@ -581,33 +589,6 @@ public class NginxConfigGenerator
             if (seen.Add(entry))
                 yield return $"allow {entry};";
         }
-    }
-
-    /// <summary>
-    /// Validates an ExcludePaths nginx location regex: rejects the quote/metachar
-    /// set that could terminate the quoted pattern or inject a directive/block,
-    /// while permitting regex syntax (^ $ . * + ? ( ) [ ] | / \ -). Fail-closed.
-    /// </summary>
-    private static string LocationRegex(string pattern)
-    {
-        if (string.IsNullOrWhiteSpace(pattern))
-            throw new InvalidOperationException("ExcludePaths pattern is empty.");
-        // Same breakout set as NginxMetacharacters minus the regex-syntax chars this
-        // field legitimately uses ($ \ are allowed here). The exotic-whitespace
-        // controls (VT/FF/NEL/LS/PS) are rejected as defense-in-depth.
-        if (pattern.IndexOfAny(
-                new[] { '"', ';', '{', '}', '#', '\n', '\r', '\0', ' ', '\t',
-                        '\v', '\f', '\u0085', '\u2028', '\u2029' }) >= 0)
-            throw new InvalidOperationException(
-                $"ExcludePaths pattern '{pattern}' contains an nginx-config metacharacter; refusing to generate (fail-closed).");
-        // A trailing ODD run of backslashes would escape the emitted closing quote
-        // ( ...\" ), breaking out of the quoted location string. (Quotes themselves
-        // are already rejected above, so this is the only backslash-escape vector.)
-        var trailing = pattern.Length - pattern.TrimEnd('\\').Length;
-        if (trailing % 2 != 0)
-            throw new InvalidOperationException(
-                $"ExcludePaths pattern '{pattern}' ends in an unbalanced backslash; refusing to generate (fail-closed).");
-        return pattern;
     }
 
     // ----------------------------------------------------------------------

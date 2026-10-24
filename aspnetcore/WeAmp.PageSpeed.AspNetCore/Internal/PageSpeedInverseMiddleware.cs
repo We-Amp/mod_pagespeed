@@ -436,8 +436,12 @@ internal sealed class PageSpeedInverseMiddleware
 
     /// <summary>
     /// Checks if the request path matches any exclusion pattern. Patterns with
-    /// * or ? are matched as globs; others as prefixes. Reused verbatim from the
-    /// 2.0 PageSpeedMiddleware (IsExcluded/GlobMatch).
+    /// * or ? are matched as globs; others as prefixes. The prefix/glob split
+    /// and the accepted pattern charset are defined once in
+    /// <see cref="ExcludePathPattern"/>, which also translates the same
+    /// definition into the generated nginx exclude locations, so both sides
+    /// exclude the same paths. Matcher reused from the 2.0 PageSpeedMiddleware
+    /// (IsExcluded/GlobMatch).
     /// </summary>
     internal static bool IsExcluded(HttpRequest request, PageSpeedOptions opts)
     {
@@ -446,7 +450,7 @@ internal sealed class PageSpeedInverseMiddleware
 
         foreach (var pattern in opts.ExcludePaths)
         {
-            if (pattern.AsSpan().IndexOfAny('*', '?') >= 0)
+            if (ExcludePathPattern.IsGlob(pattern))
             {
                 if (GlobMatch(path, pattern)) return true;
             }
