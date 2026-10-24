@@ -26,6 +26,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
 
@@ -245,8 +246,16 @@ TEST_F(QueuedWorkerPoolTest, LoadShedding) {
   wedge2_sync.Notify();
   done_sync.Wait();
 
-  // We want to shutdown here since even though done_sync signaled, there
-  // may still be a log op running in the 2nd thread. This will wait for it.
+  // Shutdown cancels every function that has not started, including a log
+  // op a worker has already dequeued but not yet begun, so first wait until
+  // the log-op sequences are idle: AreBusy stays true both for a running
+  // sequence and for one that is dequeued but not yet started. Shutdown
+  // still waits out anything running at that point.
+  std::unique_ptr<Timer> timer(thread_runtime_->NewTimer());
+  QueuedWorkerPool::SequenceSet log_op_set(log_ops.begin(), log_ops.end());
+  while (QueuedWorkerPool::AreBusy(log_op_set)) {
+    timer->SleepUs(1000);
+  }
   worker_->ShutDown();
 
   worker_->FreeSequence(wedge1);
