@@ -91,5 +91,34 @@ TEST(NgxTeardownPinTest, BodyPinsAreAllocatedWithoutThrowing) {
             cc.find("=new(std::nothrow)MappedSharedString("));
 }
 
+TEST(NgxTeardownPinTest, ClassicRecordingFinishesOffTheEventThread) {
+  // A complete classic recording ends in the HTTP cache write, which can
+  // compress and wait on cache locks. The body filter must hand it to the
+  // classic record pool; the only inline call left with response headers is
+  // the incomplete or failed one, which does no I/O.
+  const GoogleString cc = ReadStrippedSource("pagespeed/nginx/ngx_pagespeed.cc");
+  const size_t fn = cc.find(
+      "ngx_int_tps_in_place_body_filter(ngx_http_request_t*r,ngx_chain_t*in){");
+  ASSERT_NE(GoogleString::npos, fn) << "ps_in_place_body_filter was renamed";
+  const size_t open = cc.find('{', fn);
+  const size_t close = MatchingBrace(cc, open);
+  ASSERT_NE(GoogleString::npos, close);
+  const GoogleString body = cc.substr(open, close - open);
+  const size_t gate =
+      body.find("elseif(cl->buf->last_buf&&!recorder->failed()){");
+  ASSERT_NE(GoogleString::npos, gate) << "classic hand-off arm is gone";
+  const size_t handoff = body.find(
+      "g_classic_record_sequence->Add(newDaemonRecordCompletion(", gate);
+  EXPECT_NE(GoogleString::npos, handoff);
+  const size_t inline_call =
+      body.find("ctx->recorder->DoneAndSetHeaders(&response_headers,");
+  ASSERT_NE(GoogleString::npos, inline_call);
+  EXPECT_GT(inline_call, handoff)
+      << "a complete classic recording finishes inline again";
+  EXPECT_EQ(GoogleString::npos,
+            body.find("ctx->recorder->DoneAndSetHeaders(&response_headers,",
+                      inline_call + 1));
+}
+
 }  // namespace
 }  // namespace net_instaweb

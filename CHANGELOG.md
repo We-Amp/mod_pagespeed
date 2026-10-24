@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **nginx stores newly seen resources from a background thread when
+  in-place optimization runs without the optimizer service.** Recording a
+  cache miss no longer adds latency for other clients on the same worker.
+  Under heavy load a recording may be skipped (counted in
+  `ipro_classic_record_dropped`); the resource is recorded on a later
+  request.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

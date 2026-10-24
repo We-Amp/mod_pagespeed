@@ -56,6 +56,27 @@ _IPRO_FIRST_REQUEST_COUNTERS = [
 ]
 
 
+def _wait_for_stat_delta(snapshot, before, name, expected=1, timeout=15.0):
+    """Poll `snapshot` until `name` has moved by `expected` since `before`.
+
+    On nginx the recorder's final cache write runs on a background thread
+    after the response has gone out, so its counters land shortly after the
+    first request returns instead of before. Returns the snapshot that
+    showed the delta; fails the test if it never does.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        current = snapshot()
+        delta = current.get(name, 0) - before.get(name, 0)
+        if delta == expected:
+            return current
+        if time.monotonic() >= deadline:
+            pytest.fail(
+                f"{name} delta should be {expected} within {timeout}s, "
+                f"got {delta}")
+        time.sleep(0.2)
+
+
 class TestIproCaching:
     """Tests for IPRO caching behavior.
 
@@ -98,7 +119,9 @@ class TestIproCaching:
         # Runs ipro recorder flow and inserts into cache
         assert_stat_delta(stats_0, stats_1, "ipro_not_in_cache", 1)
         assert_stat_delta(stats_0, stats_1, "ipro_recorder_resources", 1)
-        assert_stat_delta(stats_0, stats_1, "ipro_recorder_inserted_into_cache", 1)
+        stats_1 = _wait_for_stat_delta(
+            secondary_stats_snapshot, stats_0,
+            "ipro_recorder_inserted_into_cache")
 
         # Image doesn't get rewritten the first time
         assert_stat_delta(stats_0, stats_1, "image_rewrites", 0)
@@ -161,7 +184,8 @@ class TestIproCaching:
         # Runs recorder but resource is not cacheable
         assert_stat_delta(stats_0, stats_1, "ipro_not_in_cache", 1)
         assert_stat_delta(stats_0, stats_1, "ipro_recorder_resources", 1)
-        assert_stat_delta(stats_0, stats_1, "ipro_recorder_not_cacheable", 1)
+        stats_1 = _wait_for_stat_delta(
+            secondary_stats_snapshot, stats_0, "ipro_recorder_not_cacheable")
 
         # Uncacheable, so no rewrites
         assert_stat_delta(stats_0, stats_1, "image_rewrites", 0)

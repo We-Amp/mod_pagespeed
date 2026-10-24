@@ -21,6 +21,8 @@ mod_pagespeed_test/auth/ requires HTTP Basic auth (user1); the lane config
 carries the bash suite's <Directory> block.
 """
 
+import time
+
 import pytest
 
 from pagespeed_test_framework import (
@@ -46,7 +48,17 @@ class TestAuthorizationBasic:
         response = client.get(f"{test_root}/auth/medium_purple.css", headers=_AUTH)
         require_status_ok(response, "authorized auth/medium_purple.css")
         assert_contains(response, "background: MediumPurple;")
-        after = stats_snapshot()
+        # On nginx the recorder finishes on a background thread, so the
+        # counter lands shortly after the response.
+        deadline = time.monotonic() + 15.0
+        while True:
+            after = stats_snapshot()
+            if (after.get("ipro_recorder_not_cacheable", 0)
+                    - before.get("ipro_recorder_not_cacheable", 0)) >= 1:
+                break
+            assert time.monotonic() < deadline, (
+                "ipro_recorder_not_cacheable did not move within 15s")
+            time.sleep(0.2)
         assert_stat_delta(before, after, "ipro_recorder_not_cacheable", 1)
 
 

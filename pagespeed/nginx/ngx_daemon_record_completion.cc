@@ -32,6 +32,7 @@ namespace net_instaweb {
 
 const char kIproDaemonRecordDropped[] = "ipro_daemon_record_dropped";
 const char kIproDaemonNotifyDropped[] = "ipro_daemon_notify_dropped";
+const char kIproClassicRecordDropped[] = "ipro_classic_record_dropped";
 
 namespace {
 
@@ -90,6 +91,7 @@ void ps_daemon_record_completion_init_stats(Statistics* statistics) {
   }
   statistics->AddVariable(kIproDaemonRecordDropped);
   statistics->AddVariable(kIproDaemonNotifyDropped);
+  statistics->AddVariable(kIproClassicRecordDropped);
 }
 
 bool TryQueueDaemonCompletion(int64 body_bytes, Variable* dropped) {

@@ -34,7 +34,12 @@ class ResponseHeaders;
 class Statistics;
 class Variable;
 
-// The completion half of the daemon record arm for nginx.
+// The completion half of the record arms for nginx.
+//
+// Both record arms use it: the daemon arm (this comment) and the classic
+// in-place arm, whose final cache write moved off the event thread onto its
+// own pool.  The closure and the queue caps are generic over IproRecorder
+// and shared; each arm owns its pool and its drop counter.
 //
 // A recorder finishes with DoneAndSetHeaders, which opens a write on the
 // daemon's shared volume, streams the buffered original and may notify the
@@ -57,6 +62,12 @@ class Variable;
 // from the statistics object at hand; there is no process-wide cached
 // pointer, because there are several statistics objects.
 extern const char kIproDaemonRecordDropped[];
+
+// Name of the nginx-side counter for classic in-place recordings that were
+// finished without being stored because the shared queue was full or no
+// classic pool existed.  The next request for the resource records again.
+// Registered by the same init-stats call.
+extern const char kIproClassicRecordDropped[];
 
 // Name of the nginx-side counter for serve-path NOTIFICATIONS (the fallback
 // re-notify and the origin-refreshed sentinel) that had no sequence to post
