@@ -10,6 +10,13 @@
          works and we avoid command-line ';' escaping. -->
     <TargetFrameworks>net8.0</TargetFrameworks>
     <TargetFrameworks Condition="'$(IncludeNet10)' == 'true'">net8.0;net10.0</TargetFrameworks>
+    <!-- Locked restore: CI restores with -p:RestoreLockedMode=true, so a package
+         version or content hash that differs from the lock file fails the build. The
+         two framework sets have a lock file each. After changing a package
+         reference, regenerate both: `dotnet restore` and
+         `dotnet restore -p:IncludeNet10=true` (with a .NET 10 SDK). -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath Condition="'$(IncludeNet10)' == 'true'">packages.net10.lock.json</NuGetLockFilePath>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12.0</LangVersion>
@@ -44,10 +51,13 @@
        NativeAssets dependency chain. A ProjectReference becomes a NuGet <dependency>
        at pack time (same version), so `dotnet add package WeAmp.PageSpeed.Sidecar`
        brings the matched nginx + module automatically — a thin-only install no longer
-       builds green then dies at runtime (NM-2). ReferenceOutputAssembly=false: the
-       native package has no managed output (IncludeBuildOutput=false) — we want the
-       package dependency only, not a compile-time assembly reference, and the native
-       binaries stay in their own package (not duplicated into this one). -->
+       builds green then dies at runtime (NM-2). ReferenceOutputAssembly stays unset:
+       with it false the SDK also drops the reference from the nuspec dependencies
+       (verified against the 8.0 SDK pack), which would break that auto-pull. The
+       compile-time reference that remains is inert: the native project's only managed
+       output is an empty assembly, kept out of its package by
+       IncludeBuildOutput=false, and its binaries stay in their own package, not
+       duplicated into this one. -->
   <ItemGroup>
     <ProjectReference Include="../WeAmp.PageSpeed.Sidecar.NativeAssets.Linux/WeAmp.PageSpeed.Sidecar.NativeAssets.Linux.csproj" />
   </ItemGroup>
