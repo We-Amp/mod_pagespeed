@@ -2282,7 +2282,7 @@ TEST_F(DaemonAdapterTest, ARefusalIsRepeatedOnceAsAWarningWithTheSameText) {
   // The same text both times, so the console folds them into one template.
   const GoogleString dump = Messages();
   const GoogleString refusal =
-      "in-place optimization is OFF: the optimizer daemon publishes cache "
+      "in-place optimization is OFF: the optimizer worker publishes cache "
       "directory generation 1 (cache_dir_generation)";
   const size_t first = dump.find(refusal);
   ASSERT_NE(GoogleString::npos, first) << dump;

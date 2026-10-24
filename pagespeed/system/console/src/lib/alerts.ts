@@ -147,9 +147,9 @@ export const MAX_HISTORY = 1024;
  * location. Other "in-place optimization is OFF" refusals have other causes.
  */
 export const VOLUME_GENERATION_TEMPLATE =
-  "in-place optimization is OFF: the optimizer daemon publishes cache directory generation N (cache_dir_generation) " +
+  "in-place optimization is OFF: the optimizer worker publishes cache directory generation N (cache_dir_generation) " +
   "and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing " +
-  "was created. Install a module and daemon package pair that agree.";
+  "was created. Install a module and optimizer package pair that agree.";
 
 const DOC_ACCESS = `${MODULE_DOCS}/admin-console/#access-control`;
 const DOC_MESSAGES = `${MODULE_DOCS}/admin-console/#message-history`;
@@ -419,7 +419,7 @@ export const ALERT_RULES: readonly AlertRule[] = [
     link: "#/optimizer",
     check: (cur) => (cur.daemon === "transient" ? undefined : cur.daemon === "unreachable"),
     message: () =>
-      "The optimizer daemon is configured but not answering. The module keeps serving pages without it.",
+      "The optimizer worker is configured but not answering. The module keeps serving pages without it.",
     fix: "Start the optimizer service, and check that the web server's DaemonApiSocketPath names the optimizer's socket.",
     doc: DOC_DIAGNOSE,
   },

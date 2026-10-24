@@ -398,9 +398,9 @@ const ACL =
   "Restrict access at the web-server layer (Apache: <Location> Require local; nginx: allow N.N.N.N; deny all; " +
   "IIS: InfoUrlsLocalOnly). See URL";
 const VOLUME =
-  "in-place optimization is OFF: the optimizer daemon publishes cache directory generation N (cache_dir_generation) " +
+  "in-place optimization is OFF: the optimizer worker publishes cache directory generation N (cache_dir_generation) " +
   "and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing " +
-  "was created. Install a module and daemon package pair that agree.";
+  "was created. Install a module and optimizer package pair that agree.";
 const OPEN_FAILED =
   "nothing will be recorded for in-place optimization: cannot open the optimizer daemon's cache volume at " +
   "/var/cache/pagespeed-optimizer/vN: permission denied (attempt N of N)";
@@ -488,7 +488,7 @@ describe("findings from the module's message log", () => {
       expect(ids(out), level).toEqual(["volume-not-opened", "admin-exposed", "recent-warnings"]);
       expect(out[0].severity).toBe("error");
       expect(out[0].message).toContain(
-        "The web server is not using the optimizer's cache: in-place optimization is OFF: the optimizer daemon " +
+        "The web server is not using the optimizer's cache: in-place optimization is OFF: the optimizer worker " +
           "publishes cache directory generation N",
       );
       expect(out[0].fix).toBe("Make the web server's DaemonVolumePath and the optimizer's cache directory (--cache-dir) agree.");

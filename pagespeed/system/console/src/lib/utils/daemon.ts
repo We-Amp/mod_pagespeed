@@ -71,7 +71,7 @@ export function wholeServerConsoleOnlyError(): ApiError {
 
 /**
  * Operator-facing sentence for why a daemon panel has nothing to show,
- * shown under the "Daemon Unreachable" heading. Maps the daemon proxy's
+ * shown under the "Optimizer unreachable" heading. Maps the daemon proxy's
  * three reason codes; anything else (including a genuine transport
  * failure/timeout) defaults to "unreachable".
  */

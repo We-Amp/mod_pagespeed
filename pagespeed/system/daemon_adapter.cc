@@ -1927,15 +1927,15 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
       abi_->SharedConfigGeneration(volume_path_.c_str());
   if (generation != 0 && generation != kCacheDirGeneration) {
     StrAppend(error,
-              "in-place optimization is OFF: the optimizer daemon publishes "
+              "in-place optimization is OFF: the optimizer worker publishes "
               "cache directory generation ",
               Integer64ToString(static_cast<int64>(generation)),
               " (cache_dir_generation) and this module is built for "
               "generation ",
               Integer64ToString(static_cast<int64>(kCacheDirGeneration)),
               ". The two cache layouts share nothing; nothing was opened and "
-              "nothing was created. Install a module and daemon package pair "
-              "that agree.");
+              "nothing was created. Install a module and optimizer package "
+              "pair that agree.");
     return DaemonStartupStatus::kOk;
   }
   // 0 is "unknown", not a generation: a pre-H1 daemon publishes no such field

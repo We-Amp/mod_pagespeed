@@ -744,9 +744,9 @@ export const ACL_TEMPLATE =
 
 /** The module's refusal to open the optimizer's cache after a layout change. */
 export const VOLUME_TEMPLATE =
-  "in-place optimization is OFF: the optimizer daemon publishes cache directory generation N (cache_dir_generation) " +
+  "in-place optimization is OFF: the optimizer worker publishes cache directory generation N (cache_dir_generation) " +
   "and this module is built for generation N. The two cache layouts share nothing; nothing was opened and nothing " +
-  "was created. Install a module and daemon package pair that agree.";
+  "was created. Install a module and optimizer package pair that agree.";
 
 export interface GroupRowFixture {
   level: string;

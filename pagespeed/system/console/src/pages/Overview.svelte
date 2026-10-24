@@ -254,7 +254,7 @@
         aria-labelledby="optimizer-heading"
       >
         <h2 id="optimizer-heading">
-          Optimizer daemon
+          Optimizer
           {#if typeof daemonView?.health?.version === "string" && daemonView.health.version}<span class="version">{daemonView.health.version}</span>{/if}
           <ScopeChip label="whole server" shown={optimizerChip} />
         </h2>

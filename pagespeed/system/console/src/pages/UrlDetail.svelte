@@ -235,10 +235,10 @@
       {/if}
     {:else if isDaemonUnavailable(altError)}
       <div class="empty-state" data-testid="url-detail-unreachable">
-        <p class="empty-title">Daemon Unreachable</p>
+        <p class="empty-title">Optimizer unreachable</p>
         <p class="empty-reason">{daemonUnavailableReason(altError)}</p>
         <p class="empty-description">
-          The module could not reach the optimizer daemon
+          The module could not reach the optimizer worker
           ({altError.message}). The page populates once it answers.
         </p>
       </div>

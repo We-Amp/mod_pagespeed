@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error message for using the sidecar off Linux, and the build warning for
   publishing with an unsupported runtime identifier now say mod_pagespeed
   where they said "ModPageSpeed 2.0".
+- The admin console calls the optimizer process the optimizer or worker.
+  Card headings, empty states, alerts and help text no longer say "daemon";
+  the cache-generation refusal the module logs when the web server and the
+  optimizer disagree about the cache directory is reworded to match. The
+  `/v1/daemon/*` console endpoints, the `daemon_unreachable` error codes and
+  the `ipro_daemon_*` statistics keep their names.
 - **Package descriptions name the product mod_pagespeed.** The
   `mod-pagespeed` and `nginx-module-pagespeed` packages now describe
   themselves as "mod_pagespeed web page optimization module for Apache

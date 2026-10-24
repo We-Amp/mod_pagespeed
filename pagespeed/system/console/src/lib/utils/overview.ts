@@ -254,12 +254,12 @@ export function availabilityText(a: DaemonAvailability): { word: string; detail:
     case "not-configured":
       return {
         word: "Not configured",
-        detail: "No optimizer daemon is configured for this server; the module optimizes on its own.",
+        detail: "No optimizer worker is configured for this server; the module optimizes on its own.",
       };
     case "unreachable":
       return {
         word: "Unreachable",
-        detail: "The optimizer daemon is configured but not answering; the module keeps serving pages without it.",
+        detail: "The optimizer worker is configured but not answering; the module keeps serving pages without it.",
       };
     case "unsupported":
       return {

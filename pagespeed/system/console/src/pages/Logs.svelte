@@ -283,11 +283,11 @@
 
   <p class="scope-note" data-testid="logs-scope-note">
     {#if raw}
-      The optimizer daemon's own recent log, oldest to newest; the list follows
+      The optimizer's own recent log, oldest to newest; the list follows
       the newest entry until you scroll up.
     {:else}
       The module's messages (every virtual host of this server) and the
-      optimizer daemon's own recent log, newest first.
+      optimizer's own recent log, newest first.
     {/if}
   </p>
 
