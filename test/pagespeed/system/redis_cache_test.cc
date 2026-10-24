@@ -28,7 +28,6 @@
 
 #include "apr_network_io.h"  // NOLINT
 #include "base/logging.h"
-#include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -38,6 +37,7 @@
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 #include "test/pagespeed/kernel/thread/worker_test_base.h"
@@ -105,8 +105,14 @@ class RedisCacheTest : public CacheTestBase {
       : thread_system_(Platform::CreateThreadSystem()),
         statistics_(thread_system_.get()),
         timer_(new NullMutex, 0),
+        handler_(thread_system_->NewMutex()),
         redis_port_env_(0),
         redis_host_env_("localhost") {
+    // The cache's timeout and error paths log through this handler; quiet
+    // keeps those messages in memory so a log-file write cannot stall the
+    // redis client thread past the timeout the operation tests measure
+    // (issue #319).
+    handler_.set_quiet();
     RedisCache::InitStats(&statistics_);
   }
 
@@ -229,7 +235,7 @@ class RedisCacheTest : public CacheTestBase {
   std::unique_ptr<ThreadSystem> thread_system_;
   SimpleStats statistics_;
   MockTimer timer_;
-  GoogleMessageHandler handler_;
+  MockMessageHandler handler_;
 
   std::unique_ptr<TcpServerThreadForTesting> custom_server_;
   static apr_port_t custom_server_port_;

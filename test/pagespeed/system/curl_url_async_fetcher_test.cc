@@ -222,7 +222,14 @@ class CurlUrlAsyncFetcherTest : public ::testing::Test {
   CurlUrlAsyncFetcherTest()
       : thread_system_(Platform::CreateThreadSystem()),
         message_handler_(thread_system_->NewMutex()),
-        fetcher_timeout_ms_(FetcherTimeoutMs()) {}
+        fetcher_timeout_ms_(FetcherTimeoutMs()) {
+    // The fetcher logs every completion, timeouts included, through this
+    // handler; quiet keeps those messages in memory (Dump() below still
+    // answers) so a log-file write cannot stall the poll thread that is
+    // delivering a timeout past WaitTillDone's deadline on a host whose
+    // disk is contended (issue #319).
+    message_handler_.set_quiet();
+  }
 
   void SetUp() override { SetUpWithProxy(""); }
 
@@ -1102,8 +1109,17 @@ TEST_F(CurlUrlAsyncFetcherTest, CancelActiveFetchesCompletesEachFetchOnce) {
   ASSERT_TRUE(fetches_[second_slow]->IsDone());
   EXPECT_FALSE(fetches_[kCgiSlowJs]->success());
   EXPECT_FALSE(fetches_[second_slow]->success());
-  EXPECT_EQ(2,
-            statistics_->GetVariable(CurlStats::kCurlFetchCancelCount)->Get());
+  // AbortActiveFetches() counts the cancellations only after it has run
+  // every Done() callback (curl_url_async_fetcher.cc), so the counter can
+  // trail the completions the wait above observed; wait for it rather than
+  // reading it at one instant.
+  Variable* cancels =
+      statistics_->GetVariable(CurlStats::kCurlFetchCancelCount);
+  deadline_ms = timer_->NowMs() + fetcher_timeout_ms_ / 2;
+  while (cancels->Get() < 2 && timer_->NowMs() < deadline_ms) {
+    usleep(1000);
+  }
+  EXPECT_EQ(2, cancels->Get());
   EXPECT_EQ(0, ActiveFetches());
   EXPECT_EQ(0,
             statistics_->GetVariable(CurlStats::kCurlFetchTimeoutCount)->Get());

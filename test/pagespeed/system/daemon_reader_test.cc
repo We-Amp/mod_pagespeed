@@ -223,7 +223,13 @@ class UdsDaemonReaderTest : public ::testing::Test {
   UdsDaemonReaderTest()
       : thread_system_(Platform::CreateThreadSystem()),
         timer_(Platform::CreateTimer()),
-        message_handler_(thread_system_->NewMutex()) {}
+        message_handler_(thread_system_->NewMutex()) {
+    // The reader and its curl fetcher log their timeout paths through this
+    // handler; quiet keeps those messages in memory so a log-file write
+    // cannot stall the poll thread past WaitForDone's deadline on a host
+    // whose disk is contended (issue #319).
+    message_handler_.set_quiet();
+  }
 
   // Waits for the fetch to complete.  The read itself is bounded by the
   // reader's 5 s upstream timeout; everything past that is the poll thread
