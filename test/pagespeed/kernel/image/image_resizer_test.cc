@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include <iterator>
 #include <memory>
 
 #include "pagespeed/kernel/image/image_resizer.h"
@@ -91,8 +92,8 @@ const size_t kOutputSize[][2] = {
     {32, 32},  // Although the image did not shrink, the algorithm is exercised.
 };
 
-const size_t kValidImageCount = arraysize(kValidImages);
-const size_t KOutputSizeCount = arraysize(kOutputSize);
+const size_t kValidImageCount = std::size(kValidImages);
+const size_t KOutputSizeCount = std::size(kOutputSize);
 
 class ScanlineResizerTest : public testing::Test {
  public:

@@ -19,6 +19,8 @@
 
 #include "net/instaweb/rewriter/public/url_input_resource.h"
 
+#include <iterator>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/resource.h"  // for Resource, etc
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -358,7 +360,7 @@ TEST_F(UrlInputResourceTest, IntPort) {
       {"https://www.google.com:1234/", 1234, 1234},
   };
 
-  for (int i = 0; i < arraysize(port_tests); ++i) {
+  for (int i = 0; i < std::size(port_tests); ++i) {
     GoogleUrl url(port_tests[i].spec);
     EXPECT_TRUE(url.IsWebValid());
     EXPECT_EQ(port_tests[i].expected_int_port, url.EffectiveIntPort());

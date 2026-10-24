@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
@@ -264,7 +265,7 @@ TEST_F(RewriteOptionsTest, NumFilterInLevels) {
       RewriteOptions::kMobilizeFilters, RewriteOptions::kTestingCoreFilters,
       RewriteOptions::kAllFilters};
 
-  for (int i = 0; i < arraysize(levels); ++i) {
+  for (int i = 0; i < std::size(levels); ++i) {
     options_.SetRewriteLevel(levels[i]);
     FilterSet s;
     for (RewriteOptions::Filter f = RewriteOptions::kFirstFilter;
@@ -342,7 +343,7 @@ const RewriteOptions::Filter kFiltersWithoutConfigNames[] = {
 };
 
 bool ExpectedToBeUnnameable(RewriteOptions::Filter filter) {
-  for (int i = 0; i < arraysize(kFiltersWithoutConfigNames); ++i) {
+  for (int i = 0; i < std::size(kFiltersWithoutConfigNames); ++i) {
     if (kFiltersWithoutConfigNames[i] == filter) {
       return true;
     }
@@ -1455,7 +1456,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
 
   // Check that every option can be looked up by name.
   std::set<StringPiece> tested_names;
-  for (int i = 0; i < arraysize(option_names); ++i) {
+  for (int i = 0; i < std::size(option_names); ++i) {
     EXPECT_TRUE(nullptr != RewriteOptions::LookupOptionByName(option_names[i]))
         << option_names[i] << " cannot be looked up by name!";
     EXPECT_FALSE(RewriteOptions::IsDeprecatedOptionName(option_names[i]))
@@ -3299,7 +3300,7 @@ TEST_F(RewriteOptionsTest, DeprecatedDeadFiltersAreInertButAccepted) {
       {"split_html", RewriteOptions::kSplitHtmlDeprecated, "sh"},
       {"split_html_helper", RewriteOptions::kSplitHtmlHelperDeprecated, "se"},
   };
-  for (int i = 0; i < arraysize(kDeprecatedFilters); ++i) {
+  for (int i = 0; i < std::size(kDeprecatedFilters); ++i) {
     SCOPED_TRACE(kDeprecatedFilters[i].name);
     RewriteOptions options(&thread_system_);
     NullMessageHandler handler;

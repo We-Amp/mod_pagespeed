@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/image/png_optimizer.h"
 
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -554,9 +555,9 @@ bool InitializeEntireReader(const GoogleString& image_string,
           pagespeed::image_compression::UNSUPPORTED);
 }
 
-const size_t kValidImageCount = arraysize(kValidImages);
-const size_t kInvalidFileCount = arraysize(kInvalidFiles);
-const size_t kOpaqueImagesWithAlphaCount = arraysize(kOpaqueImagesWithAlpha);
+const size_t kValidImageCount = std::size(kValidImages);
+const size_t kInvalidFileCount = std::size(kInvalidFiles);
+const size_t kOpaqueImagesWithAlphaCount = std::size(kOpaqueImagesWithAlpha);
 
 class PngOptimizerTest : public testing::Test {
  public:

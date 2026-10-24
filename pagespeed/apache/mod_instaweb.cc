@@ -25,6 +25,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -2105,7 +2106,7 @@ void ApacheProcessContext::InstallCommands() {
   const RewriteOptions::OptionBaseVector& v = config_template.all_options();
   const RewriteOptions::Properties* deprecated_properties =
       RewriteOptions::deprecated_properties();
-  int num_cmds = arraysize(net_instaweb::mod_pagespeed_filter_cmds);
+  int num_cmds = std::size(net_instaweb::mod_pagespeed_filter_cmds);
 
   // Allocate memory for all the rewrite_options, even though we
   // will only initialize the ones with non-null help.  We could

@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <new>
 #include <optional>
@@ -1015,7 +1016,7 @@ bool http_header_separators[256] = {false};
 
 const char* RewriteOptions::FilterName(Filter filter) {
   int i = static_cast<int>(filter);
-  int n = arraysize(kFilterVectorStaticInitializer);
+  int n = std::size(kFilterVectorStaticInitializer);
   if (i >= 0 && i < n) {
     return kFilterVectorStaticInitializer[i].filter_name;
   }
@@ -1025,7 +1026,7 @@ const char* RewriteOptions::FilterName(Filter filter) {
 
 const char* RewriteOptions::FilterId(Filter filter) {
   int i = static_cast<int>(filter);
-  int n = arraysize(kFilterVectorStaticInitializer);
+  int n = std::size(kFilterVectorStaticInitializer);
   if (i >= 0 && i < n) {
     return kFilterVectorStaticInitializer[i].filter_id;
   }
@@ -1034,7 +1035,7 @@ const char* RewriteOptions::FilterId(Filter filter) {
 }
 
 int RewriteOptions::NumFilterIds() {
-  return arraysize(kFilterVectorStaticInitializer);
+  return std::size(kFilterVectorStaticInitializer);
 }
 
 bool RewriteOptions::ParseRewriteLevel(const StringPiece& in,
@@ -1188,19 +1189,19 @@ RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
 
   // Sanity-checks -- will be active only when compiled for debug.
 #ifndef NDEBUG
-  CheckFilterSetOrdering(kCoreFilterSet, arraysize(kCoreFilterSet));
+  CheckFilterSetOrdering(kCoreFilterSet, std::size(kCoreFilterSet));
   CheckFilterSetOrdering(kOptimizeForBandwidthFilterSet,
-                         arraysize(kOptimizeForBandwidthFilterSet));
-  CheckFilterSetOrdering(kMobilizeFilterSet, arraysize(kMobilizeFilterSet));
-  CheckFilterSetOrdering(kTestFilterSet, arraysize(kTestFilterSet));
-  CheckFilterSetOrdering(kDangerousFilterSet, arraysize(kDangerousFilterSet));
+                         std::size(kOptimizeForBandwidthFilterSet));
+  CheckFilterSetOrdering(kMobilizeFilterSet, std::size(kMobilizeFilterSet));
+  CheckFilterSetOrdering(kTestFilterSet, std::size(kTestFilterSet));
+  CheckFilterSetOrdering(kDangerousFilterSet, std::size(kDangerousFilterSet));
   CheckFilterSetOrdering(kImagePreserveUrlDisabledFilters,
-                         arraysize(kImagePreserveUrlDisabledFilters));
+                         std::size(kImagePreserveUrlDisabledFilters));
   CheckFilterSetOrdering(kJsPreserveUrlDisabledFilters,
-                         arraysize(kJsPreserveUrlDisabledFilters));
+                         std::size(kJsPreserveUrlDisabledFilters));
   CheckFilterSetOrdering(kCssPreserveUrlDisabledFilters,
-                         arraysize(kCssPreserveUrlDisabledFilters));
-  CheckFilterSetOrdering(kAddHeadFilters, arraysize(kAddHeadFilters));
+                         std::size(kCssPreserveUrlDisabledFilters));
+  CheckFilterSetOrdering(kAddHeadFilters, std::size(kAddHeadFilters));
 
   // Ensure that all filters have unique IDs.
   StringSet id_set;
@@ -1315,7 +1316,7 @@ void RewriteOptions::AddProperties() {
   ResponsiveDensities default_densities;
   default_densities.assign(kDefaultResponsiveImageDensities,
                            kDefaultResponsiveImageDensities +
-                               arraysize(kDefaultResponsiveImageDensities));
+                               std::size(kDefaultResponsiveImageDensities));
   AddBaseProperty(default_densities,
                   &RewriteOptions::responsive_image_densities_, "rid",
                   kResponsiveImageDensities, kDirectoryScope,
@@ -1568,25 +1569,25 @@ bool RewriteOptions::Initialize() {
       RewriteOptions::Filter filter = static_cast<RewriteOptions::Filter>(f);
       FilterProperties* property = &filter_properties[f];
       property->level_core =
-          IsInSet(kCoreFilterSet, arraysize(kCoreFilterSet), filter);
+          IsInSet(kCoreFilterSet, std::size(kCoreFilterSet), filter);
       property->level_optimize_for_bandwidth =
           IsInSet(kOptimizeForBandwidthFilterSet,
-                  arraysize(kOptimizeForBandwidthFilterSet), filter);
+                  std::size(kOptimizeForBandwidthFilterSet), filter);
       property->level_mobilize =
-          IsInSet(kMobilizeFilterSet, arraysize(kMobilizeFilterSet), filter);
+          IsInSet(kMobilizeFilterSet, std::size(kMobilizeFilterSet), filter);
       property->level_test =
-          IsInSet(kTestFilterSet, arraysize(kTestFilterSet), filter);
+          IsInSet(kTestFilterSet, std::size(kTestFilterSet), filter);
       property->level_dangerous =
-          IsInSet(kDangerousFilterSet, arraysize(kDangerousFilterSet), filter);
+          IsInSet(kDangerousFilterSet, std::size(kDangerousFilterSet), filter);
       property->preserve_js_urls =
           IsInSet(kJsPreserveUrlDisabledFilters,
-                  arraysize(kJsPreserveUrlDisabledFilters), filter);
+                  std::size(kJsPreserveUrlDisabledFilters), filter);
       property->preserve_css_urls =
           IsInSet(kCssPreserveUrlDisabledFilters,
-                  arraysize(kCssPreserveUrlDisabledFilters), filter);
+                  std::size(kCssPreserveUrlDisabledFilters), filter);
       property->preserve_image_urls =
           IsInSet(kImagePreserveUrlDisabledFilters,
-                  arraysize(kImagePreserveUrlDisabledFilters), filter);
+                  std::size(kImagePreserveUrlDisabledFilters), filter);
     }
 
     return true;
@@ -1599,22 +1600,22 @@ void RewriteOptions::InitFilterIdToEnumArray() {
 #ifndef NDEBUG
   // The forward map must have an entry for every Filter enum value except
   // the sentinel (kEndOfFilters) and they must be in order.
-  DCHECK_EQ(arraysize(kFilterVectorStaticInitializer),
+  DCHECK_EQ(std::size(kFilterVectorStaticInitializer),
             static_cast<size_t>(kEndOfFilters));
-  for (int i = 0, n = arraysize(kFilterVectorStaticInitializer); i < n; ++i) {
+  for (int i = 0, n = std::size(kFilterVectorStaticInitializer); i < n; ++i) {
     DCHECK_EQ(i,
               static_cast<int>(kFilterVectorStaticInitializer[i].filter_enum));
   }
   // The reverse map must have the same number of elements as the forward map.
-  DCHECK_EQ(arraysize(kFilterVectorStaticInitializer),
-            arraysize(filter_id_to_enum_array_));
+  DCHECK_EQ(std::size(kFilterVectorStaticInitializer),
+            std::size(filter_id_to_enum_array_));
 #endif
   // Initialize the reverse map.
-  for (int i = 0, n = arraysize(kFilterVectorStaticInitializer); i < n; ++i) {
+  for (int i = 0, n = std::size(kFilterVectorStaticInitializer); i < n; ++i) {
     filter_id_to_enum_array_[i] = &kFilterVectorStaticInitializer[i];
   }
   std::sort(filter_id_to_enum_array_,
-            filter_id_to_enum_array_ + arraysize(filter_id_to_enum_array_),
+            filter_id_to_enum_array_ + std::size(filter_id_to_enum_array_),
             RewriteOptions::FilterEnumToIdAndNameEntryLessThanById);
 }
 
@@ -2079,14 +2080,14 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
       set->Insert(kRewriteJavascriptExternal);
       set->Insert(kRewriteJavascriptInline);
     } else if (option == "testing") {
-      for (int i = 0, n = arraysize(kTestFilterSet); i < n; ++i) {
+      for (int i = 0, n = std::size(kTestFilterSet); i < n; ++i) {
         set->Insert(kTestFilterSet[i]);
       }
-      for (int i = 0, n = arraysize(kCoreFilterSet); i < n; ++i) {
+      for (int i = 0, n = std::size(kCoreFilterSet); i < n; ++i) {
         set->Insert(kCoreFilterSet[i]);
       }
     } else if (option == "core") {
-      for (int i = 0, n = arraysize(kCoreFilterSet); i < n; ++i) {
+      for (int i = 0, n = std::size(kCoreFilterSet); i < n; ++i) {
         set->Insert(kCoreFilterSet[i]);
       }
     } else {
@@ -2141,7 +2142,7 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
             {kSplitHtmlHelperDeprecated,
              "Filter 'split_html_helper' is deprecated and has no effect."},
         };
-        for (int i = 0; i < arraysize(kDeprecatedWarnings); ++i) {
+        for (int i = 0; i < std::size(kDeprecatedWarnings); ++i) {
           if (kDeprecatedWarnings[i].filter == filter) {
             handler->Message(kWarning, "%s", kDeprecatedWarnings[i].warning);
             break;
@@ -2199,13 +2200,13 @@ RewriteOptions::Filter RewriteOptions::LookupFilterById(
   entry.filter_name = "";
   const FilterEnumToIdAndNameEntry** it = std::lower_bound(
       filter_id_to_enum_array_,
-      filter_id_to_enum_array_ + arraysize(filter_id_to_enum_array_), &entry,
+      filter_id_to_enum_array_ + std::size(filter_id_to_enum_array_), &entry,
       RewriteOptions::FilterEnumToIdAndNameEntryLessThanById);
   // We use lower_bound because it's O(log n) so relatively efficient. It
   // returns a pointer to the entry whose id is >= filter_id; if filter_id is
   // higher than all ids then 'it' will point past the end, otherwise we have
   // to check that the ids actually match.
-  if (it == filter_id_to_enum_array_ + arraysize(filter_id_to_enum_array_) ||
+  if (it == filter_id_to_enum_array_ + std::size(filter_id_to_enum_array_) ||
       filter_id != (*it)->filter_id) {
     return kEndOfFilters;
   }
@@ -2621,7 +2622,7 @@ RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName3(
 StringPiece RewriteOptions::GetEffectiveOptionName(StringPiece name) {
   StringPiece effective_name = name;
   const RenamedOptionMap* end =
-      kRenamedOptionNameData + arraysize(kRenamedOptionNameData);
+      kRenamedOptionNameData + std::size(kRenamedOptionNameData);
   const RenamedOptionMap* entry = std::lower_bound(
       kRenamedOptionNameData, end, name, &RenamedOptionMap::LessThan);
   if ((entry != end) && StringCaseEqual(name, entry->deprecated_option_name)) {
@@ -2920,11 +2921,11 @@ bool RewriteOptions::Forbidden(StringPiece filter_id) const {
   // forbidden only once every filter that can produce its URLs is forbidden.
   if (filter_id == kCacheExtenderId) {
     return AllFiltersForbidden(*this, kCacheExtenderIdFilters,
-                               arraysize(kCacheExtenderIdFilters));
+                               std::size(kCacheExtenderIdFilters));
   }
   if (filter_id == kImageCompressionId) {
     return AllFiltersForbidden(*this, kImageCompressionIdFilters,
-                               arraysize(kImageCompressionIdFilters));
+                               std::size(kImageCompressionIdFilters));
   }
   return false;
 }

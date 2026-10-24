@@ -22,6 +22,7 @@
 #include "net/instaweb/rewriter/public/css_util.h"
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -122,7 +123,7 @@ TEST_F(CssUtilTest, VectorizeMediaAttribute) {
   const char kSimpleMedia[] = "screen";
   const char* kSimpleVector[] = {"screen"};
   StringVector simple_expected(kSimpleVector,
-                               kSimpleVector + arraysize(kSimpleVector));
+                               kSimpleVector + std::size(kSimpleVector));
   StringVector simple_actual;
   VectorizeMediaAttribute(kSimpleMedia, &simple_actual);
   EXPECT_TRUE(simple_expected == simple_actual);
@@ -130,7 +131,7 @@ TEST_F(CssUtilTest, VectorizeMediaAttribute) {
   const char kUglyMessMedia[] = "screen,, ,printer , screen ";
   const char* kUglyMessVector[] = {"screen", "printer", "screen"};
   StringVector ugly_expected(kUglyMessVector,
-                             kUglyMessVector + arraysize(kUglyMessVector));
+                             kUglyMessVector + std::size(kUglyMessVector));
   StringVector ugly_actual;
   VectorizeMediaAttribute(kUglyMessMedia, &ugly_actual);
   EXPECT_TRUE(ugly_expected == ugly_actual);
@@ -145,14 +146,14 @@ TEST_F(CssUtilTest, StringifyMediaVector) {
   const char kSimpleMedia[] = "screen";
   const char* kSimpleVector[] = {"screen"};
   StringVector simple_vector(kSimpleVector,
-                             kSimpleVector + arraysize(kSimpleVector));
+                             kSimpleVector + std::size(kSimpleVector));
   GoogleString simple_media = StringifyMediaVector(simple_vector);
   EXPECT_EQ(kSimpleMedia, simple_media);
 
   const char kMultipleMedia[] = "screen,printer,screen";
   const char* kMultipleVector[] = {"screen", "printer", "screen"};
   StringVector multiple_vector(kMultipleVector,
-                               kMultipleVector + arraysize(kMultipleVector));
+                               kMultipleVector + std::size(kMultipleVector));
   GoogleString multiple_media = StringifyMediaVector(multiple_vector);
   EXPECT_EQ(kMultipleMedia, multiple_media);
 
@@ -200,7 +201,7 @@ TEST_F(CssUtilTest, ConvertMediaQueriesToStringVector) {
 
   const char* kExpectedVector[] = {"screen", "printer", "all"};
   StringVector expected_vector(kExpectedVector,
-                               kExpectedVector + arraysize(kExpectedVector));
+                               kExpectedVector + std::size(kExpectedVector));
   StringVector actual_vector;
   EXPECT_TRUE(ConvertMediaQueriesToStringVector(queries, &actual_vector));
   EXPECT_EQ(expected_vector, actual_vector);
@@ -218,7 +219,7 @@ TEST_F(CssUtilTest, ConvertStringVectorToMediaQueries) {
   const char* kInputVector[] = {"screen", "",      " ",
                                 "print ", " all ", "not braille and (color)"};
   StringVector input_vector(kInputVector,
-                            kInputVector + arraysize(kInputVector));
+                            kInputVector + std::size(kInputVector));
   Css::MediaQueries queries;
   ConvertStringVectorToMediaQueries(input_vector, &queries);
 
@@ -245,7 +246,7 @@ TEST_F(CssUtilTest, ConvertStringVectorToMediaQueries) {
 TEST_F(CssUtilTest, ClearVectorIfContainsMediaAll) {
   const char* kInputVector[] = {"screen", "", " ", "print "};
   StringVector input_vector(kInputVector,
-                            kInputVector + arraysize(kInputVector));
+                            kInputVector + std::size(kInputVector));
 
   // 1. No 'all' in there.
   StringVector output_vector = input_vector;
@@ -302,7 +303,7 @@ TEST_F(CssUtilTest, JsDetectableSelector) {
   std::unique_ptr<const Css::Selectors> selectors(parser.ParseSelectors());
   EXPECT_EQ(Css::Parser::kNoError, parser.errors_seen_mask());
   CHECK(selectors.get() != nullptr);
-  EXPECT_EQ(arraysize(kExpected), selectors->size());
+  EXPECT_EQ(std::size(kExpected), selectors->size());
   for (int i = 0; i < selectors->size(); ++i) {
     EXPECT_EQ(kExpected[i], JsDetectableSelector(*(*selectors)[i]));
   }
@@ -311,16 +312,16 @@ TEST_F(CssUtilTest, JsDetectableSelector) {
 TEST_F(CssUtilTest, EliminateElementsNotIn) {
   const char* kSmallVector[] = {"screen", "print", "alternate"};
   StringVector small_vector(kSmallVector,
-                            kSmallVector + arraysize(kSmallVector));
+                            kSmallVector + std::size(kSmallVector));
   std::sort(small_vector.begin(), small_vector.end());
   const char* kLargeVector[] = {"aural",   "visual", "screen",
                                 "tactile", "print",  "olfactory"};
   StringVector large_vector(kLargeVector,
-                            kLargeVector + arraysize(kLargeVector));
+                            kLargeVector + std::size(kLargeVector));
   std::sort(large_vector.begin(), large_vector.end());
   const char* kIntersectVector[] = {"screen", "print"};
   StringVector intersect_vector(kIntersectVector,
-                                kIntersectVector + arraysize(kIntersectVector));
+                                kIntersectVector + std::size(kIntersectVector));
   std::sort(intersect_vector.begin(), intersect_vector.end());
   StringVector empty_vector;
   StringVector input_vector;

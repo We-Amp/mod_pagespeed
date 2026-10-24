@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 
 #include <algorithm>
+#include <iterator>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -53,7 +54,7 @@ static const char* const javascript_mimetypes[] = {"application/ecmascript",
 ScriptTagScanner::ScriptTagScanner(HtmlParse* html_parse) {
 #ifndef NDEBUG
   CharStarCompareSensitive less_than;
-  for (int i = 0, n = arraysize(javascript_mimetypes); i < n - 1; ++i) {
+  for (int i = 0, n = std::size(javascript_mimetypes); i < n - 1; ++i) {
     DCHECK(less_than(javascript_mimetypes[i], javascript_mimetypes[i + 1]));
   }
 #endif
@@ -204,7 +205,7 @@ bool ScriptTagScanner::IsJsMime(const GoogleString& type_str) {
   CharStarCompareSensitive less_than;  // case-folding done by caller.
   return std::binary_search(
       javascript_mimetypes,
-      javascript_mimetypes + arraysize(javascript_mimetypes), type_str.c_str(),
+      javascript_mimetypes + std::size(javascript_mimetypes), type_str.c_str(),
       less_than);
 }
 

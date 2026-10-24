@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/image/scanline_status.h"
 
+#include <iterator>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -51,7 +53,7 @@ TEST(ScanlineStatusTest, ComesFromReader) {
       FRAME_AVIFWRITER,
   };
 
-  EXPECT_EQ(NUM_SCANLINE_SOURCE, arraysize(kAllSources));
+  EXPECT_EQ(NUM_SCANLINE_SOURCE, std::size(kAllSources));
 
   for (int i = 0; i < NUM_SCANLINE_SOURCE; ++i) {
     ScanlineStatus status(SCANLINE_STATUS_SUCCESS, kAllSources[i], "");

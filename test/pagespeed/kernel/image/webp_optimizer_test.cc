@@ -18,6 +18,7 @@
  */
 
 #include <cstdint>
+#include <iterator>
 #include <memory>
 
 #include "pagespeed/kernel/image/webp_optimizer.h"
@@ -83,7 +84,7 @@ const ImageInfo kValidImages[] = {
     {"opaque_32x20", "opaque_32x20"},  // size 32-by-20 without alpha.
     {"gray_saved_as_gray", "gray_saved_as_rgb"},  // images of same contents.
 };
-const size_t kValidImageCount = arraysize(kValidImages);
+const size_t kValidImageCount = std::size(kValidImages);
 
 const char kFileCorruptedHeader[] = "corrupt_header";
 const char kFileCorruptedBody[] = "corrupt_body";

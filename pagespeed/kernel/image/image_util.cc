@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 
 #include "external/libwebp/src/webp/decode.h"
 #include "pagespeed/kernel/base/countdown_timer.h"
@@ -37,9 +38,9 @@ static const char kInvalidPixelFormat[] = "Invalid pixel format";
 
 // Magic number of the images.
 const char kPngHeader[] = "\x89PNG\r\n\x1a\n";
-const size_t kPngHeaderLength = arraysize(kPngHeader) - 1;
+const size_t kPngHeaderLength = std::size(kPngHeader) - 1;
 const char kGifHeader[] = "GIF8";
-const size_t kGifHeaderLength = arraysize(kGifHeader) - 1;
+const size_t kGifHeaderLength = std::size(kGifHeader) - 1;
 
 // char to int *without sign extension*.
 inline int CharToInt(char c) {

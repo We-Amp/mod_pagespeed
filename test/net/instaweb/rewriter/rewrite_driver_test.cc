@@ -19,6 +19,7 @@
 
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 
+#include <iterator>
 #include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
@@ -1127,7 +1128,7 @@ TEST_F(RewriteDriverTest, CreateOutputResourceTooLong) {
 
   OutputResourcePtr resource;
   GoogleString failure_reason;
-  for (int k = 0; k < arraysize(resource_kinds); ++k) {
+  for (int k = 0; k < std::size(resource_kinds); ++k) {
     failure_reason = "";
     // Short name should always succeed at creating new resource.
     resource.reset(rewrite_driver()->CreateOutputResourceWithPath(

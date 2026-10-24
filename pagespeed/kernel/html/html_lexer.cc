@@ -24,6 +24,7 @@
 #include <cstdarg>
 #include <cstddef>  // for size_t
 #include <cstdio>
+#include <iterator>
 
 #include "base/logging.h"
 ////#include "strings/stringpiece_utils.h"
@@ -113,7 +114,7 @@ const size_t kMaxTokenSize = 10UL * 1024 * 1024;  // 10MB
 
 #ifndef NDEBUG
 #define CHECK_KEYWORD_SET_ORDERING(keywords) \
-  CheckKeywordSetOrdering(keywords, arraysize(keywords))
+  CheckKeywordSetOrdering(keywords, std::size(keywords))
 void CheckKeywordSetOrdering(const HtmlName::Keyword* keywords, int num) {
   for (int i = 1; i < num; ++i) {
     DCHECK_GT(keywords[i], keywords[i - 1]);
@@ -128,7 +129,7 @@ bool IsInSet(const HtmlName::Keyword* keywords, int num,
 }
 
 #define IS_IN_SET(keywords, keyword) \
-  IsInSet(keywords, arraysize(keywords), keyword)
+  IsInSet(keywords, std::size(keywords), keyword)
 
 }  // namespace
 

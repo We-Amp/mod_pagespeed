@@ -19,6 +19,7 @@
 
 // Unit-test the string-splitter.
 
+#include <iterator>
 #include <memory>
 
 #include "pagespeed/kernel/http/google_url.h"
@@ -453,11 +454,11 @@ TEST_F(GoogleUrlTest, RelativeUrls) {
       "//example.com/foo.html",
   };
 
-  for (int i = 0; i < arraysize(reproducible_urls); ++i) {
+  for (int i = 0; i < std::size(reproducible_urls); ++i) {
     UrlRelativity url_relativity =
         GoogleUrl::FindRelativity(reproducible_urls[i]);
 
-    for (int j = 0; j < arraysize(base_urls); ++j) {
+    for (int j = 0; j < std::size(base_urls); ++j) {
       GoogleUrl base(base_urls[j]);
       GoogleUrl url(base, reproducible_urls[i]);
       EXPECT_EQ(reproducible_urls[i], url.Relativize(url_relativity, base));
@@ -467,7 +468,7 @@ TEST_F(GoogleUrlTest, RelativeUrls) {
   // URLs which will change after Relativize().
   // Format: { (original url), (after relativized w/ base_urls[0]),
   //           (after relativized w/ base_urls[1]), ... }
-  const StringPiece non_reproducible_urls[][arraysize(base_urls) + 1] = {
+  const StringPiece non_reproducible_urls[][std::size(base_urls) + 1] = {
       {
           "../file.html",
           "file.html",
@@ -525,11 +526,11 @@ TEST_F(GoogleUrlTest, RelativeUrls) {
           "",
       },
   };
-  for (int i = 0; i < arraysize(non_reproducible_urls); ++i) {
+  for (int i = 0; i < std::size(non_reproducible_urls); ++i) {
     StringPiece in_url = non_reproducible_urls[i][0];
     UrlRelativity url_relativity = GoogleUrl::FindRelativity(in_url);
 
-    for (int j = 0; j < arraysize(base_urls); ++j) {
+    for (int j = 0; j < std::size(base_urls); ++j) {
       GoogleUrl base(base_urls[j]);
       GoogleUrl url(base, in_url);
 

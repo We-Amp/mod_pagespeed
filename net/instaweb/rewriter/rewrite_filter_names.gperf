@@ -40,6 +40,8 @@
 // rewrite_filter_names.cc is automatically generated from
 // rewrite_filter_names.gperf.
 
+#include <iterator>
+
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -177,7 +179,7 @@ StringPiece RewriteOptions::LookupFilterName(RewriteOptions::Filter filter) {
   // value-initialized to 0 (== the first Filter enum value), so entries with an
   // empty name must be skipped or every unnamed filter would appear to be named
   // as the first one.
-  for (size_t i = 0; i < arraysize(kHtmlNameTable); ++i) {
+  for (size_t i = 0; i < std::size(kHtmlNameTable); ++i) {
     const FilterMap& entry = kHtmlNameTable[i];
     if (entry.name != NULL && entry.name[0] != '\0' && entry.filter == filter) {
       return StringPiece(entry.name);

@@ -30,6 +30,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 
 #include "base/logging.h"
@@ -81,7 +82,7 @@ const ImageInfo kValidImages[] = {
     {"opaque_32x20", "opaque_32x20"},  // size 32-by-20 without alpha.
     {"gray_saved_as_gray", "gray_saved_as_rgb"},  // images of same contents.
 };
-const size_t kValidImageCount = arraysize(kValidImages);
+const size_t kValidImageCount = std::size(kValidImages);
 
 const double kMinPSNR = 33.0;
 

@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/css_filter.h"
 
 #include <algorithm>  // for std::merge.
+#include <iterator>
 #include <map>
 #include <memory>
 #include <utility>  // for pair
@@ -122,7 +123,7 @@ const RewriteOptions::Filter kRelatedFilters[] = {
     RewriteOptions::kInlineImages,           RewriteOptions::kLeftTrimUrls,
     RewriteOptions::kRewriteDomains,         RewriteOptions::kSpriteImages,
 };
-const int kRelatedFiltersSize = arraysize(kRelatedFilters);
+const int kRelatedFiltersSize = std::size(kRelatedFilters);
 
 const char* const kRelatedOptions[] = {
     RewriteOptions::kCssFlattenMaxBytes,
@@ -942,7 +943,7 @@ void CssFilter::Terminate() {
 }
 
 void CssFilter::AddRelatedOptions(StringPieceVector* target) {
-  for (int i = 0, n = arraysize(kRelatedOptions); i < n; ++i) {
+  for (int i = 0, n = std::size(kRelatedOptions); i < n; ++i) {
     target->push_back(kRelatedOptions[i]);
   }
 }

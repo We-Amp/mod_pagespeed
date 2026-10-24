@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/base/fast_wildcard_group.h"
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -42,7 +43,7 @@ const int kNoEntry = -1;
 StringPiece LongestLiteralStringInWildcard(const Wildcard* wildcard) {
   StringPiece spec = wildcard->spec();
   const char kWildcardChars[] = {Wildcard::kMatchAny, Wildcard::kMatchOne};
-  StringPiece wildcardChars(kWildcardChars, arraysize(kWildcardChars));
+  StringPiece wildcardChars(kWildcardChars, std::size(kWildcardChars));
   int longest_pos = 0;
   int longest_len = 0;
   int next_wildcard = 0;

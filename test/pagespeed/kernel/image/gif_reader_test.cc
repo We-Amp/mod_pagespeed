@@ -24,6 +24,7 @@
 #include "pagespeed/kernel/image/gif_reader.h"
 
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -121,9 +122,9 @@ const char* kValidOpaqueGifImages[] = {
 
 const char* kValidTransparentGifImages[] = {"tr-basi4a08", "tr-basn4a08"};
 
-const size_t kValidOpaqueGifImageCount = arraysize(kValidOpaqueGifImages);
+const size_t kValidOpaqueGifImageCount = std::size(kValidOpaqueGifImages);
 const size_t kValidTransparentGifImageCount =
-    arraysize(kValidTransparentGifImages);
+    std::size(kValidTransparentGifImages);
 
 const char kAnimatedGif[] = "animated";
 const char kBadGif[] = "bad";
@@ -336,9 +337,9 @@ TEST_F(GifReaderTest, OversizedScreenRejected) {
     GifSquare gif(true /* manual_gcb */, &message_handler_);
     ASSERT_TRUE(gif.Open(filename));
     ASSERT_TRUE(gif.PrepareScreen(true, 65535, 10, color_map,
-                                  arraysize(color_map), 0,
+                                  std::size(color_map), 0,
                                   GifSquare::kNoLoopCountSpecified));
-    ASSERT_TRUE(gif.PutImage(0, 0, 10, 10, color_map, arraysize(color_map), 0,
+    ASSERT_TRUE(gif.PutImage(0, 0, 10, 10, color_map, std::size(color_map), 0,
                              -1 /* transparent_idx */, false /* interlace */,
                              0 /* delay_cs */, 0 /* disposal */));
     ASSERT_TRUE(gif.Close());

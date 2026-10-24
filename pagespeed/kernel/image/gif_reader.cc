@@ -21,6 +21,7 @@
 
 #include <csetjmp>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <new>
 
@@ -54,7 +55,7 @@ namespace {
 // GIF interlace tables.
 static const int kInterlaceOffsets[] = {0, 4, 2, 1};
 static const int kInterlaceJumps[] = {8, 8, 4, 2};
-const int kInterlaceNumPass = arraysize(kInterlaceOffsets);
+const int kInterlaceNumPass = std::size(kInterlaceOffsets);
 const int kNumColorForUint8 = 256;
 const int kGifPaletteSize = 256;
 

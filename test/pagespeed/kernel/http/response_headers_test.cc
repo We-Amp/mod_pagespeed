@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cstddef>  // for size_t
+#include <iterator>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
@@ -931,7 +932,7 @@ TEST_F(ResponseHeadersTest, TestRemoveAllFromSortedArray) {
       HttpAttributes::kLocation,
   };
   EXPECT_FALSE(response_headers_.RemoveAllFromSortedArray(removes0,
-                                                          arraysize(removes0)));
+                                                          std::size(removes0)));
   ExpectSizes(8, 4);
 
   // Removing multiple headers works.
@@ -942,7 +943,7 @@ TEST_F(ResponseHeadersTest, TestRemoveAllFromSortedArray) {
       HttpAttributes::kVary,
   };
   EXPECT_TRUE(response_headers_.RemoveAllFromSortedArray(removes1,
-                                                         arraysize(removes1)));
+                                                         std::size(removes1)));
   ExpectSizes(2, 2);
   EXPECT_EQ(2, response_headers_.NumAttributes());
   EXPECT_FALSE(response_headers_.Lookup(HttpAttributes::kVary, &vs));
@@ -950,14 +951,14 @@ TEST_F(ResponseHeadersTest, TestRemoveAllFromSortedArray) {
 
   // Removing something which has already been removed has no effect.
   EXPECT_FALSE(response_headers_.RemoveAllFromSortedArray(removes1,
-                                                          arraysize(removes1)));
+                                                          std::size(removes1)));
   ExpectSizes(2, 2);
 
   // Removing one header works.
   EXPECT_TRUE(response_headers_.Lookup(HttpAttributes::kDate, &vs));
   static StringPiece removes2[] = {HttpAttributes::kDate};
   EXPECT_TRUE(response_headers_.RemoveAllFromSortedArray(removes2,
-                                                         arraysize(removes2)));
+                                                         std::size(removes2)));
   ExpectSizes(1, 1);
   EXPECT_FALSE(response_headers_.Lookup(HttpAttributes::kDate, &vs));
 
@@ -968,7 +969,7 @@ TEST_F(ResponseHeadersTest, TestRemoveAllFromSortedArray) {
       "X-Bogus-Attribute",
   };
   EXPECT_TRUE(response_headers_.RemoveAllFromSortedArray(removes3,
-                                                         arraysize(removes3)));
+                                                         std::size(removes3)));
   ExpectSizes(0, 0);
   EXPECT_FALSE(response_headers_.Lookup(HttpAttributes::kCacheControl, &vs));
 }
@@ -1485,7 +1486,7 @@ TEST_F(ResponseHeadersTest, TestRemoveDoesntSeparateCommaValues) {
       HttpAttributes::kVary,
   };
   EXPECT_TRUE(response_headers_.RemoveAllFromSortedArray(
-      remove_vector, arraysize(remove_vector)));
+      remove_vector, std::size(remove_vector)));
 
   const char expected_headers3[] =
       "HTTP/1.0 0 (null)\r\n"

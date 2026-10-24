@@ -23,6 +23,7 @@
 
 #include <clocale>
 #include <cstddef>
+#include <iterator>
 #include <set>
 #include <vector>
 
@@ -669,7 +670,7 @@ TEST_F(JoinCollectionTest, BasicSequence) {
   StringVector string_vector;
   StringPieceVector stringpiece_vector;
   StringSet string_set;
-  for (int i = 0; i < arraysize(kInputs); ++i) {
+  for (int i = 0; i < std::size(kInputs); ++i) {
     string_vector.push_back(kInputs[i]);
     stringpiece_vector.push_back(kInputs[i]);
     string_set.insert(kInputs[i]);

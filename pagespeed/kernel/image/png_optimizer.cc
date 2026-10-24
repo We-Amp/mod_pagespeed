@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/image/png_optimizer.h"
 
+#include <iterator>
 #include <memory>
 
 #include "base/logging.h"
@@ -82,7 +83,7 @@ const PngCompressParams kPngCompressionParams[] = {
     PngCompressParams(PNG_FILTER_NONE, Z_DEFAULT_STRATEGY, false),
     PngCompressParams(PNG_FILTER_NONE, Z_FILTERED, false)};
 
-const size_t kParamCount = arraysize(kPngCompressionParams);
+const size_t kParamCount = std::size(kPngCompressionParams);
 
 void ReadPngFromStream(png_structp read_ptr, png_bytep data,
                        png_size_t length) {

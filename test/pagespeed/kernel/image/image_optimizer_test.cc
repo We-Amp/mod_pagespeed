@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/image/image_optimizer.h"
 
 #include <cstddef>
+#include <iterator>
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -273,11 +274,11 @@ const TestingImageInfo kInvalidImages[] = {
     {"xlfn0g04.png", 0, 0, 0, 0, 0, 0},
 };
 
-const size_t kGifImageCount = arraysize(kGifImages);
-const size_t kPngImageCount = arraysize(kPngImages);
-const size_t kJpegImageCount = arraysize(kJpegImages);
-const size_t kAnimatedGifImageCount = arraysize(kAnimatedGifImages);
-const size_t kInvalidImageCount = arraysize(kInvalidImages);
+const size_t kGifImageCount = std::size(kGifImages);
+const size_t kPngImageCount = std::size(kPngImages);
+const size_t kJpegImageCount = std::size(kJpegImages);
+const size_t kAnimatedGifImageCount = std::size(kAnimatedGifImages);
+const size_t kInvalidImageCount = std::size(kInvalidImages);
 
 class ImageOptimizerTest : public testing::Test {
  public:

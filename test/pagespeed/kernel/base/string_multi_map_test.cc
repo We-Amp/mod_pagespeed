@@ -21,6 +21,8 @@
 
 #include "pagespeed/kernel/base/string_multi_map.h"
 
+#include <iterator>
+
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -187,7 +189,7 @@ TEST_F(StringMultiMapTest, TestEmbeddedNulsInKey) {
 TEST_F(StringMultiMapTest, TestRemoveFromSortedArray) {
   static const StringPiece kRemoveVector[] = {"c", "D"};
   EXPECT_TRUE(string_map_.RemoveAllFromSortedArray(kRemoveVector,
-                                                   arraysize(kRemoveVector)));
+                                                   std::size(kRemoveVector)));
   EXPECT_EQ(3, string_map_.num_names());
   EXPECT_TRUE(string_map_.Has("a"));
   EXPECT_TRUE(string_map_.Has("b"));

@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>  // For memset/memcpy used by sparsehash
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <utility>
@@ -213,7 +214,7 @@ void HtmlKeywords::InitEscapeSequences() {
   escape_map_.set_deleted_key("");
 
   StringSetInsensitive case_sensitive_symbols;
-  for (size_t i = 0; i < arraysize(kHtmlKeywordsSequences); ++i) {
+  for (size_t i = 0; i < std::size(kHtmlKeywordsSequences); ++i) {
     // Put all symbols in the case-sensitive map
     const HtmlKeywordsSequence& seq = kHtmlKeywordsSequences[i];
     unescape_sensitive_map_[seq.sequence] =
@@ -257,7 +258,7 @@ void HtmlKeywords::InitEscapeSequences() {
 
   // Make sure the multi-byte sequences are in order (case-insensitive).  Ties
   // are OK to account for case differences.
-  for (size_t i = 1; i < arraysize(kHtmlKeywordsSequencesMultiByte); ++i) {
+  for (size_t i = 1; i < std::size(kHtmlKeywordsSequencesMultiByte); ++i) {
     DCHECK(StringCaseCompare(kHtmlKeywordsSequencesMultiByte[i - 1].sequence,
                              kHtmlKeywordsSequencesMultiByte[i].sequence) <= 0);
   }
@@ -424,7 +425,7 @@ bool HtmlKeywords::TryUnescape(bool accumulate_numeric_code,
       // single-byte encodings list.
       if (std::binary_search(kHtmlKeywordsSequencesMultiByte,
                              (kHtmlKeywordsSequencesMultiByte +
-                              arraysize(kHtmlKeywordsSequencesMultiByte)),
+                              std::size(kHtmlKeywordsSequencesMultiByte)),
                              escape.c_str(), HtmlMultiByteSequenceCompare())) {
         // Reject known multi-byte
         // sequences e.g. (&hellip;), as we would wind up adding an extra &amp;

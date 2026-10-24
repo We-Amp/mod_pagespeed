@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -83,7 +84,7 @@ const ImageInfo kJpegImages[] = {
     {"already_optimized", 130, 97, false, false, true, false, 85},
     {"test444", 130, 97, false, false, true, false, 85},
 };
-const size_t kJpegImageCount = arraysize(kJpegImages);
+const size_t kJpegImageCount = std::size(kJpegImages);
 // In kJpegImages[], the images at position kJpegImageFirstPhotoIdx and later
 // are photos.
 const size_t kJpegImageFirstPhotoIdx = 4;
@@ -94,14 +95,14 @@ const ImageInfo kGifImages[] = {
     {"animated", 120, 50, false, true, false, false, -1},
     {"animated_interlaced", 120, 50, false, true, false, false, -1},
 };
-const size_t kGifImageCount = arraysize(kGifImages);
+const size_t kGifImageCount = std::size(kGifImages);
 
 const ImageInfo kPngImages[] = {
     {"basi0g04", 32, 32, true, false, false, false, -1},
     {"basi3p02", 32, 32, true, false, false, false, -1},
     {"basn6a16", 32, 32, false, false, false, true, -1},
 };
-const size_t kPngImageCount = arraysize(kPngImages);
+const size_t kPngImageCount = std::size(kPngImages);
 
 class ImageAnalysisTest : public testing::Test {
  public:
@@ -333,7 +334,7 @@ TEST_F(ImageAnalysisTest, PhotoMetric) {
   };
 
   float metric[kJpegImageCount];
-  for (size_t i = 0; i < arraysize(thresholds); ++i) {
+  for (size_t i = 0; i < std::size(thresholds); ++i) {
     float thr = thresholds[i];
     for (size_t j = 0; j < kJpegImageCount; ++j) {
       GoogleString image_string;

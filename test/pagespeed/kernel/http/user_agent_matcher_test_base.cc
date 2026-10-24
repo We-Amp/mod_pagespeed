@@ -19,6 +19,7 @@
 
 #include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
+#include <iterator>
 #include <memory>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -549,15 +550,15 @@ const char* const
 };
 
 const int UserAgentMatcherTestBase::kIe11UserAgentsArraySize =
-    arraysize(kIe11UserAgents);
+    std::size(kIe11UserAgents);
 const int UserAgentMatcherTestBase::kMobileUserAgentsArraySize =
-    arraysize(kMobileUserAgents);
+    std::size(kMobileUserAgents);
 const int UserAgentMatcherTestBase::kDesktopUserAgentsArraySize =
-    arraysize(kDesktopUserAgents);
+    std::size(kDesktopUserAgents);
 const int UserAgentMatcherTestBase::kTabletUserAgentsArraySize =
-    arraysize(kTabletUserAgents);
+    std::size(kTabletUserAgents);
 const int UserAgentMatcherTestBase::kImageInliningSupportedUserAgentsArraySize =
-    arraysize(kImageInliningSupportedUserAgents);
+    std::size(kImageInliningSupportedUserAgents);
 
 UserAgentMatcherTestBase::UserAgentMatcherTestBase() {
   user_agent_matcher_ = std::make_unique<UserAgentMatcher>();

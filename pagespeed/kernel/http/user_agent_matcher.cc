@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 
+#include <iterator>
 #include <map>
 #include <memory>
 #include <utility>
@@ -507,49 +508,49 @@ const Dimension kKnownScreenDimensions[] = {
 UserAgentMatcher::UserAgentMatcher()
     : chrome_version_pattern_(kChromeVersionPattern) {
   // Initialize FastWildcardGroup for image inlining allowlist & blockedlist.
-  for (int i = 0, n = arraysize(kImageInliningAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kImageInliningAllowlist); i < n; ++i) {
     supports_image_inlining_.Allow(kImageInliningAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kIeUserAgents); i < n; ++i) {
+  for (int i = 0, n = std::size(kIeUserAgents); i < n; ++i) {
     supports_image_inlining_.Allow(kIeUserAgents[i]);
   }
-  for (int i = 0, n = arraysize(kImageInliningBlockedlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kImageInliningBlockedlist); i < n; ++i) {
     supports_image_inlining_.Disallow(kImageInliningBlockedlist[i]);
   }
-  for (int i = 0, n = arraysize(kLazyloadImagesBlockedlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kLazyloadImagesBlockedlist); i < n; ++i) {
     supports_lazyload_images_.Disallow(kLazyloadImagesBlockedlist[i]);
   }
   defer_js_allowlist_.Allow(kIeUserAgents[kIEBefore11Index]);
-  for (int i = 0, n = arraysize(kDeferJSAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kDeferJSAllowlist); i < n; ++i) {
     defer_js_allowlist_.Allow(kDeferJSAllowlist[i]);
   }
 
   // https://github.com/apache/incubator-pagespeed-mod/issues/982
   defer_js_allowlist_.Disallow("* MSIE 9.*");
 
-  for (int i = 0, n = arraysize(kDeferJSBlockedlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kDeferJSBlockedlist); i < n; ++i) {
     defer_js_allowlist_.Disallow(kDeferJSBlockedlist[i]);
   }
 
-  for (int i = 0, n = arraysize(kDeferJSMobileAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kDeferJSMobileAllowlist); i < n; ++i) {
     defer_js_mobile_allowlist_.Allow(kDeferJSMobileAllowlist[i]);
   }
 
   // Do the same for webp support.
-  for (int i = 0, n = arraysize(kLegacyWebpAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kLegacyWebpAllowlist); i < n; ++i) {
     legacy_webp_.Allow(kLegacyWebpAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kLegacyWebpBlockedlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kLegacyWebpBlockedlist); i < n; ++i) {
     legacy_webp_.Disallow(kLegacyWebpBlockedlist[i]);
   }
 
   // Allows first, denies second: FastWildcardGroup lets the
   // latest-registered matching rule win, so registering the block list after
   // the allow list is what makes "deny beats allow" true here.
-  for (int i = 0, n = arraysize(kWebpNoNavigationAcceptAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kWebpNoNavigationAcceptAllowlist); i < n; ++i) {
     webp_no_navigation_accept_.Allow(kWebpNoNavigationAcceptAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kWebpNoNavigationAcceptBlockedlist); i < n;
+  for (int i = 0, n = std::size(kWebpNoNavigationAcceptBlockedlist); i < n;
        ++i) {
     webp_no_navigation_accept_.Disallow(kWebpNoNavigationAcceptBlockedlist[i]);
   }
@@ -580,37 +581,37 @@ UserAgentMatcher::UserAgentMatcher()
     webp_no_navigation_accept_.Disallow(StrCat("*Firefox/131", delim, "*"));
   }
 
-  for (int i = 0, n = arraysize(kInsertDnsPrefetchAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kInsertDnsPrefetchAllowlist); i < n; ++i) {
     supports_dns_prefetch_.Allow(kInsertDnsPrefetchAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kIeUserAgents); i < n; ++i) {
+  for (int i = 0, n = std::size(kIeUserAgents); i < n; ++i) {
     supports_dns_prefetch_.Allow(kIeUserAgents[i]);
   }
-  for (int i = 0, n = arraysize(kInsertDnsPrefetchBlockedlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kInsertDnsPrefetchBlockedlist); i < n; ++i) {
     supports_dns_prefetch_.Disallow(kInsertDnsPrefetchBlockedlist[i]);
   }
 
-  for (int i = 0, n = arraysize(kMobileUserAgentAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kMobileUserAgentAllowlist); i < n; ++i) {
     mobile_user_agents_.Allow(kMobileUserAgentAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kMobileUserAgentBlockedlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kMobileUserAgentBlockedlist); i < n; ++i) {
     mobile_user_agents_.Disallow(kMobileUserAgentBlockedlist[i]);
   }
-  for (int i = 0, n = arraysize(kTabletUserAgentAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kTabletUserAgentAllowlist); i < n; ++i) {
     tablet_user_agents_.Allow(kTabletUserAgentAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kMobilizationUserAgentAllowlist); i < n; ++i) {
+  for (int i = 0, n = std::size(kMobilizationUserAgentAllowlist); i < n; ++i) {
     mobilization_user_agents_.Allow(kMobilizationUserAgentAllowlist[i]);
   }
-  for (int i = 0, n = arraysize(kMobilizationUserAgentBlockedlist); i < n;
+  for (int i = 0, n = std::size(kMobilizationUserAgentBlockedlist); i < n;
        ++i) {
     mobilization_user_agents_.Disallow(kMobilizationUserAgentBlockedlist[i]);
   }
-  for (int i = 0, n = arraysize(kIeUserAgents); i < n; ++i) {
+  for (int i = 0, n = std::size(kIeUserAgents); i < n; ++i) {
     ie_user_agents_.Allow(kIeUserAgents[i]);
   }
   GoogleString known_devices_pattern_string = "(";
-  for (int i = 0, n = arraysize(kKnownScreenDimensions); i < n; ++i) {
+  for (int i = 0, n = std::size(kKnownScreenDimensions); i < n; ++i) {
     const Dimension& dim = kKnownScreenDimensions[i];
     screen_dimensions_map_[dim.device_name] = make_pair(dim.width, dim.height);
     if (i != 0) {

@@ -20,6 +20,7 @@
 #include "pagespeed/kernel/util/statistics_logger.h"
 
 #include <cstddef>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -242,26 +243,26 @@ void StatisticsLogger::Init() {
   variables_to_log_.clear();
 
   // List of statistics to log.
-  for (int i = 0, n = arraysize(kConsoleVars); i < n; ++i) {
+  for (int i = 0, n = std::size(kConsoleVars); i < n; ++i) {
     AddVariable(kConsoleVars[i]);
   }
-  for (int i = 0, n = arraysize(kOtherLoggedVars); i < n; ++i) {
+  for (int i = 0, n = std::size(kOtherLoggedVars); i < n; ++i) {
     AddVariable(kOtherLoggedVars[i]);
   }
-  for (int i = 0, n = arraysize(kGraphsVars); i < n; ++i) {
+  for (int i = 0, n = std::size(kGraphsVars); i < n; ++i) {
     AddVariable(kGraphsVars[i]);
   }
 }
 
 void StatisticsLogger::InitStatsForTest() {
   // List of statistics to log.
-  for (int i = 0, n = arraysize(kConsoleVars); i < n; ++i) {
+  for (int i = 0, n = std::size(kConsoleVars); i < n; ++i) {
     statistics_->AddVariable(kConsoleVars[i]);
   }
-  for (int i = 0, n = arraysize(kOtherLoggedVars); i < n; ++i) {
+  for (int i = 0, n = std::size(kOtherLoggedVars); i < n; ++i) {
     statistics_->AddVariable(kOtherLoggedVars[i]);
   }
-  for (int i = 0, n = arraysize(kGraphsVars); i < n; ++i) {
+  for (int i = 0, n = std::size(kGraphsVars); i < n; ++i) {
     statistics_->AddVariable(kGraphsVars[i]);
   }
   Init();
@@ -426,7 +427,7 @@ void StatisticsLogger::ParseDataForGraphs(StatisticsLogfileReader* reader,
     std::map<StringPiece, StringPiece> parsed_var_data;
     ParseVarDataIntoMap(data, &parsed_var_data);
     timestamps->push_back(curr_timestamp);
-    for (int i = 0, n = arraysize(kGraphsVars); i < n; ++i) {
+    for (int i = 0, n = std::size(kGraphsVars); i < n; ++i) {
       const GoogleString& var_title = kGraphsVars[i];
       std::map<StringPiece, StringPiece>::const_iterator value_iter =
           parsed_var_data.find(var_title);
