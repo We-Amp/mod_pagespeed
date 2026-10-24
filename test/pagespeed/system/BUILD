@@ -461,9 +461,17 @@ pagespeed_cc_test(
         ":libdaemon_stub_no_varies_accept.so",
         ":libdaemon_stub_unsized.so",
     ],
-    shard_count = 1,
-    # One case waits out the probe's 2 s deadline live; the small/short bucket
-    # (60 s) bounds a regressed probe far tighter than the medium default.
+    # Sharded so the small/short budget applies per shard (issue #270): the
+    # suite outgrew one 60 s bucket on loaded runners. Several cases pay the
+    # probe's 2 s connect deadline live, and gtest's index-based shard split
+    # spreads them, so no shard holds more than a few. Safe to split: every
+    # case is self-contained -- the fixture resets the process-wide
+    # announcement and socket-verdict latches before each case, and socket
+    # paths are unique per process, so no case depends on another (each shard
+    # runs as its own process).
+    shard_count = 4,
+    # Kept small on purpose: the 60 s bucket, now per shard, still bounds a
+    # regressed probe (a hang) far tighter than the medium default.
     size = "small",
     target_compatible_with = select({
         "@platforms//os:linux": [],
