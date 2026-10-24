@@ -415,6 +415,15 @@ enum PsContentType {
 // entry unread, which is the point of storing the whole field.
 inline constexpr uint16_t kPsCcOriginNoStore = 0x0004u;
 inline constexpr uint16_t kPsCcOriginNoTransform = 0x0100u;
+// The bit the peer's parser stamps when the origin sent a `Cache-Control`
+// line at all, whatever it said.  At serve time it means "the lifetime on
+// this entry is the origin's statement, not silence", which is what
+// suppresses the peer evaluator's content-type defaults (300 s for
+// stylesheets and scripts, 3600 s for images): those apply only to an entry
+// that recorded neither a lifetime nor a `Cache-Control` line.  The record
+// arm stamps it itself in exactly one case, beside a lifetime derived from
+// an `Expires`-only response -- see the gate in daemon_record_arm.cc.
+inline constexpr uint16_t kPsCcOriginHeaderPresent = 0x0200u;
 
 // Rendered length of an options-context signature, not counting the NUL.
 inline constexpr size_t kPsOptionContextSignatureChars = 64;

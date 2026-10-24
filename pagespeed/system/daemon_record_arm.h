@@ -144,8 +144,10 @@ struct DaemonRecordInput {
   StringPiece option_signature;
 
   // EVERY response header the origin sent, verbatim and in order, including
-  // the ones named individually above.  Read by exactly one rule -- the
-  // reproducible-set predicate below -- and by nothing else.
+  // the ones named individually above.  Read by two rules -- the
+  // reproducible-set predicate below, and the gate's `Expires` lifetime
+  // derivation (which reads `Expires` and `Date`, both members of the
+  // predicate's own sets) -- and by nothing else.
   //
   // ALL OF THEM, deliberately, because the predicate is fail-closed: it
   // answers "is there anything here a later serve could not put back", and a
@@ -265,17 +267,25 @@ DaemonRecordDecision EvaluateDaemonRecordGate(const DaemonAbi& abi,
 //                     `Cache-Control` built from the stored origin state.  An
 //                     origin that sent BOTH loses the `Expires` line and keeps
 //                     an equivalent lifetime; an origin that expressed its
-//                     lifetime ONLY through `Expires` stores a zero max-age,
-//                     because nothing on the record path parses `Expires` into
-//                     the stored state (see daemon_ipro_recorder.cc: the
-//                     stored lifetime is parsed from `Cache-Control` lines and
-//                     from nothing else).  A zero-lifetime entry is refused as
-//                     stale at serve time rather than served with a wrong
-//                     freshness -- a fall-through, never a wrong header.  That
-//                     last step is the peer evaluator's, MODELLED by the test
-//                     stub and pinned by a unit test here; the peer's own
-//                     arithmetic for a zero lifetime with no recorded
-//                     `Cache-Control` is not observable from this tree.
+//                     lifetime ONLY through `Expires` has that lifetime
+//                     converted into the stored max-age on the record path --
+//                     `Expires` relative to the response `Date`, stamped with
+//                     the header-present bit so the serve side's evaluator
+//                     takes it as the origin's statement (see the gate in
+//                     daemon_record_arm.cc).  The bit is the load-bearing
+//                     half: the peer's evaluator substitutes its own
+//                     content-type defaults for an entry whose stored state
+//                     records no lifetime and no `Cache-Control` at all --
+//                     300 s for stylesheets and scripts, 3600 s for images
+//                     -- so an `Expires`-only response stored as silence was
+//                     SERVED on the default, with a freshness the origin
+//                     never granted, and the emitted `Cache-Control` passed
+//                     it to every cache downstream; that is what the
+//                     derivation prevents.  An `Expires` already in the past
+//                     stores 0 with the bit set and is refused as stale at
+//                     serve time -- a fall-through, never a wrong header.
+//                     Both halves are the peer evaluator's, MODELLED by the
+//                     test stub and pinned by unit tests here.
 //   Vary              CONDITIONALLY, on `Accept-Encoding` and `Accept`.
 //                     Both are here for the same reason every other member is:
 //                     the serve arm puts them back.  `Accept-Encoding` is an
