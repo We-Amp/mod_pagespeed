@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_KERNEL_BASE_FUNCTION_H_
 #define PAGESPEED_KERNEL_BASE_FUNCTION_H_
 
+#include <utility>
+
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
 
@@ -161,7 +163,10 @@ class MemberFunction1 : public MemberFunctionBase<C> {
 
   // Constructor supplying a Run method, but no Cancel method.
   MemberFunction1(Func f, C* c, T1 v1)
-      : MemberFunctionBase<C>(c), run_(f), cancel_(nullptr), v1_(v1) {}
+      : MemberFunctionBase<C>(c),
+        run_(f),
+        cancel_(nullptr),
+        v1_(std::move(v1)) {}
 
   // Constructor supplying a Run method and a Cancel method.
   MemberFunction1(Func f, Func cancel, C* c, T1 v1)
@@ -188,11 +193,11 @@ class MemberFunction2 : public MemberFunctionBase<C> {
   using Func = void (C::*)(T1, T2);
 
   // Constructor supplying a Run method, but no Cancel method.
-  MemberFunction2(Func f, C* c, T1 v1, T2 v2)
+  MemberFunction2(Func f, C* c, const T1& v1, const T2& v2)
       : MemberFunctionBase<C>(c), run_(f), cancel_(nullptr), v1_(v1), v2_(v2) {}
 
   // Constructor supplying a Run method and a Cancel method.
-  MemberFunction2(Func f, Func cancel, C* c, T1 v1, T2 v2)
+  MemberFunction2(Func f, Func cancel, C* c, T1 v1, const T2& v2)
       : MemberFunctionBase<C>(c), run_(f), cancel_(cancel), v1_(v1), v2_(v2) {}
 
  protected:
@@ -217,7 +222,7 @@ class MemberFunction3 : public MemberFunctionBase<C> {
   using Func = void (C::*)(T1, T2, T3);
 
   // Constructor supplying a Run method, but no Cancel method.
-  MemberFunction3(Func f, C* c, T1 v1, T2 v2, T3 v3)
+  MemberFunction3(Func f, C* c, T1 v1, const T2& v2, const T3& v3)
       : MemberFunctionBase<C>(c),
         run_(f),
         cancel_(nullptr),
@@ -226,7 +231,7 @@ class MemberFunction3 : public MemberFunctionBase<C> {
         v3_(v3) {}
 
   // Constructor supplying a Run method and a Cancel method.
-  MemberFunction3(Func f, Func cancel, C* c, T1 v1, T2 v2, T3 v3)
+  MemberFunction3(Func f, Func cancel, C* c, T1 v1, const T2& v2, T3 v3)
       : MemberFunctionBase<C>(c),
         run_(f),
         cancel_(cancel),
@@ -311,7 +316,7 @@ Function* MakeFunction(C* object, void (C::*run)(), void (C::*cancel)()) {
 // Makes a Function* that calls a 1-arg class method.
 template <class C, class T>
 Function* MakeFunction(C* object, void (C::*run)(T), T t) {
-  return new MemberFunction1<C, T>(run, object, t);
+  return new MemberFunction1<C, T>(run, object, std::move(t));
 }
 
 // Makes a Function* that calls a 1-arg class method, or a 1-arg cancel
@@ -324,7 +329,8 @@ Function* MakeFunction(C* object, void (C::*run)(T), void (C::*cancel)(T),
 
 // Makes a Function* that calls a 2-arg class method.
 template <class C, class T, class U>
-Function* MakeFunction(C* object, void (C::*run)(T, U), T t, U u) {
+Function* MakeFunction(C* object, void (C::*run)(T, U), const T& t,
+                       const U& u) {
   return new MemberFunction2<C, T, U>(run, object, t, u);
 }
 
@@ -332,13 +338,14 @@ Function* MakeFunction(C* object, void (C::*run)(T, U), T t, U u) {
 // method.
 template <class C, class T, class U>
 Function* MakeFunction(C* object, void (C::*run)(T, U), void (C::*cancel)(T, U),
-                       T t, U u) {
+                       T t, const U& u) {
   return new MemberFunction2<C, T, U>(run, cancel, object, t, u);
 }
 
 // Makes a Function* that calls a 3-arg class method.
 template <class C, class T, class U, class V>
-Function* MakeFunction(C* object, void (C::*run)(T, U, V), T t, U u, V v) {
+Function* MakeFunction(C* object, void (C::*run)(T, U, V), T t, const U& u,
+                       const V& v) {
   return new MemberFunction3<C, T, U, V>(run, object, t, u, v);
 }
 
@@ -346,7 +353,7 @@ Function* MakeFunction(C* object, void (C::*run)(T, U, V), T t, U u, V v) {
 // method.
 template <class C, class T, class U, class V>
 Function* MakeFunction(C* object, void (C::*run)(T, U, V),
-                       void (C::*cancel)(T, U, V), T t, U u, V v) {
+                       void (C::*cancel)(T, U, V), T t, const U& u, V v) {
   return new MemberFunction3<C, T, U, V>(run, cancel, object, t, u, v);
 }
 

@@ -40,7 +40,7 @@ class SystemRewriteOptionsTest
   // setting an option with option_name changes return value of getter and that
   // errors are reported on incorrect values.
   void TestIntOption(const char* option_name,
-                     std::function<int(SystemRewriteOptions*)> getter) {
+                     const std::function<int(SystemRewriteOptions*)>& getter) {
     GoogleString msg;
     RewriteOptions::OptionSettingResult result =
         options_.ParseAndSetOptionFromName1(option_name, "1234", &msg,
@@ -58,7 +58,7 @@ class SystemRewriteOptionsTest
 
   void TestExternalCacheSingleOption(
       const char* option_name,
-      std::function<ExternalServerSpec(SystemRewriteOptions*)> getter,
+      const std::function<ExternalServerSpec(SystemRewriteOptions*)>& getter,
       int default_port) {
     EXPECT_TRUE(getter(&options_).empty());
 
@@ -87,7 +87,7 @@ class SystemRewriteOptionsTest
 
   void TestExternalCacheMultipleOption(
       const char* option_name,
-      std::function<ExternalClusterSpec(SystemRewriteOptions*)> getter,
+      const std::function<ExternalClusterSpec(SystemRewriteOptions*)>& getter,
       int default_port) {
     EXPECT_TRUE(getter(&options_).empty());
     EXPECT_EQ(0, getter(&options_).servers.size());
@@ -244,10 +244,10 @@ TEST_F(SystemRewriteOptionsTest, StaticAssetCdn) {
 TEST_F(SystemRewriteOptionsTest, CentralControllerPortDeprecatedNoOp) {
   GoogleString msg;
   MockMessageHandler handler(thread_system_.NewMutex());
-  EXPECT_EQ(options_.ParseAndSetOptionFromName1(
-                SystemRewriteOptions::kCentralControllerPort, "1234", &msg,
-                &handler),
-            RewriteOptions::kOptionOk);
+  EXPECT_EQ(
+      options_.ParseAndSetOptionFromName1(
+          SystemRewriteOptions::kCentralControllerPort, "1234", &msg, &handler),
+      RewriteOptions::kOptionOk);
   EXPECT_EQ(1, handler.MessagesOfType(kWarning));
 
   // Values the removed validation machinery used to reject now parse fine;
@@ -262,8 +262,8 @@ TEST_F(SystemRewriteOptionsTest, CentralControllerPortDeprecatedNoOp) {
   const char* id = nullptr;
   bool was_set = false;
   GoogleString value;
-  ASSERT_TRUE(options_.OptionValue(
-      SystemRewriteOptions::kCentralControllerPort, &id, &was_set, &value));
+  ASSERT_TRUE(options_.OptionValue(SystemRewriteOptions::kCentralControllerPort,
+                                   &id, &was_set, &value));
   EXPECT_TRUE(was_set);
   EXPECT_EQ("not-a-port", value);
 }
@@ -276,8 +276,8 @@ TEST_F(SystemRewriteOptionsTest, PopularityContestOptionsDeprecatedNoOp) {
                 &handler),
             RewriteOptions::kOptionOk);
   EXPECT_EQ(options_.ParseAndSetOptionFromName1(
-                SystemRewriteOptions::kPopularityContestMaxQueueSize, "6",
-                &msg, &handler),
+                SystemRewriteOptions::kPopularityContestMaxQueueSize, "6", &msg,
+                &handler),
             RewriteOptions::kOptionOk);
   EXPECT_EQ(2, handler.MessagesOfType(kWarning));
 }
@@ -285,10 +285,10 @@ TEST_F(SystemRewriteOptionsTest, PopularityContestOptionsDeprecatedNoOp) {
 TEST_F(SystemRewriteOptionsTest, UnrelatedOptionLogsNoControllerWarning) {
   GoogleString msg;
   MockMessageHandler handler(thread_system_.NewMutex());
-  EXPECT_EQ(options_.ParseAndSetOptionFromName1(
-                SystemRewriteOptions::kRedisServer, "host1:1234", &msg,
-                &handler),
-            RewriteOptions::kOptionOk);
+  EXPECT_EQ(
+      options_.ParseAndSetOptionFromName1(SystemRewriteOptions::kRedisServer,
+                                          "host1:1234", &msg, &handler),
+      RewriteOptions::kOptionOk);
   EXPECT_EQ(0, handler.MessagesOfType(kWarning));
 }
 

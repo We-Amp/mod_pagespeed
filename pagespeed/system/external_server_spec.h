@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_SYSTEM_EXTERNAL_SERVER_SPEC_H_
 #define PAGESPEED_SYSTEM_EXTERNAL_SERVER_SPEC_H_
 
+#include <utility>
 #include <vector>
 
 #include "pagespeed/kernel/base/string.h"
@@ -30,7 +31,7 @@ namespace net_instaweb {
 struct ExternalServerSpec {
   ExternalServerSpec() : host(), port(0) {}
   ExternalServerSpec(GoogleString host_, int port_)
-      : host(host_), port(port_) {}
+      : host(std::move(host_)), port(port_) {}
   bool SetFromString(StringPiece value_string, int default_port,
                      GoogleString* error_detail);
 

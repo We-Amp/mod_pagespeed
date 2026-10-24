@@ -3264,7 +3264,7 @@ class RewriteOptions {
                           bool safe_to_print, Properties* properties) {
     PropertyBase* property =
         new PropertyLeaf<RewriteOptionsSubclass, OptionClass>(
-            default_value, offset, id, option_name);
+            std::move(default_value), offset, id, option_name);
     property->set_scope(scope);
     property->set_help_text(help_text);
     property->set_safe_to_print(safe_to_print);
@@ -3381,9 +3381,10 @@ class RewriteOptions {
     // we may want to use a compile-time constant
     // (e.g. Timer::kHourMs) which does not have a linkable address.
     Property(ValueType default_value, const char* id, StringPiece option_name)
-        : PropertyBase(id, option_name), default_value_(default_value) {}
+        : PropertyBase(id, option_name),
+          default_value_(std::move(default_value)) {}
 
-    void set_default(ValueType value) { default_value_ = value; }
+    void set_default(ValueType value) { default_value_ = std::move(value); }
     const ValueType& default_value() const { return default_value_; }
 
    private:
@@ -3418,7 +3419,7 @@ class RewriteOptions {
 
     PropertyLeaf(ValueType default_value, OptionOffset offset, const char* id,
                  StringPiece option_name)
-        : Property<ValueType>(default_value, id, option_name),
+        : Property<ValueType>(std::move(default_value), id, option_name),
           offset_(offset) {}
 
     void InitializeOption(RewriteOptions* options) const override {
@@ -3579,8 +3580,8 @@ class RewriteOptions {
   static void AddRequestProperty(typename OptionClass::ValueType default_value,
                                  OptionClass RewriteOptions::* offset,
                                  const char* id, bool safe_to_print) {
-    AddProperty(default_value, offset, id, kNullOption, kProcessScopeStrict,
-                nullptr, safe_to_print, properties_);
+    AddProperty(std::move(default_value), offset, id, kNullOption,
+                kProcessScopeStrict, nullptr, safe_to_print, properties_);
   }
 
   // Adds a property with a unique option_name_ field, allowing use of
@@ -3591,7 +3592,7 @@ class RewriteOptions {
                               const char* id, StringPiece option_name,
                               OptionScope scope, const char* help,
                               bool safe_to_print) {
-    AddProperty(default_value, offset, id, option_name, scope, help,
+    AddProperty(std::move(default_value), offset, id, option_name, scope, help,
                 safe_to_print, properties_);
   }
 

@@ -25,6 +25,7 @@
 
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource.h"
@@ -76,7 +77,7 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   SrcSetSlot* slot(int idx) { return candidates_[idx].slot.get(); }
   const GoogleString& url(int idx) { return candidates_[idx].url; }
   void set_url(int idx, GoogleString new_url) {
-    candidates_[idx].url = new_url;
+    candidates_[idx].url = std::move(new_url);
   }
   const GoogleString& descriptor(int idx) {
     return candidates_[idx].descriptor;

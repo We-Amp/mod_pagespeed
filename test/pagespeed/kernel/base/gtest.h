@@ -74,7 +74,7 @@ inline AssertionResult CmpHelperSTRNE(const char* expected_expression,
 template <typename StringType>
 inline AssertionResult CmpHelperSUBSTR(const char* haystack_expression,
                                        const char* needle_expression,
-                                       const StringType haystack,
+                                       const StringType& haystack,
                                        const StringPiece& needle) {
   return ::testing::IsSubstring(haystack_expression, needle_expression,
                                 haystack, needle.as_string());
@@ -83,8 +83,8 @@ inline AssertionResult CmpHelperSUBSTR(const char* haystack_expression,
 template <typename StringType1, typename StringType2>
 inline AssertionResult CmpHelperSUBSTR(const char* haystack_expression,
                                        const char* needle_expression,
-                                       const StringType1 haystack,
-                                       const StringType2 needle) {
+                                       const StringType1& haystack,
+                                       const StringType2& needle) {
   return ::testing::IsSubstring(haystack_expression, needle_expression,
                                 haystack, needle);
 }
@@ -101,8 +101,8 @@ inline AssertionResult CmpHelperSUBSTRNE(const char* haystack_expression,
 template <typename StringType1, typename StringType2>
 inline AssertionResult CmpHelperSUBSTRNE(const char* haystack_expression,
                                          const char* needle_expression,
-                                         const StringType1 haystack,
-                                         const StringType2 needle) {
+                                         const StringType1& haystack,
+                                         const StringType2& needle) {
   return ::testing::IsNotSubstring(haystack_expression, needle_expression,
                                    haystack, needle);
 }

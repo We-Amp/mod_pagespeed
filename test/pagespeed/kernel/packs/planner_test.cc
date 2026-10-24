@@ -112,7 +112,8 @@ TEST_F(PlannerTest, OnlyTheKindsOfTheDecisionPointArePlanned) {
             Canonical());
   // No canonical rule decides at the end of the document, so nothing is
   // planned there (and no head is needed).
-  PagePlan end = BuildPlan(pack, Ctx(), PageFacts(), DecisionPoint::kDocumentEnd);
+  PagePlan end =
+      BuildPlan(pack, Ctx(), PageFacts(), DecisionPoint::kDocumentEnd);
   EXPECT_EQ(end.skip, SkipReason::kNone);
   EXPECT_TRUE(end.rules.empty());
 }
@@ -331,13 +332,13 @@ TEST_F(PlannerTest, InvalidExpandedUrlIsSkippedInEveryMode) {
 }
 
 TEST_F(PlannerTest, ATableMissWithoutFallbackHasNoValue) {
-  auto loaded = LoadPack(
-      R"({"pack":{"id":"edge-seo","version":"0.1.0"},)"
-      R"("sites":[{"host":"t.test","mode":"enforce"}],)"
-      R"("tables":{"t":{"/x":"https://t.test/from-table"}},)"
-      R"("rules":[{"id":"r1","kind":"canonical","enforce":true,)"
-      R"("value":{"table":"t"}}]})",
-      "");
+  auto loaded =
+      LoadPack(R"({"pack":{"id":"edge-seo","version":"0.1.0"},)"
+               R"("sites":[{"host":"t.test","mode":"enforce"}],)"
+               R"("tables":{"t":{"/x":"https://t.test/from-table"}},)"
+               R"("rules":[{"id":"r1","kind":"canonical","enforce":true,)"
+               R"("value":{"table":"t"}}]})",
+               "");
   ASSERT_TRUE(loaded.ok()) << loaded.status();
   const RulePlan rp = Only(BuildPlan(*loaded, Ctx("/other"), Facts()));
   EXPECT_EQ(rp.decision.reason, Reason::kNoValue);
@@ -576,8 +577,8 @@ TEST_F(PlannerTest, HreflangRepairDropsWhatIsUnusableAndLeavesTheRest) {
     ASSERT_EQ(op.type, OpType::kRemove);
     removed.push_back(op.target.element);
   }
-  EXPECT_EQ(removed, (std::vector<void*>{Handle(4), Handle(5), Handle(6),
-                                         Handle(7)}));
+  EXPECT_EQ(removed,
+            (std::vector<void*>{Handle(4), Handle(5), Handle(6), Handle(7)}));
   EXPECT_EQ(rp.decision.action, Action::kRemove);
   EXPECT_EQ(rp.decision.defect, "hreflang-invalid");
   EXPECT_EQ(rp.decision.removed,
@@ -619,8 +620,7 @@ TEST_F(PlannerTest, HreflangClusterWithoutAnEntryForThePageIsSkipped) {
 }
 
 TEST_F(PlannerTest, HreflangInvalidPatternValueIsSkipped) {
-  Pack pack =
-      MakePack("hreflang", "keep", R"({"pattern":{"en":"{path}"}})");
+  Pack pack = MakePack("hreflang", "keep", R"({"pattern":{"en":"{path}"}})");
   const RulePlan rp = Only(BuildPlan(pack, Ctx(), Facts()));
   EXPECT_TRUE(rp.ops.empty());
   EXPECT_EQ(rp.decision.reason, Reason::kInvalidValue);
@@ -707,14 +707,14 @@ ElementFact JFact(int id, std::string text, bool in_head = false) {
 }
 
 PagePlan DocumentPlan(const Pack& pack, const PageFacts& facts,
-                      PageContext ctx = Ctx()) {
+                      const PageContext& ctx = Ctx()) {
   return BuildPlan(pack, ctx, facts, DecisionPoint::kDocumentEnd);
 }
 
 TEST_F(PlannerTest, JsonLdIsPlannedOnlyAtTheEndOfTheDocument) {
   Pack pack = MakePack("jsonld", "keep", kOrg);
-  EXPECT_TRUE(BuildPlan(pack, Ctx(), Facts(), DecisionPoint::kHeadEnd)
-                  .rules.empty());
+  EXPECT_TRUE(
+      BuildPlan(pack, Ctx(), Facts(), DecisionPoint::kHeadEnd).rules.empty());
   const RulePlan rp = Only(DocumentPlan(pack, Facts()));
   ASSERT_EQ(rp.ops.size(), 1u);
   EXPECT_EQ(rp.ops[0].type, OpType::kInsert);
@@ -752,11 +752,12 @@ TEST_F(PlannerTest, JsonLdKeepStandsDownForABlockOfTheTypeOrAnInvalidBlock) {
 TEST_F(PlannerTest, JsonLdEqualBlocksAreEqualWhateverTheKeyOrder) {
   Pack pack = MakePack("jsonld", "keep", kOrg);
   PageFacts facts = Facts();
-  facts.For(JsonLd()).push_back(JFact(
-      1, R"( { "name" : "T", "@type":"Organization",
+  facts.For(JsonLd()).push_back(
+      JFact(1, R"( { "name" : "T", "@type":"Organization",
   "@context":"https://schema.org" } )"));
   facts.For(JsonLd()).push_back(JFact(
-      2, R"({"@context":"https://schema.org","@type":"Organization","name":"T"})"));
+      2,
+      R"({"@context":"https://schema.org","@type":"Organization","name":"T"})"));
   const RulePlan rp = Only(DocumentPlan(pack, facts));
   ASSERT_EQ(rp.ops.size(), 1u);
   EXPECT_EQ(rp.ops[0].type, OpType::kRemove);
@@ -889,8 +890,8 @@ TEST_F(PlannerTest, JsonLdQuotesOnlyWhatIsReallyInTheDocument) {
         absl::StrCat(R"(,{"id":"j2","kind":"jsonld","enforce":)",
                      rule_enforces ? "true" : "false",
                      R"(,"match":{"paths":["/x"]},"value":)", tpl, "}");
-    Pack pack = MakePack(
-        "title", "replace", R"({"template":"Planned"})", jsonld_rule);
+    Pack pack =
+        MakePack("title", "replace", R"({"template":"Planned"})", jsonld_rule);
     PageFacts facts = Facts();
     ElementFact title = Fact(5, "Existing");
     title.text_mode = TextMode::kDecoded;
@@ -940,8 +941,8 @@ TEST_F(PlannerTest, HreflangRemovedListHoldsOnlyWellFormedUtf8) {
   Pack pack = MakePack("hreflang", "repair", kCluster);
   PageFacts facts = Facts();
   // A Latin-1 byte in the code and in the href.
-  facts.For(Hreflang()).push_back(
-      HFact(1, "d\xE9", "https://t.test/caf\xE9", true));
+  facts.For(Hreflang())
+      .push_back(HFact(1, "d\xE9", "https://t.test/caf\xE9", true));
   const RulePlan rp = Only(BuildPlan(pack, Ctx(), facts));
   ASSERT_FALSE(rp.decision.removed.empty());
   EXPECT_EQ(ReplaceInvalidUtf8(rp.decision.removed), rp.decision.removed);
@@ -953,8 +954,9 @@ TEST(HelpersTest, ReplaceInvalidUtf8) {
   EXPECT_EQ(ReplaceInvalidUtf8("caf\xC3\xA9 \xE2\x82\xAC \xF0\x9F\x98\x80"),
             "caf\xC3\xA9 \xE2\x82\xAC \xF0\x9F\x98\x80");
   EXPECT_EQ(ReplaceInvalidUtf8("a\xE9z"), "a\xEF\xBF\xBDz");
-  EXPECT_EQ(ReplaceInvalidUtf8("\xC3"), "\xEF\xBF\xBD");        // truncated
-  EXPECT_EQ(ReplaceInvalidUtf8("\xC0\xAF"), "\xEF\xBF\xBD\xEF\xBF\xBD");  // overlong
+  EXPECT_EQ(ReplaceInvalidUtf8("\xC3"), "\xEF\xBF\xBD");  // truncated
+  EXPECT_EQ(ReplaceInvalidUtf8("\xC0\xAF"),
+            "\xEF\xBF\xBD\xEF\xBF\xBD");  // overlong
   EXPECT_EQ(ReplaceInvalidUtf8("\xED\xA0\x80"),
             "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD");  // surrogate
   EXPECT_EQ(ReplaceInvalidUtf8("\xF5\x80\x80\x80").size(), 12u);
