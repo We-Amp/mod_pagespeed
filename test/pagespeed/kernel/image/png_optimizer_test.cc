@@ -484,9 +484,9 @@ struct OpaqueImageInfo {
   int out_color_type;
 };
 
-OpaqueImageInfo kOpaqueImagesWithAlpha[] = {{"rgba_opaque", 1, 6, 2},
-                                            {"grey_alpha_opaque", 1, 4, 0},
-                                            {"bgai4a16", 0, 4, 4}};
+OpaqueImageInfo kOpaqueImagesWithAlpha[] = {{"rgba_opaque", true, 6, 2},
+                                            {"grey_alpha_opaque", true, 4, 0},
+                                            {"bgai4a16", false, 4, 4}};
 
 void AssertMatch(const GoogleString& in, const GoogleString& ref,
                  PngReaderInterface* reader, const ImageCompressionInfo& info,
@@ -1229,8 +1229,8 @@ GoogleString MakePngDeclaringDimensions(uint32 width, uint32 height) {
   ihdr[5] = static_cast<char>(height >> 16);
   ihdr[6] = static_cast<char>(height >> 8);
   ihdr[7] = static_cast<char>(height);
-  ihdr[8] = 8;  // Bit depth.
-  ihdr[9] = 2;  // Color type: truecolor RGB.
+  ihdr[8] = 8;   // Bit depth.
+  ihdr[9] = 2;   // Color type: truecolor RGB.
   ihdr[10] = 0;  // Compression: deflate.
   ihdr[11] = 0;  // Filter method.
   ihdr[12] = 0;  // No interlace.
@@ -1281,8 +1281,8 @@ GoogleString MakeValidPngDeclaringDimensions(uint32 width, uint32 height) {
   ihdr[5] = static_cast<char>(height >> 16);
   ihdr[6] = static_cast<char>(height >> 8);
   ihdr[7] = static_cast<char>(height);
-  ihdr[8] = 8;  // Bit depth.
-  ihdr[9] = 2;  // Color type: truecolor RGB.
+  ihdr[8] = 8;   // Bit depth.
+  ihdr[9] = 2;   // Color type: truecolor RGB.
   ihdr[10] = 0;  // Compression: deflate.
   ihdr[11] = 0;  // Filter method.
   ihdr[12] = 0;  // No interlace.
@@ -1316,8 +1316,7 @@ TEST_F(PngScanlineWriterTest, OversizedDimensionsRejectedByBestCompression) {
   message_handler_.AddPatternToSkipPrinting("*dimensions*");
   message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngError);
   message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngFailure);
-  const size_t width =
-      pagespeed::image_compression::kScanlineMaxDimension + 1;
+  const size_t width = pagespeed::image_compression::kScanlineMaxDimension + 1;
   PngCompressParams best(true /*best compression*/, false /*progressive*/);
   writer_.reset(CreateScanlineWriter(pagespeed::image_compression::IMAGE_PNG,
                                      pixel_format_, width, height_ /* = 2 */,
