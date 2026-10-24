@@ -44,6 +44,7 @@ pagespeed_py_test_suite(
         "test_cache_flush.py",
         "test_cache_purge.py",
         "test_compressed_cache.py",
+        "test_concurrent_mixed_requests.py",
         "test_content_encoding_leak.py",
         "test_critical_css_beacon.py",
         "test_cross_site_fetch.py",
