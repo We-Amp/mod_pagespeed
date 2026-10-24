@@ -2222,6 +2222,17 @@ DaemonHealth DaemonAdapter::ServingHealth() const {
   return DaemonHealth::kReady;
 }
 
+bool DaemonAdapter::ServingRecheckDue() const {
+  const DaemonHealth verdict = health_.load(std::memory_order_acquire);
+  if (verdict != DaemonHealth::kUnavailable || !unavailable_is_retryable_) {
+    // Ready, unconfigured, or one of the verdicts that are final for the
+    // process: there is no recheck to be due.
+    return false;
+  }
+  return monotonic_clock_() >=
+         unavailable_retry_due_ms_.load(std::memory_order_relaxed);
+}
+
 void DaemonAdapter::ReannounceStartupRefusal() {
   if (startup_refusal_.empty() || handler_ == nullptr ||
       !ShouldReannounce(startup_refusal_)) {

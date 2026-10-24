@@ -1940,6 +1940,84 @@ TEST_F(DaemonAdapterTest, TwoThreadsRecheckingAfterTheIntervalMakeOneProbe) {
   EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
 }
 
+TEST_F(DaemonAdapterTest, ARecheckThatFlipsReadyIsFollowedByAnOpen) {
+  // The whole recheck path in one case: the server starts with the daemon
+  // down -- its volume is on disk and its size is published, but nothing
+  // answers on the socket -- so the start-up verdict is the retryable one.
+  // The daemon then starts; the next recheck flips the verdict, and the open
+  // that follows attaches to the volume that was there all along.  Nothing
+  // opens at the recheck itself: the open belongs to the record arm.
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("recheck-then-open.sock");
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  ASSERT_TRUE(last_abi_ != nullptr);
+  const int startup_opens = last_abi_->opens;
+
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
+  EXPECT_EQ(DaemonHealth::kReady, adapter->ServingHealth());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->health());
+  EXPECT_EQ(startup_opens, last_abi_->opens) << "the recheck opened nothing";
+
+  // The attach the flipped verdict promises: exactly one checked open, and
+  // nothing created -- the volume was the daemon's own.
+  EXPECT_TRUE(adapter->RecordCache() != nullptr);
+  EXPECT_EQ(startup_opens + 1, last_abi_->opens);
+  EXPECT_EQ(1u, DaemonAdapter::VolumeFiles(volume_).size());
+  EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+}
+
+TEST_F(DaemonAdapterTest, ServingRecheckDueOnlyWhenTheRetryIntervalHasPassed) {
+  // The cheap question a request path asks before posting a recheck: a
+  // verdict that is final for the process answers no whatever the clock
+  // says, and the one retryable verdict answers no until the interval has
+  // passed -- and no again right after a probe, whichever way it went.
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("recheck-due.sock");
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_FALSE(adapter->ServingRecheckDue());
+
+  // One millisecond before the due time it is still no; at it, yes.
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs - 1;
+  EXPECT_FALSE(adapter->ServingRecheckDue());
+  now_ms_ += 1;
+  EXPECT_TRUE(adapter->ServingRecheckDue());
+
+  // A probe that fails re-arms the interval, so no until it passes again.
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->ServingHealth());
+  EXPECT_FALSE(adapter->ServingRecheckDue());
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs - 1;
+  EXPECT_FALSE(adapter->ServingRecheckDue());
+  now_ms_ += 1;
+  EXPECT_TRUE(adapter->ServingRecheckDue());
+
+  // A probe that succeeds flips the verdict, and a ready verdict answers no.
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->ServingHealth());
+  EXPECT_FALSE(adapter->ServingRecheckDue());
+
+  // Every final verdict answers no however far the clock runs: an unready
+  // verdict that is not retried, and the unconfigured adapter.
+  library_available_ = false;
+  std::unique_ptr<DaemonAdapter> absent(
+      MakeAdapter(SocketPath("recheck-due-final.sock")));
+  EXPECT_EQ(DaemonStartupStatus::kOk, absent->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, absent->health());
+  ASSERT_FALSE(absent->unavailable_is_retryable());
+  now_ms_ += 10 * DaemonAdapter::kUnavailableRetryIntervalMs;
+  EXPECT_FALSE(absent->ServingRecheckDue());
+  DaemonAdapter unconfigured("", "", &handler_);
+  EXPECT_EQ(DaemonStartupStatus::kOk, unconfigured.StartupCheck());
+  EXPECT_FALSE(unconfigured.ServingRecheckDue());
+}
+
 TEST_F(DaemonAdapterTest, ARecoveredSplitsFirstOpenRemovesTheFileItCreated) {
   // The web server started while the optimizer was down, so no size was
   // published and the start-up mirror -- the check that normally removes

@@ -287,6 +287,17 @@ class DaemonAdapter {
   // RecordCache() performs the checked open on first use.
   DaemonHealth ServingHealth() const;
 
+  // Whether the serving recheck's interval has passed for a verdict it
+  // rechecks: the request path of a port that must not probe inline (nginx)
+  // asks this before posting the probe, so a post happens only when the
+  // probe would really run -- about once per kUnavailableRetryIntervalMs per
+  // adapter -- instead of on every request that finds the verdict
+  // unavailable.  False for every verdict ServingHealth() does not recheck,
+  // and false again right after a probe until the next interval, because the
+  // probe itself advances the due time.  Thread-safe, const, no I/O, and it
+  // changes nothing: the claim the probe makes is not made here.
+  bool ServingRecheckDue() const;
+
   // Whether health() is kUnavailable only because the daemon was not
   // running yet when the start-up check ran: the ONE verdict
   // ServingHealth() rechecks.  Every other unavailable verdict -- half a

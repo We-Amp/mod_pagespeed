@@ -201,6 +201,22 @@ TEST_F(NgxDaemonRecordCompletionTest, OpenAttemptLatch) {
   EXPECT_FALSE(ShouldPostDaemonOpenAttempt());
 }
 
+TEST_F(NgxDaemonRecordCompletionTest, RecheckLatch) {
+  int64 now = 1000000;
+  SetDaemonNowMsForTesting([&now] { return now; });
+  EXPECT_TRUE(ShouldPostDaemonRecheck());
+  EXPECT_FALSE(ShouldPostDaemonRecheck());
+  now += kDaemonOpenAttemptIntervalMs - 1;
+  EXPECT_FALSE(ShouldPostDaemonRecheck());
+  now += 1;
+  EXPECT_TRUE(ShouldPostDaemonRecheck());
+  EXPECT_FALSE(ShouldPostDaemonRecheck());
+  // The two latches are independent, each on its own atomic: taking the
+  // recheck's post leaves the open attempt's free, so a busy recovery
+  // cadence can never starve a lazy open (and the other way round).
+  EXPECT_TRUE(ShouldPostDaemonOpenAttempt());
+}
+
 TEST_F(NgxDaemonRecordCompletionTest, NullVariableAccepted) {
   ps_daemon_record_completion_init_stats(nullptr);
   // A missing counter is never an error: queueing and drops work the same,
@@ -234,6 +250,34 @@ TEST_F(NgxDaemonRecordCompletionTest, PostedOpenAttemptCancelledAtShutdown) {
   QueuedWorkerPool::Sequence* sequence = pool.NewSequence();
   pool.InitiateShutDown();
   PostDaemonOpenAttempt(sequence, &adapter);
+  pool.WaitForShutDownComplete();
+  EXPECT_EQ(nullptr, adapter.RecordCacheIfOpen());
+}
+
+TEST_F(NgxDaemonRecordCompletionTest, PostedRecheckRuns) {
+  // ServingHealth() on an unresolved adapter answers its first guard before
+  // any probe, announce or latch, which is what makes the recheck executable
+  // in a unit test without a daemon.  The assertions are thin for the same
+  // reason as the open attempt's: what matters is that Run reaches the
+  // adapter and returns, which the pool's shutdown waits out; nothing opens.
+  DaemonAdapter adapter("", "", nullptr);
+  QueuedWorkerPool pool(1, "daemon_record_test", thread_system_.get());
+  QueuedWorkerPool::Sequence* sequence = pool.NewSequence();
+  PostDaemonRecheck(sequence, &adapter);
+  pool.ShutDown();
+  EXPECT_EQ(nullptr, adapter.RecordCacheIfOpen());
+}
+
+TEST_F(NgxDaemonRecordCompletionTest, PostedRecheckCancelledAtShutdown) {
+  // The shutdown path the recheck poster exists to survive: a sequence whose
+  // shutdown has begun cancels a later Add immediately instead of running
+  // it.  The sequence has to exist first: NewSequence() returns nullptr
+  // once the pool itself is in shutdown.
+  DaemonAdapter adapter("", "", nullptr);
+  QueuedWorkerPool pool(1, "daemon_record_test", thread_system_.get());
+  QueuedWorkerPool::Sequence* sequence = pool.NewSequence();
+  pool.InitiateShutDown();
+  PostDaemonRecheck(sequence, &adapter);
   pool.WaitForShutDownComplete();
   EXPECT_EQ(nullptr, adapter.RecordCacheIfOpen());
 }
