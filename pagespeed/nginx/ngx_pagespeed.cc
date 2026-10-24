@@ -2495,7 +2495,7 @@ void BuildDaemonServeRequest(const RequestHeaders& request_headers,
                              PsDaemonServeRequestStrings* strings,
                              DaemonServeRequest* out) {
   full_url.PathAndLeaf().CopyToString(&strings->url);
-  full_url.Host().CopyToString(&strings->host);
+  full_url.HostAndPort().CopyToString(&strings->host);
   full_url.Scheme().CopyToString(&strings->scheme);
 
   // LookupJoined, not Lookup1: a comma-split header is several map values,
@@ -3686,7 +3686,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
       // three fields.
       GoogleUrl full_url(ctx->url_string);
       full_url.PathAndLeaf().CopyToString(&record_request.url);
-      full_url.Host().CopyToString(&record_request.hostname);
+      full_url.HostAndPort().CopyToString(&record_request.hostname);
       full_url.Scheme().CopyToString(&record_request.scheme);
 
       RequestHeaders request_headers;

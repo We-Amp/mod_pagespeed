@@ -148,7 +148,7 @@ void ComposeIisServeResponse(const DaemonServeDecision& decision,
 void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
                              DaemonServeRequest* request) {
   request->url = url.PathAndLeaf();
-  request->hostname = url.Host();
+  request->hostname = url.HostAndPort();
   request->scheme = url.Scheme();
   IisCapabilityHeaders(http_context, &request->accept, &request->user_agent,
                        &request->save_data, &request->accept_encoding,

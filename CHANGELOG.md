@@ -91,6 +91,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Resources recorded from sites that share a host name but use different
+  ports are no longer served to each other.** The host half of the
+  optimizer cache key now carries the site's port, so a site on
+  `http://example.com/` and a site on `http://example.com:8080/` no longer
+  resolve to the same entry; before, either could be served the other's
+  script, stylesheet or image out of the shared cache. Operators serving
+  one host name on several ports should purge the optimizer cache once
+  after upgrading, because existing entries may already be mixed.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
