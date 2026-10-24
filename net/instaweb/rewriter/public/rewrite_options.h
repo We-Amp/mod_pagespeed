@@ -36,7 +36,6 @@
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 #include "net/instaweb/rewriter/public/javascript_library_identification.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dense_hash_map.h"
 #include "pagespeed/kernel/base/enum_set.h"
 #include "pagespeed/kernel/base/fast_wildcard_group.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
