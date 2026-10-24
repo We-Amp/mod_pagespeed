@@ -177,7 +177,6 @@ use_repo(
     "dav1d_src",
     "ed25519",
     "giflib",
-    "google_sparsehash",
     "hiredis",
     "jsoncpp",
     "libavif_src",

@@ -7,7 +7,6 @@ load("//bazel:foreign_cc.bzl", "cmake_build_args")
 
 exports_files([
     "gflags_cstring.patch",
-    "sparsehash_cstring.patch",
     "googleurl_visibility.patch",
     "googleurl_macos_libcxx.patch",
     "curl_boringssl_ssl_connect_8_20.patch",
