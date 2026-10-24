@@ -91,6 +91,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **IIS no longer risks a worker process failure when a site whose module
+  startup failed is recycled or its configuration is fixed.** A site that
+  started with a `pagespeed.config` that failed initialization (for example
+  a missing or unwritable `FileCachePath`) kept its half-initialized state
+  in the worker process. Repairing the file or recycling the application
+  pool released that state and could take the worker process down,
+  counting towards rapid-fail protection. The state now starts out empty,
+  so a failed startup is released cleanly.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
