@@ -255,5 +255,77 @@ class TestNginxReloadWorkerLeak:
         )
 
 
+# Budget for old workers to exit after a reload that follows a refused admin
+# POST. An abandoned admin base fetch holds the worker's shutdown drain for
+# its full 30 s budget, so a healthy exit lands well inside this.
+ADMIN_REFUSAL_WORKER_EXIT_TIMEOUT_S = 20.0
+
+
+def _master_pid_or_skip() -> int:
+    """Returns the nginx master PID, skipping when the lane did not set it."""
+    pid_file = os.environ.get("PAGESPEED_NGINX_PID_FILE", "")
+    if not pid_file or not os.path.exists(pid_file):
+        pytest.skip(
+            "PAGESPEED_NGINX_PID_FILE not set/readable; run via "
+            "run_nginx_tests.sh"
+        )
+    try:
+        return _master_pid()
+    except (OSError, ValueError) as e:
+        pytest.skip(f"Could not read nginx master PID: {e}")
+
+
+@pytest.mark.nginx_only
+@pytest.mark.process_leak
+@pytest.mark.requires_module
+@pytest.mark.slow
+class TestNginxAdminPostRefusalReload:
+    """A refused admin POST must not hold the worker's shutdown drain."""
+
+    def test_oversized_admin_post_does_not_delay_worker_exit(
+        self, client, server_config
+    ):
+        """An oversized admin POST is refused without stranding its fetch.
+
+        A POST body over the admin limit is answered 413 before the shared
+        admin handler runs. The base fetch created for it must be completed
+        on that path: an abandoned one keeps a reference until the worker's
+        shutdown drain gives up after its full 30 s budget, so a reload
+        right after the refusal must still retire the old workers promptly.
+        """
+        master_pid = _master_pid_or_skip()
+
+        # A body over the module's admin POST limit (8 KB): the request is
+        # refused before its shared admin handler runs.
+        response = client.post(
+            f"{server_config.admin_path}/cache", data="x" * 16384
+        )
+        assert response.status == 413, (
+            f"an oversized admin POST must be refused with 413, got "
+            f"status {response.status}: {response.text[:200]!r}"
+        )
+
+        pre_reload_workers = _worker_pids(master_pid)
+        assert pre_reload_workers, "Expected nginx worker processes"
+
+        _send_sighup(master_pid)
+
+        survivors = _wait_for_pids_to_exit(
+            pre_reload_workers,
+            master_pid,
+            ADMIN_REFUSAL_WORKER_EXIT_TIMEOUT_S,
+        )
+        assert not survivors, (
+            f"old worker PID(s) {sorted(survivors)} still alive "
+            f"{ADMIN_REFUSAL_WORKER_EXIT_TIMEOUT_S}s after a reload that "
+            f"followed a refused admin POST (an abandoned base fetch holds "
+            f"the worker's shutdown drain for its full 30 s budget)"
+        )
+
+        # The reload replaced the workers; the server keeps serving.
+        time.sleep(0.5)
+        assert _worker_pids(master_pid), "Expected new workers after reload"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
