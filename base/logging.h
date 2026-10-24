@@ -185,12 +185,19 @@ class CheckOpResult {
 #define VLOG_IS_ON(verboselevel) (true)
 
 // LOG_IF - conditional logging
+//
+// The replacement list must stay unparenthesized: a trailing '<<' (as in
+// CHECK below) has to bind into the conditional so the message is built only
+// when the condition holds. Enclosing the list in parentheses makes the
+// expression void and breaks every 'LOG_IF(...) << msg' use.
+// NOLINTBEGIN(bugprone-macro-parentheses)
 #define LOG_IF(severity, condition)                                           \
   !(condition) ? (void)0                                                      \
                : ::pagespeed_logging::LogMessageVoidify() &                   \
                      ::pagespeed_logging::LogMessage(logging::LOG_##severity, \
                                                      __FILE__, __LINE__)      \
                          .stream()
+// NOLINTEND(bugprone-macro-parentheses)
 
 // DLOG - debug logging (compiles to nothing in release builds)
 #ifdef NDEBUG

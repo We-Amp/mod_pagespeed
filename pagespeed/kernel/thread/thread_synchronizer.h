@@ -19,8 +19,8 @@
 
 // Thread-synchronization utility class for reproducing races in unit tests.
 
-#ifndef PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H__
-#define PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H__
+#ifndef PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H_
+#define PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H_
 
 #include <map>
 #include <memory>
@@ -126,4 +126,4 @@ class ThreadSynchronizer {
 
 }  // namespace net_instaweb
 
-#endif  // PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H__
+#endif  // PAGESPEED_KERNEL_THREAD_THREAD_SYNCHRONIZER_H_
