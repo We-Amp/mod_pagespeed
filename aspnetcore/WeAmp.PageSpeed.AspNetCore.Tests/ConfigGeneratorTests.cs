@@ -316,10 +316,10 @@ public class ConfigGeneratorTests
     [Fact]
     public void ExcludePaths_AreEmittedAsPagespeedOffLocations()
     {
-        var options = new PageSpeedOptions { ExcludePaths = ["^/api/", "^/signalr/"] };
+        var options = new PageSpeedOptions { ExcludePaths = ["/api/", "/signalr/"] };
         var conf = Generate(options).Conf;
-        conf.Should().Contain("location ~ \"^/api/\" {");
-        conf.Should().Contain("location ~ \"^/signalr/\" {");
+        conf.Should().Contain("location ~* \"^/api/\" {");
+        conf.Should().Contain("location ~* \"^/signalr/\" {");
         conf.Should().Contain("pagespeed off;");
     }
 
@@ -430,7 +430,8 @@ public class ConfigGeneratorTests
     [Fact]
     public void Injection_ExcludePathTrailingBackslash_FailsClosed()
     {
-        // A trailing odd backslash would escape the emitted closing quote.
+        // A backslash is outside the prefix/glob charset (it could once escape
+        // the emitted closing quote); it is rejected before translation.
         Invoking(new PageSpeedOptions { ExcludePaths = ["^/secret/\\"] })
             .Should().Throw<InvalidOperationException>();
     }
@@ -566,8 +567,8 @@ public class ConfigGeneratorTests
         act.Should().Throw<Exception>();
 
         // An ExcludePaths block on the Inverse path also forwards XFP + identity.
-        var conf = GenerateInverse(new PageSpeedOptions { ExcludePaths = ["^/api/"] }, nginxLoopbackPort: 5100).Conf;
-        conf.Should().Contain("location ~ \"^/api/\" {");
+        var conf = GenerateInverse(new PageSpeedOptions { ExcludePaths = ["/api/"] }, nginxLoopbackPort: 5100).Conf;
+        conf.Should().Contain("location ~* \"^/api/\" {");
         conf.Should().Contain("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;");
     }
 

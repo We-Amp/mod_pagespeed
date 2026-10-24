@@ -4,6 +4,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using WeAmp.PageSpeed.AspNetCore.Internal;
 
 namespace WeAmp.PageSpeed.AspNetCore.Options;
 
@@ -80,6 +81,35 @@ internal sealed class PageSpeedOptionsValidator : IValidateOptions<PageSpeedOpti
             errors.Add(
                 $"PageSpeed:Sidecar:ConfigValidationTimeoutMs {sc.ConfigValidationTimeoutMs} must be > 0 " +
                 "(the budget for the pre-launch nginx -t validation).");
+        }
+
+        // ExcludePaths must be expressible in BOTH matchers: the middleware's
+        // prefix/glob match and the generated nginx location. Reject every
+        // entry that is not, at startup, with the accepted syntax, instead of
+        // an opaque nginx -t failure (a glob like "*.json" used to produce an
+        // invalid location regex) or a pattern that silently never matches.
+        foreach (var pattern in options.ExcludePaths)
+        {
+            var error = ExcludePathPattern.ValidationError(pattern);
+            if (error is not null)
+            {
+                errors.Add(error);
+                continue;
+            }
+
+            // A regex-shaped entry built only from allowed characters ("/api/.*")
+            // validates and is read as a glob, where '.' is a literal dot, so it
+            // excludes far less than a regex author meant ("/api/.*" matches only
+            // paths starting "/api/."). WARN, never reject: "*.*" is a legitimate
+            // glob that contains ".*".
+            if (pattern.Contains(".*") || pattern.Contains(".+"))
+            {
+                _logger.LogWarning(
+                    "PageSpeed:ExcludePaths entry '{Pattern}' contains '.*' or '.+'. In a glob '.' is a literal " +
+                    "dot ('*' and '?' are the only wildcards), so '/api/.*' matches only paths starting '/api/.'; " +
+                    "to exclude the whole /api/ prefix, write '/api/'.",
+                    pattern);
+            }
         }
 
         if (sc.Mode == SidecarMode.Inverse)
