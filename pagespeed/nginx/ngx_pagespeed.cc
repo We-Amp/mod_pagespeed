@@ -268,6 +268,21 @@ namespace {
 
 void ps_release_base_fetch(ps_request_ctx_t* ctx);
 
+// nginx requires a content handler that does not use the request body to
+// discard it before sending its own response.  Discarding is a no-op for
+// subrequests and for a body that was already read (r->request_body set), so
+// paths that read the body (admin and beacon POSTs) need no exception.  When
+// the body cannot be discarded, the connection must not be reused; a
+// lingering close drains the leftover bytes before it is closed.
+void ps_discard_request_body(ngx_http_request_t* r) {
+  if (ngx_http_discard_request_body(r) != NGX_OK) {
+    r->keepalive = 0;
+    if (r->headers_in.content_length_n > 0 || r->headers_in.chunked) {
+      r->lingering_close = 1;
+    }
+  }
+}
+
 }  // namespace
 
 namespace ps_base_fetch {
@@ -589,7 +604,9 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
       return NGX_DONE;
     }
 
-    if (ctx->base_fetch->base_fetch_type() == kIproLookup && !status_ok) {
+    const bool ipro_lookup_miss =
+        ctx->base_fetch->base_fetch_type() == kIproLookup && !status_ok;
+    if (ipro_lookup_miss) {
       // This pass only decides: the decline below lets the server answer
       // the request itself.  headers_out may already carry fields set on
       // this request, and they must survive the miss.
@@ -625,6 +642,17 @@ ngx_int_t ps_base_fetch_handler(ngx_http_request_t* r) {
       if (ctx->base_fetch->base_fetch_type() == kHtmlTransform) {
         r->headers_out.charset = charset;
       }
+    }
+    // The module is about to answer this request itself, so the request
+    // body must be discarded before the response is sent; see
+    // ps_discard_request_body.  Two cases do not answer the request: the
+    // in-place lookup miss, which declines inside the header filter chain
+    // below so the server's own handler answers and may need the body, and
+    // the HTML transform, which only rewrites an upstream response whose
+    // content handler owns the body.
+    if (!ipro_lookup_miss &&
+        ctx->base_fetch->base_fetch_type() != kHtmlTransform) {
+      ps_discard_request_body(r);
     }
     // collect response headers from pagespeed
     rc = ctx->base_fetch->CollectHeaders(&r->headers_out);
@@ -2835,6 +2863,11 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
           server_context->statistics()->FindVariable(kIproDaemonNotifyDropped));
     }
   }
+  // Past the fall-through decline the arm is answering this request itself,
+  // so the request body must be discarded before the send; see
+  // ps_discard_request_body.  (GET and HEAD only, but a GET may still carry
+  // a body.)
+  ps_discard_request_body(r);
   ngx_int_t rc = ngx_http_send_header(r);
   if (rc == NGX_ERROR || rc > NGX_OK || r->header_only ||
       decision.not_modified) {
@@ -4136,6 +4169,11 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
     }
   }
 
+  // Both cases answer this request themselves (the decline points are
+  // past), so the request body must be discarded before the send; see
+  // ps_discard_request_body.  (No method check on these paths, so a body
+  // may be present.)
+  ps_discard_request_body(r);
   return send_out_headers_and_body(r, response_headers, output);
 }
 
@@ -4372,6 +4410,9 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
       if (!ps_webbotauth_counter_build_response(r, &response_headers, &body)) {
         return NGX_DECLINED;
       }
+      // The counter answers this request itself here, so the request body
+      // must be discarded before the send; see ps_discard_request_body.
+      ps_discard_request_body(r);
       return send_out_headers_and_body(r, response_headers, body);
     }
     case RequestRouting::kStaticContent:
