@@ -19,6 +19,7 @@ Ported from: pagespeed/system/system_tests/respect_custom_options.sh
 
 The same image is served from two directories; custom_options/ disables
 convert_jpeg_to_progressive (its .htaccess), so its rewrite is larger.
+The <Files> case scopes the same disable to a single rewritten URL's leaf.
 """
 
 import pytest
@@ -43,6 +44,49 @@ class TestRespectCustomOptions:
                 timeout=100.0,
                 detail_fn=lambda r, n=limit: f"status={r.status} bytes={len(r.body)} limit={n}",
             )
+
+
+@pytest.mark.requires_fixture("debug_conf_dirs")
+class TestFilesSectionOptions:
+    """<Files> sections apply to .pagespeed. URLs (module issue #325).
+
+    The module's map-to-storage hook serves a .pagespeed. URL through a
+    one-character stand-in leaf for httpd's directory walk; only the file
+    walk after it can match a <Files> section against the real resource
+    name. files_section/.htaccess scopes ModPagespeedDisableFilters
+    convert_jpeg_to_progressive to the exact leaf of one rewritten URL: its
+    rewrite must come out non-progressive, larger than the progressive
+    baseline of the same image under the default options.
+    """
+
+    def test_files_scoped_options_apply_to_a_pagespeed_resource(
+        self, client: PageSpeedClient, example_root: str, test_root: str
+    ):
+        baseline_url = (
+            f"{example_root}/images/xPuzzle.jpg.pagespeed.ic.fakehash.jpg"
+        )
+        client.fetch_until(
+            baseline_url,
+            condition=lambda r: r.status == 200 and len(r.body) <= 98276,
+            timeout=100.0,
+            detail_fn=lambda r: f"status={r.status} bytes={len(r.body)} limit=98276",
+        )
+        scoped_url = (
+            f"{test_root}/files_section/xPuzzle.jpg.pagespeed.ic.fakehash.jpg"
+        )
+        client.fetch_until(
+            scoped_url,
+            # Larger than the progressive baseline above: without the
+            # <Files> section this rewrite would be those same small bytes.
+            condition=lambda r: (
+                r.status == 200 and 98276 < len(r.body) <= 102902
+            ),
+            timeout=100.0,
+            detail_fn=lambda r: (
+                f"status={r.status} bytes={len(r.body)} "
+                f"expected 98276 < bytes <= 102902"
+            ),
+        )
 
 
 if __name__ == "__main__":

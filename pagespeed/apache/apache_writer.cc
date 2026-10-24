@@ -241,19 +241,19 @@ void ApacheWriter::OutputHeaders(ResponseHeaders* response_headers) {
   if (content_length_ != AsyncFetch::kContentLengthUnknown) {
     ap_set_content_length(request_, content_length_);
   }
+  // Sanitize before the headers are copied to the request: strip_cookies_
+  // asks for cookies and the other hop-by-hop headers to be dropped from
+  // proxied responses, and running it after the copy never removed anything,
+  // so a third-party origin's Set-Cookie reached browsers under the site's
+  // own domain.
+  if (strip_cookies_ && response_headers->Sanitize()) {
+    response_headers->ComputeCaching();
+  }
+
   ResponseHeadersToApacheRequest(*response_headers, request_);
   request_->status = response_headers->status_code();
   if (disable_downstream_header_filters_) {
     DisableDownstreamHeaderFilters(request_);
-  }
-
-  // TODO(jefftk): Sanitize strips cookies and a lot of other headers.  It's
-  // being run after ResponseHeadersToApacheRequest(), however, which means it's
-  // not actually doing anything.  This code is not doing what it says it does,
-  // and should be fixed, but it's possible some users like the mobilizing proxy
-  // are depending on the current behavior.
-  if (strip_cookies_ && response_headers->Sanitize()) {
-    response_headers->ComputeCaching();
   }
 
   const char* content_type =

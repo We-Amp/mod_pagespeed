@@ -45,6 +45,12 @@
 
 namespace net_instaweb {
 
+// Request note the not-found reporting (ApacheServerContext::ReportNotFound
+// helpers) leaves when it counted and logged a 404 but did not itself write
+// anything to the client: the Apache handler then returns HTTP_NOT_FOUND so
+// httpd's ap_die path, and the site's ErrorDocument, produce the response.
+extern const char kPagespeedNotFoundNote[];
+
 class ApacheConfig;
 class ApacheRequestContext;
 class ApacheRewriteDriverFactory;

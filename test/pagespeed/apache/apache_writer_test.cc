@@ -162,6 +162,9 @@ TEST_F(ApacheWriterTest, DisableDownstreamNoneToDisable) {
 
 TEST_F(ApacheWriterTest, StripCookies) {
   apache_writer_->set_strip_cookies(true);
+  // Hop-by-hop headers named in Sanitize()'s well-known list go the same
+  // way as the cookies.
+  response_headers_->Add("Connection", "close");
   apache_writer_->OutputHeaders(response_headers_.get());
   EXPECT_TRUE(apache_writer_->Write("hello world", &message_handler_));
   EXPECT_EQ(200, request_.status);
@@ -170,11 +173,12 @@ TEST_F(ApacheWriterTest, StripCookies) {
       "ap_set_content_type(text/plain) "
       "ap_rwrite(hello world)",
       MockApache::ActionsSinceLastCall());
-  // TODO(jefftk): actually strip cookies.
-  EXPECT_EQ(
-      "Content-Type: text/plain\n"
-      "Set-Cookie: test=cookie\n",
-      HeadersOutToString(&request_));
+  // The sanitizer runs before the headers are copied to the request, so the
+  // copy the client sees carries neither the cookie nor the other
+  // hop-by-hop headers.
+  EXPECT_EQ("Content-Type: text/plain\n", HeadersOutToString(&request_));
+  EXPECT_EQ(nullptr, response_headers_->Lookup1("Set-Cookie"));
+  EXPECT_EQ(nullptr, response_headers_->Lookup1("Connection"));
 }
 
 }  // namespace net_instaweb

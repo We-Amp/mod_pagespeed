@@ -50,6 +50,13 @@ class RewriteOptionsTest : public RewriteOptionsTestBase<RewriteOptions> {
 
   RewriteOptionsTest() : options_(&thread_system_) {}
 
+  void SetUp() override {
+    // Deprecation warnings are latched once per filter name per process:
+    // reset the latch so a test asserting a warning, or its absence, does
+    // not depend on the order tests run in this binary.
+    RewriteOptions::ResetDeprecatedFilterWarnings();
+  }
+
   bool NoneEnabled() {
     FilterSet s;
     return OnlyEnabled(s);
@@ -2104,6 +2111,35 @@ TEST_F(RewriteOptionsTest, DeprecatedAnalyticsFiltersWarn) {
   EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList(
       "insert_ga,make_google_analytics_async", &handler));
   EXPECT_EQ(2U, handler.messages().size());
+}
+
+TEST_F(RewriteOptionsTest, DeprecatedFilterWarningsFireOncePerProcess) {
+  // .htaccess files and PageSpeedFilters query parameters re-parse options
+  // on every request, each parse into fresh options: the deprecation warning
+  // is latched per filter name per process, not per parse, or it would grow
+  // the error log in proportion to traffic.
+  TestMessageHandler first_parse;
+  EXPECT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("mobilize", &first_parse));
+  EXPECT_EQ(1U, first_parse.messages().size());
+
+  // The same options parsed again, and a fresh options object parsed (the
+  // per-request .htaccess case), both stay silent.
+  TestMessageHandler second_parse;
+  EXPECT_TRUE(
+      options_.EnableFiltersByCommaSeparatedList("mobilize", &second_parse));
+  EXPECT_EQ(0U, second_parse.messages().size());
+  RewriteOptions fresh_options(thread_system());
+  TestMessageHandler fresh_parse;
+  EXPECT_TRUE(fresh_options.EnableFiltersByCommaSeparatedList(
+      "mobilize", &fresh_parse));
+  EXPECT_EQ(0U, fresh_parse.messages().size());
+
+  // A different deprecated filter name still warns.
+  TestMessageHandler other_filter;
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList(
+      "make_google_analytics_async", &other_filter));
+  EXPECT_EQ(1U, other_filter.messages().size());
 }
 
 TEST_F(RewriteOptionsTest, MobilizeIsADeprecatedNoOp) {

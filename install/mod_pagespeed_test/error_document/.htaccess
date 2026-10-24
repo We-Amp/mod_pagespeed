@@ -1,0 +1,3 @@
+# The module's own 404s (an unknown .pagespeed. resource under this tree)
+# must reach this ErrorDocument like any other not-found does.
+ErrorDocument 404 /mod_pagespeed_test/error_document/custom_404.html

@@ -80,10 +80,6 @@ ApacheFetch::ApacheFetch(const GoogleString& mapped_url, StringPiece debug_info,
   // We are proxying content, and the caching in the http configuration
   // should not apply; we want to use the caching from the proxy.
   apache_writer_->set_disable_downstream_header_filters(true);
-  // TODO(jefftk): ApacheWriter has a bug where it doesn't actually strip the
-  // cookies when we ask it to.  This is hard to fix because we're not sure
-  // which uses depend on cookies being passed through.
-  apache_writer_->set_strip_cookies(true);
 
   request_headers->RemoveAll(HttpAttributes::kCookie);
   request_headers->RemoveAll(HttpAttributes::kCookie2);
