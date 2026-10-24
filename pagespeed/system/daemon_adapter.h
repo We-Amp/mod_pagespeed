@@ -179,6 +179,28 @@ class DaemonAdapter {
   static constexpr int64_t kRecordCacheFirstBackoffMs = 1000;
   static constexpr int64_t kRecordCacheMaxBackoffMs = 60000;
 
+  // The volume-open lock's two timings, one per caller (VolumeOpenLock in
+  // the .cc takes the lock around every checked open of the shared cache
+  // volume, so two processes of this server cannot race a scan-open-scan
+  // against each other's stray-file cleanup).
+  //
+  // START-UP WAITS for its lock: the mirror runs once per start, not per
+  // request, and a start that waits out another process's open (an open is
+  // milliseconds; a cold multi-gigabyte mmap is tens of them) instead of
+  // racing it is a start that cannot attach to the file that process is
+  // about to remove.  Five seconds covers a web garden or a fleet of
+  // children recycling onto one volume; past it, the check answers with the
+  // retryable "not running yet" verdict, which ServingHealth() looks for
+  // again after kUnavailableRetryIntervalMs.
+  static constexpr int64_t kVolumeOpenLockStartupWaitMs = 5000;
+  // SERVING DOES NOT WAIT: RecordCache() runs on request threads (and on
+  // nginx's event loop), and the contended case is common and benign -- a
+  // server's children all starting at once.  A busy try counts no attempt
+  // of the schedule above, logs nothing, and is tried again after this
+  // quiet delay, so a fleet of workers converges on the optimizer's volume
+  // without spending their retry schedules on each other.
+  static constexpr int64_t kVolumeOpenLockBusyRetryMs = 250;
+
   // A source of monotonic milliseconds.  Injectable ONLY so the schedule
   // above can be tested by advancing a number instead of by sleeping out its
   // 363 seconds; production always uses the steady clock.
@@ -326,7 +348,9 @@ class DaemonAdapter {
   // see kRecordCacheMaxAttempts.  Returns nullptr while the arm is between
   // attempts and after it has given up, so every caller still sees the same
   // two outcomes it always did; nothing blocks and nothing sleeps on a
-  // request thread.
+  // request thread.  The volume-open lock held by another process of this
+  // server is the same quiet nullptr: it counts no attempt, logs nothing,
+  // and is tried again after kVolumeOpenLockBusyRetryMs.
   void* RecordCache();
 
   // Closes this process's volume handle if one is open, and clears it.  For
@@ -431,7 +455,17 @@ class DaemonAdapter {
   // daemon never reads, so every open in a serving process -- a process's
   // first as much as a reopen -- asks the daemon for the size it publishes
   // NOW (not the one this server read when it started) and looks at the
-  // disk first.  Only volume files of the CURRENT cache format count: the
+  // disk first.  Those looks, the open between them and the cleanup after
+  // a detected split all run under ONE LOCK PER CACHE DIRECTORY
+  // (VolumeOpenLock in the .cc), held from the scan before the open to the
+  // removal after it: a second process of this server -- another child,
+  // another virtual host's adapter, on IIS another w3wp -- cannot scan and
+  // attach while the first one's stray file is on disk.  The optimizer is
+  // not a party to that lock (it owns the volume, and the owner checks
+  // below keep its direction of every race), and the residual is a process
+  // still running the previous build during an overlapping upgrade, which
+  // takes no lock until it exits.  Only volume files of the CURRENT cache
+  // format count: the
   // daemon's purge removes its own format's files and deliberately keeps one
   // written in an earlier format, which is therefore never a candidate and
   // never in the way.  No published size, or no current-format file:
@@ -441,11 +475,12 @@ class DaemonAdapter {
   // nothing here can tell the two apart; a first open tolerates several, as
   // the start-up check does after a resize.
   //
-  // After the open it looks once more.  If a volume file has appeared or
-  // gone, or a file is no longer the same file, the open may itself have
-  // created a volume file: the handle is closed without ever having been
-  // handed out, in-place optimization is off in this process until it ends,
-  // and one error line names the files.  What happens to a file that
+  // After the open it looks once more, still under the lock.  If a volume
+  // file has appeared or gone, or a file is no longer the same file, the
+  // open may itself have created a volume file: the handle is closed
+  // without ever having been handed out, in-place optimization is off in
+  // this process until it ends, and one error line names the files.  What
+  // happens to a file that
   // APPEARED depends on the start this process had.  A start whose mirror
   // ran (Resolve() reached its open) LEAVES EVERY FILE WHERE IT IS: a file
   // left that way then keeps the other processes of the server from
@@ -571,6 +606,19 @@ class DaemonAdapter {
   // Overrides the probe verdict latch interval.  Tests only.
   static void SetSocketVerdictLatchMsForTesting(int64_t latch_ms);
 
+  // Makes every volume-open lock acquisition answer "unsupported"
+  // process-wide, so opens run exactly as they did before the lock
+  // existed.  Tests only.
+  static void SetVolumeOpenLockDisabledForTesting(bool disabled);
+
+  // Holds the volume-open lock for `volume_path` in *out, playing a
+  // sibling process or thread that is between its scan and its cleanup.
+  // Release by resetting the slot; the slot type is opaque because the
+  // lock's class lives in an anonymous namespace in the .cc.  Tests only.
+  using VolumeOpenLockSlot = std::shared_ptr<void>;
+  static bool HoldVolumeOpenLockForTesting(StringPiece volume_path,
+                                           VolumeOpenLockSlot* out);
+
  private:
   static bool SocketAnswers(StringPiece path, GoogleString* error);
 
@@ -648,6 +696,10 @@ class DaemonAdapter {
   // another one's history.
   int record_cache_attempts_ = 0;
   int64_t record_cache_next_attempt_ms_ = 0;
+  // When RecordCache() may next try the volume-open lock after another
+  // process of this server held it: a quiet, uncounted window, kept apart
+  // from the schedule above because contention is not a condition.
+  int64_t open_lock_retry_ms_ = 0;
   bool record_cache_gave_up_ = false;
   // Set by CloseRecordCache(), guarded by the same mutex.  Final: a closed
   // adapter never reopens.  Deliberately not the gave-up latch above.

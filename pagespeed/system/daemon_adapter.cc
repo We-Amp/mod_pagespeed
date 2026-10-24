@@ -44,6 +44,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -201,6 +202,14 @@ void AppendDaemonDeadlineMessage(GoogleString* error,
             " seconds -- it may be stopped or overloaded.");
 }
 
+// The volume-open lock's side file, named here so the scans that skip it
+// and the lock that creates it (Windows only; POSIX flocks the directory
+// itself and creates nothing, see VolumeOpenLock below) cannot drift
+// apart.  The leading dot keeps it out of every stem-matched volume scan;
+// the scans skip it by name as well, because a directory-shaped configured
+// path counts every regular file inside.
+const char kVolumeOpenLockFileName[] = ".pagespeed-module-open.lock";
+
 #ifndef _WIN32
 void ScanDirectory(const GoogleString& dir, StringPiece stem,
                    std::vector<GoogleString>* out) {
@@ -211,6 +220,12 @@ void ScanDirectory(const GoogleString& dir, StringPiece stem,
   while (struct dirent* e = readdir(d)) {
     const StringPiece name(e->d_name);
     if (name == "." || name == "..") {
+      continue;
+    }
+    // The open lock's side file, never a volume in either scan shape
+    // (nothing creates it on this platform; the skip keeps the two
+    // listers symmetric).
+    if (name == kVolumeOpenLockFileName) {
       continue;
     }
     if (!stem.empty() && !IsVolumeNameFor(name, stem)) {
@@ -344,6 +359,12 @@ void ScanDirectory(const GoogleString& dir, StringPiece stem,
     // A name that does not survive the UTF-8 round trip cannot match a
     // UTF-8 stem and is skipped rather than mangled.
     if (!WideToUtf8(data.cFileName, &name)) {
+      continue;
+    }
+    // The open lock's own side file: never a volume, in either scan shape.
+    // A directory-shaped configured path counts every regular file inside,
+    // so this skip is what keeps the lock file out of that count.
+    if (name == kVolumeOpenLockFileName) {
       continue;
     }
     if (!stem.empty() && !IsVolumeNameFor(name, stem)) {
@@ -502,12 +523,17 @@ RemoveOutcome RemoveVolumeFile(const GoogleString& volume_path,
     os_text.pop_back();
   }
   if (error == ERROR_SHARING_VIOLATION) {
-    // A sharing violation on a file this module has itself closed almost
-    // certainly means the optimizer holds it: its live volume, not ours.
-    // Same advice as the POSIX owner refusal -- leave it in place.
+    // A sharing violation on a file this module has itself closed means
+    // another process holds it.  The opens of this build serialize under
+    // the open lock, so a sibling w3wp of this build cannot be the holder
+    // any more: what remains is the optimizer's live volume, or a web
+    // server process still running the previous build, which takes no
+    // lock.  Both want the same advice the POSIX owner refusal gives:
+    // leave it in place.
     StrAppend(why, full,
               " was left in place: another process holds it open, most "
-              "likely the optimizer worker's new volume");
+              "likely the optimizer worker's new volume, or a web server "
+              "process that has not been restarted onto this version yet");
     return RemoveOutcome::kHeldByOtherUser;
   }
   StrAppend(why, full, ": ", os_text);
@@ -588,8 +614,13 @@ struct CreatedVolumeCleanup {
 // made the file and this open attached to it: the check refuses either
 // way -- it saw a file appear -- and the removal is what must not then
 // take the daemon's volume (the owner refusal in RemoveVolumeFile keeps
-// that one on disk).  No lock is added: coordinating two processes' opens
-// of a volume the daemon owns would invent a protocol neither side has.
+// that one on disk).  THE MODULE'S OWN PROCESSES no longer race each other
+// here: every checked open this module makes runs under VolumeOpenLock
+// below, so a sibling process cannot scan and attach while this removal's
+// stray is on disk.  The daemon is not a party to that lock (it owns the
+// volume and its own locks), so its direction of the race keeps the owner
+// refusal; and a sibling still running the previous build during an
+// overlapping upgrade takes no lock either, which ends when it exits.
 //
 // The claim the caller makes is only as strong as the scan that detected
 // the split, so the scan has the last word -- in BOTH directions.  A name
@@ -722,6 +753,18 @@ void AppendCreatedVolumeCleanupSentences(const CreatedVolumeCleanup& cleanup,
                 ": a start that finds it attaches to it without refusing. ");
     }
   }
+#ifndef _WIN32
+  // The optimizer refuses to start beside a volume-shaped file another user
+  // owns, so a stray this module leaves behind does not merely wait to be
+  // attached to: it also keeps the optimizer's next start from happening
+  // at all.  POSIX only, because that refusal is an ownership check.
+  if (!cleanup.stuck.empty() || !cleanup.unverified.empty()) {
+    StrAppend(out,
+              "Until it is removed, the optimizer worker will also refuse "
+              "to start, because it does not start beside a volume file "
+              "another user owns. ");
+  }
+#endif
 }
 
 // The cache format number in a volume file's name: the digits that follow
@@ -847,6 +890,267 @@ bool ReadVolumeFileIdentity(const GoogleString& volume_path,
   identity->file = static_cast<uint64_t>(st.st_ino);
   return true;
 #endif
+}
+
+// The directory the open lock is taken on: the configured path itself when
+// it names a directory, its parent when it names the stem the volume sits
+// beside -- the same two shapes the volume scans read.
+GoogleString VolumeOpenLockDir(const GoogleString& volume_path) {
+  if (VolumePathIsDirectory(volume_path)) {
+    return volume_path;
+  }
+#ifdef _WIN32
+  const size_t slash = volume_path.find_last_of("/\\");
+#else
+  const size_t slash = volume_path.find_last_of('/');
+#endif
+  if (slash == GoogleString::npos) {
+    return ".";
+  }
+  if (slash == 0) {
+#ifdef _WIN32
+    return "\\";
+#else
+    return "/";
+#endif
+  }
+  return volume_path.substr(0, slash);
+}
+
+// Whether Acquire answers kUnsupported unconditionally: the one way to
+// replay the pre-lock behaviour against the same adapter logic.  Relaxed,
+// because the tests set it before the threads that read it exist.
+std::atomic<bool> g_volume_open_lock_disabled_for_testing{false};
+
+// ONE LOCK AROUND EVERY CHECKED VOLUME OPEN THIS MODULE MAKES.  The race it
+// closes: between one process's open and its removal of the stray (split)
+// file that open created, a sibling process of the same web server --
+// another child, another virtual host's adapter, on IIS another w3wp --
+// runs its own scan, lists the stray as an ordinary candidate, opens it
+// and attaches, and then serves from a file nothing else will ever read
+// until it restarts.  Holding one lock per cache directory from the scan
+// before the open through the removal after it makes that whole window
+// indivisible: while one process's stray is on disk, no other process of
+// this build can see it.
+//
+// WHAT THE LOCK IS, and why not a file named after the volume: any name
+// built from the volume stem is one the scans count and the removal
+// removes, so a lock file of the module's own creating would be a stray by
+// its own definition.  POSIX flocks the cache DIRECTORY (O_RDONLY open,
+// no file created, no write permission needed); Windows has no directory
+// locks, so it locks byte 0 of a hidden side file named
+// kVolumeOpenLockFileName above.  Both conflict between two opens in one
+// process as well as across processes, so sibling ADAPTERS serialize too.
+//
+// WHO TAKES IT AND WHO DOES NOT.  Every module open of the volume --
+// Resolve()'s start-up mirror and RecordCache()'s serving open, checked
+// and unchecked alike -- runs under it, and always BEFORE the cache
+// library's own init lock, never after.  The optimizer daemon never takes
+// it: it owns the volume and its own locks, the daemon-versus-module
+// races keep the owner check in RemoveVolumeFile, and no lock order
+// between the two products exists to invert.
+//
+// THE DEGRADES.  A filesystem with no usable flock (some NFS mounts) or a
+// cache directory the lock file cannot be created in answers
+// kUnsupported: the open proceeds exactly as it did before the lock
+// existed, with one info line per process.  A busy lock is not an error:
+// the start-up path waits it out (bounded by the caller), and the serving
+// path backs off quietly.  A process still running the previous build
+// during an overlapping upgrade takes no lock at all; that residual ends
+// when it exits.
+class VolumeOpenLock {
+ public:
+  enum class Result : std::uint8_t {
+    kHeld,         // *out holds the lock until it is destroyed
+    kBusy,         // held elsewhere; wait_ms, if any, is spent
+    kUnsupported,  // no usable lock here; proceed without one
+  };
+
+  // Takes the lock for `volume_path`'s directory, polling every
+  // kVolumeOpenLockPollMs up to `wait_ms` (0 means one try, no wait, and
+  // the clock is never asked).  `now_ms` is the caller's monotonic clock,
+  // so a test can time the wait out without sleeping it out.
+  static Result Acquire(const GoogleString& volume_path, int64_t wait_ms,
+                        const DaemonAdapter::MonotonicClock& now_ms,
+                        VolumeOpenLock* out);
+
+  // Closing the descriptor or handle is the whole release: on POSIX close
+  // drops the flock with it, on Windows the byte-range lock dies with the
+  // handle, and nothing is left on disk for POSIX at all.
+  ~VolumeOpenLock();
+  VolumeOpenLock() = default;
+  VolumeOpenLock(const VolumeOpenLock&) = delete;
+  VolumeOpenLock& operator=(const VolumeOpenLock&) = delete;
+
+ private:
+#ifdef _WIN32
+  HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+  int fd_ = -1;
+#endif
+};
+
+// How often a waiting acquisition retries the non-blocking take.
+constexpr int64_t kVolumeOpenLockPollMs = 10;
+
+VolumeOpenLock::~VolumeOpenLock() {
+#ifdef _WIN32
+  if (handle_ != INVALID_HANDLE_VALUE) {
+    CloseHandle(handle_);
+  }
+#else
+  if (fd_ >= 0) {
+    close(fd_);
+  }
+#endif
+}
+
+#ifndef _WIN32
+VolumeOpenLock::Result VolumeOpenLock::Acquire(
+    const GoogleString& volume_path, int64_t wait_ms,
+    const DaemonAdapter::MonotonicClock& now_ms, VolumeOpenLock* out) {
+  if (g_volume_open_lock_disabled_for_testing.load(std::memory_order_relaxed)) {
+    return Result::kUnsupported;
+  }
+  // O_CLOEXEC so no forked child (Apache children, nginx workers) inherits
+  // a held lock through an exec -- and acquiring and releasing inside one
+  // call means the parent holds nothing at fork time anyway.
+  const int fd = open(VolumeOpenLockDir(volume_path).c_str(),
+                      O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (fd < 0) {
+    // No directory to lock, or no permission to open it: the permission
+    // failures fail louder elsewhere, and an arm that still optimizes
+    // without coordination beats one that refuses to optimize.
+    return Result::kUnsupported;
+  }
+  int64_t deadline_ms = 0;
+  bool deadline_known = false;
+  for (;;) {
+    if (flock(fd, LOCK_EX | LOCK_NB) == 0) {
+      out->fd_ = fd;
+      return Result::kHeld;
+    }
+    const int error = errno;
+    if (error != EWOULDBLOCK && error != EAGAIN && error != EINTR) {
+      // ENOLCK, EOPNOTSUPP, EINVAL and friends: this filesystem offers no
+      // lock here, so the caller proceeds unlocked.
+      break;
+    }
+    if (wait_ms <= 0) {
+      close(fd);
+      return Result::kBusy;
+    }
+    if (!deadline_known) {
+      // The deadline is computed on the first BUSY try only, so a
+      // wait_ms of 0 never asks the clock at all.
+      deadline_known = true;
+      deadline_ms = now_ms() + wait_ms;
+    } else if (now_ms() >= deadline_ms) {
+      close(fd);
+      return Result::kBusy;
+    }
+    usleep(static_cast<useconds_t>(1000 * kVolumeOpenLockPollMs));
+  }
+  close(fd);
+  return Result::kUnsupported;
+}
+#else
+VolumeOpenLock::Result VolumeOpenLock::Acquire(
+    const GoogleString& volume_path, int64_t wait_ms,
+    const DaemonAdapter::MonotonicClock& now_ms, VolumeOpenLock* out) {
+  if (g_volume_open_lock_disabled_for_testing.load(std::memory_order_relaxed)) {
+    return Result::kUnsupported;
+  }
+  const GoogleString dir = VolumeOpenLockDir(volume_path);
+  const GoogleString file =
+      (!dir.empty() && (dir.back() == '\\' || dir.back() == '/'))
+          ? StrCat(dir, kVolumeOpenLockFileName)
+          : StrCat(dir, "\\", kVolumeOpenLockFileName);
+  std::wstring wide;
+  if (!Utf8ToWide(file, &wide)) {
+    return Result::kUnsupported;
+  }
+  // Every kind of sharing: the file is only a lock target, and an
+  // operator's delete or a backup must never be blocked by it.  HIDDEN,
+  // like every leading-dot side file on this platform.
+  HANDLE handle =
+      CreateFileW(wide.c_str(), GENERIC_READ | GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_HIDDEN, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    // No directory, or an identity that cannot create the file there:
+    // today's unlocked behaviour rather than a dead arm.
+    return Result::kUnsupported;
+  }
+  int64_t deadline_ms = 0;
+  bool deadline_known = false;
+  for (;;) {
+    // Byte 0 only, exclusive, never blocking: a byte-range lock on a
+    // handle conflicts with every other handle of the file, including a
+    // second one in this same process.
+    OVERLAPPED overlapped;
+    ZeroMemory(&overlapped, sizeof(overlapped));
+    if (LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                   0, 1, 0, &overlapped) != 0) {
+      out->handle_ = handle;
+      return Result::kHeld;
+    }
+    if (GetLastError() != ERROR_LOCK_VIOLATION) {
+      break;
+    }
+    if (wait_ms <= 0) {
+      CloseHandle(handle);
+      return Result::kBusy;
+    }
+    if (!deadline_known) {
+      deadline_known = true;
+      deadline_ms = now_ms() + wait_ms;
+    } else if (now_ms() >= deadline_ms) {
+      CloseHandle(handle);
+      return Result::kBusy;
+    }
+    Sleep(static_cast<DWORD>(kVolumeOpenLockPollMs));
+  }
+  CloseHandle(handle);
+  return Result::kUnsupported;
+}
+#endif  // _WIN32
+
+// The one-line note for a cache directory whose open lock cannot be taken
+// at all: the open proceeds exactly as before the lock existed, and the
+// operator learns that coordination is off rather than wondering.  Both
+// call sites share this, and ShouldAnnounce keeps the two of them to one
+// line per process.
+void AnnounceUnsupportedVolumeOpenLock(MessageHandler* handler,
+                                       const GoogleString& volume_path) {
+  if (handler == nullptr) {
+    return;
+  }
+  // Which of the three it is, so the line does not read as a lock fault
+  // when the directory is simply not there yet or not reachable.
+  const char* cause = "this filesystem does not support the lock";
+  switch (DaemonAdapter::VolumeDirAccess(volume_path)) {
+    case DaemonAdapter::DirAccess::kAbsent:
+      cause = "the cache directory does not exist";
+      break;
+    case DaemonAdapter::DirAccess::kDenied:
+      cause = "the cache directory is not accessible to this process";
+      break;
+    case DaemonAdapter::DirAccess::kReadable:
+      break;
+  }
+  const GoogleString message = StrCat(
+      "cannot coordinate opens of the optimizer worker's cache volume at ",
+      volume_path,
+      " between this server's processes, because no lock can be taken on "
+      "that cache directory (",
+      cause,
+      "); in-place optimization still runs, and a "
+      "process starting exactly as another discards a cache file it "
+      "created could attach to that file");
+  if (ShouldAnnounce(message)) {
+    handler->Message(kInfo, "%s", message.c_str());
+  }
 }
 
 // Probe verdicts already reached in this process, keyed by the socket path
@@ -1154,6 +1458,31 @@ void* DaemonAdapter::RecordCache() {
     // wrong -- it is what keeps a durable failure from costing an open
     // syscall, and a log line, on every request.
     return nullptr;
+  }
+  if (now_ms < open_lock_retry_ms_) {
+    // Inside the open lock's quiet window: another process of this server
+    // is between its scan and its own stray-file cleanup, and this
+    // process's open waits it out rather than racing it.  Silent and
+    // uncounted on purpose -- contention between a server's own children
+    // is not a condition, so it must spend no attempt of the schedule and
+    // print no line (contrast the backoff above, which is a condition).
+    return nullptr;
+  }
+  // THE OPEN LOCK, one try, no waiting: this runs on request threads (and
+  // on nginx's event loop), so a held lock answers nullptr at once and is
+  // tried again after kVolumeOpenLockBusyRetryMs.  Held, it spans the scan
+  // below, the open and the scan after it, so a sibling process of this
+  // server cannot attach to a stray file this open is about to remove (see
+  // VolumeOpenLock); RAII releases it on every way out of this function.
+  VolumeOpenLock open_lock;
+  const VolumeOpenLock::Result open_lock_result =
+      VolumeOpenLock::Acquire(volume_path_, 0, monotonic_clock_, &open_lock);
+  if (open_lock_result == VolumeOpenLock::Result::kBusy) {
+    open_lock_retry_ms_ = now_ms + kVolumeOpenLockBusyRetryMs;
+    return nullptr;
+  }
+  if (open_lock_result == VolumeOpenLock::Result::kUnsupported) {
+    AnnounceUnsupportedVolumeOpenLock(handler_, volume_path_);
   }
   ++record_cache_attempts_;
 
@@ -1478,6 +1807,27 @@ void DaemonAdapter::SetSocketVerdictLatchMsForTesting(int64_t latch_ms) {
   SocketVerdicts* verdicts = socket_verdicts();
   std::lock_guard<std::mutex> lock(verdicts->mu);
   verdicts->latch_ms = latch_ms;
+}
+
+void DaemonAdapter::SetVolumeOpenLockDisabledForTesting(bool disabled) {
+  g_volume_open_lock_disabled_for_testing.store(disabled,
+                                                std::memory_order_relaxed);
+}
+
+bool DaemonAdapter::HoldVolumeOpenLockForTesting(StringPiece volume_path,
+                                                 VolumeOpenLockSlot* out) {
+  // A zero wait never asks the clock, so the production steady clock is
+  // passed without a thought: the helper either holds at once or not at
+  // all.
+  const GoogleString path(volume_path.data(), volume_path.size());
+  VolumeOpenLock* lock = new VolumeOpenLock;
+  if (VolumeOpenLock::Acquire(path, 0, MonotonicNowMs, lock) ==
+      VolumeOpenLock::Result::kHeld) {
+    out->reset(lock);
+    return true;
+  }
+  delete lock;
+  return false;
 }
 
 bool DaemonAdapter::ApplyInheritedSizing(PsCacheConfig* config,
@@ -1978,131 +2328,161 @@ DaemonStartupStatus DaemonAdapter::Resolve(GoogleString* error) {
     return DaemonStartupStatus::kOk;
   }
 
-  const std::vector<GoogleString> before = VolumeFiles(volume_path_);
-  if (before.empty()) {
-    if (VolumeDirAccess(volume_path_) == DirAccess::kDenied) {
-      // The scan found nothing because it was not ALLOWED to look: the cache
-      // directory is group-only (2770 pagespeed:pagespeed) since the
-      // privilege drop.  Reported apart from the absent case below, because
-      // "start the daemon" is the wrong fix for this one.
+  // THE OPEN LOCK: held from the scan below through the removal after a
+  // refused open, so no sibling process of this server -- another child,
+  // another virtual host's adapter, on IIS another w3wp -- can scan, open
+  // and attach while a stray this open is about to remove is on disk (see
+  // VolumeOpenLock above).  The wait is bounded: five seconds covers a web
+  // garden or a fleet of children recycling onto one volume, and a timeout
+  // is the one verdict the serving recheck tries again after its interval.
+  {
+    VolumeOpenLock open_lock;
+    const VolumeOpenLock::Result open_lock_result =
+        VolumeOpenLock::Acquire(volume_path_, kVolumeOpenLockStartupWaitMs,
+                                monotonic_clock_, &open_lock);
+    if (open_lock_result == VolumeOpenLock::Result::kBusy) {
+      unavailable_is_retryable_ = true;
       StrAppend(error,
-                "in-place optimization is OFF: cannot look inside the "
-                "optimizer worker's cache directory at ",
-                volume_path_, ": permission denied.", kGroupMembershipHint);
+                "in-place optimization is OFF: another process of this "
+                "server is opening the optimizer worker's cache volume; "
+                "in-place optimization will be retried");
       return DaemonStartupStatus::kOk;
     }
-    // The daemon published a size but its volume file is not there.  Creating
-    // it is exactly what must not happen: the daemon is the volume's owner and
-    // a volume we invent is one nothing else reads.  Also a race time can fix
-    // -- the daemon may not have finished starting -- so the serving recheck
-    // retries this exit too.
-    unavailable_is_retryable_ = true;
-    StrAppend(error,
-              "in-place optimization is OFF: the optimizer worker's cache "
-              "volume does not exist yet at ",
-              volume_path_,
-              ". This module never creates it — start the worker first.");
-    return DaemonStartupStatus::kOk;
-  }
-  if (before.size() > 1) {
-    // Several volume files is the EXPECTED steady state after an operator
-    // changes the daemon's cache size: the filename encodes the geometry and
-    // the daemon does not remove the file it used to use, so the old one is
-    // simply left behind.  Refusing to start here would turn a routine resize
-    // into a server that will not come up.
-    //
-    // It is also not the failure this check exists for.  That failure is
-    // SILENT -- a module quietly using a different file from the daemon --
-    // and this state is neither silent nor ambiguous: the daemon published
-    // which size it is using, so the inherited size names exactly one of
-    // these files, and the attach check below proves we landed on the file
-    // named for the published size.  That is the daemon's file unless
-    // something other than the daemon left a file of that name.  So: say
-    // something an operator can act on, and carry on.  (A start the mirror
-    // below refuses removes the file its own open created, so a refused
-    // start does not add to this state unless its removal fails, and then
-    // its message says so.)
-    extra_volume_warning_ = StrCat(
-        "the optimizer worker's cache directory holds more than one cache "
-        "volume (",
-        JoinCollection(before, ", "),
-        "). Only the one matching the size the worker publishes is in use; "
-        "the others are left over from an earlier cache size and are just "
-        "occupying disk. They can be removed while the worker is stopped.");
-  }
+    if (open_lock_result == VolumeOpenLock::Result::kUnsupported) {
+      AnnounceUnsupportedVolumeOpenLock(handler_, volume_path_);
+    }
 
-  // Only now, with a known size and exactly one volume on disk, is it safe to
-  // open — and even then the result is CHECKED rather than assumed.
-  alignas(std::max_align_t) unsigned char
-      config_storage[kCacheConfigProbeBytes] = {};
-  PsCacheConfig* config = reinterpret_cast<PsCacheConfig*>(config_storage);
-  abi_->CacheConfigInit(config);
-  if (!ApplyInheritedSizing(config, inherited)) {
-    StrAppend(error,
-              "in-place optimization is OFF: the optimizer worker reported an "
-              "unusable cache volume size");
-    return DaemonStartupStatus::kOk;
-  }
-  config->volume_path = volume_path_.c_str();
+    const std::vector<GoogleString> before = VolumeFiles(volume_path_);
+    if (before.empty()) {
+      if (VolumeDirAccess(volume_path_) == DirAccess::kDenied) {
+        // The scan found nothing because it was not ALLOWED to look: the cache
+        // directory is group-only (2770 pagespeed:pagespeed) since the
+        // privilege drop.  Reported apart from the absent case below, because
+        // "start the daemon" is the wrong fix for this one.
+        StrAppend(error,
+                  "in-place optimization is OFF: cannot look inside the "
+                  "optimizer worker's cache directory at ",
+                  volume_path_, ": permission denied.", kGroupMembershipHint);
+        return DaemonStartupStatus::kOk;
+      }
+      // The daemon published a size but its volume file is not there.
+      // Creating it is exactly what must not happen: the daemon is the
+      // volume's owner and a volume we invent is one nothing else reads.
+      // Also a race time can fix -- the daemon may not have finished
+      // starting -- so the serving recheck retries this exit too.
+      unavailable_is_retryable_ = true;
+      StrAppend(error,
+                "in-place optimization is OFF: the optimizer worker's cache "
+                "volume does not exist yet at ",
+                volume_path_,
+                ". This module never creates it — start the worker first.");
+      return DaemonStartupStatus::kOk;
+    }
+    if (before.size() > 1) {
+      // Several volume files is the EXPECTED steady state after an operator
+      // changes the daemon's cache size: the filename encodes the geometry and
+      // the daemon does not remove the file it used to use, so the old one is
+      // simply left behind.  Refusing to start here would turn a routine resize
+      // into a server that will not come up.
+      //
+      // It is also not the failure this check exists for.  That failure is
+      // SILENT -- a module quietly using a different file from the daemon --
+      // and this state is neither silent nor ambiguous: the daemon published
+      // which size it is using, so the inherited size names exactly one of
+      // these files, and the attach check below proves we landed on the file
+      // named for the published size.  That is the daemon's file unless
+      // something other than the daemon left a file of that name.  So: say
+      // something an operator can act on, and carry on.  (A start the mirror
+      // below refuses removes the file its own open created, so a refused
+      // start does not add to this state unless its removal fails, and then
+      // its message says so.)
+      extra_volume_warning_ = StrCat(
+          "the optimizer worker's cache directory holds more than one cache "
+          "volume (",
+          JoinCollection(before, ", "),
+          "). Only the one matching the size the worker publishes is in use; "
+          "the others are left over from an earlier cache size and are just "
+          "occupying disk. They can be removed while the worker is stopped.");
+    }
 
-  void* cache = nullptr;
-  const int open_error = abi_->CacheOpen(config, &cache);
-  if (open_error != kPsOk) {
-    StrAppend(error,
-              "in-place optimization is OFF: cannot open the optimizer "
-              "worker's cache volume at ",
-              volume_path_, ": ", DescribeDaemonError(abi_.get(), open_error));
-    return DaemonStartupStatus::kOk;
-  }
-  // The mirror's open has run, so this adapter's own start-up check is the
-  // cleanup that owns the files its opens create: a serving process's
-  // checked open leaves what appears where it is (see RecordCache).
-  startup_mirror_ran_ = true;
-  // The probe is all this check needs the volume for.  Holding it open across
-  // the server's fork into worker processes would hand every child a handle it
-  // never asked for.
-  abi_->CacheClose(cache);
+    // Only now, with a known size and exactly one volume on disk, is it safe to
+    // open — and even then the result is CHECKED rather than assumed.
+    alignas(std::max_align_t) unsigned char
+        config_storage[kCacheConfigProbeBytes] = {};
+    PsCacheConfig* config = reinterpret_cast<PsCacheConfig*>(config_storage);
+    abi_->CacheConfigInit(config);
+    if (!ApplyInheritedSizing(config, inherited)) {
+      StrAppend(
+          error,
+          "in-place optimization is OFF: the optimizer worker reported an "
+          "unusable cache volume size");
+      return DaemonStartupStatus::kOk;
+    }
+    config->volume_path = volume_path_.c_str();
 
-  // Did opening at the inherited size land on the daemon's file, or make a new
-  // one?  This is the mirror.  It catches a size that disagrees with the
-  // volume actually on disk, and it also catches any OTHER geometry input
-  // diverging — which matters, because the size is the only one of them the
-  // daemon publishes.
-  const std::vector<GoogleString> after = VolumeFiles(volume_path_);
-  if (after.size() > before.size()) {
-    // A refused start removes what APPEARED between its two scans: left in
-    // place, that file would let the next start of this server attach to
-    // it and come up healthy on a cache the daemon never reads -- the
-    // silent split this refusal exists to prevent.  RemoveCreatedVolumeFiles
-    // owns the how (and the POSIX owner refusal that keeps the daemon's own
-    // new volume on disk).
-    const std::vector<GoogleString> created = NamesThatAppeared(before, after);
-    const CreatedVolumeCleanup cleanup =
-        RemoveCreatedVolumeFiles(volume_path_, created, before);
-    StrAppend(error,
-              "refusing to start: opening the optimizer worker's cache volume "
-              "at the size the worker published (",
-              Integer64ToString(static_cast<int64>(inherited)),
-              " bytes) created a SECOND volume file (",
-              JoinCollection(created, ", "), ") beside the worker's (",
-              JoinCollection(before, ", "),
-              ") instead of attaching to it. The two would share nothing and "
-              "each run a permanently cold cache, with no error to show for "
-              "it. ");
-    AppendCreatedVolumeCleanupSentences(cleanup, "This start", "this start",
-                                        "before this server starts again",
-                                        error);
-    StrAppend(error,
-              "The usual cause is start order during an upgrade: the "
-              "optimizer worker has a new on-disk cache format and has not "
-              "restarted onto it yet, so its new volume does not exist for "
-              "this server to attach to. Start or restart the optimizer "
-              "worker, let it create its volume, then start this server. If "
-              "this server still refuses after that, the sizes genuinely "
-              "disagree: install a module and optimizer package pair that "
-              "agree.");
-    return DaemonStartupStatus::kRefuseToStart;
-  }
+    void* cache = nullptr;
+    const int open_error = abi_->CacheOpen(config, &cache);
+    if (open_error != kPsOk) {
+      StrAppend(error,
+                "in-place optimization is OFF: cannot open the optimizer "
+                "worker's cache volume at ",
+                volume_path_, ": ",
+                DescribeDaemonError(abi_.get(), open_error));
+      return DaemonStartupStatus::kOk;
+    }
+    // The mirror's open has run, so this adapter's own start-up check is the
+    // cleanup that owns the files its opens create: a serving process's
+    // checked open leaves what appears where it is (see RecordCache).
+    startup_mirror_ran_ = true;
+    // The probe is all this check needs the volume for.  Holding it open
+    // across the server's fork into worker processes would hand every child
+    // a handle it never asked for.
+    abi_->CacheClose(cache);
+
+    // Did opening at the inherited size land on the daemon's file, or make
+    // a new one?  This is the mirror.  It catches a size that disagrees
+    // with the volume actually on disk, and it also catches any OTHER
+    // geometry input diverging — which matters, because the size is the
+    // only one of them the daemon publishes.
+    const std::vector<GoogleString> after = VolumeFiles(volume_path_);
+    if (after.size() > before.size()) {
+      // A refused start removes what APPEARED between its two scans: left in
+      // place, that file would let the next start of this server attach to
+      // it and come up healthy on a cache the daemon never reads -- the
+      // silent split this refusal exists to prevent.  RemoveCreatedVolumeFiles
+      // owns the how (and the POSIX owner refusal that keeps the daemon's own
+      // new volume on disk).
+      const std::vector<GoogleString> created =
+          NamesThatAppeared(before, after);
+      const CreatedVolumeCleanup cleanup =
+          RemoveCreatedVolumeFiles(volume_path_, created, before);
+      StrAppend(
+          error,
+          "refusing to start: opening the optimizer worker's cache volume "
+          "at the size the worker published (",
+          Integer64ToString(static_cast<int64>(inherited)),
+          " bytes) created a SECOND volume file (",
+          JoinCollection(created, ", "), ") beside the worker's (",
+          JoinCollection(before, ", "),
+          ") instead of attaching to it. The two would share nothing and "
+          "each run a permanently cold cache, with no error to show for "
+          "it. ");
+      AppendCreatedVolumeCleanupSentences(cleanup, "This start", "this start",
+                                          "before this server starts again",
+                                          error);
+      StrAppend(error,
+                "The usual cause is start order during an upgrade: the "
+                "optimizer worker has a new on-disk cache format and has not "
+                "restarted onto it yet, so its new volume does not exist for "
+                "this server to attach to. Start or restart the optimizer "
+                "worker, let it create its volume, then start this server. If "
+                "this server still refuses after that, the sizes genuinely "
+                "disagree: install a module and optimizer package pair that "
+                "agree.");
+      return DaemonStartupStatus::kRefuseToStart;
+    }
+
+  }  // open lock; SocketAnswers needs no lock
 
   if (!SocketAnswers(socket_path_, &why)) {
     // The daemon was not running when the check ran -- the one verdict the
