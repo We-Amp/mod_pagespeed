@@ -540,8 +540,8 @@ jobs:
   # ---------------------------------------------------------------------
   # The optimizer packages the module is released with (the serving pair).
   # Fetched from the public optimizer release named by the pin file, verified
-  # against the pin (the hash of the release's SHA256SUMS, then every file
-  # against the sums). Anonymous: the release is public. The job's own
+  # against the pin (the hash of the release's SHA256SUMS, then every fetched
+  # package against the sums). Anonymous: the release is public. The job's own
   # read-only token is sent to the API endpoint only, to avoid the anonymous
   # rate limit of shared runner addresses.
   # ---------------------------------------------------------------------
@@ -638,25 +638,43 @@ jobs:
           python3 - <<'PY'
           import json, sys
           doc = json.load(open("optimizer-release.json"))
-          urls = [a["browser_download_url"] for a in doc.get("assets", [])]
-          if not urls:
-              sys.exit("::error::the pinned optimizer release has no assets")
+          urls = {a["name"]: a["browser_download_url"] for a in doc.get("assets", [])}
+          if "SHA256SUMS" not in urls:
+              sys.exit("::error::the pinned optimizer release has no SHA256SUMS asset")
           with open("optimizer-assets.txt", "w") as fh:
-              fh.write("\n".join(urls) + "\n")
+              fh.write("\n".join(f"{n} {u}" for n, u in sorted(urls.items())) + "\n")
           PY
           cd optimizer-dist
-          while IFS= read -r url; do
-            curl -fsSL --retry 5 --retry-all-errors -O "$url"
-          done < ../optimizer-assets.txt
+          # SHA256SUMS first: the pin fixes its bytes, and it then names the
+          # package files to fetch. The release may carry other files (a
+          # signature, metadata); they are not module release files and are
+          # not fetched.
+          sums_url=$(awk '$1 == "SHA256SUMS" { print $2 }' ../optimizer-assets.txt)
+          curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$sums_url"
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
-          # The downloaded set must be exactly the set SHA256SUMS lists. A
-          # signed optimizer release also carries SHA256SUMS.asc; the pin above
-          # already fixes the bytes of SHA256SUMS, so the signature is not
-          # part of the set.
-          diff <(awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS | LC_ALL=C sort) \
-               <(find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name SHA256SUMS.asc -printf '%f\n' | LC_ALL=C sort) \
-            || { echo "::error::the downloaded files differ from the files SHA256SUMS lists"; exit 1; }
-          sha256sum -c SHA256SUMS
+          # The package names the module needs, picked by name from the
+          # verified list: every deb, every rpm and the Windows zip.
+          awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS \
+            | { grep -E -e '^[A-Za-z0-9._+~-]+(\.deb|\.rpm|-win-x64\.zip)$' || true; } \
+            | LC_ALL=C sort -u > ../optimizer-wanted.txt
+          for kind in '\.deb' '\.rpm'; do
+            grep -q -E -e "${kind}\$" ../optimizer-wanted.txt \
+              || { echo "::error::SHA256SUMS lists no file of kind ${kind}"; exit 1; }
+          done
+          # The Windows zip is optional, as for the IIS installer build: a
+          # pinned release without one gives an installer that carries the
+          # module only.
+          grep -q -E -e '-win-x64\.zip$' ../optimizer-wanted.txt \
+            || echo "::warning::SHA256SUMS lists no win-x64 zip; continuing without one"
+          while IFS= read -r name; do
+            url=$(awk -v n="$name" '$1 == n { print $2 }' ../optimizer-assets.txt)
+            [ -n "$url" ] || { echo "::error::$name is listed in SHA256SUMS but is not a release asset"; exit 1; }
+            curl -fsSL --retry 5 --retry-all-errors -O "$url"
+          done < ../optimizer-wanted.txt
+          # Verify exactly those files against the pinned list.
+          awk 'NR == FNR { want[$1] = 1; next } { n = $2; sub(/^\*/, "", n); if (n in want) print }' \
+            ../optimizer-wanted.txt SHA256SUMS > ../optimizer-wanted.sums
+          sha256sum -c ../optimizer-wanted.sums
           ls -la
 
       # The modules load the optimizer client library into the web-server
@@ -680,7 +698,7 @@ jobs:
 
       # The optimizer's own SHA256SUMS was verified above; the release
       # derives its own manifest over every file it ships and signs its own
-      # SHA256SUMS, so neither optimizer file travels on.
+      # SHA256SUMS, so the optimizer's list does not travel on.
       - name: Keep the verified packages
         run: |
           set -euo pipefail
