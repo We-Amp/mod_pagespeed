@@ -41,10 +41,10 @@ class InlineSList;
 // directly.
 template <class T>
 class InlineSListElement {
- protected:
+ private:
+  friend T;  // Only the CRTP-derived class constructs this base.
   InlineSListElement() : next_(nullptr) {}
 
- private:
   friend class InlineSList<T>;
   T* next() { return next_; }
   void set_next(T* new_next) { next_ = new_next; }

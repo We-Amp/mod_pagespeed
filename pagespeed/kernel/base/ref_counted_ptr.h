@@ -44,7 +44,6 @@ namespace net_instaweb {
 template <class T>
 class RefCounted {
  public:
-  RefCounted() : ref_count_(0) {}
   ~RefCounted() { DCHECK_EQ(0, ref_count_.value()); }
 
   void Release() {
@@ -58,6 +57,9 @@ class RefCounted {
   bool HasOneRef() { return (ref_count_.value() == 1); }
 
  private:
+  friend T;  // Only the CRTP-derived class constructs this base.
+  RefCounted() : ref_count_(0) {}
+
   AtomicInt32 ref_count_;
   RefCounted(const RefCounted&) = delete;
   RefCounted& operator=(const RefCounted&) = delete;
@@ -102,6 +104,7 @@ class RefCountedPtr {
   // this is safe when the source or *this lives inside the object being
   // released, e.g. head = head->next_ with head holding the last reference.
   RefCountedPtr<T>& operator=(const RefCountedPtr<T>& other) {
+    if (this == &other) return *this;
     RefCountedPtr<T> tmp(other);
     std::swap(ptr_, tmp.ptr_);
     return *this;

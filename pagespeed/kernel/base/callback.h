@@ -54,12 +54,12 @@ class Callback1 {
 
 // TODO(gee): Fill out other useful specializations.
 template <class C, class A1, bool DeleteAfterRun>
-class _MemberCallback_0_1 : public Callback1<A1> {
+class MemberCallback_0_1 : public Callback1<A1> {
  public:
   using MemberSignature = void (C::*)(A1);
   using base = Callback1<A1>;
 
-  _MemberCallback_0_1(C* object, MemberSignature member)
+  MemberCallback_0_1(C* object, MemberSignature member)
       : object_(object), member_(member) {}
 
   void Run(A1 t) override {
@@ -76,16 +76,16 @@ class _MemberCallback_0_1 : public Callback1<A1> {
 
 // Creates a callback that automatically gets deleted after being run.
 template <class T1, class T2, class A1>
-typename _MemberCallback_0_1<T1, A1, true>::base* NewCallback(
+typename MemberCallback_0_1<T1, A1, true>::base* NewCallback(
     T1* obj, void (T2::*member)(A1)) {
-  return new _MemberCallback_0_1<T1, A1, true>(obj, member);
+  return new MemberCallback_0_1<T1, A1, true>(obj, member);
 }
 
 // Creates a callback that does not get deleted after being run.
 template <class T1, class T2, class A1>
-typename _MemberCallback_0_1<T1, A1, false>::base* NewPermanentCallback(
+typename MemberCallback_0_1<T1, A1, false>::base* NewPermanentCallback(
     T1* obj, void (T2::*member)(A1)) {
-  return new _MemberCallback_0_1<T1, A1, false>(obj, member);
+  return new MemberCallback_0_1<T1, A1, false>(obj, member);
 }
 
 // Specified by TR1 [4.7.2] Reference modifications.
@@ -105,7 +105,7 @@ struct ConstRef {
 };
 
 template <class T, class P1, class A1, bool DeleteAfterRun>
-class _MemberCallback_1_1 : public Callback1<A1> {
+class MemberCallback_1_1 : public Callback1<A1> {
  public:
   using base = Callback1<A1>;
   using MemberSignature = void (T::*)(P1, A1);
@@ -116,8 +116,8 @@ class _MemberCallback_1_1 : public Callback1<A1> {
   typename remove_reference<P1>::type p1_;
 
  public:
-  _MemberCallback_1_1(T* object, MemberSignature member,
-                      typename ConstRef<P1>::type p1)
+  MemberCallback_1_1(T* object, MemberSignature member,
+                     typename ConstRef<P1>::type p1)
       : object_(object), member_(member), p1_(p1) {}
 
   void Run(A1 a1) override {
@@ -130,17 +130,17 @@ class _MemberCallback_1_1 : public Callback1<A1> {
 
 // Creates a callback that automatically gets deleted after being run.
 template <class T1, class T2, class P1, class A1>
-inline typename _MemberCallback_1_1<T1, P1, A1, true>::base* NewCallback(
+inline typename MemberCallback_1_1<T1, P1, A1, true>::base* NewCallback(
     T1* obj, void (T2::*member)(P1, A1), typename ConstRef<P1>::type p1) {
-  return new _MemberCallback_1_1<T1, P1, A1, true>(obj, member, p1);
+  return new MemberCallback_1_1<T1, P1, A1, true>(obj, member, p1);
 }
 
 // Creates a callback that does not get deleted after being run.
 template <class T1, class T2, class P1, class A1>
-inline typename _MemberCallback_1_1<T1, P1, A1, false>::base*
+inline typename MemberCallback_1_1<T1, P1, A1, false>::base*
 NewPermanentCallback(T1* obj, void (T2::*member)(P1, A1),
                      typename ConstRef<P1>::type p1) {
-  return new _MemberCallback_1_1<T1, P1, A1, false>(obj, member, p1);
+  return new MemberCallback_1_1<T1, P1, A1, false>(obj, member, p1);
 }
 
 // Base class for a two-argument callback.  Currently we have a single
@@ -175,12 +175,12 @@ class Callback2 {
 
 // TODO(gee): Fill out other useful specializations.
 template <class C, class A1, class A2, bool DeleteAfterRun>
-class _MemberCallback_0_2 : public Callback2<A1, A2> {
+class MemberCallback_0_2 : public Callback2<A1, A2> {
  public:
   using MemberSignature = void (C::*)(A1, A2);
   using base = Callback2<A1, A2>;
 
-  _MemberCallback_0_2(C* object, MemberSignature member)
+  MemberCallback_0_2(C* object, MemberSignature member)
       : object_(object), member_(member) {}
 
   void Run(A1 t1, A2 t2) override {
@@ -197,20 +197,20 @@ class _MemberCallback_0_2 : public Callback2<A1, A2> {
 
 // Creates a callback that automatically gets deleted after being run.
 template <class T1, class T2, class A1, class A2>
-typename _MemberCallback_0_2<T1, A1, A2, true>::base* NewCallback(
+typename MemberCallback_0_2<T1, A1, A2, true>::base* NewCallback(
     T1* obj, void (T2::*member)(A1, A2)) {
-  return new _MemberCallback_0_2<T1, A1, A2, true>(obj, member);
+  return new MemberCallback_0_2<T1, A1, A2, true>(obj, member);
 }
 
 // Creates a callback that does not get deleted after being run.
 template <class T1, class T2, class A1, class A2>
-typename _MemberCallback_0_2<T1, A1, A2, false>::base* NewPermanentCallback(
+typename MemberCallback_0_2<T1, A1, A2, false>::base* NewPermanentCallback(
     T1* obj, void (T2::*member)(A1, A2)) {
-  return new _MemberCallback_0_2<T1, A1, A2, false>(obj, member);
+  return new MemberCallback_0_2<T1, A1, A2, false>(obj, member);
 }
 
 template <class T, class P1, class A1, class A2, bool DeleteAfterRun>
-class _MemberCallback_2_1 : public Callback2<A1, A2> {
+class MemberCallback_2_1 : public Callback2<A1, A2> {
  public:
   using base = Callback2<A1, A2>;
   using MemberSignature = void (T::*)(P1, A1, A2);
@@ -221,8 +221,8 @@ class _MemberCallback_2_1 : public Callback2<A1, A2> {
   typename remove_reference<P1>::type p1_;
 
  public:
-  _MemberCallback_2_1(T* object, MemberSignature member,
-                      typename ConstRef<P1>::type p1)
+  MemberCallback_2_1(T* object, MemberSignature member,
+                     typename ConstRef<P1>::type p1)
       : object_(object), member_(member), p1_(p1) {}
 
   void Run(A1 a1, A2 a2) override {
@@ -235,17 +235,17 @@ class _MemberCallback_2_1 : public Callback2<A1, A2> {
 
 // Creates a callback that automatically gets deleted after being run.
 template <class T1, class T2, class P1, class A1, class A2>
-inline typename _MemberCallback_2_1<T1, P1, A1, A2, true>::base* NewCallback(
+inline typename MemberCallback_2_1<T1, P1, A1, A2, true>::base* NewCallback(
     T1* obj, void (T2::*member)(P1, A1, A2), typename ConstRef<P1>::type p1) {
-  return new _MemberCallback_2_1<T1, P1, A1, A2, true>(obj, member, p1);
+  return new MemberCallback_2_1<T1, P1, A1, A2, true>(obj, member, p1);
 }
 
 // Creates a callback that does not get deleted after being run.
 template <class T1, class T2, class P1, class A1, class A2>
-inline typename _MemberCallback_2_1<T1, P1, A1, A2, false>::base*
+inline typename MemberCallback_2_1<T1, P1, A1, A2, false>::base*
 NewPermanentCallback(T1* obj, void (T2::*member)(P1, A1, A2),
                      typename ConstRef<P1>::type p1) {
-  return new _MemberCallback_2_1<T1, P1, A1, A2, false>(obj, member, p1);
+  return new MemberCallback_2_1<T1, P1, A1, A2, false>(obj, member, p1);
 }
 
 }  // namespace net_instaweb
