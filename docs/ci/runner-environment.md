@@ -40,10 +40,29 @@ page lists names and meanings only.
 | `BAZEL_SH` | the bash Bazel runs genrules with | MSYS2's bash, else Git for Windows' bash |
 | `CI_WIN_BAZEL_OUTPUT_ROOT` | Bazel `--output_user_root` for every Windows job (a short path on a volume with room) | `C:/b` |
 | `CI_WIN_CACHE_DIR` | directory for the Bazel disk cache of Windows jobs | the cache lives under the job's temporary directory and is lost with it |
-| `CI_WIN_CACHE_MAX_SIZE` | size cap for that cache (Bazel's size syntax); the cache has no built-in eviction, so a runner that keeps it sets this | no cap is applied by the job |
+| `CI_WIN_CACHE_MAX_SIZE` | size cap for that cache (`N[K|M|G|T]`, Bazel's size syntax); a runner that keeps the cache sets this, and each job enforces it at its start (see below) | no cap is applied by the job |
 | `CI_WIN_LLVM_DIR` | install directory of LLVM 19 (`clang-cl` and the AddressSanitizer runtime library directory) | `clang-cl` from `PATH`; sanitizer jobs skip with a notice when the runtime is not found |
 | `CI_WIN_PYTHON_DIR` | directory of Python 3.12 with pip, placed ahead of Git for Windows' python stub | `python` from `PATH` |
 | `CI_WIN_DUMP_DIR` | directory for crash dumps (Windows Error Reporting local dumps); the scripts read it as `PAGESPEED_DUMP_DIR` | a directory under the job's temporary directory |
+
+The size cap is enforced by the job itself, not by Bazel. Bazel collects a
+disk cache (`--experimental_disk_cache_gc_max_size`) only from its server,
+only after the server has been idle for a while, and a `bazel shutdown` or a
+server exit cancels the collection; the next Windows job on a runner shuts
+the previous server down first, and Bazel 8 cannot run the collection
+synchronously, so the flag alone never frees anything. Each Windows job
+therefore runs `tools/ci/Prune-WinDiskCache.ps1` right after that shutdown,
+when nothing holds the directory. It removes the files under the cache's
+`ac/` and `cas/` directories with the oldest last-write time first (an
+action-cache entry before a content blob of the same time) until the rest
+fits `CI_WIN_CACHE_MAX_SIZE`, never follows a reparse point, never touches
+anything else under `CI_WIN_CACHE_DIR`, and logs the size before and after.
+Without the variable nothing is removed. A file that cannot be removed is a
+warning, never a job failure. The nightly ASan and Application Verifier
+builds keep their own caches next to `CI_WIN_CACHE_DIR` (`-asan` and
+`-appverif` suffixes) and prune those the same way. The cap applies to each
+directory separately. `tools/ci/Prune-WinDiskCache_test.ps1` is the script's
+hermetic self-test; the pull-request Windows jobs run it.
 
 Tool expectations that have no variable: NASM is pinned to 2.16.03 (the
 image-codec dependency rejects 3.x), so the Windows jobs install that version
