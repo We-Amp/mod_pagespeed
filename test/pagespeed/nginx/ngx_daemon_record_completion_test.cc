@@ -201,6 +201,36 @@ TEST_F(NgxDaemonRecordCompletionTest, OpenAttemptLatch) {
   EXPECT_FALSE(ShouldPostDaemonOpenAttempt());
 }
 
+TEST_F(NgxDaemonRecordCompletionTest, InitStatsRegistersClassicDropCounter) {
+  Variable* classic = stats_.FindVariable(kIproClassicRecordDropped);
+  ASSERT_NE(nullptr, classic);
+  EXPECT_EQ(0, classic->Get());
+  EXPECT_STREQ("ipro_classic_record_dropped", kIproClassicRecordDropped);
+}
+
+TEST_F(NgxDaemonRecordCompletionTest, ClassicDropIsCountedOnItsOwnVariable) {
+  Variable* classic = stats_.FindVariable(kIproClassicRecordDropped);
+  ASSERT_NE(nullptr, classic);
+  EXPECT_FALSE(
+      TryQueueDaemonCompletion(kDaemonCompletionQueueMaxBytes + 1, classic));
+  EXPECT_EQ(1, classic->Get());
+  EXPECT_EQ(0, dropped_->Get());
+}
+
+TEST_F(NgxDaemonRecordCompletionTest, PooledCompletionFinishesOnceAndReleases) {
+  ASSERT_TRUE(TryQueueDaemonCompletion(10, dropped_));
+  QueuedWorkerPool pool(1, "classic_record_test", thread_system_.get());
+  QueuedWorkerPool::Sequence* sequence = pool.NewSequence();
+  sequence->Add(new DaemonRecordCompletion(new FakeRecorder(),
+                                           new ResponseHeaders(), true, 10));
+  pool.ShutDown();
+  // ShutDown lets the active item finish and cancels queued ones, so one of
+  // the two happened exactly once and the reservation is back either way.
+  EXPECT_EQ(1, FakeRecorder::calls);
+  EXPECT_TRUE(
+      TryQueueDaemonCompletion(kDaemonCompletionQueueMaxBytes, dropped_));
+}
+
 TEST_F(NgxDaemonRecordCompletionTest, NullVariableAccepted) {
   ps_daemon_record_completion_init_stats(nullptr);
   // A missing counter is never an error: queueing and drops work the same,
