@@ -88,7 +88,8 @@ Test Directories:
 Environment Variables:
   PAGESPEED_HOST          Server hostname (default: localhost)
   PAGESPEED_PORT          Server port (default: 8080)
-  BAZEL_CONFIG            Bazel config (default: --config=clang-libstdcxx13)
+  BAZEL_CONFIG            Bazel config (default: --config=envoy-filter; set
+                           BAZEL_CONFIG to override)
   BAZEL_JOBS              Parallel build jobs (default: auto)
 
 Note: Building Envoy requires significant memory (16GB+ recommended).
@@ -100,7 +101,7 @@ EOF
 BUILD_ONLY=false
 SKIP_BUILD=false
 KEEP_RUNNING=false
-BAZEL_CONFIG="${BAZEL_CONFIG:---config=clang-libstdcxx13}"
+BAZEL_CONFIG="${BAZEL_CONFIG:---config=envoy-filter}"
 BAZEL_JOBS="${BAZEL_JOBS:-}"
 PYTEST_ARGS=()
 
