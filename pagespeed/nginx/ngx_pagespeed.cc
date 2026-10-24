@@ -1613,26 +1613,38 @@ char* ps_merge_srv_conf(ngx_conf_t* cf, void* parent, void* child) {
 
 char* ps_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child) {
   ps_loc_conf_t* cfg_l = static_cast<ps_loc_conf_t*>(child);
+  ps_loc_conf_t* parent_cfg_l = static_cast<ps_loc_conf_t*>(parent);
+
   if (cfg_l->options == nullptr) {
-    // No directory specific options.
+    // No pagespeed directives in this block.  nginx calls us with the
+    // enclosing location's conf as the parent for a nested location and for
+    // an "if" or "limit_except" block inside a location: those are pretend
+    // locations on the enclosing location's list (ngx_http_rewrite_if,
+    // ngx_http_core_limit_except).  For a top-level location the parent is
+    // the server's loc conf, which never holds pagespeed options, since
+    // server-level directives land in the srv conf (ps_srv_configure) and
+    // ps_merge_srv_conf moves them into the server context before locations
+    // merge.  So a parent with options is always an enclosing location, and
+    // a block without directives of its own inherits its settings.  Without
+    // this the block would fall back to the server-level options and
+    // silently lose what the enclosing location configured.
+    if (parent_cfg_l->options != nullptr) {
+      cfg_l->options = parent_cfg_l->options->Clone();
+    }
     return NGX_CONF_OK;
   }
 
-  // While you can't put a "location" block inside a "location" block you can
-  // put an "if" block inside a "location" block, which is implemented by making
-  // a pretend "location" block.  In this case we may have pagespeed options
-  // from the parent "location" block as well as from the current locationish
-  // "if" block.
-  ps_loc_conf_t* parent_cfg_l = static_cast<ps_loc_conf_t*>(parent);
+  // This block has its own pagespeed directives, and is nested inside a block
+  // that also has some.  Rebase our options off of the ones defined in the
+  // parent block, so this block's own directives win.
   if (parent_cfg_l->options != nullptr) {
-    // Rebase our options off of the ones defined in the parent location block.
     ps_merge_options(parent_cfg_l->options, &cfg_l->options);
     return NGX_CONF_OK;
   }
 
-  // Pagespeed options are defined in this location block, and it either has no
-  // parent (typical case) or is an if block whose parent location block defines
-  // no pagespeed options.  Base our options off of those in the server block.
+  // Pagespeed options are defined in this location block and its parent block
+  // defines none, so the nearest settings above are the server's.  Base our
+  // options off of those in the server block.
 
   ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
       ngx_http_conf_get_module_srv_conf(cf, ngx_pagespeed));

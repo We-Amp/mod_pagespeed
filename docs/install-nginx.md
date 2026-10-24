@@ -86,6 +86,23 @@ http {
 }
 ```
 
+### Settings in `location` blocks
+
+`pagespeed` directives can be scoped to a `location` block, for example to
+turn PageSpeed off for part of a site:
+
+```nginx
+location /shop/ {
+    pagespeed off;
+}
+```
+
+Settings put on a location also apply inside its nested locations and its
+`if` and `limit_except` blocks when those carry no `pagespeed` directives of
+their own; a nested block that sets its own directives keeps them and
+inherits the rest of the enclosing location's settings. To run a nested block
+with different settings, put the directives in the nested block itself.
+
 ## Cache Directory Setup
 
 ```bash
@@ -108,7 +125,7 @@ curl -I http://localhost/
 ./test/system/run_nginx_tests.sh
 ```
 
-Expected: 169 pass, 40 skip, 0 fail.
+Expected: 173 pass, 40 skip, 0 fail.
 
 ## Using the optimizer worker
 

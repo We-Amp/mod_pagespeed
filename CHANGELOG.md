@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **nginx: `pagespeed` settings in a `location` block now also apply inside
+  its nested locations and its `if` blocks.** Until now a nested `location`,
+  or an `if` or `limit_except` block inside a location that sets `pagespeed`
+  directives, silently ran with the server-level settings only, so pages an
+  operator had excluded with `pagespeed off` on the location, or narrowed
+  with `pagespeed Allow` and `pagespeed Disallow`, filter or caching
+  settings, could still be optimized. A nested block that sets no `pagespeed`
+  directives of its own now inherits the enclosing location's settings,
+  matching how every other nginx module's directives behave there. Operators
+  who relied on a nested block escaping the enclosing location's settings
+  must now set the directives in the nested block itself.
 - **Module log and error messages name the optimizer rather than "the
   daemon".** The refuse-to-start message for a split cache volume (with
   its IIS event-log and error-page counterparts), the volume-open
