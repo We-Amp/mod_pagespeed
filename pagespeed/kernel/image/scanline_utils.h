@@ -70,10 +70,10 @@ struct PaletteRGBA {
 class ScanlineStreamInput {
  public:
   explicit ScanlineStreamInput(MessageHandler* handler)
-      : data_(NULL), length_(0), offset_(0), message_handler_(handler) {}
+      : data_(nullptr), length_(0), offset_(0), message_handler_(handler) {}
 
   void Reset() {
-    data_ = NULL;
+    data_ = nullptr;
     length_ = 0;
     offset_ = 0;
   }

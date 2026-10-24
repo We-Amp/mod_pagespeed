@@ -49,7 +49,7 @@ class Arena {
     DCHECK(sizeof(void*) <= kAlign);
     DCHECK(size < Chunk::kSize);
 
-    if (chunk_end_ == NULL || next_alloc_ + size > chunk_end_) {
+    if (chunk_end_ == nullptr || next_alloc_ + size > chunk_end_) {
       AddChunk();
     }
 
@@ -60,7 +60,7 @@ class Arena {
     // should point to our base
     char** our_last_link_field = reinterpret_cast<char**>(base);
     *last_link_ = base;
-    *our_last_link_field = NULL;
+    *our_last_link_field = nullptr;
     last_link_ = our_last_link_field;
 
     next_alloc_ += size;
@@ -141,7 +141,7 @@ void Arena<T>::DestroyObjects() {
   for (int i = 0; i < static_cast<int>(chunks_.size()); ++i) {
     // Walk through objects in this chunk.
     char* base = chunks_[i]->buf;
-    while (base != NULL) {
+    while (base != nullptr) {
       reinterpret_cast<T*>(base + kAlign)->~T();
       base = *reinterpret_cast<char**>(base);
     }
@@ -157,9 +157,9 @@ void Arena<T>::InitEmpty() {
   // will call AddChunk(). Doing it this way rather than calling NewChunk()
   // from here establishes the invariant that all the chunks are non-empty,
   // which helps in DestroyObjects()
-  next_alloc_ = NULL;
-  last_link_ = NULL;
-  chunk_end_ = NULL;
+  next_alloc_ = nullptr;
+  last_link_ = nullptr;
+  chunk_end_ = nullptr;
 }
 
 }  // namespace  net_instaweb

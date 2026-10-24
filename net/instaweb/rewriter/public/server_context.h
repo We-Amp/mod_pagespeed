@@ -211,7 +211,7 @@ class ServerContext {
   Scheduler* scheduler() const { return scheduler_; }
   void set_scheduler(Scheduler* s) { scheduler_ = s; }
   bool has_default_system_fetcher() const {
-    return default_system_fetcher_ != NULL;
+    return default_system_fetcher_ != nullptr;
   }
   // Note: for rewriting user content, you want to use RewriteDriver's
   // async_fetcher() instead, as it may apply session-specific optimizations.

@@ -42,7 +42,7 @@ class InlineSList;
 template <class T>
 class InlineSListElement {
  protected:
-  InlineSListElement() : next_(NULL) {}
+  InlineSListElement() : next_(nullptr) {}
 
  private:
   friend class InlineSList<T>;
@@ -84,7 +84,7 @@ class InlineSList {
    protected:
     IterBase(const InlineSList<T>* list, T* node) : list_(list), node_(node) {}
 
-    bool AtEnd() const { return (node_ == NULL); }
+    bool AtEnd() const { return (node_ == nullptr); }
 
     void Advance() {
       DCHECK(!AtEnd());
@@ -92,7 +92,7 @@ class InlineSList {
       // If we travel to the tail node (as opposed to start pointing to it),
       // we have reached the end, and became one-past-the-end iterator.
       if (node_ == list_->tail_) {
-        node_ = NULL;
+        node_ = nullptr;
       }
     }
 
@@ -180,12 +180,12 @@ class InlineSList {
 
   using const_iterator = ConstIterator;
 
-  InlineSList() : tail_(NULL) {}
+  InlineSList() : tail_(nullptr) {}
 
   // The destructor deletes all the nodes in the list.
   ~InlineSList();
 
-  bool IsEmpty() const { return (tail_ == NULL); }
+  bool IsEmpty() const { return (tail_ == nullptr); }
 
   void Append(T* node);
 
@@ -215,8 +215,8 @@ class InlineSList {
   const_iterator begin() const { return ConstIterator(this, tail_); }
 
   // End iterators have their position at NULL.
-  iterator end() { return Iterator(this, NULL); }
-  const_iterator end() const { return ConstIterator(this, NULL); }
+  iterator end() { return Iterator(this, nullptr); }
+  const_iterator end() const { return ConstIterator(this, nullptr); }
 
  private:
   // The representation we chose here is a circular linked list where we point
@@ -230,7 +230,7 @@ class InlineSList {
 
 template <class T>
 inline InlineSList<T>::~InlineSList() {
-  if (tail_ != NULL) {
+  if (tail_ != nullptr) {
     T* node = tail_->next();  // start at head node.
     while (true) {
       T* next = node->next();
@@ -242,12 +242,12 @@ inline InlineSList<T>::~InlineSList() {
       }
     }
   }
-  tail_ = NULL;
+  tail_ = nullptr;
 }
 
 template <class T>
 inline void InlineSList<T>::Append(T* node) {
-  if (tail_ == NULL) {
+  if (tail_ == nullptr) {
     tail_ = node;
     node->set_next(node);
   } else {
@@ -266,15 +266,15 @@ inline void InlineSList<T>::Erase(Iterator* iter) {
 
   if (iter_node == target_node) {
     // Only 1 element before the call, 0 now.
-    tail_ = NULL;
-    iter->node_ = NULL;
+    tail_ = nullptr;
+    iter->node_ = nullptr;
   } else {
     iter_node->set_next(target_node->next());
     if (target_node == tail_) {
       // Removed tail.. need to point it earlier.
       tail_ = iter_node;
       // Iterator is now one-past-end
-      iter->node_ = NULL;
+      iter->node_ = nullptr;
     }
   }
   delete target_node;

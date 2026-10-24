@@ -366,7 +366,7 @@ class Statistics {
   // Find a variable from a name, aborting if not found.
   UpDownCounter* GetUpDownCounter(const StringPiece& name) const {
     UpDownCounter* var = FindUpDownCounter(name);
-    CHECK(var != NULL) << "UpDownCounter not found: " << name;
+    CHECK(var != nullptr) << "UpDownCounter not found: " << name;
     return var;
   }
 
@@ -381,7 +381,7 @@ class Statistics {
   // Find a variable from a name, aborting if not found.
   Variable* GetVariable(const StringPiece& name) const {
     Variable* var = FindVariable(name);
-    CHECK(var != NULL) << "Variable not found: " << name;
+    CHECK(var != nullptr) << "Variable not found: " << name;
     return var;
   }
 
@@ -394,7 +394,7 @@ class Statistics {
   // Find a histogram from a name, aborting if not found.
   Histogram* GetHistogram(const StringPiece& name) const {
     Histogram* hist = FindHistogram(name);
-    CHECK(hist != NULL) << "Histogram not found: " << name;
+    CHECK(hist != nullptr) << "Histogram not found: " << name;
     return hist;
   }
 
@@ -409,7 +409,7 @@ class Statistics {
   // Find a TimedVariable from a name, aborting if not found.
   TimedVariable* GetTimedVariable(const StringPiece& name) const {
     TimedVariable* stat = FindTimedVariable(name);
-    CHECK(stat != NULL) << "TimedVariable not found: " << name;
+    CHECK(stat != nullptr) << "TimedVariable not found: " << name;
     return stat;
   }
   // Return the names of all the histograms for render.
@@ -436,7 +436,7 @@ class Statistics {
   // need it. In the context in which it is needed we only have access to a
   // Statistics*, rather than the specific subclass, hence its being here.
   // Return the StatisticsLogger associated with this Statistics.
-  virtual StatisticsLogger* console_logger() { return NULL; }
+  virtual StatisticsLogger* console_logger() { return nullptr; }
 
   // Advance this statistics' console log when its logging interval has
   // elapsed; called on every request and around resource fetches. The

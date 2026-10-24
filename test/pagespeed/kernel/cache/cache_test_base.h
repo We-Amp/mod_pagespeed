@@ -22,8 +22,8 @@
 #ifndef PAGESPEED_KERNEL_CACHE_CACHE_TEST_BASE_H_
 #define PAGESPEED_KERNEL_CACHE_CACHE_TEST_BASE_H_
 
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -45,25 +45,25 @@ class CacheTestBase : public testing::Test {
   class Callback : public CacheInterface::SynchronousCallback {
    public:
     explicit Callback(CacheTestBase* test) : test_(test) { Reset(); }
-    Callback() : test_(NULL) { Reset(); }
+    Callback() : test_(nullptr) { Reset(); }
     ~Callback() override {}
     Callback* Reset() {
       SynchronousCallback::Reset();
       validate_called_ = false;
       noop_wait_called_ = false;
       value_of_called_when_wait_was_invoked_ = false;
-      invalid_value_ = NULL;
-      invalid_key_ = NULL;
+      invalid_value_ = nullptr;
+      invalid_key_ = nullptr;
       return this;
     }
 
     bool ValidateCandidate(const GoogleString& key,
                            CacheInterface::KeyState state) override {
       validate_called_ = true;
-      if ((invalid_value_ != NULL) && (value_str() == invalid_value_)) {
+      if ((invalid_value_ != nullptr) && (value_str() == invalid_value_)) {
         return false;
       }
-      if ((invalid_key_ != NULL) && (key == invalid_key_)) {
+      if ((invalid_key_ != nullptr) && (key == invalid_key_)) {
         return false;
       }
       return true;
@@ -72,7 +72,7 @@ class CacheTestBase : public testing::Test {
     void Done(CacheInterface::KeyState state) override {
       SynchronousCallback::Done(state);
       EXPECT_TRUE(validate_called_);
-      if (test_ != NULL) {
+      if (test_ != nullptr) {
         test_->GetDone();
       }
     }
@@ -104,8 +104,8 @@ class CacheTestBase : public testing::Test {
 
  protected:
   CacheTestBase()
-      : invalid_value_(NULL),
-        invalid_key_(NULL),
+      : invalid_value_(nullptr),
+        invalid_key_(nullptr),
         mutex_(new NullMutex),
         outstanding_fetches_(0) {}
   ~CacheTestBase() override { STLDeleteElements(&callbacks_); }

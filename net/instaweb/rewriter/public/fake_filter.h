@@ -77,7 +77,7 @@ class FakeFilter : public RewriteFilter {
         exceed_deadline_(false),
         enabled_(true),
         num_rewrites_(0),
-        output_content_type_(NULL),
+        output_content_type_(nullptr),
         num_calls_to_encode_user_agent_(0),
         category_(category) {}
 
@@ -87,7 +87,7 @@ class FakeFilter : public RewriteFilter {
   void EndElementImpl(HtmlElement* element) override {}
   void StartElementImpl(HtmlElement* element) override;
   RewriteContext* MakeRewriteContext() override {
-    return MakeFakeContext(driver(), NULL /* not nested */, NULL);
+    return MakeFakeContext(driver(), nullptr /* not nested */, nullptr);
   }
   RewriteContext* MakeNestedRewriteContext(
       RewriteContext* parent, const ResourceSlotPtr& slot) override;

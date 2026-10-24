@@ -38,15 +38,15 @@ class HtmlEvent {
 
   // If this is a StartElement event, returns the HtmlElement that is being
   // started.  Otherwise returns NULL.
-  virtual HtmlElement* GetElementIfStartEvent() { return NULL; }
+  virtual HtmlElement* GetElementIfStartEvent() { return nullptr; }
 
   // If this is an EndElement event, returns the HtmlElement that is being
   // ended.  Otherwise returns NULL.
-  virtual HtmlElement* GetElementIfEndEvent() { return NULL; }
+  virtual HtmlElement* GetElementIfEndEvent() { return nullptr; }
 
-  virtual HtmlLeafNode* GetLeafNode() { return NULL; }
-  virtual HtmlNode* GetNode() { return NULL; }
-  virtual HtmlCharactersNode* GetCharactersNode() { return NULL; }
+  virtual HtmlLeafNode* GetLeafNode() { return nullptr; }
+  virtual HtmlNode* GetNode() { return nullptr; }
+  virtual HtmlCharactersNode* GetCharactersNode() { return nullptr; }
   void DebugPrint();
 
   int line_number() const { return line_number_; }

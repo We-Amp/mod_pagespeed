@@ -220,7 +220,7 @@ class ResourceSlot : public RefCounted<ResourceSlot> {
 class NullResourceSlot : public ResourceSlot {
  public:
   NullResourceSlot(const ResourcePtr& resource, StringPiece location);
-  HtmlElement* element() const override { return NULL; }
+  HtmlElement* element() const override { return nullptr; }
   void Render() override {}
   GoogleString LocationString() const override { return location_; }
 
@@ -241,7 +241,7 @@ class FetchResourceSlot : public ResourceSlot {
  public:
   explicit FetchResourceSlot(const ResourcePtr& resource)
       : ResourceSlot(resource) {}
-  HtmlElement* element() const override { return NULL; }
+  HtmlElement* element() const override { return nullptr; }
   void Render() override;
   GoogleString LocationString() const override;
 

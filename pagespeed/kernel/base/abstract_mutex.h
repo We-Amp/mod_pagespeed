@@ -52,9 +52,9 @@ class SCOPED_LOCKABLE ScopedMutex {
   }
 
   void Release() UNLOCK_FUNCTION() {
-    if (mutex_ != NULL) {
+    if (mutex_ != nullptr) {
       mutex_->Unlock();
-      mutex_ = NULL;
+      mutex_ = nullptr;
     }
   }
 

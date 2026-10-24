@@ -65,7 +65,9 @@ class DelayCache : public CacheInterface {
 
   // Release the delay on the callback delivered for a specific key.  It is
   // ane error to attempt to release a key that was never delayed.
-  void ReleaseKey(const GoogleString& key) { ReleaseKeyInSequence(key, NULL); }
+  void ReleaseKey(const GoogleString& key) {
+    ReleaseKeyInSequence(key, nullptr);
+  }
 
   // See ReleaseKey.  If sequence is non-NULL, the callback is
   // delivered on the sequence, otherwise it is delivered directly

@@ -53,7 +53,7 @@ class StatisticsTemplate : public Statistics {
   // description.
   Var* AddVariable(const StringPiece& name) override {
     Var* var = FindVariable(name);
-    if (var == NULL) {
+    if (var == nullptr) {
       var = NewVariable(name);
       variables_.push_back(var);
       variable_names_.push_back(name.as_string());
@@ -64,7 +64,7 @@ class StatisticsTemplate : public Statistics {
 
   UpDown* AddUpDownCounter(const StringPiece& name) override {
     UpDown* var = FindUpDownCounter(name);
-    if (var == NULL) {
+    if (var == nullptr) {
       var = NewUpDownCounter(name);
       up_downs_.push_back(var);
       up_down_names_.push_back(name.as_string());
@@ -75,7 +75,7 @@ class StatisticsTemplate : public Statistics {
 
   UpDown* AddGlobalUpDownCounter(const StringPiece& name) override {
     UpDown* var = FindUpDownCounter(name);
-    if (var == NULL) {
+    if (var == nullptr) {
       var = NewGlobalUpDownCounter(name);
       up_downs_.push_back(var);
       up_down_names_.push_back(name.as_string());
@@ -86,7 +86,7 @@ class StatisticsTemplate : public Statistics {
 
   Var* FindVariable(const StringPiece& name) const override {
     typename VarMap::const_iterator p = variable_map_.find(name.as_string());
-    Var* var = NULL;
+    Var* var = nullptr;
     if (p != variable_map_.end()) {
       var = p->second;
     }
@@ -95,7 +95,7 @@ class StatisticsTemplate : public Statistics {
 
   UpDown* FindUpDownCounter(const StringPiece& name) const override {
     typename UpDownMap::const_iterator p = up_down_map_.find(name.as_string());
-    UpDown* var = NULL;
+    UpDown* var = nullptr;
     if (p != up_down_map_.end()) {
       var = p->second;
     }
@@ -104,7 +104,7 @@ class StatisticsTemplate : public Statistics {
 
   Hist* AddHistogram(const StringPiece& name) override {
     Hist* hist = FindHistogram(name);
-    if (hist == NULL) {
+    if (hist == nullptr) {
       hist = NewHistogram(name);
       histograms_.push_back(hist);
       histogram_names_.push_back(name.as_string());
@@ -115,7 +115,7 @@ class StatisticsTemplate : public Statistics {
 
   Hist* FindHistogram(const StringPiece& name) const override {
     typename HistMap::const_iterator p = histogram_map_.find(name.as_string());
-    Hist* hist = NULL;
+    Hist* hist = nullptr;
     if (p != histogram_map_.end()) {
       hist = p->second;
     }
@@ -125,7 +125,7 @@ class StatisticsTemplate : public Statistics {
   TimedVar* AddTimedVariable(const StringPiece& name,
                              const StringPiece& group) override {
     TimedVar* timedvar = FindTimedVariable(name);
-    if (timedvar == NULL) {
+    if (timedvar == nullptr) {
       timedvar = NewTimedVariable(name);
       timed_vars_.push_back(timedvar);
       timed_var_map_[name.as_string()] = timedvar;
@@ -137,7 +137,7 @@ class StatisticsTemplate : public Statistics {
   TimedVar* FindTimedVariable(const StringPiece& name) const override {
     typename TimedVarMap::const_iterator p =
         timed_var_map_.find(name.as_string());
-    TimedVar* timedvar = NULL;
+    TimedVar* timedvar = nullptr;
     if (p != timed_var_map_.end()) {
       timedvar = p->second;
     }

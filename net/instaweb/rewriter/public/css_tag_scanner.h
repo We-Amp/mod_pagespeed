@@ -76,7 +76,7 @@ class CssTagScanner {
                               HtmlElement::Attribute** href,
                               const char** media) {
     return ParseCssElement(element, href, media,
-                           NULL /* nonstandard attributes */);
+                           nullptr /* nonstandard attributes */);
   }
 
   // When parsing streaming input, we need to be told if the given input

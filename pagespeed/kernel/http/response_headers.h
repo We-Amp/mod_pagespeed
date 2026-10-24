@@ -286,7 +286,7 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   // Does this header have an HTML-like Content-Type (HTML, XHTML, ...).
   bool IsHtmlLike() const {
     const ContentType* type = DetermineContentType();
-    return (type != NULL && type->IsHtmlLike());
+    return (type != nullptr && type->IsHtmlLike());
   }
 
   // Get the charset. Empty string if none set in a Content-Type header.

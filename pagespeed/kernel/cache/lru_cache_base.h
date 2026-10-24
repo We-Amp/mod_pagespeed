@@ -110,7 +110,7 @@ class LRUCacheBase {
   // the entry in the lru-list.  Note: this pointer is safe to use until the
   // next call to Put or Delete in the cache.
   ValueType* GetFreshen(const GoogleString& key) {
-    ValueType* value = NULL;
+    ValueType* value = nullptr;
     typename Map::iterator p = map_.find(key);
     if (p != map_.end()) {
       ListNode cell = p->second;
@@ -129,7 +129,7 @@ class LRUCacheBase {
   }
 
   ValueType* GetNoFreshen(const GoogleString& key) const {
-    ValueType* value = NULL;
+    ValueType* value = nullptr;
     typename Map::const_iterator p = map_.find(key);
     if (p != map_.end()) {
       ListNode cell = p->second;

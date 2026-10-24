@@ -54,7 +54,7 @@ class HtmlKeywords {
     if (keyword < HtmlName::kNotAKeyword) {
       return &instance()->keyword_vector_[keyword];
     } else {
-      return NULL;
+      return nullptr;
     }
   }
 

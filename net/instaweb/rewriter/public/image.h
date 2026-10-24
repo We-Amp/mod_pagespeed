@@ -53,10 +53,10 @@ class Image {
 
   struct ConversionBySourceVariable {
     ConversionBySourceVariable()
-        : timeout_count(NULL),
-          overrun_count(NULL),
-          success_ms(NULL),
-          failure_ms(NULL) {}
+        : timeout_count(nullptr),
+          overrun_count(nullptr),
+          success_ms(nullptr),
+          failure_ms(nullptr) {}
 
     Variable* timeout_count;  // # of conversions that did not produce output
                               // because of the timeout: either aborted
@@ -98,7 +98,7 @@ class Image {
     };
     ConversionBySourceVariable* Get(VariableType var_type) {
       if ((var_type < FROM_UNKNOWN_FORMAT) || (var_type >= NUM_VARIABLE_TYPE)) {
-        return NULL;
+        return nullptr;
       }
       return &(vars[var_type]);
     }
@@ -145,8 +145,8 @@ class Image {
           avif_conversion_timeout_ms(-1),
           conversions_attempted(0),
           preserve_lossless(false),
-          webp_conversion_variables(NULL),
-          avif_conversion_variables(NULL) {}
+          webp_conversion_variables(nullptr),
+          avif_conversion_variables(nullptr) {}
 
     // These options are set by the client to specify what type of
     // conversion to perform:

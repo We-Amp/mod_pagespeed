@@ -51,7 +51,7 @@ class CssResourceSlot : public ResourceSlot {
   void Finished() override;
   GoogleString LocationString() const override;
 
-  HtmlElement* element() const override { return NULL; }
+  HtmlElement* element() const override { return nullptr; }
   Css::Values* values() const { return values_; }
   size_t value_index() const { return value_index_; }
   UrlRelativity url_relativity() const { return url_relativity_; }

@@ -33,7 +33,7 @@ class MockImageLibraryInterface : public ImageLibraryInterface {
  public:
   class MockImage : public ImageLibraryInterface::Image {
    public:
-    MockImage() : Image(NULL) {}
+    MockImage() : Image(nullptr) {}
     MOCK_CONST_METHOD2(GetDimensions, bool(int* out_width, int* out_height));
     ~MockImage() override {}
 
@@ -55,7 +55,7 @@ class MockImageLibraryInterface : public ImageLibraryInterface {
   // a canvas to a file.
   class MockCanvas : public ImageLibraryInterface::Canvas {
    public:
-    MockCanvas() : Canvas(NULL) {}
+    MockCanvas() : Canvas(nullptr) {}
     ~MockCanvas() override {}
     MOCK_METHOD3(DrawImage, bool(const Image* image, int x, int y));
     MOCK_METHOD2(WriteToFile,

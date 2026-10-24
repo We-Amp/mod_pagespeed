@@ -74,7 +74,7 @@ class InstawebHandler {
   // Any PageSpeed query params are removed.
   const GoogleUrl& stripped_gurl() const { return stripped_gurl_; }
   const RequestContextPtr request_context() const { return request_context_; }
-  bool use_custom_options() const { return custom_options_.get() != NULL; }
+  bool use_custom_options() const { return custom_options_.get() != nullptr; }
   const QueryParams& query_params() { return rewrite_query_.query_params(); }
   const QueryParams& pagespeed_query_params() {
     return rewrite_query_.pagespeed_query_params();

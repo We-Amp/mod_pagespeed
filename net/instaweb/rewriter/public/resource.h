@@ -235,7 +235,7 @@ class Resource : public RefCounted<Resource> {
     ~FreshenCallback() override;
     // Returns NULL by default. Sublasses should override this if they want this
     // to be updated based on the response fetched while freshening.
-    virtual InputInfo* input_info() { return NULL; }
+    virtual InputInfo* input_info() { return nullptr; }
 
     // This is called with resource_ok = true only if the hash of the fetched
     // response is the same as the hash in input_info()->input_content_hash().

@@ -65,9 +65,9 @@ T* DecodeFromPropertyCache(const PropertyCache* cache,
                            PropertyCacheDecodeResult* status) {
   const PropertyValue* property_value = DecodeFromPropertyCacheHelper(
       cache, page, cohort, property_name, cache_ttl_ms, status);
-  if (property_value == NULL) {
+  if (property_value == nullptr) {
     // *status set by helper
-    return NULL;
+    return nullptr;
   }
 
   std::unique_ptr<T> result = std::make_unique<T>();
@@ -75,7 +75,7 @@ T* DecodeFromPropertyCache(const PropertyCache* cache,
                          property_value->value().size());
   if (!result->ParseFromZeroCopyStream(&input)) {
     *status = kPropertyCacheDecodeParseError;
-    return NULL;
+    return nullptr;
   }
 
   *status = kPropertyCacheDecodeOk;

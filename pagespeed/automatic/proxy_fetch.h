@@ -207,8 +207,8 @@ class ProxyFetchPropertyCallbackCollector {
 
   // Returns the actual property page.
   PropertyPage* property_page() {
-    return fallback_property_page_ == NULL
-               ? NULL
+    return fallback_property_page_ == nullptr
+               ? nullptr
                : fallback_property_page_->actual_property_page();
   }
 

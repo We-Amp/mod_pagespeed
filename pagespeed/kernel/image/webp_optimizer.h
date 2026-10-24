@@ -58,8 +58,8 @@ struct WebpConfiguration : public ScanlineWriterConfig {
         alpha_quality(100),
         kmin(0),
         kmax(0),
-        progress_hook(NULL),
-        user_data(NULL) {}
+        progress_hook(nullptr),
+        user_data(nullptr) {}
 
   ~WebpConfiguration() override;
 

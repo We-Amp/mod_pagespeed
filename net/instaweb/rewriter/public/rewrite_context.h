@@ -265,7 +265,7 @@ class RewriteContext {
   bool is_metadata_cache_miss() const { return is_metadata_cache_miss_; }
 
   // Returns true if this is a nested rewriter.
-  bool has_parent() const { return parent_ != NULL; }
+  bool has_parent() const { return parent_ != nullptr; }
 
   // Returns true if this is a child rewriter and its parent has the given
   // id.
@@ -740,7 +740,7 @@ class RewriteContext {
 
   // Returns true if this rewrite context was created to fetch a resource (e.g.,
   // IPRO or .pagespeed. URLs) and false otherwise.
-  bool IsFetchRewrite() const { return fetch_.get() != NULL; }
+  bool IsFetchRewrite() const { return fetch_.get() != nullptr; }
 
   // Called on the parent from a nested Rewrite when it is complete.
   // Note that we don't track rewrite success/failure here.  We only

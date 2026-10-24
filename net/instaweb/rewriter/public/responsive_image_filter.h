@@ -36,7 +36,7 @@ namespace net_instaweb {
 struct ResponsiveImageCandidate {
   ResponsiveImageCandidate(HtmlElement* element_arg, double resolution_arg)
       : element(element_arg), resolution(resolution_arg) {}
-  ResponsiveImageCandidate() : element(NULL), resolution(0) {}
+  ResponsiveImageCandidate() : element(nullptr), resolution(0) {}
 
   HtmlElement* element;
   double resolution;

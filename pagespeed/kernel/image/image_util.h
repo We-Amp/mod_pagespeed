@@ -169,11 +169,11 @@ class ConversionTimeoutHandler {
  public:
   ConversionTimeoutHandler(int64 time_allowed_ms, net_instaweb::Timer* timer,
                            net_instaweb::MessageHandler* handler)
-      : countdown_timer_(timer, NULL, time_allowed_ms),
+      : countdown_timer_(timer, nullptr, time_allowed_ms),
         time_allowed_ms_(time_allowed_ms),
         time_elapsed_ms_(0),
         was_timed_out_(false),
-        output_(NULL),
+        output_(nullptr),
         handler_(handler) {}
 
   // Returns true if (1) the timer has not expired, or (2) the timer has

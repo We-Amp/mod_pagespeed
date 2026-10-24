@@ -244,7 +244,7 @@ class RewriteDriver : public HtmlParse {
   // Return a mutable pointer to the response headers that filters can update
   // before the first flush.  Returns NULL after Flush has occurred.
   ResponseHeaders* mutable_response_headers() {
-    return flush_occurred_ ? NULL : response_headers_;
+    return flush_occurred_ ? nullptr : response_headers_;
   }
 
   // Returns a const version of the ResponseHeaders*, indepdendent of whether
@@ -289,7 +289,7 @@ class RewriteDriver : public HtmlParse {
   }
 
   UserAgentMatcher* user_agent_matcher() const {
-    DCHECK(server_context() != NULL);
+    DCHECK(server_context() != nullptr);
     return server_context()->user_agent_matcher();
   }
 
@@ -476,7 +476,7 @@ class RewriteDriver : public HtmlParse {
 
   // Takes ownership of 'options'.
   void set_custom_options(RewriteOptions* options) {
-    set_options_for_pool(NULL, options);
+    set_options_for_pool(nullptr, options);
   }
 
   // Takes ownership of 'options'. pool denotes the pool of rewrite drivers that

@@ -95,7 +95,7 @@ class ScopedPngStruct {
   ScopedPngStruct(Type type, MessageHandler* handler);
   ~ScopedPngStruct();
 
-  bool valid() const { return png_ptr_ != NULL && info_ptr_ != NULL; }
+  bool valid() const { return png_ptr_ != nullptr && info_ptr_ != nullptr; }
 
   // This will only return false as a result of a longjmp due to an
   // unhandled libpng error.

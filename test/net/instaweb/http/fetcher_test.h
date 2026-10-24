@@ -115,7 +115,7 @@ class FetcherTest : public testing::Test {
   // classes which want to use CountFetchersAsync.
   virtual UrlAsyncFetcher* async_fetcher() {
     LOG(FATAL) << "async_fetcher() must be overridden before use.";
-    return NULL;
+    return nullptr;
   };
 
   GoogleString TestFilename() {
