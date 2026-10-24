@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <unistd.h>
 #include <vector>
 
 #include "base/logging.h"
@@ -52,6 +53,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/async_cache.h"
 #include "pagespeed/kernel/cache/cache_batcher.h"
+#include "pagespeed/kernel/cache/cache_key_prepender.h"
 #include "pagespeed/kernel/cache/cache_stats.h"
 #include "pagespeed/kernel/cache/compressed_cache.h"
 #include "pagespeed/kernel/cache/fallback_cache.h"
@@ -95,6 +97,15 @@ GoogleString MakeTempCacheDir(const char* suffix) {
   char* dir = mkdtemp(tmpl.data());
   CHECK(dir != nullptr) << "Failed to create temp dir: " << tmpl;
   return GoogleString(dir) + "/";
+}
+
+// Shards of this target run as separate processes that all talk to the job's
+// one memcached and one redis server, so every key this binary sends to those
+// servers carries this prefix: the same bare key in two shards is exactly the
+// cross-process race of issue #204. Tests inside one process run sequentially
+// and read their own writes back, so the process id is enough.
+GoogleString SharedServerKeyPrefix() {
+  return StrCat("p", IntegerToString(getpid()), "_");
 }
 
 // Cache paths are created per-process to avoid test interference.
@@ -144,6 +155,49 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
   static constexpr int kThreadLimit = 3;
   static constexpr int kUsableMetadataCacheSize = 8 * 1024;
 
+  // File cache sizes, right-sized per issue #260. SetUp() empties this
+  // process's cache directories before every test, so every test builds its
+  // Cyclone volumes from scratch and syncs them away again in TearDown, and
+  // that cost scales with the stripe count, not with the bytes stored: on
+  // create Cyclone zeroes and fsyncs a ~720 KB mmap directory per stripe,
+  // and the shutdown pass msyncs them again. The product default
+  // (FileCacheSizeKb, 1 GB) is 17 stripes (16 auto-stripes of default volume
+  // plus one 128 MB small-tier stripe) for tests that store a handful of
+  // small entries.
+  //
+  // One volume, one stripe: auto-striping rounds usable / 32 MB to the
+  // nearest count, so anything below ~48 MB usable stays single-stripe, and
+  // 32 MB is far under the ~256 MB two-volume floor, so the small tier stays
+  // inactive. That changes no asserted cache name: the "file_cache_small"
+  // label follows FileCacheSmallTierPercent (default 10), not
+  // small_tier_active(), and SmallTierCacheSettings plus
+  // MetadataSurvivesPayloadChurn pin the active/inactive boundary on
+  // purpose. The capacity over a minimal volume is free (volume files are
+  // sparse and the cost is per stripe) and still holds the biggest write
+  // here, the external stress tests' 200 x 20 KB inserts, with 8x headroom.
+  static constexpr int64 kFastFileCacheKb = 32 * 1024;
+
+  // The smallest size that keeps the small-object tier ACTIVE, which the
+  // restart-persistence tests need: their point is that entries come back
+  // through the small-tier volume after a restart, so that volume must
+  // physically exist. The floor is two volumes of one 128 MB stripe plus a
+  // 64-byte header each; 264 MB clears it with one 128 MB small-volume
+  // stripe (65,536 directory slots for the few entries those tests write)
+  // and a ~136 MB default volume, which is also what
+  // MetadataSurvivesPayloadChurn sizes its 200 MB churn against (~1.5x,
+  // enough to wrap the default volume and evict).
+  static constexpr int64 kSmallTierActiveFileCacheKb = 264 * 1024;
+
+  // SystemCaches builds a volume per distinct cache path key (the key also
+  // covers the purge settings and flush filename), and the first config to
+  // produce a key fixes that volume's size. So every config this fixture
+  // hands to SystemCaches states its size explicitly instead of silently
+  // getting the 1 GB product default; tests whose scenario needs the small
+  // tier set kSmallTierActiveFileCacheKb instead.
+  void UseFastFileCache(SystemRewriteOptions* options) {
+    options->set_file_cache_clean_size_kb(kFastFileCacheKb);
+  }
+
   // Helper that blocks for async HTTP cache lookups.
   class HTTPBlockingCallback : public HTTPCache::Callback {
    public:
@@ -188,6 +242,9 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
         options_(new SystemRewriteOptions(thread_system_.get())),
         purge_done_(false),
         purge_success_(false) {
+    // Tests that need the small-object tier physically active raise this to
+    // kSmallTierActiveFileCacheKb.
+    UseFastFileCache(options_.get());
     shared_mem_ = std::make_unique<InProcessSharedMem>(thread_system_.get());
     factory_->set_hasher(new MD5Hasher());
     Statistics* stats = factory()->statistics();
@@ -276,14 +333,19 @@ class SystemCachesTest : public CustomRewriteTestBase<SystemRewriteOptions> {
     // TODO(yeputons): it's important that RedisCache is connected at that
     // point. Otherwise it will try to connect in Put() and combination of
     // AsyncCache and fast-fail in "connecting" state will play against us.
-    TestPut(server_context->metadata_cache(), "a", "b");
-    TestGet(server_context->metadata_cache(), "a", CacheInterface::kAvailable,
-            "b");
+    //
+    // The sanity keys reach the shared memcached/redis servers whenever an
+    // external cache is configured, so they carry the per-process prefix.
+    GoogleString sanity_key = StrCat(SharedServerKeyPrefix(), "a");
+    TestPut(server_context->metadata_cache(), sanity_key, "b");
+    TestGet(server_context->metadata_cache(), sanity_key,
+            CacheInterface::kAvailable, "b");
 
-    TestHttpPut(server_context->http_cache(), "http://www.example.com",
-                "fragment", "a");
-    TestHttpGet(server_context->http_cache(), "http://www.example.com",
-                "fragment", kFoundResult, "a");
+    GoogleString sanity_url =
+        StrCat("http://www.example.com/", SharedServerKeyPrefix());
+    TestHttpPut(server_context->http_cache(), sanity_url, "fragment", "a");
+    TestHttpGet(server_context->http_cache(), sanity_url, "fragment",
+                kFoundResult, "a");
     return server_context.release();
   }
 
@@ -626,9 +688,16 @@ class SystemCachesExternalCacheTestBase : public SystemCachesTest {
     // because the async nature of these caches means keys may not be
     // immediately available after a Put. Multiple threads writing to the
     // same keys can also cause transient unavailability.
+    //
+    // The spammer's fixed "name%d" keys reach those shared servers too, so
+    // they carry the per-process prefix: without it StressTest and
+    // StressTestWithDeletions could land in different shards and fight over
+    // the same keys, and the two tests write different random values, so a
+    // cross-read fails the value check.
+    CacheKeyPrepender prefixed_cache(SharedServerKeyPrefix(), cache);
     CacheSpammer::RunTests(4 /* num_threads */, 200 /* iters */,
                            200 /* inserts */, true /* expecting_evictions */,
-                           do_deletes, value.c_str(), cache,
+                           do_deletes, value.c_str(), &prefixed_cache,
                            thread_system_.get());
   }
 
@@ -920,6 +989,7 @@ TEST_F(SystemCachesTest, FileShare) {
     SystemRewriteOptions* config = options_->NewOptions();
     config->set_file_cache_path((i == 2) ? kCachePath : kAltCachePath);
     config->set_default_shared_memory_cache_kb(0);
+    UseFastFileCache(config);
     system_caches_->RegisterConfig(config);
     configs.push_back(config);
   }
@@ -978,6 +1048,7 @@ TEST_F(SystemCachesTest, ShmShare) {
   for (int i = 0; i < 3; ++i) {
     SystemRewriteOptions* config = options_->NewOptions();
     config->set_file_cache_path((i == 2) ? kAltCachePath : kCachePath);
+    UseFastFileCache(config);
     system_caches_->RegisterConfig(config);
     configs.push_back(config);
   }
@@ -1021,6 +1092,7 @@ TEST_F(SystemCachesTest, ShmDefault) {
   for (int i = 0; i < 3; ++i) {
     SystemRewriteOptions* config = options_->NewOptions();
     config->set_file_cache_path(kPaths[i]);
+    UseFastFileCache(config);
     system_caches_->RegisterConfig(config);
     configs.push_back(config);
   }
@@ -1069,17 +1141,19 @@ TEST_F(SystemCachesTest, ShmDefault) {
 // value is still readable -- which it can only be if it was written through to
 // disk.  Under the old FallbackCache wiring this Get would return kNotFound.
 //
-// Note: metadata_l2 is the small-object-tier view of the Cyclone cache.  At the
-// default cache size the tier is active, so this exercises restart persistence
-// through the small-tier view; SmallTierCacheSettings covers the below-floor
-// fallback-to-default routing and MetadataSurvivesPayloadChurn covers churn
-// survival.
+// Note: metadata_l2 is the small-object-tier view of the Cyclone cache.  At
+// kSmallTierActiveFileCacheKb the tier is active (the fixture's
+// kFastFileCacheKb default is below the two-volume floor), so this exercises
+// restart persistence through the small-tier view; SmallTierCacheSettings
+// covers the below-floor fallback-to-default routing and
+// MetadataSurvivesPayloadChurn covers churn survival.
 TEST_F(SystemCachesTest, ShmMetadataPersistsAcrossRestart) {
   GoogleString error_msg;
   EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
       kCachePath, kUsableMetadataCacheSize, &error_msg));
 
   options_->set_file_cache_path(kCachePath);
+  options_->set_file_cache_clean_size_kb(kSmallTierActiveFileCacheKb);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(0);
   PrepareWithConfig(options_.get());
@@ -1103,6 +1177,8 @@ TEST_F(SystemCachesTest, ShmMetadataPersistsAcrossRestart) {
   std::unique_ptr<SystemRewriteOptions> options2(
       new SystemRewriteOptions(thread_system_.get()));
   options2->set_file_cache_path(kCachePath);
+  // Same size, so the reopened volume keeps its geometry.
+  options2->set_file_cache_clean_size_kb(kSmallTierActiveFileCacheKb);
   options2->set_use_shared_mem_locking(false);
   options2->set_lru_cache_kb_per_process(0);
   PrepareWithConfig(options2.get());
@@ -1127,8 +1203,8 @@ TEST_F(SystemCachesTest, ShmMetadataPersistsAcrossRestart) {
 // the old FallbackCache wiring the post-restart Read finds nothing.
 //
 // Note: like ShmMetadataPersistsAcrossRestart, the property store's L2 is the
-// small-object-tier view, active at the default cache size, so this exercises
-// restart persistence through the small-tier view.
+// small-object-tier view, active at kSmallTierActiveFileCacheKb, so this
+// exercises restart persistence through the small-tier view.
 TEST_F(SystemCachesTest, PropertyCachePersistsAcrossRestart) {
   const char kPageUrl[] = "http://www.example.com/page.html";
   const char kOptionsHash[] = "hash";
@@ -1141,6 +1217,7 @@ TEST_F(SystemCachesTest, PropertyCachePersistsAcrossRestart) {
       kCachePath, kUsableMetadataCacheSize, &error_msg));
 
   options_->set_file_cache_path(kCachePath);
+  options_->set_file_cache_clean_size_kb(kSmallTierActiveFileCacheKb);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(0);
   PrepareWithConfig(options_.get());
@@ -1177,6 +1254,8 @@ TEST_F(SystemCachesTest, PropertyCachePersistsAcrossRestart) {
   std::unique_ptr<SystemRewriteOptions> options2(
       new SystemRewriteOptions(thread_system_.get()));
   options2->set_file_cache_path(kCachePath);
+  // Same size, so the reopened volume keeps its geometry.
+  options2->set_file_cache_clean_size_kb(kSmallTierActiveFileCacheKb);
   options2->set_use_shared_mem_locking(false);
   options2->set_lru_cache_kb_per_process(0);
   PrepareWithConfig(options2.get());
@@ -1212,6 +1291,7 @@ void SystemCachesExternalCacheTestBase::TestCacheShare() {
     config->set_file_cache_path(kCachePath);
     config->set_default_shared_memory_cache_kb(0);
     SetUpExternalCache(config);
+    UseFastFileCache(config);
     system_caches_->RegisterConfig(config);
     configs.push_back(config);
   }
@@ -1393,26 +1473,26 @@ TEST_F(SystemCachesTest, SmallTierDisabledFallsBackToDefaultWiring) {
 // still served after a restart while the churned payloads were evicted.
 //
 // Sizing: the small volume floor is one 128 MB stripe (+64-byte header) and
-// the default volume needs the same floor, so 264 MB total yields a ~128 MB
-// small volume (10% of 264 MB is below the floor, so it gets the floor) and a
-// ~136 MB default volume.  The volume files are created sparse, so the
-// apparent 264 MB costs only what the churn actually writes (~200 MB).
+// the default volume needs the same floor, so the fixture's
+// kSmallTierActiveFileCacheKb (264 MB total) yields a ~128 MB small volume
+// (10% of 264 MB is below the floor, so it gets the floor) and a ~136 MB
+// default volume.  The volume files are created sparse, so the apparent
+// 264 MB costs only what the churn actually writes (~200 MB).
 TEST_F(SystemCachesTest, MetadataSurvivesPayloadChurn) {
   const char kPageUrl[] = "http://www.example.com/churn_page.html";
   const char kOptionsHash[] = "hash";
   const char kCacheKeySuffix[] = "suffix";
   const char kPropertyName[] = "critical_images";
   const char kPropertyValue[] = "beacon-derived value";
-  const int kChurnEntries = 200;                  // ~200 MB of payload churn,
-  const int kChurnEntryBytes = 1024 * 1024;       // ~1.5x the default volume.
-  const int64 kCacheSizeKb = 264 * 1024;          // 264 MB total.
+  const int kChurnEntries = 200;             // ~200 MB of payload churn,
+  const int kChurnEntryBytes = 1024 * 1024;  // ~1.5x the default volume.
 
   GoogleString error_msg;
   EXPECT_TRUE(system_caches_->CreateShmMetadataCache(
       kCachePath, kUsableMetadataCacheSize, &error_msg));
 
   options_->set_file_cache_path(kCachePath);
-  options_->set_file_cache_clean_size_kb(kCacheSizeKb);
+  options_->set_file_cache_clean_size_kb(kSmallTierActiveFileCacheKb);
   options_->set_use_shared_mem_locking(false);
   options_->set_lru_cache_kb_per_process(0);
   SystemRewriteOptions* options = options_.get();
@@ -1473,7 +1553,7 @@ TEST_F(SystemCachesTest, MetadataSurvivesPayloadChurn) {
   std::unique_ptr<SystemRewriteOptions> options2(
       new SystemRewriteOptions(thread_system_.get()));
   options2->set_file_cache_path(kCachePath);
-  options2->set_file_cache_clean_size_kb(kCacheSizeKb);
+  options2->set_file_cache_clean_size_kb(kSmallTierActiveFileCacheKb);
   options2->set_use_shared_mem_locking(false);
   options2->set_lru_cache_kb_per_process(0);
   PrepareWithConfig(options2.get());
@@ -1537,6 +1617,7 @@ TEST_F(SystemCachesTest, ShareIdenticalNoPurge) {
   SystemCachePath* path1 = system_caches_->GetCache(options_.get());
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_EQ(path1, path2);
 }
@@ -1548,6 +1629,7 @@ TEST_F(SystemCachesTest, ShareIdenticalPurge) {
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
   options2.set_enable_cache_purge(true);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_EQ(path1, path2);
 }
@@ -1558,6 +1640,7 @@ TEST_F(SystemCachesTest, NoSharePurgeFlush) {
   SystemCachePath* path1 = system_caches_->GetCache(options_.get());
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_NE(path1, path2);
 }
@@ -1569,6 +1652,7 @@ TEST_F(SystemCachesTest, ShareIdenticalPurgeCustomPath) {
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
   options2.set_cache_flush_filename("f1");
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_EQ(path1, path2);
 }
@@ -1580,6 +1664,7 @@ TEST_F(SystemCachesTest, NoShareVaryingPurgeCustomPath) {
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
   options2.set_cache_flush_filename("f2");
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_NE(path1, path2);
 }
@@ -1590,6 +1675,7 @@ TEST_F(SystemCachesTest, ShareOnOff) {
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
   options2.set_enabled(RewriteOptions::kEnabledOff);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_EQ(path1, path2);
 }
@@ -1600,6 +1686,7 @@ TEST_F(SystemCachesTest, ShareOnStandby) {
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
   options2.set_enabled(RewriteOptions::kEnabledStandby);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_EQ(path1, path2);
 }
@@ -1612,6 +1699,7 @@ TEST_F(SystemCachesTest, NoShareOnUnplugged) {
   options2.set_file_cache_path("/b");
   options2.set_enabled(RewriteOptions::kEnabledUnplugged);
   options2.set_cache_flush_filename("f2");
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_EQ(path1, path2);  // All 'unplugged' caches are the same.
 }
@@ -1622,6 +1710,7 @@ TEST_F(SystemCachesTest, ShareUnpluggedWithOtherMismatches) {
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kCachePath);
   options2.set_enabled(RewriteOptions::kEnabledUnplugged);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_NE(path1, path2);
 }
@@ -1631,6 +1720,7 @@ TEST_F(SystemCachesTest, FileCacheNoConflictTwoPaths) {
   SystemCachePath* path1 = system_caches_->GetCache(options_.get());
   SystemRewriteOptions options2(thread_system_.get());
   options2.set_file_cache_path(kAltCachePath);
+  UseFastFileCache(&options2);
   SystemCachePath* path2 = system_caches_->GetCache(&options2);
   EXPECT_NE(path1, path2);
   EXPECT_EQ(0, message_handler()->MessagesOfType(kWarning));
