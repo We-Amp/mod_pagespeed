@@ -769,6 +769,11 @@ class SystemCachesMemCacheTest : public SystemCachesExternalCacheTestBase {
 
   void SetUpExternalCache(SystemRewriteOptions* options) override {
     options->set_memcached_servers(ServerSpec());
+    // The production default (500 ms) is tuned for serving. Under sanitizer
+    // instrumentation a short latency blip of the shared test server produces
+    // enough timeouts to trip MemcachedCache's error-burst circuit breaker,
+    // after which every later operation reads as a miss.
+    options->set_memcached_timeout_us(5000000);
   }
 
   void TestBasicMemCacheAndNoLru(int num_threads_specified,
@@ -953,6 +958,10 @@ class SystemCachesRedisCacheTest : public SystemCachesExternalCacheTestBase {
 
   void SetUpExternalCache(SystemRewriteOptions* options) override {
     options->set_redis_server(ServerSpec());
+    // The production default (50 ms) is tuned for serving. Under sanitizer
+    // instrumentation a short latency blip of the shared test server times
+    // enough operations out to fail the test.
+    options->set_redis_timeout_us(5000000);
   }
 
  private:
@@ -1314,21 +1323,25 @@ void SystemCachesExternalCacheTestBase::TestCacheShare() {
                  servers[i]->page_property_cache()->property_store()->Name());
   }
 
-  // Metadata + HTTP cache will end up shared
-  TestPut(servers[0]->metadata_cache(), "b", "value");
-  TestGet(servers[0]->metadata_cache(), "b", CacheInterface::kAvailable,
-          "value");
-  TestGet(servers[1]->metadata_cache(), "b", CacheInterface::kAvailable,
-          "value");
-  TestGet(servers[2]->metadata_cache(), "b", CacheInterface::kAvailable,
-          "value");
+  // Metadata + HTTP cache will end up shared. These keys reach the shared
+  // memcached/redis servers, so they carry the per-process prefix like every
+  // other server-backed key.
+  GoogleString metadata_key = StrCat(SharedServerKeyPrefix(), "b");
+  TestPut(servers[0]->metadata_cache(), metadata_key, "value");
+  TestGet(servers[0]->metadata_cache(), metadata_key,
+          CacheInterface::kAvailable, "value");
+  TestGet(servers[1]->metadata_cache(), metadata_key,
+          CacheInterface::kAvailable, "value");
+  TestGet(servers[2]->metadata_cache(), metadata_key,
+          CacheInterface::kAvailable, "value");
 
-  TestHttpPut(servers[0]->http_cache(), "http://b.org", "fragment", "value");
-  TestHttpGet(servers[0]->http_cache(), "http://b.org", "fragment",
+  GoogleString http_key = StrCat("http://b.org/", SharedServerKeyPrefix());
+  TestHttpPut(servers[0]->http_cache(), http_key, "fragment", "value");
+  TestHttpGet(servers[0]->http_cache(), http_key, "fragment",
               kFoundResult, "value");
-  TestHttpGet(servers[1]->http_cache(), "http://b.org", "fragment",
+  TestHttpGet(servers[1]->http_cache(), http_key, "fragment",
               kFoundResult, "value");
-  TestHttpGet(servers[2]->http_cache(), "http://b.org", "fragment",
+  TestHttpGet(servers[2]->http_cache(), http_key, "fragment",
               kFoundResult, "value");
 
   STLDeleteElements(&servers);

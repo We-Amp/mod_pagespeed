@@ -198,6 +198,7 @@ class SystemRewriteOptions : public RewriteOptions {
     return redis_reconnection_delay_ms_.value();
   }
   int64 redis_timeout_us() const { return redis_timeout_us_.value(); }
+  void set_redis_timeout_us(int64 x) { set_option(x, &redis_timeout_us_); }
   int redis_database_index() const { return redis_database_index_.value(); }
   bool has_redis_database_index() const {
     return redis_database_index_.was_set();
