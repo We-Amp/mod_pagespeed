@@ -258,8 +258,8 @@ ServerContext* TestRewriteDriverFactory::NewDecodingServerContext() {
 void TestRewriteDriverFactory::AddPlatformSpecificDecodingPasses(
     RewriteDriver* driver) {
   if (add_platform_specific_decoding_passes_) {
-    for (std::size_t i = 0; i < rewriter_callback_vector_.size(); i++) {
-      RewriteFilter* filter = rewriter_callback_vector_[i]->Done(driver);
+    for (auto& i : rewriter_callback_vector_) {
+      RewriteFilter* filter = i->Done(driver);
       driver->AppendRewriteFilter(filter);
     }
   }
@@ -267,20 +267,20 @@ void TestRewriteDriverFactory::AddPlatformSpecificDecodingPasses(
 
 void TestRewriteDriverFactory::AddPlatformSpecificRewritePasses(
     RewriteDriver* driver) {
-  for (std::size_t i = 0; i < filter_callback_vector_.size(); i++) {
-    HtmlFilter* filter = filter_callback_vector_[i]->Done(driver);
+  for (auto& i : filter_callback_vector_) {
+    HtmlFilter* filter = i->Done(driver);
     driver->AddOwnedPostRenderFilter(filter);
   }
-  for (std::size_t i = 0; i < rewriter_callback_vector_.size(); i++) {
-    RewriteFilter* filter = rewriter_callback_vector_[i]->Done(driver);
+  for (auto& i : rewriter_callback_vector_) {
+    RewriteFilter* filter = i->Done(driver);
     driver->AppendRewriteFilter(filter);
   }
 }
 
 void TestRewriteDriverFactory::ApplyPlatformSpecificConfiguration(
     RewriteDriver* driver) {
-  for (std::size_t i = 0; i < platform_config_vector_.size(); i++) {
-    platform_config_vector_[i]->Done(driver);
+  for (auto& i : platform_config_vector_) {
+    i->Done(driver);
   }
 }
 

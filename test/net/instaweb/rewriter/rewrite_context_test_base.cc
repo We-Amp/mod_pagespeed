@@ -101,8 +101,8 @@ void NestedFilter::Context::RewriteSingle(const ResourcePtr& input,
   GoogleUrl base(input->url());
   if (base.IsWebValid()) {
     // Add a new nested multi-slot context.
-    for (int i = 0, n = pieces.size(); i < n; ++i) {
-      GoogleUrl url(base, pieces[i]);
+    for (auto piece : pieces) {
+      GoogleUrl url(base, piece);
       if (url.IsWebValid()) {
         bool unused;
         ResourcePtr resource(Driver()->CreateInputResource(
@@ -134,9 +134,9 @@ void NestedFilter::Context::Harvest() {
   GoogleString new_content;
 
   if (filter_->check_nested_rewrite_result_) {
-    for (int i = 0, n = nested_slots_.size(); i < n; ++i) {
+    for (const auto& nested_slot : nested_slots_) {
       EXPECT_EQ(filter_->expected_nested_rewrite_result(),
-                nested_slots_[i]->was_optimized());
+                nested_slot->was_optimized());
     }
   }
 

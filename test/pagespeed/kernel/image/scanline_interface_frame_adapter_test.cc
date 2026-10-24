@@ -17,10 +17,10 @@
  * under the License.
  */
 
+#include "pagespeed/kernel/image/scanline_interface_frame_adapter.h"
+
 #include <iterator>
 #include <memory>
-
-#include "pagespeed/kernel/image/scanline_interface_frame_adapter.h"
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -70,8 +70,7 @@ TEST_F(ScanlineInterfaceFrameAdapterTest, PrepareImage) {
       {"interlaced.gif", IMAGE_PNG, true, SCANLINE_STATUS_SUCCESS},
   };
 
-  for (size_t k = 0; k < std::size(cases); ++k) {
-    const TestCase& test = cases[k];
+  for (const auto& test : cases) {
     ScanlineStatus status;
     ImageSpec spec;
 

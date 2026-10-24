@@ -68,8 +68,8 @@ class DisabledCriticalImagesFinder : public MockCriticalImagesFinder {
 
  private:
   DisabledCriticalImagesFinder(const DisabledCriticalImagesFinder&) = delete;
-  DisabledCriticalImagesFinder& operator=(
-      const DisabledCriticalImagesFinder&) = delete;
+  DisabledCriticalImagesFinder& operator=(const DisabledCriticalImagesFinder&) =
+      delete;
 };
 
 }  // namespace
@@ -163,20 +163,20 @@ TEST_F(PrioritizeCriticalImagesFilterTest, CriticalImageGetsFetchPriority) {
   critical_images->insert("http://test.com/critical.jpg");
   SetCriticalImages(critical_images);
 
-  ValidateExpected(
-      "critical_annotated",
-      "<head></head>"
-      "<body>"
-      "<img src=\"critical.jpg\"/>"
-      "<img src=\"other.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"other.jpg\"/>"
-      "</body>");
-  EXPECT_EQ(1, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  ValidateExpected("critical_annotated",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical.jpg\"/>"
+                   "<img src=\"other.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"other.jpg\"/>"
+                   "</body>");
+  EXPECT_EQ(
+      1, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
   ExpectHtmlStatus(RewriterHtmlApplication::ACTIVE);
 }
 
@@ -190,22 +190,22 @@ TEST_F(PrioritizeCriticalImagesFilterTest, CapLimitsToFirstTwoCriticalImages) {
 
   // The cap bounds high-priority images in document order: with three
   // beacon-critical images only the first two are annotated.
-  ValidateExpected(
-      "cap_first_two",
-      "<head></head>"
-      "<body>"
-      "<img src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img src=\"critical1.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>");
-  EXPECT_EQ(2, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  ValidateExpected("cap_first_two",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical1.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>");
+  EXPECT_EQ(
+      2, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, AuthorFetchPriorityRespected) {
@@ -218,43 +218,42 @@ TEST_F(PrioritizeCriticalImagesFilterTest, AuthorFetchPriorityRespected) {
 
   // An author fetchpriority="low" is left untouched and does not consume a
   // slot of the cap: both remaining critical images are annotated.
-  ValidateExpected(
-      "author_low",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority=\"low\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority=\"low\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical3.jpg\" fetchpriority=\"high\"/>"
-      "</body>");
+  ValidateExpected("author_low",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority=\"low\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority=\"low\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical3.jpg\" fetchpriority=\"high\"/>"
+                   "</body>");
 
   // An author fetchpriority="high" is left untouched but does consume a
   // slot: the cap bounds the total number of high-priority images, so only
   // one more image is annotated.
-  ValidateExpected(
-      "author_high",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority=\"high\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority=\"high\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>");
+  ValidateExpected("author_high",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority=\"high\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority=\"high\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>");
   // Cap accounting: two annotations in the author-low document plus one in
   // the author-high document; author-supplied attributes are never counted
   // as applications of this filter.
-  EXPECT_EQ(3, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      3, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest,
@@ -269,59 +268,57 @@ TEST_F(PrioritizeCriticalImagesFilterTest,
   // Attribute name lookup is case-insensitive (the keyword table is built
   // with gperf %ignore-case), so FETCHPRIORITY="high" is author markup too:
   // it is left untouched and consumes one slot of the cap.
-  ValidateExpected(
-      "author_high_uppercase_name",
-      "<head></head>"
-      "<body>"
-      "<img FETCHPRIORITY=\"high\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img FETCHPRIORITY=\"high\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>");
+  ValidateExpected("author_high_uppercase_name",
+                   "<head></head>"
+                   "<body>"
+                   "<img FETCHPRIORITY=\"high\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img FETCHPRIORITY=\"high\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>");
 
   // The value is compared case-insensitively as well: fetchpriority="HIGH"
   // counts as high, so it is left untouched and consumes a slot.
-  ValidateExpected(
-      "author_high_uppercase_value",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority=\"HIGH\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority=\"HIGH\" src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>");
+  ValidateExpected("author_high_uppercase_value",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority=\"HIGH\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority=\"HIGH\" src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>");
 
   // A valueless fetchpriority attribute is still author markup and wins, but
   // with no "high" value it does not consume a slot of the cap: both
   // remaining critical images are annotated.
-  ValidateExpected(
-      "author_valueless",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "<img src=\"critical3.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img fetchpriority src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical3.jpg\" fetchpriority=\"high\"/>"
-      "</body>");
+  ValidateExpected("author_valueless",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "<img src=\"critical3.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img fetchpriority src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical3.jpg\" fetchpriority=\"high\"/>"
+                   "</body>");
   // One annotation in each of the first two documents, two in the third;
   // author-supplied attributes are never counted.
-  EXPECT_EQ(4, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      4, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, NoOpWithoutCriticalImagesData) {
@@ -345,8 +342,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, NoOpWithoutCriticalImagesData) {
                     "<body>"
                     "<img src=\"critical.jpg\"/>"
                     "</body>");
-  EXPECT_EQ(0, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      0, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
   ExpectHtmlStatus(RewriterHtmlApplication::DISABLED);
 }
 
@@ -466,10 +464,11 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataUnsupportedEmitsNoVary) {
 TEST_F(PrioritizeCriticalImagesFilterTest, VaryIsIndependentOfBeaconData) {
   InitPrioritizeCriticalImagesFilter();
 
-  const char kHtml[] = "<head></head>"
-                       "<body>"
-                       "<img src=\"critical.jpg\"/>"
-                       "</body>";
+  const char kHtml[] =
+      "<head></head>"
+      "<body>"
+      "<img src=\"critical.jpg\"/>"
+      "</body>";
   const char kAnnotatedHtml[] =
       "<head></head>"
       "<body>"
@@ -505,10 +504,10 @@ TEST_F(PrioritizeCriticalImagesFilterTest, VaryIsIndependentOfBeaconData) {
   ParseAndCollectVary("vary_warm_empty_save_data", kHtml, true, kHtml,
                       &vary_values[2][1]);
 
-  for (int i = 0; i < 3; ++i) {
+  for (auto& vary_value : vary_values) {
     for (int j = 0; j < 2; ++j) {
-      EXPECT_EQ(vary_values[0][0], vary_values[i][j]);
-      EXPECT_EQ(GoogleString(HttpAttributes::kSaveData), vary_values[i][j]);
+      EXPECT_EQ(vary_values[0][0], vary_value[j]);
+      EXPECT_EQ(GoogleString(HttpAttributes::kSaveData), vary_value[j]);
     }
   }
 }
@@ -576,8 +575,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SkipsDataUrlMissingSrcAndNoscript) {
                     "<img src=\"critical.jpg\"/>"
                     "</noscript>"
                     "</body>");
-  EXPECT_EQ(0, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      0, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, DisallowedUrlNotAnnotated) {
@@ -593,8 +593,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, DisallowedUrlNotAnnotated) {
                     "<body>"
                     "<img src=\"disallowed.jpg\"/>"
                     "</body>");
-  EXPECT_EQ(0, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      0, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, AmpDocumentIsNoOp) {
@@ -610,8 +611,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, AmpDocumentIsNoOp) {
                     "<html amp><body>"
                     "<img src=\"critical.jpg\"/>"
                     "</body></html>");
-  EXPECT_EQ(0, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      0, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 
   // The same page without the amp attribute is annotated normally.
   ValidateExpected("non_amp_applies",
@@ -621,8 +623,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, AmpDocumentIsNoOp) {
                    "<html><body>"
                    "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
                    "</body></html>");
-  EXPECT_EQ(1, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      1, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest,
@@ -649,8 +652,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest,
                           rewritten_url,
                           "\" fetchpriority=\"high\"/>"
                           "</body>"));
-  EXPECT_EQ(1, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      1, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest,
@@ -668,22 +672,22 @@ TEST_F(PrioritizeCriticalImagesFilterTest,
   // mis-prioritize a below-fold image and burn a slot of the cap, pushing a
   // genuinely critical image out. The mixed image must stay untouched while
   // both src-critical images are annotated.
-  ValidateExpected(
-      "srcset_candidates_not_consulted",
-      "<head></head>"
-      "<body>"
-      "<img src=\"thumb.jpg\" srcset=\"hires.jpg 2x\"/>"
-      "<img src=\"critical1.jpg\"/>"
-      "<img src=\"critical2.jpg\"/>"
-      "</body>",
-      "<head></head>"
-      "<body>"
-      "<img src=\"thumb.jpg\" srcset=\"hires.jpg 2x\"/>"
-      "<img src=\"critical1.jpg\" fetchpriority=\"high\"/>"
-      "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
-      "</body>");
-  EXPECT_EQ(2, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  ValidateExpected("srcset_candidates_not_consulted",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"thumb.jpg\" srcset=\"hires.jpg 2x\"/>"
+                   "<img src=\"critical1.jpg\"/>"
+                   "<img src=\"critical2.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"thumb.jpg\" srcset=\"hires.jpg 2x\"/>"
+                   "<img src=\"critical1.jpg\" fetchpriority=\"high\"/>"
+                   "<img src=\"critical2.jpg\" fetchpriority=\"high\"/>"
+                   "</body>");
+  EXPECT_EQ(
+      2, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest,
@@ -710,8 +714,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest,
       "<img srcset=\"lowres.jpg 1x, hires.jpg 2x\" fetchpriority=\"high\"/>"
       "<img srcset=\"lowres.jpg 1x, other.jpg 2x\"/>"
       "</body>");
-  EXPECT_EQ(1, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      1, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, SrcsetOnlyImageConsumesCapSlot) {
@@ -738,8 +743,9 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SrcsetOnlyImageConsumesCapSlot) {
       "<img src=\"critical1.jpg\" fetchpriority=\"high\"/>"
       "<img src=\"critical2.jpg\"/>"
       "</body>");
-  EXPECT_EQ(2, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(
+      2, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
 }
 
 TEST_F(PrioritizeCriticalImagesFilterTest, WorksWithNativeLazyload) {
@@ -772,10 +778,10 @@ TEST_F(PrioritizeCriticalImagesFilterTest, WorksWithNativeLazyload) {
       "<img src=\"critical.jpg\" fetchpriority=\"high\" decoding=\"async\"/>"
       "<img src=\"other.jpg\" loading=\"lazy\" decoding=\"async\"/>"
       "</body>");
-  EXPECT_EQ(1, StatValue(PrioritizeCriticalImagesFilter::
-                             kPrioritizeCriticalImagesApplied));
-  EXPECT_EQ(1,
-            StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
+  EXPECT_EQ(
+      1, StatValue(
+             PrioritizeCriticalImagesFilter::kPrioritizeCriticalImagesApplied));
+  EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesSkippedCritical));
   EXPECT_EQ(1, StatValue(LazyloadImagesFilter::kLazyloadImagesNativeApplied));
 }
 

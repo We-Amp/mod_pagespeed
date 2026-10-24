@@ -72,7 +72,7 @@ inline void AssertWorstCaseOptionContextFitsTheBound(RewriteOptions* options,
   ASSERT_FALSE(all.empty()) << class_name << " registered no options at all";
 
   size_t settable = 0;
-  for (size_t i = 0; i < all.size(); ++i) {
+  for (auto i : all) {
     // Re-setting each option to its CURRENT value flips was_set() without
     // inventing values that could not occur in the field.
     //
@@ -85,7 +85,7 @@ inline void AssertWorstCaseOptionContextFitsTheBound(RewriteOptions* options,
     // small minority so that a regression turning many options unsettable
     // cannot pass unnoticed.
     GoogleString error;
-    if (all[i]->SetFromString(all[i]->ToString(), &error)) {
+    if (i->SetFromString(i->ToString(), &error)) {
       ++settable;
     }
   }

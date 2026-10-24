@@ -206,8 +206,8 @@ class ResponseHeadersTest : public testing::Test {
   // control as a joined string.
   GoogleString AddPublicToCacheControl(const StringVector& cache_control) {
     ResponseHeaders headers;
-    for (int i = 0, n = cache_control.size(); i < n; ++i) {
-      headers.Add(HttpAttributes::kCacheControl, cache_control[i]);
+    for (const auto& i : cache_control) {
+      headers.Add(HttpAttributes::kCacheControl, i);
     }
     headers.SetCacheControlPublic();
     return headers.LookupJoined(HttpAttributes::kCacheControl);
@@ -216,8 +216,8 @@ class ResponseHeadersTest : public testing::Test {
   // Same as AddPublicToCacheControl, but for SetCacheControlImmutable.
   GoogleString AddImmutableToCacheControl(const StringVector& cache_control) {
     ResponseHeaders headers;
-    for (int i = 0, n = cache_control.size(); i < n; ++i) {
-      headers.Add(HttpAttributes::kCacheControl, cache_control[i]);
+    for (const auto& i : cache_control) {
+      headers.Add(HttpAttributes::kCacheControl, i);
     }
     headers.SetCacheControlImmutable();
     return headers.LookupJoined(HttpAttributes::kCacheControl);
@@ -2423,9 +2423,8 @@ TEST_F(ResponseHeadersTest, MaxHeaderCountGuard) {
   // Headers added before the cap are retained; ones past it are dropped.
   ConstStringStarVector values;
   EXPECT_TRUE(headers.Lookup("X-Header-0", &values));
-  EXPECT_FALSE(
-      headers.Lookup(StrCat("X-Header-", IntegerToString(kOverflow - 1)),
-                     &values));
+  EXPECT_FALSE(headers.Lookup(
+      StrCat("X-Header-", IntegerToString(kOverflow - 1)), &values));
 }
 
 // The end-to-end header table is binary-searched (IsHopByHopIndication,
@@ -2461,7 +2460,8 @@ TEST_F(ResponseHeadersTest, OversizedHeaderLineIsDropped) {
   const GoogleString http_data = StrCat(
       "HTTP/1.1 200 OK\r\n"
       "X-Huge: ",
-      huge_value, "\r\n"
+      huge_value,
+      "\r\n"
       "Content-Type: text/html\r\n"
       "\r\n");
   int num_consumed = parser_.ParseChunk(http_data, &message_handler_);
@@ -2488,10 +2488,12 @@ TEST_F(ResponseHeadersTest, DroppedOverlongLineMakesResponseUncacheable) {
   const GoogleString http_data = StrCat(
       "HTTP/1.1 200 OK\r\n"
       "Date: ",
-      start_time_string_, "\r\n"
+      start_time_string_,
+      "\r\n"
       "Content-Type: text/css\r\n"
       "Cache-Control: private, ",
-      huge_private, "\r\n"
+      huge_private,
+      "\r\n"
       "\r\n");
   int num_consumed = parser_.ParseChunk(http_data, &message_handler_);
   EXPECT_TRUE(parser_.headers_complete());

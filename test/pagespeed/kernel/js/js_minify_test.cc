@@ -634,8 +634,9 @@ TEST_F(JsMinifyTest, GeneratorMethodCommaSeparator) {
   CheckNewMinification("var o = { *yield() {}, b: 2 };",
                        "var o={*yield(){},b:2};");
   // Mixed member forms after a generator method.
-  CheckNewMinification("var o = { *m() {}, \"s\": 1, [k]: 2, n() {}, *p() {} };",
-                       "var o={*m(){},\"s\":1,[k]:2,n(){},*p(){}};");
+  CheckNewMinification(
+      "var o = { *m() {}, \"s\": 1, [k]: 2, n() {}, *p() {} };",
+      "var o={*m(){},\"s\":1,[k]:2,n(){},*p(){}};");
   // The same separator path inside a class-field initializer.
   CheckNewMinification("class C { x = { *m() {}, b: 2 }; }",
                        "class C{x={*m(){},b:2};}");
@@ -1278,8 +1279,7 @@ TEST_F(JsMinifyTest, SpeculativeOperatorBlockGuard) {
   // commit).
   CheckNewMinification("class await {}\n/ a /.test(b) ? f() : g();",
                        "class await{}/ a /.test(b)?f():g();");
-  CheckNewMinification("class await extends B {}",
-                       "class await extends B{}");
+  CheckNewMinification("class await extends B {}", "class await extends B{}");
   CheckNewMinification("function await() { return 1; }",
                        "function await(){return 1;}");
   // `class yield {}` is a SyntaxError in every mode; byte-preserving.
@@ -1640,12 +1640,12 @@ TEST_F(JsMinifyTest, MinifyPrototype) {
 GoogleString MappingsToString(
     const net_instaweb::source_map::MappingVector& mappings) {
   GoogleString result("{");
-  for (int i = 0, n = mappings.size(); i < n; ++i) {
-    StrAppend(&result, "(", net_instaweb::IntegerToString(mappings[i].gen_line),
-              ", ", net_instaweb::IntegerToString(mappings[i].gen_col), ", ");
-    StrAppend(&result, net_instaweb::IntegerToString(mappings[i].src_file),
-              ", ", net_instaweb::IntegerToString(mappings[i].src_line), ", ",
-              net_instaweb::IntegerToString(mappings[i].src_col), "), ");
+  for (const auto& mapping : mappings) {
+    StrAppend(&result, "(", net_instaweb::IntegerToString(mapping.gen_line),
+              ", ", net_instaweb::IntegerToString(mapping.gen_col), ", ");
+    StrAppend(&result, net_instaweb::IntegerToString(mapping.src_file), ", ",
+              net_instaweb::IntegerToString(mapping.src_line), ", ",
+              net_instaweb::IntegerToString(mapping.src_col), "), ");
   }
   result += "}";
   return result;

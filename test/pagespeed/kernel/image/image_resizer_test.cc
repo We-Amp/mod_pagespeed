@@ -17,10 +17,10 @@
  * under the License.
  */
 
+#include "pagespeed/kernel/image/image_resizer.h"
+
 #include <iterator>
 #include <memory>
-
-#include "pagespeed/kernel/image/image_resizer.h"
 
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -163,9 +163,9 @@ ScanlineWriterInterface* CreateWriter(PixelFormat pixel_format, size_t width,
 void ScanlineResizerTest::ResizeAndValidateImage(const char* file_name,
                                                  const GoogleString& image) {
   PngScanlineReaderRaw gold_reader(&message_handler_);
-  for (size_t index_size = 0; index_size < KOutputSizeCount; ++index_size) {
-    size_t width = kOutputSize[index_size][0];
-    size_t height = kOutputSize[index_size][1];
+  for (auto index_size : kOutputSize) {
+    size_t width = index_size[0];
+    size_t height = index_size[1];
     ASSERT_TRUE(reader_.Initialize(image.data(), image.length()));
     ASSERT_TRUE(resizer_.Initialize(&reader_, width, height));
 
@@ -204,8 +204,7 @@ void ScanlineResizerTest::ResizeAndValidateImage(const char* file_name,
 TEST_F(ScanlineResizerTest, Accuracy) {
   // Test accuracy of resizing for some images in PNG Suite. All images in this
   // suite have 32-by-32 pixels.
-  for (size_t index_image = 0; index_image < kValidImageCount; ++index_image) {
-    const char* file_name = kValidImages[index_image];
+  for (auto file_name : kValidImages) {
     ASSERT_TRUE(
         ReadTestFile(kPngSuiteTestDir, file_name, "png", &input_image_));
     ResizeAndValidateImage(file_name, input_image_);
@@ -222,14 +221,13 @@ TEST_F(ScanlineResizerTest, ResizeAndWrite) {
   message_handler_.AddPatternToSkipPrinting(kMessagePatternPixelFormat);
   message_handler_.AddPatternToSkipPrinting(kMessagePatternStats);
   message_handler_.AddPatternToSkipPrinting(kMessagePatternWritingToWebp);
-  for (size_t index_image = 0; index_image < kValidImageCount; ++index_image) {
-    const char* file_name = kValidImages[index_image];
+  for (auto file_name : kValidImages) {
     ASSERT_TRUE(
         ReadTestFile(kPngSuiteTestDir, file_name, "png", &input_image_));
 
-    for (size_t index_size = 0; index_size < KOutputSizeCount; ++index_size) {
-      const size_t width = kOutputSize[index_size][0];
-      const size_t height = kOutputSize[index_size][1];
+    for (auto index_size : kOutputSize) {
+      const size_t width = index_size[0];
+      const size_t height = index_size[1];
       ASSERT_TRUE(
           reader_.Initialize(input_image_.data(), input_image_.length()));
       ASSERT_TRUE(resizer_.Initialize(&reader_, width, height));

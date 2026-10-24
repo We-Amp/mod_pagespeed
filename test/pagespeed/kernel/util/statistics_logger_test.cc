@@ -247,8 +247,8 @@ TEST_F(StatisticsLoggerTest, MissingVariableSerializesAsNullNotZero) {
   ASSERT_EQ(4, list_of_timestamps.size());
   const VariableInfo& unlogged = parsed_var_data[kUnloggedVariable];
   ASSERT_EQ(4, unlogged.size());
-  for (size_t i = 0; i < unlogged.size(); ++i) {
-    EXPECT_EQ("null", unlogged[i]);
+  for (const auto& i : unlogged) {
+    EXPECT_EQ("null", i);
   }
   const VariableInfo& flushes = parsed_var_data["num_flushes"];
   ASSERT_EQ(4, flushes.size());
@@ -281,8 +281,8 @@ TEST_F(StatisticsLoggerTest, GraphsParseEmitsNullForMissingCounters) {
   EXPECT_EQ("400", hits[0]);
   const VariableInfo& expirations = parsed_var_data["cache_expirations"];
   ASSERT_EQ(4, expirations.size());
-  for (size_t i = 0; i < expirations.size(); ++i) {
-    EXPECT_EQ("null", expirations[i]);
+  for (const auto& expiration : expirations) {
+    EXPECT_EQ("null", expiration);
   }
 }
 

@@ -628,10 +628,10 @@ class PngScanlineWriterTest : public testing::Test {
 
 TEST_F(PngOptimizerTest, ValidPngs) {
   reader_ = std::make_unique<PngReader>(&message_handler_);
-  for (size_t i = 0; i < kValidImageCount; i++) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kValidImages[i].filename, "png", &in);
-    AssertMatch(in, in, reader_.get(), kValidImages[i]);
+    ReadTestFile(kPngSuiteTestDir, kValidImage.filename, "png", &in);
+    AssertMatch(in, in, reader_.get(), kValidImage);
   }
 }
 
@@ -641,9 +641,9 @@ TEST(PngScanlineReaderTest, InitializeRead_validPngs) {
   if (setjmp(*scanline_reader.GetJmpBuf())) {
     ASSERT_FALSE(true) << "Execution should never reach here";
   }
-  for (size_t i = 0; i < kValidImageCount; i++) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kValidImages[i].filename, "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kValidImage.filename, "png", &in);
     PngReader png_reader(&message_handler);
     ASSERT_TRUE(scanline_reader.Reset());
 
@@ -651,16 +651,14 @@ TEST(PngScanlineReaderTest, InitializeRead_validPngs) {
     ASSERT_TRUE(
         png_reader.GetAttributes(in, &width, &height, &bit_depth, &color_type));
 
-    EXPECT_EQ(kValidImages[i].original_color_type, color_type);
+    EXPECT_EQ(kValidImage.original_color_type, color_type);
     ASSERT_TRUE(scanline_reader.InitializeRead(png_reader, in));
-    EXPECT_EQ(kValidImages[i].original_color_type,
-              scanline_reader.GetColorType());
+    EXPECT_EQ(kValidImage.original_color_type, scanline_reader.GetColorType());
   }
 
-  for (size_t i = 0; i < kOpaqueImagesWithAlphaCount; i++) {
+  for (auto& i : kOpaqueImagesWithAlpha) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kOpaqueImagesWithAlpha[i].filename, "png",
-                 &in);
+    ReadTestFile(kPngSuiteTestDir, i.filename, "png", &in);
     PngReader png_reader(&message_handler);
     ASSERT_TRUE(scanline_reader.Reset());
 
@@ -668,23 +666,21 @@ TEST(PngScanlineReaderTest, InitializeRead_validPngs) {
     ASSERT_TRUE(
         png_reader.GetAttributes(in, &width, &height, &bit_depth, &color_type));
 
-    EXPECT_EQ(kOpaqueImagesWithAlpha[i].in_color_type, color_type);
+    EXPECT_EQ(i.in_color_type, color_type);
     ASSERT_TRUE(scanline_reader.InitializeRead(png_reader, in));
-    EXPECT_EQ(kOpaqueImagesWithAlpha[i].out_color_type,
-              scanline_reader.GetColorType());
+    EXPECT_EQ(i.out_color_type, scanline_reader.GetColorType());
   }
 }
 
 TEST_F(PngOptimizerTest, ValidPngs_isOpaque) {
   ScopedPngStruct read(ScopedPngStruct::READ, &message_handler_);
 
-  for (size_t i = 0; i < kOpaqueImagesWithAlphaCount; i++) {
+  for (auto& i : kOpaqueImagesWithAlpha) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kOpaqueImagesWithAlpha[i].filename, "png",
-                 &in);
+    ReadTestFile(kPngSuiteTestDir, i.filename, "png", &in);
     reader_ = std::make_unique<PngReader>(&message_handler_);
     ASSERT_TRUE(reader_->ReadPng(in, read.png_ptr(), read.info_ptr(), 0));
-    EXPECT_EQ(kOpaqueImagesWithAlpha[i].is_opaque,
+    EXPECT_EQ(i.is_opaque,
               PngReaderInterface::IsAlphaChannelOpaque(
                   read.png_ptr(), read.info_ptr(), &message_handler_));
     ASSERT_TRUE(read.reset());
@@ -716,9 +712,9 @@ TEST_F(PngOptimizerTest, LargerPng) {
 
 TEST_F(PngOptimizerTest, InvalidPngs) {
   reader_ = std::make_unique<PngReader>(&message_handler_);
-  for (size_t i = 0; i < kInvalidFileCount; i++) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kInvalidFiles[i], "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kInvalidFile, "png", &in);
     ASSERT_FALSE(PngOptimizer::OptimizePngBestCompression(*reader_, in, &out,
                                                           &message_handler_));
     ASSERT_FALSE(
@@ -728,13 +724,13 @@ TEST_F(PngOptimizerTest, InvalidPngs) {
     const bool get_attributes_result =
         reader_->GetAttributes(in, &width, &height, &bit_depth, &color_type);
     bool expected_get_attributes_result = false;
-    if (strcmp("x00n0g01", kInvalidFiles[i]) == 0) {
+    if (strcmp("x00n0g01", kInvalidFile) == 0) {
       // Special case: even though the image is invalid, it has a
       // valid IDAT chunk, so we can read its attributes.
       expected_get_attributes_result = true;
     }
     EXPECT_EQ(expected_get_attributes_result, get_attributes_result)
-        << kInvalidFiles[i];
+        << kInvalidFile;
   }
 }
 
@@ -790,13 +786,13 @@ TEST_F(PngOptimizerTest, PartialPng) {
 
 TEST_F(PngOptimizerTest, ValidGifs) {
   reader_ = std::make_unique<GifReader>(&message_handler_);
-  for (size_t i = 0; i < kValidGifImageCount; i++) {
+  for (const auto& kValidGifImage : kValidGifImages) {
     GoogleString in, ref, gif_rgba;
-    ReadTestFile(kPngSuiteGifTestDir, kValidGifImages[i].filename, "gif", &in);
-    ReadTestFile(kPngSuiteGifTestDir, kValidGifImages[i].filename, "gif.rgba",
+    ReadTestFile(kPngSuiteGifTestDir, kValidGifImage.filename, "gif", &in);
+    ReadTestFile(kPngSuiteGifTestDir, kValidGifImage.filename, "gif.rgba",
                  &gif_rgba);
-    ReadTestFile(kPngSuiteTestDir, kValidGifImages[i].filename, "png", &ref);
-    AssertMatch(in, ref, reader_.get(), kValidGifImages[i], gif_rgba);
+    ReadTestFile(kPngSuiteTestDir, kValidGifImage.filename, "png", &ref);
+    AssertMatch(in, ref, reader_.get(), kValidGifImage, gif_rgba);
   }
 }
 
@@ -900,9 +896,9 @@ TEST_F(PngOptimizerTest, InvalidGifs) {
   // Verify that we fail gracefully when trying to parse PNGs using
   // the GIF reader.
   reader_ = std::make_unique<GifReader>(&message_handler_);
-  for (size_t i = 0; i < kValidImageCount; i++) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kValidImages[i].filename, "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kValidImage.filename, "png", &in);
     ASSERT_FALSE(
         PngOptimizer::OptimizePng(*reader_, in, &out, &message_handler_));
     int width, height, bit_depth, color_type;
@@ -911,9 +907,9 @@ TEST_F(PngOptimizerTest, InvalidGifs) {
   }
 
   // Also verify we fail gracefully for the invalid PNG images.
-  for (size_t i = 0; i < kInvalidFileCount; i++) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString in, out;
-    ReadTestFile(kPngSuiteTestDir, kInvalidFiles[i], "png", &in);
+    ReadTestFile(kPngSuiteTestDir, kInvalidFile, "png", &in);
     ASSERT_FALSE(
         PngOptimizer::OptimizePng(*reader_, in, &out, &message_handler_));
     int width, height, bit_depth, color_type;
@@ -1026,10 +1022,9 @@ TEST_F(PngScanlineReaderRawTest, ValidPngsRow) {
     FAIL();
   }
 
-  for (size_t i = 0; i < kValidImageCount; i++) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString image_string;
-    ReadTestFile(kPngSuiteTestDir, kValidImages[i].filename, "png",
-                 &image_string);
+    ReadTestFile(kPngSuiteTestDir, kValidImage.filename, "png", &image_string);
 
     // Initialize entire_image_reader (PngScanlineReader).
     if (!InitializeEntireReader(image_string, png_reader,
@@ -1083,10 +1078,9 @@ TEST_F(PngScanlineReaderRawTest, ValidPngsEntire) {
     FAIL();
   }
 
-  for (size_t i = 0; i < kValidImageCount; ++i) {
+  for (auto& kValidImage : kValidImages) {
     GoogleString image_string;
-    ReadTestFile(kPngSuiteTestDir, kValidImages[i].filename, "png",
-                 &image_string);
+    ReadTestFile(kPngSuiteTestDir, kValidImage.filename, "png", &image_string);
 
     // Initialize entire_image_reader (PngScanlineReader).
     if (!InitializeEntireReader(image_string, png_reader,
@@ -1229,8 +1223,8 @@ GoogleString MakePngDeclaringDimensions(uint32 width, uint32 height) {
   ihdr[5] = static_cast<char>(height >> 16);
   ihdr[6] = static_cast<char>(height >> 8);
   ihdr[7] = static_cast<char>(height);
-  ihdr[8] = 8;  // Bit depth.
-  ihdr[9] = 2;  // Color type: truecolor RGB.
+  ihdr[8] = 8;   // Bit depth.
+  ihdr[9] = 2;   // Color type: truecolor RGB.
   ihdr[10] = 0;  // Compression: deflate.
   ihdr[11] = 0;  // Filter method.
   ihdr[12] = 0;  // No interlace.
@@ -1281,8 +1275,8 @@ GoogleString MakeValidPngDeclaringDimensions(uint32 width, uint32 height) {
   ihdr[5] = static_cast<char>(height >> 16);
   ihdr[6] = static_cast<char>(height >> 8);
   ihdr[7] = static_cast<char>(height);
-  ihdr[8] = 8;  // Bit depth.
-  ihdr[9] = 2;  // Color type: truecolor RGB.
+  ihdr[8] = 8;   // Bit depth.
+  ihdr[9] = 2;   // Color type: truecolor RGB.
   ihdr[10] = 0;  // Compression: deflate.
   ihdr[11] = 0;  // Filter method.
   ihdr[12] = 0;  // No interlace.
@@ -1316,8 +1310,7 @@ TEST_F(PngScanlineWriterTest, OversizedDimensionsRejectedByBestCompression) {
   message_handler_.AddPatternToSkipPrinting("*dimensions*");
   message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngError);
   message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngFailure);
-  const size_t width =
-      pagespeed::image_compression::kScanlineMaxDimension + 1;
+  const size_t width = pagespeed::image_compression::kScanlineMaxDimension + 1;
   PngCompressParams best(true /*best compression*/, false /*progressive*/);
   writer_.reset(CreateScanlineWriter(pagespeed::image_compression::IMAGE_PNG,
                                      pixel_format_, width, height_ /* = 2 */,
@@ -1337,9 +1330,9 @@ TEST_F(PngScanlineReaderRawTest, InvalidPngs) {
   message_handler_.AddPatternToSkipPrinting(kMessagePatternLibpngWarning);
   message_handler_.AddPatternToSkipPrinting(kMessagePatternUnexpectedEOF);
   PngScanlineReaderRaw reader(&message_handler_);
-  for (size_t i = 0; i < kInvalidFileCount; i++) {
+  for (auto& kInvalidFile : kInvalidFiles) {
     GoogleString image_string;
-    ReadTestFile(kPngSuiteTestDir, kInvalidFiles[i], "png", &image_string);
+    ReadTestFile(kPngSuiteTestDir, kInvalidFile, "png", &image_string);
 
     ASSERT_FALSE(reader.Initialize(image_string.data(), image_string.length()));
 

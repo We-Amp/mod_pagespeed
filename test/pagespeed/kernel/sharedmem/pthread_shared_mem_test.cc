@@ -76,9 +76,9 @@ class PthreadSharedMemThreadEnv : public PthreadSharedMemEnvBase {
   }
 
   void WaitForChildren() override {
-    for (size_t i = 0; i < child_threads_.size(); ++i) {
+    for (pthread_t child_thread : child_threads_) {
       void* result = this;  // non-NULL -> failure.
-      EXPECT_EQ(0, pthread_join(child_threads_[i], &result));
+      EXPECT_EQ(0, pthread_join(child_thread, &result));
       EXPECT_EQ(nullptr, result) << "Child reported failure";
     }
     child_threads_.clear();
@@ -122,9 +122,9 @@ class PthreadSharedMemProcEnv : public PthreadSharedMemEnvBase {
   }
 
   void WaitForChildren() override {
-    for (size_t i = 0; i < child_processes_.size(); ++i) {
+    for (pid_t child_process : child_processes_) {
       int status;
-      EXPECT_EQ(child_processes_[i], waitpid(child_processes_[i], &status, 0));
+      EXPECT_EQ(child_process, waitpid(child_process, &status, 0));
       EXPECT_TRUE(WIFEXITED(status)) << "Child did not exit cleanly";
       EXPECT_EQ(0, WEXITSTATUS(status)) << "Child reported failure";
     }

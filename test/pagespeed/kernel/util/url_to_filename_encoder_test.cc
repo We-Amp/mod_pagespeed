@@ -36,9 +36,9 @@ class UrlToFilenameEncoderTest : public ::testing::Test {
   static void CheckSegmentLength(const StringPiece& escaped_word) {
     StringPieceVector components;
     SplitStringPieceToVector(escaped_word, "/", &components, false);
-    for (size_t i = 0; i < components.size(); ++i) {
+    for (auto& component : components) {
       EXPECT_GE(UrlToFilenameEncoder::kMaximumSubdirectoryLength,
-                components[i].size());
+                component.size());
     }
   }
 
@@ -48,8 +48,7 @@ class UrlToFilenameEncoderTest : public ::testing::Test {
     //
     // See http://msdn.microsoft.com/en-us/library/aa365247(VS.85).aspx
     const StringPiece kInvalidChars("<>:\"\\|?*'");
-    for (size_t i = 0; i < escaped_word.size(); ++i) {
-      char c = escaped_word[i];
+    for (char c : escaped_word) {
       EXPECT_EQ(StringPiece::npos, kInvalidChars.find(c));
       EXPECT_NE('\0', c);  // only invalid character in Posix
       EXPECT_GT(0x7E, c);  // only English printable characters
@@ -121,8 +120,8 @@ TEST_F(UrlToFilenameEncoderTest, Escapes) {
       "#%"              // Perforce doesn't like
       ",";              // The escape char has to be escaped
 
-  for (size_t i = 0; i < bad_chars.size(); ++i) {
-    ValidateEscaped(bad_chars[i]);
+  for (char bad_char : bad_chars) {
+    ValidateEscaped(bad_char);
   }
 
   // Check non-printable characters.

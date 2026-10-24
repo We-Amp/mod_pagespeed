@@ -251,9 +251,9 @@ TEST_F(PushPreloadFilterTest, ModulesDoNotConsumeTheFontCap) {
             .c_str(),
         links[4 + i]->c_str());
   }
-  for (int i = 0, n = links.size(); i < n; ++i) {
-    EXPECT_EQ(GoogleString::npos, links[i]->find("w5.woff2"))
-        << "The fifth font must not be hinted: " << *links[i];
+  for (auto& link : links) {
+    EXPECT_EQ(GoogleString::npos, link->find("w5.woff2"))
+        << "The fifth font must not be hinted: " << *link;
   }
 }
 
@@ -443,9 +443,9 @@ TEST_F(PushPreloadFilterTest, NoCrossoriginOnStylesAndScripts) {
   ASSERT_EQ(2, links.size());
   EXPECT_STREQ("</a.css>; rel=preload; as=style; nopush", *links[0]);
   EXPECT_STREQ("</b.js>; rel=preload; as=script; nopush", *links[1]);
-  for (int i = 0, n = links.size(); i < n; ++i) {
-    EXPECT_EQ(GoogleString::npos, links[i]->find("crossorigin"))
-        << "crossorigin leaked onto a non-font preload: " << *links[i];
+  for (auto& link : links) {
+    EXPECT_EQ(GoogleString::npos, link->find("crossorigin"))
+        << "crossorigin leaked onto a non-font preload: " << *link;
   }
 }
 
@@ -484,9 +484,9 @@ TEST_F(PushPreloadFilterTest, FontPreloadCap) {
                *links[3]);
   EXPECT_STREQ("</w4.woff2>; rel=preload; as=font; crossorigin; nopush",
                *links[4]);
-  for (int i = 0, n = links.size(); i < n; ++i) {
-    EXPECT_EQ(GoogleString::npos, links[i]->find("w5.woff2"))
-        << "The fifth font must not be hinted: " << *links[i];
+  for (auto& link : links) {
+    EXPECT_EQ(GoogleString::npos, link->find("w5.woff2"))
+        << "The fifth font must not be hinted: " << *link;
   }
 }
 
@@ -532,9 +532,9 @@ TEST_F(PushPreloadFilterTest, FontPreloadCapIsPageGlobal) {
   EXPECT_STREQ("</f2.css>; rel=preload; as=style; nopush", *links[4]);
   EXPECT_STREQ("</b1.woff2>; rel=preload; as=font; crossorigin; nopush",
                *links[5]);
-  for (int i = 0, n = links.size(); i < n; ++i) {
-    EXPECT_EQ(GoogleString::npos, links[i]->find("b2.woff2"))
-        << "The fifth font must not be hinted: " << *links[i];
+  for (auto& link : links) {
+    EXPECT_EQ(GoogleString::npos, link->find("b2.woff2"))
+        << "The fifth font must not be hinted: " << *link;
   }
 }
 

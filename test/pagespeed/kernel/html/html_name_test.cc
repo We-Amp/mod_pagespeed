@@ -89,15 +89,15 @@ TEST_F(HtmlNameTest, AllKeywordsMixedCase) {
   for (HtmlName::Iterator iter; !iter.AtEnd(); iter.Next()) {
     GoogleString mixed(iter.name());
     bool upper = false;
-    for (int i = 0, n = mixed.size(); i < n; ++i) {
-      char c = mixed[i];
+    for (char& i : mixed) {
+      char c = i;
       upper = !upper;
       if (upper) {
         c = UpperChar(c);
       } else {
         c = LowerChar(c);
       }
-      mixed[i] = c;
+      i = c;
     }
     EXPECT_EQ(iter.keyword(), HtmlName::Lookup(mixed));
   }

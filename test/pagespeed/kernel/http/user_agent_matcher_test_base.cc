@@ -583,30 +583,31 @@ bool UserAgentMatcherTestBase::IsTabletUserAgent(
 }
 
 void UserAgentMatcherTestBase::VerifyGetDeviceTypeForUA() {
-  for (int i = 0; i < kMobileUserAgentsArraySize; ++i) {
-    EXPECT_TRUE(IsMobileUserAgent(kMobileUserAgents[i]))
-        << "\"" << kMobileUserAgents[i] << "\""
+  for (auto kMobileUserAgent : kMobileUserAgents) {
+    EXPECT_TRUE(IsMobileUserAgent(kMobileUserAgent))
+        << "\"" << kMobileUserAgent << "\""
         << " not detected as mobile user agent.";
   }
 
-  for (int i = 0; i < kDesktopUserAgentsArraySize; ++i) {
-    EXPECT_TRUE(IsDesktopUserAgent(kDesktopUserAgents[i]))
-        << "\"" << kDesktopUserAgents[i] << "\""
+  for (auto kDesktopUserAgent : kDesktopUserAgents) {
+    EXPECT_TRUE(IsDesktopUserAgent(kDesktopUserAgent))
+        << "\"" << kDesktopUserAgent << "\""
         << " not detected as desktop user agent.";
   }
 
-  for (int i = 0; i < kTabletUserAgentsArraySize; ++i) {
-    EXPECT_TRUE(IsTabletUserAgent(kTabletUserAgents[i]))
-        << "\"" << kTabletUserAgents[i] << "\""
+  for (auto kTabletUserAgent : kTabletUserAgents) {
+    EXPECT_TRUE(IsTabletUserAgent(kTabletUserAgent))
+        << "\"" << kTabletUserAgent << "\""
         << " not detected as tablet user agent.";
   }
 }
 
 void UserAgentMatcherTestBase::VerifyImageInliningSupport() {
-  for (int i = 0; i < kImageInliningSupportedUserAgentsArraySize; ++i) {
+  for (auto kImageInliningSupportedUserAgent :
+       kImageInliningSupportedUserAgents) {
     EXPECT_TRUE(user_agent_matcher_->SupportsImageInlining(
-        kImageInliningSupportedUserAgents[i]))
-        << "\"" << kImageInliningSupportedUserAgents[i]
+        kImageInliningSupportedUserAgent))
+        << "\"" << kImageInliningSupportedUserAgent
         << "\" not detected as a user agent that supports image inlining";
   }
   EXPECT_FALSE(user_agent_matcher_->SupportsImageInlining("random user agent"));

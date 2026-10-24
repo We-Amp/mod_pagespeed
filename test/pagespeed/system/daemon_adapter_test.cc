@@ -1853,8 +1853,7 @@ TEST_F(DaemonAdapterTest, OnlyDaemonNotRunningVerdictsAreRetried) {
   // load-bearing one: its recheck gates would all pass, so only
   // unavailable_is_retryable_ keeps the verdict down.
   const std::vector<std::pair<const char*, std::function<void()>>> faults = {
-      {"the client library is absent",
-       [this] { library_available_ = false; }},
+      {"the client library is absent", [this] { library_available_ = false; }},
       {"the optimizer package publishes no size",
        [this] { publishes_size_ = false; }},
       {"the worker publishes another cache directory generation",
@@ -1864,8 +1863,8 @@ TEST_F(DaemonAdapterTest, OnlyDaemonNotRunningVerdictsAreRetried) {
       {"the worker's volume cannot be opened",
        [this] { fake_open_error_ = kPsErrNoSpace; }},
   };
-  for (size_t i = 0; i < faults.size(); ++i) {
-    SCOPED_TRACE(faults[i].first);
+  for (const auto& fault : faults) {
+    SCOPED_TRACE(fault.first);
     // Restore the fixture's defaults, then stage this fault.  last_abi_ is
     // reset with them: the library-absent case loads no fake, and a stale
     // pointer from the previous iteration would count the wrong one.
@@ -1874,7 +1873,7 @@ TEST_F(DaemonAdapterTest, OnlyDaemonNotRunningVerdictsAreRetried) {
     published_generation_ = DaemonAdapter::kCacheDirGeneration;
     fake_open_error_ = kPsOk;
     last_abi_ = nullptr;
-    faults[i].second();
+    fault.second();
     DaemonCreatedItsVolume(kDaemonSize);
     const GoogleString socket_path = SocketPath("final-verdict.sock");
     std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
@@ -1980,10 +1979,9 @@ TEST_F(DaemonAdapterTest, ARecoveredSplitsFirstOpenRemovesTheFileItCreated) {
   const GoogleString created =
       FakeDaemonAbi::VolumeFileFor(volume_, kDaemonSize);
   const size_t created_slash = created.find_last_of('/');
-  const GoogleString created_name =
-      created_slash == GoogleString::npos
-          ? created
-          : created.substr(created_slash + 1);
+  const GoogleString created_name = created_slash == GoogleString::npos
+                                        ? created
+                                        : created.substr(created_slash + 1);
   EXPECT_NE(created_name, files[0]) << "the file the open created is on disk";
   EXPECT_EQ(2, handler_.MessagesOfType(kError)) << Messages();
   EXPECT_NE(GoogleString::npos,
@@ -2175,8 +2173,7 @@ TEST_F(DaemonAdapterTest, APermissionDeniedSocketNamesTheGroup) {
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
   EXPECT_EQ(1, handler_.MessagesOfType(kError));
   EXPECT_NE(GoogleString::npos, Messages().find(kHintFragment)) << Messages();
-  EXPECT_EQ(GoogleString::npos,
-            Messages().find("start the optimizer worker"))
+  EXPECT_EQ(GoogleString::npos, Messages().find("start the optimizer worker"))
       << Messages();
   // The listener's destructor unlinks the socket at scope exit, after this --
   // so remove it explicitly, or the rmdir below fails on a non-empty dir.
@@ -3497,8 +3494,8 @@ TEST_F(DaemonAdapterTest, TheVolumeGenerationIsKnownOrUnknownNeverGuessed) {
   }
   // Empty, cut short before its newline, not a number, or too large to
   // hold: UNKNOWN -- never "generation 0", which would read as a change.
-  for (const char* text : {"", "\n", "12", "12\r", "12\rx\n", "x12\n",
-                           " 12\n", "-1\n", "18446744073709551616\n"}) {
+  for (const char* text : {"", "\n", "12", "12\r", "12\rx\n", "x12\n", " 12\n",
+                           "-1\n", "18446744073709551616\n"}) {
     WriteGenerationFile(text);
     generation = 99;
     EXPECT_FALSE(DaemonAdapter::ReadVolumeGeneration(volume_, &generation))
@@ -3776,7 +3773,8 @@ TEST_F(DaemonAdapterTest, AReopenWaitsUntilTheDaemonPublishesASize) {
   EXPECT_EQ(opens + 1, last_abi_->opens);
 }
 
-TEST_F(DaemonAdapterTest, AnUnreadableGenerationNeverClearsADetectedReplacement) {
+TEST_F(DaemonAdapterTest,
+       AnUnreadableGenerationNeverClearsADetectedReplacement) {
   // Once a replacement has been seen, a read that gives no answer is not
   // evidence against it: the old handle stays out of use, nothing is opened
   // under a number nobody could read, and requests go to the origin until a
@@ -4032,7 +4030,8 @@ TEST_F(DaemonAdapterTest, AnEarlierFormatVolumeFileDoesNotBlockAReopen) {
   EXPECT_EQ(2u, DaemonAdapter::VolumeFiles(volume_).size());
 }
 
-TEST_F(DaemonAdapterTest, AProcessStartedAfterAResizeAndAPurgeOpensTheCurrentVolume) {
+TEST_F(DaemonAdapterTest,
+       AProcessStartedAfterAResizeAndAPurgeOpensTheCurrentVolume) {
   // The server read the daemon's cache size when it started.  The daemon
   // was then restarted with another size and its cache purged: the file of
   // the old size is gone.  A worker process that starts NOW makes its first
@@ -4108,7 +4107,8 @@ TEST_F(DaemonAdapterTest, AFirstOpenWithNoVolumeFileOpensNothing) {
   EXPECT_EQ(opens + 1, last_abi_->opens);
 }
 
-TEST_F(DaemonAdapterTest, AFirstOpenBesideALeftOverVolumeOfAnotherSizeStillOpens) {
+TEST_F(DaemonAdapterTest,
+       AFirstOpenBesideALeftOverVolumeOfAnotherSizeStillOpens) {
   // After a resize without a purge the file of the earlier size is still
   // there, and the server starts beside it with a warning.  A worker's
   // first open must work there too: the look after the open is what guards

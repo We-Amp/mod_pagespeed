@@ -402,9 +402,9 @@ class ImageRewriteTest : public RewriteTestBase {
       NullThreadSystem thread_system;
       RewriteOptions options(&thread_system);
       resource_tag_scanner::ScanElement(element, &options, &attributes);
-      for (int i = 0, n = attributes.size(); i < n; ++i) {
-        if (attributes[i].category == semantic_type::kImage) {
-          img_srcs_->push_back(attributes[i].url->DecodedValueOrNull());
+      for (auto& attribute : attributes) {
+        if (attribute.category == semantic_type::kImage) {
+          img_srcs_->push_back(attribute.url->DecodedValueOrNull());
         }
       }
     }
@@ -2809,8 +2809,8 @@ TEST_F(ImageRewriteTest, InlinableCssImagesInsertedIntoPropertyCache) {
   SplitStringPieceToVector(FetchInlinablePropertyCacheValue()->value(), ",",
                            &urls, false);
   EXPECT_EQ(expected_urls.size(), urls.size());
-  for (int i = 0; i < urls.size(); ++i) {
-    EXPECT_EQ(1, expected_urls.count(urls[i].as_string()));
+  for (auto url : urls) {
+    EXPECT_EQ(1, expected_urls.count(url.as_string()));
   }
 }
 
@@ -3776,8 +3776,8 @@ TEST_F(ImageRewriteTest, NoTransformOptimized) {
   ConstStringStarVector values;
   ASSERT_TRUE(response_headers.Lookup(HttpAttributes::kCacheControl, &values));
   bool found = false;
-  for (int i = 0, n = values.size(); i < n; ++i) {
-    found |= *(values[i]) == "no-transform";
+  for (auto& value : values) {
+    found |= *value == "no-transform";
   }
   EXPECT_TRUE(found);
 }

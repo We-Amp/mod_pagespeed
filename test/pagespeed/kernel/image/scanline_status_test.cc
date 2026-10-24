@@ -55,8 +55,8 @@ TEST(ScanlineStatusTest, ComesFromReader) {
 
   EXPECT_EQ(NUM_SCANLINE_SOURCE, std::size(kAllSources));
 
-  for (int i = 0; i < NUM_SCANLINE_SOURCE; ++i) {
-    ScanlineStatus status(SCANLINE_STATUS_SUCCESS, kAllSources[i], "");
+  for (auto kAllSource : kAllSources) {
+    ScanlineStatus status(SCANLINE_STATUS_SUCCESS, kAllSource, "");
     bool is_reader = (strstr(status.SourceStr(), "READER") != nullptr);
     EXPECT_EQ(is_reader, status.ComesFromReader());
   }

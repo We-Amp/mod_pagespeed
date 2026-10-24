@@ -20,9 +20,9 @@
 // Unit-test the RewriteContext class.  This is made simplest by
 // setting up some dummy rewriters in our test framework.
 
-#include <memory>
-
 #include "net/instaweb/rewriter/public/rewrite_context.h"
+
+#include <memory>
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/async_fetch_with_lock.h"
@@ -179,8 +179,8 @@ class RewriteContextTest : public RewriteContextTestBase {
     GoogleString rewritten_html = output_buffer_;
     CollectCssLinks("collecting_links", rewritten_html, &css_links);
     int num_unrewritten_css = 0;
-    for (int i = 0, n = css_links.size(); i < n; ++i) {
-      if (css_links[i]->url_.find(".pagespeed.") == GoogleString::npos) {
+    for (auto& css_link : css_links) {
+      if (css_link->url_.find(".pagespeed.") == GoogleString::npos) {
         ++num_unrewritten_css;
       }
     }
@@ -2301,11 +2301,10 @@ TEST_F(RewriteContextTest, ChainedFetchDoesNotBakePublicIntoStoredEntry) {
                                 " span { display: inline; }", 100);
 
   // Outer combination whose inputs are themselves .pagespeed. URLs.
-  GoogleString url =
-      Encode(kTestDomain, "cc", "0",
-             MultiUrl(Encode("", "cf", "0", "a.css", "css"),
-                      Encode("", "cf", "0", "b.css", "css")),
-             "css");
+  GoogleString url = Encode(kTestDomain, "cc", "0",
+                            MultiUrl(Encode("", "cf", "0", "a.css", "css"),
+                                     Encode("", "cf", "0", "b.css", "css")),
+                            "css");
 
   GoogleString content;
   ResponseHeaders headers;
@@ -2319,8 +2318,8 @@ TEST_F(RewriteContextTest, ChainedFetchDoesNotBakePublicIntoStoredEntry) {
   GoogleString stored_headers;
   StoredHeadersCallback callback(options(), CreateRequestContext(),
                                  &stored_headers);
-  http_cache()->Find(url, rewrite_driver()->CacheFragment(),
-                     message_handler(), &callback);
+  http_cache()->Find(url, rewrite_driver()->CacheFragment(), message_handler(),
+                     &callback);
   ASSERT_TRUE(callback.found());
   EXPECT_EQ(GoogleString::npos, stored_headers.find("public"))
       << stored_headers;
@@ -5319,13 +5318,11 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleWithResourceChange) {
                                 kTtlMs / Timer::kSecondMs);
 
   // Phase 1: initial rewrite — both resources fetched and combined.
-  GoogleString combined_url =
-      Encode("", CombiningFilter::kFilterId, "0",
-             MultiUrl("alpha.css", "beta.css"), "css");
-  ValidateExpected(
-      "initial",
-      StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
-      CssLinkHref(combined_url));
+  GoogleString combined_url = Encode("", CombiningFilter::kFilterId, "0",
+                                     MultiUrl("alpha.css", "beta.css"), "css");
+  ValidateExpected("initial",
+                   StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
+                   CssLinkHref(combined_url));
   EXPECT_EQ(1, combining_filter_->num_rewrites());
   EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
 
@@ -5356,10 +5353,9 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleWithResourceChange) {
   // num_pending_freshens_ would underflow (wrap to a large positive int
   // on unsigned, or go negative on int), and Cleanup() would never fire,
   // leaking the manager and leaving stale metadata in cache.
-  ValidateExpected(
-      "freshen_resource_change",
-      StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
-      CssLinkHref(combined_url));
+  ValidateExpected("freshen_resource_change",
+                   StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
+                   CssLinkHref(combined_url));
   EXPECT_EQ(0, combining_filter_->num_rewrites());
 
   // At least one fetch for the imminently-expiring resource(s).
@@ -5377,10 +5373,9 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleWithResourceChange) {
   // The URL stays the same (mock hasher always returns "0"), but the rewrite
   // must fire again because the metadata cache entry was deleted.
   AdvanceTimeMs(2 * Timer::kMinuteMs);
-  ValidateExpected(
-      "after_freshen",
-      StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
-      CssLinkHref(combined_url));
+  ValidateExpected("after_freshen",
+                   StrCat(CssLinkHref("alpha.css"), CssLinkHref("beta.css")),
+                   CssLinkHref(combined_url));
   // Proves the rewrite ran again after metadata invalidation.
   EXPECT_EQ(1, combining_filter_->num_rewrites());
 }
@@ -5407,8 +5402,7 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleUnchangedResources) {
   response_headers.SetStatusAndReason(HttpStatus::kOK);
   response_headers.ComputeCaching();
   mock_url_fetcher()->SetConditionalResponse(
-      "http://test.com/gamma.css", -1, "etag-gamma",
-      response_headers, kDataIn);
+      "http://test.com/gamma.css", -1, "etag-gamma", response_headers, kDataIn);
 
   // Initial rewrite.
   ValidateExpected("initial", CssLinkHref(kPath),
@@ -5425,8 +5419,7 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleUnchangedResources) {
   AdvanceTimeMs(kTtlMs / 2);
   response_headers.FixDateHeaders(timer()->NowMs());
   mock_url_fetcher()->SetConditionalResponse(
-      "http://test.com/gamma.css", -1, "etag-gamma",
-      response_headers, kDataIn);
+      "http://test.com/gamma.css", -1, "etag-gamma", response_headers, kDataIn);
   AdvanceTimeMs(kTtlMs / 2 - 3 * Timer::kMinuteMs);
 
   // This triggers Freshen(). The resource is unchanged (etag match → 304),
@@ -5438,8 +5431,7 @@ TEST_F(RewriteContextTest, FreshenCounterLifecycleUnchangedResources) {
   EXPECT_EQ(0, trim_filter_->num_rewrites());
   EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(
-      1,
-      server_context()->rewrite_stats()->num_conditional_refreshes()->Get());
+      1, server_context()->rewrite_stats()->num_conditional_refreshes()->Get());
 
   // Metadata was updated, not deleted — Cleanup() chose PutSwappingString.
   // This proves the counter reached 0 correctly and Cleanup() ran.

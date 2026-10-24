@@ -122,9 +122,8 @@ int MockMessageHandler::TotalSkippedMessages() const {
 
 int MockMessageHandler::TotalMessagesImpl(const MessageCountMap& counts) const {
   int total = 0;
-  for (MessageCountMap::const_iterator i = counts.begin(); i != counts.end();
-       ++i) {
-    total += i->second;
+  for (auto count : counts) {
+    total += count.second;
   }
   return total;
 }

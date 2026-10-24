@@ -498,8 +498,7 @@ TEST_F(CssHierarchyTest, ExpandNested) {
   EXPECT_EQ(2, top.stylesheet()->imports().size());
   EXPECT_EQ(2, top.children().size());
 
-  for (int i = 0, n = top.children().size(); i < n; ++i) {
-    CssHierarchy* child = top.children()[i];
+  for (auto child : top.children()) {
     EXPECT_TRUE(nullptr != child->stylesheet());
     EXPECT_EQ(1, child->stylesheet()->imports().size());
     EXPECT_EQ(1, child->children().size());
@@ -631,8 +630,7 @@ TEST_F(CssHierarchyTest, ExpandElidesImportsWithNoMedia) {
   EXPECT_EQ(2, top.stylesheet()->imports().size());
   EXPECT_EQ(2, top.children().size());
 
-  for (int i = 0, n = top.children().size(); i < n; ++i) {
-    CssHierarchy* child = top.children()[i];
+  for (auto child : top.children()) {
     EXPECT_TRUE(nullptr != child->stylesheet());
     EXPECT_EQ(1, child->stylesheet()->imports().size());
     EXPECT_EQ(1, child->children().size());
@@ -815,8 +813,8 @@ TEST_F(CssHierarchyTest, RollUpStylesheetsNestedWithChildrenRollUpContents) {
 
   // Roll up all the children's contents manually. This is the contract so
   // we test that here. Later we roll up our own contents and test that case.
-  for (int i = 0, n = top.children().size(); i < n; ++i) {
-    top.children()[i]->RollUpContents();
+  for (auto& i : top.children()) {
+    i->RollUpContents();
   }
 
   top.RollUpStylesheets();

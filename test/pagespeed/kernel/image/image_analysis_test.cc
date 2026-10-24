@@ -108,8 +108,8 @@ class ImageAnalysisTest : public testing::Test {
  public:
   ImageAnalysisTest() : message_handler_(new NullMutex) {
     // Initialize the expected histogram.
-    for (int i = 0; i < kNumColorHistogramBins; ++i) {
-      expected_hist_[i] = 0.0f;
+    for (float& i : expected_hist_) {
+      i = 0.0f;
     }
   }
 
@@ -124,8 +124,7 @@ class ImageAnalysisTest : public testing::Test {
         GetNumChannelsFromPixelFormat(pixel_format, &message_handler_);
 
     // Synthesize the image.
-    std::unique_ptr<uint8_t[]> image(
-        new uint8_t[bytes_per_line * height]);
+    std::unique_ptr<uint8_t[]> image(new uint8_t[bytes_per_line * height]);
     SynthesizeImage(width, height, bytes_per_line, num_channels, seed_value,
                     delta_x, delta_y, image.get());
 
@@ -202,8 +201,7 @@ TEST_F(ImageAnalysisTest, GradientOfWhiteImage) {
       GetNumChannelsFromPixelFormat(pixel_format, &message_handler_);
 
   uint8_t seed[] = {0};
-  std::unique_ptr<uint8_t[]> expected_gradient(
-      new uint8_t[width * height]);
+  std::unique_ptr<uint8_t[]> expected_gradient(new uint8_t[width * height]);
   SynthesizeImage(width, height, width, num_channels, seed, delta_x, delta_y,
                   expected_gradient.get());
 
@@ -227,8 +225,7 @@ TEST_F(ImageAnalysisTest, GradientOfIncreasingPixelValues) {
   //   max( 2 * (delta_x[0] + delta_x[1] + delta_x[2]) / 3,
   //        2 * (delta_y[0] + delta_y[1] + delta_y[2]) / 3 )
   // which is 40.
-  std::unique_ptr<uint8_t[]> expected_gradient(
-      new uint8_t[width * height]);
+  std::unique_ptr<uint8_t[]> expected_gradient(new uint8_t[width * height]);
   memset(expected_gradient.get(), 0, width * height);
   for (int y = 1; y < height - 1; ++y) {
     memset(expected_gradient.get() + y * width + 1, 40, width - 2);
@@ -272,8 +269,7 @@ TEST_F(ImageAnalysisTest, HistogramOfBlankImage) {
   const int delta_x[] = {0};
   const int delta_y[] = {0};
 
-  std::unique_ptr<uint8_t[]> image(
-      new uint8_t[bytes_per_line * height]);
+  std::unique_ptr<uint8_t[]> image(new uint8_t[bytes_per_line * height]);
   SynthesizeImage(width, height, bytes_per_line, num_channels, seed_value,
                   delta_x, delta_y, image.get());
 
@@ -302,8 +298,7 @@ TEST_F(ImageAnalysisTest, HistogramOfIncreasingPixelValues) {
   const int delta_x[] = {1};
   const int delta_y[] = {9};
 
-  std::unique_ptr<uint8_t[]> image(
-      new uint8_t[bytes_per_line * height]);
+  std::unique_ptr<uint8_t[]> image(new uint8_t[bytes_per_line * height]);
   SynthesizeImage(width, height, bytes_per_line, num_channels, seed_value,
                   delta_x, delta_y, image.get());
 
@@ -334,8 +329,7 @@ TEST_F(ImageAnalysisTest, PhotoMetric) {
   };
 
   float metric[kJpegImageCount];
-  for (size_t i = 0; i < std::size(thresholds); ++i) {
-    float thr = thresholds[i];
+  for (float thr : thresholds) {
     for (size_t j = 0; j < kJpegImageCount; ++j) {
       GoogleString image_string;
       ASSERT_TRUE(ReadTestFile(kJpegTestDir, kJpegImages[j].file_name, "jpg",

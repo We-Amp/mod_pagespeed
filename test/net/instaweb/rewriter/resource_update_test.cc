@@ -113,9 +113,8 @@ class ResourceUpdateTest : public RewriteContextTestBase {
 
     // Load text of subresources.
     StringVector subresources;
-    for (StringPieceVector::const_iterator iter = urls.begin();
-         iter != urls.end(); ++iter) {
-      subresources.push_back(FetchUrlAndCheckHash(*iter));
+    for (auto url : urls) {
+      subresources.push_back(FetchUrlAndCheckHash(url));
     }
     return subresources;
   }

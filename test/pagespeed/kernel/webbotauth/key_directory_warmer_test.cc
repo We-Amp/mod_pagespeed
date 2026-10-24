@@ -86,9 +86,9 @@ class DeferredFetcher : public UrlAsyncFetcher {
   DeferredFetcher(ThreadSystem* thread_system, GoogleString body)
       : thread_system_(thread_system), body_(std::move(body)) {}
   ~DeferredFetcher() override {
-    for (size_t i = 0; i < completers_.size(); ++i) {
-      completers_[i]->Join();
-      delete completers_[i];
+    for (auto& completer : completers_) {
+      completer->Join();
+      delete completer;
     }
   }
   void Fetch(const GoogleString& url, MessageHandler* handler,

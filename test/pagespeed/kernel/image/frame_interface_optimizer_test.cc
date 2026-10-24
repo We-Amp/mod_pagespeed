@@ -21,8 +21,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
@@ -209,11 +209,9 @@ class MultipleFramePaddingReaderTest : public testing::Test {
     FrameSpec frame_spec;  // FrameSpec returned from MultipleFramePaddingReader
     ScanlineStatus status;
     EXPECT_TRUE(padder->Initialize(nullptr, 0, &status)) << status.ToString();
-    for (size_px frame_idx = 0; frame_idx < all_frames.size(); ++frame_idx) {
+    for (auto frame_orig : all_frames) {
       ASSERT_TRUE(padder->HasMoreFrames());
       ASSERT_TRUE(padder->PrepareNextFrame(&status)) << status.ToString();
-
-      FrameSpec frame_orig = all_frames[frame_idx];
 
       EXPECT_TRUE(padder->GetFrameSpec(&frame_spec, &status))
           << status.ToString();
@@ -319,8 +317,10 @@ class MultipleFramePaddingReaderTest : public testing::Test {
   MockMessageHandler message_handler_;
 
  private:
-  MultipleFramePaddingReaderTest(const MultipleFramePaddingReaderTest&) = delete;
-  MultipleFramePaddingReaderTest& operator=(const MultipleFramePaddingReaderTest&) = delete;
+  MultipleFramePaddingReaderTest(const MultipleFramePaddingReaderTest&) =
+      delete;
+  MultipleFramePaddingReaderTest& operator=(
+      const MultipleFramePaddingReaderTest&) = delete;
 };
 
 TEST_F(MultipleFramePaddingReaderTest, ReaderPadsRGBA_8888) {
