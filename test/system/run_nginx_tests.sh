@@ -670,6 +670,19 @@ EOF
             add_header PageSpeedFilters +collapse_whitespace;
         }
 
+        # Nested-location and if-block inheritance probe: the enclosing
+        # location turns pagespeed off, and the nested regex location and
+        # the if block carry no pagespeed directives of their own, so both
+        # must run with the enclosing location's settings (issue #303).
+        # nested/ pages are matched by the nested location, page.html by
+        # the enclosing location directly; ?ps_if=1 additionally switches
+        # the request into the if block's configuration.
+        location ^~ /mod_pagespeed_test/location_inherit/ {
+            pagespeed off;
+            location ~ ^/mod_pagespeed_test/location_inherit/nested/ { }
+            if (\$arg_ps_if) { set \$ps_if_matched 1; }
+        }
+
 EOF
     fi
 
