@@ -455,6 +455,11 @@ EOF
     # Configure canonicalize_javascript_libraries filter (matches Apache)
     pagespeed Library 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js;
 
+    # Script variables: enable request-time evaluation of pagespeed
+    # directives whose value comes from an nginx variable
+    # (test/system/nginx/test_nginx_script_variables.py).
+    pagespeed ProcessScriptVariables on;
+
 EOF
     fi
 
@@ -575,6 +580,13 @@ EOF
         # stand-in for Apache's imagebeacon.example.com test vhost.
         location = /mod_pagespeed_example/prioritize_critical_images.html {
             pagespeed CriticalImagesBeaconEnabled true;
+        }
+
+        # Script-variable option probe (test_nginx_script_variables.py): the
+        # location enables a filter from the request's own query argument, so
+        # an invalid value exercises the request-time option refusal path.
+        location ^~ /mod_pagespeed_test/script_variables/ {
+            pagespeed EnableFilters \$arg_filters;
         }
 
         # In-place method probe: the echo origin answers POST with a

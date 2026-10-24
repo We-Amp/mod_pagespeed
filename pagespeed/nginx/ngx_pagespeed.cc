@@ -2016,6 +2016,8 @@ bool ps_set_experiment_state_and_cookie(ngx_http_request_t* r,
 // Consider them all, returning appropriate options for this request, of which
 // the caller takes ownership.  If the only applicable options are global,
 // set options to NULL so we can use server_context->global_options().
+// On failure every copy made here is freed and *options is NULL: the caller
+// serves the request without optimization and takes ownership of nothing.
 bool ps_determine_options(
     ngx_http_request_t* r, RequestHeaders* request_headers,
     ResponseHeaders* response_headers, RewriteOptions** options,
@@ -2070,8 +2072,12 @@ bool ps_determine_options(
   // ExecuteScriptVariables() sets 'pagespeed off' on ngx_options when execution
   // fails and then returns false. When that happens we return, as we don't want
   // to allow enabling pagespeed by request and execute without the intended
-  // configuration.
+  // configuration.  The caller serves the request without optimization and
+  // takes ownership of nothing, so free the copies made for this request here.
   if (!ngx_options->ExecuteScriptVariables(r, cfg_s->handler, ngx_factory)) {
+    delete *options;
+    *options = nullptr;
+    delete request_options;
     return false;
   }
 
@@ -2168,6 +2174,19 @@ void ps_release_base_fetch(ps_request_ctx_t* ctx) {
     ctx->base_fetch->Detach();
     ctx->base_fetch = nullptr;
   }
+}
+
+// Complete the base fetch of an admin request that is refused before its
+// shared handler ran: nothing else will ever call Done() on it, and the
+// request cleanup only detaches, which would leave the fetch holding a
+// reference until the worker's shutdown drain gives up on it after its full
+// budget.  The fetch's headers never reach the client; its status is still
+// set to the refusal's so the completion is not counted as a resource 404.
+void ps_abandon_admin_base_fetch(ps_request_ctx_t* ctx) {
+  ctx->base_fetch->response_headers()->set_status_code(
+      HttpStatus::kEntityTooLarge);
+  ctx->base_fetch->Done(false /* failure */);
+  ps_release_base_fetch(ctx);
 }
 
 // TODO(chaizhenhua): merge into NgxBaseFetch ctor
@@ -2946,7 +2965,10 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
                             &options, request_context, cfg_s, &url,
                             &pagespeed_query_params, &pagespeed_option_cookies,
                             html_rewrite)) {
-    return NGX_ERROR;
+    // This request's options could not be determined (a script variable
+    // evaluated to a value the configuration rejects).  Serve the request
+    // without optimization rather than failing it.
+    return NGX_DECLINED;
   }
 
   // Take ownership of custom_options.
@@ -3087,6 +3109,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
         // or unreadable; already logged) is refused like an oversized one.
         if (!ps_request_body_to_string_piece(r, &request_body) &&
             r->request_body->bufs != nullptr) {
+          ps_abandon_admin_base_fetch(ctx);
           return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
         }
         if (request_body.size() > ADMIN_MAX_POST_SIZE) {
@@ -3094,6 +3117,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
                         "admin POST body too large: %uz > %uz",
                         request_body.size(),
                         static_cast<size_t>(ADMIN_MAX_POST_SIZE));
+          ps_abandon_admin_base_fetch(ctx);
           return NGX_HTTP_REQUEST_ENTITY_TOO_LARGE;
         }
       }
@@ -4097,6 +4121,9 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
   // Backing store for cache_control when a case below points it at a
   // fetch's response headers, which do not outlive the switch block.
   GoogleString fetch_cache_control;
+  // Backing store for the Allow header, same lifetime rule: the messages
+  // handler names the allowed methods on its method-not-allowed answer.
+  GoogleString fetch_allow;
   const char* error_message = nullptr;
 
   switch (response_category) {
@@ -4137,9 +4164,15 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
       server_context->MessageHistoryHandler(*server_context->config(),
                                             AdminSite::kOther,
                                             message_query_params, &fetch);
-      // ps_simple_handler's shared post-switch code pins content_type and
-      // cache_control to defaults; take the JSON type and cache policy the
-      // shared handler set instead.
+      // ps_simple_handler's shared post-switch code pins status, content_type
+      // and cache_control to defaults; take what the shared handler set
+      // instead, so its method-not-allowed (405 with Allow) and busy (429)
+      // answers keep their status instead of a fixed 200.  Only the numeric
+      // status is used: nginx writes its own status line.
+      const int fetch_status = fetch.response_headers()->status_code();
+      if (fetch_status != 0) {
+        status = static_cast<HttpStatus::Code>(fetch_status);
+      }
       const ContentType* fetch_content_type =
           fetch.response_headers()->DetermineContentType();
       if (fetch_content_type != nullptr) {
@@ -4150,6 +4183,8 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
       if (!fetch_cache_control.empty()) {
         cache_control = fetch_cache_control;
       }
+      fetch_allow =
+          fetch.response_headers()->LookupJoined(HttpAttributes::kAllow);
       writer.Write(json, message_handler);
       break;
     }
@@ -4182,6 +4217,9 @@ ngx_int_t ps_simple_handler(ngx_http_request_t* r,
   response_headers.SetDate(now_ms);
   response_headers.SetLastModified(now_ms);
   response_headers.Add(HttpAttributes::kCacheControl, cache_control);
+  if (!fetch_allow.empty()) {
+    response_headers.Add(HttpAttributes::kAllow, fetch_allow);
+  }
 
   char* cache_control_s = string_piece_to_pool_string(r->pool, cache_control);
   if (cache_control_s != nullptr) {
