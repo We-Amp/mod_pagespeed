@@ -183,6 +183,56 @@ TEST_F(DaemonSeamTest, BothArmsReadOneClientsHeadersThroughOneReader) {
       << "the serve request no longer carries Sec-CH-DPR";
 }
 
+TEST_F(DaemonSeamTest, BothArmsKeyTheHostWithItsPort) {
+  // The peer composes the shared cache's key from the scheme, the host
+  // value and the path, and it keeps any port other than 80 or 443 in the
+  // host half.  Two sites that share a host name and differ only in port
+  // are different sites, so the host half both arms hand on must carry the
+  // port -- HostAndPort, which keeps a non-default port and drops only the
+  // scheme-default one, never the portless spelling, which erases the port
+  // and lets each site serve the other's resources out of the shared cache
+  // (http://example.com/ versus http://example.com:8080/).  The VALUE is
+  // pinned where it can execute, in GoogleUrlTest.TestHostAndPort; what is
+  // pinned here is that both builders build it with the port-keeping
+  // spelling.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+
+  const size_t record =
+      source.find("InstawebHandler::BuildDaemonRecordRequest");
+  const size_t serve = source.find("InstawebHandler::BuildDaemonServeRequest");
+  ASSERT_NE(GoogleString::npos, record)
+      << "the record builder has been renamed; this pin needs updating";
+  ASSERT_NE(GoogleString::npos, serve)
+      << "the serve builder has been renamed; this pin needs updating";
+  const size_t record_end = source.find("\n}", record);
+  const size_t serve_end = source.find("\n}", serve);
+  ASSERT_NE(GoogleString::npos, record_end)
+      << "the record builder's block does not close";
+  ASSERT_NE(GoogleString::npos, serve_end)
+      << "the serve builder's block does not close";
+
+  EXPECT_NE(GoogleString::npos,
+            source.substr(record, record_end - record)
+                .find("stripped_gurl_.HostAndPort().CopyToString("
+                      "&request->hostname);"))
+      << "the record key's host half no longer carries the port";
+  EXPECT_NE(GoogleString::npos,
+            source.substr(serve, serve_end - serve)
+                .find("stripped_gurl_.HostAndPort().CopyToString("
+                      "&daemon_serve_host_);"))
+      << "the serve key's host half no longer carries the port";
+
+  // Neither builder may go back to the portless spelling.  Scoped to the
+  // two builders rather than the file, because the portless reader is the
+  // right one for the serve-stats host attribution and other non-key reads.
+  const GoogleString builders = source.substr(record, serve_end - record);
+  EXPECT_EQ(GoogleString::npos, builders.find(".Host().CopyToString("))
+      << "a builder erases the port from the key's host half again; two "
+         "sites on one host name but different ports would share every "
+         "cache entry";
+}
+
 TEST_F(DaemonSeamTest, TheDaemonSubstrateServesBeforeItRecords) {
   // Order, not merely presence. A request the shared cache can answer has
   // nothing to record, and recording it anyway re-stores an original the

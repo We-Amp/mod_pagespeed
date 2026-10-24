@@ -566,6 +566,9 @@ TEST_F(NgxDaemonSeamTest, TheRecordKeyIsTheModulesOwnUrl) {
   // and which the serve arm will key on.  Pinned inside the daemon branch
   // of the header filter, bounded by its own braces, because the classic
   // part of the same function legitimately calls ps_determine_url.
+  // The host half carries any non-default port: the peer's cache key
+  // keeps every port other than 80 or 443, so two sites that share a host
+  // name and differ only in port must not share entries.
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   const size_t branch = cc.find("if(ctx->daemon_record_pending){");
   ASSERT_NE(GoogleString::npos, branch)
@@ -580,6 +583,9 @@ TEST_F(NgxDaemonSeamTest, TheRecordKeyIsTheModulesOwnUrl) {
   EXPECT_NE(GoogleString::npos,
             body.find("GoogleUrlfull_url(ctx->url_string);"))
       << "the record key is not built from ctx->url_string";
+  EXPECT_NE(GoogleString::npos, body.find("full_url.HostAndPort().CopyToString("
+                                          "&record_request.hostname)"))
+      << "the record key's host half no longer carries the port";
   EXPECT_EQ(GoogleString::npos, body.find("ps_determine_url("))
       << "the record key is built from the raw URL again: PageSpeed "
          "parameters unstripped, X-Forwarded-Proto ignored";
@@ -918,6 +924,9 @@ TEST_F(NgxDaemonSeamTest, TheServeKeyIsTheRecordKey) {
   // was synced from.  A serve key that differs from the record key never
   // hits, and a second parse (of the URL or of the headers) is both a
   // skew risk and the dominant per-request cost this function must not pay.
+  // The host half carries the port for the same reason as on the record
+  // side: the peer's cache key keeps any port other than 80 or 443, so
+  // http://example.com/ and http://example.com:8080/ must key apart.
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   const size_t fn = cc.find("voidBuildDaemonServeRequest(");
   ASSERT_NE(GoogleString::npos, fn)
@@ -932,8 +941,11 @@ TEST_F(NgxDaemonSeamTest, TheServeKeyIsTheRecordKey) {
             body.find("full_url.PathAndLeaf().CopyToString(&strings->url)"))
       << "the serve key's URL is not taken from the parsed GoogleUrl";
   EXPECT_NE(GoogleString::npos,
-            body.find("full_url.Host().CopyToString(&strings->host)"))
-      << "the serve key's host is not taken from the parsed GoogleUrl";
+            body.find("full_url.HostAndPort().CopyToString(&strings->host)"))
+      << "the serve key's host half no longer carries the port";
+  EXPECT_EQ(GoogleString::npos, body.find("full_url.Host().CopyToString("))
+      << "the serve key's host half erases the port again; two sites on one "
+         "host name but different ports would share every cache entry";
   EXPECT_NE(GoogleString::npos,
             body.find("full_url.Scheme().CopyToString(&strings->scheme)"))
       << "the serve key's scheme is not taken from the parsed GoogleUrl";
