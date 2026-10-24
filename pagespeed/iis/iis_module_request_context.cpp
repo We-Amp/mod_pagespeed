@@ -23,14 +23,9 @@ namespace net_instaweb
 	IisModuleRequestContext::IisModuleRequestContext(IHttpContext *pContext, bool is_resource, const char * url, size_t url_len, GoogleUrl* gurl
 		, IisProcessContext* process_context, IisServerContext* server_context, int local_port, GoogleString local_ip_address)
 		:
-		hideacceptencoding_(false),
 		inflater_(nullptr),
-		empty_(false),
-		hasNextStatus(false)
-		
+		empty_(false)
 	{
-		pRawValueAcceptEncoding = 0;
-		pRawValueLengthAcceptEncoding = 0;
 		// Transport scheme of the incoming connection — what a loopback fetch
 		// to local_port must speak. The request URL's scheme can differ when
 		// X-Forwarded-Proto is honored (the loopback-fetch protocol defect:
@@ -42,10 +37,8 @@ namespace net_instaweb
 		GoogleString checkpath = FindConfigFile(ws2s(pContext->GetApplication()->GetApplicationPhysicalPath()));
 		requestContext_->SetSiteConfigFile(checkpath);
 	}
-	IisModuleRequestContext::IisModuleRequestContext() :requestContext_(nullptr), empty_(true), pRawValueAcceptEncoding(nullptr), pRawValueLengthAcceptEncoding(0),
-		inflater_(nullptr),
-		hideacceptencoding_(false),
-		hasNextStatus(false)
+	IisModuleRequestContext::IisModuleRequestContext() :requestContext_(nullptr), empty_(true),
+		inflater_(nullptr)
 	{
 
 	}
@@ -118,33 +111,6 @@ namespace net_instaweb
 		if (requestContext_) requestContext_->CleanupStoredContext();
 	}
 
-	void IisModuleRequestContext::StripAndStoreAcceptEncoding(IHttpContext *c, bool stripforever)
-	{
-		if (!hideacceptencoding_) return;
-		auto rr = c->GetRequest()->GetRawHttpRequest();
-		if (!stripforever && rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue)
-		{
-			pRawValueAcceptEncoding = rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue;
-			pRawValueLengthAcceptEncoding = rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].RawValueLength;
-		}
-		rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].RawValueLength = 0;
-		rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue = 0;
-	}
-	void IisModuleRequestContext::AddStoredAcceptEncoding(IHttpContext *c)
-	{
-		if (!hideacceptencoding_) return;
-		if (pRawValueAcceptEncoding)
-		{
-			auto rr = c->GetRequest()->GetRawHttpRequest();
-			if (rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue == nullptr)
-			{
-				rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].pRawValue = pRawValueAcceptEncoding;
-				rr->Headers.KnownHeaders[HttpHeaderAcceptEncoding].RawValueLength = pRawValueLengthAcceptEncoding;
-			}
-			//pRawValueAcceptEncoding=0;
-			//pRawValueLengthAcceptEncoding=0;
-		}
-	}
 	void IisModuleRequestContext::set_base_fetch(IisModuleBaseFetch *base_fetcher)
 	{
 		// When switching from the IPRO cache lookup to html rewriting, 
