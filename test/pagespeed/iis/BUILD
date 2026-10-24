@@ -440,6 +440,22 @@ pagespeed_cc_test(
     ],
 )
 
+# The per-request cleanup pin: every early return between building the
+# request context and handing it to IIS frees the state through the one
+# cleanup helper, and the recorder's final response headers are not
+# heap-allocated. Reads the port source as data, so it needs no IIS headers
+# and can build anywhere; today only the Windows lane tests this directory.
+pagespeed_cc_test(
+    name = "iis_request_cleanup_pin_test",
+    srcs = ["iis_request_cleanup_pin_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # Reading response entity chunks for the HTML rewriter: unreadable chunk
 # types and file-handle chunks whose file changes size between the length
 # lookup and the read, against real temporary files. Also pins that
