@@ -299,8 +299,12 @@ All of it is public and read only, and needs no credential:
   time, because the admin console build checks its synced copy against it;
 - the pinned optimizer release: the commit named in the pin file (its
   `MODULE.bazel`, for the cache library check), and the release assets of the
-  pinned tag. The hash of the release's `SHA256SUMS` must equal the pin, and
-  every file must match `SHA256SUMS`. The API call carries the job's own
+  pinned tag. The hash of the release's `SHA256SUMS` must equal the pin. Only
+  the package files are fetched, picked by name from that list (every `.deb`,
+  every `.rpm` and the `-win-x64.zip`; at least one deb and one rpm, the zip
+  is optional), and each must match `SHA256SUMS`. Other files of the
+  optimizer release (a signature, metadata) are neither fetched nor shipped
+  with the module. The API call carries the job's own
   read-only token, to avoid the rate limit of shared runner addresses; the
   downloads carry none;
 - the dependency sources named in the Bazel files;
