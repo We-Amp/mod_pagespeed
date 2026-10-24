@@ -120,6 +120,9 @@ build:clang-libstdcxx15 --linkopt=-L/usr/lib/gcc/x86_64-linux-gnu/15
 # Use with source tarballs that include vendor/ directory (built by tools/vendor-deps.sh).
 # All http_archive deps are served from the repository cache; Cyclone is
 # overridden from its vendored source copy.
+# The repository cache also serves the registry files MODULE.bazel.lock pins
+# (content-addressed by their sha256), so --registry must stay as committed for
+# offline resolution; tools/vendor-deps.sh asserts they are all vendored.
 #
 # Examples:
 #   Linux:   bazel build --config=vendored --config=clang-libstdcxx13 -c opt //:libmod_pagespeed.so
