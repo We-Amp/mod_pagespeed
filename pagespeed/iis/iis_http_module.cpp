@@ -620,6 +620,42 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   return true;
 }
 
+	// IIS frees a stored module context through CleanupStoredContext() when
+	// the request ends, but only once SetModuleContext() has taken the context
+	// over. CreateRequestContext() takes the parsed URL over only when it
+	// returns a context; on failure the URL stays with the caller. Every
+	// return between those two calls must therefore free what it still owns
+	// through this one path: the request context when one was built (with it
+	// the inner context, the parsed URL and the claimed process-context
+	// reference), and just the parsed URL when there is none.
+	static void FreeUnstoredRequestState(IisModuleRequestContext* ctx, GoogleUrl* gurl)
+	{
+		if (ctx != nullptr) {
+			// The same free path IIS runs for a stored context.
+			ctx->CleanupStoredContext();
+		}
+		else {
+			delete gurl;
+		}
+	}
+
+	// Drops a base fetch that was created but never handed to PSOL
+	// (InitiatePropertyCacheLookup / CreateNewProxyFetch): at that point the
+	// request context's pointer and the completion reference are still its
+	// only two holders (IisBaseFetch starts at two references), so dropping it
+	// releases both. Never `delete` the fetch directly: the day earlier code
+	// hands it to PSOL or takes another reference first, a direct delete
+	// turns into a use-after-free while the refcount path stays correct.
+	static void DropUnstartedBaseFetch(IisInnerRequestContext* innerContext)
+	{
+		IisBaseFetch* base_fetch = innerContext->base_fetch();
+		innerContext->set_base_fetch(nullptr);
+		if (base_fetch != nullptr) {
+			base_fetch->ReleaseRef();
+			base_fetch->ReleaseRef();
+		}
+	}
+
 	REQUEST_NOTIFICATION_STATUS
 		IisHttpModule::OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
 	{
@@ -751,7 +787,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (ctx == nullptr) {
 			if (!IsLocalRequest(pHttpContext)) {
 				log(pHttpContext, "OnBeginRequest: Failed to create a request context, bail");
-				delete gurl;
+				FreeUnstoredRequestState(ctx, gurl);
 				return RQ_NOTIFICATION_CONTINUE;
 			}
 
@@ -935,6 +971,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			r->SetHeader(HttpAttributes::kCacheControl, "no-store",
 				(USHORT)strlen("no-store"), true);
 			WriteResponseMessage(pHttpContext, (PVOID)body.data(), body.size(), true);
+			FreeUnstoredRequestState(ctx, gurl);
 			return RQ_NOTIFICATION_FINISH_REQUEST;
 		}
 
@@ -960,6 +997,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				delete innerContext->base_fetch();
 				innerContext->set_base_fetch(nullptr);
 			}
+			FreeUnstoredRequestState(ctx, gurl);
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
@@ -970,6 +1008,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				delete innerContext->base_fetch();
 				innerContext->set_base_fetch(nullptr);
 			}
+			FreeUnstoredRequestState(ctx, gurl);
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
@@ -1581,8 +1620,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				{
 					log(pHttpContext, "determine options failed!");
 					innerContext->set_leave(true);
-					delete innerContext->base_fetch();
-					innerContext->set_base_fetch(nullptr);
+					DropUnstartedBaseFetch(innerContext);
 					return RQ_NOTIFICATION_FINISH_REQUEST;
 				}
 
@@ -1616,8 +1654,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				if (!options->enabled() || !options->IsAllowed(innerContext->gurl()->spec_c_str()))
 				{
 					log(pHttpContext, "pagespeed disabled");
-					delete innerContext->base_fetch();
-					innerContext->set_base_fetch(nullptr);
+					DropUnstartedBaseFetch(innerContext);
 					innerContext->set_leave(true);
 					return RQ_NOTIFICATION_CONTINUE;
 				}
@@ -1636,8 +1673,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						if (pHttpContext->GetResponse()->GetHeader("X-Page-Speed"))
 						{
 							log(pHttpContext, "OnSendResponse ---  content is already rewritten, don't rewrite");
-							delete innerContext->base_fetch();
-							innerContext->set_base_fetch(nullptr);
+							DropUnstartedBaseFetch(innerContext);
 							innerContext->set_leave(true);
 							return RQ_NOTIFICATION_CONTINUE;
 						}
@@ -1645,8 +1681,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						if (http_status != 200)
 						{
 							log(pHttpContext, "OnSendResponse ---  http response status code <> 200, don't rewrite");
-							delete innerContext->base_fetch();
-							innerContext->set_base_fetch(nullptr);
+							DropUnstartedBaseFetch(innerContext);
 							innerContext->set_leave(true);
 							return RQ_NOTIFICATION_CONTINUE;
 						}
@@ -1660,8 +1695,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 							if (inflater == nullptr)
 							{
 								log(pHttpContext, "OnSendResponse ---  unknown encoding %s", encoding.c_str());
-								delete innerContext->base_fetch();
-								innerContext->set_base_fetch(nullptr);
+								DropUnstartedBaseFetch(innerContext);
 								
 								innerContext->set_leave(true);
 								return RQ_NOTIFICATION_CONTINUE;
@@ -1924,14 +1958,18 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 
 			if (!more_data && innerContext->recorder() != nullptr)  {
-				ResponseHeaders* response_headers = new ResponseHeaders();
-				response_headers->SetDate(innerContext->server_context()->timer()->NowMs());
-				IisModuleBaseFetch::PopulateResponseHeaders(pHttpContext, response_headers);
+				// The recorder reads but does not take ownership of the
+				// headers (in_place_resource_recorder.h), so they live on
+				// the stack like the ones offered to ConsiderResponseHeaders
+				// above; a heap allocation here leaks per recorded response.
+				ResponseHeaders response_headers;
+				response_headers.SetDate(innerContext->server_context()->timer()->NowMs());
+				IisModuleBaseFetch::PopulateResponseHeaders(pHttpContext, &response_headers);
 				GoogleString s;
 				StringWriter sw(&s);
-				response_headers->WriteAsHttp(&sw, nullptr);
+				response_headers.WriteAsHttp(&sw, nullptr);
 				log(pHttpContext, "IPRO recorded. Final response headers: %s", s.c_str());
-				innerContext->recorder()->DoneAndSetHeaders(response_headers, true);
+				innerContext->recorder()->DoneAndSetHeaders(&response_headers, true);
 				innerContext->set_recorder(nullptr);
 			}
 
