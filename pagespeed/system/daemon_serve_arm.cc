@@ -68,7 +68,7 @@ uint64_t FnvMix(uint64_t hash, uint8_t byte) {
 }
 
 // The identity discriminator, or false when the entry carries no identity
-// signal at all and the legacy tag shape is owed.
+// signal at all and no validator may be minted.
 bool ContentIdentity64(const uint8_t* origin_html_hash, StringPiece origin_etag,
                        uint32_t origin_last_modified, uint64_t* out) {
   // Tier 1: the stamped source binding.  All-zero is the reserved "not
@@ -425,27 +425,23 @@ GoogleString ServeDerivedETag(uint32_t full_mask, uint8_t flags,
                               uint32_t origin_last_modified,
                               size_t body_length) {
   uint64_t identity = 0;
-  const bool has_identity = ContentIdentity64(origin_html_hash, origin_etag,
-                                              origin_last_modified, &identity);
+  if (!ContentIdentity64(origin_html_hash, origin_etag, origin_last_modified,
+                         &identity)) {
+    // No identity means no validator, never a 304: a tag minted from the
+    // mask, the flags and the length alone would keep confirming a client's
+    // copy of bytes that changed, re-optimized to the same length.  An
+    // empty tag states no validator, and the conditional falls through to
+    // a full response.
+    return GoogleString();
+  }
   // Sized from the widest form: W/"ps- (6) + mask+flags (10) + '-' +
   // identity (16) + '-' + length (16) + closing quote + NUL.
   char buffer[52];
-  int written;
-  if (has_identity) {
-    written =
-        snprintf(buffer, sizeof(buffer), "W/\"ps-%08x%02x-%016llx-%016llx\"",
-                 static_cast<unsigned>(full_mask), static_cast<unsigned>(flags),
-                 static_cast<unsigned long long>(identity),
-                 static_cast<unsigned long long>(body_length));
-  } else {
-    // The identity-free form, emitted byte for byte as the optimizer emits
-    // it, so a client holding a tag for an entry that carries no identity
-    // signal keeps getting its 304 whichever front end answers.
-    written =
-        snprintf(buffer, sizeof(buffer), "W/\"ps-%08x%02x-%016llx\"",
-                 static_cast<unsigned>(full_mask), static_cast<unsigned>(flags),
-                 static_cast<unsigned long long>(body_length));
-  }
+  const int written =
+      snprintf(buffer, sizeof(buffer), "W/\"ps-%08x%02x-%016llx-%016llx\"",
+               static_cast<unsigned>(full_mask), static_cast<unsigned>(flags),
+               static_cast<unsigned long long>(identity),
+               static_cast<unsigned long long>(body_length));
   if (written <= 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
     // Suppressed, never truncated: half a validator is a validator for a
     // representation that does not exist.
