@@ -178,7 +178,7 @@ try {
             # then wait for the workers to actually exit. Strictly
             # pool-scoped, never a blind w3wp kill: this runner's single IIS
             # instance is shared with other jobs (e.g. the IIS ASan nightly).
-            foreach ($pool in @('PageSpeedTestPool', 'DefaultAppPool')) {
+            foreach ($pool in @('PageSpeedTestPool', 'PageSpeedTestAspNetPool', 'DefaultAppPool')) {
                 if (-not (Stop-PoolWorker $pool)) {
                     # WAS force-kills at shutdownTimeLimit, so this is a
                     # genuinely stuck worker; the purge retries below absorb

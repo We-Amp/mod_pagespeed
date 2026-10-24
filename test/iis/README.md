@@ -8,6 +8,11 @@ This directory contains integration tests for the PageSpeed IIS module.
 - Python 3.8+ with pip
 - pytest and requests packages
 - PageSpeed IIS module installed
+- ASP.NET 4.x for the streamed-HTML fixture: the system-test lane
+  (test/system/run_iis_tests.ps1 -UseFullIIS) enables it on the host
+  (Web-Asp-Net45 on Server, IIS-ASPNET45 on client Windows) and hosts the
+  /aspnet application (test/system/iis/aspnet/stream.aspx) in its own app
+  pool under the test site
 
 ## Quick Start
 
