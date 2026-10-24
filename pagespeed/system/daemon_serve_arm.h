@@ -346,7 +346,9 @@ struct DaemonServeDecision {
   bool vary_image_selection = false;
 
   // The derived, WEAK validator for the bytes being served, and whether one
-  // of the client's conditionals matched.  Empty when nothing is served.
+  // of the client's conditionals matched.  Empty when nothing is served,
+  // and empty when the stored entry carries no content identity, for which
+  // no validator is minted (see `ServeDerivedETag`).
   //
   // `not_modified` is set by `If-None-Match` against the derived tag on any
   // serve, and by `If-Modified-Since` against the origin's `Last-Modified` on
@@ -872,8 +874,11 @@ GoogleString ServeVaryFieldValueOnBothLegs(const DaemonServeDecision& decision,
 // `origin_html_hash` is the entry's stamped 32-byte source binding, or null
 // when it carries none; `origin_etag` and `origin_last_modified` are the
 // origin's own validators as stored.  When none of the three is present the
-// legacy, identity-free form is emitted -- the same one the optimizer emits
-// for the same entry, so those clients keep their 304s.
+// result is EMPTY.  Nothing then ties a validator to the content: a tag
+// built from the mask, the flags and the length alone would keep confirming
+// a client's copy of bytes that changed, re-optimized to the same length.
+// No tag means no validator, and a conditional request is answered with a
+// full response, never a 304.
 //
 // The result is always WEAK (`W/`), and never the origin's own tag: this
 // module cannot promise byte-identity across re-optimizations of one source,
