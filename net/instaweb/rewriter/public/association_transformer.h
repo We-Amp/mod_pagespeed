@@ -100,7 +100,7 @@ class AssociationTransformer : public CssTagScanner::Transformer {
 class AssociationSlot : public ResourceSlot {
  public:
   // Note: map must outlive AssociationSlot.
-  AssociationSlot(ResourcePtr resource, StringStringMap* map,
+  AssociationSlot(const ResourcePtr& resource, StringStringMap* map,
                   const StringPiece& key)
       : ResourceSlot(resource), map_(map) {
     key.CopyToString(&key_);

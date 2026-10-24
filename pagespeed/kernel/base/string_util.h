@@ -170,7 +170,7 @@ inline bool StringToInt64(const GoogleString& in, int64* out) {
 // Note: This also parses hex and exponential float notation.
 bool StringToDouble(const char* in, double* out);
 
-inline bool StringToDouble(GoogleString in, double* out) {
+inline bool StringToDouble(const GoogleString& in, double* out) {
   const char* in_c_str = in.c_str();
   if (strlen(in_c_str) != in.size()) {
     // If there are embedded nulls, always fail.
