@@ -1,0 +1,13 @@
+<html>
+  <head>
+    <title>in-place optimization must skip this page's includes</title>
+    <!-- The include below runs as an httpd subrequest: it must pass through
+         the module untouched, with no in-place lookup, record or serve under
+         this page's URL. -->
+    <!--#include virtual="/mod_pagespeed_test/ssi/included.css" -->
+  </head>
+  <body>
+    <p>ssi-ipro-page-body: the stylesheet above arrives by a server-side
+    include.</p>
+  </body>
+</html>
