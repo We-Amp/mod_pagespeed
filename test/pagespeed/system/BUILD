@@ -227,7 +227,12 @@ pagespeed_cc_test(
 pagespeed_cc_test(
     name = "system_caches_test",
     srcs = ["system_caches_test.cc"],
-    shard_count = 1,
+    # Sharded so one slow case cannot eat the whole 900 s large-test budget
+    # (issue #260). Shards run as concurrent processes that all talk to the
+    # job's one memcached and one redis server; that is safe only because the
+    # keys this binary sends those servers carry a per-process prefix
+    # (issue #204).
+    shard_count = 6,
     size = "large",
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
@@ -251,9 +256,9 @@ pagespeed_cc_test(
 # Backward-compatible aggregate test target
 # =============================================================================
 
-# system_caches_test.cc must run only once per job because its tests share the
-# job's memcached and redis servers, so it is not part of this aggregate
-# target (issue #204).
+# system_caches_test.cc is not part of this aggregate target: it runs sharded
+# as its own target above, and the aggregate would run it a second time per
+# job against the same shared memcached and redis servers (issue #204).
 
 pagespeed_cc_test(
     name = "system",
