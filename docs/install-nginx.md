@@ -271,6 +271,13 @@ them only when they are next optimized.
 
 ## Known Limitations
 
+- Waiting for a `RemoteConfigurationUrl` refresh can hold up the nginx
+  worker for up to `RemoteConfigurationTimeoutMs` (one second by default).
+  With `UseNativeFetcher on` and the default file cache the module does
+  not wait: requests during a refresh run with the local configuration,
+  and later requests use the refreshed copy. With an external cache
+  (memcached or redis) the module still waits, and nginx logs a warning
+  about the combination at startup.
 - Lazyload images filter may time out
 - Inline preview images filter may time out
 - Canonicalize JS libraries filter may time out
