@@ -52,6 +52,14 @@ enum class IproDisposition {
 
 IproDisposition IproDispositionFor(DaemonHealth health);
 
+// The value of the local-only X-Pagespeed-Init-Status response header for a
+// serving seam whose daemon verdict is kUnavailable, or nullptr when the
+// verdict deserves no header at all.  The init-failure page that header
+// comes from is unreachable for a degraded-but-serving site, so a port that
+// has the header repeats this value on NORMAL responses, local requests
+// only; keeping the mapping here makes it unit-testable off any port.
+const char* DaemonInitStatusToken(DaemonHealth health);
+
 // The ONE place in this tree from which a serving seam may construct the
 // classic in-place recorder.
 //

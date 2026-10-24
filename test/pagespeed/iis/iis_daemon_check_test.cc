@@ -460,9 +460,9 @@ TEST_F(IisDaemonCheckTest, OneOptionAloneIsUnavailableWithOneLineAndNoLoad) {
   CountingBinder binder(0);
   InstallBinder(&binder);
   RecordingHandler site;
+  const GoogleString pipe_name = UniquePipeName();
 
-  IisDaemonCheckRegistry::Result result =
-      CheckSite(UniquePipeName(), "", &site);
+  IisDaemonCheckRegistry::Result result = CheckSite(pipe_name, "", &site);
 
   ASSERT_NE(nullptr, result.adapter);
   EXPECT_FALSE(result.split);
@@ -472,6 +472,22 @@ TEST_F(IisDaemonCheckTest, OneOptionAloneIsUnavailableWithOneLineAndNoLoad) {
   EXPECT_TRUE(site.SawContaining(
       "both the daemon socket path and the daemon volume path must be set"))
       << site.Dump();
+
+  // The verdict is final for the process, so it gets its OWN warning,
+  // not the recheck one: ONE entry, at kWarning, naming BOTH configured
+  // paths (the volume one is empty here), saying the module does not
+  // check again, and never promising the 30-second recheck.
+  EXPECT_EQ(1, log_count.load());
+  EXPECT_EQ(EventLogLevel::kWarning, last_level);
+  EXPECT_NE(GoogleString::npos, last_message.find(pipe_name))
+      << last_message;
+  EXPECT_NE(GoogleString::npos, last_message.find("DaemonVolumePath"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("does not check again"))
+      << last_message;
+  EXPECT_EQ(GoogleString::npos, last_message.find("every 30 seconds"))
+      << last_message;
 
   // And the other half alone: the same answer, from its own adapter.
   IisDaemonCheckRegistry::Result volume_only =
@@ -484,7 +500,12 @@ TEST_F(IisDaemonCheckTest, OneOptionAloneIsUnavailableWithOneLineAndNoLoad) {
   // Its line is word for word the one just announced, and the adapter
   // announces a distinct line once per process: still one.
   EXPECT_EQ(1, site.count()) << site.Dump();
-  EXPECT_EQ(0, log_count.load());
+  // A DISTINCT configuration, so its own warning: one entry per
+  // configuration, this one naming the volume with the socket empty.
+  EXPECT_EQ(2, log_count.load());
+  EXPECT_EQ(EventLogLevel::kWarning, last_level);
+  EXPECT_NE(GoogleString::npos, last_message.find(StrCat(dir_, "/half")))
+      << last_message;
 }
 
 TEST_F(IisDaemonCheckTest, SameKeySharesOneAdapterAndBindsOnce) {
@@ -557,6 +578,50 @@ TEST_F(IisDaemonCheckTest, APresentDaemonWithAMatchingVolumeIsReady) {
   EXPECT_FALSE(result.split);
   EXPECT_EQ(DaemonHealth::kReady, result.adapter->health());
   EXPECT_EQ(1, binder.calls());
+
+  // A worker that starts READY never wrote the warning, so a recovery
+  // note must never appear for it either.
+  registry_->NoteDaemonRecovered(result.adapter);
+  EXPECT_EQ(0, log_count.load());
+}
+
+TEST_F(IisDaemonCheckTest, AReattachedServiceWritesOneInfoEntry) {
+  // The worker starts without the service (the warning above), the
+  // service then comes up, and a serving recheck -- its retry interval
+  // bypassed with the adapter's injected clock, so nothing sleeps --
+  // reattaches it.  What a site context does when it sees that flip is
+  // NoteDaemonRecovered: ONE informational entry, however often it is
+  // called and however many sites share the adapter.
+  const uint64_t published = 1ULL << 30;
+  const GoogleString volume = StrCat(dir_, "/reattach");
+  CreateVolume(volume, published);
+  const GoogleString pipe_name = UniquePipeName();
+  CountingBinder binder(published);
+  InstallBinder(&binder);
+  RecordingHandler site;
+
+  IisDaemonCheckRegistry::Result result = CheckSite(pipe_name, volume, &site);
+  ASSERT_NE(nullptr, result.adapter);
+  ASSERT_EQ(DaemonHealth::kUnavailable, result.adapter->health());
+  ASSERT_EQ(1, log_count.load());
+
+  PipeServer server(pipe_name);
+  ASSERT_TRUE(server.valid());
+  // The start-up check armed the first retry one interval from ITS now;
+  // a clock already past that makes the very next read a real probe.
+  result.adapter->set_monotonic_clock([] { return 1LL << 45; });
+  ASSERT_EQ(DaemonHealth::kReady, result.adapter->ServingHealth());
+
+  registry_->NoteDaemonRecovered(result.adapter);
+  registry_->NoteDaemonRecovered(result.adapter);  // a second site
+
+  EXPECT_EQ(2, log_count.load());
+  EXPECT_EQ(EventLogLevel::kInfo, last_level);
+  EXPECT_NE(GoogleString::npos, last_message.find(pipe_name))
+      << last_message;
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("in-place optimization through it is on again"))
+      << last_message;
 }
 
 #endif  // _WIN32
@@ -660,20 +725,77 @@ TEST_F(IisDaemonCheckTest, TwentyRebuildsLeaveTheHandleCountFlat) {
 #endif
 }
 
-TEST_F(IisDaemonCheckTest, UnusableDaemonIsNotASplitAndLogsNothing) {
+TEST_F(IisDaemonCheckTest, UnusableDaemonIsNotASplitAndLogsOneWarning) {
   // The daemon publishes no size: the adapter degrades with its own
-  // announcement, the site keeps serving, no event-log entry, no split.
+  // announcement, the site keeps serving, no split.  The "not running
+  // yet" family is the one verdict the module rechecks, so it is also the
+  // one that reaches the event log whatever UseEventLog says: ONE warning
+  // naming the socket, promising the recheck, and carrying the check's
+  // own words.
   CountingBinder binder(0);
   InstallBinder(&binder);
   RecordingHandler site;
+  const GoogleString pipe_name = UniquePipeName();
 
   IisDaemonCheckRegistry::Result result =
-      CheckSite(UniquePipeName(), StrCat(dir_, "/absent"), &site);
+      CheckSite(pipe_name, StrCat(dir_, "/absent"), &site);
 
   ASSERT_NE(nullptr, result.adapter);
   EXPECT_EQ(DaemonHealth::kUnavailable, result.adapter->health());
   EXPECT_FALSE(result.split);
-  EXPECT_EQ(0, log_count.load());
+  EXPECT_EQ(1, log_count.load());
+  EXPECT_EQ(EventLogLevel::kWarning, last_level);
+  EXPECT_NE(GoogleString::npos, last_message.find(pipe_name))
+      << last_message;
+  // The entry says what is wrong, for WHOM, what to DO, and that the
+  // module looks again.
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("for every site configured with this socket"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("Start the optimizer service"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("checks for the service again every 30 seconds"))
+      << last_message;
+  EXPECT_NE(GoogleString::npos, last_message.find("The check reported:"))
+      << last_message;
+}
+
+TEST_F(IisDaemonCheckTest, AnUnreachableServiceLogsOneWarningHoweverOften) {
+  // The volume file matches the size the peer publishes, but nothing
+  // listens on the pipe: the "daemon was not running" verdict.  However
+  // many sites and configuration rebuilds see it: ONE warning, like the
+  // split.  A second socket is a distinct condition, so a second entry.
+  const uint64_t published = 1ULL << 30;
+  CreateVolume(StrCat(dir_, "/once"), published);
+  CreateVolume(StrCat(dir_, "/twice"), published);
+  CountingBinder binder(published);
+  InstallBinder(&binder);
+  RecordingHandler site;
+  const GoogleString pipe_name = UniquePipeName();
+
+  const IisDaemonCheckRegistry::Result first =
+      CheckSite(pipe_name, StrCat(dir_, "/once"), &site);
+  ASSERT_NE(nullptr, first.adapter);
+  EXPECT_FALSE(first.split);
+  EXPECT_EQ(DaemonHealth::kUnavailable, first.adapter->health());
+  EXPECT_EQ(1, log_count.load());
+  EXPECT_EQ(EventLogLevel::kWarning, last_level);
+
+  // A rebuilt configuration, another site with the same paths: the SAME
+  // adapter, and NO second event-log entry.
+  const IisDaemonCheckRegistry::Result again =
+      CheckSite(pipe_name, StrCat(dir_, "/once"), &site);
+  EXPECT_EQ(first.adapter, again.adapter);
+  EXPECT_EQ(1, log_count.load());
+
+  // A second socket is a distinct condition: a second entry.
+  const IisDaemonCheckRegistry::Result other =
+      CheckSite(UniquePipeName(), StrCat(dir_, "/twice"), &site);
+  ASSERT_NE(nullptr, other.adapter);
+  EXPECT_EQ(DaemonHealth::kUnavailable, other.adapter->health());
+  EXPECT_EQ(2, log_count.load());
 }
 
 #ifdef _WIN32
@@ -725,6 +847,15 @@ TEST_F(IisDaemonCheckTest, TheRealBinderNamesTheAbsolutePathWhenMissing) {
   EXPECT_EQ(DaemonHealth::kUnavailable, result.adapter->health());
   EXPECT_TRUE(site.SawContaining(DefaultDaemonLibraryPath()))
       << "messages seen: " << site.Dump();
+  // The missing-library verdict is final too, so it gets the SAME kind
+  // of entry as half a configuration: one warning, no recheck promise.
+  EXPECT_EQ(1, log_count.load());
+  EXPECT_EQ(EventLogLevel::kWarning, last_level);
+  EXPECT_NE(GoogleString::npos,
+            last_message.find("does not check again"))
+      << last_message;
+  EXPECT_EQ(GoogleString::npos, last_message.find("every 30 seconds"))
+      << last_message;
 }
 
 #ifdef _WIN32

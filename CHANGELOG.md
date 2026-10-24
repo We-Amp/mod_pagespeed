@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **IIS reports an optimizer service it cannot use where administrators
+  look first.** A worker process that starts with a configured optimizer
+  service it cannot use (the service stopped, one of
+  `DaemonSocketPath` / `DaemonVolumePath` missing, a missing or outdated
+  client library, a package fault) serves normally with in-place
+  optimization off, and until now the only place that said so was the
+  admin console's message history. One Windows event-log warning is now
+  written for each such configuration when a worker starts in that state,
+  whatever `UseEventLog` says (like the volume-split entry). For a stopped
+  service it says the module checks for the service again every 30 seconds
+  and turns it on once it answers (one informational entry follows when a
+  later check reattaches the service); for the other verdicts it names both
+  configured paths and says the module does not check again: correct the
+  cause in the entry, then recycle the application pool. Local requests
+  also carry `X-Pagespeed-Init-Status: daemon-unavailable` on normal
+  responses for every one of these verdicts, and the response carrying it
+  is never cached, so it cannot reach a visitor. Apache and nginx are
+  unchanged: their error log already carries the line.
+
 ### Changed
 
 - **The ASP.NET Core sidecar package's user-visible strings name the product

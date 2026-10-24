@@ -177,7 +177,16 @@ public:
 	
 	
 	bool IsLocalRequest(IN IHttpContext* pHttpContext);
-	
+
+	// Sets the local-only X-Pagespeed-Init-Status value for an unusable
+	// optimizer service (DaemonInitStatusToken: every kUnavailable
+	// verdict, not only an unreachable service) on the response, when
+	// the request is local and the live daemon verdict is kUnavailable,
+	// and disarms the kernel and user caches for that response so the
+	// header can never reach a visitor through a cached copy.
+	void SetDaemonInitStatusHeaderIfLocal(IN IHttpContext* pHttpContext,
+	                                      IisInnerRequestContext* innerContext);
+
 	void log(IHttpContext* c, const char * msg, ...);
 
 	IisProcessContext* process_context(const GoogleString& site_app_id,std::string site_root, const GoogleString& app_url_base) { 

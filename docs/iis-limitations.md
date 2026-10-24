@@ -35,7 +35,9 @@ enforced on IIS as on the other ports.
   machine-readable `X-Pagespeed-Init-Status` response header with one of:
   `cache-path-empty | cache-path-missing | cache-path-not-writable |
   cache-path-create-failed | log-dir-create-failed | daemon-volume-split |
-  post-config-failed | startup-failed` (`iis_http_module.cpp`).
+  post-config-failed | startup-failed` (`iis_http_module.cpp`). A further
+  value, `daemon-unavailable`, is never on that page: it marks a site that
+  keeps serving, so it appears on normal responses instead (next item).
 - `daemon-volume-split`: the site set both `DaemonSocketPath` and
   `DaemonVolumePath`, and the module's startup check found that opening the
   daemon's cache volume at the size the daemon published created a second
@@ -62,14 +64,35 @@ enforced on IIS as on the other ports.
   with either option set the classic in-place recorder is not used for the
   site, whatever the check finds; with both unset the module behaves exactly
   as before.
+- `daemon-unavailable`: a configured optimizer service is not usable (not
+  reachable, half configured, or a package fault). This value is not on the
+  init-failure page: a degraded site serves normally and never fails init,
+  so the module sets it on NORMAL responses, local requests only
+  (`OnSendResponse`), reading the live verdict; it disappears again once a
+  recheck has reattached the service (the not-reachable verdict is the one
+  that recovers; the final verdicts carry the header until the application
+  pool recycles). The response that carries it never enters a cache (its
+  kernel and user cache are disabled), so it cannot reach a visitor through
+  a cached copy. Windows event-log WARNINGS, written whatever `UseEventLog`
+  says (like the split's entry), cover these states, one per configuration
+  when a worker process starts in one: the not-reachable state writes one
+  saying that the module checks for the service again every 30 seconds and
+  turns it on once it answers (one informational entry follows when a later
+  check reattaches the service), and each final verdict (half a
+  configuration, a missing or old client library, a generation mismatch,
+  permission denied, an open failure) writes its own, naming both configured
+  paths and saying the module does not check again: correct the cause in
+  the entry, then recycle the application pool.
 
 ### Event Logging (`UseEventLog`)
 
 - `pagespeed UseEventLog on` (in `pagespeed.config`) routes the module's
   WARNING and ERROR messages to the Windows Application event log under the
   `PageSpeed` source. INFO messages never reach the event log (on this port
-  they are per-request volume); a FATAL is always written, whatever the
-  directive says. With the directive off or unset, the first suppressed
+  they are per-request volume), with one exception: the informational entry
+  the daemon startup check writes when a recheck reattaches an optimizer
+  service the worker started without; a FATAL is always written, whatever
+  the directive says. With the directive off or unset, the first suppressed
   warning and the first suppressed error each write ONE entry saying
   event-log writing is off, how to turn it on, and that the messages can
   also be read at the admin message history path (`/pagespeed_message` by

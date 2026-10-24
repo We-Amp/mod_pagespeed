@@ -132,6 +132,54 @@ namespace net_instaweb
 
 		return IsLoopbackClientIp(remote_ip_address) || remote_ip_address == local_ip_address;
 	}
+
+	// A site whose configured optimizer service is not usable keeps
+	// serving, so nothing on the wire says why in-place optimization is
+	// off.  This repeats the diagnostic page's machine-readable value for
+	// that state on LOCAL requests only -- visitors must not see internal
+	// state -- reading the LIVE verdict, so the header disappears again
+	// once a recheck has reattached the service (the unreachable verdict
+	// is the one that recovers; the final verdicts carry the header until
+	// the pool recycles).  Called from the top of OnSendResponse, and
+	// again after the HTML path's Clear(), which wipes headers set
+	// earlier in the notification: a degraded site still rewrites HTML,
+	// and the home page is the first thing an operator checks.
+	void IisHttpModule::SetDaemonInitStatusHeaderIfLocal(
+		IN IHttpContext* pHttpContext, IisInnerRequestContext* innerContext)
+	{
+		if (!IsLocalRequest(pHttpContext)) {
+			return;
+		}
+		const char* daemon_init_status = DaemonInitStatusToken(
+			innerContext->server_context()->daemon_health());
+		if (daemon_init_status == nullptr) {
+			return;
+		}
+		IHttpResponse* response = pHttpContext->GetResponse();
+		if (response == nullptr) {
+			return;
+		}
+		response->SetHeader("X-Pagespeed-Init-Status", daemon_init_status,
+			(USHORT)strlen(daemon_init_status), true);
+		// The header is internal state and must never reach a visitor
+		// through a cache.  In this state IPRO is off, so a static file
+		// takes the "no recorder, no html" bail further down BEFORE the
+		// HTML path's own DisableKernelCache, and http.sys caches a
+		// static file hit twice within ten seconds by default: a cached
+		// copy would hand the header to every later visitor, with no way
+		// to invalidate it and long past recovery.  The user (output)
+		// cache policy is disarmed the same way, for output-cache
+		// profiles.  Local request, degraded verdict only, so the cost
+		// is nil.
+		response->DisableKernelCache();
+		auto cache_policy = response->GetCachePolicy();
+		if (cache_policy != nullptr) {
+			auto user_cache = cache_policy->GetUserCachePolicy();
+			if (user_cache != nullptr) {
+				user_cache->Policy = HttpCachePolicyNocache;
+			}
+		}
+	}
 	namespace RequestRouting {
 		enum Response {
 			kError,
@@ -716,6 +764,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			//   cache-path-not-writable | cache-path-create-failed |
 			//   log-dir-create-failed | daemon-volume-split |
 			//   post-config-failed | startup-failed
+			// One further value, daemon-unavailable, never appears on this
+			// page: a site whose configured optimizer service is not
+			// usable keeps serving and never fails init. It is set on
+			// NORMAL responses instead, local requests only (see
+			// SetDaemonInitStatusHeaderIfLocal and
+			// DaemonInitStatusToken).
 			GoogleString body;
 			StringWriter writer(&body);
 			GoogleMessageHandler handler;
@@ -1303,6 +1357,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
+		SetDaemonInitStatusHeaderIfLocal(pHttpContext, innerContext);
+
 		log(pHttpContext, "OnSendResponse: [%s]", innerContext->url());
 		innerContext->set_send_response_seen(true);
 
@@ -1888,6 +1944,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					pHttpResponse->Clear();
 					// oschaaf: not sure if this adds any value:
 					pResponseStruct->EntityChunkCount=0;
+					// Clear() wiped the headers set at the top of this
+					// notification; the rewritten response below still
+					// deserves the local-only daemon init-status value.
+					SetDaemonInitStatusHeaderIfLocal(pHttpContext, innerContext);
 #ifdef IISPEEDHASFLUSH
 					if (bf->need_flush() ) { 
 						log(pHttpContext, "Need flush");

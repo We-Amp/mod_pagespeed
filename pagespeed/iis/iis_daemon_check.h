@@ -78,6 +78,15 @@ class IisDaemonCheckRegistry {
 	                   const GoogleString& socket_path,
 	                   const GoogleString& volume_path);
 
+	// One informational event-log entry when a serving recheck reattached
+	// a service a worker had started without: the warning GetOrCreate
+	// writes for that start promised the module would look again, and this
+	// closes that loop where the promise was read.  Called from a request
+	// thread by whichever site context first sees the verdict flip,
+	// however many share the adapter: one entry per distinct socket path
+	// per process.
+	void NoteDaemonRecovered(const DaemonAdapter* adapter);
+
 	// Adds `handler` to the set of live site handlers the registry's own
 	// handler forwards the adapters' messages to.  A context registers the
 	// handler its factory owns when it runs the check and deregisters it in
@@ -113,7 +122,20 @@ class IisDaemonCheckRegistry {
 	mutable std::mutex mu_;
 	std::map<std::tuple<GoogleString, GoogleString, GoogleString>, Entry>
 	    entries_;
-	std::set<GoogleString> split_logged_;  // event-log dedup, per message
+	// The event-log entries this registry writes (the split error, the
+	// two unavailable warnings -- the retryable one and the final one --
+	// and the recovery note) are de-duplicated per distinct fixed text
+	// per process.  The recovery note answers the retryable warning, so
+	// warned_sockets_ remembers which sockets the process actually
+	// warned about: an adapter that was ready from the start never gets
+	// a note, and neither does a final verdict, which can never
+	// recover.  Both guarded by event_mu_, NOT mu_: a start-up check
+	// can hold mu_ for the socket probe's full deadline, and the
+	// recovery note arrives on a request thread that must never wait
+	// behind one.  Lock order: mu_, then event_mu_.
+	mutable std::mutex event_mu_;
+	std::set<GoogleString> event_logged_;
+	std::set<GoogleString> warned_sockets_;
 	DaemonAdapter::AbiLoader loader_ = &LoadDaemonAbi;
 	int binder_calls_ = 0;
 };

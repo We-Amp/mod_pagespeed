@@ -18,6 +18,7 @@
 #include "pagespeed/system/loopback_route_fetcher.h"
 
 #include "pagespeed/iis/iis_request_context.h"
+#include "pagespeed/iis/iis_daemon_check.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 namespace net_instaweb {
@@ -44,6 +45,28 @@ namespace net_instaweb {
 	IisRewriteOptions* IisServerContext::config() {
 		return (IisRewriteOptions*)global_options();
 	}
+
+	DaemonHealth IisServerContext::daemon_health() const {
+		if (daemon_adapter_ == nullptr) {
+			return DaemonHealth::kNotConfigured;
+		}
+		const DaemonHealth verdict = daemon_adapter_->ServingHealth();
+		// The one transition an operator must hear about: a serving
+		// recheck reattached a service this worker started without.  The
+		// registry writes ONE informational event-log entry, however many
+		// sites share the adapter or noticed the flip; every other change
+		// of verdict is bookkeeping only.
+		const DaemonHealth previous =
+			last_daemon_health_.load(std::memory_order_relaxed);
+		last_daemon_health_.store(verdict, std::memory_order_relaxed);
+		if (previous == DaemonHealth::kUnavailable &&
+			verdict == DaemonHealth::kReady) {
+			IisDaemonCheckRegistry::Get()->NoteDaemonRecovered(
+				daemon_adapter_);
+		}
+		return verdict;
+	}
+
 	IisServerContext::~IisServerContext() {
 	}
 }  // namespace net_instaweb

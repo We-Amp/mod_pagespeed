@@ -287,6 +287,15 @@ class DaemonAdapter {
   // RecordCache() performs the checked open on first use.
   DaemonHealth ServingHealth() const;
 
+  // Whether health() is kUnavailable only because the daemon was not
+  // running yet when the start-up check ran: the ONE verdict
+  // ServingHealth() rechecks.  Every other unavailable verdict -- half a
+  // configuration, package and permission faults -- is final for the
+  // process, so a report that promises a recheck must name only this one.
+  // Written only inside Resolve(), before the adapter is published to
+  // serving threads, so a plain read is safe on any thread.
+  bool unavailable_is_retryable() const { return unavailable_is_retryable_; }
+
   // Logs the start-up refusal once more, as a warning, through the same
   // handler; nothing when the start-up check left the arm ready or found no
   // daemon configured.  For a serving child process, once its message
