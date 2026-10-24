@@ -1,0 +1,7 @@
+/* A stylesheet pulled in by a server-side include (ssi_ipro.shtml).
+   The spacing, the zero units and this comment are redundant on purpose:
+   requested directly, the file must still optimize in place, and the
+   shrinkage proves it did. */
+.ssi-ipro-marker { color: purple; background: yellow; }
+.ssi-ipro-second { margin: 0px; padding: 0px; }
+.ssi-ipro-third { border-width: 0px; outline-width: 0px; }

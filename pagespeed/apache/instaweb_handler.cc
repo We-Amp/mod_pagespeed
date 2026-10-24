@@ -895,6 +895,25 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
 bool InstawebHandler::HandleAsInPlace() {
   bool handled = false;
 
+  // Requests with a non-NULL main pointer are internal requests created by
+  // Apache or a module in it, such as a mod_include include; the HTML output
+  // filter already declines them.  Declining is load-bearing here in a way it
+  // is not there.  MakeRequestUrl resolves a subrequest's URL by chasing
+  // request->main, so the in-place paths would run under the INCLUDING page's
+  // URL rather than the included resource's, and on a miss the recorder is
+  // attached to the subrequest: one of its output filters is protocol-level,
+  // httpd allocates it from the subrequest pool, and that pool is destroyed
+  // before the main request finishes, leaving the protocol filter chain the
+  // subrequest shares with the main request pointing at freed memory.  Let
+  // the subrequest pass through untouched; the main request keeps its
+  // in-place behaviour exactly as before.
+  if (request_->main != nullptr) {
+    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request_,
+                  "Request not in-place optimized because: "
+                  "request->main != NULL");
+    return handled;
+  }
+
   // Which in-place substrate this server is on.  Resolved once at startup;
   // read here, never recomputed and never logged from, so a missing daemon
   // costs one line at startup rather than one per request.
