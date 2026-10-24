@@ -121,6 +121,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the optimizer has processed them again. Applies to Apache, nginx and IIS
   with the optimizer worker. Update recommended. No configuration change
   and no cache purge required.
+- **A conditional request with both `If-None-Match` and `If-Modified-Since`
+  no longer answers 304 on the date alone.** RFC 9110 has a server ignore
+  `If-Modified-Since` whenever the request also carries `If-None-Match`. A
+  client revalidating a resource served from the optimizer's cache whose
+  entity tag no longer matched, but whose date was still current, was
+  answered 304 and kept its stale copy where it should have received the
+  current response. Requests carrying only `If-Modified-Since`, or an
+  entity tag that matches, are answered as before. Applies to Apache,
+  nginx and IIS.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
