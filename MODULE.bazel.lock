@@ -837,7 +837,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_bcr_deps": {
       "general": {
-        "bzlTransitiveDigest": "KGfyAcWwdwNllO4HhM9xHo7b+ftIrgO3xclqZv/B1BU=",
+        "bzlTransitiveDigest": "h4KITcBX3msb1CIyctqDjqsiiKv5ga4OGL99FRZZgRc=",
         "usagesDigest": "Ba3C/QSRWx/cj/SHNe4MyHopX+FuysaxdGMyG9CHa7E=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools"
@@ -888,21 +888,6 @@
               "sha256": "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37",
               "strip_prefix": "libwebp-1.5.0",
               "build_file_content": "\n# Description:\n#   WebP codec library\n\nlicenses([\"notice\"])  # WebM license\n\nexports_files([\"COPYING\"])\n\n# Config setting for x86/x64 platforms where SSE is available\nconfig_setting(\n    name = \"is_x86\",\n    constraint_values = [\"@platforms//cpu:x86_64\"],\n)\n\nconfig_setting(\n    name = \"is_x86_32\",\n    constraint_values = [\"@platforms//cpu:x86_32\"],\n)\n\n# SSE intrinsics - only built on x86 platforms\ncc_library(\n    name = \"libwebp_sse\",\n    srcs = select({\n        \":is_x86\": glob([\n            \"src/dsp/*_sse2.c\",\n            \"src/dsp/*_sse41.c\",\n        ]) + [\"sharpyuv/sharpyuv_sse2.c\"],\n        \":is_x86_32\": glob([\n            \"src/dsp/*_sse2.c\",\n            \"src/dsp/*_sse41.c\",\n        ]) + [\"sharpyuv/sharpyuv_sse2.c\"],\n        \"//conditions:default\": [],\n    }),\n    hdrs = glob([\n        \"src/dsp/*.h\",\n        \"src/webp/*.h\",\n        \"src/dec/*.h\",\n        \"src/enc/*.h\",\n        \"src/utils/*.h\",\n        \"sharpyuv/*.h\",\n    ]),\n    copts = select({\n        \":is_x86\": [\"-mssse3\", \"-msse4.1\"],\n        \":is_x86_32\": [\"-mssse3\", \"-msse4.1\"],\n        \"//conditions:default\": [],\n    }),\n    includes = [\".\"],\n    visibility = [\"//visibility:private\"],\n)\n\n# SharpYUV CPU info - compiles cpu.c with VP8GetCPUInfo renamed to\n# SharpYuvGetCPUInfo, providing the symbol that sharpyuv.c expects.\ncc_library(\n    name = \"sharpyuv_cpu\",\n    srcs = [\"src/dsp/cpu.c\"],\n    hdrs = [\n        \"src/dsp/cpu.h\",\n        \"src/webp/types.h\",\n    ],\n    includes = [\".\"],\n    local_defines = [\"VP8GetCPUInfo=SharpYuvGetCPUInfo\"],\n    visibility = [\"//visibility:private\"],\n)\n\ncc_library(\n    name = \"libwebp\",\n    srcs = glob([\n        \"src/dsp/*.c\",\n        \"src/dsp/*.h\",\n        \"src/utils/*.c\",\n        \"src/utils/*.h\",\n        \"src/dec/*.c\",\n        \"src/dec/*.h\",\n        \"src/mux/*.c\",\n        \"src/mux/*.h\",\n        \"src/demux/*.c\",\n        \"src/demux/*.h\",\n        \"src/enc/*.c\",\n        \"src/enc/*.h\",\n        \"sharpyuv/*.c\",\n        \"sharpyuv/*.h\",\n    ], exclude = [\n        \"src/dsp/*_sse2.c\",\n        \"src/dsp/*_sse41.c\",\n        \"sharpyuv/sharpyuv_sse2.c\",\n        \"sharpyuv/sharpyuv_cpu.c\",\n    ]) + [\n        \"imageio/imageio_util.c\",\n        \"imageio/webpdec.c\",\n        \"imageio/metadata.c\",\n    ],\n    hdrs = glob([\n        \"src/webp/*.h\",\n        \"examples/unicode.h\",\n    ]) + [\n        \"imageio/webpdec.h\",\n        \"imageio/metadata.h\",\n        \"imageio/imageio_util.h\",\n    ],\n    copts = [],\n    defines = [],\n    includes = [\n        \".\",\n        \"src\",\n    ],\n    # Our sources include these headers as \"external/libwebp/...\". Under bzlmod\n    # the repo directory carries a canonical name, so serve the headers at the\n    # old spelling through _virtual_includes.\n    include_prefix = \"external/libwebp\",\n    linkopts = [],\n    visibility = [\"//visibility:public\"],\n    deps = [\n        \":libwebp_sse\",\n        \":sharpyuv_cpu\",\n    ],\n)\n"
-            }
-          },
-          "google_sparsehash": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
-            "attributes": {
-              "strip_prefix": "sparsehash-6ff8809259d2408cb48ae4fa694e80b15b151af3",
-              "url": "https://github.com/sparsehash/sparsehash/archive/6ff8809259d2408cb48ae4fa694e80b15b151af3.tar.gz",
-              "build_file_content": "\ncc_library(\n    name = \"google_sparsehash\",\n    hdrs = [\n        \"src/google/dense_hash_map\",\n        \"src/google/dense_hash_set\",\n        \"src/google/sparse_hash_map\",\n        \"src/google/sparse_hash_set\",\n        \"src/google/sparsetable\",\n        \"src/google/sparsehash/libc_allocator_with_realloc.h\",\n        \"src/google/sparsehash/densehashtable.h\",\n        \"src/google/sparsehash/sparsehashtable.h\",\n        \"src/google/type_traits.h\",\n    ],\n    # Add cstring include for memset/memcpy - newer GCC requires explicit include\n    copts = select({\n        \"@platforms//os:windows\": [],\n        \"//conditions:default\": [\"-include\", \"cstring\"],\n    }),\n    visibility = [\"//visibility:public\"],\n    strip_include_prefix = \"src/\",\n\n)\n",
-              "sha256": "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3",
-              "patches": [
-                "@@//bazel:sparsehash_cstring.patch"
-              ],
-              "patch_args": [
-                "-p1"
-              ]
             }
           },
           "com_github_gflags_gflags": {

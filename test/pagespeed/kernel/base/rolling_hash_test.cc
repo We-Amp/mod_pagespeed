@@ -23,7 +23,7 @@
 
 #include "pagespeed/kernel/base/basictypes.h"
 #ifdef NDEBUG
-#include "pagespeed/kernel/base/dense_hash_set.h"
+#include "absl/container/flat_hash_set.h"
 #endif
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -70,12 +70,9 @@ TEST(RollingHashTest, RollShakedown) {
 // as it only has 23 bits!
 #ifdef NDEBUG  // This test takes ~15 seconds in debug mode.
 TEST(RollingHashTest, NGrams) {
-  // Using dense_hash_set is MUCH faster (6x) than std::set.
+  // Using a flat hash set is much faster than std::set.
   // That keeps this test "small".
-  // TODO(sligocki): Currently fails in 32-bit g++ 4.1 because there's
-  // no specialization of std::tr1::hash<> for <long long unsigned int>.
-  dense_hash_set<uint64> grams;
-  grams.set_empty_key(0ULL);
+  absl::flat_hash_set<uint64> grams;
   char buf[3];
   uint64 hash;
   bool gramOverlap = false;

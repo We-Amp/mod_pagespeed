@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-23T05:56:06Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-24T13:04:20Z",
   "creationInfo": {
-    "created": "2026-10-23T05:56:06Z",
+    "created": "2026-10-24T13:04:20Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -325,24 +325,6 @@
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
           "referenceLocator": "pkg:github/videolan/dav1d@1.5.1"
-        }
-      ]
-    },
-    {
-      "SPDXID": "SPDXRef-Package-sparsehash",
-      "name": "sparsehash",
-      "versionInfo": "6ff8809259d2408cb48ae4fa694e80b15b151af3",
-      "supplier": "Organization: Google Inc.",
-      "downloadLocation": "https://github.com/sparsehash/sparsehash",
-      "filesAnalyzed": false,
-      "licenseConcluded": "BSD-3-Clause",
-      "licenseDeclared": "BSD-3-Clause",
-      "copyrightText": "Copyright Google Inc.",
-      "externalRefs": [
-        {
-          "referenceCategory": "PACKAGE-MANAGER",
-          "referenceType": "purl",
-          "referenceLocator": "pkg:github/sparsehash/sparsehash@6ff8809259d2408cb48ae4fa694e80b15b151af3"
         }
       ]
     },
@@ -689,11 +671,6 @@
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-dav1d"
-    },
-    {
-      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
-      "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-sparsehash"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
