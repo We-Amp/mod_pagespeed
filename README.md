@@ -31,7 +31,7 @@ Originally created by Google, now maintained by [We-Amp](https://we-amp.com).
 ### Pre-built packages
 
 All packages and installers are on the
-[downloads page](https://modpagespeed.com/1.1/docs/downloads/): signed apt/dnf
+[downloads page](https://modpagespeed.com/download/): signed apt/dnf
 packages for Apache (`mod-pagespeed`) and Nginx (`nginx-module-pagespeed`) via
 `packages.modpagespeed.com`, and the signed IIS MSI. The Apache module
 package pairs with the `pagespeed-optimizer` daemon package at the same
@@ -50,10 +50,10 @@ Then see the per-platform installation guides:
 
 Full product documentation lives on modpagespeed.com:
 
-- [Filter selection](https://modpagespeed.com/1.1/docs/filter-selection/) -- rewrite levels and per-filter enable/disable
-- [Filter reference](https://modpagespeed.com/1.1/docs/filter-reference/) -- what each filter does and which level enables it
-- [Configuration](https://modpagespeed.com/1.1/docs/configuration/) -- directives and baseline setup
-- [Admin console](https://modpagespeed.com/1.1/docs/admin-console/) -- statistics, cache inspection, and purging
+- [Filter selection](https://modpagespeed.com/docs/filter-selection/) -- rewrite levels and per-filter enable/disable
+- [Filter reference](https://modpagespeed.com/docs/filters/) -- what each filter does and which level enables it
+- [Configuration](https://modpagespeed.com/docs/configuration/) -- directives and baseline setup
+- [Admin console](https://modpagespeed.com/docs/admin-console/) -- statistics, cache inspection, and purging
 
 ### Build from Source
 
@@ -114,8 +114,8 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 |---|---|
 | Source | https://github.com/we-amp/mod_pagespeed |
 | Issues | https://github.com/we-amp/mod_pagespeed/issues |
-| Downloads | https://modpagespeed.com/1.1/docs/downloads/ |
-| Upgrade from open-source | https://modpagespeed.com/1.1/docs/upgrading-from-open-source/ |
+| Downloads | https://modpagespeed.com/download/ |
+| Upgrade from open-source | https://modpagespeed.com/docs/migrating-to-2-1/ |
 | Support | https://modpagespeed.com/contact/ |
 
 ## Background
