@@ -252,32 +252,6 @@ pagespeed_cc_test(
     ],
 )
 
-# =============================================================================
-# Backward-compatible aggregate test target
-# =============================================================================
-
-# system_caches_test.cc is not part of this aggregate target: it runs sharded
-# as its own target above, and the aggregate would run it a second time per
-# job against the same shared memcached and redis servers (issue #204).
-
-pagespeed_cc_test(
-    name = "system",
-    srcs = [
-        "external_server_spec_test.cc",
-        "in_place_resource_recorder_test.cc",
-        "loopback_route_fetcher_test.cc",
-        "memcached_cache_test.cc",
-        "redis_cache_cluster_test.cc",
-        "system_message_handler_test.cc",
-    ],
-    shard_count = 1,
-    size = "large",
-    target_compatible_with = ["@platforms//os:linux"],
-    deps = [
-        "//test/pagespeed/system:test_base",
-    ],
-)
-
 # A real, dlopen-able stand-in for the daemon's client library.
 #
 # The stub daemon library's runfiles file name, in ONE place (the header is
