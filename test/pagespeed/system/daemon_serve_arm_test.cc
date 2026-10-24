@@ -112,6 +112,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_ORIGIN_CCFLAGS");
     unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
     unsetenv("PS_STUB_GZIP_ISIZE");
+    unsetenv("PS_STUB_READ_ALT_STATUS");
     setenv("PS_STUB_INSERTED_AT", "1000", 1);
     setenv("PS_STUB_ORIGIN_MAXAGE", "600", 1);
     setenv("PS_STUB_ORIGIN_CT", "image/png", 1);
@@ -150,6 +151,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_ORIGIN_CCFLAGS");
     unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
     unsetenv("PS_STUB_GZIP_ISIZE");
+    unsetenv("PS_STUB_READ_ALT_STATUS");
   }
 
   GoogleString CallLog() const {
@@ -1043,6 +1045,43 @@ TEST_F(DaemonServeArmTest, TheFlagIsReadOffTheByIdOriginalAndNowhereElse) {
   EXPECT_TRUE(best == GoogleString::npos || by_id < best) << log;
 }
 
+TEST_F(DaemonServeArmTest, AProbeErrorDeclinesTheWholeSubstrate) {
+  // THE HOLE THIS CLOSES.  The probe can fail in ways that are neither an
+  // answer nor an absence -- busy while the original is re-recorded, an
+  // I/O error, a corrupted entry, a closed volume -- and on every one of
+  // them the flags byte it reports is zero, which is "no restrictions".
+  // Serving on that is the variant leg of a marked URL going out without
+  // the origin's other headers and without its `Vary: Accept`, with a full
+  // lifetime: the response rule 6 exists to prevent, delivered by the
+  // error path.  So every status but found and not-found declines, and the
+  // variant below is present, servable and exactly what the client asked
+  // for -- the same shape the marked-original case pins, one failure mode
+  // further out.
+  const int kErrIo = 2, kErrCorrupted = 3, kErrBusy = 6, kErrClosed = 7;
+  for (const int status : {kErrIo, kErrCorrupted, kErrBusy, kErrClosed}) {
+    SCOPED_TRACE(status);
+    SetAlternates("09:00:1,0c:00:0");  // variant beside an UNMARKED original
+    char value[8];
+    snprintf(value, sizeof(value), "%d", status);
+    setenv("PS_STUB_READ_ALT_STATUS", value, 1);
+    const DaemonServeDecision decision = Serve(Request("image/webp,*/*"));
+    EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+    EXPECT_STREQ(daemon_serve_reason::kReadFailed, decision.reason);
+    // PENDING, not cold and not declined: the entry was not absent and was
+    // not refused on purpose, the volume could not answer.  Collapsing the
+    // three would report an I/O fault on the volume as an empty cache.
+    EXPECT_EQ(kPsServeClassOriginalPending, decision.serve_class);
+    EXPECT_FALSE(decision.selected);
+    EXPECT_TRUE(decision.body.empty());
+    // NOTHING WAS SELECTED: the decline is before the variant is ever
+    // considered, which is what "restrictions unknown" requires.  A check
+    // placed after the selection would have to un-serve the variant it had
+    // already chosen; this one never chooses.
+    EXPECT_EQ(GoogleString::npos, CallLog().find("read_best"));
+  }
+  unsetenv("PS_STUB_READ_ALT_STATUS");
+}
+
 TEST_F(DaemonServeArmTest, AnUnmarkedOriginalChangesNothing) {
   // The other half of the discrimination, and the one a "decline everything"
   // implementation would fail: the same family with a CLEAR flags byte is
@@ -1542,22 +1581,56 @@ TEST_F(DaemonServeArmTest, AStaleEntryFallsThroughInsteadOfBeingServed) {
   EXPECT_TRUE(decision.body.empty());
 }
 
-TEST_F(DaemonServeArmTest, AZeroLifetimeEntryFallsThroughRatherThanServes) {
-  // THE PREMISE `Expires` RESTS ON, made a test instead of a comment.  Nothing
-  // on the record path parses `Expires` into the stored lifetime, so an origin
-  // that expressed its lifetime ONLY that way stores a zero max-age and no
-  // recorded `Cache-Control` at all.  What keeps `Expires` in the reproducible
-  // set is that such an entry is REFUSED rather than served with a freshness
-  // nobody stated -- a fall-through, never a wrong header.
-  //
-  // WHAT THIS DOES AND DOES NOT PROVE, because the difference matters: it
-  // pins the behaviour of the in-tree MODEL of the peer's evaluator.  The
-  // peer's own arithmetic for a zero lifetime with no recorded
-  // `Cache-Control` is not observable from this tree, and if it applied a
-  // content-type default there instead the entry would be served fresh.  That
-  // is the one step of the `Expires` argument this suite cannot close.
+TEST_F(DaemonServeArmTest, ANonStatedLifetimeIsServedOnTheTypeDefault) {
+  // THE PEER'S REAL ARITHMETIC, which this suite used to assume was the
+  // opposite.  An entry whose stored state records neither a lifetime nor
+  // a `Cache-Control` line is served on the peer evaluator's content-type
+  // default -- 3600 s for an image, 300 s for a stylesheet or script --
+  // and the emitted `Cache-Control` relays that default downstream.  The
+  // stand-in used to model zero-lifetime as refused, which is what let an
+  // `Expires`-only origin be stored as silence: nothing here disagreed.
+  // The record arm now derives that lifetime (see the record suite), so
+  // the state below is the residual one -- an entry recorded before that,
+  // or by a caller that stated no lifetime at all -- and it is served,
+  // which is exactly why the derivation has to happen at record time.
   setenv("PS_STUB_ORIGIN_MAXAGE", "0", 1);
-  setenv("PS_STUB_ORIGIN_CCFLAGS", "0", 1);  // no Cache-Control was recorded
+  setenv("PS_STUB_ORIGIN_CCFLAGS", "0", 1);  // no lifetime was stated
+  SetAlternates("09:00:1");
+  const DaemonServeDecision image = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, image.verdict);
+  EXPECT_EQ("must-revalidate, max-age=3600", image.cache_control);
+
+  UseStylesheetFamily();
+  const DaemonServeDecision css = Serve(CssRequest("identity"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, css.verdict);
+  EXPECT_EQ("must-revalidate, max-age=300", css.cache_control);
+  unsetenv("PS_STUB_ORIGIN_CCFLAGS");
+  setenv("PS_STUB_ORIGIN_MAXAGE", "600", 1);
+}
+
+TEST_F(DaemonServeArmTest, AnExpiresDerivedLifetimeGovernsTheServe) {
+  // What the record gate now stamps for an origin that stated its lifetime
+  // only through `Expires`: the derived max-age with the header-present
+  // bit, so the evaluator takes the origin's lifetime rather than its
+  // content-type default.  Ten minutes of `Expires` is ten minutes of
+  // serving, not 3600 of it.
+  setenv("PS_STUB_ORIGIN_MAXAGE", "600", 1);
+  setenv("PS_STUB_ORIGIN_CCFLAGS", "512", 1);  // 0x0200: lifetime stated
+  SetAlternates("09:00:1");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_EQ("must-revalidate, max-age=600", decision.cache_control);
+  unsetenv("PS_STUB_ORIGIN_CCFLAGS");
+}
+
+TEST_F(DaemonServeArmTest, AnExpiredExpiresEntryIsNotServedFresh) {
+  // `Expires` in the past: the gate stores 0 with the lifetime-stated bit,
+  // the same stored state an explicit `max-age=0` produces -- not freshly
+  // cacheable, refused at serve, and the request falls through to the
+  // origin, which is the revalidation.  Without the bit this entry would
+  // be served on the image default instead; see the test above it.
+  setenv("PS_STUB_ORIGIN_MAXAGE", "0", 1);
+  setenv("PS_STUB_ORIGIN_CCFLAGS", "512", 1);  // 0x0200: lifetime stated
   SetAlternates("09:00:1");
   const DaemonServeDecision decision = Serve(Request("image/webp"));
   EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);

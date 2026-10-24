@@ -27,6 +27,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/time_util.h"
 
 namespace net_instaweb {
 
@@ -188,6 +189,48 @@ bool NameIsIn(StringPiece name, const char* const (&table)[N]) {
   return false;
 }
 
+// The freshness lifetime the origin's `Expires` field grants, in seconds,
+// relative to the response's `Date` (RFC 9111 4.2.1) or, when the response
+// carries no readable `Date`, to the record time.  False when there is
+// nothing to derive: no `Expires` field at all, or one whose value is not a
+// date any parser accepts.  The FIRST field of each name is the answer, the
+// same reading this module's classic CachingHeaders gives a repeated field.
+//
+// An `Expires` at or before its reference is 0, not an error: the origin
+// stated a lifetime and it is "not freshly cacheable", which is what the
+// stored state must say for the serve side to refuse the entry rather than
+// apply a default.
+bool OriginExpiresLifetime(const std::vector<DaemonOriginHeader>& headers,
+                           int64 now_seconds, uint32_t* lifetime_seconds) {
+  int64 expires_ms = 0;
+  bool saw_expires = false;
+  bool have_expires = false;
+  int64 date_ms = 0;
+  bool saw_date = false;
+  bool have_date = false;
+  for (const DaemonOriginHeader& header : headers) {
+    StringPiece name = header.name;
+    TrimWhitespace(&name);
+    if (!saw_expires && StringCaseEqual(name, "expires")) {
+      saw_expires = true;
+      have_expires = ConvertStringToTime(header.value, &expires_ms);
+    } else if (!saw_date && StringCaseEqual(name, "date")) {
+      saw_date = true;
+      have_date = ConvertStringToTime(header.value, &date_ms);
+    }
+  }
+  if (!have_expires) {
+    return false;
+  }
+  // RFC 9111 4.2.1 computes from `Date`; this module's record seams stamp
+  // one on every response they hand the gate, so this is the belt to those
+  // braces for a caller whose headers carry none.
+  const int64 reference_ms = have_date ? date_ms : now_seconds * 1000;
+  const int64 lifetime_ms = expires_ms - reference_ms;
+  *lifetime_seconds = lifetime_ms > 0 ? ClampToUint32(lifetime_ms / 1000) : 0;
+  return true;
+}
+
 }  // namespace
 
 bool OriginHeadersAreReproducible(
@@ -327,6 +370,43 @@ DaemonRecordDecision EvaluateDaemonRecordGate(const DaemonAbi& abi,
     // treating a line as fatal would refuse to record responses over
     // directives the peer was right to skip.
     (void)abi.ParseCacheControl(line.c_str(), &cc);
+  }
+
+  // ---- the origin's lifetime, `Expires` included -----------------------
+  // DERIVED HERE, NOT AT SERVE TIME, because the stored state is the only
+  // place the origin's `Expires` and this response's `Date` still coexist.
+  // RFC 9111 4.2.1: an `Expires` value is an explicit freshness lifetime,
+  // and an explicit lifetime outranks every heuristic.  The peer's serve
+  // side substitutes its own content-type defaults for an entry whose
+  // stored state records neither a lifetime nor a `Cache-Control` line
+  // (300 s for stylesheets and scripts, 3600 s for images), so a response
+  // that stated its lifetime ONLY through `Expires` was, stored as silence,
+  // served with a freshness the origin never granted -- and the emitted
+  // `Cache-Control` passed that lifetime to every cache downstream.
+  //
+  // APPLIED ONLY WHEN NO `Cache-Control` LINE WAS PARSED, so no origin
+  // statement is overridden: `max-age` outranks `Expires` outright, and a
+  // `Cache-Control` carrying no lifetime of its own (a bare `no-cache`, an
+  // explicit `max-age=0`) is already a lifetime statement, recorded by the
+  // parser with the header-present bit that tells the evaluator no default
+  // may apply.
+  //
+  // The header-present bit is stamped beside the derived value for the same
+  // reason the parser stamps it: it is what marks the stored lifetime as
+  // the origin's statement rather than silence, which is what suppresses
+  // the serve-side default.  An `Expires` already in the past stores 0 with
+  // the bit set -- not freshly cacheable, the same stored state an explicit
+  // `max-age=0` produces -- never a default.  An `Expires` no parser
+  // accepts derives nothing and the entry keeps its pre-`Expires` state;
+  // the seams' own cacheability gate refuses such a response before this
+  // gate runs, so that is a caller-supplied state, not a live one.
+  if ((cc.cc_flags & kPsCcOriginHeaderPresent) == 0) {
+    uint32_t expires_lifetime = 0;
+    if (OriginExpiresLifetime(input.response_headers, now_seconds,
+                              &expires_lifetime)) {
+      cc.max_age = expires_lifetime;
+      cc.cc_flags |= kPsCcOriginHeaderPresent;
+    }
   }
 
   if ((cc.cc_flags & kPsCcOriginNoStore) != 0) {
