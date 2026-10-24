@@ -225,11 +225,15 @@ class UdsDaemonReaderTest : public ::testing::Test {
         timer_(Platform::CreateTimer()),
         message_handler_(thread_system_->NewMutex()) {}
 
-  // Waits for the fetch to complete (bounded by the reader's 5s upstream
-  // timeout plus slack).
+  // Waits for the fetch to complete.  The read itself is bounded by the
+  // reader's 5 s upstream timeout; everything past that is the poll thread
+  // delivering the completion, which a loaded host can delay by many
+  // seconds (the old 5 s slack gave up on a fetch that completed at
+  // 10.8 s, issue #241), so the deadline sits at the timeout plus 15 s and
+  // only a fetch whose completion never arrives reaches it.
   void WaitForDone(const ReaderTestFetch& fetch) {
     int64 deadline_ms =
-        timer_->NowMs() + UdsDaemonReader::kUpstreamTimeoutMs + 5000;
+        timer_->NowMs() + UdsDaemonReader::kUpstreamTimeoutMs + 15000;
     while (!fetch.done() && timer_->NowMs() < deadline_ms) {
       usleep(1000);
     }
