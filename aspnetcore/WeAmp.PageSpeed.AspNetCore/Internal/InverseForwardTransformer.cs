@@ -17,11 +17,17 @@ namespace WeAmp.PageSpeed.AspNetCore.Internal;
 ///   cache-key/URL correctness: a 127.0.0.1 Host partitions the pagespeed cache
 ///   and emits 127.0.0.1 asset URLs;</item>
 ///   <item>REMOVES all inbound <c>X-Forwarded-Proto</c> then SETS exactly ONE
-///   validated value (http|https; anything else → https). ngx_pagespeed's
+///   validated value (http|https; anything else → https): the ORIGINAL
+///   request's scheme, or, on a plain-HTTP public connection, the scheme a
+///   TLS terminator reported via the inbound <c>X-Forwarded-Proto</c> (the
+///   README's documented HTTPS deployment; without it the app's raw-origin
+///   leg would see http behind a terminator and e.g. UseHttpsRedirection
+///   would loop). On a TLS (https) public connection the client is direct,
+///   so an inbound XFP is attacker-controlled noise and the real scheme
+///   always wins: a client-supplied <c>http</c> must not downgrade asset
+///   URLs (mixed-content / cache-poison). ngx_pagespeed's
 ///   ps_apply_x_forwarded_proto reads the FIRST XFP header, so a single
-///   authoritative value is mandatory — appending a client-supplied XFP would let
-///   an attacker's <c>http</c> win and downgrade asset URLs (mixed-content /
-///   cache-poison);</item>
+///   authoritative value is mandatory;</item>
 ///   <item>appends <c>X-Forwarded-For</c> with the transport peer;</item>
 ///   <item>sets <c>X-PageSpeed-Hop</c> = inbound + 1 (default 1) — the tamper-
 ///   evident cross-hop termination counter;</item>
@@ -87,9 +93,10 @@ public sealed class InverseForwardTransformer : HttpTransformer
         }
 
         // X-Forwarded-Proto: REMOVE all inbound, then SET exactly one validated
-        // value. First-match-wins in the module makes the single value mandatory.
+        // value (ForwardedScheme). First-match-wins in the module makes the
+        // single value mandatory.
         proxyRequest.Headers.Remove(ForwardedProtoHeader);
-        proxyRequest.Headers.TryAddWithoutValidation(ForwardedProtoHeader, NormalizeScheme(httpContext.Request.Scheme));
+        proxyRequest.Headers.TryAddWithoutValidation(ForwardedProtoHeader, ForwardedScheme(httpContext.Request));
 
         // X-Forwarded-For: append the transport peer. (nginx re-appends 127.0.0.1
         // on the inner hop via $proxy_add_x_forwarded_for.)
@@ -134,6 +141,36 @@ public sealed class InverseForwardTransformer : HttpTransformer
     {
         if (string.Equals(scheme, "http", StringComparison.OrdinalIgnoreCase)) return "http";
         return "https";
+    }
+
+    /// <summary>
+    /// The single validated X-Forwarded-Proto value forwarded on the loopback
+    /// hop. On a plain-HTTP public connection the INBOUND header wins: the
+    /// documented HTTPS deployment fronts the app with a TLS terminator, whose
+    /// X-Forwarded-Proto carries the scheme the client actually used, which the
+    /// plain-HTTP transport cannot know (relaying the transport scheme instead
+    /// made the app's raw-origin leg see http behind a terminator, so
+    /// UseForwardedHeaders + UseHttpsRedirection redirected every optimized
+    /// page to itself in a loop). The LAST value is taken (the nearest proxy's,
+    /// like X-Forwarded-For's append order) and each value is normalized, so
+    /// anything but an exact http/https (an empty or comma-joined value) falls
+    /// to https. The request's own scheme is used when the header is absent.
+    /// On an HTTPS public connection the client is direct, the inbound header
+    /// is untrusted, and the real scheme always wins: never a downgrade.
+    /// </summary>
+    internal static string ForwardedScheme(HttpRequest request)
+    {
+        var scheme = NormalizeScheme(request.Scheme);
+        if (scheme == "https")
+        {
+            return scheme;
+        }
+        var inbound = request.Headers[ForwardedProtoHeader];
+        if (inbound.Count == 0)
+        {
+            return scheme;
+        }
+        return NormalizeScheme(inbound[inbound.Count - 1]);
     }
 
     private static int ReadHop(Microsoft.Extensions.Primitives.StringValues value)

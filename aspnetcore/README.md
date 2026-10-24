@@ -48,10 +48,19 @@ Non-optimizable requests, and any request received while the sidecar isn't runni
 straight through to your app un-optimized. Optimization is always additive: if nginx is
 down, your app still serves traffic.
 
-The loopback hop to nginx is plain HTTP. The middleware injects exactly one validated
-`X-Forwarded-Proto` header so optimized asset URLs root at the public scheme your client
-used. The package generates its own `nginx.conf`, runs nginx as a background service
-(start, health, auto-restart, graceful stop), and registers ASP.NET Core health checks.
+The loopback hop to nginx is plain HTTP. The middleware forwards exactly one validated
+`X-Forwarded-Proto` header, so both the optimizer and your app (via
+`UseForwardedHeaders()`) see the scheme your client used: when the app is fronted by a
+TLS terminator on a plain-HTTP connection, the terminator's inbound
+`X-Forwarded-Proto` is passed through unchanged, and a request without one carries the
+request's own scheme. The package generates its own `nginx.conf`, runs nginx as a
+background service (start, health, auto-restart, graceful stop), and registers
+ASP.NET Core health checks.
+
+Middleware order matters when you use `UseForwardedHeaders()`: call `UsePageSpeed()`
+before it. In the reverse order, forwarded-header processing rewrites the remote
+address before the sidecar's loopback check reads it, and every optimized request is
+rejected with `421`.
 
 ## Install
 
@@ -147,6 +156,7 @@ it's shown to name the keys.
 | `RewriteLevel` | `CoreFilters` | optional | One of `PassThrough`, `CoreFilters`, `OptimizeForBandwidth`, `MobilizeFilters`, `TestingCoreFilters`, `AllFilters`. |
 | `EnabledFilters` | unset | optional | Comma-separated filter names to enable on top of `RewriteLevel` (e.g. `"rewrite_css,rewrite_javascript,recompress_images"`). Spaces are stripped and the list is checked for syntax only (`[-+a-z0-9_,]`); the filter names themselves are validated by the optimization engine at startup. |
 | `DisabledFilters` | unset | optional | Comma-separated filter names to turn off. Disabling wins over enabling, including over filters implied by `RewriteLevel`. Same syntax rules as `EnabledFilters`. |
+| `ExcludePaths` | `[]` | optional | Request paths to leave un-optimized. Each entry is a path prefix (`"/api/"`) or a glob where `*` matches any sequence and `?` any single character (`"/admin/*"`, `"*.json"`); matching is case-insensitive. Entries are not regular expressions: an entry that cannot be read this way fails at startup with a message naming the accepted syntax. |
 | `Sidecar.Mode` | `Inverse` | optional | `Inverse` (default — your middleware is the public front door, nginx optimizes on loopback), `Process` (classic front-proxy — bundled nginx is the public front door, Kestrel the private origin), `External` (connect to an operator-managed nginx). `Docker` is reserved for a future release and fails config validation. |
 | `Sidecar.ListenPort` | `8080` | optional | The public port the package binds in Inverse (the default, since `OwnPublicPort` is `true`) and the public nginx port in Process. |
 | `Sidecar.OwnPublicPort` | `true` | optional | Inverse only. When `true` (default), the package binds the public endpoint on `0.0.0.0:Sidecar.ListenPort`. Set `false` to own the bind yourself via `Kestrel:Endpoints` (note: `--urls` / `UseUrls` / `ASPNETCORE_URLS` are overridden once the loopback endpoint is added and will not bind publicly). Ignored in Process/External. |

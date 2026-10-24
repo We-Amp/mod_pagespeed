@@ -94,6 +94,58 @@ public class InverseForwardHeaderTests
             "the client-supplied http must be overwritten with the real https scheme");
     }
 
+    [Fact]
+    public async Task ForwardedRequest_PassesThroughTerminatorXForwardedProto()
+    {
+        // #294: the documented HTTPS deployment fronts the plain-HTTP app with
+        // a TLS terminator, which sends X-Forwarded-Proto: https. That value
+        // carries the scheme the client used; forwarding the transport 'http'
+        // instead made the app's raw-origin leg see http (UseForwardedHeaders +
+        // UseHttpsRedirection then redirected every optimized page to itself).
+        var req = await Transform(InverseTestSupport.NewEndpoint(), scheme: "http",
+            headers: new Dictionary<string, string>
+            {
+                [InverseForwardTransformer.ForwardedProtoHeader] = "https"
+            });
+
+        Count(req, InverseForwardTransformer.ForwardedProtoHeader).Should().Be(1,
+            "exactly one validated XFP must be present");
+        First(req, InverseForwardTransformer.ForwardedProtoHeader).Should().Be("https",
+            "the terminator-reported scheme must reach nginx and the raw-origin app");
+    }
+
+    [Fact]
+    public async Task ForwardedRequest_InboundHttpProto_OnPlainHttpTransport_IsKept()
+    {
+        // A plain-HTTP connection whose inbound XFP also says http: forwarded
+        // as http (the terminator is honest; no synthetic upgrade).
+        var req = await Transform(InverseTestSupport.NewEndpoint(), scheme: "http",
+            headers: new Dictionary<string, string>
+            {
+                [InverseForwardTransformer.ForwardedProtoHeader] = "http"
+            });
+
+        First(req, InverseForwardTransformer.ForwardedProtoHeader).Should().Be("http");
+    }
+
+    [Theory]
+    [InlineData("HTTPS")]
+    [InlineData("ftp")]
+    [InlineData("")]
+    public async Task ForwardedRequest_InboundProtoIsNormalized_FailSafeToHttps(string inbound)
+    {
+        // An inbound value that is not http/https normalizes to https (never a
+        // downgrade), same rule as the request scheme itself.
+        var req = await Transform(InverseTestSupport.NewEndpoint(), scheme: "http",
+            headers: new Dictionary<string, string>
+            {
+                [InverseForwardTransformer.ForwardedProtoHeader] = inbound
+            });
+
+        First(req, InverseForwardTransformer.ForwardedProtoHeader).Should().Be("https",
+            "a non-http/https inbound value normalizes to https (fail-safe, never downgrade)");
+    }
+
     [Theory]
     [InlineData("ftp")]
     [InlineData("ws")]
