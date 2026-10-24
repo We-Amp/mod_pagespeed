@@ -117,7 +117,7 @@ void EnvoyRewriteOptions::AddProperties() {
       kDefaultDaemonApiSocketPath,
       &EnvoyRewriteOptions::daemon_api_socket_path_, "dasp",
       kDaemonApiSocketPath, kServerScope,
-      "Set the unix socket path of the optimizer daemon's management API, "
+      "Set the unix socket path of the optimizer worker's management API, "
       "backing the /v1/daemon/* admin endpoints. Empty disables them.",
       true);
 

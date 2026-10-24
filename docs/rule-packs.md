@@ -354,14 +354,14 @@ The module removes the origin's `Content-Length` from HTML it rewrites, so a
 while the `GET` response can carry the length of the body it sends. Do not rely
 on a `HEAD` response for the size of a page.
 
-## Daemon servers
+## Servers with the optimizer worker
 
-On Apache, nginx and IIS the optimizer daemon serves no HTML, and the module
+On Apache, nginx and IIS the optimizer worker serves no HTML, and the module
 records none into it. Every HTML response is rewritten by the module's own
 filter chain, which carries the pack, whether or not `rule_packs` is enabled.
-CSS, JavaScript and images are served and recorded by the daemon as before.
+CSS, JavaScript and images are served and recorded by the worker as before.
 `ipro_daemon_fallthrough` rises on HTML requests as part of this normal
-daemon behaviour.
+worker behaviour.
 
 ## Decision log
 
@@ -680,7 +680,7 @@ decision table.
   that finds a bad file has no pack, while old children keep the good one.
 - Do not delete or rotate the current day's decision log. Check who can read it
   (0640 on Linux and macOS).
-- `ipro_daemon_fallthrough` rises on HTML requests on daemon servers by design.
+- `ipro_daemon_fallthrough` rises on HTML requests on servers that use the optimizer worker, by design.
 - To learn why a path was not touched, request it with
   `?PageSpeedFilters=+debug` and check the host, the path patterns and the three
   mode settings.
