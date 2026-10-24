@@ -75,6 +75,11 @@ class IisModuleBaseFetch : public IisBaseFetch {
   void set_pending(bool x) { pending_ = x; }
   void set_flush_html(bool x) { flush_html_ = x; }  
   bool get_flush_html() { return flush_html_; }  
+  // Caching-header policy for CollectHeaders.  Set on the HTML base fetch
+  // from the options resolved for the response being rewritten (the HTML
+  // driver is not stored on the inner context, so CollectHeaders cannot
+  // read the flag from there).
+  void set_modify_cache_headers(bool x) { modify_cache_headers_ = x; }
   void SendData(MessageHandler* handler, bool flush);  
   bool HasChunk(HTTP_DATA_CHUNK* chunk);
 
@@ -152,6 +157,7 @@ class IisModuleBaseFetch : public IisBaseFetch {
   size_t chunk_send_index_;
   bool pending_;
   bool flush_html_;
+  bool modify_cache_headers_;
   IisInnerRequestContext* ctx_;
   MessageHandler* handler_;
 
