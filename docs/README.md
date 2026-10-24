@@ -3,8 +3,8 @@
 Developer- and operator-facing documentation for mod_pagespeed (the C++ Apache /
 nginx / Envoy / IIS optimization engine). For an architecture overview and the
 build/test workflow, start at the root [`CLAUDE.md`](../CLAUDE.md). Customer-facing
-1.1 docs are not here — they live in the `pagespeed-optimizer` repo at
-`website/src/content/docs-1.1/` (published to modpagespeed.com/1.1/docs/).
+docs are not here: they live in the `pagespeed-optimizer` repo at
+`website/src/content/docs/` (published to modpagespeed.com/docs/).
 
 ## Orientation
 

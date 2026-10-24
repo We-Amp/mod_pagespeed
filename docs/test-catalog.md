@@ -2,7 +2,7 @@
 
 Comprehensive reference of test baselines, skip markers, and platform-specific behavior across all deployment modes.
 
-Last updated: 2026-02-10
+Pass and skip counts change as tests are added, so this page lists commands, markers and known skips rather than counts; the current numbers are in the CI job output.
 
 ## Test Suite Baselines
 
@@ -15,12 +15,7 @@ bazel test --config=clang-libstdcxx13 \
   //test/pagespeed/... //test/net/...
 ```
 
-| Status | Count | Notes |
-|--------|-------|-------|
-| Passed | 45 | |
-| Failed (build) | 1 | `iis_html_flushing_integration_test` — pre-existing `TakePendingChunks` missing |
-| Skipped | 15 | IIS tests (require Windows) |
-| Network-dependent | 1 | `curl_url_async_fetcher_test` — tagged `requires-network` |
+`iis_html_flushing_integration_test` is tagged `manual` and excluded from wildcard builds (it does not build: `TakePendingChunks` is missing). The IIS unit tests need Windows. Everything else in the two wildcards is expected to pass.
 
 ### Apache System Tests
 
@@ -28,23 +23,11 @@ bazel test --config=clang-libstdcxx13 \
 ./test/system/run_system_tests.sh
 ```
 
-| Status | Count | Notes |
-|--------|-------|-------|
-| Passed | 195 | |
-| Skipped | 14 | HTTPS, IIS, secondary host |
-| Failed | 0 | |
-
 ### Envoy System Tests
 
 ```
 ./test/system/run_envoy_tests.sh
 ```
-
-| Status | Count | Notes |
-|--------|-------|-------|
-| Passed | 189 | |
-| Skipped | 20 | See [Envoy Skips](#envoy-skips) |
-| Failed | 0 | |
 
 ### Nginx System Tests
 
@@ -52,17 +35,9 @@ bazel test --config=clang-libstdcxx13 \
 ./test/system/run_nginx_tests.sh
 ```
 
-| Status | Count | Notes |
-|--------|-------|-------|
-| Passed | 169 | |
-| Skipped | 40 | Shared `not_envoy`/`not_nginx` + nginx-specific skips |
-| Failed | 0 | |
-
 ---
 
----
-
-## Envoy Skips (~20 tests)
+## Envoy Skips
 
 Most streaming architecture limitations (X-PSA-Blocking-Rewrite) were resolved by converting tests
 to use `fetch_until_contains`/`fetch_until_count` polling instead of blocking rewrite headers.
@@ -83,7 +58,7 @@ to use `fetch_until_contains`/`fetch_until_count` polling instead of blocking re
 
 ---
 
-## Nginx Skips (~26 tests)
+## Nginx Skips
 
 Nginx shares all Envoy skip markers, plus additional nginx-specific issues.
 
@@ -101,23 +76,7 @@ All tests marked `not_envoy` above are also marked `not_nginx`.
 
 ## IIS-Only Tests
 
-Tests that only run when `PAGESPEED_SERVER_TYPE=iis`:
-
-| File | Tests | Category |
-|------|-------|----------|
-| test_iis_sanity.py | 10 | Basic connectivity, headers (1 xfail: heap corruption) |
-| test_iis_admin.py | 26 | Admin UI, health checks |
-| test_iis_config.py | 21 | web.config parsing |
-| test_iis_statistics.py | 25 | Statistics endpoints |
-| test_iis_error_handling.py | 18 | Error recovery |
-| test_iis_headers.py | 19 | HTTP response headers |
-| test_iis_beacons.py | 13 | Beacon handling |
-| test_iis_cache.py | 15 | Caching behavior |
-| test_iis_blocking_rewrite.py | 11 | Blocking rewrite |
-
-**Total: ~158 IIS-specific tests**
-
-IIS Python integration tests (run on Windows): 350/356 passed, 5 skipped, 1 timing-dependent.
+Tests in `test/system/iis/` (plus `test/system/automatic/test_iis_sanity.py`) run only when `PAGESPEED_SERVER_TYPE=iis` and cover the admin pages, `pagespeed.config` handling, statistics, error recovery, response headers, beacons, caching, blocking rewrites, HTTPS and rule packs. The `*.ps1` scripts in the same directory are installer and cache-directory gates run on Windows. The IIS integration suite in `test/iis/` runs on Windows; see [iis-limitations.md](iis-limitations.md#tests).
 
 ---
 
@@ -159,7 +118,7 @@ Tests are organized in `test/system/`:
 - `automatic/` — Golden standard tests shared across all platforms
 - `system/` — System-level tests (IPRO, headers)
 - `envoy/` — Envoy-specific tests
-- `nginx/` — Nginx-specific tests (TBD)
+- `nginx/` — Nginx-specific pytest files and shell smoke scripts
 - `iis/` — IIS-specific tests (run on Windows)
 
 ### Common Root Causes for Skips
