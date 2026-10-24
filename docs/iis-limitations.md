@@ -40,23 +40,23 @@ enforced on IIS as on the other ports.
   keeps serving, so it appears on normal responses instead (next item).
 - `daemon-volume-split`: the site set both `DaemonSocketPath` and
   `DaemonVolumePath`, and the module's startup check found that opening the
-  daemon's cache volume at the size the daemon published created a second
-  volume file instead of attaching to the daemon's. The site then engages no
+  worker's cache volume at the size the worker published created a second
+  volume file instead of attaching to the worker's. The site then engages no
   PageSpeed at all — nothing silently optimizes from the wrong cache — and one
   Windows event-log entry is written under the `PageSpeed` event source; when
   that source is not registered on the machine, Event Viewer still shows the
   entry, prefixed with a note that the description cannot be found. The
   verdict lives until the application pool recycles: a configuration edit that
-  leaves both paths unchanged does not re-probe. (A daemon that was merely
-  not running when the first site with this configuration started in a worker
-  process is the one verdict that recovers on its own: the module checks for
-  the daemon again every 30 seconds and turns in-place optimization on once
-  it answers, without a pool recycle.) The
+  leaves both paths unchanged does not re-probe. (An optimizer worker that was
+  merely not running when the first site with this configuration started in
+  a worker process is the one verdict that recovers on its own: the module
+  checks for the optimizer worker again every 30 seconds and turns in-place
+  optimization on once it answers, without a pool recycle.) The
   check removes the volume file its own open created; the event-log entry's
   appended report says so, or names the file to remove by hand when it could
-  not. Recovery: start or restart the optimizer daemon and let it create its
+  not. Recovery: start or restart the optimizer worker and let it create its
   volume, then recycle the application pool. If the site still refuses after
-  that, the module and the daemon disagree about the volume: install a module
+  that, the module and the worker disagree about the volume: install a module
   and optimizer package pair that agree. If the event-log entry says the file
   could not be removed, remove it before the pool recycles: a worker process
   that finds it attaches to it without refusing. The check runs when EITHER option is set —
@@ -90,8 +90,8 @@ enforced on IIS as on the other ports.
   WARNING and ERROR messages to the Windows Application event log under the
   `PageSpeed` source. INFO messages never reach the event log (on this port
   they are per-request volume), with one exception: the informational entry
-  the daemon startup check writes when a recheck reattaches an optimizer
-  service the worker started without; a FATAL is always written, whatever
+  the optimizer worker startup check writes when a recheck reattaches an
+  optimizer service the IIS worker process started without; a FATAL is always written, whatever
   the directive says. With the directive off or unset, the first suppressed
   warning and the first suppressed error each write ONE entry saying
   event-log writing is off, how to turn it on, and that the messages can

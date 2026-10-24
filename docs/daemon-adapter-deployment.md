@@ -1,21 +1,21 @@
-# Deploying alongside the optimizer daemon
+# Deploying alongside the optimizer worker
 
 This page covers the two Apache directives that point the module at the
-optimizer daemon, the layout they are meant to be used in, and what happens
-when the daemon is missing. The nginx module takes the same two directives
+optimizer worker, the layout they are meant to be used in, and what happens
+when the worker is missing. The nginx module takes the same two directives
 (`pagespeed DaemonSocketPath` and `pagespeed DaemonVolumePath` in a `server`
-block); its set-up is in `docs/install-nginx.md`, "Using the optimizer daemon".
+block); its set-up is in `docs/install-nginx.md`, "Using the optimizer worker".
 IIS is covered in `docs/daemon-adapter-iis.md`.
 
 Both halves are wired now. With the directives set, a server records origin
-responses into the daemon's cache, asks the daemon to optimize them, and
+responses into the worker's cache, asks the worker to optimize them, and
 answers later in-place-eligible requests from that cache when there is
 something there to answer them with.
 
 The Apache module packages install `pagespeed_daemon.conf`, which sets both
 directives to the optimizer package's default paths. With them set and the
-daemon usable, in-place optimization runs over the daemon's cache: the module
-records eligible responses, the daemon optimizes them, and the module serves
+worker usable, in-place optimization runs over the worker's cache: the module
+records eligible responses, the worker optimizes them, and the module serves
 the optimized variant, or the stored original when no variant fits the
 client. With both unset, the module's own (classic) in-place path is used,
 exactly as before.
@@ -32,8 +32,8 @@ serve" below.
 
 | Directive | Argument | Scope |
 |---|---|---|
-| `ModPagespeedDaemonSocketPath` | Path of the daemon's notification socket | server / virtual host |
-| `ModPagespeedDaemonVolumePath` | Path of the daemon's shared cache volume | server / virtual host |
+| `ModPagespeedDaemonSocketPath` | Path of the worker's notification socket | server / virtual host |
+| `ModPagespeedDaemonVolumePath` | Path of the worker's shared cache volume | server / virtual host |
 | `ModPagespeedDaemonServeStoredEncodings` | `on` or `off` (default `off`): serve the optimizer's stored gzip and brotli copies — see "Serving the stored compressed copies" | server / virtual host |
 
 The two path directives are unset in the module's own defaults, which is the
@@ -43,15 +43,15 @@ and nothing on this page applies. The Apache module packages set both in
 Set them together — one without the other is a configuration mistake and the
 module says so at startup.
 
-There is no directive that switches between the classic and daemon in-place
-substrates at run time, and there will not be one. If the daemon substrate
+There is no directive that switches between the classic and worker in-place
+substrates at run time, and there will not be one. If the worker substrate
 misbehaves on a host, the mitigation is to reinstall the previous module and
-daemon packages together. The module and the daemon are a matched pair; they
+worker packages together. The module and the worker are a matched pair; they
 are installed, upgraded and rolled back as one.
 
 ## Group membership and the versioned cache directory (2.1)
 
-Since the daemon's privilege drop (2.1), the optimizer daemon runs as the
+Since the worker's privilege drop (2.1), the optimizer worker runs as the
 unprivileged `pagespeed` user and its artifacts are group-scoped: the cache
 volume, the notify socket and the shared configuration are mode `0660`/`0640`
 owned by `pagespeed:pagespeed`, under the versioned cold-start cache directory
@@ -69,16 +69,16 @@ web user gets the one-liner version: `usermod -a -G pagespeed <user>`.
 Two consequences are visible at startup:
 
 * **Permission denied is told apart from absent.** A module that cannot read
-  the daemon's cache directory, shared configuration or socket *because of
+  the worker's cache directory, shared configuration or socket *because of
   permissions* logs a line naming the likely cause — the web-server user not
-  being in the `pagespeed` group — rather than the "start the daemon" line
+  being in the `pagespeed` group — rather than the "start the worker" line
   the absent case gets. The same distinction is made in the request-serving
   process, where the volume is really opened.
-* **The cache-directory generation is checked.** The daemon publishes
+* **The cache-directory generation is checked.** The worker publishes
   `cache_dir_generation` in its shared configuration; this module is built
-  for generation 3. A daemon publishing a different generation is a loud
+  for generation 3. A worker publishing a different generation is a loud
   handshake failure — in-place optimization off, nothing opened, never a
-  silent split-brain across two layouts that share nothing. A daemon
+  silent split-brain across two layouts that share nothing. A worker
   publishing no generation at all (a package from before the privilege drop)
   is the legacy layout: tolerated, announced once at startup, and used with
   the configured paths as-is.
@@ -97,14 +97,14 @@ support answers assume:
   ModPagespeedFileCachePath      /var/cache/mod_pagespeed/
   ModPagespeedFileCacheSizeKb    1048576
 
-  # The daemon. A DIFFERENT directory, and its own socket.
+  # The worker. A DIFFERENT directory, and its own socket.
   ModPagespeedDaemonSocketPath   /var/run/pagespeed/daemon.sock
   ModPagespeedDaemonVolumePath   /var/cache/pagespeed-daemon/volume
 </IfModule>
 ```
 
 The two caches are different things with different owners. The module owns the
-first; the daemon owns the second and this module is one of its readers.
+first; the worker owns the second and this module is one of its readers.
 Pointing both at one directory makes a single volume file's health a
 shared-fate dependency of both: a volume that will not open, or that a
 crashed process left locked, takes out the classic cache at the same time,
@@ -115,46 +115,46 @@ warning below applies to it with extra force.
 
 ## Cache sizing is inherited, not configured, and a split cache stops the server
 
-The daemon derives the FILENAME of its cache volume from the volume's
+The worker derives the FILENAME of its cache volume from the volume's
 geometry. That is deliberate: two peers with different layouts open different
 files during an overlapping upgrade instead of corrupting one another's data.
 
 The consequence is that a sizing disagreement is invisible. A process that
-opens the daemon's directory with a different size does not collide and does
+opens the worker's directory with a different size does not collide and does
 not fail — it creates and uses a different file, shares nothing, and runs a
 permanently cold cache. Every request works. Nothing is ever optimized. There
 is no error anywhere.
 
 So the module does not have a size setting, and does not carry one internally.
-It **inherits** the size from the daemon, which publishes the size it actually
+It **inherits** the size from the worker, which publishes the size it actually
 opened its volume with. There is nothing for an operator to keep in sync.
 
 What the module then checks is whether inheriting that size actually landed on
-the daemon's volume:
+the worker's volume:
 
 * **It never opens the volume while the size is unknown**, and it never
-  creates one. If the daemon is not running, or is an older release that does
+  creates one. If the worker is not running, or is an older release that does
   not publish its size, in-place optimization is simply off (see below).
 * **If the directory already holds more than one volume file**, the server
   starts and logs a warning naming them. This is the normal state after you
-  change the daemon's cache size: the filename encodes the size, and the daemon
-  leaves the file it stopped using in place. The size the daemon publishes
+  change the worker's cache size: the filename encodes the size, and the worker
+  leaves the file it stopped using in place. The size the worker publishes
   names exactly one of them, and the module verifies it attached to that one,
   so the extras are wasted disk rather than a split cache. They can be deleted
-  while the daemon is stopped.
-* **If opening at the daemon's published size creates a second volume file**,
+  while the worker is stopped.
+* **If opening at the worker's published size creates a second volume file**,
   the server **refuses to start**, names the file its open created, and says
   what became of it: removed, still there, not confirmed gone, or left in
   place because another user or process holds it. There are two ways to reach
   the refusal, and the message distinguishes them.
 
   The common one is **start order during an upgrade to a release that changes
-  the on-disk cache format**. The daemon's volume filename carries the format,
-  so a daemon on a new format opens a new file; until it has restarted and
+  the on-disk cache format**. The worker's volume filename carries the format,
+  so a worker on a new format opens a new file; until it has restarted and
   created it, the only volume in the directory is the previous format's, and a
   web server that starts in that window creates the new file itself instead of
-  attaching to the daemon's. **Upgrade and start or restart the optimizer
-  daemon, let it create its volume, then start the web server.** The refused
+  attaching to the worker's. **Upgrade and start or restart the optimizer
+  worker, let it create its volume, then start the web server.** The refused
   start has usually removed the file it created; when the message says it
   could not, or could not confirm it is gone, remove that file by hand before
   the next start —
@@ -173,14 +173,14 @@ the daemon's volume:
   every boot, not just once at upgrade; and a web server under any other unit
   name is not ordered at all, so add an ordering drop-in for it
   (`Before=<your unit>` on the optimizer service, or `After=` on yours). The
-  ordering is ordering only — the daemon is not required by the web server, so
-  a web server still starts when the daemon is absent, and the daemon still
+  ordering is ordering only — the worker is not required by the web server, so
+  a web server still starts when the worker is absent, and the worker still
   starts when no web server is installed.
 
   The other is a genuine disagreement: the published size does not match the
-  volume on disk. Start or restart the optimizer daemon, let it create its
+  volume on disk. Start or restart the optimizer worker, let it create its
   volume, then start the web server; if it still refuses after that, install a
-  module and daemon package pair that agree.
+  module and worker package pair that agree.
 
 That last one is the only condition that stops the server. It earns it because
 it is the only one an operator cannot otherwise see: everything else announces
@@ -191,21 +191,21 @@ must never prevent a start.
 
 A release that changes the on-disk cache format leaves the old volume file in
 place and creates a new one beside it. Both count against the same filesystem,
-and the new one grows to the daemon's **full configured cache size** as it
-fills — the daemon extends it at startup, before any reclamation runs. So the
-directory needs free space of at least the daemon's cache size on top of what
+and the new one grows to the worker's **full configured cache size** as it
+fills — the worker extends it at startup, before any reclamation runs. So the
+directory needs free space of at least the worker's cache size on top of what
 the existing volume already occupies.
 
 **If the directory is sized for exactly one volume, delete the old file before
-starting the new daemon, not after.** This is the opposite of the usual advice
+starting the new worker, not after.** This is the opposite of the usual advice
 to tidy up afterwards, and the reason is that on Linux the new volume is
 allocated sparsely: too little space does not fail the start. It fails hours
 later, mid-traffic, as the cache warms and the sparse file becomes real. On
 Windows the space is claimed at creation, so the failure is immediate instead.
-Neither the module nor the daemon checks free space, so this is an operator
+Neither the module nor the worker checks free space, so this is an operator
 check.
 
-The procedure, with the daemon stopped:
+The procedure, with the worker stopped:
 
 1. List the directory. Volume files are named `<stem>-<format number>-<hash>`,
    where `<stem>` is the last path element of `ModPagespeedDaemonVolumePath`
@@ -213,26 +213,26 @@ The procedure, with the daemon stopped:
 2. The file to remove is the one whose **format number is lower**. A file with
    a different hash and the same format number is a leftover from an earlier
    cache size, not from an earlier format; those are safe to remove too.
-3. Remove it, then start the daemon, then start the web server.
+3. Remove it, then start the worker, then start the web server.
 
-Removing the old file gives up a warm rollback — an earlier daemon would have
+Removing the old file gives up a warm rollback — an earlier worker would have
 reopened it untouched. Where there is room for both, keep it until you are
-confident you will not roll back, and reclaim it then. A running daemon holds
+confident you will not roll back, and reclaim it then. A running worker holds
 its volume open, so deleting a file while it runs does not return the space
 until it restarts.
 
-The module never enables a per-process memory tier over the daemon's volume,
-regardless of the daemon's own defaults. Such a tier is keyed without any
+The module never enables a per-process memory tier over the worker's volume,
+regardless of the worker's own defaults. Such a tier is keyed without any
 check against the on-disk entry, so a process holding it would keep serving
-bytes the daemon had already replaced.
+bytes the worker had already replaced.
 
 ## What gets recorded, and what does not
 
-With both directives set and the daemon usable, an in-place-eligible response
-is kept in the daemon's cache as the ORIGINAL — the bytes the origin sent,
+With both directives set and the worker usable, an in-place-eligible response
+is kept in the worker's cache as the ORIGINAL — the bytes the origin sent,
 before anything touched them — with the origin's `Cache-Control` state and its
-validators, and the daemon is told the entry is there. The module writes that
-one class of entry and no other: the optimized variants are the daemon's to
+validators, and the worker is told the entry is there. The module writes that
+one class of entry and no other: the optimized variants are the worker's to
 write, and each class has a single writer.
 
 What an operator can observe from the outside:
@@ -241,28 +241,28 @@ What an operator can observe from the outside:
   `304`/`206` is not the whole of one.
 * A response to a request that carried `Authorization`, or that Apache
   authenticated, is recorded only if the origin marked it `public` — the same
-  rule the classic path applies. It matters more here: the daemon's cache is
+  rule the classic path applies. It matters more here: the worker's cache is
   shared across every virtual host on the server.
 * `Cache-Control: no-transform` is kept but never offered for optimization.
   `Cache-Control: no-store` is not kept at all.
 * **Two `Vary` tests are applied and a response has to pass both.** First this
   module's own, exactly as on the classic path, honouring
-  `ModPagespeedRespectVary` the same way. Then the daemon's, which admits only
+  `ModPagespeedRespectVary` the same way. Then the worker's, which admits only
   `Accept-Encoding`, `User-Agent`, `Accept` and `Save-Data`. They differ in
-  both directions: the daemon refuses an ordinary named axis such as
+  both directions: the worker refuses an ordinary named axis such as
   `Vary: Accept-Language` that this module would admit on a resource, and this
-  module refuses `Vary: *` and `Vary: Cookie` on resources before the daemon
+  module refuses `Vary: *` and `Vary: Cookie` on resources before the worker
   is asked. The cache is shared, so whichever is stricter for a given response
   is the one that decides. How this module treats `Vary` in its own cache is
   unchanged.
 * **An origin that sends `Vary: Accept` is recorded, and recorded as such.**
   That origin picks the representation from the request itself, so the copy
   that gets kept is whichever one the first requester happened to ask for.
-  The entry is marked with the daemon's own flag for it, which is what stops
-  the daemon deriving a set of variants from that one copy and serving them to
+  The entry is marked with the worker's own flag for it, which is what stops
+  the worker deriving a set of variants from that one copy and serving them to
   everyone else. The mark can only be applied when the response is stored: on
   a later cache hit the origin's `Vary` is gone. The question of whether the
-  origin varies on `Accept` is answered by the daemon's own predicate, not by
+  origin varies on `Accept` is answered by the worker's own predicate, not by
   a second reading of the header here.
 * A `HEAD` is not recorded: there is no body to record.
 * A response that arrived through an upstream cache carrying `Age` is recorded
@@ -295,7 +295,7 @@ but the stored original can be served, the original is served from the cache
 and nothing is recorded.
 
 Each re-record costs the work of storing the body again and one notification
-to the daemon. A re-record replaces the previous copy: the superseded copy is
+to the worker. A re-record replaces the previous copy: the superseded copy is
 unlinked as the replacement is written, and an entry that reaches the cache's
 limit on versions of one entry resets and accepts writes again instead of
 freezing. Several server processes can still record the same URL at the same
@@ -567,9 +567,9 @@ location ~* \.(jpe?g|png|gif|webp|avif)$ {
 }
 ```
 
-## When the daemon is missing
+## When the worker is missing
 
-If the directives are set and the daemon cannot be used — its client library
+If the directives are set and the worker cannot be used — its client library
 is not installed, it is **an older release than this module can work with**, it
 is an older release that does not publish its cache volume's size, it
 publishes a cache-directory generation this build is not written for, it has
@@ -578,25 +578,25 @@ socket, or any of those is unreachable **because the web-server user is not in
 the `pagespeed` group** — then, for that server:
 
 * in-place optimization is **off** — nothing is recorded and nothing is
-  served from the daemon's cache;
+  served from the worker's cache;
 * **one** message is logged, at startup, at error level, saying which of those
   it was — once per condition per server process, however many virtual hosts
   and however many times the configuration is read;
 * the classic in-place recorder does **not** come back;
-* the daemon's cache volume is **not** opened and never created.
+* the worker's cache volume is **not** opened and never created.
 
-Three of those conditions mean only "the daemon was not running yet": no
+Three of those conditions mean only "the worker was not running yet": no
 published size, no volume on disk, nothing answering on the socket. Apache
 looks for those three again while it serves, at most once every 30 seconds
 per server process, and turns in-place optimization back on by itself when
-the daemon answers; one info line in the error log says so. nginx does not
+the worker answers; one info line in the error log says so. nginx does not
 recheck: after starting or restarting the optimizer, restart nginx (see
 "Start order and upgrades" in [install-nginx.md](install-nginx.md)).
 
 A version too old to use is a **refusal**, not a partial start, and that is
 deliberate. The published interface grows, and this module binds what it needs;
 a release missing part of it is missing rules, not merely features. The
-`Vary: Accept` marking above is the clearest case — without the daemon's own
+`Vary: Accept` marking above is the clearest case — without the worker's own
 predicate there is no safe way to decide whether an origin negotiates on
 `Accept`, and guessing wrong is wrong bytes with nothing to notice it. A
 refusal at startup, named in the log with both version numbers, is the loud
@@ -604,37 +604,37 @@ form of that answer. Install the matching release.
 
 That last point is the one worth stating explicitly. Falling back would look
 like the kinder behaviour and is not: it would fill a cache that nothing on
-the daemon substrate reads, and it would leave a server that appears healthy
-while an operator's daemon is simply absent. Off and loud beats busy and
+the worker substrate reads, and it would leave a server that appears healthy
+while an operator's worker is simply absent. Off and loud beats busy and
 silent.
 
-Requests continue to be served normally throughout. The daemon's absence
+Requests continue to be served normally throughout. The worker's absence
 costs optimization, never availability.
 
 ## Checking a deployment
 
 * Start the server and read the error log once. A healthy pair logs nothing
-  about the daemon; each unhealthy condition logs exactly one line.
+  about the worker; each unhealthy condition logs exactly one line.
 * If the server refuses to start, read the message: it says whether the
   start removed the volume file its open created, and names the file to
   remove by hand before the next start when it could not.
 * A warning about extra volume files after changing the cache size is
   expected; it names the leftovers so you can delete them.
-* An older daemon release is a normal, loud, non-fatal state: in-place
+* An older worker release is a normal, loud, non-fatal state: in-place
   optimization is off until the packages match. A release too old to use at all
   says so in one line naming the version it has and the version this build
   needs.
 * A **permission-denied** line names the likely missing group membership
   (`usermod -a -G pagespeed <web user>`); an **absent** socket or volume line
-  tells you to start the daemon. The two are not the same fix, and the log
+  tells you to start the worker. The two are not the same fix, and the log
   says which one you have.
-* A daemon that was not running when the server started is picked up again
+* A worker that was not running when the server started is picked up again
   within about 30 seconds of it answering: one info line says in-place
   optimization is on again. Only the three not-running conditions recover
   this way; every other line above stays until the server restarts.
-* A daemon publishing no cache-directory generation logs one line about the
+* A worker publishing no cache-directory generation logs one line about the
   legacy layout and keeps working; one publishing a *different* generation
   logs a handshake failure and in-place optimization stays off until the
-  module and daemon packages agree.
-* An in-place request on a server where the daemon is unavailable is served
+  module and worker packages agree.
+* An in-place request on a server where the worker is unavailable is served
   as-is, with no per-request log entries.
