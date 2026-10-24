@@ -47,6 +47,7 @@ public sealed class InternalSidecarEndpoint
     private int _rawOriginLoopbackPort;
     private int _nginxLoopbackPort;
     private byte[]? _internalNonce;
+    private string? _healthProbeToken;
 
     // The socket path is emitted verbatim into the generated `proxy_pass
     // http://unix:<path>:` AND bound by Kestrel. Sidecar.SocketPath is operator-
@@ -234,6 +235,30 @@ public sealed class InternalSidecarEndpoint
             {
                 _internalNonce ??= RandomNumberGenerator.GetBytes(16);
                 return _internalNonce;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The per-launch health-probe identity: a token minted once per endpoint
+    /// (== once per host build, since the endpoint is a DI singleton) that the
+    /// nginx config generator embeds in the generated
+    /// <c>/pagespeed/health</c> response body and the sidecar manager compares
+    /// on every probe. A probe answered by a DIFFERENT listener on the same
+    /// port (an orphan nginx from an earlier launch, or a second app instance
+    /// during a rolling deploy) does not carry this launch's token and must
+    /// not count as healthy. Minted lazily on first read so it exists even
+    /// when no config is generated (External mode).
+    /// </summary>
+    public string HealthProbeToken
+    {
+        get
+        {
+            lock (_gate)
+            {
+                _healthProbeToken ??= Convert.ToHexString(
+                    RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+                return _healthProbeToken;
             }
         }
     }

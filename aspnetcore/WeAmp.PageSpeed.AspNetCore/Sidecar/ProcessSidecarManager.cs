@@ -257,8 +257,28 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
             var healthPort = ResolveHealthPort(opts, _endpoint);
             var healthUrl = $"http://127.0.0.1:{healthPort}/pagespeed/health";
             var response = await client.GetAsync(healthUrl, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return false;
+            }
 
-            return response.IsSuccessStatusCode;
+            // Probe identity: when this manager generated the nginx config, the
+            // generated health body embeds a per-launch token (the endpoint
+            // singleton mints it once per host build), so only THIS launch's
+            // nginx can answer healthy. Without the comparison a probe answered
+            // by another listener on the same port (a port conflict: the new
+            // nginx exits at bind while the old listener keeps serving) counts
+            // as healthy and the restart counter resets forever.
+            if (_configPath == null)
+            {
+                // No config was generated here (External mode, or PageSpeed
+                // disabled): there is no token to compare, the status code is
+                // all there is to check.
+                return true;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return body.Contains(_endpoint.HealthProbeToken, StringComparison.Ordinal);
         }
         catch
         {
@@ -751,6 +771,19 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         {
             try
             {
+                // Failed is terminal (restarts exhausted or auto-restart off):
+                // the process is gone and will not be relaunched. Stop the
+                // monitor with one final line instead of repeating the same
+                // exit warning (and restart error) every interval for the
+                // life of the app.
+                if (State == SidecarState.Failed)
+                {
+                    _logger.LogError(
+                        "PageSpeed sidecar is failed and will not be retried: {ErrorMessage}. Stopping the sidecar monitor.",
+                        ErrorMessage);
+                    break;
+                }
+
                 await Task.Delay(opts.Sidecar.HealthCheckIntervalMs, cancellationToken);
 
                 // Check if process is still running
@@ -933,6 +966,46 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         }
     }
 
+    /// <summary>
+    /// Best-effort removal of the per-start origin-socket directory the Kestrel
+    /// configurator auto-builds in Process mode (<c>ps-&lt;pid&gt;-&lt;hex&gt;</c> under the
+    /// temp root). Kestrel removes the socket FILE at unbind but never its
+    /// private directory, which would accumulate one empty directory per app
+    /// start. An operator-pinned <see cref="SidecarOptions.SocketPath"/> is
+    /// theirs to keep, and the auto-built name pattern is re-checked before
+    /// deleting so a pinned or foreign path is never touched. Extracted as an
+    /// internal static so the cleanup contract is unit-testable, like
+    /// <see cref="CleanupArtifacts"/>.
+    /// </summary>
+    internal static void CleanupSocketDirectory(SidecarOptions sidecar, InternalSidecarEndpoint endpoint)
+    {
+        try
+        {
+            if (sidecar.SocketPath != null)
+            {
+                return; // operator-pinned: theirs to keep
+            }
+
+            var socketPath = endpoint.SocketPath;
+            var dir = socketPath == null ? null : Path.GetDirectoryName(socketPath);
+            if (dir == null || !Directory.Exists(dir))
+            {
+                return;
+            }
+
+            if (!Path.GetFileName(dir).StartsWith($"ps-{Environment.ProcessId}-", StringComparison.Ordinal))
+            {
+                return; // not the auto-built layout; never touch it
+            }
+
+            Directory.Delete(dir, recursive: true);
+        }
+        catch
+        {
+            // best-effort cleanup
+        }
+    }
+
     public void Dispose()
     {
         Task? monitorTask;
@@ -1011,5 +1084,11 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         // Reap the generated artifacts (the secret-bearing per-app dir when we own it,
         // else just the generated nginx.conf). See CleanupArtifacts (SEC hygiene).
         CleanupArtifacts(_configDir, _ownsConfigDir, _configPath);
+
+        // Reap the per-start origin-socket directory (Process mode, auto UDS):
+        // the Kestrel configurator creates it under the temp root and Kestrel
+        // removes the socket file at unbind but never the directory, so one
+        // empty directory would accumulate per app start.
+        CleanupSocketDirectory(_options.Value.Sidecar, _endpoint);
     }
 }

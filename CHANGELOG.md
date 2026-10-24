@@ -91,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ASP.NET Core sidecar: invalid timing options fail at startup, a failed
+  sidecar stops repeating its error, health probes only accept this app's own
+  sidecar, and the per-start socket temp directory is removed on shutdown.**
+  `PageSpeed:Sidecar:HealthCheckIntervalMs`, `HealthCheckTimeoutMs` and
+  `ShutdownTimeoutMs` must be positive and at most ten minutes.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which
