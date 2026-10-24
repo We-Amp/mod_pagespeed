@@ -1324,25 +1324,20 @@ TEST_F(DaemonAdapterTest, AnAbsentSocketAnswersAtOnceWithTheSameText) {
   // same text as before, and it does not wait the deadline out.
   DaemonCreatedItsVolume(kDaemonSize);
   std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(SocketPath("fast.sock")));
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
-  // Only the probe is timed.  The bound sits just under the 2000 ms
-  // connect deadline: a probe that wrongly waits the deadline out answers
-  // at 2000 ms or later and trips it, while anything short of the
-  // deadline is host load on one failing connect, which issue #208 shows
-  // can run to seconds.
-  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
+  // "At once" is asserted by outcome, not by a wall-clock bound, which a
+  // loaded host overruns (issues #208, #318): the not-found text can only
+  // come from a connect that failed outright, while a probe that waited
+  // the deadline out announces "did not accept a connection" instead, so
+  // the finds below separate the two shapes however long the host took.
   EXPECT_NE(GoogleString::npos,
             Messages().find("the optimizer worker does not answer at "))
       << Messages();
   EXPECT_NE(GoogleString::npos, Messages().find(kNotFoundText)) << Messages();
   EXPECT_NE(GoogleString::npos, Messages().find(kStartDaemonFragment))
+      << Messages();
+  EXPECT_EQ(GoogleString::npos, Messages().find("did not accept a connection"))
       << Messages();
 }
 
@@ -1403,6 +1398,12 @@ TEST_F(DaemonAdapterTest, ASecondProbeOfTheSamePathInsideTheLatchIsFree) {
     GTEST_SKIP() << "this kernel answers a full queue with "
                  << fill->fill_errno();
   }
+
+  // The case tests "inside the latch", not expiry, so the latch is
+  // lengthened: a host stall over the default 10 s between the two probes
+  // would expire it and read like a latch bug.  Expiry stays covered by
+  // the 100 ms cases below.
+  DaemonAdapter::SetSocketVerdictLatchMsForTesting(600000);
 
   std::unique_ptr<DaemonAdapter> first(MakeAdapter(socket_path));
   const std::chrono::steady_clock::time_point first_start =
@@ -1486,19 +1487,14 @@ TEST_F(DaemonAdapterTest, AnAbsentPipeAnswersAtOnceWhileAnotherPipeIsBusy) {
   Sleep(200);
 
   std::unique_ptr<DaemonAdapter> absent(MakeAdapter(SocketPath("gone3.sock")));
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonStartupStatus::kOk, absent->StartupCheck());
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
   EXPECT_EQ(DaemonHealth::kUnavailable, absent->health());
-  // Only the absent pipe's probe is timed.  The bound sits just under the
-  // 2000 ms deadline a wrongly waiting probe (#1050) would pay: anything
-  // short of that is host load on the one failing open, which issue #208
-  // shows can run to seconds.
-  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
+  // "At once" is asserted by outcome, not by a wall-clock bound, which a
+  // loaded host overruns (issues #208, #318): the not-exists line below
+  // can only come from the absent pipe's open failing outright, while a
+  // probe that sat out the deadline (#1050) announces the deadline text
+  // instead, so the finds separate the two shapes however long the host
+  // took.
 
   busy_thread.join();
   EXPECT_EQ(DaemonHealth::kUnavailable, busy_health);
@@ -1571,20 +1567,11 @@ TEST_F(DaemonAdapterTest, ALatchedPathThatRecoversAnswersAfterExpiry) {
 #endif
 
   std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
   EXPECT_EQ(DaemonHealth::kReady, adapter->health());
-  // Only the recovered probe is timed.  The bound sits just under the
-  // 2000 ms connect deadline a wrongly waiting probe would pay: a
-  // recovered answer costs milliseconds, anything up to the deadline is
-  // host load on that one connect (issue #208), and the ready verdict
-  // above already carries the outcome (issue #241).
-  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
+  // The ready verdict alone is the assertion (issues #241, #318): the
+  // probe is the only path to kReady, so it connected after the expiry,
+  // and how long the host took to run it is not the property.
 }
 
 TEST_F(DaemonAdapterTest, TwoThreadsProbingOnePathCannotRaceTheLatch) {
@@ -1600,6 +1587,12 @@ TEST_F(DaemonAdapterTest, TwoThreadsProbingOnePathCannotRaceTheLatch) {
     GTEST_SKIP() << "this kernel answers a full queue with "
                  << fill->fill_errno();
   }
+
+  // The case tests "inside the latch", not expiry, so the latch is
+  // lengthened: a host stall over the default 10 s between the racing
+  // pair and the third probe would expire it and read like a latch bug.
+  // Expiry stays covered by the 100 ms cases above.
+  DaemonAdapter::SetSocketVerdictLatchMsForTesting(600000);
 
   std::unique_ptr<DaemonAdapter> first(MakeAdapter(socket_path));
   std::unique_ptr<DaemonAdapter> second(MakeAdapter(socket_path));
@@ -1688,8 +1681,13 @@ TEST_F(DaemonAdapterTest, TheRecoveryRetryNeverProbesALatchedPathAgain) {
   // startup probe just paid for: the probe latch holds, and a retry that
   // lands inside it answers from the latch at once and silently.  The
   // injected clock is past the retry interval while real time is still
-  // inside the latch, so a recheck that ignored the latch would pay the
-  // two-second deadline here.
+  // inside the latch, so a recheck that ignored the latch would reattach
+  // here.  The shapes are separated by outcome, not by a wall-clock
+  // bound, which a loaded host overruns (issues #208, #241, #318): the
+  // fill guard is dropped for an accepting listener before the recheck,
+  // and an unlatched recheck would connect, flip to kReady and announce
+  // "answers again", while the latched answer stays kUnavailable and
+  // silent.
   DaemonCreatedItsVolume(kDaemonSize);
   const GoogleString socket_path = SocketPath("latched-retry.sock");
   std::unique_ptr<BacklogFillGuard> fill = FillBackloggedQueue(socket_path);
@@ -1698,31 +1696,25 @@ TEST_F(DaemonAdapterTest, TheRecoveryRetryNeverProbesALatchedPathAgain) {
     GTEST_SKIP() << "this kernel answers a full queue with "
                  << fill->fill_errno();
   }
+  // The latch is lengthened so a multi-second host stall between the
+  // startup probe and the recheck cannot expire it and masquerade as a
+  // recheck that probed; expiry itself stays covered by the 100 ms cases
+  // above.
+  DaemonAdapter::SetSocketVerdictLatchMsForTesting(600000);
 
   std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
   EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
   ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
   ASSERT_EQ(1, handler_.MessagesOfType(kError));
 
+  // The guard drops and an accepting listener takes the path: the volume
+  // is there, the listener answers, and a real recheck would reattach.
+  fill.reset();
+  ListeningSocket accepting(socket_path);
+  ASSERT_TRUE(accepting.bound());
+
   now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->ServingHealth());
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
-  // Only the recheck is timed, and the bound sits just under the 2000 ms
-  // deadline a recheck that ignored the latch would pay: a verdict served
-  // from the latch costs microseconds, and anything short of the deadline
-  // is host load on that one call (issues #208, #241).  Outcome alone
-  // cannot separate the two in this setup: the backlog is still full, so
-  // a recheck that ignored the latch would time out on it too, and that
-  // failure path returns silently; an accepting listener swapped in for
-  // the fill before the recheck would make the shapes separable by
-  // outcome, an unlatched recheck connecting, flipping to kReady and
-  // announcing "answers again".
-  EXPECT_LT(elapsed_ms, 1900) << elapsed_ms;
   EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
   // The latched answer is silent: no new line of either level.
   EXPECT_EQ(1, handler_.MessagesOfType(kError)) << Messages();
@@ -4327,11 +4319,14 @@ TEST_F(DaemonAdapterTest, RecordCacheIfOpenNeverWaitsOnAnOpenInFlight) {
   std::condition_variable finished_cv;
   bool finished = false;
   std::thread opening([&]() { adapter->RecordCache(); });
-  // Bounds the OPEN: releases the gate after 1500 ms at the latest, or at
-  // once when the measurement below is over.
+  // A pure hang guard for the OPEN: releases the gate after 30 s at the
+  // latest, or at once when the case is over.  It no longer bounds a
+  // measured span: the ordering assertion below catches a call that waits
+  // at any host speed, so the guard only exists so a wrongly waiting call
+  // (or a stalled one) cannot spin the case into the suite's timeout.
   std::thread watchdog([&]() {
     std::unique_lock<std::mutex> lock(finished_mutex);
-    finished_cv.wait_for(lock, std::chrono::milliseconds(1500),
+    finished_cv.wait_for(lock, std::chrono::seconds(30),
                          [&]() { return finished; });
     open_gate.store(1);
   });
@@ -4370,18 +4365,15 @@ TEST_F(DaemonAdapterTest, RecordCacheIfOpenNeverWaitsOnAnOpenInFlight) {
   }
   // A is demonstrably inside the slow open, holding the adapter's mutex.
   ASSERT_TRUE(open_reached.load()) << "the fake's open was never reached";
-  const std::chrono::steady_clock::time_point start =
-      std::chrono::steady_clock::now();
   void* answer = adapter->RecordCacheIfOpen();
-  const int64_t elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
   EXPECT_TRUE(answer == nullptr);
-  // Only RecordCacheIfOpen() is timed, and the bound is its cost plus a
-  // full second of headroom: a loaded CI host or a sanitizer build can
-  // stall even a call that must not wait (issue #208).
-  EXPECT_LT(elapsed_ms, 1000) << elapsed_ms;
+  // Asserted by ordering, not by duration: the call returned while the
+  // open was still in flight (only the watchdog or the case's end opens
+  // the gate), and a call that waited on the open could not return before
+  // the gate opened, so this fails a wrong build at any host speed and
+  // passes a right one through any stall short of the 30 s guard.
+  EXPECT_EQ(0, open_gate.load())
+      << "RecordCacheIfOpen() waited for the in-flight open";
 }
 
 TEST_F(DaemonAdapterTest, RecordCacheIfOpenIsNullOutsideReady) {

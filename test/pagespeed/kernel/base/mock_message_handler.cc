@@ -39,7 +39,11 @@ void MockMessageHandler::MessageSImpl(MessageType type,
                                       const GoogleString& message) {
   ScopedMutex hold_mutex(mutex_.get());
   if (ShouldPrintMessage(message)) {
-    internal_handler_.MessageSImpl(type, message);
+    // A quiet handler keeps every message out of the test log except a fatal
+    // one, which must still abort the test the way the real handler does.
+    if (!quiet_.load() || type == kFatal) {
+      internal_handler_.MessageSImpl(type, message);
+    }
     GoogleString type_str = MessageTypeToString(type);
     StringPiece type_char(type_str.data(), 1);
     // A message may itself contain embedded "\n"s (SystemMessageHandler's
@@ -69,7 +73,9 @@ void MockMessageHandler::FileMessageSImpl(MessageType type,
                                           const GoogleString& message) {
   ScopedMutex hold_mutex(mutex_.get());
   if (ShouldPrintMessage(message)) {
-    internal_handler_.FileMessageSImpl(type, filename, line, message);
+    if (!quiet_.load() || type == kFatal) {
+      internal_handler_.FileMessageSImpl(type, filename, line, message);
+    }
     GoogleString type_str = MessageTypeToString(type);
     StringPiece type_char(type_str.data(), 1);
     StringPieceVector lines;
@@ -143,6 +149,8 @@ void MockMessageHandler::set_mutex(AbstractMutex* mutex) {
 void MockMessageHandler::AddPatternToSkipPrinting(const char* pattern) {
   patterns_to_skip_.Allow(GoogleString(pattern));
 }
+
+void MockMessageHandler::set_quiet() { quiet_.store(true); }
 
 bool MockMessageHandler::ShouldPrintMessage(const StringPiece& msg) {
   return !patterns_to_skip_.Match(msg, false);
