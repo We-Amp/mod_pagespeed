@@ -264,12 +264,16 @@ TEST(EventSchedulerAttachTest, AlarmsBeforeAttachFireAfterAttach) {
   EventScheduler scheduler(thread_system.get(), timer.get());
 
   std::atomic<int> counter(0);
-  scheduler.AddAlarmAtUs(timer->NowUs() + 10 * Timer::kMsUs,
+  // AddAlarmAtUs runs an alarm that is already due at add time inline, so
+  // the margin must be wide enough that a slow add (under a sanitizer on a
+  // loaded host) cannot make the alarm due: the point under test is that an
+  // alarm added before attach fires only after attach.
+  scheduler.AddAlarmAtUs(timer->NowUs() + 300 * Timer::kMsUs,
                          new AtomicCountFunction(&counter));
 
   // Unattached and nothing ever blocks in the scheduler: past-due alarms
   // have no driver.
-  timer->SleepUs(100 * Timer::kMsUs);
+  timer->SleepUs(400 * Timer::kMsUs);
   EXPECT_EQ(0, counter.load(std::memory_order_acquire));
 
   LibeventDispatcher dispatcher(thread_system.get(), timer.get());
