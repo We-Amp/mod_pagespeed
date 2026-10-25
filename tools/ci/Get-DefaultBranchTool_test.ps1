@@ -28,16 +28,21 @@ try {
   Set-Location $work
 
   $env:DEFAULT_BRANCH_REMOTE = 'file:///nonexistent'
-  $got = & powershell -NoProfile -File $helper -Path 'tools/x/old.ps1' 2>$null
+  $got = & powershell -NoProfile -ExecutionPolicy Bypass -File $helper -Path 'tools/x/old.ps1' 2>$null
   Check 'present in checkout' ($LASTEXITCODE -eq 0 -and "$got" -eq 'tools/x/old.ps1')
 
   $env:DEFAULT_BRANCH_REMOTE = $origin
-  $got = & powershell -NoProfile -File $helper -Path 'tools/x/tool.ps1' -With 'tools/x/tool_test.ps1' 2>$null
+  $got = & powershell -NoProfile -ExecutionPolicy Bypass -File $helper -Path 'tools/x/tool.ps1' -With 'tools/x/tool_test.ps1' 2>$null
   $gotPath = ($got | Select-Object -Last 1)
   Check 'absent: fetched, same content' (($LASTEXITCODE -eq 0) -and (Test-Path -LiteralPath "$gotPath") -and ((Get-Content "$gotPath") -match 'new-tool'))
   Check 'absent: sibling extracted alongside' (Test-Path -LiteralPath (Join-Path (Split-Path -Parent "$gotPath") 'tool_test.ps1'))
 
-  & powershell -NoProfile -File $helper -Path 'tools/x/none.ps1' *> $null
+  Set-Content -Path (Join-Path $work 'tools\x\tool.ps1') -Value 'old-version' -Encoding ascii
+  $got = & powershell -NoProfile -ExecutionPolicy Bypass -File $helper -Path 'tools/x/tool.ps1' -PreferDefault 2>$null
+  $gotPath = ($got | Select-Object -Last 1)
+  Check '-PreferDefault: master copy wins over an old one' (($LASTEXITCODE -eq 0) -and ("$gotPath" -ne 'tools/x/tool.ps1') -and ((Get-Content "$gotPath") -match 'new-tool'))
+
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $helper -Path 'tools/x/none.ps1' *> $null
   Check 'missing everywhere fails closed' ($LASTEXITCODE -ne 0)
 } finally {
   Set-Location $oldLoc

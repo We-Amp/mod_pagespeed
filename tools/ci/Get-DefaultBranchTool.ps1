@@ -31,6 +31,11 @@ if ((-not $PreferDefault) -and (Test-Path -LiteralPath $Path -PathType Leaf)) {
 
 & git fetch --quiet --depth=1 $remote $branch 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
+  # One retry: a network blip must not turn a gate red.
+  Start-Sleep -Seconds 5
+  & git fetch --quiet --depth=1 $remote $branch 2>$null | Out-Null
+}
+if ($LASTEXITCODE -ne 0) {
   Write-Host "::error::$Path is not in this checkout and $remote/$branch could not be fetched"
   exit 1
 }
@@ -42,21 +47,16 @@ if ($LASTEXITCODE -ne 0) {
 
 $base = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
 $out = Join-Path $base 'default-branch-tools'
-New-Item -ItemType Directory -Force -Path $out | Out-Null
-# git archive -o and tar keep the bytes exact (a PowerShell pipe would re-encode them).
-$tar = Join-Path $out ("fetch-" + [guid]::NewGuid().ToString('N') + ".tar")
-$paths = @($Path) + @($With)
-& git archive --format=tar -o $tar FETCH_HEAD -- @paths
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "::error::git archive of $($paths -join ', ') from $branch failed"
-  exit 1
-}
-& tar -xf $tar -C $out
-$code = $LASTEXITCODE
-Remove-Item -LiteralPath $tar -Force -ErrorAction SilentlyContinue
-if ($code -ne 0) {
-  Write-Host "::error::could not unpack $Path from $branch"
-  exit 1
+# cmd.exe's redirect writes the blob byte-exactly (a PowerShell pipe would
+# re-encode it, and a tar from the PATH may not be the one we expect).
+foreach ($p in (@($Path) + @($With))) {
+  $dest = Join-Path $out ($p -replace '/', '\')
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+  & $env:ComSpec /c "git show FETCH_HEAD:$p > `"$dest`""
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $dest) -or (Get-Item -LiteralPath $dest).Length -eq 0) {
+    Write-Host "::error::could not write $p from $branch"
+    exit 1
+  }
 }
 Write-Host "::notice::$Path taken from $branch (this branch predates it or has a different version)"
 Write-Output (Join-Path $out ($Path -replace '/', '\'))

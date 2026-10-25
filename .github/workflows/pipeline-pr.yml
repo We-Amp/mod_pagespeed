@@ -270,7 +270,8 @@ jobs:
       - name: Changelog fragment tools - self-tests
         if: ${{ !cancelled() }}
         run: |
-          # A branch that predates a tool takes it from master (docs/ci/pipelines.md).
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
           h=tools/ci/with-default-branch-tool.sh
           if [ ! -f "$h" ]; then
             git fetch --quiet --depth=1 origin master
@@ -283,14 +284,15 @@ jobs:
           python3 -I "$to_fragment" --self-test
 
       - name: Default-branch tool helper - self-test
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && hashFiles('tools/ci/with-default-branch-tool.sh') != '' }}
         run: bash tools/ci/with-default-branch-tool.sh --self-test
 
       # Fragment content (the release-note gate reads names only).
       - name: Changelog fragments are well formed
         if: ${{ !cancelled() }}
         run: |
-          # A branch that predates a tool takes it from master (docs/ci/pipelines.md).
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
           h=tools/ci/with-default-branch-tool.sh
           if [ ! -f "$h" ]; then
             git fetch --quiet --depth=1 origin master
@@ -364,7 +366,8 @@ jobs:
       - name: User-facing change carries a release note
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
-          # A branch that predates a tool takes it from master (docs/ci/pipelines.md).
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
           h=tools/ci/with-default-branch-tool.sh
           if [ ! -f "$h" ]; then
             git fetch --quiet --depth=1 origin master
@@ -2431,13 +2434,15 @@ jobs:
           }
           # Shut down a stale server so it picks up the vcvars-enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
-          # A branch that predates a tool takes it from master (docs/ci/pipelines.md).
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the Build the IIS module step).
           $dbt = 'tools\ci\Get-DefaultBranchTool.ps1'
           if (-not (Test-Path -LiteralPath $dbt)) {
             git fetch --quiet --depth=1 origin master
             $dbt = Join-Path $env:RUNNER_TEMP 'Get-DefaultBranchTool.ps1'
             git show 'FETCH_HEAD:tools/ci/Get-DefaultBranchTool.ps1' | Set-Content -Encoding ascii -LiteralPath $dbt
           }
+          if (Test-Path tools\ci\Get-DefaultBranchTool_test.ps1) { powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\Get-DefaultBranchTool_test.ps1"; if ($LASTEXITCODE -ne 0) { Write-Host "::error::Get-DefaultBranchTool self-test failed (exit $LASTEXITCODE)"; exit 1 } }
           $prune = & $dbt -Path 'tools/ci/Prune-WinDiskCache.ps1' -With 'tools/ci/Prune-WinDiskCache_test.ps1' | Select-Object -Last 1
           if (-not $prune -or -not (Test-Path -LiteralPath $prune)) { Write-Host "::error::could not locate Prune-WinDiskCache.ps1"; exit 1 }
           $pruneTest = Join-Path (Split-Path -Parent $prune) 'Prune-WinDiskCache_test.ps1'
@@ -2742,7 +2747,8 @@ jobs:
           }
           # Shut down a stale server so it picks up the vcvars-enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
-          # A branch that predates a tool takes it from master (docs/ci/pipelines.md).
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the Build the IIS module step).
           $dbt = 'tools\ci\Get-DefaultBranchTool.ps1'
           if (-not (Test-Path -LiteralPath $dbt)) {
             git fetch --quiet --depth=1 origin master
