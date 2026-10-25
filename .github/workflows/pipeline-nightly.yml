@@ -409,6 +409,7 @@ jobs:
           docker run --rm --init \
             --name "${NAME}" \
             --network none \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -541,6 +542,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -704,6 +706,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -835,6 +838,7 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/shared-cache"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run --rm --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp/ci-home -e USER=dev -e "BZL_FLAGS=${BZL_FLAGS}" \
@@ -1001,6 +1005,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -1167,6 +1172,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -1323,6 +1329,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -1521,6 +1528,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -1752,6 +1760,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -1980,6 +1989,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
@@ -2245,6 +2255,7 @@ jobs:
             docker run --rm --entrypoint cat "${DOCKER_IMAGE}" /etc/passwd; } > "${RUNNER_TEMP}/ci-passwd"
           docker rm -f "${CTR}" >/dev/null 2>&1 || true
           docker run -d --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \

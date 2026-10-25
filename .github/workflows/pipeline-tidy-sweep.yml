@@ -166,6 +166,7 @@ jobs:
           slot_budget || exit 1
           MEM_ARGS=()
           [ -z "${SLOT_MEM}" ] || MEM_ARGS=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || MEM_ARGS+=(--cpus="${SLOT_CPUS}")
           set +e
           docker run --rm --init \
             "${MEM_ARGS[@]}" \

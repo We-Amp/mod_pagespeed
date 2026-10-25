@@ -36,6 +36,7 @@ else
 fi
 
 docker run --rm --init "${EXTRA_DOCKER[@]}" \
+  ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
   --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
   --user "$(id -u):$(id -g)" \
   -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
