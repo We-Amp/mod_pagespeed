@@ -1632,10 +1632,13 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     // out its whole timeout on some hosts (#1050).
     // SECURITY_IDENTIFICATION: the open identifies this process and nothing
     // more; whatever answers under the configured name cannot act as it.
-    HANDLE pipe =
-        CreateFileW(wide_spelled.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
-                    nullptr, OPEN_EXISTING,
-                    SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+    // The access is spelled out, not GENERIC_WRITE: that maps to
+    // FILE_GENERIC_WRITE, which includes FILE_APPEND_DATA, and on a named
+    // pipe that bit is FILE_CREATE_PIPE_INSTANCE, which the worker's DACL
+    // withholds from other accounts. The probe only opens and closes.
+    HANDLE pipe = CreateFileW(
+        wide_spelled.c_str(), kPipeClientDesiredAccess, 0, nullptr, OPEN_EXISTING,
+        SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
     if (pipe != INVALID_HANDLE_VALUE) {
       CloseHandle(pipe);
       connected = true;

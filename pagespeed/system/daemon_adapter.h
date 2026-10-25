@@ -41,6 +41,15 @@ namespace net_instaweb {
 
 class MessageHandler;
 
+#ifdef _WIN32
+// The access a client requests when it opens the worker's pipe:
+// FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE.  Not GENERIC_WRITE, which
+// includes FILE_APPEND_DATA -- on a named pipe the bit of
+// FILE_CREATE_PIPE_INSTANCE, which the worker's access rules withhold from
+// other accounts.
+inline constexpr unsigned long kPipeClientDesiredAccess = 0x00100003;
+#endif
+
 // Whether the server may start at all.  Reserved, deliberately, for exactly
 // one class of condition: see StartupCheck.
 enum class DaemonStartupStatus {

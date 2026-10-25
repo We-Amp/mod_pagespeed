@@ -91,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **IIS: the module can now reach an optimizer worker that runs under
+  another account.** The module's check for the worker's pipe asked for
+  more access than the worker grants other accounts, so with the module in
+  an application pool identity and the worker under a service account every
+  daemon-backed request reported `X-Pagespeed-Init-Status:
+  daemon-unavailable`. The check now asks only for read and write access.
+
 - **nginx: a remote configuration refresh no longer pauses the worker when
   the native fetcher is in use.** With `RemoteConfigurationUrl` and
   `UseNativeFetcher on`, each refresh used to hold up every connection on
