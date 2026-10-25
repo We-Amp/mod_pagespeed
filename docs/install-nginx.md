@@ -266,6 +266,7 @@ copies instead:
 server {
     # ...
     pagespeed DaemonServeStoredEncodings on;   # default: off
+    pagespeed DaemonServeHonorRequestFreshness on;   # default: off; a reload bypasses the cache
 }
 ```
 

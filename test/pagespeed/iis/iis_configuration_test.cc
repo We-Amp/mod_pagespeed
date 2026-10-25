@@ -288,6 +288,22 @@ TEST_F(IisConfigurationTest, DaemonOptionsDefaultEmpty) {
   EXPECT_EQ("", rwo.daemon_volume_path());
 }
 
+// The request-freshness switch is off by default and parses on and off.
+TEST_F(IisConfigurationTest, HonorRequestFreshnessDefaultsOffAndParses) {
+  IisRewriteOptions defaults(nullptr);
+  ParseAndGetConfig("", "", &defaults);
+  EXPECT_FALSE(defaults.daemon_serve_honor_request_freshness());
+
+  IisRewriteOptions on(nullptr);
+  ParseAndGetConfig("pagespeed DaemonServeHonorRequestFreshness on\n", "", &on);
+  EXPECT_TRUE(on.daemon_serve_honor_request_freshness());
+
+  IisRewriteOptions off(nullptr);
+  ParseAndGetConfig("pagespeed DaemonServeHonorRequestFreshness off\n", "",
+                    &off);
+  EXPECT_FALSE(off.daemon_serve_honor_request_freshness());
+}
+
 // A quoted value with spaces and a backslash path survives byte for byte:
 // the config tokenizer keeps a double-quoted token verbatim.
 TEST_F(IisConfigurationTest, DaemonOptionQuotedValueWithSpacesVerbatim) {

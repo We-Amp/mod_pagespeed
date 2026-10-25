@@ -322,5 +322,59 @@ TEST_F(NgxDaemonOptionsPinTest, TheStoredEncodingsSwitchMatchesAcrossPorts) {
          "in this release and its docs say so";
 }
 
+// The request-freshness switch: the same name, id, default and scope on all
+// three ports, kept out of the configuration's signature on Apache and nginx.
+TEST_F(NgxDaemonOptionsPinTest, TheRequestFreshnessSwitchMatchesAcrossPorts) {
+  const GoogleString nginx = StripWhitespace(ReadSource(kNgxOptionsCc));
+  const GoogleString apache = StripWhitespace(ReadSource(kApacheConfigCc));
+  const GoogleString iis = StripWhitespace(ReadSource(kIisOptionsCc));
+
+  const char kName[] =
+      "kDaemonServeHonorRequestFreshness[]="
+      "\"DaemonServeHonorRequestFreshness\"";
+  EXPECT_NE(GoogleString::npos, nginx.find(kName));
+  EXPECT_NE(GoogleString::npos, apache.find(kName));
+
+  const char kNgxRegistration[] =
+      "add_ngx_option(false,&NgxRewriteOptions::daemon_serve_honor_request_"
+      "freshness_,\"dshrf\",kDaemonServeHonorRequestFreshness,kServerScope,";
+  const char kApacheRegistration[] =
+      "AddApacheProperty(false,&ApacheConfig::daemon_serve_honor_request_"
+      "freshness_,\"dshrf\",kDaemonServeHonorRequestFreshness,";
+  const size_t ngx_at = nginx.find(kNgxRegistration);
+  const size_t apache_at = apache.find(kApacheRegistration);
+  ASSERT_NE(GoogleString::npos, ngx_at)
+      << "the nginx registration changed: default, id, name and scope are "
+         "the contract";
+  ASSERT_NE(GoogleString::npos, apache_at)
+      << "the Apache registration changed: default, id and name are the "
+         "contract";
+
+  const size_t ngx_next = nginx.find("add_ngx_option(", ngx_at + 1);
+  const GoogleString ngx_tail = nginx.substr(ngx_at, ngx_next - ngx_at);
+  EXPECT_NE(GoogleString::npos,
+            ngx_tail.find("ngx_properties_->property(ngx_properties_->size()-"
+                          "1)->set_do_not_use_for_signature_computation("
+                          "true);"))
+      << "the nginx switch participates in the configuration's signature";
+  const size_t apache_next = apache.find("AddDeprecatedProperty(", apache_at);
+  const GoogleString apache_tail =
+      apache.substr(apache_at, apache_next - apache_at);
+  EXPECT_NE(GoogleString::npos,
+            apache_tail.find("apache_properties_->property(apache_properties_"
+                             "->size()-1)->set_do_not_use_for_signature_"
+                             "computation(true);"))
+      << "the Apache switch participates in the configuration's signature";
+
+  const char kIisRegistration[] =
+      "add_iis_option(false,&IisRewriteOptions::daemon_serve_honor_request_"
+      "freshness_,\"dshrf\",kDaemonServeHonorRequestFreshness,kServerScope,";
+  EXPECT_NE(GoogleString::npos, iis.find(kName))
+      << "the IIS port lost the request-freshness switch";
+  EXPECT_NE(GoogleString::npos, iis.find(kIisRegistration))
+      << "the IIS registration changed: default, id, name and scope are the "
+         "contract";
+}
+
 }  // namespace
 }  // namespace net_instaweb

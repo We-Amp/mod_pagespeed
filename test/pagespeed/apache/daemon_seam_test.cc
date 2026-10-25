@@ -1057,6 +1057,45 @@ TEST_F(DaemonSeamTest, TheReaderTakesTheHostsStoredEncodingsSwitch) {
   EXPECT_EQ(1, CountSubstring(source, "set_serve_stored_encodings("));
 }
 
-}  // namespace
+TEST_F(DaemonSeamTest, TheReaderTakesTheHostsRequestFreshnessSwitch) {
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve =
+      source.find("bool InstawebHandler::ServeFromDaemonSubstrate()");
+  ASSERT_NE(GoogleString::npos, serve);
+  const size_t fn_end = source.find("\n}\n", serve);
+  ASSERT_NE(GoogleString::npos, fn_end);
+  const GoogleString body = source.substr(serve, fn_end - serve);
+  const size_t set = body.find("reader->set_honor_request_freshness(");
+  ASSERT_NE(GoogleString::npos, set)
+      << "the directive never reaches the serve arm";
+  EXPECT_NE(GoogleString::npos,
+            body.find("options_->daemon_serve_honor_request_freshness()", set))
+      << "the switch is not taken from this request's configuration";
+  const size_t selection = body.find("reader->Serve(");
+  ASSERT_NE(GoogleString::npos, selection);
+  EXPECT_LT(set, selection) << "the switch is set after the selection";
+  EXPECT_EQ(1, CountSubstring(source, "set_honor_request_freshness("));
+}
 
+TEST_F(DaemonSeamTest, TheServeBuilderHandsOverTheRawReloadHeaders) {
+  // The forced-reload decision lives in the arm, once, for every port.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t serve = source.find("InstawebHandler::BuildDaemonServeRequest");
+  ASSERT_NE(GoogleString::npos, serve);
+  const size_t end = source.find("\n}", serve);
+  ASSERT_NE(GoogleString::npos, end);
+  const GoogleString body = source.substr(serve, end - serve);
+  EXPECT_EQ(GoogleString::npos, body.find("\"no-cache\""))
+      << "the forced-reload decision is back in the port";
+  EXPECT_NE(GoogleString::npos,
+            body.find("request->cache_control = RequestHeader("
+                      "HttpAttributes::kCacheControl);"));
+  EXPECT_NE(GoogleString::npos,
+            body.find("request->pragma = RequestHeader("
+                      "HttpAttributes::kPragma);"));
+}
+
+}  // namespace
 }  // namespace net_instaweb

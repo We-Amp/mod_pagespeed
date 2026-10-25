@@ -2502,14 +2502,16 @@ struct PsDaemonServeRequestStrings {
   GoogleString sec_ch_dpr;
   GoogleString if_none_match;
   GoogleString if_modified_since;
+  GoogleString cache_control;
+  GoogleString pragma;
 };
 
 // Fills the daemon serve request the way the record arm fills its own: the
 // URL the rest of the module already agreed on (PageSpeed parameters
 // stripped, X-Forwarded-Proto honoured -- the SAME source the record key
 // uses), the five capability headers verbatim with absent meaning empty,
-// the client's conditionals verbatim, and the forced-reload test Apache
-// applies (a case-insensitive "no-cache" in Cache-Control or Pragma).
+// the client's conditionals verbatim, and the raw Cache-Control and Pragma
+// values, which the arm reads (see ServeRequestForcesRevalidation).
 //
 // The headers and the URL come in ALREADY PARSED from the resource handler:
 // re-reading them off the request would be a second RequestHeaders
@@ -2552,19 +2554,15 @@ void BuildDaemonServeRequest(const RequestHeaders& request_headers,
   out->if_none_match = strings->if_none_match;
   out->if_modified_since = strings->if_modified_since;
 
-  // A forced reload, in both of the spellings a client still sends, found
-  // with a case-insensitive substring search over the joined value: the
-  // directive is case-insensitive, and "no-cache, no-store" or a repeated
-  // Pragma line must not read as absent.  Handed to the peer's freshness
-  // evaluator rather than acted on here, as Apache does.
-  GoogleString cache_control =
+  // The reload directives, handed over raw: whether they mean a forced
+  // reload, and whether that bypasses the cache at all, is the arm's call
+  // (ServeRequestForcesRevalidation and the server's
+  // DaemonServeHonorRequestFreshness), so the three ports cannot drift.
+  strings->cache_control =
       request_headers.LookupJoined(HttpAttributes::kCacheControl);
-  GoogleString pragma = request_headers.LookupJoined(HttpAttributes::kPragma);
-  LowerString(&cache_control);
-  LowerString(&pragma);
-  out->force_revalidate =
-      cache_control.find("no-cache") != GoogleString::npos ||
-      pragma.find("no-cache") != GoogleString::npos;
+  strings->pragma = request_headers.LookupJoined(HttpAttributes::kPragma);
+  out->cache_control = strings->cache_control;
+  out->pragma = strings->pragma;
 }
 
 // The names this request's server{} block is configured with, as copied
@@ -2623,6 +2621,11 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
   const NgxRewriteOptions* config = server_context->config();
   reader->set_serve_stored_encodings(config != nullptr &&
                                      config->daemon_serve_stored_encodings());
+  // And its switch for letting a client's reload headers bypass that copy
+  // (pagespeed DaemonServeHonorRequestFreshness), per server block, off by
+  // default.
+  reader->set_honor_request_freshness(
+      config != nullptr && config->daemon_serve_honor_request_freshness());
   // Lets the arm notice, while it serves a stored original, that the URL's
   // optimized copy has gone missing.  This worker process's own limiter:
   // one look per URL per window.  The look is one more read of the mapped

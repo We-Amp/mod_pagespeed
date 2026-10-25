@@ -61,6 +61,16 @@
 //                                  alternate is consulted, so a caller is
 //                                  testable against a probe that answers
 //                                  neither found nor not-found
+//   PS_STUB_ORIGINAL_FLAGS_SEQUENCE
+//                                comma-separated hex flags bytes, e.g.
+//                                "00,08": the n-th by-id read of the durable
+//                                original (id 0x0C, ps_cache_read_alternate)
+//                                reports the n-th value as its flags byte
+//                                instead of the table's, and the last value
+//                                repeats.  Models an original re-recorded
+//                                between the arm's two reads of it.  The
+//                                count restarts whenever the string changes
+//                                (unset it between cases that reuse a spec).
 //
 // Two cases cannot be environment variables, because a symbol cannot be
 // un-exported at run time and its PRESENCE is what the loader acts on. Each is
@@ -704,6 +714,50 @@ StubReadResult* StubMakeResult(const StubAlternate& alternate) {
   return result;
 }
 
+// PS_STUB_ORIGINAL_FLAGS_SEQUENCE: the flags byte the n-th read of the
+// durable original reports.  The stub re-reads its environment on every call,
+// so the last spec seen is remembered here and the count restarts when it
+// changes.
+void StubApplyOriginalFlagsSequence(StubAlternate* alternate) {
+  static char last_spec[128] = "";
+  static size_t reads = 0;
+  const char* spec = StubGetenv("PS_STUB_ORIGINAL_FLAGS_SEQUENCE");
+  if (spec == nullptr || spec[0] == '\0') {
+    last_spec[0] = '\0';
+    reads = 0;
+    return;
+  }
+  // No C++ runtime in this file: a fixed buffer.  A spec too long to fit is
+  // truncated, which only makes it compare as new on every call.
+  char current[sizeof(last_spec)];
+  snprintf(current, sizeof(current), "%s", spec);
+  if (strcmp(last_spec, current) != 0 || strlen(spec) >= sizeof(current)) {
+    memcpy(last_spec, current, sizeof(last_spec));
+    reads = 0;
+  }
+  const size_t want = reads++;
+  size_t index = 0;
+  const char* p = spec;
+  long value = alternate->flags;
+  while (true) {
+    char* end = nullptr;
+    const long parsed = strtol(p, &end, 16);
+    if (end == p) {
+      break;
+    }
+    value = parsed;
+    if (index == want) {
+      break;
+    }
+    ++index;
+    if (*end != ',') {
+      break;
+    }
+    p = end + 1;
+  }
+  alternate->flags = static_cast<uint8_t>(value);
+}
+
 }  // namespace
 
 extern "C" {
@@ -1321,7 +1375,11 @@ int ps_cache_read_alternate(void* cache, const char* url, const char* hostname,
     if (table[i].id != alternate_id) {
       continue;
     }
-    StubReadResult* result = StubMakeResult(table[i]);
+    StubAlternate chosen = table[i];
+    if (alternate_id == 0x0C) {
+      StubApplyOriginalFlagsSequence(&chosen);
+    }
+    StubReadResult* result = StubMakeResult(chosen);
     if (result == nullptr) {
       return kErrInvalidArg;
     }

@@ -481,28 +481,129 @@ GoogleString ServeOriginPlaneETag(StringPiece origin_etag) {
   return StrCat("W/", tag);
 }
 
+namespace {
+
+// Splits a comma-separated header list on the commas that are OUTSIDE a
+// quoted string.  etagc and quoted-string contents may contain a comma
+// (RFC 9110 8.8.3, 5.6.4), so a plain split would cut such a member in half.
+// An unterminated quote swallows the rest of the field into one member.
+// Members are returned untrimmed; empty ones are kept for the caller to skip.
+void SplitOutsideQuotes(StringPiece field, StringPieceVector* members) {
+  size_t start = 0;
+  bool in_quotes = false;
+  for (size_t i = 0; i < field.size(); ++i) {
+    const char c = field[i];
+    if (c == '"') {
+      in_quotes = !in_quotes;
+    } else if (c == ',' && !in_quotes) {
+      members->push_back(field.substr(start, i - start));
+      start = i + 1;
+    }
+  }
+  members->push_back(field.substr(start));
+}
+
+// True, with the opaque tag in `*opaque`, for a WELL-FORMED entity-tag
+// member: an optional `W/` and a quoted string with no quote inside it.  An
+// unquoted or unterminated member is not a tag and never matches.
+bool WellFormedEntityTag(StringPiece member, StringPiece* opaque) {
+  TrimWhitespace(&member);
+  if (member.size() >= 2 && (member[0] == 'W' || member[0] == 'w') &&
+      member[1] == '/') {
+    member.remove_prefix(2);
+  }
+  if (member.size() < 2 || member[0] != '"' ||
+      member[member.size() - 1] != '"') {
+    return false;
+  }
+  member.remove_prefix(1);
+  member.remove_suffix(1);
+  if (member.find('"') != StringPiece::npos) {
+    return false;
+  }
+  *opaque = member;
+  return true;
+}
+
+// A directive's argument with one pair of surrounding quotes removed (RFC
+// 9111 5.2 asks recipients to accept the token and the quoted-string form).
+StringPiece DirectiveArgument(StringPiece argument) {
+  TrimWhitespace(&argument);
+  if (argument.size() >= 2 && argument[0] == '"' &&
+      argument[argument.size() - 1] == '"') {
+    argument.remove_prefix(1);
+    argument.remove_suffix(1);
+  }
+  return argument;
+}
+
+}  // namespace
+
 bool ServeDerivedValidatorMatches(StringPiece if_none_match,
                                   StringPiece derived) {
-  if (if_none_match.empty() || derived.empty()) {
+  TrimWhitespace(&if_none_match);
+  if (if_none_match.empty()) {
+    return false;
+  }
+  // `*` as the whole field: a representation is being served, so the
+  // condition is false and the answer is 304 (RFC 9110 13.1.2).  Before the
+  // empty-validator return on purpose: an entry that carries no validator is
+  // still a current representation.
+  if (if_none_match == "*") {
+    return true;
+  }
+  if (derived.empty()) {
     return false;
   }
   const StringPiece want = OpaqueTag(derived);
   if (want.empty()) {
     return false;
   }
-  // The field is a comma-separated list.  An entity tag cannot contain a
-  // comma (RFC 9110 defines the opaque tag as etagc, which excludes it), so
-  // splitting on commas cannot cut one in half.
-  StringPieceVector entries;
-  SplitStringPieceToVector(if_none_match, ",", &entries,
-                           true /* omit_empty_strings */);
-  for (StringPiece entry : entries) {
-    TrimWhitespace(&entry);
-    if (entry == "*") {
-      // Not a validator on any plane; see the header.
-      continue;
+  StringPieceVector members;
+  SplitOutsideQuotes(if_none_match, &members);
+  for (StringPiece member : members) {
+    StringPiece opaque;
+    if (WellFormedEntityTag(member, &opaque) && opaque == want) {
+      return true;
     }
-    if (OpaqueTag(entry) == want) {
+  }
+  return false;
+}
+
+bool ServeRequestForcesRevalidation(StringPiece cache_control,
+                                    StringPiece pragma) {
+  TrimWhitespace(&cache_control);
+  if (!cache_control.empty()) {
+    StringPieceVector directives;
+    SplitOutsideQuotes(cache_control, &directives);
+    for (StringPiece directive : directives) {
+      TrimWhitespace(&directive);
+      StringPiece name = directive;
+      StringPiece argument;
+      const size_t equals = directive.find('=');
+      const bool has_argument = equals != StringPiece::npos;
+      if (has_argument) {
+        name = directive.substr(0, equals);
+        argument = DirectiveArgument(directive.substr(equals + 1));
+        TrimWhitespace(&name);
+      }
+      if (StringCaseEqual(name, "no-cache")) {
+        return true;
+      }
+      if (has_argument && StringCaseEqual(name, "max-age") &&
+          !argument.empty() &&
+          argument.find_first_not_of('0') == StringPiece::npos) {
+        return true;
+      }
+    }
+    // A Cache-Control field is present, so Pragma is ignored (RFC 7234 5.4).
+    return false;
+  }
+  StringPieceVector tokens;
+  SplitOutsideQuotes(pragma, &tokens);
+  for (StringPiece token : tokens) {
+    TrimWhitespace(&token);
+    if (StringCaseEqual(token, "no-cache")) {
       return true;
     }
   }
@@ -767,7 +868,13 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   // would ignore `s-maxage` and would reuse an origin's `private` response
   // for the next user.
   freshness_input.cache_scope = kPsCacheScopeShared;
-  freshness_input.force_revalidate = request.force_revalidate ? 1 : 0;
+  // The client's reload directives, read by the arm (not by the ports) and
+  // only when the operator asked for them to bypass the optimizer's copy.
+  freshness_input.force_revalidate =
+      (honor_request_freshness_ &&
+       ServeRequestForcesRevalidation(request.cache_control, request.pragma))
+          ? 1
+          : 0;
   freshness_input.origin_cc_flags = abi_->ReadOriginCcFlags(result_);
 
   PsFreshnessResult freshness;
@@ -868,7 +975,11 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
   // origin's own `Last-Modified` -- which is the durable-original serve, the
   // one case `negotiated` is false for.  Asking it on an optimized variant
   // would answer 304 over a validator that response does not carry.
-  if (!negotiated && !decision->not_modified &&
+  //
+  // Ignored whenever the request carries `If-None-Match` (RFC 9110 13.1.3):
+  // the tag has already decided, and a date that says "unmodified" must not
+  // override a tag that says "changed".
+  if (!negotiated && !decision->not_modified && request.if_none_match.empty() &&
       ServeOriginDateIsUnmodified(request.if_modified_since,
                                   decision->origin_last_modified)) {
     decision->not_modified = true;
@@ -960,9 +1071,11 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
   // in between replaces whatever result is held).
   //
   // The byte it hands back is ALSO what clause (ii) of the `Vary`
-  // biconditional is answered from, further down -- see Compose.  Both
-  // statements belong to the durable original and neither can be read off an
-  // optimized variant.
+  // biconditional is answered from on the NEGOTIATED (optimized variant)
+  // path, further down -- see Compose; that is the only original byte that
+  // path has.  On the durable-original serve the original is read again and
+  // the served entry's own byte is used instead.  Both statements belong to
+  // the durable original and neither can be read off an optimized variant.
   uint8_t original_flags = 0;
   int original_status = ProbeOriginalFlags(request, &original_flags);
   // A PROBE ERROR IS RESTRICTIONS UNKNOWN, NOT NONE.  Only the two statuses
@@ -1121,8 +1234,23 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
   // The rule-6 probe above already asked this question and its answer is
   // reused: a key it found nothing under is not asked again, and one it DID
   // find is re-read because the selection in between released the result.
+  //
+  // The served entry's OWN flags byte decides rule 6 and clause (ii) of the
+  // `Vary` biconditional on this path, not the probe's: the original may have
+  // been re-recorded between the two reads, and the bytes sent are the second
+  // read's.  Rule 6 is therefore asked again of the re-read entry.
+  uint8_t served_original_flags = original_flags;
   if (original_status == kPsOk) {
     original_status = ReadById(request, kPsSentinelOriginal);
+    if (original_status == kPsOk) {
+      served_original_flags = abi_->ReadFlags(result_);
+      if ((served_original_flags & kPsFlagOriginHeadersNotReproducible) != 0) {
+        Release();
+        decision.reason = daemon_serve_reason::kOriginHeadersNotReproducible;
+        decision.serve_class = kPsServeClassOriginalDeclined;
+        return decision;
+      }
+    }
   }
   if (original_status != kPsOk) {
     if (!decision.selected &&
@@ -1139,7 +1267,7 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
     return decision;
   }
 
-  Compose(request, now_seconds, false /* negotiated */, original_flags,
+  Compose(request, now_seconds, false /* negotiated */, served_original_flags,
           &decision);
   if (decision.selected) {
     decision.verdict = DaemonServeVerdict::kServeOriginal;

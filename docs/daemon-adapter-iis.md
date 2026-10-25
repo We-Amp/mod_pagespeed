@@ -112,6 +112,14 @@ nginx) is not available on IIS in this release. If you do not need them for
 another server, setting the optimizer's `gzip_level` and `brotli_level` to `0`
 stops it writing them.
 
+### Client reloads
+
+A request that carries `Cache-Control: no-cache`, `Cache-Control: max-age=0`
+or `Pragma: no-cache` (without a `Cache-Control`) is answered from the
+optimizer's cache like any other request. To send such requests to the origin
+instead, add `pagespeed DaemonServeHonorRequestFreshness on` for the site; the origin's
+own bytes are then served, and the resource is recorded again.
+
 ## The cache size
 
 The volume is 1 GiB unless you choose otherwise. The size belongs to the

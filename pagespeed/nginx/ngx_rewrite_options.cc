@@ -49,6 +49,8 @@ const char kDaemonSocketPath[] = "DaemonSocketPath";
 const char kDaemonVolumePath[] = "DaemonVolumePath";
 const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
 const char kDaemonServeStoredEncodings[] = "DaemonServeStoredEncodings";
+const char kDaemonServeHonorRequestFreshness[] =
+    "DaemonServeHonorRequestFreshness";
 const char kWebBotAuth[] = "WebBotAuth";
 const char kWebBotAuthTelemetry[] = "WebBotAuthTelemetry";
 const char kWebBotAuthBotDetection[] = "WebBotAuthBotDetection";
@@ -186,6 +188,19 @@ void NgxRewriteOptions::AddProperties() {
   // It decides which stored bytes are sent, not what the optimizer
   // produces: turning it on must not change the configuration context the
   // optimizer files this server's work under.
+  ngx_properties_->property(ngx_properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+  add_ngx_option(false,
+                 &NgxRewriteOptions::daemon_serve_honor_request_freshness_,
+                 "dshrf", kDaemonServeHonorRequestFreshness, kServerScope,
+                 "Let a client's reload headers (Cache-Control: no-cache or "
+                 "max-age=0, or Pragma: no-cache without a Cache-Control) "
+                 "bypass the optimizer daemon's cached copy of a resource, so "
+                 "the origin's own bytes are sent. Default off: a reload is "
+                 "served from the cache.",
+                 true);
+  // Like the switch above, it decides which stored bytes are sent, not what
+  // the optimizer produces.
   ngx_properties_->property(ngx_properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
 

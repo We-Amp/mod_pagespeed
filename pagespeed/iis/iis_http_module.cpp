@@ -453,6 +453,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
     return false;
   }
 
+  // The site's switch for letting a client's reload headers bypass the
+  // optimizer's copy (DaemonServeHonorRequestFreshness), off by default.
+  const IisRewriteOptions* iis_options = server_context->config();
+  reader->set_honor_request_freshness(
+      iis_options != nullptr &&
+      iis_options->daemon_serve_honor_request_freshness());
+
   DaemonServeRequest serve_request;
   BuildDaemonServeRequest(http_context, *request_context->gurl(),
                           &serve_request);

@@ -35,6 +35,7 @@ serve" below.
 | `ModPagespeedDaemonSocketPath` | Path of the worker's notification socket | server / virtual host |
 | `ModPagespeedDaemonVolumePath` | Path of the worker's shared cache volume | server / virtual host |
 | `ModPagespeedDaemonServeStoredEncodings` | `on` or `off` (default `off`): serve the optimizer's stored gzip and brotli copies — see "Serving the stored compressed copies" | server / virtual host |
+| `ModPagespeedDaemonServeHonorRequestFreshness` | `on` or `off` (default `off`): let a client's reload headers (`Cache-Control: no-cache` or `max-age=0`, or `Pragma: no-cache` when there is no `Cache-Control`) bypass the optimizer's cached copy and send the origin's own bytes; off, a reload is served from the cache | server / virtual host (`DaemonServeHonorRequestFreshness` on IIS and nginx) |
 
 The two path directives are unset in the module's own defaults, which is the
 classic configuration: in-place optimization behaves exactly as it always has
@@ -287,7 +288,8 @@ needs its own answer.
 **A request the cache does not answer is recorded again**, on Apache and
 nginx alike, because recording is what happens when there is nothing there to
 serve. That covers a URL with no entry, an entry that has aged out, a client
-that asked for a reload, and a URL whose entry is marked because its origin
+that asked for a reload while `DaemonServeHonorRequestFreshness` is on (off by
+default, a reload is answered from the cache), and a URL whose entry is marked because its origin
 sent headers this module cannot put back (see "Which responses this substrate
 will serve" below): such a URL is served by the ordinary path and recorded
 again on every eligible request. When no optimized variant fits the client

@@ -152,6 +152,7 @@ class DaemonServeArmTest : public testing::Test {
     unsetenv("PS_STUB_ORIGIN_CONTENT_LENGTH");
     unsetenv("PS_STUB_GZIP_ISIZE");
     unsetenv("PS_STUB_READ_ALT_STATUS");
+    unsetenv("PS_STUB_ORIGINAL_FLAGS_SEQUENCE");
   }
 
   GoogleString CallLog() const {
@@ -259,6 +260,14 @@ class DaemonServeArmTest : public testing::Test {
   DaemonServeDecision ServeEncoded(const DaemonServeRequest& request) {
     DaemonServeReader reader(abi_.get(), cache_);
     reader.set_serve_stored_encodings(true);
+    return reader.Serve(request, 1100 /* now_seconds */);
+  }
+
+  // The same call through a reader whose switch for honouring a client's
+  // reload headers is ON, as a seam sets it from its port's directive.
+  DaemonServeDecision ServeHonouringReloads(const DaemonServeRequest& request) {
+    DaemonServeReader reader(abi_.get(), cache_);
+    reader.set_honor_request_freshness(true);
     return reader.Serve(request, 1100 /* now_seconds */);
   }
 
@@ -610,8 +619,10 @@ TEST_F(DaemonServeArmTest, ConditionalIsMatchedOnTheDerivedPlaneOnly) {
   // THE ORIGIN PLANE IS NEVER CROSSED: a client holding the origin's own tag
   // holds a validator for a representation this arm did not issue.
   EXPECT_FALSE(ServeDerivedValidatorMatches("\"origin\"", derived));
-  // `*` is not a validator on any plane.
-  EXPECT_FALSE(ServeDerivedValidatorMatches("*", derived));
+  // `*` as the whole field is satisfied by any representation being served
+  // (RFC 9110 13.1.2): it names no validator, so it crosses no plane.
+  EXPECT_TRUE(ServeDerivedValidatorMatches("*", derived));
+  EXPECT_TRUE(ServeDerivedValidatorMatches(" * ", derived));
   EXPECT_FALSE(ServeDerivedValidatorMatches("", derived));
 }
 
@@ -1699,8 +1710,31 @@ TEST_F(DaemonServeArmTest, AnExpiredExpiresEntryIsNotServedFresh) {
 TEST_F(DaemonServeArmTest, AClientForcedReloadFallsThrough) {
   SetAlternates("09:00:1");
   DaemonServeRequest request = Request("image/webp");
-  request.force_revalidate = true;
-  EXPECT_EQ(DaemonServeVerdict::kFallThrough, Serve(request).verdict);
+  request.cache_control = "no-cache";
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough,
+            ServeHonouringReloads(request).verdict);
+}
+
+TEST_F(DaemonServeArmTest, AClientReloadIsServedFromTheCopyUnlessHonoured) {
+  // The switch is OFF by default: a reload is a request like any other.
+  SetAlternates("09:00:1");
+  for (const char* cache_control : {"no-cache", "max-age=0"}) {
+    DaemonServeRequest request = Request("image/webp");
+    request.cache_control = cache_control;
+    EXPECT_EQ(DaemonServeVerdict::kServeOptimized, Serve(request).verdict)
+        << cache_control;
+    EXPECT_EQ(DaemonServeVerdict::kFallThrough,
+              ServeHonouringReloads(request).verdict)
+        << cache_control;
+  }
+  DaemonServeRequest pragma = Request("image/webp");
+  pragma.pragma = "no-cache";
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, Serve(pragma).verdict);
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough,
+            ServeHonouringReloads(pragma).verdict);
+  // Honoured, an ordinary request still gets the copy.
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized,
+            ServeHonouringReloads(Request("image/webp")).verdict);
 }
 
 TEST_F(DaemonServeArmTest, AnAgeExpiredVariantIsMarkedForTheOriginRefresh) {
@@ -1746,8 +1780,8 @@ TEST_F(DaemonServeArmTest, AClientForcedReloadIsNotAnExpiry) {
   setenv("PS_STUB_INSERTED_AT", "1", 1);
   SetAlternates("09:00:1,0c:00:0");
   DaemonServeRequest request = Request("image/webp");
-  request.force_revalidate = true;
-  const DaemonServeDecision decision = Serve(request);
+  request.cache_control = "no-cache";
+  const DaemonServeDecision decision = ServeHonouringReloads(request);
   EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
   EXPECT_STREQ(daemon_serve_reason::kNeedsRevalidation, decision.reason);
   EXPECT_FALSE(decision.stale_variant_expired_by_age);
@@ -1863,6 +1897,169 @@ TEST_F(DaemonServeArmTest, IfModifiedSinceIsHonouredOnTheOriginPlaneOnly) {
   EXPECT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
   EXPECT_FALSE(variant.not_modified);
   unsetenv("PS_STUB_ORIGIN_LM");
+}
+
+TEST_F(DaemonServeArmTest, IfNoneMatchParsesQuotedTagsContainingCommas) {
+  const GoogleString comma_tag = "W/\"v1,gz\"";
+  // etagc includes the comma: a quoted tag with one inside is ONE member.
+  EXPECT_TRUE(ServeDerivedValidatorMatches("\"v1,gz\"", comma_tag));
+  EXPECT_TRUE(ServeDerivedValidatorMatches("\"a\", W/\"v1,gz\"", comma_tag));
+  EXPECT_TRUE(ServeDerivedValidatorMatches("\"x,y\", \"v1,gz\"", comma_tag));
+  // Neither half of the tag is the tag.
+  EXPECT_FALSE(ServeDerivedValidatorMatches("\"v1\"", comma_tag));
+  EXPECT_FALSE(ServeDerivedValidatorMatches("\"gz\"", comma_tag));
+  EXPECT_FALSE(ServeDerivedValidatorMatches("\"v1\"", "W/\"v1,gz\""));
+  // A member that is not a well-formed entity-tag never matches.
+  EXPECT_FALSE(ServeDerivedValidatorMatches("\"v1,gz", comma_tag));
+  EXPECT_FALSE(ServeDerivedValidatorMatches("v1,gz", comma_tag));
+  const GoogleString derived =
+      ServeDerivedETag(kMaskWebpDesktop, 0, nullptr, "\"origin\"", 1234, 100);
+  GoogleString unquoted = derived;
+  GlobalReplaceSubstring("W/", "", &unquoted);
+  GlobalReplaceSubstring("\"", "", &unquoted);
+  EXPECT_FALSE(ServeDerivedValidatorMatches(unquoted, derived));
+  // ... and does not spoil its neighbours.
+  EXPECT_TRUE(ServeDerivedValidatorMatches(
+      StrCat("junk, \"a\", ", derived, ", \"b"), derived));
+  // `*` counts only as the whole field value; inside a list it is ignored.
+  EXPECT_FALSE(ServeDerivedValidatorMatches("\"a\", *", derived));
+  EXPECT_TRUE(ServeDerivedValidatorMatches("*", derived));
+  EXPECT_TRUE(ServeDerivedValidatorMatches("*", ""));
+}
+
+TEST_F(DaemonServeArmTest, AnOriginTagWithACommaRevalidatesItsOwnEcho) {
+  setenv("PS_STUB_ORIGIN_ETAG", "\"v1,gz\"", 1);
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision first = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, first.verdict);
+  EXPECT_EQ("W/\"v1,gz\"", first.etag);
+  EXPECT_FALSE(first.not_modified);
+
+  DaemonServeRequest echo = Request("image/webp");
+  echo.if_none_match = first.etag;
+  const DaemonServeDecision second = Serve(echo);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, second.verdict);
+  EXPECT_TRUE(second.not_modified);
+}
+
+TEST_F(DaemonServeArmTest,
+       IfNoneMatchStarIsAnswered304WhenARepresentationIsServed) {
+  DaemonServeRequest star = Request("image/webp");
+  star.if_none_match = "*";
+
+  // A tier-1 variant.
+  setenv("PS_STUB_ORIGIN_HASH_BYTE", "01", 1);
+  SetAlternates("09:00:1");
+  const DaemonServeDecision variant = Serve(star);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
+  EXPECT_TRUE(variant.not_modified);
+
+  // A durable original.
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(star);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  EXPECT_TRUE(original.not_modified);
+
+  // A variant that carries no origin identity at all.
+  unsetenv("PS_STUB_ORIGIN_HASH_BYTE");
+  unsetenv("PS_STUB_ORIGIN_ETAG");
+  SetAlternates("09:00:1");
+  const DaemonServeDecision plain = Serve(star);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, plain.verdict);
+  EXPECT_TRUE(plain.not_modified);
+
+  // Nothing to serve: no 304, because there is no representation.
+  SetAlternates("");
+  const DaemonServeDecision cold = Serve(star);
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, cold.verdict);
+  EXPECT_FALSE(cold.not_modified);
+}
+
+TEST_F(DaemonServeArmTest, IfModifiedSinceIsIgnoredWhenIfNoneMatchIsPresent) {
+  setenv("PS_STUB_ORIGIN_LM", "1000000000", 1);  // 2001-09-09T01:46:40Z
+  setenv("PS_STUB_ORIGIN_ETAG", "\"new\"", 1);
+  const char kAtTheStamp[] = "Sun, 09 Sep 2001 01:46:40 GMT";
+  const char kBeforeIt[] = "Sat, 08 Sep 2001 01:46:40 GMT";
+  SetAlternates("0c:00:0");
+
+  // The tag says "changed"; the date must not overrule it.
+  DaemonServeRequest changed = Request("image/webp");
+  changed.if_none_match = "\"old\"";
+  changed.if_modified_since = kAtTheStamp;
+  const DaemonServeDecision stale_client = Serve(changed);
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, stale_client.verdict);
+  EXPECT_FALSE(stale_client.not_modified);
+
+  // The tag matches: the tag decides, whatever the date says.
+  DaemonServeRequest matched = Request("image/webp");
+  matched.if_none_match = "\"new\"";
+  matched.if_modified_since = kBeforeIt;
+  EXPECT_TRUE(Serve(matched).not_modified);
+
+  // Without an If-None-Match the date still answers.
+  DaemonServeRequest date_only = Request("image/webp");
+  date_only.if_modified_since = kAtTheStamp;
+  EXPECT_TRUE(Serve(date_only).not_modified);
+  unsetenv("PS_STUB_ORIGIN_LM");
+}
+
+TEST_F(DaemonServeArmTest,
+       ServeRequestForcesRevalidationReadsDirectivesNotSubstrings) {
+  // Directives that force a reload.
+  EXPECT_TRUE(ServeRequestForcesRevalidation("no-cache", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("No-Cache", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("max-age=60, no-cache", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("no-store,no-cache", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("max-age=0", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("MAX-AGE=0", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("max-age=\"0\"", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("max-age=00", ""));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("max-age = 0", ""));
+  // Pragma counts only without a Cache-Control field.
+  EXPECT_TRUE(ServeRequestForcesRevalidation("", "no-cache"));
+  EXPECT_TRUE(ServeRequestForcesRevalidation("", "No-Cache"));
+  // Not directives: a longer token, a different directive, an argument.
+  EXPECT_FALSE(ServeRequestForcesRevalidation("no-cache-x", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("x-no-cache", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("max-age=1", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("max-age=0x", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("max-age=", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("min-fresh=0", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("max-stale", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("max-age=60", "no-cache"));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("", ""));
+  EXPECT_FALSE(ServeRequestForcesRevalidation("", "no-cache-x"));
+}
+
+TEST_F(DaemonServeArmTest, TheDurableOriginalIsServedOnItsOwnFlags) {
+  SetAlternates("0c:00:0");
+  // The original is re-recorded with the not-reproducible bit between the
+  // probe and the serving read: declined, on the served entry's own byte.
+  setenv("PS_STUB_ORIGINAL_FLAGS_SEQUENCE", "00,08", 1);
+  const DaemonServeDecision marked = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, marked.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kOriginHeadersNotReproducible,
+               marked.reason);
+  EXPECT_EQ(kPsServeClassOriginalDeclined, marked.serve_class);
+  EXPECT_TRUE(marked.body.empty());
+  EXPECT_EQ(2,
+            CountSubstring(CallLog(), "read_alternate url=/a/photo.png id=12"));
+
+  // Varies-Accept appears on the re-recorded copy: the served copy says so.
+  setenv("PS_STUB_ORIGINAL_FLAGS_SEQUENCE", "00,04", 1);
+  const DaemonServeDecision gained = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, gained.verdict);
+  EXPECT_TRUE(gained.emit_vary_accept);
+  EXPECT_TRUE(gained.vary_accept_origin_declared);
+
+  // ... and disappears from it: the served copy is the truth in both
+  // directions.
+  setenv("PS_STUB_ORIGINAL_FLAGS_SEQUENCE", "04,00", 1);
+  const DaemonServeDecision lost = Serve(Request("image/webp"));
+  EXPECT_EQ(DaemonServeVerdict::kServeOriginal, lost.verdict);
+  EXPECT_FALSE(lost.emit_vary_accept);
+  EXPECT_FALSE(lost.vary_accept_origin_declared);
+  unsetenv("PS_STUB_ORIGINAL_FLAGS_SEQUENCE");
 }
 
 TEST_F(DaemonServeArmTest, ADeadSubstrateIsSkewRatherThanCold) {
@@ -2417,8 +2614,8 @@ TEST_F(DaemonServeArmTest, AnUnflaggedFallThroughSendsNoRefreshNotify) {
   setenv("PS_STUB_INSERTED_AT", "1", 1);
   SetAlternates("09:00:1,0c:00:0");
   DaemonServeRequest request = Request("image/webp");
-  request.force_revalidate = true;
-  const DaemonServeDecision decision = Serve(request);
+  request.cache_control = "no-cache";
+  const DaemonServeDecision decision = ServeHonouringReloads(request);
   ASSERT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
   ASSERT_FALSE(decision.stale_variant_expired_by_age);
 

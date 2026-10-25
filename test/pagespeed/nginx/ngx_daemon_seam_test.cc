@@ -1535,5 +1535,44 @@ TEST_F(NgxDaemonSeamTest, TheReaderTakesTheServerBlocksStoredEncodingsSwitch) {
   EXPECT_EQ(1, CountSubstring(cc, "set_serve_stored_encodings("));
 }
 
+TEST_F(NgxDaemonSeamTest, TheReaderTakesTheServerBlocksRequestFreshnessSwitch) {
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  const size_t fn = cc.find("ngx_int_tPsServeFromDaemonSubstrate(");
+  ASSERT_NE(GoogleString::npos, fn)
+      << "PsServeFromDaemonSubstrate was renamed; this pin needs updating";
+  const size_t open = cc.find("{", fn);
+  ASSERT_NE(GoogleString::npos, open);
+  const size_t block_end = MatchingBrace(cc, open);
+  ASSERT_NE(GoogleString::npos, block_end);
+  const GoogleString body = cc.substr(fn, block_end - fn);
+  const size_t set = body.find(
+      "reader->set_honor_request_freshness(config!=nullptr&&config->daemon_"
+      "serve_honor_request_freshness());");
+  ASSERT_NE(GoogleString::npos, set)
+      << "the directive never reaches the serve arm";
+  const size_t selection = body.find("reader->Serve(");
+  ASSERT_NE(GoogleString::npos, selection);
+  EXPECT_LT(set, selection) << "the switch is set after the selection";
+  EXPECT_EQ(1, CountSubstring(cc, "set_honor_request_freshness("));
+}
+
+TEST_F(NgxDaemonSeamTest, TheServeBuilderHandsOverTheRawReloadHeaders) {
+  // Whether a Cache-Control / Pragma value means a forced reload is decided
+  // in the arm, once, for every port: the builder only carries the values.
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  const size_t serve_fn = cc.find("voidBuildDaemonServeRequest(");
+  ASSERT_NE(GoogleString::npos, serve_fn);
+  const size_t serve_open = cc.find("{", serve_fn);
+  ASSERT_NE(GoogleString::npos, serve_open);
+  const size_t serve_end = MatchingBrace(cc, serve_open);
+  ASSERT_NE(GoogleString::npos, serve_end);
+  const GoogleString body = cc.substr(serve_fn, serve_end - serve_fn);
+  EXPECT_EQ(GoogleString::npos, body.find("\"no-cache\""))
+      << "the forced-reload decision is back in the port";
+  EXPECT_NE(GoogleString::npos,
+            body.find("out->cache_control=strings->cache_control;"));
+  EXPECT_NE(GoogleString::npos, body.find("out->pragma=strings->pragma;"));
+}
+
 }  // namespace
 }  // namespace net_instaweb
