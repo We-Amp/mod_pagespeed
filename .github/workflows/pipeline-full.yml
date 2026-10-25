@@ -73,15 +73,20 @@ jobs:
   # Path filter for the sidecar pair: a hosted job diffs what this run
   # covers and publishes `sidecar_pair`. A dispatch (the release candidate
   # run) always builds the pair, so no fleet job of it is skipped; a pull
-  # request labelled ci:full diffs against its base; a push diffs BEFORE..SHA,
-  # and a new branch (an all-zero BEFORE) or a BEFORE the clone cannot reach
-  # counts as everything changed. The weekly nightly run covers drift outside
+  # request labelled ci:full diffs against its base; a push diffs from the
+  # head of the last push run that finished without being cancelled
+  # (tools/ci/push_range_base.sh), and no usable base counts as everything
+  # changed. The weekly nightly run covers drift outside
   # the paths.
   changes:
     name: Detect changed paths (full tier)
     needs: event-guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read for the runs API (the base of a push range).
+    permissions:
+      actions: read
+      contents: read
     outputs:
       sidecar_pair: ${{ steps.diff.outputs.sidecar_pair }}
     steps:
@@ -95,6 +100,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           sidecar_pair=true
           paths='^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|\.github/workflows/pipeline-full\.yml)'
@@ -105,13 +111,30 @@ jobs:
               sidecar_pair=false
             fi
           elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ] \
-               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-              git diff --name-only "${BEFORE}" "${GITHUB_SHA}" > "${changed}"
+            # Cumulative base: the last push run that finished without being
+            # cancelled, so a run superseded by a newer push leaves its range
+            # to the next one. No usable base counts as everything changed.
+            base="$(bash tools/ci/push_range_base.sh)" || base=""
+            if [ -n "${base}" ]; then
+              git diff --name-only "${base}" "${GITHUB_SHA}" > "${changed}"
               if ! grep -qE "${paths}" "${changed}"; then
                 sidecar_pair=false
               fi
+              echo "push range: ${base}..${GITHUB_SHA}, sidecar_pair=${sidecar_pair}"
+            else
+              echo "push range: no usable base, sidecar_pair=true"
             fi
+            # Shadow: what the previous push as the base would have said.
+            shadow=true
+            if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              if git diff --name-only "${BEFORE}" "${GITHUB_SHA}" | grep -qE "${paths}"; then
+                shadow=true
+              else
+                shadow=false
+              fi
+            fi
+            echo "shadow: event.before range would say sidecar_pair=${shadow}"
           fi
           echo "sidecar_pair=${sidecar_pair}" >> "$GITHUB_OUTPUT"
           echo "path filters: sidecar_pair=${sidecar_pair}"

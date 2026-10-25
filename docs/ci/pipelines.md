@@ -178,8 +178,15 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   module is materialized), which is why it is path-filtered: the full tier's
   hosted `changes` job publishes `sidecar_pair` from the same paths (with
   `pipeline-full.yml` in place of `pipeline-pr.yml`). On a push to `master` it
-  compares the pushed range (`github.event.before` to the pushed commit; a new
-  branch or an unreachable `before` counts as everything changed), on a pull
+  compares a cumulative range: from the head of the most recent push `CI` run
+  on `master` that completed without being cancelled and whose head is an
+  ancestor of the pushed commit (`tools/ci/push_range_base.sh`, which reads the
+  Actions runs API with `actions: read`) to the pushed commit. `github.event.before`
+  is not the base, because a newer push cancels an older pending run and
+  `before` then names a range nobody examined. When the API fails, answers
+  nothing usable or no candidate is an ancestor, the filter counts everything as
+  changed and builds the pair; the log shows the reason and, as a shadow, what
+  the `before` range would have said. On a pull
   request labelled `ci:full` the pull request against its base, and a
   `workflow_dispatch` (the release candidate run) always builds the pair. With
   `FLEET_ENABLED` `false` the x64 leg runs on a hosted runner, and on a build
