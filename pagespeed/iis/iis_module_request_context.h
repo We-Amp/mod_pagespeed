@@ -35,27 +35,13 @@ namespace net_instaweb
 		IisInnerRequestContext *GetInnerContext();
 
 	// specific IIS module functions
-		bool HideAcceptEncoding() {return hideacceptencoding_;};
-		void SetHideAcceptEncoding(bool value) {hideacceptencoding_=value;}
-
-		void StripAndStoreAcceptEncoding(IHttpContext *c,bool stripforever=false);
-		void AddStoredAcceptEncoding(IHttpContext *c);
 		GzipInflater* inflater() { return inflater_; }
 		void set_inflater(GzipInflater* x) { inflater_ = x; }
 		bool empty() { return empty_; }
-		void set_nextsendresponsestatus(REQUEST_NOTIFICATION_STATUS status) { hasNextStatus = true; nextsendresponsestatus_ = status; }
-		void reset_nextsendresponsestatus() { hasNextStatus = false; }
-		bool has_nextstatus() { return hasNextStatus; }
-		REQUEST_NOTIFICATION_STATUS nextsendresponsestatus() { return nextsendresponsestatus_; }
 		static IisModuleRequestContext* GetRequestContext(IHttpContext* pHttpContext);
 	protected:
 		bool empty_;
-		bool hasNextStatus;
-		REQUEST_NOTIFICATION_STATUS nextsendresponsestatus_;
 		IisInnerRequestContext *requestContext_;
-		bool hideacceptencoding_;
-		PCSTR pRawValueAcceptEncoding;
-		USHORT pRawValueLengthAcceptEncoding;
 		GzipInflater* inflater_;
 	};
 

@@ -69,7 +69,6 @@ class IisModuleBaseFetch : public IisBaseFetch {
   bool headers_collected() { return headers_collected_; }
   void SetLastWrite(DWORD lastwrite) {this->lastwritetime=lastwrite;}
   DWORD RequestTime() {return lastwritetime-donetime;}
-  static volatile LONG fetchount;
   bool need_flush() { return need_flush_; }
   void set_need_flush(bool x) { need_flush_ = x; }
   void set_pending(bool x) { pending_ = x; }

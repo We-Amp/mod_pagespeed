@@ -121,6 +121,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the optimizer has processed them again. Applies to Apache, nginx and IIS
   with the optimizer worker. Update recommended. No configuration change
   and no cache purge required.
+- **IIS: the entity tag now travels under its standard `ETag` name.**
+  The module's header table spelled it `E-Tag`, so clients could get a
+  non-standard header instead of a usable validator, and rewritten HTML
+  kept the origin's `ETag` for a body it no longer describes.
+- IIS: a `HEAD` request for a resource that is not in the in-place cache
+  is no longer counted and logged as a failed recording.
 - **`prioritize_critical_images`: the `Vary` header of HTML no longer depends
   on cache state.** With Save-Data image qualities in effect, pages handled by
   this filter carried `Vary: Save-Data` only once browsers had reported which

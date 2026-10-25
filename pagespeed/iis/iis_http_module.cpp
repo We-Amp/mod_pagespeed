@@ -963,16 +963,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
-		if (!is_resource && IisModuleBaseFetch::fetchount > 250) {
-			log(pHttpContext, "Too many outstanding rewrites - bail");
-			innerContext->set_leave(true);
-			if (innerContext->base_fetch() != nullptr) {
-				delete innerContext->base_fetch();
-				innerContext->set_base_fetch(nullptr);
-			}
-			return RQ_NOTIFICATION_CONTINUE;
-		}
-
 		innerContext->server_context()->FlushCacheIfNecessary();
 
 
@@ -1304,28 +1294,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 
-	void IisHttpModule::HideAcceptEncodingIfNeeded(IN IHttpContext* pHttpContext)
-	{
-		IisModuleRequestContext* request_context = IisModuleRequestContext::GetRequestContext(pHttpContext);
-		if (!request_context) return;
-		if (request_context->HideAcceptEncoding())  request_context->StripAndStoreAcceptEncoding(pHttpContext);
-	}
-
-	void IisHttpModule::RestoreAcceptEncoding(IN IHttpContext* pHttpContext)
-	{
-		IisModuleRequestContext* request_context = IisModuleRequestContext::GetRequestContext(pHttpContext);
-		if (!request_context) return;
-		if (request_context->HideAcceptEncoding()) request_context->AddStoredAcceptEncoding(pHttpContext);
-	}
-
-
-	REQUEST_NOTIFICATION_STATUS IisHttpModule::OnPostBeginRequest(IN IHttpContext* pHttpContext, IN IHttpEventProvider* pProvider)
-	{
-		log(pHttpContext, "OnPostBeginRequest");
-		RestoreAcceptEncoding(pHttpContext);
-		return RQ_NOTIFICATION_CONTINUE;
-	}
-
 	MyCustomProvider cp2;
 
 	// Request memory for a response body chunk: lives as long as the request.
@@ -1344,12 +1312,6 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			return RQ_NOTIFICATION_CONTINUE;
 		}
 
-		if (request_context->has_nextstatus())
-		{			
-			auto ret = request_context->nextsendresponsestatus();
-			request_context->reset_nextsendresponsestatus();
-			return ret;
-		}
 		auto innerContext = request_context->GetInnerContext();
 
 		if (innerContext == nullptr) {
@@ -1410,12 +1372,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			PCSTR http_request_method = pHttpContext->GetRequest()->GetHttpMethod();
 			if (!(StringCaseEqual(http_request_method, "GET") || StringCaseEqual(http_request_method, "POST")))
 			{
-				log(pHttpContext, "OnSendResponse - not GET or HEAD, bail");
+				log(pHttpContext, "OnSendResponse - not GET or POST, bail");
 				innerContext->set_leave(true);
 				return RQ_NOTIFICATION_CONTINUE;
 			}
 
-			if (innerContext->proxy_fetch() == nullptr && !innerContext->end_request_seen())
+			if (innerContext->proxy_fetch() == nullptr)
 			{
 				USHORT ct_len;
 				PCSTR ct = pHttpContext->GetResponse()->GetHeader(HttpHeaderContentType, &ct_len);
@@ -1497,7 +1459,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			}
 
 			// TODO(oschaaF): if first time, and we want to rewrite html, etc
-			if (innerContext->rewrite_html() && innerContext->proxy_fetch() == nullptr && !innerContext->end_request_seen())
+			if (innerContext->rewrite_html() && innerContext->proxy_fetch() == nullptr)
 			{
 				if (innerContext->recorder() != nullptr) {
 					innerContext->recorder()->Fail();
