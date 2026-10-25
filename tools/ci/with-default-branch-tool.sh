@@ -37,10 +37,13 @@ resolve() { # <prefer-default 0|1> <path> [extra path]...
     printf '%s\n' "$path"
     return 0
   fi
-  git fetch --quiet --depth=1 "$REMOTE" "$BRANCH" >&2 || {
-    echo "::error::$path is not in this checkout and ${REMOTE}/${BRANCH} could not be fetched" >&2
-    return 1
-  }
+  # One retry: a network blip must not turn a gate red.
+  git fetch --quiet --depth=1 "$REMOTE" "$BRANCH" >&2 \
+    || { sleep "${DEFAULT_BRANCH_RETRY_SLEEP:-5}"; git fetch --quiet --depth=1 "$REMOTE" "$BRANCH" >&2; } \
+    || {
+      echo "::error::$path is not in this checkout and ${REMOTE}/${BRANCH} could not be fetched" >&2
+      return 1
+    }
   if ! git cat-file -e "FETCH_HEAD:${path}" 2>/dev/null; then
     echo "::error::$path is in neither this checkout nor ${BRANCH}" >&2
     return 1
@@ -87,7 +90,7 @@ self_test() {
 
   # 1: present in the checkout -> the checkout's copy, no fetch needed.
   got="$(cd "$work" && DEFAULT_BRANCH_REMOTE=file:///nonexistent bash "$self" tools/x/old.sh 2>/dev/null)" || true
-  [ "$got" = tools/x/old.sh ] && pass "present in checkout" || fail "present in checkout (got '$got')"
+  if [ "$got" = tools/x/old.sh ]; then pass "present in checkout"; else fail "present in checkout (got '$got')"; fi
 
   # 2: absent -> fetched from the default branch, siblings alongside.
   got="$(cd "$work" && bash "$self" tools/x/tool.sh 2>/dev/null)" || got=""
@@ -107,16 +110,31 @@ self_test() {
     fail "--prefer-default overrides an old copy (got '$got')"
   fi
 
+  # 3b: --prefer-default with the file absent from the checkout still fetches.
+  rm -f "$work/tools/x/tool.sh"
+  got="$(cd "$work" && bash "$self" --prefer-default tools/x/tool.sh 2>/dev/null)" || got=""
+  if [ -n "$got" ] && grep -q new-tool "$got"; then pass "--prefer-default, absent in checkout"; else fail "--prefer-default, absent in checkout (got '$got')"; fi
+
   # 4: --with also extracts a named repo file next to the tool tree.
   got="$(cd "$work" && bash "$self" --prefer-default --with tools/x/sibling.txt tools/x/tool.sh 2>/dev/null)" || got=""
-  [ -n "$got" ] && [ -f "${RUNNER_TEMP}/default-branch-tools/tools/x/sibling.txt" ] \
-    && pass "--with extracts the named file" || fail "--with extracts the named file"
+  if [ -n "$got" ] && [ -f "${RUNNER_TEMP}/default-branch-tools/tools/x/sibling.txt" ]; then
+    pass "--with extracts the named file"
+  else
+    fail "--with extracts the named file"
+  fi
 
   # 5: in neither place -> fails closed.
   if (cd "$work" && bash "$self" tools/x/none.sh >/dev/null 2>&1); then
     fail "missing everywhere must fail"
   else
     pass "missing everywhere fails closed"
+  fi
+
+  # 6: an unreachable remote fails closed after the retry.
+  if (cd "$work" && DEFAULT_BRANCH_RETRY_SLEEP=0 DEFAULT_BRANCH_REMOTE="file://${tmp}/nonexistent" bash "$self" tools/x/tool.sh >/dev/null 2>&1); then
+    fail "unreachable remote must fail"
+  else
+    pass "unreachable remote fails closed"
   fi
 
   rm -rf "$tmp"
