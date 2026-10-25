@@ -449,8 +449,11 @@ InstawebContext* build_context_for_request(request_rec* request) {
   // setup as both the original and the proxy server, mod_pagespeed filter may
   // be applied twice. To avoid this, skip the content if it is already
   // optimized by mod_pagespeed.
+  // Check both tables: an upstream FastCGI or CGI origin can deliver the
+  // header in err_headers_out.
   // TODO(sligocki): Move inside PSOL.
-  if (apr_table_get(request->headers_out, kModPagespeedHeader) != nullptr) {
+  if (apr_table_get(request->headers_out, kModPagespeedHeader) != nullptr ||
+      apr_table_get(request->err_headers_out, kModPagespeedHeader) != nullptr) {
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request,
                   "Request not rewritten because: X-Mod-Pagespeed header set.");
     return nullptr;

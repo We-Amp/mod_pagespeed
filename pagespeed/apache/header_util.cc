@@ -222,16 +222,26 @@ class ApacheCachingHeaders : public CachingHeaders {
       : CachingHeaders(request->status), request_(request) {}
 
   bool Lookup(const StringPiece& key, StringPieceVector* values) override {
-    const char* value =
-        apr_table_get(request_->headers_out, key.as_string().c_str());
-    if (value == nullptr) {
-      return false;
+    // httpd sends err_headers_out merged with headers_out, so a header can
+    // be present in both tables at once: a Cache-Control set by php-fpm, a
+    // CGI script or "Header always set" sits in err_headers_out while
+    // headers_out may hold another one.  Collect the values from both
+    // tables, in the order httpd sends them.
+    bool found = false;
+    for (apr_table_t* table :
+         {request_->err_headers_out, request_->headers_out}) {
+      const char* value = apr_table_get(table, key.as_string().c_str());
+      if (value != nullptr) {
+        found = true;
+        SplitStringPieceToVector(value, ",", values, true);
+      }
     }
-    SplitStringPieceToVector(value, ",", values, true);
-    for (auto& value : *values) {
-      TrimWhitespace(&value);
+    if (found) {
+      for (auto& value : *values) {
+        TrimWhitespace(&value);
+      }
     }
-    return true;
+    return found;
   }
 
   bool IsLikelyStaticResourceType() const override {
@@ -254,6 +264,11 @@ class ApacheCachingHeaders : public CachingHeaders {
 void DisableCacheControlHeader(request_rec* request) {
   // Turn off Cache-Control header for the HTTP requests.
   ApacheCachingHeaders headers(request);
+  // The generated value accounts for the Cache-Control directives of both
+  // tables (Lookup reads err_headers_out too), and the response must carry
+  // only ours: drop the origin's from err_headers_out before writing ours
+  // to headers_out.
+  apr_table_unset(request->err_headers_out, HttpAttributes::kCacheControl);
   apr_table_set(request->headers_out, HttpAttributes::kCacheControl,
                 headers.GenerateDisabledCacheControl().c_str());
 }
@@ -265,6 +280,10 @@ void DisableCachingRelatedHeaders(request_rec* request) {
       HttpAttributes::CachingHeadersToBeRemoved();
   for (auto i : response_headers_to_remove) {
     apr_table_unset(request->headers_out, i.as_string().c_str());
+    // The response is sent with err_headers_out merged in, where php-fpm,
+    // CGI scripts and "Header always set" put their caching headers; unset
+    // them there as well, or they would survive next to ours.
+    apr_table_unset(request->err_headers_out, i.as_string().c_str());
   }
 }
 
