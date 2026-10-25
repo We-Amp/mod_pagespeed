@@ -114,11 +114,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now checks for the service again every 30 seconds and turns in-place
   optimization back on once it answers, with one info line saying so; the
   volume split and every other configuration or package fault are still
-  final until a restart. nginx still requires a restart after starting the
-  service. A worker whose first volume open after such a recovery detects a
-  cache-layout split also removes the stray volume file that open created,
-  the same way a refusing start-up check does, so a later pool recycle or
-  restart cannot quietly attach to it.
+  final until a restart. A worker whose first volume open after such a
+  recovery detects a cache-layout split also removes the stray volume file
+  that open created, the same way a refusing start-up check does, so a later
+  pool recycle or restart cannot quietly attach to it.
+- **nginx picks up an optimizer worker that starts after nginx, without a
+  reload.** A worker process that started while the optimizer was not
+  running kept in-place optimization off until nginx was reloaded or
+  restarted. While requests arrive, each nginx worker process now checks
+  for the optimizer again at most once every 30 seconds, off the request
+  path, and turns in-place optimization back on by itself once the
+  optimizer answers, with one info line in the error log saying so. The
+  volume split and every other configuration or package fault remain final
+  until a restart, as before.
 - **Responses served from the optimizer volume's stored original are no
   longer counted or tagged as optimizer output.** With the optimizer
   service stopped, every recorded URL was answered with the stored

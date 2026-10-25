@@ -64,7 +64,11 @@ class NgxServerContext : public SystemServerContext {
   // neither probes nor logs per request.
   bool RunDaemonStartupCheck();
 
-  // This server's daemon health.  kNotConfigured until
+  // This server's daemon health.  The start-up verdict, which may flip to
+  // kReady after a recovery recheck posted off the event thread: the probe
+  // blocks, so nginx -- unlike the Apache and IIS accessors -- never runs
+  // it inline, and the flipped verdict lands here through the adapter's
+  // published health once it does.  kNotConfigured until
   // RunDaemonStartupCheck() has run, which is also the correct answer for
   // every path that reaches serving without a daemon configured.
   DaemonHealth daemon_health() const {

@@ -42,8 +42,9 @@ class Variable;
 // thread.  This translation unit owns everything about getting that one call
 // onto a PSOL low-priority-pool sequence instead: the closure that carries
 // it, the process-wide caps that keep the queue bounded, the counter for
-// completions the caps turned away, and the time latch that keeps a missing
-// volume handle from being re-attempted per request.
+// completions the caps turned away, and the time latches that keep a missing
+// volume handle's open attempt and a recovery recheck from being posted per
+// request.
 //
 // Deliberately nginx-free so it can be unit tested standalone
 // (//test/pagespeed/nginx:ngx_daemon_record_completion_test).  Nothing here
@@ -91,7 +92,8 @@ constexpr int kDaemonNotifyQueueMaxItems = kDaemonCompletionQueueMaxItems / 2;
 // At most one RecordCache() open attempt is posted per this interval when
 // the health verdict says the daemon is usable but no volume handle is open
 // yet.  RecordCache() has its own retry schedule; this latch only keeps a
-// busy server from queueing an open per request.
+// busy server from queueing an open per request.  The recovery recheck's
+// post latch shares this interval, on its own atomic.
 constexpr int64 kDaemonOpenAttemptIntervalMs = 1000;
 
 // Registers the drop counter on one statistics object.  Must run before
@@ -127,6 +129,20 @@ bool ShouldPostDaemonOpenAttempt();
 // is the adapter's normal not-yet state, not an error this path reports.
 void PostDaemonOpenAttempt(QueuedWorkerPool::Sequence* sequence,
                            DaemonAdapter* adapter);
+
+// True at most once per kDaemonOpenAttemptIntervalMs across the process, on
+// the recheck's OWN latch so the two post cadences can never starve each
+// other.
+bool ShouldPostDaemonRecheck();
+
+// Posts one recovery recheck for `adapter` onto `sequence`.  Both are
+// borrowed.  The recheck re-reads the daemon's serving health on the pool
+// thread -- the probe blocks, so it may not run on nginx's event thread --
+// and asks for the volume open only when that verdict says the daemon is
+// usable again.  The outcome is deliberately ignored: the flipped verdict
+// publishes itself, and the next request reads it.
+void PostDaemonRecheck(QueuedWorkerPool::Sequence* sequence,
+                       DaemonAdapter* adapter);
 
 // Clock seam for the open-attempt latch.  Test-only; passing an empty
 // function restores the production steady clock.
