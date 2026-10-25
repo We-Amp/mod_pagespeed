@@ -121,6 +121,55 @@ TEST_F(DaemonSeamTest, TheInPlaceHandlerAsksTheGate) {
          "so the substrate would record for ever and hand nothing back";
 }
 
+TEST_F(DaemonSeamTest, ASubrequestTakesNoInPlacePath) {
+  // An httpd subrequest, such as a mod_include include, reaches this seam
+  // with the INCLUDING page's URL (MakeRequestUrl chases request->main), so
+  // every in-place path would run a second time under that URL: the serves
+  // would answer the included resource from the page's entry, and a miss
+  // would attach the recorder to the subrequest, whose pool Apache destroys
+  // while the protocol filter chain it shares with the main request still
+  // points at the recorder's filter, freeing it twice over.  The HTML output
+  // filter already declines subrequests; the in-place seam needs the same
+  // rule.  The decision needs a live httpd to execute, so the wiring is
+  // pinned in the source, this file's idiom: the guard exists, and it stands
+  // before each of the four in-place paths, so a subrequest neither serves
+  // nor records on either substrate.
+  const GoogleString source =
+      ReadSource("pagespeed/apache/instaweb_handler.cc");
+  const size_t handler = source.find("bool InstawebHandler::HandleAsInPlace()");
+  ASSERT_NE(GoogleString::npos, handler)
+      << "the in-place seam has been renamed; this pin needs updating";
+
+  const size_t guard = source.find("request_->main != nullptr", handler);
+  ASSERT_NE(GoogleString::npos, guard)
+      << "the in-place seam no longer skips httpd subrequests, so a "
+         "server-side include runs in-place optimization under the "
+         "including page's URL";
+
+  // The daemon arm: no serve attempt, no recorder attached.
+  const size_t daemon_serve =
+      source.find("ServeFromDaemonSubstrate()", handler);
+  ASSERT_NE(GoogleString::npos, daemon_serve);
+  const size_t daemon_record =
+      source.find("MakeDaemonIproRecorderIfReady(", handler);
+  ASSERT_NE(GoogleString::npos, daemon_record);
+  EXPECT_LT(guard, daemon_serve)
+      << "the subrequest guard runs after the daemon serve attempt";
+  EXPECT_LT(guard, daemon_record)
+      << "the subrequest guard runs after a daemon recorder is attached";
+
+  // The classic arm: no serve attempt, no recorder attached.
+  const size_t classic_serve = source.find("FetchInPlaceResource(", handler);
+  ASSERT_NE(GoogleString::npos, classic_serve);
+  const size_t classic_record =
+      source.find("MakeIproRecorderIfClassic(", handler);
+  ASSERT_NE(GoogleString::npos, classic_record);
+  EXPECT_LT(guard, classic_serve)
+      << "the subrequest guard runs after the classic serve attempt";
+  EXPECT_LT(guard, classic_record)
+      << "the subrequest guard runs after a classic recorder is attached";
+}
+
 TEST_F(DaemonSeamTest, BothArmsReadOneClientsHeadersThroughOneReader) {
   // The mask a request SELECTS with has to be the mask a recording of that
   // same request would NOTIFY at.  Two independent readings of one client's
