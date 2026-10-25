@@ -36,7 +36,11 @@ jobs:
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@ci-dev
 
   # Dispatch with full=true to exercise pipeline-full.yml from the ci-dev
-  # branch; the called workflow takes its permissions from the top level.
+  # branch; actions: read is for its path filter (reads the push runs of the
+  # default branch), and a called workflow cannot exceed what its caller grants.
   full:
     if: ${{ inputs.full }}
+    permissions:
+      actions: read
+      contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@ci-dev
