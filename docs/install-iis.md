@@ -29,7 +29,7 @@ on, see [Running PageSpeed for IIS with the optimizer](daemon-adapter-iis.md).
 
 ## Configuration
 
-PageSpeed for IIS is configured via `web.config` XML files.
+PageSpeed directives live in `pagespeed.config`, not in `web.config`. The machine-wide `C:\ProgramData\We-Amp\PageSpeed\pagespeed.config` applies to every site; a `pagespeed.config` in a site's root, when present, is used for that site instead. Directives use the `pagespeed <Option> <args>` form, and the file is re-read when it changes. `web.config` is only used for IIS plumbing: module registration and request filtering.
 
 **Important:** If the module is registered globally (via `New-WebGlobalModule`),
 do NOT add it again in the site's `web.config` -- this causes 500.19 errors.
@@ -52,9 +52,7 @@ applies default optimizations (image compression, CSS/JS minification,
 cache extension) to all responses. The admin UI is available at
 `/pagespeed_admin` for monitoring and diagnostics.
 
-Filter configuration is managed through the `web.config` XML. For advanced
-configuration options, see the [CLAUDE.md](../CLAUDE.md#windowsiis-development)
-development guide.
+Filters are enabled and disabled in `pagespeed.config` (for example `pagespeed EnableFilters collapse_whitespace`). See [iis-limitations.md](iis-limitations.md#architecture) for how the configuration file is resolved, and [Running PageSpeed for IIS with the optimizer](daemon-adapter-iis.md) for the optimizer directives.
 
 ## Verification
 

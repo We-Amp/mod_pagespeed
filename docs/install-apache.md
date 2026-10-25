@@ -3,13 +3,13 @@
 ## Requirements
 
 - Apache 2.4+
-- Linux x86_64 (Ubuntu 22.04+, Debian 12+, RHEL 9+, Rocky 9+)
+- Linux x86_64 or arm64 (Ubuntu 22.04+, Debian 12+, RHEL 9+, Rocky 9+)
 
 ## Install
 
 Add the We-Amp package repository (once), then install. Direct `.deb` / `.rpm` /
 `.so` downloads (amd64 + arm64) are also on the
-[downloads page](https://modpagespeed.com/1.1/docs/downloads/).
+[downloads page](https://modpagespeed.com/download/).
 
 ```bash
 curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
@@ -20,10 +20,10 @@ sudo dnf install mod-pagespeed     # RHEL / AlmaLinux / Rocky 9
 
 The package installs `mod_pagespeed.so` (`/usr/lib/apache2/modules/` on
 Debian/Ubuntu, `/usr/lib64/httpd/modules/` on EL9), its config, and the cache
-directory at `/var/cache/mod_pagespeed/`. Enable and restart:
+directory at `/var/cache/mod_pagespeed/`. On a first install the Debian/Ubuntu package enables the module itself; restart Apache:
 
 ```bash
-sudo a2enmod pagespeed && sudo systemctl restart apache2   # Debian/Ubuntu
+sudo systemctl restart apache2   # Debian/Ubuntu
 sudo systemctl restart httpd                               # EL9
 ```
 
@@ -116,12 +116,12 @@ curl -I http://localhost/
 ./test/system/run_system_tests.sh -k sanity  # Quick sanity check
 ```
 
-Expected: 195 pass, 14 skip, 0 fail.
+Expected: no failures. Some tests skip by design, depending on the server type and on whether the optional HTTPS and secondary test hosts are configured.
 
 ## Next steps: configuration & operations
 
 Full configuration and operations documentation lives on modpagespeed.com:
 
-- [Filter selection](https://modpagespeed.com/1.1/docs/filter-selection/) — rewrite levels and per-filter enable/disable
-- [Filter reference](https://modpagespeed.com/1.1/docs/filter-reference/) — what each filter does and which level enables it
-- [Admin console](https://modpagespeed.com/1.1/docs/admin-console/) — statistics, cache inspection, and cache purging
+- [Filter selection](https://modpagespeed.com/docs/filter-selection/) — rewrite levels and per-filter enable/disable
+- [Filter reference](https://modpagespeed.com/docs/filters/) — what each filter does and which level enables it
+- [Admin console](https://modpagespeed.com/docs/admin-console/) — statistics, cache inspection, and cache purging
