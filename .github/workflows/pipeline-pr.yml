@@ -3003,6 +3003,23 @@ jobs:
           & .\tools\ci\Set-WerLocalDumps.ps1 -Enable -DumpDir $env:PAGESPEED_DUMP_DIR | Out-Null
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::could not arm crash dumps"; exit 1 }
 
+      # The optimizer worker the module's daemon paths talk to: the pinned
+      # optimizer release's Windows zip, fetched and verified the way the
+      # installer does it, started as a background process with its volume
+      # under C:\pagespeed_optimizer and the management API on loopback
+      # behind a token generated for this run. The step exports the API
+      # address, token and volume to the test step, and setup_iis_full.ps1
+      # writes DaemonSocketPath and DaemonVolumePath into the configuration
+      # of an extra site only (its URL is exported as
+      # PAGESPEED_IIS_DAEMON_SITE_URL), so the main site keeps classic
+      # in-place optimization. The volume is emptied at each start. A pinned
+      # release that cannot be fetched fails the job; it is never skipped.
+      - name: Start the optimizer worker
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tools\ci\Start-OptimizerWorker.ps1 -Action start
+          exit $LASTEXITCODE
+
       # Full IIS, not IIS Express: the runner is a service, and IIS Express
       # needs an interactive desktop session.
       - name: Run the IIS system tests
@@ -3018,6 +3035,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose
           exit $LASTEXITCODE
+
+      # The worker goes down with the job's tests, whatever their outcome; its
+      # logs are in the evidence directory the failure upload ships.
+      - name: Stop the optimizer worker
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          .\tools\ci\Start-OptimizerWorker.ps1 -Action stop
+          $global:LASTEXITCODE = 0
 
       # On a failure, stage this run's dumps (compressed, with a decode when
       # symbols are available) into the evidence directory that the upload
