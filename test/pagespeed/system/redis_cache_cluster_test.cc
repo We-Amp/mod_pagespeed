@@ -26,7 +26,6 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
-#include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -36,6 +35,7 @@
 #include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/redis_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/kernel/cache/cache_test_base.h"
 #include "test/pagespeed/system/redis_cache_cluster_setup.h"
@@ -74,7 +74,13 @@ class RedisCacheClusterTest : public CacheTestBase {
   RedisCacheClusterTest()
       : thread_system_(Platform::CreateThreadSystem()),
         statistics_(thread_system_.get()),
-        timer_(new NullMutex, 0) {
+        timer_(new NullMutex, 0),
+        handler_(thread_system_->NewMutex()) {
+    // The cache's timeout and error paths log through this handler; quiet
+    // keeps those messages in memory so a log-file write cannot stall the
+    // redis client thread past the timeout the operation tests measure
+    // (issue #319).
+    handler_.set_quiet();
     RedisCache::InitStats(&statistics_);
   }
 
@@ -112,7 +118,7 @@ class RedisCacheClusterTest : public CacheTestBase {
   std::unique_ptr<ThreadSystem> thread_system_;
   SimpleStats statistics_;
   MockTimer timer_;
-  GoogleMessageHandler handler_;
+  MockMessageHandler handler_;
 
   StringVector node_ids_;
   std::vector<int> ports_;

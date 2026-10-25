@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_KERNEL_BASE_MOCK_MESSAGE_HANDLER_H_
 #define PAGESPEED_KERNEL_BASE_MOCK_MESSAGE_HANDLER_H_
 
+#include <atomic>
 #include <map>
 #include <memory>
 
@@ -66,6 +67,16 @@ class MockMessageHandler : public MessageHandler {
   // it will not be printed, but will still be counted.
   void AddPatternToSkipPrinting(const char* pattern);
 
+  // Stops the pass-through print to the process log while keeping every
+  // message counted and buffered (Dump() still answers).  For fixtures whose
+  // measured region must not write to the log file: the print goes through
+  // the synchronous process logger, and on a host whose disk writes stall
+  // that write can freeze the thread that just timed out, turning a correct
+  // timeout into a failed assertion (issue #319).  Call before handing this
+  // handler to the component under test; the flag is read on logging
+  // threads.
+  void set_quiet();
+
   // Dumps contents of String Buffer.
   bool Dump(Writer* writer) override;
 
@@ -101,6 +112,8 @@ class MockMessageHandler : public MessageHandler {
   // Number of newline-terminated lines appended to buffer_ (see
   // DumpWithCount() above).
   int64 lines_written_ = 0;
+  // Set by set_quiet(); read on logging threads, so atomic.
+  std::atomic<bool> quiet_{false};
   // This handler is only for internal use in Dump method.
   GoogleMessageHandler internal_handler_;
 
