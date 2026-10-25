@@ -15,6 +15,22 @@ The pipeline is being moved over in steps. This document describes the
 shape and the tooling; the sections on tiers and required checks say which
 jobs exist today.
 
+## Tools a step runs from the checkout
+
+A pull request runs the pipeline at `master` but checks out its own commit,
+so a branch cut before a tool was added (or before its command line changed)
+does not have the tool the pipeline calls. A step of a master pipeline that
+executes a script from the checkout must therefore tolerate such a branch: it
+takes the tool through `tools/ci/with-default-branch-tool.sh` (bash; pass
+`--prefer-default` when an older copy exists but takes different arguments) or
+`tools/ci/Get-DefaultBranchTool.ps1` (PowerShell). They use the checkout's
+copy when there is one, otherwise fetch `master` and use its copy (with the
+files beside it), and fail closed when neither has it. The helper may itself
+be missing from an old branch, so the step first fetches it from `master` with
+a few inline lines; copy them from an existing step. A tool that inspects the
+checkout must be pointed at it explicitly (`assemble.py --lint --repo-root "$PWD"`),
+since a fetched copy lives under `$RUNNER_TEMP`.
+
 ## Tiers
 
 | Tier | Workflow | Runs on | Holds |
