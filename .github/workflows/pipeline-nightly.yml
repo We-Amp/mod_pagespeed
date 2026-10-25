@@ -2584,6 +2584,11 @@ jobs:
             if [ -n "${CI_WIN_CACHE_MAX_SIZE:-}" ]; then
               FLAGS+=("--experimental_disk_cache_gc_max_size=${CI_WIN_CACHE_MAX_SIZE}")
             fi
+            # Shut down the server an earlier job left, so nothing holds the disk cache.
+            "$BAZEL_BIN" --output_user_root="$(echo "${CI_WIN_BAZEL_OUTPUT_ROOT:-${SYSTEMDRIVE:-C:}/b}" | tr '\\' '/')" shutdown || true
+            # Bazel's own cache collection never runs here (the server is shut down
+            # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
+            powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "${GITHUB_WORKSPACE}/tools/ci/Prune-WinDiskCache.ps1")" -CacheDir "$(cygpath -w "${CACHE_DIR}-asan")" || true
           fi
           # A short output root keeps Windows path lengths in bounds.
           OUT_ROOT="${CI_WIN_BAZEL_OUTPUT_ROOT:-${SYSTEMDRIVE:-C:}/b}"
@@ -2893,6 +2898,11 @@ jobs:
             if [ -n "${CI_WIN_CACHE_MAX_SIZE:-}" ]; then
               FLAGS+=("--experimental_disk_cache_gc_max_size=${CI_WIN_CACHE_MAX_SIZE}")
             fi
+            # Shut down the server an earlier job left, so nothing holds the disk cache.
+            "$BAZEL_BIN" --output_user_root="$(echo "${CI_WIN_BAZEL_OUTPUT_ROOT:-${SYSTEMDRIVE:-C:}/b}" | tr '\\' '/')" shutdown || true
+            # Bazel's own cache collection never runs here (the server is shut down
+            # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
+            powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "${GITHUB_WORKSPACE}/tools/ci/Prune-WinDiskCache.ps1")" -CacheDir "$(cygpath -w "${CACHE_DIR}-appverif")" || true
           fi
           # A short output root keeps Windows path lengths in bounds.
           OUT_ROOT="${CI_WIN_BAZEL_OUTPUT_ROOT:-${SYSTEMDRIVE:-C:}/b}"

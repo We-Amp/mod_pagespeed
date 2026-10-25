@@ -1023,6 +1023,9 @@ jobs:
           }
           # Shut down a stale server so it picks up the enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
+          # Bazel's own cache collection never runs here (the server is shut down
+          # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
+          if ($env:WIN_CACHE_DIR) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Prune-WinDiskCache.ps1') -CacheDir $env:WIN_CACHE_DIR }
           # Build-tool runfiles trees with junctions that an earlier job left in this
           # output base break rules_foreign_cc's tool copy; drop them first.
           $outputBase = "$(& $bazel $root info output_base 2>$null)".Trim()
@@ -1247,6 +1250,11 @@ jobs:
           } else {
             Write-Host "::notice::BAZEL_REMOTE_CACHE_URL not set: building without the remote cache (docs/ci/runner-environment.md)"
           }
+          # Shut down the server an earlier job left, so nothing holds the disk cache.
+          & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
+          # Bazel's own cache collection never runs here (the server is shut down
+          # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
+          if ($env:WIN_CACHE_DIR) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Prune-WinDiskCache.ps1') -CacheDir $env:WIN_CACHE_DIR }
           # Build-tool runfiles trees with junctions that an earlier job left in this
           # output base break rules_foreign_cc's tool copy; drop them first.
           $outputBase = "$(& $bazel $root info output_base 2>$null)".Trim()
