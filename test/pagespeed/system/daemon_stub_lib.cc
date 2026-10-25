@@ -55,6 +55,12 @@
 //                                  sentinel marker), steerable so the serve
 //                                  arm's sentinel guard is testable against
 //                                  the one input it exists for
+//   PS_STUB_READ_ALT_STATUS        non-zero: every by-id read fails with this
+//                                  code (one of the peer's I/O, corrupted,
+//                                  busy or closed values) before any
+//                                  alternate is consulted, so a caller is
+//                                  testable against a probe that answers
+//                                  neither found nor not-found
 //
 // Two cases cannot be environment variables, because a symbol cannot be
 // un-exported at run time and its PRESENCE is what the loader acts on. Each is
@@ -198,11 +204,18 @@ struct StubNotifyParams {
   const char* option_signature;
 };
 
+// The peer's published error codes, in its numbering.  Only the ones some
+// caller distinguishes by value or a test steers a read into are here;
+// corrupted and busy exist for exactly one purpose: ps_cache_read_alternate
+// being asked to fail the way the real volume does -- neither found nor
+// not-found.
 constexpr int kOk = 0;
 constexpr int kErrNotFound = 1;
 constexpr int kErrIo = 2;
+constexpr int kErrCorrupted = 3;
 constexpr int kErrNoSpace = 4;
 constexpr int kErrInvalidArg = 5;
+constexpr int kErrBusy = 6;
 constexpr int kErrClosed = 7;
 
 constexpr uint8_t kSentinelOriginal = 0x0C;
@@ -1288,6 +1301,20 @@ int ps_cache_read_alternate(void* cache, const char* url, const char* hostname,
     return kErrInvalidArg;
   }
   *out = nullptr;
+  // A steered failure, standing for the states a real volume reaches:
+  // busy while another process re-records, an I/O error, a corrupted
+  // entry, a closed volume.  Before any alternate is consulted, because
+  // the point is that the READ failed, not that a particular id was
+  // missing -- the statuses the serve arm's probe has to treat as
+  // restrictions-unknown rather than as none.
+  const long forced_status = EnvOr("PS_STUB_READ_ALT_STATUS", 0);
+  if (forced_status != 0) {
+    char line[256];
+    snprintf(line, sizeof(line), "read_alternate url=%s id=%u err=%ld", url,
+             static_cast<unsigned>(alternate_id), forced_status);
+    Log(line);
+    return static_cast<int>(forced_status);
+  }
   StubAlternate table[16];
   const size_t count = StubParseAlternates(table, 16);
   for (size_t i = 0; i < count; ++i) {
@@ -1414,6 +1441,22 @@ int ps_evaluate_freshness(const StubFreshnessInput* input,
   uint32_t effective = input->origin_max_age;
   if ((input->origin_cc_flags & 0x0040u) != 0) {  // s-maxage present
     effective = input->origin_s_maxage;           // shared cache prefers it
+  }
+  // TYPE DEFAULTS FOR A SILENT ORIGIN, the peer's own step and numbers:
+  // an entry whose stored state records neither a lifetime nor a
+  // `Cache-Control` line (0x0200, the header-present bit) is served on the
+  // default -- 300 s for a stylesheet or script, 3600 s for an image --
+  // not refused.  The stand-in used to model zero as always-refused, which
+  // made an `Expires`-only origin look safe to store as silence; the peer
+  // serves it, which is why the record arm derives that lifetime now.
+  // HTML is deliberately not modelled: the peer's html default is 0, and
+  // this module's arm declines HTML before it ever evaluates freshness.
+  if (effective == 0 && (input->origin_cc_flags & 0x0200u) == 0) {
+    if (input->content_type == 1 || input->content_type == 2) {  // css, js
+      effective = 300u;
+    } else if (input->content_type == 3) {                       // image
+      effective = 3600u;
+    }
   }
   if (effective > 86400u) {
     effective = 86400u;
