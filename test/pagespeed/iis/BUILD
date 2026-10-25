@@ -428,6 +428,22 @@ pagespeed_cc_test(
     ],
 )
 
+# The per-site process context's release path: a site whose startup failed
+# is released when its configuration is repaired or the application pool
+# recycles, and that release must tolerate exactly the state a failed
+# startup left. The context sits behind the IIS runtime headers, so the
+# lifecycle is pinned as text over the port's sources (runs on every
+# platform).
+pagespeed_cc_test(
+    name = "iis_process_context_seam_test",
+    srcs = ["iis_process_context_seam_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # Reading response entity chunks for the HTML rewriter: unreadable chunk
 # types and file-handle chunks whose file changes size between the length
 # lookup and the read, against real temporary files. Also pins that

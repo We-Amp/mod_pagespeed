@@ -131,18 +131,25 @@ namespace net_instaweb
 		const GoogleString site_app_id_;
 		std::atomic<DWORD> reference_count_;
 		HTTP_MODULE_ID module_id_;
-		IisRewriteDriverFactory* driver_factory_; 
+		// Every pointer this class owns starts null at its declaration, so
+		// a context whose GetServerContext() failed, or never ran, is safe
+		// to release: Shutdown() null-checks each member before deleting
+		// it, and a member that was never created must read as null, not
+		// as whatever the heap block happened to contain.  message_handler_
+		// and root_options_ are the exceptions; the constructor's
+		// initializer list always supplies them.
+		IisRewriteDriverFactory* driver_factory_ = nullptr;
 		MessageHandler * message_handler_;
 		IisRewriteOptions* root_options_;
-		ProxyFetchFactory* fetch_factory_;
-		IisServerContext* server_context_;
+		ProxyFetchFactory* fetch_factory_ = nullptr;
+		IisServerContext* server_context_ = nullptr;
 		DWORD page_size_;
 		// KS: needed for request context
-		AbstractMutex *loggingMutex_;
+		AbstractMutex *loggingMutex_ = nullptr;
 		std::wstring app_pool_name_;
 		AtomicInt32 stopped_;
 		global_settings settings_;
-		AbstractMutex* server_context_mutex_;
+		AbstractMutex* server_context_mutex_ = nullptr;
 		bool ok_;
 
 		// Set when the daemon startup check registered this factory's
