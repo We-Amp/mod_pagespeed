@@ -4309,6 +4309,13 @@ void ps_query_params_handler(ngx_http_request_t* r, StringPiece* data) {
 void ps_admin_body_handler(ngx_http_request_t* r) {
   RequestRouting::Response response_category = ps_route_request(r);
   ngx_int_t rc = ps_resource_handler(r, false, response_category);
+  // A request-body post handler must finish the request itself: handing it
+  // back to the phase engine with NGX_DECLINED would land in this module's
+  // phase again, now with the body already read.  Answer a declined admin
+  // POST with the 404 the admin location gives a path it does not handle.
+  if (rc == NGX_DECLINED) {
+    rc = NGX_HTTP_NOT_FOUND;
+  }
   if (rc != NGX_DONE) {
     ngx_http_finalize_request(r, rc);
   }
@@ -4412,6 +4419,16 @@ ngx_int_t ps_content_handler(ngx_http_request_t* r) {
       if (r->method == NGX_HTTP_POST) {
         // POST requests need the body read before we can handle them.
         // Control flow continues in ps_admin_body_handler.
+        //
+        // Arm the body read at most once per request: a second arm of ours
+        // would make nginx invoke the post handler synchronously from inside
+        // this phase. Only a read this module itself armed carries our post
+        // handler, so a body another module already read reaches the arm,
+        // which hands it straight to the post handler.
+        if (r->request_body != nullptr &&
+            r->request_body->post_handler == ps_admin_body_handler) {
+          return NGX_DECLINED;
+        }
         ngx_int_t rc =
             ngx_http_read_client_request_body(r, ps_admin_body_handler);
         if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
