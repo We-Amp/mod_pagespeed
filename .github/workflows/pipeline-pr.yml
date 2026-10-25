@@ -270,13 +270,37 @@ jobs:
       - name: Changelog fragment tools - self-tests
         if: ${{ !cancelled() }}
         run: |
-          python3 -I tools/changelog/assemble.py --self-test
-          python3 -I tools/changelog/to_fragment.py --self-test
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
+          h=tools/ci/with-default-branch-tool.sh
+          if [ ! -f "$h" ]; then
+            git fetch --quiet --depth=1 origin master
+            h="${RUNNER_TEMP}/with-default-branch-tool.sh"
+            git show "FETCH_HEAD:tools/ci/with-default-branch-tool.sh" > "$h"
+          fi
+          assemble="$(bash "$h" --with CHANGELOG.md tools/changelog/assemble.py)"
+          to_fragment="$(bash "$h" tools/changelog/to_fragment.py)"
+          python3 -I "$assemble" --self-test
+          python3 -I "$to_fragment" --self-test
+
+      - name: Default-branch tool helper - self-test
+        if: ${{ !cancelled() && hashFiles('tools/ci/with-default-branch-tool.sh') != '' }}
+        run: bash tools/ci/with-default-branch-tool.sh --self-test
 
       # Fragment content (the release-note gate reads names only).
       - name: Changelog fragments are well formed
         if: ${{ !cancelled() }}
-        run: python3 -I tools/changelog/assemble.py --lint
+        run: |
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
+          h=tools/ci/with-default-branch-tool.sh
+          if [ ! -f "$h" ]; then
+            git fetch --quiet --depth=1 origin master
+            h="${RUNNER_TEMP}/with-default-branch-tool.sh"
+            git show "FETCH_HEAD:tools/ci/with-default-branch-tool.sh" > "$h"
+          fi
+          assemble="$(bash "$h" tools/changelog/assemble.py)"
+          python3 -I "$assemble" --lint --repo-root "$PWD"
 
       # A selected image variant names every request header the selection
       # read in Vary. The module mirrors the optimizer's list; this compares
@@ -342,7 +366,17 @@ jobs:
       - name: User-facing change carries a release note
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
-          bash tools/ci/check_release_note.sh \
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the changelog self-tests step).
+          h=tools/ci/with-default-branch-tool.sh
+          if [ ! -f "$h" ]; then
+            git fetch --quiet --depth=1 origin master
+            h="${RUNNER_TEMP}/with-default-branch-tool.sh"
+            git show "FETCH_HEAD:tools/ci/with-default-branch-tool.sh" > "$h"
+          fi
+          # An older copy exists but rejects --added-from, so always use master's.
+          gate="$(bash "$h" --prefer-default tools/ci/check_release_note.sh)"
+          bash "$gate" \
             --files-from "${RUNNER_TEMP}/pr-files.txt" \
             --haystack-from "${RUNNER_TEMP}/pr-haystack.txt" \
             --added-from "${RUNNER_TEMP}/pr-added.txt"
@@ -2400,11 +2434,23 @@ jobs:
           }
           # Shut down a stale server so it picks up the vcvars-enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
-          powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\Prune-WinDiskCache_test.ps1"
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the Build the IIS module step).
+          $dbt = 'tools\ci\Get-DefaultBranchTool.ps1'
+          if (-not (Test-Path -LiteralPath $dbt)) {
+            git fetch --quiet --depth=1 origin master
+            $dbt = Join-Path $env:RUNNER_TEMP 'Get-DefaultBranchTool.ps1'
+            git show 'FETCH_HEAD:tools/ci/Get-DefaultBranchTool.ps1' | Set-Content -Encoding ascii -LiteralPath $dbt
+          }
+          if (Test-Path tools\ci\Get-DefaultBranchTool_test.ps1) { powershell -NoProfile -ExecutionPolicy Bypass -File "$($env:GITHUB_WORKSPACE)\tools\ci\Get-DefaultBranchTool_test.ps1"; if ($LASTEXITCODE -ne 0) { Write-Host "::error::Get-DefaultBranchTool self-test failed (exit $LASTEXITCODE)"; exit 1 } }
+          $prune = & $dbt -Path 'tools/ci/Prune-WinDiskCache.ps1' -With 'tools/ci/Prune-WinDiskCache_test.ps1' | Select-Object -Last 1
+          if (-not $prune -or -not (Test-Path -LiteralPath $prune)) { Write-Host "::error::could not locate Prune-WinDiskCache.ps1"; exit 1 }
+          $pruneTest = Join-Path (Split-Path -Parent $prune) 'Prune-WinDiskCache_test.ps1'
+          powershell -NoProfile -ExecutionPolicy Bypass -File $pruneTest
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Prune-WinDiskCache self-test failed (exit $LASTEXITCODE)"; exit 1 }
           # Bazel's own cache collection never runs here (the server is shut down
           # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
-          if ($env:WIN_CACHE_DIR) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Prune-WinDiskCache.ps1') -CacheDir $env:WIN_CACHE_DIR }
+          if ($env:WIN_CACHE_DIR) { & $prune -CacheDir $env:WIN_CACHE_DIR }
           # Build-tool runfiles trees with junctions that an earlier job left in this
           # output base break rules_foreign_cc's tool copy; drop them first, after
           # the cleanup's own hermetic test.
@@ -2701,9 +2747,19 @@ jobs:
           }
           # Shut down a stale server so it picks up the vcvars-enriched PATH.
           & { $ErrorActionPreference = 'Continue'; & $bazel $root shutdown 2>$null } *>$null
+          # A branch that predates a tool takes it from master (docs/ci/pipelines.md;
+          # canonical copy of this block: the Build the IIS module step).
+          $dbt = 'tools\ci\Get-DefaultBranchTool.ps1'
+          if (-not (Test-Path -LiteralPath $dbt)) {
+            git fetch --quiet --depth=1 origin master
+            $dbt = Join-Path $env:RUNNER_TEMP 'Get-DefaultBranchTool.ps1'
+            git show 'FETCH_HEAD:tools/ci/Get-DefaultBranchTool.ps1' | Set-Content -Encoding ascii -LiteralPath $dbt
+          }
+          $prune = & $dbt -Path 'tools/ci/Prune-WinDiskCache.ps1' | Select-Object -Last 1
+          if (-not $prune -or -not (Test-Path -LiteralPath $prune)) { Write-Host "::error::could not locate Prune-WinDiskCache.ps1"; exit 1 }
           # Bazel's own cache collection never runs here (the server is shut down
           # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
-          if ($env:WIN_CACHE_DIR) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Prune-WinDiskCache.ps1') -CacheDir $env:WIN_CACHE_DIR }
+          if ($env:WIN_CACHE_DIR) { & $prune -CacheDir $env:WIN_CACHE_DIR }
           # Build-tool runfiles trees with junctions that an earlier job left in this
           # output base break rules_foreign_cc's tool copy; drop them first.
           $outputBase = "$(& $bazel $root info output_base 2>$null)".Trim()
