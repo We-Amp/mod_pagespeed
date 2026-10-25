@@ -29,8 +29,9 @@ most often miss; it does not duplicate `CLAUDE.md`.
 - **Customer-facing 1.1 docs live in `pagespeed-optimizer/website/src/content/docs-1.1/`**,
   not in this repo's `docs/`.
 - **A PR touching `pagespeed/`, `net/` or `install/` must carry a release note**
-  — a blocking check (`release-note-guard` in the maintainer CI). Add an entry to `RELEASE_NOTES.md` (top,
-  in-development section) *or* `CHANGELOG.md` (`## [Unreleased]`); either one is
+  (a blocking check, `release-note-guard` in the maintainer CI). Add a fragment `changelog.d/<branch-slug>.<category>.md` (the bullet
+  exactly as it should read; see `changelog.d/README.md`), *or* an entry in `RELEASE_NOTES.md` (top,
+  in-development section) or `CHANGELOG.md` (`## [Unreleased]`, still accepted for now); any one is
   enough. Tests, `BUILD` files and `*.md` do not trigger it; `pagespeed/iis/` does.
   If nothing observable changed, waive it with a reason (≥12 chars) in a commit
   message or the PR body: `Release-Note: none - <why this is invisible to users>`.
