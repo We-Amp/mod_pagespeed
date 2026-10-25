@@ -74,7 +74,7 @@ jobs:
   # covers and publishes `sidecar_pair`. A dispatch (the release candidate
   # run) always builds the pair, so no fleet job of it is skipped; a pull
   # request labelled ci:full diffs against its base; a push diffs from the
-  # head of the last push run that finished without being cancelled
+  # head of the last push run of CI that succeeded
   # (tools/ci/push_range_base.sh), and no usable base counts as everything
   # changed. The weekly nightly run covers drift outside
   # the paths.
@@ -111,9 +111,8 @@ jobs:
               sidecar_pair=false
             fi
           elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            # Cumulative base: the last push run that finished without being
-            # cancelled, so a run superseded by a newer push leaves its range
-            # to the next one. No usable base counts as everything changed.
+            # Cumulative base: the last push run that succeeded, so a run that
+            # was cancelled or failed leaves its range to the next one. No usable base counts as everything changed.
             base="$(bash tools/ci/push_range_base.sh)" || base=""
             if [ -n "${base}" ]; then
               git diff --name-only "${base}" "${GITHUB_SHA}" > "${changed}"

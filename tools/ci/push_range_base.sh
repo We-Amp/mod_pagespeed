@@ -5,12 +5,14 @@
 # Base of the cumulative range a push to the default branch covers
 # (docs/ci/pipelines.md, "The sidecar native pair"). The full tier's path
 # filter diffs <base>..GITHUB_SHA. The base is the head of the most recent
-# push `CI` run on the default branch that completed with a conclusion other
-# than `cancelled` and whose head is an ancestor of GITHUB_SHA: that run's own
-# range was evaluated, so everything after it is still to be examined. A
-# cancelled run (a newer push superseded it) never evaluated its range, which
-# is why `github.event.before` is not enough: it names the previous push even
-# when that push's run was cancelled.
+# push run of CI (ci.yml) on the default branch that SUCCEEDED and whose head
+# is an ancestor of GITHUB_SHA: that run's own range was evaluated, so
+# everything after it is still to be examined. Any other conclusion (cancelled,
+# failure, startup_failure, timed_out, skipped, none) may never have evaluated
+# its range, which is why `github.event.before` is not enough either: it names
+# the previous push even when that push's run was cancelled. The cost: after a
+# red push to the default branch, the next push rebuilds the pair if the
+# combined range touches it.
 #
 # Env: GITHUB_REPOSITORY, GITHUB_SHA, GH_TOKEN (actions: read); optional
 # DEFAULT_BRANCH (default master). Run from a checkout with full history.
@@ -33,14 +35,14 @@ if [ -z "${repo}" ] || [ -z "${sha}" ]; then
   exit 0
 fi
 
-if ! body="$(gh api "repos/${repo}/actions/runs?event=push&branch=${branch}&status=completed&per_page=30")"; then
+if ! body="$(gh api "repos/${repo}/actions/workflows/ci.yml/runs?event=push&branch=${branch}&status=completed&per_page=30")"; then
   log "the runs API call failed"
   exit 0
 fi
 
 if ! candidates="$(printf '%s' "${body}" | jq -r --arg sha "${sha}" '
     [ (.workflow_runs? // [])[]?
-      | select(.name == "CI" and .conclusion != "cancelled" and .head_sha != $sha
+      | select(.conclusion == "success" and .head_sha != $sha
                and ((.head_sha // "") | test("^[0-9a-f]{40}$"))) ]
     | sort_by(.created_at) | reverse | .[].head_sha' 2>/dev/null)"; then
   log "the runs API answer is unusable"
@@ -48,7 +50,7 @@ if ! candidates="$(printf '%s' "${body}" | jq -r --arg sha "${sha}" '
 fi
 
 if [ -z "${candidates}" ]; then
-  log "no completed, uncancelled push CI run on ${branch} other than this commit"
+  log "no successful push run of CI on ${branch} other than this commit"
   exit 0
 fi
 

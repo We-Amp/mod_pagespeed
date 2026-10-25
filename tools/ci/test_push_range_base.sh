@@ -97,7 +97,7 @@ check() {
 
 run "$(runs "CI:${C3}:success:2026-10-25T03:00:00Z" "CI:${C2}:success:2026-10-25T02:00:00Z")"
 check "newest-completed-run-is-the-base" "${C3}"
-if grep -qF 'repos/We-Amp/example/actions/runs?event=push&branch=master&status=completed&per_page=30' "${WORK}/gh.log"; then
+if grep -qF 'repos/We-Amp/example/actions/workflows/ci.yml/runs?event=push&branch=master&status=completed&per_page=30' "${WORK}/gh.log"; then
   pass "queried the completed push runs of master"
 else
   fail "gh log: $(cat "${WORK}/gh.log")"
@@ -105,7 +105,13 @@ fi
 
 # Order in the answer does not matter: created_at decides.
 run "$(runs "CI:${C2}:success:2026-10-25T02:00:00Z" "CI:${C3}:failure:2026-10-25T03:00:00Z")"
-check "failed-run-still-evaluated-its-range" "${C3}"
+check "failed-run-is-passed-over" "${C2}"
+for c in startup_failure timed_out skipped neutral stale action_required; do
+  run "$(runs "CI:${C3}:${c}:2026-10-25T03:00:00Z" "CI:${C2}:success:2026-10-25T02:00:00Z")"
+  check "${c}-run-is-passed-over" "${C2}"
+done
+run "{\"workflow_runs\":[{\"head_sha\":\"${C3}\",\"conclusion\":null,\"created_at\":\"2026-10-25T03:00:00Z\"},{\"head_sha\":\"${C2}\",\"conclusion\":\"success\",\"created_at\":\"2026-10-25T02:00:00Z\"}]}"
+check "null-conclusion-is-passed-over" "${C2}"
 
 run "$(runs "CI:${C3}:cancelled:2026-10-25T03:00:00Z" "CI:${C2}:cancelled:2026-10-25T02:00:00Z" "CI:${C1}:success:2026-10-25T01:00:00Z")"
 check "cancelled-runs-are-skipped" "${C1}" "base ${C1}"
@@ -120,10 +126,7 @@ run "$(runs "CI:${C4}:success:2026-10-25T04:00:00Z" "CI:${C3}:success:2026-10-25
 check "current-sha-is-excluded" "${C3}"
 
 run "$(runs "CI:${C4}:success:2026-10-25T04:00:00Z")"
-check "only-current-sha-gives-nothing" "" "no completed"
-
-run "$(runs "Other:${C3}:success:2026-10-25T03:00:00Z" "CI:${C2}:success:2026-10-25T02:00:00Z")"
-check "other-workflows-are-ignored" "${C2}"
+check "only-current-sha-gives-nothing" "" "no successful"
 
 run "$(runs "CI:${SIDE}:success:2026-10-25T03:00:00Z" "CI:${NOT_THERE}:success:2026-10-25T02:00:00Z")"
 check "no-ancestor-gives-nothing" "" "no candidate is an ancestor"
@@ -132,13 +135,13 @@ run "" FAKE_GH_FAIL=1
 check "api-failure-gives-nothing" "" "API call failed"
 
 run ""
-check "empty-body-gives-nothing" "" "no completed"
+check "empty-body-gives-nothing" "" "no successful"
 
 run "<html>"
 check "unparseable-body-gives-nothing" "" "unusable"
 
 run '{"message":"Not Found"}'
-check "error-object-gives-nothing" "" "no completed"
+check "error-object-gives-nothing" "" "no successful"
 
 run "$(runs "CI:${C3}:success:2026-10-25T03:00:00Z")" DEFAULT_BRANCH=release
 if grep -qF 'branch=release&' "${WORK}/gh.log"; then pass "DEFAULT_BRANCH is honoured"; else fail "DEFAULT_BRANCH: $(cat "${WORK}/gh.log")"; fi
