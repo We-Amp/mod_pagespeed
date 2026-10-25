@@ -29,6 +29,7 @@ run_case() {
   cp "${ROOT}/.github/hygiene-rules.txt" "${repo}/.github/"
   { grep -v '^allow-path' "${ROOT}/.github/hygiene-credential-rules.txt"; printf '%b' "${EXTRA_RULES:-}"; } \
     > "${repo}/.github/hygiene-credential-rules.txt"
+  mkdir -p "$(dirname "${repo}/${name}")"
   printf '%s\n' "$content" > "${repo}/${name}"
   git -C "$repo" init -q
   git -C "$repo" add -A
@@ -129,6 +130,9 @@ EXTRA_RULES='placeholder\t\n'      EXPECT_MSG='empty placeholder' run_case fail 
 EXTRA_RULES='placeholder\t.\n'     EXPECT_MSG='canary' run_case fail "placeholder dot trips canary" t.sh 'x=1'
 EXTRA_RULES='placeholder\t.*\n'    EXPECT_MSG='canary' run_case fail "placeholder dot-star trips canary" t.sh 'x=1'
 EXTRA_RULES='placeholder-dq\t.\n'  EXPECT_MSG='canary' run_case fail "placeholder-dq dot trips canary" t.sh 'x=1'
+
+# changelog fragments are scanned like any other tracked file
+run_case fail "fragment under changelog.d/ is scanned" changelog.d/planted.fixed.md "- see AK""IA$(printf 'A%.0s' $(seq 16))"
 
 # allowlist
 run_case pass "clean tree" t.txt "nothing to see"

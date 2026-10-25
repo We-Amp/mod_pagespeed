@@ -17,17 +17,28 @@
 # impossible to ignore. A change with no user-visible effect declares that in
 # one line and moves on; what it cannot do is say nothing at all.
 #
-# This repo keeps two note files and EITHER satisfies the gate:
+# Any ONE of these satisfies the gate:
+#   changelog.d/<slug>.<category>.md
+#                     a per-PR fragment ADDED by this change: the changelog
+#                     bullet exactly as it should read (see changelog.d/README.md)
 #   RELEASE_NOTES.md  operator-facing, newest release first; the in-development
 #                     section is the top entry marked "**Status:** In development"
-#   CHANGELOG.md      Keep a Changelog; add under "## [Unreleased]"
+#   CHANGELOG.md      Keep a Changelog; add under "## [Unreleased]" (still
+#                     accepted during the move to fragments)
+#
+# The gate reads file NAMES only. A bad fragment name, or a change adding
+# fragments from more than one slug or two of one category, blocks even when
+# nothing else is user-facing. Fragment CONTENT is checked by
+# `python3 -I tools/changelog/assemble.py --lint`, a separate CI step.
 #
 # Run locally:  bash tools/ci/check_release_note.sh --base origin/master --head HEAD
 # Self-test:    bash tools/ci/check_release_note.sh --self-test
 #
 # In CI the inputs come from the GitHub API instead of git, so the check works
 # on the shallow checkout the rest of the job already uses:
-#   bash tools/ci/check_release_note.sh --files-from FILE --haystack-from FILE
+#   bash tools/ci/check_release_note.sh --files-from FILE --haystack-from FILE \
+#        [--added-from FILE]
+# where --added-from lists the files the change ADDS (status "added").
 
 set -euo pipefail
 
@@ -43,6 +54,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # call, not this script's.
 RELEASE_NOTE_FILES="RELEASE_NOTES.md
 CHANGELOG.md"
+
+# Per-PR changelog fragments. The category infix set mirrors
+# tools/changelog/assemble.py; keep the two in step.
+FRAGMENT_DIR="changelog.d"
+FRAGMENT_CATEGORIES="security|added|changed|deprecated|fixed|removed|documentation|upgrade-notes|known-issues"
+FRAGMENT_RE="^changelog\\.d/[a-z0-9][a-z0-9-]{2,62}\\.(${FRAGMENT_CATEGORIES})\\.md\$"
 
 # Product code: changing it can change what someone observes. pagespeed/ and
 # net/ are the two source trees (see "Two Source Trees" in CLAUDE.md).
@@ -88,12 +105,53 @@ WAIVER_MIN_REASON=12
 #
 # $1 -- newline-separated changed-file list
 # $2 -- waiver haystack (commit messages and/or PR body)
+# $3 -- newline-separated list of files the change ADDS (optional)
 #
 # 0 = pass, 1 = block.
 evaluate_release_note() {
   local changed="$1"
   local haystack="$2"
+  local added="${3:-}"
   local triggering note_touched waiver_line reason
+  local bad_frag added_frags slugs dup_cat existing_frag
+
+  # Fragment hygiene applies to every change, user-facing or not: a stray or
+  # misnamed file under changelog.d/ would be skipped, or break, the assembler.
+  bad_frag="$(printf '%s\n' "$changed" \
+    | grep -E "^${FRAGMENT_DIR}/" \
+    | grep -vFx "${FRAGMENT_DIR}/README.md" \
+    | grep -vE "$FRAGMENT_RE" || true)"
+  if [ -n "$bad_frag" ]; then
+    echo "" >&2
+    echo "FAILED: misnamed file(s) under ${FRAGMENT_DIR}/:" >&2
+    printf '%s\n' "$bad_frag" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Fragments are named ${FRAGMENT_DIR}/<slug>.<category>.md with category one of:" >&2
+    echo "  $(printf '%s' "$FRAGMENT_CATEGORIES" | sed 's/|/, /g')" >&2
+    echo "and a slug of 3-63 lowercase letters, digits and hyphens. See ${FRAGMENT_DIR}/README.md." >&2
+    return 1
+  fi
+
+  added_frags="$(printf '%s\n' "$added" | grep -E "$FRAGMENT_RE" || true)"
+  if [ -n "$added_frags" ]; then
+    slugs="$(printf '%s\n' "$added_frags" \
+      | sed -E "s#^${FRAGMENT_DIR}/##; s#\\.(${FRAGMENT_CATEGORIES})\\.md\$##" | sort -u)"
+    if [ "$(printf '%s\n' "$slugs" | wc -l | tr -d ' ')" -gt 1 ]; then
+      echo "" >&2
+      echo "FAILED: this change adds fragments from more than one slug:" >&2
+      printf '%s\n' "$added_frags" | sed 's/^/  /' >&2
+      echo "One pull request uses one slug (its branch name), with at most one fragment per category." >&2
+      return 1
+    fi
+    dup_cat="$(printf '%s\n' "$added_frags" \
+      | sed -E "s#^.*\\.(${FRAGMENT_CATEGORIES})\\.md\$#\\1#" | sort | uniq -d)"
+    if [ -n "$dup_cat" ]; then
+      echo "" >&2
+      echo "FAILED: this change adds two fragments for category: $(printf '%s' "$dup_cat" | tr '\n' ' ')" >&2
+      echo "Put every bullet of one category in the same fragment." >&2
+      return 1
+    fi
+  fi
 
   triggering="$(printf '%s\n' "$changed" \
     | grep -E "$USER_FACING_RE" \
@@ -105,11 +163,21 @@ evaluate_release_note() {
     return 0
   fi
 
+  # An ADDED fragment counts. A fragment that is merely modified already
+  # exists on the base: it is somebody else's entry, not this change's.
+  if [ -n "$added_frags" ]; then
+    echo "OK: user-facing change carries a changelog fragment: $(printf '%s' "$added_frags" | tr '\n' ' ')"
+    return 0
+  fi
+
   # Exact whole-line match: docs/CHANGELOG.md is not the release note.
   note_touched="$(printf '%s\n' "$changed" \
     | grep -Fx "$RELEASE_NOTE_FILES" || true)"
   if [ -n "$note_touched" ]; then
     echo "OK: user-facing change carries an entry in: $(printf '%s' "$note_touched" | tr '\n' ' ')"
+    if [ "$note_touched" = "CHANGELOG.md" ]; then
+      echo "::notice::Prefer a fragment: add ${FRAGMENT_DIR}/<branch-slug>.<category>.md instead of editing CHANGELOG.md (see ${FRAGMENT_DIR}/README.md)."
+    fi
     return 0
   fi
 
@@ -151,13 +219,20 @@ evaluate_release_note() {
   echo "Files that triggered the gate:" >&2
   printf '%s\n' "$triggering" | sed 's/^/  /' >&2
   echo "" >&2
+  existing_frag="$(printf '%s\n' "$changed" | grep -E "$FRAGMENT_RE" || true)"
+  if [ -n "$existing_frag" ]; then
+    printf '%s\n' "$existing_frag" | while IFS= read -r f; do
+      echo "NOTE: $f already exists on master; pick another slug." >&2
+    done
+    echo "" >&2
+  fi
   echo "Do one of these:" >&2
   echo "" >&2
-  echo "  1. Add an entry to RELEASE_NOTES.md (the in-development section at the top," >&2
-  echo "     marked '**Status:** In development') or to CHANGELOG.md (under" >&2
-  echo "     '## [Unreleased]'). Either satisfies this gate. Write it for someone" >&2
-  echo "     deciding whether to upgrade: what they observed before, what they" >&2
-  echo "     observe now." >&2
+  echo "  1. Add ${FRAGMENT_DIR}/<branch-slug>.<category>.md holding the bullet exactly as" >&2
+  echo "     it should read in CHANGELOG.md (see ${FRAGMENT_DIR}/README.md). Write it for" >&2
+  echo "     someone deciding whether to upgrade: what they observed before, what" >&2
+  echo "     they observe now. An entry in RELEASE_NOTES.md (in-development section)" >&2
+  echo "     or CHANGELOG.md (under '## [Unreleased]') is still accepted." >&2
   echo "" >&2
   echo "  2. If nothing a user can observe has changed, say so explicitly:" >&2
   echo "" >&2
@@ -335,6 +410,48 @@ self_test() {
 
   check "nothing changed at all              -> pass" 0 "" ""
 
+  # --- changelog fragments ---
+
+  fchk() {
+    local name="$1" want="$2" changed="$3" added="$4"
+    local got=0
+    n=$((n + 1))
+    evaluate_release_note "$changed" "" "$added" >/dev/null 2>&1 || got=$?
+    if [ "$got" -ne "$want" ]; then
+      echo "  FAIL  $name (wanted exit $want, got $got)" >&2
+      failures=$((failures + 1))
+    else
+      echo "  ok    $name"
+    fi
+  }
+  local F1=changelog.d/my-branch.fixed.md F2=changelog.d/my-branch.added.md
+
+  fchk "fragment alone                       -> pass" 0 "$F1" "$F1"
+  fchk "fragment + product code              -> pass" 0 \
+    "$(printf 'pagespeed/a.cc\n%s\n' "$F1")" "$F1"
+  fchk "two categories, one slug             -> pass" 0 \
+    "$(printf 'pagespeed/a.cc\n%s\n%s\n' "$F1" "$F2")" "$(printf '%s\n%s\n' "$F1" "$F2")"
+  fchk "bad fragment name + CHANGELOG.md     -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\nCHANGELOG.md\nchangelog.d/Bad_Name.md\n')" "changelog.d/Bad_Name.md"
+  fchk "unknown category                     -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\nchangelog.d/my-branch.bogus.md\n')" "changelog.d/my-branch.bogus.md"
+  fchk "nested path under changelog.d        -> BLOCK" 1 \
+    "$(printf 'changelog.d/sub/my-branch.fixed.md\n')" "changelog.d/sub/my-branch.fixed.md"
+  fchk "bad name, nothing user-facing        -> BLOCK" 1 \
+    "changelog.d/x.fixed.md" "changelog.d/x.fixed.md"
+  fchk "two slugs                            -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\nchangelog.d/one-slug.fixed.md\nchangelog.d/two-slug.added.md\n')" \
+    "$(printf 'changelog.d/one-slug.fixed.md\nchangelog.d/two-slug.added.md\n')"
+  fchk "modified existing fragment           -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\n%s\n' "$F1")" ""
+  fchk "README.md edit alone                 -> pass" 0 "changelog.d/README.md" ""
+  fchk "README.md edit does not satisfy      -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\nchangelog.d/README.md\n')" ""
+  fchk "deleting a fragment (the cut)        -> pass" 0 \
+    "$(printf 'CHANGELOG.md\n%s\n' "$F1")" ""
+  fchk "CHANGELOG.md still passes (window)   -> pass" 0 \
+    "$(printf 'pagespeed/a.cc\nCHANGELOG.md\n')" ""
+
   # End-to-end through the entry point, because the CI path and the fail-closed
   # branches live there rather than in the pure function above. A gate that
   # cannot see its input must go red, not quietly green.
@@ -359,6 +476,9 @@ self_test() {
   printf 'net/instaweb/rewriter/css_filter.cc\nRELEASE_NOTES.md\n' > "$tmp/files-relnotes.txt"
   printf 'net/instaweb/rewriter/css_filter.cc\nCHANGELOG.md\n' > "$tmp/files-changelog.txt"
   printf 'Release-Note: none - build plumbing only, nothing user visible\n' > "$tmp/waiver.txt"
+  printf 'net/instaweb/rewriter/css_filter.cc\nchangelog.d/my-branch.fixed.md\n' > "$tmp/files-frag.txt"
+  printf 'changelog.d/my-branch.fixed.md\n' > "$tmp/added-frag.txt"
+  : > "$tmp/added-none.txt"
 
   e2e "--files-from missing               -> BLOCK" 1 --files-from "$tmp/nope.txt"
   e2e "--haystack-from missing            -> BLOCK" 1 \
@@ -368,6 +488,12 @@ self_test() {
   e2e "--files-from, CHANGELOG.md         -> pass " 0 --files-from "$tmp/files-changelog.txt"
   e2e "--files-from + waiver file         -> pass " 0 \
     --files-from "$tmp/files-block.txt" --haystack-from "$tmp/waiver.txt"
+  e2e "--added-from, fragment added       -> pass " 0 \
+    --files-from "$tmp/files-frag.txt" --added-from "$tmp/added-frag.txt"
+  e2e "--added-from, fragment not added   -> BLOCK" 1 \
+    --files-from "$tmp/files-frag.txt" --added-from "$tmp/added-none.txt"
+  e2e "--added-from missing               -> BLOCK" 1 \
+    --files-from "$tmp/files-frag.txt" --added-from "$tmp/nope.txt"
   e2e "no arguments at all                -> BLOCK" 1
   e2e "unresolvable base                  -> BLOCK" 1 \
     --base 0000000000000000000000000000000000000000
@@ -389,6 +515,7 @@ BASE=""
 HEAD="HEAD"
 FILES_FROM=""
 HAYSTACK_FROM=""
+ADDED_FROM=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -397,8 +524,9 @@ while [ $# -gt 0 ]; do
     --head) HEAD="${2:-}"; shift 2 ;;
     --files-from) FILES_FROM="${2:-}"; shift 2 ;;
     --haystack-from) HAYSTACK_FROM="${2:-}"; shift 2 ;;
+    --added-from) ADDED_FROM="${2:-}"; shift 2 ;;
     -h|--help)
-      sed -n '6,31p' "${BASH_SOURCE[0]}"
+      sed -n '6,41p' "${BASH_SOURCE[0]}"
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -423,7 +551,16 @@ if [ -n "$FILES_FROM" ]; then
     fi
     HAYSTACK="$(cat "$HAYSTACK_FROM")"
   fi
-  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK"
+  ADDED=""
+  if [ -n "$ADDED_FROM" ]; then
+    if [ ! -f "$ADDED_FROM" ]; then
+      echo "FAILED: --added-from '$ADDED_FROM' does not exist." >&2
+      echo "This check cannot run, so it is failing rather than passing silently." >&2
+      exit 1
+    fi
+    ADDED="$(cat "$ADDED_FROM")"
+  fi
+  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$ADDED"
   exit $?
 fi
 
@@ -443,8 +580,9 @@ if ! MERGE_BASE="$(git merge-base "$BASE" "$HEAD" 2>/dev/null)" || [ -z "$MERGE_
   exit 1
 fi
 
-CHANGED="$(git diff --name-only "$MERGE_BASE" "$HEAD")"
+CHANGED="$(git diff --no-renames --name-only "$MERGE_BASE" "$HEAD")"
 COMMIT_MESSAGES="$(git log --format='%B' "$MERGE_BASE..$HEAD")"
 HAYSTACK="$(printf '%s\n%s\n' "$COMMIT_MESSAGES" "${PR_BODY:-}")"
+ADDED="$(git diff --no-renames --diff-filter=A --name-only "$MERGE_BASE" "$HEAD")"
 
-evaluate_release_note "$CHANGED" "$HAYSTACK"
+evaluate_release_note "$CHANGED" "$HAYSTACK" "$ADDED"

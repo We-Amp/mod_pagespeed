@@ -85,8 +85,11 @@ System tests: `./test/system/run_system_tests.sh` (Apache),
 - **Release notes are required.** A pull request that touches `pagespeed/`,
   `net/`, or a shipped `install/**/*.conf` / `*.template` file (outside tests,
   `BUILD` files and `*.md`) must also
-  add an entry to [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` or to
-  the in-development section of [RELEASE_NOTES.md](RELEASE_NOTES.md). If the
+  add a changelog fragment, `changelog.d/<branch-slug>.<category>.md`, holding
+  the entry exactly as it should read (see
+  [changelog.d/README.md](changelog.d/README.md)). Editing
+  [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` or the in-development
+  section of [RELEASE_NOTES.md](RELEASE_NOTES.md) is still accepted for now. If the
   change is invisible to users, put `Release-Note: none - <why>` in a commit
   message or the pull request description (editing the description does not
   re-run the check; re-run the job). Check it locally with

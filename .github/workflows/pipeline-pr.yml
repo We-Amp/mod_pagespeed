@@ -267,6 +267,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 tools/ci/check_optimizer_pin_pair.py --self-test
 
+      - name: Changelog fragment tools - self-tests
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -I tools/changelog/assemble.py --self-test
+          python3 -I tools/changelog/to_fragment.py --self-test
+
+      # Fragment content (the release-note gate reads names only).
+      - name: Changelog fragments are well formed
+        if: ${{ !cancelled() }}
+        run: python3 -I tools/changelog/assemble.py --lint
+
       # A selected image variant names every request header the selection
       # read in Vary. The module mirrors the optimizer's list; this compares
       # it with the list in the pinned optimizer's source.
@@ -313,23 +324,28 @@ jobs:
         run: |
           set -euo pipefail
           api="repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
-          gh api --paginate "${api}/files" \
-            --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/pr-files.txt"
+          gh api --paginate "${api}/files" > "${RUNNER_TEMP}/pr-files.json"
+          jq -r '.[] | .filename, (.previous_filename // empty)' \
+            "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-files.txt"
+          jq -r '.[] | select(.status=="added") | .filename' \
+            "${RUNNER_TEMP}/pr-files.json" > "${RUNNER_TEMP}/pr-added.txt"
           gh api --paginate "${api}/commits" \
             --jq '.[].commit.message' > "${RUNNER_TEMP}/pr-haystack.txt"
           gh api "${api}" --jq '.body // ""' >> "${RUNNER_TEMP}/pr-haystack.txt"
           echo "collected $(wc -l < "${RUNNER_TEMP}/pr-files.txt" | tr -d ' ') changed file name(s)"
 
-      # A user-facing change must touch RELEASE_NOTES.md or CHANGELOG.md, or
-      # say in one line why it is invisible (`Release-Note: none - <why>` in a
-      # commit message or the description). No pipe in this run: a pipe would
-      # swallow the gate's exit code.
+      # A user-facing change must add a changelog.d/ fragment (or touch
+      # RELEASE_NOTES.md or CHANGELOG.md), or say in one line why it is
+      # invisible (`Release-Note: none - <why>` in a commit message or the
+      # description). No pipe in this run: a pipe would swallow the gate's
+      # exit code.
       - name: User-facing change carries a release note
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           bash tools/ci/check_release_note.sh \
             --files-from "${RUNNER_TEMP}/pr-files.txt" \
-            --haystack-from "${RUNNER_TEMP}/pr-haystack.txt"
+            --haystack-from "${RUNNER_TEMP}/pr-haystack.txt" \
+            --added-from "${RUNNER_TEMP}/pr-added.txt"
 
       # html/ is the legacy documentation archive, published unchanged.
       - name: Legacy documentation archive is untouched

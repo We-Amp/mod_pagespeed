@@ -13,5 +13,5 @@
 ## Checklist
 
 - [ ] Tests added or updated for behaviour changes
-- [ ] `CHANGELOG.md` (`## [Unreleased]`) or `RELEASE_NOTES.md` entry, or `Release-Note: none - <why>` (required when `pagespeed/`, `net/` or a shipped `install/**/*.conf`/`*.template` changes)
+- [ ] `changelog.d/<branch-slug>.<category>.md` fragment (or a `CHANGELOG.md` / `RELEASE_NOTES.md` entry), or `Release-Note: none - <why>` (required when `pagespeed/`, `net/` or a shipped `install/**/*.conf`/`*.template` changes)
 - [ ] Formatted with `clang-format-20` (`tools/fix-format.sh`)
