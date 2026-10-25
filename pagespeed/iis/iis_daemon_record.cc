@@ -157,7 +157,7 @@ void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
       HasHeader(http_context, HttpAttributes::kCookie2),
       HasHeader(http_context, HttpAttributes::kAuthorization));
   url.PathAndLeaf().CopyToString(&request->url);
-  url.Host().CopyToString(&request->hostname);
+  url.HostAndPort().CopyToString(&request->hostname);
   url.Scheme().CopyToString(&request->scheme);
 
   StringPiece accept, user_agent, save_data, accept_encoding, sec_ch_dpr;

@@ -536,7 +536,7 @@ void InstawebHandler::BuildDaemonRecordRequest(
     DaemonRecordRequest* request) {
   request->request_properties = request_properties;
   stripped_gurl_.PathAndLeaf().CopyToString(&request->url);
-  stripped_gurl_.Host().CopyToString(&request->hostname);
+  stripped_gurl_.HostAndPort().CopyToString(&request->hostname);
   stripped_gurl_.Scheme().CopyToString(&request->scheme);
 
   StringPiece accept, user_agent, save_data, accept_encoding, sec_ch_dpr;
@@ -571,7 +571,7 @@ void InstawebHandler::BuildDaemonRecordRequest(
 // reason stated there.
 void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   stripped_gurl_.PathAndLeaf().CopyToString(&daemon_serve_url_);
-  stripped_gurl_.Host().CopyToString(&daemon_serve_host_);
+  stripped_gurl_.HostAndPort().CopyToString(&daemon_serve_host_);
   stripped_gurl_.Scheme().CopyToString(&daemon_serve_scheme_);
   request->url = daemon_serve_url_;
   request->hostname = daemon_serve_host_;

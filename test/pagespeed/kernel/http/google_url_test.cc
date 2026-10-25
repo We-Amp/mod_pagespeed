@@ -319,6 +319,15 @@ TEST_F(GoogleUrlTest, TestHostAndPort) {
   EXPECT_EQ(kExpected, GoogleUrl("http://example.com").HostAndPort());
   EXPECT_EQ(kExpected, GoogleUrl("http://example.com/a/b").HostAndPort());
   EXPECT_EQ(kExpected, GoogleUrl("https://example.com").HostAndPort());
+  // The shared optimizer cache keys an entry by scheme, host and path, and
+  // keeps any port other than 80 or 443 in the host half, so the record and
+  // serve request builders of every port hand this value on as the host
+  // half of their key: two URLs that differ only in port must differ here,
+  // and a scheme-default port must be gone.
+  EXPECT_NE(GoogleUrl("http://example.com/a.js").HostAndPort(),
+            GoogleUrl("http://example.com:8080/a.js").HostAndPort());
+  EXPECT_EQ(kExpected, GoogleUrl("http://example.com:80/a.js").HostAndPort());
+  EXPECT_EQ(kExpected, GoogleUrl("https://example.com:443/a.js").HostAndPort());
 }
 
 TEST_F(GoogleUrlTest, TestPort) {
