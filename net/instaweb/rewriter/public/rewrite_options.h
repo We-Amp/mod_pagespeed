@@ -571,9 +571,11 @@ class RewriteOptions {
 
   // Returns true if PageSpeed may use the Save-Data image qualities, i.e.
   // serve a smaller image to a client that asked for one with "Save-Data: on".
-  // The response carries no Vary: Save-Data header -- the Save-Data quality is
-  // folded into the metadata cache key instead, and the varying bytes are only
-  // ever published under a distinct rewritten URL.
+  // A rewritten resource response carries no Vary: Save-Data header -- the
+  // Save-Data quality is folded into the metadata cache key instead, and the
+  // varying bytes are only ever published under a distinct rewritten URL. The
+  // HTML that references those URLs does vary, so the HTML response names
+  // Save-Data in Vary (see HtmlVaryFilter and PrioritizeCriticalImagesFilter).
   bool SupportSaveData() const { return HasValidSaveDataQualities(); }
 
   // Image qualities and parameters, after applying the inheritance rules.
@@ -1168,6 +1170,12 @@ class RewriteOptions {
   // kRecompressJPeg, kRecompressPng, kRecompressWebp, kConvertGifToPng,
   // kConvertJpegToWebp, kConvertPngToJpeg, and kConvertToWebpLossless.
   bool ImageOptimizationEnabled() const;
+
+  // True when the image rewrite filter is part of the HTML filter chain: any
+  // image filter is enabled and the image URLs are not preserved (or in-place
+  // preemptive rewriting of images is on). Shared by AddPreRenderFilters and
+  // HtmlVaryFilter so the two cannot disagree.
+  bool ImageRewriteFilterInHtmlChain() const;
 
   explicit RewriteOptions(ThreadSystem* thread_system);
   virtual ~RewriteOptions();
@@ -2242,6 +2250,12 @@ class RewriteOptions {
     set_option(p.as_string(), &downstream_cache_purge_method_);
   }
 
+  // DownstreamCachePurgeLocationPrefix: the location of a cache in front of
+  // this server that is sent purge requests; setting it turns on downstream
+  // cache integration, in which the origin's HTML Cache-Control is passed
+  // through. The HTML then differs by Accept, Save-Data and User-Agent when
+  // image rewriting is on; the response names those in Vary (HtmlVaryFilter),
+  // but a cache that ignores Vary must key on them itself.
   const GoogleString& downstream_cache_purge_location_prefix() const {
     return downstream_cache_purge_location_prefix_.value();
   }

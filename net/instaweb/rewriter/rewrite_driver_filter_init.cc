@@ -55,6 +55,7 @@
 #include "net/instaweb/rewriter/public/flush_html_filter.h"
 #include "net/instaweb/rewriter/public/google_font_css_inline_filter.h"
 #include "net/instaweb/rewriter/public/handle_noscript_redirect_filter.h"
+#include "net/instaweb/rewriter/public/html_vary_filter.h"
 #include "net/instaweb/rewriter/public/image_combine_filter.h"
 #include "net/instaweb/rewriter/public/image_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/in_place_rewrite_context.h"
@@ -257,6 +258,16 @@ void RewriteDriver::AddPreRenderFilters() {
   if (rewrite_options->Enabled(RewriteOptions::kDecodeRewrittenUrls)) {
     AddOwnedEarlyPreRenderFilter(new DecodeRewrittenUrlsFilter(this));
   }
+  {
+    // Names the request headers the rewritten HTML depends on in Vary. The
+    // token list is a function of the configuration alone, so the filter is
+    // present exactly when there is something to say.
+    StringVector vary_tokens;
+    HtmlVaryFilter::HtmlVaryTokens(*rewrite_options, &vary_tokens);
+    if (!vary_tokens.empty()) {
+      AddOwnedEarlyPreRenderFilter(new HtmlVaryFilter(this));
+    }
+  }
 
   if (rewrite_options->Enabled(RewriteOptions::kResponsiveImages) &&
       rewrite_options->Enabled(RewriteOptions::kResizeImages)) {
@@ -399,23 +410,8 @@ void RewriteDriver::AddPreRenderFilters() {
     CHECK(server_context_ != nullptr);
     AppendOwnedPreRenderFilter(new JsInlineFilter(this));
   }
-  if (rewrite_options->Enabled(RewriteOptions::kConvertJpegToProgressive) ||
-      rewrite_options->ImageOptimizationEnabled() ||
-      rewrite_options->Enabled(RewriteOptions::kResizeImages) ||
-      rewrite_options->Enabled(
-          RewriteOptions::kResizeToRenderedImageDimensions) ||
-      rewrite_options->Enabled(RewriteOptions::kInlineImages) ||
-      rewrite_options->Enabled(RewriteOptions::kInsertImageDimensions) ||
-      rewrite_options->Enabled(RewriteOptions::kJpegSubsampling) ||
-      rewrite_options->Enabled(RewriteOptions::kStripImageColorProfile) ||
-      rewrite_options->Enabled(RewriteOptions::kStripImageMetaData) ||
-      rewrite_options->Enabled(RewriteOptions::kDelayImages)) {
-    // Since AddFilters only applies to the HTML rewrite path, we check here
-    // if IPRO preemptive rewrites are disabled and skip the filter if so.
-    if (!rewrite_options->image_preserve_urls() ||
-        rewrite_options->in_place_preemptive_rewrite_images()) {
-      EnableRewriteFilter(RewriteOptions::kImageCompressionId);
-    }
+  if (rewrite_options->ImageRewriteFilterInHtmlChain()) {
+    EnableRewriteFilter(RewriteOptions::kImageCompressionId);
   }
   if (rewrite_options->Enabled(RewriteOptions::kRemoveComments)) {
     AppendOwnedPreRenderFilter(new RemoveCommentsFilter(

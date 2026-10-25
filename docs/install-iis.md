@@ -54,6 +54,21 @@ cache extension) to all responses. The admin UI is available at
 
 Filters are enabled and disabled in `pagespeed.config` (for example `pagespeed EnableFilters collapse_whitespace`). See [iis-limitations.md](iis-limitations.md#architecture) for how the configuration file is resolved, and [Running PageSpeed for IIS with the optimizer](daemon-adapter-iis.md) for the optimizer directives.
 
+
+### HTML caching
+
+Rewritten HTML is served as not cacheable by shared caches by default, and it
+carries `Vary: Accept, Save-Data, User-Agent` (the headers its image URLs and
+inlining depend on; fewer when fewer image filters are on). If you let a CDN or
+proxy store the HTML (for example with `ModifyCachingHeaders off`), see "Behind
+a shared cache or CDN" in
+[daemon-adapter-deployment.md](daemon-adapter-deployment.md), including how to
+make the HTML the same for every client with `ImagePreserveURLs on`. If you
+enable IIS output caching for rewritten pages, use the user-mode `policy` with
+`varyByHeaders` set to `Accept;Save-Data;User-Agent`, and keep
+`kernelCachePolicy` off for them: kernel-mode caching cannot vary by request
+header.
+
 ## Verification
 
 ```powershell

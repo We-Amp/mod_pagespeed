@@ -449,6 +449,7 @@ selection reads is named in `Vary`, on the 200 and on the 304, and no other.
 | A stored compressed copy (any type) | `Accept-Encoding` in addition | the above plus `Accept-Encoding` |
 | The recorded original of an image, a stylesheet, a script | nothing (one copy for every client) | none, or `Accept-Encoding` where the server compresses it |
 | Any of these, when the origin itself sends `Vary: Accept` | the origin's `Accept` negotiation | `Accept` is added |
+| Rewritten HTML (the page that references the images) | `Accept`, `Save-Data`, `User-Agent` (see "Rewritten HTML" below) | `Accept, Save-Data, User-Agent`, from the configuration alone; never `Sec-CH-DPR` |
 
 This list is the optimizer's own, so a cache keys a response the same way
 whether the module or the optimizer's front end served it. The one client
@@ -461,8 +462,8 @@ can send `Accept-CH` itself. Other hints (`Sec-CH-UA-Mobile`,
 `Viewport-Width`, `DPR`) are not read, so they are not named. They could not
 replace `User-Agent` either: browsers that send no client hints still need a
 device class, and in the traffic sample below they made up about 44% of
-requests. HTML is never served from the optimizer's cache, so its
-`Vary` is unchanged. A response whose origin sends a `Vary` on any other
+requests. HTML is never served from the optimizer's cache, so it carries its
+own, shorter list (below). A response whose origin sends a `Vary` on any other
 header is not served from the optimizer's cache at all (see above), so the
 module never replaces a `Vary` the origin chose; the server merges its own
 `Accept-Encoding` into the same field. `Cache-Control` is unaffected.
@@ -500,6 +501,63 @@ coarser or different rule can still hand one client another's variant where
 the two rules disagree, so the configurations below send the origin one
 representative `User-Agent` per class: the origin then selects for exactly the
 class the key names.
+
+**Rewritten HTML.** With image optimization on, the markup the module
+writes depends on the client: image URLs carry the format (`Accept`), the
+quality for a data-saver request (`Save-Data`) and for a small screen
+(`User-Agent`), and small images may be inlined as `data:` URIs depending on
+the browser. Rewritten HTML therefore names the headers its markup depends on
+in `Vary`, on every port: `Accept` when a WebP or AVIF conversion is on,
+`Save-Data` when the Save-Data qualities differ from the base qualities, and
+`User-Agent` when WebP, distinct small-screen qualities, `inline_images`,
+`delay_images`, `dedup_inlined_images`, `local_storage_cache`,
+`lazyload_images`, `resize_to_rendered_image_dimensions` or
+`prioritize_critical_images` apply (the last seven read the browser even when
+image URLs are preserved). The
+default configuration (`CoreFilters`) therefore sends
+`Vary: Accept, Save-Data, User-Agent`. The list is a function of the
+configuration alone, so it is the same for every request to a URL whatever the
+request carries, the cache state or the response's `Cache-Control`; with
+`ImagePreserveURLs on` (and no in-place preemptive image rewriting) the image
+tokens are not added. `Sec-CH-DPR` is not in the list: the HTML rewriter does
+not read it. The server merges its own `Accept-Encoding` into the same field.
+
+By default rewritten HTML is still not cacheable by shared caches
+(`Cache-Control: max-age=0, no-cache` on Apache; `no-cache` on IIS; `no-cache`
+or `private` on nginx), so most sites see no change. `Vary` matters when something
+makes the HTML storable: `ModifyCachingHeaders off` with an origin that sends
+`public`, `s-maxage` or a positive `max-age`; downstream-cache integration
+(`DownstreamCachePurgeLocationPrefix`) on Apache and nginx; or a CDN rule that
+overrides the origin's `Cache-Control`. Cloudflare and CloudFront ignore
+`Vary` on HTML as they do on images, so for them bypass the cache for HTML, or
+key it on `Accept`, `Save-Data` and the device class or `User-Agent` (not
+`Sec-CH-DPR`, which the HTML does not depend on).
+Akamai treats the `Vary` as uncacheable. On IIS, the output cache is
+configured separately (`varyByHeaders`): if you enable it for rewritten pages
+with `ModifyCachingHeaders off`, list `Accept`, `Save-Data` and `User-Agent`
+there (user-mode caching only; kernel-mode caching cannot vary by header).
+
+The header is added when the page body is parsed, so a HEAD request whose
+origin sends no body may not carry it.
+
+A cache that honours `Vary` keys HTML on the raw `User-Agent`, so the shared
+hit rate for HTML falls to close to zero unless the edge normalises it. Two
+ways to a good hit rate:
+
+- **Make the HTML the same for every client.** Set `ImagePreserveURLs on` with
+  the optimizer worker installed: image URLs stay at their originals and the
+  optimizer picks the format, density and Save-Data variant at the image URL,
+  which carries the full image list above. The HTML then drops `Accept` and
+  `Save-Data`; `User-Agent` stays while inlining, delayed images, lazy loading
+  or another `User-Agent`-dependent filter is on, so turn those off for a
+  shared HTML cache.
+- **Normalise at the cache.** Key HTML on the device class, as for images (the
+  recipes below match image URLs only; extend the match to cover your HTML
+  pages). The module reads more of `User-Agent` than the device class (WebP
+  support in Safari and Firefox without `image/webp` in `Accept`, inlining
+  support), so a class string that matches none of those rules safely loses
+  those optimisations and never serves an undecodable image. Key on `Accept`
+  and `Save-Data` as well.
 
 **What each cache does by default, and what it needs.**
 

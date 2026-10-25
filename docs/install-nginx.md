@@ -103,6 +103,17 @@ their own; a nested block that sets its own directives keeps them and
 inherits the rest of the enclosing location's settings. To run a nested block
 with different settings, put the directives in the nested block itself.
 
+### HTML caching
+
+Rewritten HTML is served as not cacheable by shared caches by default, and it
+carries `Vary: Accept, Save-Data, User-Agent` (the headers its image URLs and
+inlining depend on; fewer when fewer image filters are on). If you let a CDN or
+proxy store the HTML (for example with `pagespeed ModifyCachingHeaders off`, or
+with `pagespeed DownstreamCachePurgeLocationPrefix` set), see "Behind a shared
+cache or CDN" in [daemon-adapter-deployment.md](daemon-adapter-deployment.md),
+including how to make the HTML the same for every client with
+`ImagePreserveURLs on`.
+
 ## Cache Directory Setup
 
 ```bash

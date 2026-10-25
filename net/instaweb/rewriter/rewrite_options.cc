@@ -1169,6 +1169,20 @@ bool RewriteOptions::ImageOptimizationEnabled() const {
           this->Enabled(RewriteOptions::kConvertToAvifLossless));
 }
 
+bool RewriteOptions::ImageRewriteFilterInHtmlChain() const {
+  const bool any_image_filter =
+      Enabled(kConvertJpegToProgressive) || ImageOptimizationEnabled() ||
+      Enabled(kResizeImages) || Enabled(kResizeToRenderedImageDimensions) ||
+      Enabled(kInlineImages) || Enabled(kInsertImageDimensions) ||
+      Enabled(kJpegSubsampling) || Enabled(kStripImageColorProfile) ||
+      Enabled(kStripImageMetaData) || Enabled(kDelayImages);
+  // AddFilters only applies to the HTML rewrite path, so when IPRO
+  // preemptive rewrites are disabled and URLs are preserved the image filter
+  // stays out of the chain.
+  return any_image_filter &&
+         (!image_preserve_urls() || in_place_preemptive_rewrite_images());
+}
+
 RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
     : modified_(false),
       frozen_(false),

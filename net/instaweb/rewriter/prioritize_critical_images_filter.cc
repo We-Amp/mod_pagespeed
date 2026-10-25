@@ -84,6 +84,9 @@ void PrioritizeCriticalImagesFilter::DetermineEnabled(
     if (headers != nullptr &&
         !headers->HasValue(HttpAttributes::kVary, HttpAttributes::kSaveData)) {
       headers->Add(HttpAttributes::kVary, HttpAttributes::kSaveData);
+      // Recorded like HtmlVaryFilter's own additions: this runs before that
+      // filter's StartDocument, which then finds the token present.
+      driver()->AddHtmlVaryTokenAdded(HttpAttributes::kSaveData);
     }
   }
   if (availability != CriticalImagesFinder::kAvailable) {

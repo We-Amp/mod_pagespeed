@@ -426,6 +426,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   status_code_ = 0;
   flush_requested_ = false;
   flush_occurred_ = false;
+  html_vary_tokens_added_.clear();
   defer_instrumentation_script_ = false;
   is_amp_ = false;
   executing_rewrite_tasks_.set_value(false);

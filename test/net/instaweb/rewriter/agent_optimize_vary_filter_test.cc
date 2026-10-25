@@ -120,6 +120,25 @@ TEST_F(AgentOptimizeVaryFilterTest, ExistingVaryAcceptIsNotDuplicated) {
   EXPECT_TRUE(VariesOnAccept());
 }
 
+TEST_F(AgentOptimizeVaryFilterTest, WithHtmlVaryFilterAcceptAppearsOnce) {
+  // Image rewriting makes HtmlVaryFilter name Accept in every response; a
+  // markdown-negotiating request must not add a second one.
+  options()->ClearSignatureForTesting();
+  options()->SetRewriteLevel(RewriteOptions::kCoreFilters);
+  options()->set_agent_optimize(true);
+  rewrite_driver()->AddFilters();
+  ParseWithAccept("text/markdown, image/webp");
+  ConstStringStarVector values;
+  ASSERT_TRUE(response_headers_.Lookup(HttpAttributes::kVary, &values));
+  int accept_count = 0;
+  for (const GoogleString* value : values) {
+    if (StringCaseEqual(*value, HttpAttributes::kAccept)) {
+      ++accept_count;
+    }
+  }
+  EXPECT_EQ(1, accept_count);
+}
+
 TEST_F(AgentOptimizeVaryFilterTest, BodyIsNeverChanged) {
   // 1.1 has no markdown render: the signal is header-only, so a markdown-
   // accepting request gets byte-identical HTML.
