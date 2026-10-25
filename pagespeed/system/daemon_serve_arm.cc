@@ -965,6 +965,25 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
   // optimized variant.
   uint8_t original_flags = 0;
   int original_status = ProbeOriginalFlags(request, &original_flags);
+  // A PROBE ERROR IS RESTRICTIONS UNKNOWN, NOT NONE.  Only the two statuses
+  // that carry an answer are taken as one: found hands back the byte, and
+  // not found says the URL was never recorded so there is nothing to drop.
+  // Every other status -- busy while the original is re-recorded, an I/O
+  // error, a corrupted entry, a closed volume -- leaves both questions this
+  // read answers UNANSWERED, and the zeroed byte it leaves behind is not
+  // "no restrictions", it is what no restrictions looks like.  Serving on
+  // it is the variant leg of a marked URL going out without the origin's
+  // other headers and without its `Vary: Accept`, with a full lifetime --
+  // the exact response rule 6 exists to prevent, delivered by the error
+  // path.  So the request falls through to the origin exactly as a miss
+  // does, in the read-failure class: not cold (the volume was not empty)
+  // and not declined (nothing was refused on purpose -- the substrate
+  // could not answer).
+  if (original_status != kPsOk && original_status != kPsErrNotFound) {
+    decision.reason = daemon_serve_reason::kReadFailed;
+    decision.serve_class = kPsServeClassOriginalPending;
+    return decision;
+  }
   if ((original_flags & kPsFlagOriginHeadersNotReproducible) != 0) {
     decision.reason = daemon_serve_reason::kOriginHeadersNotReproducible;
     // The entry EXISTS and is being declined, which is the peer's

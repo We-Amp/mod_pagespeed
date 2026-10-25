@@ -1016,6 +1016,108 @@ TEST_F(DaemonRecordArmTest, TheOriginsCacheControlAndValidatorsAreStamped) {
   EXPECT_NE(GoogleString::npos, log.find("origin_ct=text/css")) << log;
 }
 
+TEST_F(DaemonRecordArmTest, AnExpiresOnlyResponseStoresTheExpiresLifetime) {
+  // RFC 9111 4.2.1: `Expires` is an explicit freshness lifetime, relative
+  // to the response `Date`.  Ten minutes ahead stores 600 -- with the
+  // header-present bit, which is the half that carries the meaning: it is
+  // what tells the serve side's evaluator the lifetime on this entry is
+  // the origin's statement rather than silence, and an evaluator left to
+  // guess substitutes its content-type defaults (300 s here, 3600 s for an
+  // image) and hands a freshness the origin never granted to every cache
+  // downstream.  The serve side of this pair is pinned in the serve suite.
+  DaemonRecordInput input = EligibleInput();
+  input.cache_control_lines.clear();
+  input.response_headers = Headers(
+      {"Content-Type", "text/css", "Date", "Mon, 10 Aug 2026 00:00:00 GMT",
+       "Expires", "Mon, 10 Aug 2026 00:10:00 GMT"});
+  const DaemonRecordDecision decision =
+      EvaluateDaemonRecordGate(*abi_, input, 1000);
+  ASSERT_NE(DaemonRecordVerdict::kRefuse, decision.verdict);
+  EXPECT_EQ(600u, decision.params.origin_max_age);
+  EXPECT_EQ(kPsCcOriginHeaderPresent, decision.params.origin_cc_flags);
+
+  int cache_marker = 0;
+  DaemonRecordWriter writer(abi_.get(), &cache_marker);
+  ASSERT_EQ(kPsOk, writer.Begin(input, decision));
+  ASSERT_EQ(kPsOk, writer.Commit());
+  // What the PEER was told, off its own log, in the decimal the stand-in
+  // prints: 0x0200 is 512.
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("max_age=600")) << log;
+  EXPECT_NE(GoogleString::npos, log.find("cc_flags=512")) << log;
+}
+
+TEST_F(DaemonRecordArmTest, AnExpiredExpiresStoresZeroStillMarkedAsStated) {
+  // `Expires` before the `Date`: the origin stated a lifetime and it is
+  // "not freshly cacheable".  Stored as 0 WITH the header-present bit --
+  // the same state an explicit `max-age=0` produces -- because stored as
+  // silence it would be served on a content-type default instead.
+  DaemonRecordInput input = EligibleInput();
+  input.cache_control_lines.clear();
+  input.response_headers = Headers(
+      {"Content-Type", "text/css", "Date", "Mon, 10 Aug 2026 00:00:00 GMT",
+       "Expires", "Sun, 09 Aug 2026 00:00:00 GMT"});
+  const DaemonRecordDecision decision =
+      EvaluateDaemonRecordGate(*abi_, input, 1000);
+  ASSERT_NE(DaemonRecordVerdict::kRefuse, decision.verdict);
+  EXPECT_EQ(0u, decision.params.origin_max_age);
+  EXPECT_EQ(kPsCcOriginHeaderPresent, decision.params.origin_cc_flags);
+}
+
+TEST_F(DaemonRecordArmTest, CacheControlStillOutranksExpires) {
+  // RFC 9111 5.2.2.1: a `max-age` in the response's `Cache-Control`
+  // overrides `Expires`.  The eligible response carries `max-age=600`;
+  // an `Expires` a day ahead must not stretch the stored lifetime to
+  // 86400, and the header-present bit here is the parser's own, stamped
+  // for the `Cache-Control` line, not the derivation's.
+  DaemonRecordInput input = EligibleInput();
+  input.response_headers = Headers(
+      {"Content-Type", "text/css", "Date", "Mon, 10 Aug 2026 00:00:00 GMT",
+       "Expires", "Tue, 11 Aug 2026 00:00:00 GMT"});
+  const DaemonRecordDecision decision =
+      EvaluateDaemonRecordGate(*abi_, input, 1000);
+  ASSERT_NE(DaemonRecordVerdict::kRefuse, decision.verdict);
+  EXPECT_EQ(600u, decision.params.origin_max_age);
+}
+
+TEST_F(DaemonRecordArmTest, AnUnreadableExpiresDerivesNothing) {
+  // `Expires: 0`, the spelling half the frameworks use for "already
+  // expired", is not a date any parser accepts.  The derivation leaves
+  // the stored state alone rather than guessing, so such a response keeps
+  // the pre-`Expires` behaviour -- silence, and the serve side's
+  // content-type default.  The seams' own cacheability gate refuses an
+  // invalid `Expires` before the gate ever runs, so from a port this is
+  // not a reachable state; it is pinned so the gate's own fallback is
+  // stated rather than implied.
+  DaemonRecordInput input = EligibleInput();
+  input.cache_control_lines.clear();
+  input.response_headers = Headers({"Content-Type", "text/css",
+                                    "Date", "Mon, 10 Aug 2026 00:00:00 GMT",
+                                    "Expires", "0"});
+  const DaemonRecordDecision decision =
+      EvaluateDaemonRecordGate(*abi_, input, 1000);
+  ASSERT_NE(DaemonRecordVerdict::kRefuse, decision.verdict);
+  EXPECT_EQ(0u, decision.params.origin_max_age);
+  EXPECT_EQ(0, decision.params.origin_cc_flags);
+}
+
+TEST_F(DaemonRecordArmTest, WithoutADateTheRecordTimeAnchorsTheExpires) {
+  // No `Date` on the response: the record time is the reference, the same
+  // stand-in RFC 9111 4.2.3 allows when a response carries no clock.  The
+  // seams stamp a `Date` on everything they hand the gate, so this is the
+  // direct-call path's belt to those braces.
+  DaemonRecordInput input = EligibleInput();
+  input.cache_control_lines.clear();
+  // 5000 s after the epoch plus ten minutes.
+  input.response_headers = Headers(
+      {"Content-Type", "text/css", "Expires",
+       "Thu, 01 Jan 1970 01:33:20 GMT"});
+  const DaemonRecordDecision decision =
+      EvaluateDaemonRecordGate(*abi_, input, 5000);
+  ASSERT_NE(DaemonRecordVerdict::kRefuse, decision.verdict);
+  EXPECT_EQ(600u, decision.params.origin_max_age);
+}
+
 // --- rule: the content cap --------------------------------------------------
 
 TEST_F(DaemonRecordArmTest, ADeclaredLengthOverTheCapIsRefusedBeforeTheWrite) {
