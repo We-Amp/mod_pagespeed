@@ -30,6 +30,7 @@
 #include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_health.h"
@@ -120,6 +121,11 @@ void DaemonIproRecorder::ConsiderResponseHeaders(
       response_headers->Lookup1(HttpAttributes::kContentEncoding);
   if (encoding != nullptr && !StringCaseEqual(encoding, "identity")) {
     failure_ = true;
+  } else {
+    // The encoding of the bytes about to be captured, remembered for
+    // BuildInput: the capture sits before the server's compressor, so an
+    // identity body can still reach finalized headers that carry one.
+    captured_identity_ = true;
   }
 }
 
@@ -139,9 +145,22 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
   if (content_type != nullptr) {
     input->content_type = content_type;
   }
+  // THE ENCODING OF THE CAPTURED BYTES, NOT THE FINALIZED HEADERS'.  The
+  // capture sits before the server's compressor, so a response the origin
+  // sent as identity can reach this point with `Content-Encoding: gzip` --
+  // the compressor's statement about the bytes the client receives, not
+  // about `body_`, which holds the uncompressed form.  Carrying it to the
+  // gate would refuse the record as content-encoded and, worse, would stamp
+  // the one field this class exists to keep truthful with a lie.  It is
+  // dropped rather than trusted, decided from the headers the seam stated
+  // at capture time; the classic recorder reaches its verdict on the same
+  // question from the other end, sniffing the captured body for gzip magic
+  // bytes, and DoneAndSetHeaders keeps that sniff here as the backstop.  A
+  // seam that never showed preliminary headers keeps the finalized value
+  // and the gate's refusal decides it.
   const char* content_encoding =
       response_headers.Lookup1(HttpAttributes::kContentEncoding);
-  if (content_encoding != nullptr) {
+  if (content_encoding != nullptr && !captured_identity_) {
     input->content_encoding = content_encoding;
   }
   const char* etag = response_headers.Lookup1(HttpAttributes::kEtag);
@@ -269,6 +288,23 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     // if it were the resource.
     if (response_headers->IsErrorStatus() ||
         response_headers->status_code() != HttpStatus::kOK) {
+      break;
+    }
+
+    // ---- a body that IS gzip is not the original either ---------------
+    // The backstop for a capture-time view that could not see the origin's
+    // own coding: the seams state it where they can (ConsiderResponseHeaders
+    // and the Apache snapshot that feeds it), but a view that misses it
+    // captures gzip bytes as if they were the origin's uncompressed form,
+    // and the serve arm would later hand them out as plain CSS or JS.
+    // Decided from the body with the same sniff the classic recorder makes
+    // of it.  Brotli has no magic bytes to sniff, so an origin's brotli is
+    // refused only by the capture-time headers -- which is why the seams are
+    // fixed to state the origin's coding rather than this check trusted
+    // alone.
+    if (captured_identity_ && GzipInflater::HasGzipMagicBytes(body_)) {
+      outcome.verdict = DaemonRecordVerdict::kRefuse;
+      outcome.reason = daemon_record_reason::kContentEncoded;
       break;
     }
 

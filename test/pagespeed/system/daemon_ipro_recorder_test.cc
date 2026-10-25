@@ -61,6 +61,10 @@ namespace net_instaweb {
 namespace {
 
 const char kBody[] = "body{color:red}";
+// The first ten bytes of a gzip stream: what the gzip magic-byte backstop
+// sniffs for, and meaningless as CSS. Embedded NULs, so it is never handed
+// anywhere as a NUL-terminated string.
+const char kGzipBody[] = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03";
 
 class DaemonIproRecorderTest : public testing::Test {
  public:
@@ -651,6 +655,86 @@ TEST_F(DaemonIproRecorderTest, AnEncodedBodyIsNotTheOriginal) {
       Run(&headers, kBody, true, nullptr, &preliminary);
   EXPECT_FALSE(outcome.gate_ran);
   EXPECT_FALSE(outcome.stored);
+}
+
+TEST_F(DaemonIproRecorderTest, ACompressorAddedEncodingIsNotOnTheRecord) {
+  // THE mod_deflate/mod_brotli SHAPE: the capture runs before the server's
+  // compressor, so the preliminary headers carry no Content-Encoding while
+  // the finalized ones do, with the compressor's `Vary: Accept-Encoding`
+  // beside it.  The captured bytes are the origin's own uncompressed form, so
+  // the record must carry no encoding: the gate refuses one as
+  // content-encoded, which before the fix is exactly what happened to every
+  // stylesheet and script a browser requested.
+  ResponseHeaders preliminary;
+  MakeOkHeaders(&preliminary);
+  preliminary.ComputeCaching();
+
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Add(HttpAttributes::kContentEncoding, "gzip");
+  headers.Add(HttpAttributes::kVary, HttpAttributes::kAcceptEncoding);
+  headers.ComputeCaching();
+
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, &preliminary);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kStoreAndNotify, outcome.verdict);
+  EXPECT_TRUE(outcome.stored);
+  EXPECT_TRUE(outcome.notified);
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("write_original")) << log;
+  // flags 0 alone: the entry is neither marked not-reproducible over the
+  // compressor's header (bit 8; a marked entry is declined on every serve)
+  // nor stated to vary on Accept (bit 4).
+  EXPECT_NE(GoogleString::npos, log.find(" flags=0")) << log;
+}
+
+TEST_F(DaemonIproRecorderTest,
+       AnEncodingOnHeadersTheCaptureNeverSawStillRefuses) {
+  // The other half, so the case above is a rule and not a blanket drop: a
+  // seam that never showed preliminary headers (the IIS shape, where the
+  // headers are complete when the recorder first sees them) has no capture
+  // encoding to compare against, so the finalized Content-Encoding stands and
+  // the gate refuses rather than store encoded bytes as the original.
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Add(HttpAttributes::kContentEncoding, "gzip");
+  headers.ComputeCaching();
+
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
+  EXPECT_STREQ(daemon_record_reason::kContentEncoded, outcome.reason);
+  EXPECT_FALSE(outcome.stored);
+}
+
+TEST_F(DaemonIproRecorderTest, AGzipBodyCapturedAsIdentityIsRefused) {
+  // THE BLIND-SPOT SHAPE the capture-time headers alone cannot always close:
+  // an origin that compressed its own output (a PHP or FastCGI script, a
+  // pre-compressed file) can reach the capture with headers that state no
+  // encoding -- the finalized Content-Encoding appears only later -- so the
+  // gzip bytes would be buffered, stored as the identity original and served
+  // as plain CSS. The same sniff the classic recorder makes of the body
+  // refuses them here; brotli has no magic bytes and rides on the
+  // capture-time headers instead, which is why the seams state the origin's
+  // coding there rather than trusting this backstop alone.
+  ResponseHeaders preliminary;
+  MakeOkHeaders(&preliminary);
+  preliminary.ComputeCaching();
+
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Add(HttpAttributes::kContentEncoding, "gzip");
+  headers.ComputeCaching();
+
+  const DaemonRecordOutcome outcome =
+      Run(&headers, StringPiece(kGzipBody, sizeof(kGzipBody) - 1), true,
+          nullptr, &preliminary);
+  EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
+  EXPECT_STREQ(daemon_record_reason::kContentEncoded, outcome.reason);
+  EXPECT_FALSE(outcome.stored);
+  EXPECT_EQ(GoogleString::npos, CallLog().find("write_original"));
 }
 
 TEST_F(DaemonIproRecorderTest, ATruncatedResponseIsNotRecorded) {

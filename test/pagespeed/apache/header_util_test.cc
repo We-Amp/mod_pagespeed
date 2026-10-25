@@ -25,6 +25,7 @@
 #include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "test/pagespeed/apache/mock_apache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -38,6 +39,11 @@ class HeaderUtilTest : public testing::Test {
   void SetUp() override {
     MockApache::Initialize();
     MockApache::PrepareRequest(&request_);
+    // request_ starts as an uninitialized C struct: PrepareRequest fills the
+    // pool and the tables it needs, and the two AddOriginContentEncoding
+    // reads would otherwise be reads of whatever was in the struct.
+    request_.err_headers_out = apr_table_make(request_.pool, 10);
+    request_.content_encoding = nullptr;
   }
 
   void TearDown() override {
@@ -116,6 +122,48 @@ TEST_F(HeaderUtilTest, DisableCachingRelatedHeaders) {
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
                       HttpAttributes::kNoStore),
                GetCacheControl());
+}
+
+TEST_F(HeaderUtilTest, NoOriginEncodingAddsNothing) {
+  ResponseHeaders headers;
+  AddOriginContentEncoding(request_, &headers);
+  EXPECT_TRUE(headers.Lookup1(HttpAttributes::kContentEncoding) == nullptr);
+}
+
+TEST_F(HeaderUtilTest, OriginEncodingFromErrHeadersOut) {
+  // A script origin (CGI, FastCGI, PHP) writes its own headers, an encoding
+  // included, into err_headers_out; before the protocol filters merge the
+  // two tables, headers_out alone does not show it.
+  apr_table_set(request_.err_headers_out, HttpAttributes::kContentEncoding,
+                "gzip");
+  ResponseHeaders headers;
+  AddOriginContentEncoding(request_, &headers);
+  EXPECT_STREQ("gzip", headers.Lookup1(HttpAttributes::kContentEncoding));
+}
+
+TEST_F(HeaderUtilTest, OriginEncodingFromModMime) {
+  // mod_mime records the coding an AddEncoding extension stands for in
+  // content_encoding (the pre-compressed-asset recipe, AddEncoding gzip
+  // .gz), which the protocol filters merge into headers_out only later.
+  apr_table_set(request_.err_headers_out, HttpAttributes::kContentEncoding,
+                "");
+  request_.content_encoding = "br";
+  ResponseHeaders headers;
+  AddOriginContentEncoding(request_, &headers);
+  EXPECT_STREQ("br", headers.Lookup1(HttpAttributes::kContentEncoding));
+}
+
+TEST_F(HeaderUtilTest, AnEncodingInHeadersOutStands) {
+  // Whatever headers_out already states is authoritative at this point (an
+  // upstream's coding sits there), and the helper must not overwrite it
+  // with a second value off the request.
+  apr_table_set(request_.headers_out, HttpAttributes::kContentEncoding,
+                "deflate");
+  request_.content_encoding = "gzip";
+  ResponseHeaders headers;
+  ApacheRequestToResponseHeaders(request_, &headers, nullptr);
+  AddOriginContentEncoding(request_, &headers);
+  EXPECT_STREQ("deflate", headers.Lookup1(HttpAttributes::kContentEncoding));
 }
 
 TEST_F(HeaderUtilTest, SelectiveRequestHeaders) {
