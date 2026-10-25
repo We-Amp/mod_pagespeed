@@ -509,6 +509,9 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         return si;
     }
 
+    // Startup-only safety bound for nginx -t; the module makes the check slower on a loaded machine.
+    private static readonly TimeSpan ConfigCheckTimeout = TimeSpan.FromSeconds(60);
+
     /// <summary>
     /// Runs <c>nginx -t</c> against the generated config and throws an
     /// <see cref="InvalidOperationException"/> carrying nginx's captured stderr when
@@ -534,7 +537,7 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         proc.BeginErrorReadLine();
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
+        timeoutCts.CancelAfter(ConfigCheckTimeout);
         await proc.WaitForExitAsync(timeoutCts.Token);
 
         if (proc.ExitCode != 0)

@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The ASP.NET Core sidecar gives its startup configuration check more
+  time.** The sidecar waits up to 60 seconds for its nginx configuration
+  check instead of 15, so a slow machine no longer fails startup.
 - **Module log and error messages name the optimizer rather than "the
   daemon".** The refuse-to-start message for a split cache volume (with
   its IIS event-log and error-page counterparts), the volume-open
