@@ -96,14 +96,14 @@ void ApacheConfig::AddProperties() {
 
   AddApacheProperty(
       "", &ApacheConfig::daemon_socket_path_, "dmsp", kDaemonSocketPath,
-      "Path of the optimizer daemon's notification socket. Set this together "
-      "with DaemonVolumePath to hand in-place optimization to the daemon; "
+      "Path of the optimizer worker's notification socket. Set this together "
+      "with DaemonVolumePath to hand in-place optimization to the worker; "
       "leave both unset to keep the classic in-place path.",
       true /* safe_to_print */);
 
   AddApacheProperty(
       "", &ApacheConfig::daemon_volume_path_, "dmvp", kDaemonVolumePath,
-      "Path of the optimizer daemon's shared cache volume. Keep this on a "
+      "Path of the optimizer worker's shared cache volume. Keep this on a "
       "DIFFERENT path from FileCachePath. Set this together with "
       "DaemonSocketPath; leave both unset to keep the classic in-place path.",
       true /* safe_to_print */);
@@ -111,7 +111,7 @@ void ApacheConfig::AddProperties() {
   AddApacheProperty(
       kDefaultDaemonApiSocketPath, &ApacheConfig::daemon_api_socket_path_,
       "dasp", kDaemonApiSocketPath,
-      "Path of the optimizer daemon's management API unix socket, backing "
+      "Path of the optimizer worker's management API unix socket, backing "
       "the /v1/daemon/* admin endpoints. Empty disables them. This is a "
       "different socket from DaemonSocketPath (the notification socket).",
       true /* safe_to_print */);
@@ -119,7 +119,7 @@ void ApacheConfig::AddProperties() {
   AddApacheProperty(
       false, &ApacheConfig::daemon_serve_stored_encodings_, "dsse",
       kDaemonServeStoredEncodings,
-      "Serve the optimizer daemon's stored gzip and brotli copies of "
+      "Serve the optimizer worker's stored gzip and brotli copies of "
       "stylesheets, scripts and SVG images to clients that accept them, "
       "labelled with Content-Encoding, instead of compressing the "
       "uncompressed copy on the way out. Default off.",

@@ -110,31 +110,31 @@ curl -I http://localhost/
 
 Expected: 169 pass, 40 skip, 0 fail.
 
-## Using the optimizer daemon
+## Using the optimizer worker
 
-The nginx module can hand in-place optimization to the optimizer daemon (the
+The nginx module can hand in-place optimization to the optimizer worker (the
 `pagespeed-optimizer` package), as the Apache module does. With two directives
 set in a `server {}` block, the module records each eligible resource into the
-daemon's cache, the daemon builds optimized variants of it, and the module
+worker's cache, the worker builds optimized variants of it, and the module
 serves the variant that fits each client from that cache. With both directives
 unset, the classic in-place path is unchanged.
 
 ### Before you start
 
-- **Install the daemon of the same release.** Install `pagespeed-optimizer`
+- **Install the worker of the same release.** Install `pagespeed-optimizer`
   from the same package repository, at the same release as
-  `nginx-module-pagespeed`, and start it. The module and the daemon are a
+  `nginx-module-pagespeed`, and start it. The module and the worker are a
   matched pair: install, upgrade and roll them back together.
-- **Let nginx reach the daemon's files.** The daemon runs as the unprivileged
+- **Let nginx reach the worker's files.** The worker runs as the unprivileged
   `pagespeed` user; its cache directory, notification socket and shared
   configuration are open to members of the `pagespeed` group only. When
   `nginx-module-pagespeed` is installed or upgraded and that group exists, the
   package adds the nginx user to it (`www-data` on Debian/Ubuntu, `nginx` on
-  the RHEL family). If the module was installed before the daemon, or nginx
+  the RHEL family). If the module was installed before the worker, or nginx
   runs as another user, add the user yourself
   (`sudo usermod -a -G pagespeed www-data`). Restart nginx afterwards: the
   membership takes effect only in a restarted nginx.
-- **Find the two paths.** The packaged daemon's defaults are
+- **Find the two paths.** The packaged worker's defaults are
   `/run/pagespeed-optimizer/notify.sock` (notification socket) and
   `/var/cache/pagespeed-optimizer/v3/cache` (cache volume). If `SOCKET_PATH`
   or `CACHE_DIR` was changed in `/etc/default/pagespeed-optimizer`, use those
@@ -150,7 +150,7 @@ server {
     pagespeed on;
     pagespeed FileCachePath /var/cache/ngx_pagespeed;
 
-    # The optimizer daemon: its notification socket and its cache volume.
+    # The optimizer worker: its notification socket and its cache volume.
     pagespeed DaemonSocketPath /run/pagespeed-optimizer/notify.sock;
     pagespeed DaemonVolumePath /var/cache/pagespeed-optimizer/v3/cache;
 }
@@ -159,40 +159,40 @@ server {
 - Set the two together. With only one of them set, in-place optimization is
   off and the error log says that both are needed.
 - Keep `DaemonVolumePath` on a different path from `FileCachePath`.
-- nginx resolves the daemon when it starts. After changing either directive,
+- nginx resolves the worker when it starts. After changing either directive,
   restart nginx.
 
 ### Start order and upgrades
 
-The packaged daemon service is ordered ahead of `nginx.service` and waits up
+The packaged worker service is ordered ahead of `nginx.service` and waits up
 to 30 seconds for its notification socket before it counts as started, so at
-boot nginx starts after the daemon. This is ordering only: nginx still starts
-when the daemon is absent. An nginx under another unit name is not ordered
-against the daemon; give it an ordering drop-in
+boot nginx starts after the worker. This is ordering only: nginx still starts
+when the worker is absent. An nginx under another unit name is not ordered
+against the worker; give it an ordering drop-in
 (`After=pagespeed-optimizer.service`).
 
-When upgrading, upgrade and start the daemon first, let it create its cache
+When upgrading, upgrade and start the worker first, let it create its cache
 volume, then restart nginx. If nginx starts in between, in-place optimization
-is off, with the reason in the error log, and nginx picks the daemon up by
+is off, with the reason in the error log, and nginx picks the worker up by
 itself once it answers: with requests arriving, at the latest about 30
-seconds after the daemon starts, one info line per worker process says so.
+seconds after the worker starts, one info line per worker process says so.
 After an update that changes the cache format, a fresh start of nginx in
 that window can fail instead, again with the reason in the error log.
-Starting the daemon and then restarting nginx clears both. See
+Starting the worker and then restarting nginx clears both. See
 `docs/daemon-adapter-deployment.md` for the cache-volume details.
 
-### When the daemon is not available
+### When the worker is not available
 
-If the directives are set but the daemon cannot be used (not running, a
+If the directives are set but the worker cannot be used (not running, a
 release this module cannot work with, or nginx is not allowed to reach its
 files), in-place optimization is off for that server and nginx serves every
 request normally. One error line at startup names the cause and tells a
-missing `pagespeed` group membership apart from a daemon that is not running;
+missing `pagespeed` group membership apart from a worker that is not running;
 the same reason appears once in the admin console's message history. The
-classic in-place path does not take over. A daemon that was only not
+classic in-place path does not take over. A worker that was only not
 running needs no restart: with requests arriving, each worker process
 checks for it again at most once every 30 seconds and turns in-place
-optimization back on once the daemon answers. Every other cause -- a
+optimization back on once the worker answers. Every other cause -- a
 release this module cannot work with, nginx not being allowed to reach
 its files, or a split cache volume -- still needs the cause fixed and a
 restart.
@@ -200,21 +200,21 @@ restart.
 ### Checking it works
 
 1. `sudo nginx -t`, restart nginx, and read the error log. A working pair logs
-   no error about the daemon; each problem logs one line.
+   no error about the worker; each problem logs one line.
 2. Request a stylesheet or script of the site a few times.
 3. Read the module's statistics (`StatisticsPath`, or the admin console's
    Statistics page). `ipro_daemon_served` counts in-place requests answered
-   with an optimized variant from the daemon's cache;
+   with an optimized variant from the worker's cache;
    `ipro_daemon_fallthrough` counts the ones passed to the ordinary path.
    `ipro_daemon_served_original` counts the ones answered with the stored
-   original's own bytes: the daemon held no variant for the URL yet, which
-   is every such answer while the optimizer service is down. Once the daemon
+   original's own bytes: the worker held no variant for the URL yet, which
+   is every such answer while the optimizer service is down. Once the worker
    has built a variant, `ipro_daemon_served` rises. If only
    `ipro_daemon_fallthrough` rises, see "Limits" below; if
    `ipro_daemon_served_original` rises instead, the optimizer service is
    answering no variants -- check that it is running.
 
-The admin console's optimizer panels read the daemon's management API through
+The admin console's optimizer panels read the worker's management API through
 the separate `DaemonApiSocketPath` directive.
 
 ### Limits
@@ -238,7 +238,7 @@ the separate `DaemonApiSocketPath` directive.
 
 ## Serving the optimizer's compressed copies
 
-When the module is paired with the optimizer daemon (`pagespeed
+When the module is paired with the optimizer worker (`pagespeed
 DaemonSocketPath` and `pagespeed DaemonVolumePath`), the optimizer stores a
 gzip and a brotli copy next to each optimized stylesheet, script and SVG
 image. By default the module serves the uncompressed optimized copy and nginx's

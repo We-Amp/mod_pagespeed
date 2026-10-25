@@ -167,18 +167,18 @@ void IisRewriteOptions::AddProperties() {
 	add_iis_option(
 		"", &IisRewriteOptions::daemon_socket_path_, "dmsp",
 		kDaemonSocketPath, kProcessScopeStrict,
-		"Path of the optimizer daemon's notification pipe. Set this "
+		"Path of the optimizer worker's notification pipe. Set this "
 		"together with DaemonVolumePath to have the module check the "
-		"daemon at startup; leave both unset to keep the classic "
+		"worker at startup; leave both unset to keep the classic "
 		"in-place path. With either of the two set, the classic "
 		"in-place recorder is not used. See docs/daemon-adapter-iis.md.",
 		true);
 	add_iis_option(
 		"", &IisRewriteOptions::daemon_volume_path_, "dmvp",
 		kDaemonVolumePath, kProcessScopeStrict,
-		"Path of the optimizer daemon's shared cache volume. Keep this "
+		"Path of the optimizer worker's shared cache volume. Keep this "
 		"on a DIFFERENT path from FileCachePath. Set this together "
-		"with DaemonSocketPath to have the module check the daemon at "
+		"with DaemonSocketPath to have the module check the worker at "
 		"startup; leave both unset to keep the classic in-place path. "
 		"With either of the two set, the classic in-place recorder is "
 		"not used. See docs/daemon-adapter-iis.md.",

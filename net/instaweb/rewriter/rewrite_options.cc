@@ -1336,7 +1336,7 @@ void RewriteOptions::AddProperties() {
       "", &RewriteOptions::allow_vary_on_deprecated_, "avo", kAllowVaryOn,
       kDirectoryScope,
       "Deprecated and ignored: it no longer affects in-place optimization. "
-      "With the optimizer daemon attached, in-place images are served in the "
+      "With the optimizer worker attached, in-place images are served in the "
       "format the request's Accept header selects, with Vary: Accept.",
       true);
   properties_->property(properties_->size() - 1)
@@ -1353,7 +1353,7 @@ void RewriteOptions::AddProperties() {
       kPrivateNotVaryForIE, kDirectoryScope,
       "Deprecated and ignored: in-place optimized resources are no longer "
       "downgraded to Cache-Control: private for Internet Explorer. With the "
-      "optimizer daemon attached, in-place images vary by the request's "
+      "optimizer worker attached, in-place images vary by the request's "
       "Accept header and carry Vary: Accept.",
       true);
   properties_->property(properties_->size() - 1)
