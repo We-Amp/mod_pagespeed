@@ -138,8 +138,6 @@ CPP_DEPS = [
     # every other C++ dep precisely so this chain sees it.
     {"name": "gurl", "version": {"key": "GOOGLEURL_COMMIT"}, "license": "BSD-3-Clause",
      "holder": "The Chromium Authors", "repo": "google/gurl", "purl_version": None},
-    {"name": "gflags", "version": {"key": "GFLAGS_COMMIT"}, "license": "BSD-3-Clause",
-     "holder": "Google Inc.", "repo": "gflags/gflags", "purl_version": "v2.3.0"},
     {"name": "libpsl", "version": {"key": "LIBPSL_VERSION"}, "license": "MIT",
      "holder": "Tim Ruehsen and contributors", "repo": "rockdaboot/libpsl", "purl_version": "0.21.5"},
     {"name": "giflib", "version": {"key": "GIFLIB_COMMIT"}, "license": "MIT",

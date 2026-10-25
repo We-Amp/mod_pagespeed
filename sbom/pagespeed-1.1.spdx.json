@@ -3,9 +3,9 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "pagespeed-1.1",
-  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-23T05:56:06Z",
+  "documentNamespace": "https://spdx.org/spdxdocs/pagespeed-1.1-2026-10-25T00:30:57Z",
   "creationInfo": {
-    "created": "2026-10-23T05:56:06Z",
+    "created": "2026-10-25T00:30:57Z",
     "creators": [
       "Tool: generate-sbom.py-1.0",
       "Organization: We-Amp B.V."
@@ -365,24 +365,6 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-gflags",
-      "name": "gflags",
-      "versionInfo": "de1b8d3daa40b5b07208ec9e82f223d430e2ecc1",
-      "supplier": "Organization: Google Inc.",
-      "downloadLocation": "https://github.com/gflags/gflags",
-      "filesAnalyzed": false,
-      "licenseConcluded": "BSD-3-Clause",
-      "licenseDeclared": "BSD-3-Clause",
-      "copyrightText": "Copyright Google Inc.",
-      "externalRefs": [
-        {
-          "referenceCategory": "PACKAGE-MANAGER",
-          "referenceType": "purl",
-          "referenceLocator": "pkg:github/gflags/gflags@v2.3.0"
-        }
-      ]
-    },
-    {
       "SPDXID": "SPDXRef-Package-libpsl",
       "name": "libpsl",
       "versionInfo": "0.21.5",
@@ -699,11 +681,6 @@
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-gurl"
-    },
-    {
-      "spdxElementId": "SPDXRef-Package-pagespeed-1.1",
-      "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-gflags"
     },
     {
       "spdxElementId": "SPDXRef-Package-pagespeed-1.1",

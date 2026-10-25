@@ -6,7 +6,6 @@ load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 load("//bazel:foreign_cc.bzl", "cmake_build_args")
 
 exports_files([
-    "gflags_cstring.patch",
     "sparsehash_cstring.patch",
     "googleurl_visibility.patch",
     "googleurl_macos_libcxx.patch",

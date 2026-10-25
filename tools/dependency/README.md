@@ -235,7 +235,7 @@ and fail without a reviewable snapshot/dep/ignore-list change.
   hand-maintained CVE comments in `repositories.bzl`.
 - **A wrong CPE is a silent false-negative.** Where the NVD dictionary had no
   authoritative entry for the exact upstream project (e.g. Google `re2`,
-  `gflags`, `sparsehash`, the zlib-ng *library*), we set `N/A` with a
+  `sparsehash`, the zlib-ng *library*), we set `N/A` with a
   justification rather than assert a plausible-but-wrong CPE.
 - **CPE-level matching is product-wide, not version-precise.** NVD's
   `virtualMatchString` returns all CVEs for the product; the release_date filter

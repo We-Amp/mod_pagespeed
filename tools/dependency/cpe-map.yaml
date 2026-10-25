@@ -148,11 +148,6 @@ deps:
     justification: "Google sparsehash has no NVD CPE; header-only hashtable, no public CVEs"
     release_date: "2018-01-01"                  # 6ff8809 (long-frozen pin)
 
-  gflags:
-    cpe: "N/A"
-    justification: "gflags has no NVD CPE; command-line flag parsing lib, no public CVEs"
-    release_date: "2018-11-11"                  # v2.3.0 (de1b8d3)
-
   gurl:
     cpe: "N/A"
     justification: "google/gurl (standalone mirror of Chromium's url/ library) has no NVD CPE of its own; google:chrome would false-positive against a 2025-08 snapshot that postdates the fixes those CVEs name"

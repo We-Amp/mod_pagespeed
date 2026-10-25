@@ -170,7 +170,6 @@ use_repo(
     "aom_src",
     "apr",
     "aprutil",
-    "com_github_gflags_gflags",
     "com_github_libevent_libevent",
     "curl_src",
     "cyclone",
