@@ -640,20 +640,26 @@ class TestCacheIntegration:
         )
         assert_http_status(response, 200)
 
-        # Check Cache-Control header on optimized resources
-        # Optimized resources should have extended cache times
-        cache_control = response.header("Cache-Control")
-        if cache_control:
-            # Should have max-age directive
-            if "max-age=" in cache_control.lower():
-                # Extract max-age value
-                import re
-                match = re.search(r"max-age=(\d+)", cache_control.lower())
-                if match:
-                    max_age = int(match.group(1))
-                    # Extended cache should have long TTL (at least 1 day = 86400s)
-                    # But this may vary by configuration
-                    assert max_age > 0, "max-age should be positive"
+        # The page itself is rewritten HTML, which the module answers with
+        # "max-age=0, no-cache" on every port. The extended lifetime is on
+        # the optimized resource the page now points at, so check that.
+        import re
+        from urllib.parse import urljoin, urlsplit
+
+        match = re.search(r'(?:src|href)="([^"]*\.pagespeed\.[^"]*)"', response.text)
+        assert match, "no optimized resource URL in the rewritten page"
+        resource = urlsplit(urljoin(test_url, match.group(1)))
+        resource_path = resource.path + (f"?{resource.query}" if resource.query else "")
+        resource_response = client.get(resource_path)
+        assert_http_status(resource_response, 200)
+
+        cache_control = resource_response.header("Cache-Control").lower()
+        match = re.search(r"max-age=(\d+)", cache_control)
+        assert match, f"no max-age on the optimized resource: {cache_control!r}"
+        # An optimized resource carries a long TTL (the module serves it with
+        # a one-year max-age); anything under a day means the hash did not
+        # match and a short private response was served instead.
+        assert int(match.group(1)) >= 86400, f"max-age too short: {cache_control!r}"
 
 
 if __name__ == "__main__":

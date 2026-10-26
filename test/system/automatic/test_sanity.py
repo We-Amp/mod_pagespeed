@@ -168,17 +168,12 @@ class TestInitialHeaders:
         assert any(l.lower().startswith("vary:") and "accept-encoding" in l.lower()
                    for l in lines), f"no Vary: Accept-Encoding: {lines}"
         assert not response.header_values("Last-Modified"), f"Last-Modified present: {lines}"
-        if on_iis:
-            # The IIS port answers rewritten HTML with a bare "no-cache"; the
-            # other ports send "max-age=0, no-cache". Both forbid reuse
-            # without revalidation.
-            cache_control = [l.split(":", 1)[1].strip().lower() for l in lines
-                             if l.lower().startswith("cache-control:")]
-            assert cache_control == ["no-cache"], f"Cache-Control on IIS: {lines}"
-        else:
-            assert any("cache-control: max-age=0, no-cache" in l.lower() for l in lines), (
-                f"no 'Cache-Control: max-age=0, no-cache': {lines}"
-            )
+        # Rewritten HTML carries "max-age=0, no-cache" on every port, IIS
+        # included (it sends the same disabled-caching value as Apache and
+        # nginx).
+        assert any("cache-control: max-age=0, no-cache" in l.lower() for l in lines), (
+            f"no 'Cache-Control: max-age=0, no-cache': {lines}"
+        )
         assert not response.header_values("X-Frame-Options"), f"X-Frame-Options present: {lines}"
 
 

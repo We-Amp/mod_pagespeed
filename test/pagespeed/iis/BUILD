@@ -119,6 +119,24 @@ pagespeed_cc_test(
     ],
 )
 
+# CollectHeaders' caching-header policy on rewritten HTML against a
+# recording stub IHttpResponse.
+pagespeed_cc_test(
+    name = "iis_module_base_fetch_cache_control_test",
+    srcs = [
+        "iis_module_base_fetch_cache_control_test.cc",
+        "stub_iis_http_context.h",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http:http",
+        "//pagespeed/kernel/thread:win_thread",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 pagespeed_cc_test(
     name = "iis_inplace_resource_handler_test",
     tags = ["manual"],  # Old 1.1 API; needs rewrite for IISpeed adoption
