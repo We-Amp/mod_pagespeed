@@ -260,6 +260,10 @@ class SystemRewriteOptions : public RewriteOptions {
   // configured; the loopback decision uses the validated client IP supplied by
   // the caller, never the client-controlled Host header.  See AllowDomain().
   bool strict_admin_access() const { return strict_admin_access_.value(); }
+  // OPT-IN, DEFAULT FALSE.  The operator declares the admin pages public on
+  // purpose.  Only changes what is logged and what the console reports about
+  // non-loopback admin requests; no access check consults it.
+  bool public_admin_access() const { return public_admin_access_.value(); }
   bool fetch_with_gzip() const { return fetch_with_gzip_.value(); }
   int64 ipro_max_response_bytes() const {
     return ipro_max_response_bytes_.value();
@@ -525,6 +529,9 @@ class SystemRewriteOptions : public RewriteOptions {
 
   // OPT-IN, DEFAULT FALSE.  See strict_admin_access() / AllowDomain() above.
   Option<bool> strict_admin_access_;
+
+  // OPT-IN, DEFAULT FALSE.  See public_admin_access() above.
+  Option<bool> public_admin_access_;
 
   // Makes fetches from PSA to origin-server request
   // accept-encoding:gzip, even when used in a context when we want

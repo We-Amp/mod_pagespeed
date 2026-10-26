@@ -2404,7 +2404,8 @@ void ps_warn_admin_exposure(ngx_http_request_t* r,
       break;
   }
   WarnIfNonLoopbackAdminAccess(ps_client_ip_for_admin_warning(r), family, name,
-                               server_context->message_handler());
+                               server_context->message_handler(),
+                               server_context->config()->public_admin_access());
 }
 
 // Set us up for processing a request.  Creates a request context and determines

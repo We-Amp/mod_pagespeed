@@ -1573,7 +1573,8 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
       global_config->StatisticsAccessAllowed(gurl, client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kStatistics,
-                                 kStatisticsHandler, message_handler);
+                                 kStatisticsHandler, message_handler,
+                                 global_config->public_admin_access());
     InstawebHandler instaweb_handler(request);
     server_context->StatisticsPage(
         false /* not global */, instaweb_handler.query_params(),
@@ -1585,7 +1586,8 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                                           client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kGlobalStatistics,
-                                 kGlobalStatisticsHandler, message_handler);
+                                 kGlobalStatisticsHandler, message_handler,
+                                 global_config->public_admin_access());
     InstawebHandler instaweb_handler(request);
     server_context->StatisticsPage(
         true /* global */, instaweb_handler.query_params(),
@@ -1594,9 +1596,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     return APACHE_OK;
   } else if (request_handler_str == kAdminHandler &&
              global_config->AdminAccessAllowed(gurl, client_is_loopback)) {
-    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
-                                 AdminHandlerFamily::kAdmin, kAdminHandler,
-                                 message_handler);
+    WarnIfNonLoopbackAdminAccess(
+        ClientIpForAdminWarning(request), AdminHandlerFamily::kAdmin,
+        kAdminHandler, message_handler, global_config->public_admin_access());
     InstawebHandler instaweb_handler(request);
     // Read POST body for JSON API endpoints.
     GoogleString request_body;
@@ -1635,7 +1637,8 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                                      client_is_loopback)) {
     WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
                                  AdminHandlerFamily::kGlobalAdmin,
-                                 kGlobalAdminHandler, message_handler);
+                                 kGlobalAdminHandler, message_handler,
+                                 global_config->public_admin_access());
     InstawebHandler instaweb_handler(request);
     // Read POST body for JSON API endpoints.
     GoogleString request_body;
@@ -1677,9 +1680,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     ret = APACHE_OK;
   } else if (request_handler_str == kConsoleHandler &&
              global_config->ConsoleAccessAllowed(gurl, client_is_loopback)) {
-    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
-                                 AdminHandlerFamily::kConsole, kConsoleHandler,
-                                 message_handler);
+    WarnIfNonLoopbackAdminAccess(
+        ClientIpForAdminWarning(request), AdminHandlerFamily::kConsole,
+        kConsoleHandler, message_handler, global_config->public_admin_access());
     InstawebHandler instaweb_handler(request);
     server_context->ConsoleHandler(
         *instaweb_handler.options(), AdminSite::kOther,
@@ -1688,9 +1691,9 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     ret = APACHE_OK;
   } else if (request_handler_str == kMessageHandler &&
              global_config->MessagesAccessAllowed(gurl, client_is_loopback)) {
-    WarnIfNonLoopbackAdminAccess(ClientIpForAdminWarning(request),
-                                 AdminHandlerFamily::kMessages, kMessageHandler,
-                                 message_handler);
+    WarnIfNonLoopbackAdminAccess(
+        ClientIpForAdminWarning(request), AdminHandlerFamily::kMessages,
+        kMessageHandler, message_handler, global_config->public_admin_access());
     InstawebHandler instaweb_handler(request);
     server_context->MessageHistoryHandler(
         *instaweb_handler.options(), AdminSite::kOther,

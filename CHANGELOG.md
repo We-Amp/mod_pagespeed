@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PublicAdminAccess` declares an intentionally public admin console.**
+  A new process-scope option, default off. When on, the module stops
+  logging the "intended for loopback" warning for admin handlers (one
+  informational line is logged instead), and the console's Overview shows
+  an informational "This console is public by configuration" finding in
+  place of "Admin console reachable from the network". Access control is
+  unchanged. Apache: `ModPagespeedPublicAdminAccess on`; nginx:
+  `pagespeed PublicAdminAccess on;` (set it in the main context).
 - **IIS reports an optimizer service it cannot use where administrators
   look first.** A worker process that starts with a configured optimizer
   service it cannot use (the service stopped, one of

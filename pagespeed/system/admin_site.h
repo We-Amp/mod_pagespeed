@@ -73,10 +73,16 @@ enum class AdminHandlerFamily {
 // `handler_name` is the URL handler string used in the warning text (e.g.
 // "pagespeed_admin"). Pass nullptr handler to skip logging (used to test
 // the loopback predicate directly).
+//
+// `console_public` is the PublicAdminAccess option. When true the warning is
+// not logged; one informational line saying the console is public by
+// configuration is logged instead (same once-per-family rule). The loopback
+// check and all access control are unchanged.
 void WarnIfNonLoopbackAdminAccess(StringPiece client_ip,
                                   AdminHandlerFamily family,
                                   StringPiece handler_name,
-                                  MessageHandler* message_handler);
+                                  MessageHandler* message_handler,
+                                  bool console_public = false);
 
 // Returns true if `client_ip` represents an IPv4 or IPv6 loopback address
 // (127.0.0.0/8, ::1, or the IPv4-mapped/compatible variants ::ffff:127.x.y.z

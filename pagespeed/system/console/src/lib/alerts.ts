@@ -266,6 +266,12 @@ const isAdminExposure = (g: MessageGroup): boolean => {
   return g.template.indexOf(ADMIN_EXPOSURE_LOOPBACK, from + ADMIN_EXPOSURE_FROM.length) !== -1;
 };
 
+// The line the module logs at info level instead of that warning when the
+// operator set PublicAdminAccess (pagespeed/system/admin_site.cc).
+const ADMIN_PUBLIC_TEMPLATE = "mod_pagespeed: This console is public by configuration (PublicAdminAccess on).";
+
+const isAdminPublic = (g: MessageGroup): boolean => g.level === "info" && g.template === ADMIN_PUBLIC_TEMPLATE;
+
 /** The cache-generation refusal at warning or error level (never the start-up race lines). */
 const isGenerationRefusal = (g: MessageGroup): boolean =>
   (g.level === "warning" || g.level === "error") && g.template === VOLUME_GENERATION_TEMPLATE;
@@ -452,6 +458,8 @@ export const ALERT_RULES: readonly AlertRule[] = [
     link: "#/logs?source=module&level=warning",
     doc: DOC_ACCESS,
     check: (cur) => {
+      // A console declared public by configuration reports that instead.
+      if (loggedGroups(cur, isAdminPublic)?.length) return false;
       const groups = loggedGroups(cur, isAdminExposure);
       return groups === undefined ? undefined : groups.length > 0;
     },
@@ -464,6 +472,20 @@ export const ALERT_RULES: readonly AlertRule[] = [
     fix:
       "Restrict the admin paths to trusted addresses at the web server (Apache: Require local; nginx: allow " +
       "127.0.0.1; deny all; IIS: InfoUrlsLocalOnly), or acknowledge this if the console is public on purpose.",
+  },
+  {
+    id: "admin-public",
+    label: "This console is public by configuration",
+    severity: "info",
+    kind: "state",
+    link: "#/logs?source=module&level=info",
+    doc: DOC_ACCESS,
+    check: (cur) => {
+      const groups = loggedGroups(cur, isAdminPublic);
+      return groups === undefined ? undefined : groups.length > 0;
+    },
+    message: () => "This console is public by configuration.",
+    fix: "Nothing to do: PublicAdminAccess is on, so the module does not warn about remote admin requests.",
   },
   {
     id: "error-rate",

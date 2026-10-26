@@ -332,6 +332,15 @@ void SystemRewriteOptions::AddProperties() {
                     "When off (default) access checks behave exactly as "
                     "before.",
                     false);
+  AddSystemProperty(false, &SystemRewriteOptions::public_admin_access_, "paa",
+                    "PublicAdminAccess", kProcessScopeStrict,
+                    "OPT-IN, default off. Declares that the admin pages are "
+                    "reachable from the network on purpose. When on, the "
+                    "loopback warning for admin handlers is replaced by one "
+                    "informational line, and the console "
+                    "shows an informational finding instead of the exposure "
+                    "warning. Access control is unchanged.",
+                    false);
   AddSystemProperty(false, &SystemRewriteOptions::fetch_with_gzip_, "afg",
                     "FetchWithGzip", kLegacyProcessScope,
                     "Request http content from origin servers using gzip",
