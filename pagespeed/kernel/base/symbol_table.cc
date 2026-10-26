@@ -45,11 +45,7 @@ namespace net_instaweb {
 
 template <class CharTransform>
 SymbolTable<CharTransform>::SymbolTable()
-    : next_ptr_(nullptr), string_bytes_allocated_(0) {
-  // We can use an empty string piece as the empty value, since
-  // ::Intern has a quick exit on empty inputs.
-  string_map_.set_empty_key(StringPiece());
-}
+    : next_ptr_(nullptr), string_bytes_allocated_(0) {}
 
 template <class CharTransform>
 void SymbolTable<CharTransform>::Clear() {

@@ -24,8 +24,9 @@
 #include <atomic>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/hash/hash.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/sparse_hash_map.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -190,20 +191,39 @@ class HtmlKeywords {
   StringPiece UnescapeHelper(const StringPiece& escaped, GoogleString* buf,
                              bool* decoding_error) const;
 
-  // Conventional wisdom suggests this application calls for dense_hash_map,
-  // but my microbenchmarks show that sparse_hash_map has better performance.
-  // My theory is that the maps are sufficiently small that the algorithmic
-  // differences are not dominant, but keeping the data small helps the
-  // processor cache behavior.
-  using StringStringSparseHashMapInsensitive =
-      sparse_hash_map<GoogleString, const char*, CaseFoldStringHash,
-                      CaseFoldStringEqual>;
-  using StringStringSparseHashMapSensitive =
-      sparse_hash_map<GoogleString, const char*, CasePreserveStringHash>;
+  // These maps are small and built once at startup, then only probed, never
+  // iterated. When this was last measured, sparse_hash_map beat
+  // dense_hash_map: the maps are small enough that algorithmic differences
+  // were not dominant, and keeping the data compact helped the processor
+  // cache. absl::flat_hash_map is similarly compact (one slot per entry plus
+  // a control byte); its speed relative to sparse_hash_map has not been
+  // measured, and its lookups go through the mixed hashers below, so the
+  // sparsehash dependency could be dropped.
+  //
+  // absl's Swiss tables use the top 7 bits of the hash as the probe tag (a
+  // custom hasher's output gets no further mixing), and HashString leaves
+  // those bits zero for keys of 8 characters or fewer, which covers every
+  // entity name. absl::HashOf mixes the full word, and being a pure function
+  // of the inner hash it stays in agreement with the equality functors.
+  struct MixedCaseFoldHash {
+    size_t operator()(const GoogleString& str) const {
+      return absl::HashOf(CaseFoldStringHash()(str));
+    }
+  };
+  struct MixedCasePreserveHash {
+    size_t operator()(const GoogleString& str) const {
+      return absl::HashOf(CasePreserveStringHash()(str));
+    }
+  };
+  using StringStringHashMapInsensitive =
+      absl::flat_hash_map<GoogleString, const char*, MixedCaseFoldHash,
+                          CaseFoldStringEqual>;
+  using StringStringHashMapSensitive =
+      absl::flat_hash_map<GoogleString, const char*, MixedCasePreserveHash>;
 
-  StringStringSparseHashMapInsensitive unescape_insensitive_map_;
-  StringStringSparseHashMapSensitive unescape_sensitive_map_;
-  StringStringSparseHashMapSensitive escape_map_;
+  StringStringHashMapInsensitive unescape_insensitive_map_;
+  StringStringHashMapSensitive unescape_sensitive_map_;
+  StringStringHashMapSensitive escape_map_;
 
   // Note that this is left immutable after being filled in, so it's OK
   // to take pointers into it.

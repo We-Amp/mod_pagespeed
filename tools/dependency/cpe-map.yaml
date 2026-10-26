@@ -143,11 +143,6 @@ deps:
     cpe: "cpe:2.3:a:aomedia:libavif"           # NVD: 3 CVEs (aomedia:libavif — the AOMediaCodec container/coordination lib, distinct from aomedia:aomedia)
     release_date: "2026-05-26"                 # v1.4.2 — AOMediaCodec/libavif GitHub release + annotated tag both 2026-05-26
 
-  sparsehash:
-    cpe: "N/A"
-    justification: "Google sparsehash has no NVD CPE; header-only hashtable, no public CVEs"
-    release_date: "2018-01-01"                  # 6ff8809 (long-frozen pin)
-
   gurl:
     cpe: "N/A"
     justification: "google/gurl (standalone mirror of Chromium's url/ library) has no NVD CPE of its own; google:chrome would false-positive against a 2025-08 snapshot that postdates the fixes those CVEs name"

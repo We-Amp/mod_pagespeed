@@ -26,9 +26,10 @@
 #include <list>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/hash/hash.h"
 #include "pagespeed/kernel/base/atom.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dense_hash_map.h"
 #include "pagespeed/kernel/base/string_hash.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -91,13 +92,21 @@ class SymbolTable {
     }
   };
 
+  // HashString leaves the top 7 bits of its result zero for short keys, and
+  // absl's Swiss tables use exactly those bits as the probe tag (a custom
+  // hasher's output gets no further mixing), so short-key lookups would
+  // otherwise compare keys across a whole probe group. absl::HashOf mixes
+  // the full word, and being a pure function of the inner hash it stays in
+  // agreement with Comparator.
   struct Hash {
     size_t operator()(const StringPiece& key) const {
-      return HashString<CharTransform, size_t>(key.data(), key.length());
+      return absl::HashOf(
+          HashString<CharTransform, size_t>(key.data(), key.length()));
     }
   };
 
-  using SymbolMap = dense_hash_map<StringPiece, StringPiece*, Hash, Comparator>;
+  using SymbolMap =
+      absl::flat_hash_map<StringPiece, StringPiece*, Hash, Comparator>;
   SymbolMap string_map_;
 
   // Since we don't want to have Atom include both base and size, it keeps

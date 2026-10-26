@@ -25,6 +25,7 @@ cc_library(
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
+        "@com_google_absl//absl/hash",
     ],
 )
 

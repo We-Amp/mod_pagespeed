@@ -33,9 +33,9 @@
 #include <memory>
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
 #include "third_party/css_parser/src/string_using.h"
 #include "third_party/css_parser/src/strings/stringpiece.h"
-#include "third_party/css_parser/src/util/gtl/dense_hash_map.h"
 #include "third_party/css_parser/src/webutil/html/htmltagenum.h"
 
 class HtmlTagIndex {
@@ -78,7 +78,7 @@ class HtmlTagIndex {
   uint64_t case_mask_8_;
 
   int index_max_;
-  typedef dense_hash_map<string, int> CustomTagMap;
+  typedef absl::flat_hash_map<string, int> CustomTagMap;
   std::unique_ptr<CustomTagMap> custom_tag_map_;
 
   DISALLOW_COPY_AND_ASSIGN(HtmlTagIndex);

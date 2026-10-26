@@ -74,10 +74,6 @@ Comment: The authors of this software are Rob Pike and Ken Thompson. The
    REPRESENTATION OR WARRANTY OF ANY KIND CONCERNING THE MERCHANTABILITY
    OF THIS SOFTWARE OR ITS FITNESS FOR A PARTICULAR PURPOSE.
 
-Files: third_party/google-sparsehash/*
-Copyright: 2005 Google Inc.
-License: BSD-3-clause
-
 Files: external/com_googlesource_googleurl (google/gurl, Bazel http_archive
        pinned in bazel/repositories.bzl)
 Copyright: 2015 The Chromium Authors

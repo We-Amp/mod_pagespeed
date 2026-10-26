@@ -131,8 +131,6 @@ CPP_DEPS = [
      "purl": "pkg:generic/aom@v3.12.0"},
     {"name": "dav1d", "version": {"key": "DAV1D_VERSION"}, "license": "BSD-2-Clause",
      "holder": "VideoLAN and dav1d authors", "repo": "videolan/dav1d", "purl_version": None},
-    {"name": "sparsehash", "version": {"key": "GOOGLE_SPARSEHASH_COMMIT"}, "license": "BSD-3-Clause",
-     "holder": "Google Inc.", "repo": "sparsehash/sparsehash", "purl_version": None},
     # gurl (Chromium's URL parser) ships statically linked into core code
     # (pagespeed/kernel/http). It is declared in bazel/repositories.bzl like
     # every other C++ dep precisely so this chain sees it.

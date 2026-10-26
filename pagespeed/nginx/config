@@ -93,7 +93,7 @@ NGX_PAGESPEED_INCS="
 # Header include directories for the PageSpeed dependency graph.
 #
 # The glue (ngx_pagespeed.cc) pulls in the full PageSpeed header tree, which
-# in turn references abseil, protobuf, boringssl, sparsehash, apr, gtest and a
+# in turn references abseil, protobuf, boringssl, apr, gtest and a
 # long tail of vendored deps -- plus Bazel-GENERATED headers (version.h, the
 # protobuf *.pb.h, and per-target _virtual_includes/ roots). Hand-maintaining
 # that list is brittle (the archive's CppCompile action carries ~70 distinct

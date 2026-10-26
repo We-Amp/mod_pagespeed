@@ -24,7 +24,6 @@
 
 #include "base/logging.h"
 #include "third_party/css_parser/src/strings/ascii_ctype.h"
-#include "third_party/css_parser/src/util/gtl/dense_hash_map.h"
 
 // Assert character properties that the fast path depends on.
 //   (Uppercase letter | 0x20) == lowercase letter
@@ -131,7 +130,6 @@ int HtmlTagIndex::AddHtmlTag(const char* tag, int length) {
   // Add to the custom table.
   if (custom_tag_map_.get() == nullptr) {
     custom_tag_map_ = std::make_unique<CustomTagMap>();
-    custom_tag_map_->set_empty_key(string(""));
   }
   string tag_copy(CaseAwareString(case_sensitive_, tag, length));
   (*custom_tag_map_)[tag_copy] = index_max_;

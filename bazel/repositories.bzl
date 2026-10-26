@@ -7,7 +7,6 @@ load(":hiredis.bzl", "hiredis_build_rule")
 load(":jsoncpp.bzl", "jsoncpp_build_rule")
 load(":libpng.bzl", "libpng_build_rule")
 load(":libwebp.bzl", "libwebp_build_rule")
-load(":google_sparsehash.bzl", "google_sparsehash_build_rule")
 load(":libpsl.bzl", "libpsl_build_rule")
 load(":giflib.bzl", "giflib_build_rule")
 load(":optipng.bzl", "optipng_build_rule")
@@ -79,8 +78,6 @@ LIBPNG_COMMIT = "1.6.58"  # Updated May 2026 - 4 point releases of parser harden
 LIBPNG_SHA = "a9d4df463d36a6e5f9c29bd6f4967312d17e996c1854f3511f833924eb1993cf"
 LIBWEBP_COMMIT = "1.5.0"  # Updated Mar 2026 - CVE-2023-4863 fix (heap buffer overflow)
 LIBWEBP_SHA = "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37"
-GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
-GOOGLE_SPARSEHASH_SHA = "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3"
 # googleurl (gurl) — Chromium's URL parser, used by pagespeed/kernel/http for
 # URL parsing (parses attacker-controllable href/src/url()). Originally an
 # Envoy dep, but referenced directly by core PageSpeed code. Fully
@@ -688,16 +685,6 @@ filegroup(
         sha256 = LIBWEBP_SHA,
         strip_prefix = "libwebp-%s" % LIBWEBP_COMMIT,
         build_file_content = libwebp_build_rule,
-    )
-
-    http_archive(
-        name = "google_sparsehash",
-        strip_prefix = "sparsehash-%s" % GOOGLE_SPARSEHASH_COMMIT,
-        url = "https://github.com/sparsehash/sparsehash/archive/%s.tar.gz" % GOOGLE_SPARSEHASH_COMMIT,
-        build_file_content = google_sparsehash_build_rule,
-        sha256 = GOOGLE_SPARSEHASH_SHA,
-        patches = [Label("//bazel:sparsehash_cstring.patch")],
-        patch_args = ["-p1"],
     )
 
     http_archive(
