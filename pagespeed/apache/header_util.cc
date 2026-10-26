@@ -265,12 +265,13 @@ void DisableCacheControlHeader(request_rec* request) {
   // Turn off Cache-Control header for the HTTP requests.
   ApacheCachingHeaders headers(request);
   // The generated value accounts for the Cache-Control directives of both
-  // tables (Lookup reads err_headers_out too), and the response must carry
-  // only ours: drop the origin's from err_headers_out before writing ours
-  // to headers_out.
+  // tables (Lookup reads err_headers_out too), so compute it before touching
+  // either table. The response must carry only ours: drop the origin's from
+  // err_headers_out, then write ours to headers_out.
+  const GoogleString value = headers.GenerateDisabledCacheControl();
   apr_table_unset(request->err_headers_out, HttpAttributes::kCacheControl);
   apr_table_set(request->headers_out, HttpAttributes::kCacheControl,
-                headers.GenerateDisabledCacheControl().c_str());
+                value.c_str());
 }
 
 void DisableCachingRelatedHeaders(request_rec* request) {
