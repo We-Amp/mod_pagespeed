@@ -109,6 +109,19 @@ void DisableCachingRelatedHeaders(request_rec* request);
 // err_headers_out into account, and is written to headers_out only.
 void DisableCacheControlHeader(request_rec* request);
 
+// Adds s-maxage to the response's Cache-Control for in-place resources.
+// Cache-Control values are read from both request->headers_out and
+// request->err_headers_out (php-fpm, CGI and 'Header always set' write to the
+// latter), and combined into ONE Cache-Control header in headers_out; the
+// origin's copy is removed from whichever table it came from.
+//
+// Returns false, leaving both tables untouched, if no s-maxage should be
+// added (for example no-cache, private, or no-transform is present).  On
+// true, *had_original says whether the response had a Cache-Control at all
+// and *original holds the origin's value (multiple headers joined with ", ").
+bool ApplyInPlaceSMaxAge(request_rec* request, int s_maxage_sec,
+                         bool* had_original, GoogleString* original);
+
 }  // namespace net_instaweb
 
 #endif  // PAGESPEED_APACHE_HEADER_UTIL_H_
