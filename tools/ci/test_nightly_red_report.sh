@@ -34,10 +34,15 @@ mkdir -p "${BIN}"
 #                                                   FAKE_RUNS_CI_PUSH
 #   api .../actions/runs/<id> --jq .created_at      FAKE_RUN_CREATED (fails
 #                                                    when FAKE_RUN_FAIL=1)
-#   api .../actions/jobs/<id>/logs                  FAKE_RAWLOG_<id> (HTTP 404
-#                                                    when unset)
+#   api --allow-escape-sequences .../actions/jobs/<id>/logs
+#                                                   FAKE_RAWLOG_<id> (HTTP 404
+#                                                    when unset); without the
+#                                                    flag, real gh's refusal
+#                                                    (exit 0, FAKE_REFUSAL_RC)
 #   run view <run> --job <id> ...                   FAKE_LOG_<id> (fails when
-#                                                    FAKE_VIEW_FAIL=1)
+#                                                    FAKE_VIEW_FAIL=1; rejects
+#                                                    --allow-escape-sequences,
+#                                                    as real gh does)
 #   issue list ...                                  FAKE_ISSUES (fails when
 #                                                    FAKE_ISSUES_FAIL=1)
 #   issue create|edit|comment|close, label create   nothing, exit 0
@@ -53,7 +58,7 @@ for a in "$@"; do
 done
 answer() { local var="$1"; printf '%s' "${!var-}"; }
 case "$1 $2" in
-  "api --paginate"|"api repos/"*)
+  "api --paginate"|"api repos/"*|"api --allow-escape-sequences")
     path="$*"
     case "${path}" in
       */actions/runs/*/jobs*)
@@ -75,12 +80,22 @@ case "$1 $2" in
         id="${id%%/*}"
         var="FAKE_RAWLOG_${id}"
         if [ -z "${!var+set}" ]; then echo "HTTP 404" >&2; exit 1; fi
+        if [ "$2" != "--allow-escape-sequences" ] || [ "${FAKE_FORCE_REFUSAL:-0}" = "1" ]; then
+          echo "the response contains terminal escape sequences; pass --allow-escape-sequences to print it anyway"
+          exit "${FAKE_REFUSAL_RC:-0}"
+        fi
         answer "${var}"
         ;;
       *) echo "unexpected api call" >&2; exit 1 ;;
     esac
     ;;
   "run view")
+    for a in "$@"; do
+      if [ "${a}" = "--allow-escape-sequences" ]; then
+        echo "unknown flag: --allow-escape-sequences" >&2
+        exit 1
+      fi
+    done
     if [ "${FAKE_VIEW_FAIL:-0}" = "1" ]; then echo "HTTP 404" >&2; exit 1; fi
     id=""
     prev=""
@@ -428,12 +443,36 @@ expect no-history "exit 0" eq "${RC}" 0
 expect no-history "no green within 0" body_has "no green within 0 completed full-tier runs"
 done_case no-history-says-no-green
 
-# --- log-fetch-uses-escape-flag
+# --- primary-log-fetch-has-no-escape-flag (gh run view has no such flag)
 start
 run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" FAKE_RUNS_NIGHTLY="${H40}" FAKE_JOBS_40="${J40_GREEN}"
-expect log-fetch "exact call" grep -qxF -- "gh run view 50 --job 502 --log-failed --allow-escape-sequences" "${WORK}/gh.log"
-expect log-fetch "one fetch per failed job" eq "$(calls '^gh run view')" 1
-done_case log-fetch-uses-escape-flag
+expect primary-log-fetch "exact call" grep -qxF -- "gh run view 50 --job 502 --log-failed" "${WORK}/gh.log"
+expect primary-log-fetch "one fetch per failed job" eq "$(calls '^gh run view')" 1
+expect primary-log-fetch "no fallback" eq "$(calls 'actions/jobs/')" 0
+expect primary-log-fetch "target extracted" body_has "//t:race_test"
+done_case primary-log-fetch-has-no-escape-flag
+
+# --- fallback-uses-api-escape-flag
+start
+run FAKE_VIEW_FAIL=1 FAKE_JOBS_50="${RED_JOBS}" \
+  FAKE_RAWLOG_502='2026-10-26T04:12:30.0000000Z //t:race_test    FAILED in 3.1s' \
+  FAKE_RUNS_NIGHTLY="${H40}" FAKE_JOBS_40="${J40_GREEN}"
+expect fallback-flag "exit 0" eq "${RC}" 0
+expect fallback-flag "exact call" \
+  grep -qxF -- "gh api --allow-escape-sequences repos/We-Amp/example/actions/jobs/502/logs" "${WORK}/gh.log"
+expect fallback-flag "target extracted" body_has "//t:race_test"
+done_case fallback-uses-api-escape-flag
+
+# --- the escape-sequence refusal is no log (exit 0 and exit 1 forms)
+for rc in 0 1; do
+  start
+  run FAKE_VIEW_FAIL=1 FAKE_FORCE_REFUSAL=1 FAKE_REFUSAL_RC="${rc}" FAKE_JOBS_50="${RED_JOBS}" \
+    FAKE_RAWLOG_502='//t:race_test    FAILED in 3.1s' FAKE_RUNS_NIGHTLY="${H40}" FAKE_JOBS_40="${J40_GREEN}"
+  expect refusal "exit 0" eq "${RC}" 0
+  expect refusal "log not available" body_has "none extracted (log not available)"
+  expect refusal "not marked as read" no body_has "from the whole job log"
+  done_case "escape-refusal-is-no-log (gh exit ${rc})"
+done
 
 # --- log-fetch-falls-back-to-the-job-log-api
 start
@@ -441,7 +480,7 @@ run FAKE_VIEW_FAIL=1 FAKE_JOBS_50="${RED_JOBS}" \
   FAKE_RAWLOG_502='2026-10-26T04:12:30.0000000Z //t:race_test    FAILED in 3.1s' \
   FAKE_RUNS_NIGHTLY="${H40}" FAKE_JOBS_40="${J40_GREEN}"
 expect log-fallback "exit 0" eq "${RC}" 0
-expect log-fallback "job log API read" grep -qxF -- "gh api repos/We-Amp/example/actions/jobs/502/logs" "${WORK}/gh.log"
+expect log-fallback "job log API read" grep -qxF -- "gh api --allow-escape-sequences repos/We-Amp/example/actions/jobs/502/logs" "${WORK}/gh.log"
 expect log-fallback "target extracted" body_has "//t:race_test"
 expect log-fallback "marked as from the whole job log" body_has "- Failing targets (from the whole job log):"
 done_case log-fetch-falls-back-to-the-job-log-api
