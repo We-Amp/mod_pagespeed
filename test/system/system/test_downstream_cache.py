@@ -71,6 +71,21 @@ class TestDownstreamCache:
         for name in ("Cache-Control", "Expires", "Last-Modified"):
             assert response.header_values(name), f"{name} missing: {response.raw_headers}"
 
+    def test_html_vary_names_image_inputs_with_downstream_cache_on(self, vhost_client):
+        # The vhost's HTML is private for the downstream cache; the rewritten
+        # page still names the headers its image URLs depend on, once each.
+        vhost = vhost_client(HOST)
+        response = _fetch(vhost, "rewrite_images", {"Accept": "text/html,image/webp,*/*"})
+        tokens = [
+            t.strip().lower()
+            for value in response.header_values("Vary")
+            for t in value.split(",")
+            if t.strip()
+        ]
+        for wanted in ("accept", "save-data", "user-agent"):
+            assert tokens.count(wanted) == 1, _lines(response)
+        assert "sec-ch-dpr" not in tokens, _lines(response)
+
     def test_image_rebeaconing_needs_the_key(self, vhost_client):
         vhost = vhost_client(HOST)
         run = r"pagespeed\.CriticalImages\.Run"

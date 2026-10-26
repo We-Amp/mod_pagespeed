@@ -183,6 +183,31 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
     return output_headers.LookupJoined(HttpAttributes::kCacheControl);
   }
 
+  // Fetches an HTML page whose origin sends input_cache_control and returns
+  // the comma-joined Vary values of the response.
+  GoogleString RewriteHtmlVary(const StringPiece& id,
+                               const StringPiece& input_cache_control) {
+    GoogleString url = StrCat("http://www.example.com/", id, ".html");
+    ResponseHeaders input_headers;
+    DefaultResponseHeaders(kContentTypeHtml, 100, &input_headers);
+    input_headers.Replace(HttpAttributes::kCacheControl, input_cache_control);
+    SetFetchResponse(url, input_headers, "<body>Foo</body>");
+
+    GoogleString body;
+    ResponseHeaders output_headers;
+    FetchFromProxy(url, true, &body, &output_headers);
+    ConstStringStarVector values;
+    output_headers.Lookup(HttpAttributes::kVary, &values);
+    GoogleString joined;
+    for (const GoogleString* value : values) {
+      if (!joined.empty()) {
+        StrAppend(&joined, ",");
+      }
+      StrAppend(&joined, *value);
+    }
+    return joined;
+  }
+
   int GetStatusCodeInPropertyCache(const GoogleString& url) {
     PropertyCache* pcache = page_property_cache();
     std::unique_ptr<MockPropertyPage> page(
@@ -2962,6 +2987,38 @@ TEST_F(ProxyInterfaceTest, NoSMaxAgeOnRewrittenHtml) {
   EXPECT_STREQ(
       "max-age=0, no-cache, no-store",
       RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
+}
+
+// Rewritten HTML names the headers its image URLs depend on in Vary, and the
+// list does not depend on the caching headers the response ends up with.
+TEST_F(ProxyInterfaceTest, HtmlVaryIsIndependentOfCachingHeaders) {
+  const char kExpectedVary[] = "Accept,Save-Data,User-Agent";
+  RewriteOptions* options = server_context()->global_options();
+  options->ClearSignatureForTesting();
+  options->EnableFilter(RewriteOptions::kConvertJpegToWebp);
+  options->EnableFilter(RewriteOptions::kRecompressWebp);
+  options->EnableFilter(RewriteOptions::kRecompressJpeg);
+
+  // Default: HTML is not cacheable (max-age=0, no-cache).
+  options->set_max_html_cache_time_ms(0);
+  server_context()->ComputeSignature(options);
+  EXPECT_EQ(kExpectedVary, RewriteHtmlVary("v-nocache2", ""));
+
+  // A positive MaxHtmlCacheTimeMs: private.
+  options->ClearSignatureForTesting();
+  options->set_max_html_cache_time_ms(kHtmlCacheTimeSec * Timer::kSecondMs);
+  server_context()->ComputeSignature(options);
+  EXPECT_EQ(kExpectedVary, RewriteHtmlVary("v-private2", "max-age=100"));
+
+  // An origin public Cache-Control with downstream-cache options set (the
+  // proxy path itself has no downstream branch).
+  options->ClearSignatureForTesting();
+  options->set_downstream_cache_purge_method("GET");
+  options->set_downstream_cache_purge_location_prefix("http://localhost:1234");
+  options->set_downstream_cache_rebeaconing_key("key");
+  options->set_downstream_cache_rewritten_percentage_threshold(95);
+  server_context()->ComputeSignature(options);
+  EXPECT_EQ(kExpectedVary, RewriteHtmlVary("v-public", "public, max-age=100"));
 }
 
 TEST_F(ProxyInterfaceTest, PropCacheFilter) {

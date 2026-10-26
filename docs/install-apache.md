@@ -102,6 +102,18 @@ gate the `/pagespeed_admin` and `/pagespeed_statistics` endpoints. They are
 shown here scoped to `localhost`; in production, restrict access with a firewall
 or ACL rather than relying on these directives alone.
 
+
+### HTML caching
+
+Rewritten HTML is served as not cacheable by shared caches by default, and it
+carries `Vary: Accept, Save-Data, User-Agent` (the headers its image URLs and
+inlining depend on; fewer when fewer image filters are on). If you let a CDN or
+proxy store the HTML (for example with `ModPagespeedModifyCachingHeaders off`,
+or with `ModPagespeedDownstreamCachePurgeLocationPrefix` set), see "Behind a
+shared cache or CDN" in
+[daemon-adapter-deployment.md](daemon-adapter-deployment.md), including how to
+make the HTML the same for every client with `ImagePreserveURLs on`.
+
 ## Verification
 
 ```bash

@@ -48,6 +48,18 @@ http_filters:
 
 The options are the fields of the `pagespeed.Decoder` message in `pagespeed/envoy/http_filter.proto`; other PageSpeed directives go in a virtual host's `custom_options` map.
 
+### HTML caching
+
+Rewritten HTML is served as not cacheable by shared caches by default. The
+rewriter adds `Vary: Accept, Save-Data, User-Agent` (the headers its image
+URLs and inlining depend on; fewer when fewer image filters are on) to the
+response headers it produces; that this `Vary` reaches the wire on Envoy is
+not yet verified. If you let a CDN or
+proxy store the HTML (for example with `ModifyCachingHeaders off`), see "Behind
+a shared cache or CDN" in
+[daemon-adapter-deployment.md](daemon-adapter-deployment.md), including how to
+make the HTML the same for every client with `ImagePreserveURLs on`.
+
 ## Verification
 
 ```bash

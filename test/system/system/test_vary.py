@@ -70,5 +70,84 @@ class TestRespectVary:
         )
 
 
+DESKTOP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+SAFARI_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+)
+PHONE_UA = (
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+)
+
+# Rewritten HTML depends on Accept (image format), Save-Data (image quality)
+# and User-Agent (device class, inlining) whenever image rewriting is on, and
+# names them in Vary whatever the request carries. Sec-CH-DPR is read only by
+# the optimizer worker at the image URL, never by the HTML rewriter.
+HTML_VARY_TOKENS = ["accept", "save-data", "user-agent"]
+CLIENTS = {
+    "desktop-webp": {"User-Agent": DESKTOP_UA, "Accept": "text/html,image/webp,*/*"},
+    "safari-no-webp": {"User-Agent": SAFARI_UA, "Accept": "text/html,*/*"},
+    "phone": {"User-Agent": PHONE_UA, "Accept": "text/html,image/webp,*/*"},
+    "save-data": {
+        "User-Agent": DESKTOP_UA,
+        "Accept": "text/html,image/webp,*/*",
+        "Save-Data": "on",
+    },
+}
+
+
+def vary_tokens(response):
+    """Lower-cased Vary tokens across all Vary lines, in order, with repeats."""
+    tokens = []
+    for value in response.header_values("Vary"):
+        tokens.extend(t.strip().lower() for t in value.split(",") if t.strip())
+    return tokens
+
+
+class TestHtmlVary:
+    """Rewritten HTML names the request headers it depends on in Vary."""
+
+    IMAGES_ON = "?PageSpeedFilters=rewrite_images"
+    IMAGES_OFF = "?PageSpeedFilters=collapse_whitespace"
+
+    @pytest.mark.parametrize("name", sorted(CLIENTS))
+    def test_image_rewriting_names_the_three_headers_once(
+        self, client: PageSpeedClient, example_root: str, name: str
+    ):
+        url = f"{example_root}/rewrite_images.html{self.IMAGES_ON}"
+        response = client.get(url, headers=CLIENTS[name])
+        require_status_ok(response, f"{name} {url}")
+        tokens = vary_tokens(response)
+        for wanted in HTML_VARY_TOKENS:
+            assert tokens.count(wanted) == 1, (name, response.raw_headers)
+        assert "sec-ch-dpr" not in tokens, (name, response.raw_headers)
+
+    def test_head_carries_the_same_vary_as_get(self, client: PageSpeedClient, example_root: str):
+        url = f"{example_root}/rewrite_images.html{self.IMAGES_ON}"
+        headers = CLIENTS["desktop-webp"]
+        get = client.get(url, headers=headers)
+        head = client.head(url, headers=headers)
+        require_status_ok(get, url)
+        require_status_ok(head, url)
+        assert sorted(t for t in vary_tokens(head) if t in HTML_VARY_TOKENS) == sorted(
+            HTML_VARY_TOKENS
+        ), head.raw_headers
+        assert [t for t in vary_tokens(head) if t in HTML_VARY_TOKENS] == [
+            t for t in vary_tokens(get) if t in HTML_VARY_TOKENS
+        ]
+
+    def test_images_off_names_none_of_them(self, client: PageSpeedClient, example_root: str):
+        url = f"{example_root}/rewrite_images.html{self.IMAGES_OFF}"
+        response = client.get(url, headers=CLIENTS["desktop-webp"])
+        require_status_ok(response, url)
+        tokens = vary_tokens(response)
+        for unwanted in HTML_VARY_TOKENS:
+            assert unwanted not in tokens, response.raw_headers
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

@@ -262,6 +262,17 @@ class RewriteDriver : public HtmlParse {
     response_headers_ = headers;
   }
 
+  // The Vary tokens HtmlVaryFilter added to the response headers of the
+  // current document (tokens already present, such as an origin's own, are not
+  // recorded). Empty when the filter is absent or added nothing. Cleared when
+  // the driver is recycled.
+  const StringVector& html_vary_tokens_added() const {
+    return html_vary_tokens_added_;
+  }
+  void AddHtmlVaryTokenAdded(StringPiece token) {
+    html_vary_tokens_added_.push_back(token.as_string());
+  }
+
   // Reinitializes request_headers_ (a scoped ptr) with a copy of the original
   // request headers. Note that the fetches associated with the driver could
   // be using a modified version of the original request headers.
@@ -1534,6 +1545,7 @@ class RewriteDriver : public HtmlParse {
 
   bool flush_requested_;
   bool flush_occurred_;
+  StringVector html_vary_tokens_added_;
 
   // If it is set to true, then lazyload script is flushed with flush early
   // flow.

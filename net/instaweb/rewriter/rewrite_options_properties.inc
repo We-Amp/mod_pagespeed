@@ -290,7 +290,11 @@
     kModifyCachingHeaders, kDirectoryScope, \
     "Set to false to disallow mod_pagespeed from editing HTML " \
     "Cache-Control headers. This is not safe in general and can cause " \
-    "the incorrect versions of HTML to be served to users.", true)
+    "the incorrect versions of HTML to be served to users. Rewritten HTML " \
+    "names the request headers its image URLs depend on (Accept, " \
+    "Save-Data, User-Agent) in Vary even when this is off, so a shared " \
+    "cache that honours Vary keeps the variants apart; caches that ignore " \
+    "Vary need their own cache key or a bypass for HTML.", true)
 
 // Segment 2: lazyload_images_after_onload_ through enable_prioritizing_scripts_.
 // Preceded by BeaconUrl (individual call).
