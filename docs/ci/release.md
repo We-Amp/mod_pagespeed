@@ -17,7 +17,7 @@ The lane has two halves in one workflow.
 - **Build and validate** (every run, a dry run included): build every package,
   the Windows installer and the sidecar pair (tested with the sidecar's suite,
   live nginx included), run the package smokes, the security gates, the
-  unit tests, the system-test gate and the two release gates on the Hyper-V
+  unit tests, the two CI gates and the two release gates on the Hyper-V
   class (installer upgrade, cPanel), and end in one run artifact with the asset
   set, `SHA256SUMS` and `manifest.json`. A dry run signs nothing, creates
   nothing and uses no secret.
@@ -114,8 +114,19 @@ The two differ only in the `dry_run` output of the `version` job: with
 `dry_run` true nothing is ever signed or created, and the installer is built
 from the unsigned binaries. A dry run builds and validates everything and runs
 the gates (a gate that needs the Hyper-V class is skipped while the fleet is
-off), so it is the way to find out whether a tag will go through. The `system-test gate` reports its verdict and lets a dry run
-continue; on a real run a red verdict stops the release.
+off), so it is the way to find out whether a tag will go through. The two CI
+gates (`systest-gate` and `ci-release-gate`, see "The CI gates") report their
+verdict and let a dry run continue; on a real run a red verdict stops the
+release.
+
+The order of a release is: dispatch `ci.yml` with `full=true` on the candidate
+commit (while it is the tip of `master`), then the gates, then the tag. A push
+run of `master` is not evidence for the full tier, so the dispatch comes
+first; the gates wait for it while it is still running:
+
+```text
+gh workflow run ci.yml --ref master -f full=true
+```
 
 Runs of one tag are serialized by the caller (`release.yml`), and a release
 always runs out: it is never cancelled by a newer run.
@@ -225,7 +236,7 @@ never taken up.
 
 All jobs have `permissions: contents: read`, except `create-release`
 (`contents: write`), and only the jobs marked `release` below hold a secret.
-The system-test gate reads the workflow runs of this public repository, and the
+The two CI gates read the workflow runs of this public repository, and the
 optimizer fetch calls a public API, both with the job's own read-only token and
 no further permission. "Pair" means the job exists as a build
 runner job and as a `-hosted` twin; exactly one of the two runs, and a small
@@ -239,6 +250,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `security-gates` | hosted | generates the SBOM for the stamped tree, then notices, VEX, grype with VEX applied on that SBOM; makes the versioned SBOM and VEX files |
 | `optimizer-fetch` | hosted | fetches the pinned optimizer release and verifies it (see below) |
 | `systest-gate` | hosted | requires a green Apache and Nginx system test of the CI run of the release commit |
+| `ci-release-gate` | hosted | requires a green full-tier `full=true` CI dispatch of the release commit (see "The CI gates") |
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
 | `linux-arm64-release-build` | hosted arm64 | the same for arm64 |
 | `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
@@ -331,26 +343,43 @@ generated file is the release's SBOM. It does not run `generate-sbom.py
 the tag's, so the drift check would fail on every tag. That check belongs to
 the pull request tier, once the tree's `VERSION` and the committed SBOM agree.
 
-### The system-test gate
+### The CI gates
 
-The gate looks for a completed run of `ci.yml` on `master` for the release
-commit in which the jobs named `Apache System Tests` and `Nginx System Tests`
-(under any caller prefix) finished with `success`. Both a `push` run and a
-`workflow_dispatch` run count (the dispatch with `full=true` is the release
-candidate run the release checklist requires), and the log line names the event of the
-run that passed. A release commit that never ran those lanes cannot be
-released: run the CI on it first.
+Two gates read the CI runs of the release commit; both must pass. Both wait,
+up to an hour, for a run that is still queued or in progress, retry transient
+API failures, and refuse a completed run without a pass only after two
+consecutive checks agree, so a flaky empty API page costs one extra poll
+instead of a false refusal. A pass always needs a run that was actually seen
+green. Every API failure and the deadline still refuse.
 
-The gate checks the system-test lanes only. It does not assert the full tier:
-that every fleet job of the `full=true` dispatch at the candidate SHA is
-`success` is checked by the release checklist's release-readiness check (the
-only allowed skip is `iis-sys-tests` when the repository variable
-`FLEET_IIS_ENABLED` is not `true`).
+**The system-test gate** (`systest-gate`, `tools/ci/systest_gate.sh`) looks for
+a completed run of `ci.yml` on `master` for the release commit in which the
+jobs named `Apache System Tests` and `Nginx System Tests` (under any caller
+prefix) finished with `success`. Both a `push` run and a `workflow_dispatch`
+run count, and the log line names the event of the run that passed.
 
-A completed run without green system-test lanes, with nothing in flight, is
-refused only after two consecutive checks agree, so a flaky empty API page
-costs one extra poll instead of a false refusal. A pass always needs a run
-that was actually seen green. Every API failure and the deadline still refuse.
+**The full-tier gate** (`ci-release-gate`, `tools/ci/ci_release_gate.sh`)
+accepts only a `workflow_dispatch` run of `ci.yml` on `master` at the release
+commit, the candidate dispatch with `full=true`. Push runs are never read, and
+a scheduled nightly or a re-run of one is never evidence. In that run every
+fleet job of the PR tier and every job of the full tier (its event guard, path
+filter and fleet-off notice aside) must be `success`, and no other job may be
+`failure`, `cancelled` or `timed_out`. A dispatch without `full=true` has no
+`full / ` jobs and is refused. The script's test compares its list with the
+two tier workflows, so a job added to a tier without the gate list fails CI.
+
+- `skipped` is a failure, with one allow-list: `pr / IIS System Tests` and
+  `full / Windows AppVerif` need the IIS runner class and may be skipped only
+  while the repository variable `FLEET_IIS_ENABLED` is not `true` when the gate
+  runs. The gate then prints a `::warning::` naming the variable's value and
+  each accepted job in the release evidence.
+- The arm64 legs have no allow-list entry: if the hosted arm64 class is
+  unavailable, the release waits or is waived explicitly.
+- `full / Windows ASan` concludes `success` even when the ASan runtime is
+  missing, so the gate also requires its step `Run the unit tests under ASan`
+  to be `success`.
+- No job of the two tiers is `continue-on-error` today; such a job would be
+  advisory (reported, not required).
 
 ### Runners
 
@@ -621,5 +650,7 @@ repository, which packs the pair into
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |
+| `tools/ci/systest_gate.sh`, `tools/ci/test_systest_gate.sh` | the system-test gate and its test |
+| `tools/ci/ci_release_gate.sh`, `tools/ci/test_ci_release_gate.sh` | the full-tier gate and its test |
 
 The self-tests run in the `CI tooling self-tests` job of `ci.yml`.

@@ -159,6 +159,8 @@ jobs:
           python3 -I tools/ci/check_module_optimizer_version.py --self-test
           tools/ci/test_cache_gen_for_version.sh
           bash tools/ci/test_assert_release_stamp.sh
+      - name: Release CI gate
+        run: tools/ci/test_ci_release_gate.sh
 
   # Aggregate gate: the one check branch protection needs besides the
   # per-job ones. A called workflow cannot read needs.*.result of its

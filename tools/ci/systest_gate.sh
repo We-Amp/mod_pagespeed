@@ -4,10 +4,11 @@
 #
 # The release's system-test gate: a run of ci.yml for the release commit must
 # have passed both the Apache and the Nginx System Tests. This script checks
-# those two lanes only; it does not assert the full tier (that is checked by
-# the release checklist: every fleet job of the full=true dispatch at the
-# candidate SHA must be success; the only allowed skip is iis-sys-tests when
-# the repository variable FLEET_IIS_ENABLED is not true).
+# those two lanes only; tools/ci/ci_release_gate.sh, the release lane's other
+# gate, checks the full tier of the full=true dispatch at the candidate SHA.
+#
+# The order of a release is: the candidate full=true dispatch of ci.yml, then
+# the gates, then the tag. The gates wait for that dispatch while it runs.
 #
 #   * Every API call is retried on a transient failure (HTTP 5xx, timeouts,
 #     connection errors) with backoff 10/20/40/80 s; a 4xx is not retried.
@@ -17,8 +18,8 @@
 #     full=true is a run of its own).
 #   * When no run of ci.yml for the commit has passed yet but one is still
 #     queued or in progress, the gate polls until it finishes, up to
-#     MAX_WAIT_SECONDS. The tag can therefore be pushed right after the merge
-#     and the release builds overlap the CI run of the same commit.
+#     MAX_WAIT_SECONDS. The candidate dispatch may therefore still be running
+#     when the gate starts, and the release builds overlap it.
 #   * A completed run that lacks green Apache and Nginx System Tests, with no
 #     run left in flight, is refused only when two consecutive checks agree
 #     (one extra POLL_SECONDS before a red refusal, so a flaky empty page

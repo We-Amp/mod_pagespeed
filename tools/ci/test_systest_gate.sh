@@ -4,7 +4,9 @@
 #
 # Test for tools/ci/systest_gate.sh with a fake gh. The scenario selects what
 # the fake serves; a counter file lets a call fail or report "in flight" the
-# first N times. No network, no token.
+# first N times. No network, no token. The release order is: the candidate
+# full=true dispatch, then the gate, then the tag; the first case is that
+# order (the dispatch still in flight when the gate starts).
 #
 # Run: tools/ci/test_systest_gate.sh
 set -euo pipefail
@@ -75,6 +77,11 @@ run_gate() {
     GITHUB_REPOSITORY=o/r RELEASE_SHA=abc POLL_SECONDS=0 RETRY_BASE_SECONDS=0 MAX_WAIT_SECONDS=3 \
     "$@" bash "${GATE}" 2>&1)" || RC=$?
 }
+
+run_gate dispatch-inflight
+if [ "$RC" -eq 0 ] && grep -q 'still in flight' <<<"$OUT" && [ "$(grep -c 'waiting' <<<"$OUT")" -ge 1 ] && grep -q 'passed in ci.yml run 11 (workflow_dispatch)' <<<"$OUT"; then
+  pass "the candidate dispatch in flight is waited for, then the gate passes"
+else fail "dispatch-inflight (rc=$RC)"; echo "$OUT"; fi
 
 run_gate 502-then-ok
 if [ "$RC" -eq 0 ] && grep -q 'retrying' <<<"$OUT" && grep -q 'passed in ci.yml run 11' <<<"$OUT"; then
@@ -153,11 +160,6 @@ run_gate both-red
 if [ "$RC" -eq 1 ] && grep -q 'refuses this release' <<<"$OUT" && [ "$(grep -c 'waiting' <<<"$OUT")" -eq 1 ]; then
   pass "red push and red dispatch runs on two consecutive checks are refused"
 else fail "both-red (rc=$RC)"; echo "$OUT"; fi
-
-run_gate dispatch-inflight
-if [ "$RC" -eq 0 ] && grep -q 'still in flight' <<<"$OUT" && [ "$(grep -c 'waiting' <<<"$OUT")" -ge 1 ] && grep -q 'passed in ci.yml run 11 (workflow_dispatch)' <<<"$OUT"; then
-  pass "a dispatch run in flight is waited for, then the gate passes"
-else fail "dispatch-inflight (rc=$RC)"; echo "$OUT"; fi
 
 [ "$FAILS" -eq 0 ] || { echo "$FAILS failure(s)"; exit 1; }
 echo "all ok"

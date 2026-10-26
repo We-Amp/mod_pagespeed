@@ -728,6 +728,35 @@ jobs:
         run: bash tools/ci/systest_gate.sh
 
   # ---------------------------------------------------------------------
+  # The release is also gated on the full tier: a full=true dispatch of
+  # ci.yml at the release commit must have every fleet job of the PR tier
+  # and every job of the full tier green (a skip of the two IIS jobs is
+  # accepted, with a warning, only while FLEET_IIS_ENABLED is not true). A
+  # push run never counts. The order is: dispatch, then the gate (it waits
+  # for the dispatch while it runs), then the tag. On a dry run the verdict
+  # is reported and the run continues. See tools/ci/ci_release_gate.sh.
+  # ---------------------------------------------------------------------
+  ci-release-gate:
+    name: CI run of the release commit (full tier)
+    needs: [ref-guard, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      FLEET_IIS_ENABLED: ${{ vars.FLEET_IIS_ENABLED }}
+    steps:
+      - name: Checkout master (gate script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+      - name: Require a green full=true CI dispatch of this commit
+        run: bash tools/ci/ci_release_gate.sh
+
+  # ---------------------------------------------------------------------
   # Linux packages. One step list for three jobs: x64 on the build runners,
   # its hosted twin, and arm64 on a hosted arm64 runner (a native build).
   # The Apache module, its deb and rpm, the nginx module tarball built in the
@@ -2961,6 +2990,7 @@ jobs:
       - security-gates
       - optimizer-fetch
       - systest-gate
+      - ci-release-gate
       - linux-ready
       - linux-arm64-release-build
       - nginx-ready
