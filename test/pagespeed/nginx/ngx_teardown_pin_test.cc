@@ -321,6 +321,10 @@ TEST(NgxTeardownPinTest, ClassicRecordingFinishesOffTheEventThread) {
   EXPECT_EQ(GoogleString::npos,
             body.find("ctx->recorder->DoneAndSetHeaders(&response_headers,",
                       inline_call + 1));
+  // The request declined to nginx when its recorder was created, which
+  // released the driver: the body filter must not reach through it.
+  EXPECT_EQ(GoogleString::npos, body.find("ctx->driver->"))
+      << "the in-place body filter dereferences the released driver";
 }
 
 }  // namespace
