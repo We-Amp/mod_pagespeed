@@ -693,7 +693,12 @@ bool DirectoryListingIsRefused(const GoogleString& dir, DWORD* unexpected) {
 // -listing cases carry).
 class DeniedPipe {
  public:
-  explicit DeniedPipe(const GoogleString& base) : full_(FullPipeName(base)) {
+  // `ace` is the SDDL entry before the current user's SID; the default
+  // denies everything.  A grant of the worker's client mask models a foreign
+  // account, which meets only the Authenticated Users entry.
+  explicit DeniedPipe(const GoogleString& base,
+                      const wchar_t* ace = L"(D;;FA;;;")
+      : full_(FullPipeName(base)) {
     HANDLE token = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
       return;
@@ -716,7 +721,7 @@ class DeniedPipe {
       // Deny FILE_ALL_ACCESS for the current user, nothing else: the
       // creator's own handle is unaffected.
       const std::wstring sddl_text =
-          std::wstring(L"D:(D;;FA;;;") + sid_text + L")";
+          std::wstring(L"D:") + ace + sid_text + L")";
       SECURITY_ATTRIBUTES attributes;
       ZeroMemory(&attributes, sizeof(attributes));
       attributes.nLength = sizeof(attributes);
@@ -2241,6 +2246,42 @@ TEST_F(DaemonAdapterTest, AnUnreadableSharedConfigNamesTheGroup) {
       << Messages();
 #endif
 }
+
+#ifdef _WIN32
+static_assert(kPipeClientDesiredAccess ==
+                  (FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE),
+              "the probe requests read, write and synchronize only");
+static_assert((kPipeClientDesiredAccess & FILE_CREATE_PIPE_INSTANCE) == 0,
+              "the probe never asks for the pipe instance right");
+
+// The worker grants other accounts exactly 0x12019b on its pipes.  A pipe
+// whose only entry grants the current user that mask is reached by this
+// process the way a foreign account is: GENERIC_WRITE asks for the pipe
+// instance right the mask withholds, the probe's mask does not.
+TEST_F(DaemonAdapterTest, TheProbeOpensAPipeThatGrantsOnlyTheClientMask) {
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("pgrant.pipe");
+  DeniedPipe pipe(socket_path, L"(A;;0x12019b;;;");
+  ASSERT_TRUE(pipe.created());
+  std::wstring wide;
+  ASSERT_TRUE(Utf8ToWidePath(FullPipeName(socket_path), &wide));
+
+  HANDLE generic = CreateFileW(wide.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
+  if (generic != INVALID_HANDLE_VALUE) {
+    CloseHandle(generic);
+    GTEST_SKIP() << "the pipe's DACL does not bind this process";
+  }
+  ASSERT_EQ(static_cast<DWORD>(ERROR_ACCESS_DENIED), GetLastError());
+
+  // The probe opens with kPipeClientDesiredAccess and must get through.  (One
+  // open only: the pipe has one instance, which a second open would find
+  // taken.)
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kReady, adapter->health()) << Messages();
+}
+#endif  // _WIN32
 
 TEST_F(DaemonAdapterTest, APermissionDeniedSocketNamesTheGroup) {
 #ifdef _WIN32
