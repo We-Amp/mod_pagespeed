@@ -2,7 +2,7 @@
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
 # pipeline-nightly.yml -- the nightly tier, as a reusable workflow, called by
-# nightly.yml (schedule 21:30 UTC Monday to Saturday plus the Sunday run, and
+# nightly.yml (schedule 04:00 UTC Monday to Saturday plus the Sunday run, and
 # workflow_dispatch). See docs/ci/pipelines.md. The caller serializes
 # nightlies (one group, never cancelled); this file carries no concurrency
 # block.
@@ -3218,7 +3218,7 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
         run: |
           run=false
-          if [ "$EVENT" = workflow_dispatch ] || [ "$SCHEDULE" = '30 21 * * 0' ]; then run=true; fi
+          if [ "$EVENT" = workflow_dispatch ] || [ "$SCHEDULE" = '0 4 * * 0' ]; then run=true; fi
           echo "run=${run}" >> "$GITHUB_OUTPUT"
           echo "sidecar pair this night: ${run}"
 
