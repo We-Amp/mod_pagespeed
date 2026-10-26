@@ -219,10 +219,13 @@ def test_unusable_service_reported_locally_never_remotely(server_config, example
         raw_original = handle.read()
     empty_volume = tempfile.mkdtemp(prefix="pagespeed-unusable-")
     pipe = rf"\\.\pipe\pagespeed-unusable-{uuid.uuid4().hex}"
+    # Prepended, not appended: the lane's config ends in "host:" match blocks,
+    # and directives appended there fall inside the last block (where the
+    # daemon options are refused) instead of the site's own scope.
     injected = (
-        original.rstrip("\r\n")
-        + f"\npagespeed DaemonSocketPath {pipe}\n"
+        f"pagespeed DaemonSocketPath {pipe}\n"
         + f"pagespeed DaemonVolumePath {empty_volume}\n"
+        + original
     )
     try:
         with open(SITE_CONFIG, "w", encoding="utf-8", newline="") as handle:
