@@ -29,13 +29,6 @@ public:
 	{
 	}
 
-	REQUEST_NOTIFICATION_STATUS
-    OnCustomRequestNotification(
-        IN IHttpContext * pHttpContext,
-        IN ICustomNotificationProvider * pProvider
-    ) override;
-
-
 	REQUEST_NOTIFICATION_STATUS OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider) override;
 	REQUEST_NOTIFICATION_STATUS OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider);
 
