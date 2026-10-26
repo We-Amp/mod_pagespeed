@@ -414,12 +414,13 @@ every one is validated before use: `fuzz_seconds` and
 `duration` (1 to 1800 seconds), `concurrency`, `protocols`, `arms` and
 `severity`.
 
-Nothing in this tier writes to GitHub and nothing reads a secret. Both the
-caller and the called workflow hold `contents: read` only (the full tier's
-call adds `actions: read`), which is why the
-tier has no report jobs: a lane that finds something goes red, writes the
-job summary and uploads its evidence (kept three days, seven for the IIS
-matrix). Opening a tracking issue for a finding, or proposing the refreshed
+Nothing in the nightly tier writes to GitHub and nothing reads a secret. Both
+the caller and the called workflow hold `contents: read` only (the full tier's
+call adds `actions: read`). The one writer in `nightly.yml` is the hosted
+`nightly-red` job after the full tier (see "The nightly-red issue" under
+"Report jobs"); the nightly tier itself has no report jobs: a lane that
+finds something goes red, writes the job summary and uploads its evidence
+(kept three days, seven for the IIS matrix). Opening a tracking issue for a finding, or proposing the refreshed
 vulnerability snapshot as a pull request, needs a write token and belongs to
 a separate hosted bot job with its own token in a protected environment; it
 is not part of this tier.
@@ -479,6 +480,47 @@ the split (rule f): every reusable workflow declares a top-level
 `permissions:` block with no write access, and a write permission (quoted or
 not) is allowed only on a job with a hosted `runs-on`. Report jobs check out
 `master` for the tools they run, because they hold a write token.
+
+### The nightly-red issue
+
+`nightly.yml` ends with the hosted job `nightly-red` (`Nightly full-tier
+report`): `needs: [full]`, runs whenever `full` was not skipped,
+`actions: read`, `contents: read` and `issues: write`, no secret. It runs
+`tools/ci/nightly_red_report.sh` from `master`. The caller sees one result
+for `full`, and a `continue-on-error` job never turns it red, so the script
+reads the run's own job list and judges each `full / <job>` itself:
+
+- **skipped** never counts as green, and is never listed as failed either;
+  the issue names skipped jobs on a line of their own.
+- **green** is `success`, plus a success of every step named for the job in
+  `RUNTIME_STEP_CHECKS` (`<job name>=<step name>` lines). This repository
+  sets `full / Windows ASan=Run the unit tests under ASan`, so a Windows ASan
+  job that skipped its tests because the sanitizer runtime was missing is red.
+- **failed** is everything else (failure, cancelled, timed out, a green job
+  whose checked step did not succeed).
+
+When a job failed, the script opens one issue titled `Nightly full tier red`
+with the label `nightly-red` (created on first use), or comments on the open
+one and replaces its body. Per failed job the body lists the job, the SHA,
+the failing targets from its log (`tools/ci/failing_targets.sh`; `none
+extracted` when the log names none, `timeout-only` when every one timed
+out), the last completed run in which that job was green and the commit
+count since, and a marker line `<!-- nightly-red-job: <job name> -->`. The
+last green is searched in the completed runs of `nightly.yml` and `ci.yml`
+on `master`, newest first, whatever their event (a scheduled night, a
+`full_tier` or `full: true` dispatch, a push), so a missed night does not
+hide it; at most `REPORT_MAX_LOOKUPS` (12) runs are looked up, and the body
+says `no green within <N> completed runs` when none is found. The body names
+jobs, SHAs, targets and run links only.
+
+When no job failed, the open issue is closed, with a comment, once every job
+named by a marker line is green in this run. **A re-run never closes it:** on
+`GITHUB_RUN_ATTEMPT` 2 or later the script only comments, because a re-run
+that goes green is a flake signal and not evidence of a fix. An API failure
+fails the job, so a reporter that could not report is visible. A run on any
+ref other than `master` is a dry run that prints what it would write.
+`tools/ci/test_nightly_red_report.sh` and `tools/ci/test_failing_targets.sh`
+(in `CI tooling self-tests`) pin this behaviour.
 
 ## The full tier
 

@@ -184,6 +184,10 @@ jobs:
         run: tools/ci/test_push_range_base.sh
       - name: Full tier scope
         run: tools/ci/test_full_tier_scope.sh
+      - name: Failing target extraction
+        run: tools/ci/test_failing_targets.sh
+      - name: Nightly red report
+        run: tools/ci/test_nightly_red_report.sh
       - name: Post-merge tests never reuse cached results
         run: tools/ci/test_post_merge_nocache.sh --selftest && tools/ci/test_post_merge_nocache.sh
       - name: Artifact staging and bundle validation

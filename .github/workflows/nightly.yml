@@ -4,7 +4,8 @@
 # Nightly caller: schedule and manual dispatch. The nightly jobs live in
 # pipeline-nightly.yml and the full tier in pipeline-full.yml (job `full`),
 # both pinned to master. Every scheduled night runs both; a dispatch runs the
-# full tier only with full_tier set. See docs/ci/pipelines.md.
+# full tier only with full_tier set. The hosted `nightly-red` job reports a
+# red full tier in one issue. See docs/ci/pipelines.md.
 
 name: Nightly
 
@@ -86,3 +87,34 @@ jobs:
       actions: read
       contents: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@master
+
+  # The nightly-red issue (docs/ci/pipelines.md, "The nightly-red issue").
+  # Hosted, no secret: it reads this run's own job list, because the caller
+  # sees one result for `full` and a continue-on-error job never turns it
+  # red, and opens, updates or closes one issue labelled nightly-red. The
+  # issue body carries job names, SHAs, failing targets and run links only.
+  # The script comes from master; on any other ref it is a dry run that
+  # prints what it would write.
+  nightly-red:
+    name: Nightly full-tier report
+    needs: [full]
+    if: always() && needs.full.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open, update or close the nightly-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: master
+          DRY_RUN: ${{ github.ref != 'refs/heads/master' }}
+          RUNTIME_STEP_CHECKS: "full / Windows ASan=Run the unit tests under ASan"
+        run: bash tools/ci/nightly_red_report.sh
