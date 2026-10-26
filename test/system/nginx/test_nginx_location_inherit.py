@@ -33,7 +33,9 @@ def _assert_passes_through(response, what: str) -> None:
     page_speed = response.header("X-Page-Speed")
     assert not page_speed, (
         f"{what} must not carry an X-Page-Speed header, got: {page_speed!r}")
-    assert_not_contains(response.text, ".pagespeed.",
+    # The pattern is a regex: escape the dots, or "_pagespeed_" in the
+    # fixture's own /mod_pagespeed_test/ URLs would match.
+    assert_not_contains(response.text, r"\.pagespeed\.",
                         f"{what} must not be rewritten")
 
 
@@ -77,7 +79,9 @@ class TestLocationInherit:
         # instead of trusting the first fetch (earlier tests may or may not
         # have warmed it).
         response = client.fetch_until_contains(
-            f"{example_root}/index.html", pattern=r"\.pagespeed\.",
+            f"{example_root}/extend_cache.html"
+            "?PageSpeedFilters=extend_cache_images",
+            pattern=r"\.pagespeed\.",
             timeout=30.0)
         require_status_ok(response, "server control page")
         assert response.header("X-Page-Speed"), (
