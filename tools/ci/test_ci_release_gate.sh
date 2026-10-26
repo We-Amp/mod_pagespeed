@@ -22,7 +22,10 @@ FAILS=0
 pass() { echo "PASS: $*"; }
 fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 
-# tier_jobs <workflow> <mode>: one "<job id>|<name>|<runs-on>" line per job.
+# tier_jobs <workflow>: one "<job id>|<name>|<runs-on>" line per job.
+# Assumes the shapes the tier workflows use today: a job's name: line carries
+# no trailing comment, and runs-on: is a single-line value (the list form
+# would leave it empty and drop a PR-tier job from the comparison).
 tier_jobs() {
   awk -v q="'" '
     /^jobs:/ { in_jobs = 1; next }
@@ -77,7 +80,7 @@ echo "$path" >> "${FAKE_LOG}"
 bump() { local n; n=$(cat "${FAKE_STATE}/$1" 2>/dev/null || echo 0); echo $((n + 1)) > "${FAKE_STATE}/$1"; echo "$n"; }
 asan_step='STEP full / Windows ASan/Run the unit tests under ASan'
 jobs_of() { # jobs_of <jobs filter sed> <step conclusion>
-  { cat "${WF_REQUIRED}"; echo 'pr / Guards (security gates)'; echo 'CI gate'; } |
+  { cat "${WF_REQUIRED}"; echo 'pr / Guards (security gates, console drift, placement, pytest exit, bazelrc, git_repository, PR policy)'; echo 'CI gate'; } |
     sed 's/$/=success/' | sed "$1"
   echo "${asan_step}=$2"
 }
@@ -105,7 +108,7 @@ case "$path" in
       arm64-skipped) jobs_of 's#^full / Linux arm64 Build=success#full / Linux arm64 Build=skipped#' success ;;
       iis-skipped) jobs_of 's#^pr / IIS System Tests=success#pr / IIS System Tests=skipped#;s#^full / Windows AppVerif=success#full / Windows AppVerif=skipped#' success ;;
       asan-runtime-missing) jobs_of 's/^$//' skipped ;;
-      other-red) jobs_of 's#^pr / Guards (security gates)=success#pr / Guards (security gates)=failure#' success ;;
+      other-red) jobs_of 's#^\(pr / Guards [^=]*\)=success#\1=failure#' success ;;
       *) jobs_of 's/^$//' success ;;
     esac ;;
   */actions/runs/22/jobs*) jobs_of 's/^$//' success ;;
@@ -200,7 +203,7 @@ if [ "$RC" -eq 1 ] && grep -q 'ci gate refuses this release: ci.yml run 21: full
 else fail "win-asan-runtime-missing-refuses (rc=$RC)"; echo "$OUT"; fi
 
 run_gate other-red
-if [ "$RC" -eq 1 ] && grep -q 'ci gate refuses this release: ci.yml run 21: .*pr / Guards (security gates) is failure' <<<"$OUT"; then
+if [ "$RC" -eq 1 ] && grep -q 'ci gate refuses this release: ci.yml run 21: .*pr / Guards (security gates, console drift, placement, pytest exit, bazelrc, git_repository, PR policy) is failure' <<<"$OUT"; then
   pass "other-red-refuses"
 else fail "other-red-refuses (rc=$RC)"; echo "$OUT"; fi
 

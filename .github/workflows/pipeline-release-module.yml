@@ -701,8 +701,9 @@ jobs:
   # whose configuration lacks the lane fixtures, so their pytest step is
   # informational. A completed run of the main workflow for the release
   # commit must have passed both lanes. While that run is still queued or in
-  # progress the gate waits for it (the tag may be pushed right after the
-  # merge), and transient API failures are retried. On a dry run the verdict
+  # progress the gate waits for it (the candidate full=true dispatch may
+  # still be running when the gate starts), and transient API failures are
+  # retried. On a dry run the verdict
   # is reported and the run continues. See tools/ci/systest_gate.sh.
   # ---------------------------------------------------------------------
   systest-gate:

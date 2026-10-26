@@ -34,6 +34,10 @@
 #   * Every API call is retried on a transient failure (HTTP 5xx, timeouts,
 #     connection errors) with backoff 10/20/40/80 s; a 4xx is not retried.
 #     When the retries run out the gate refuses (fail closed).
+#   * Any green full=true dispatch at the SHA suffices: the first one that
+#     passes wins, and a newer red dispatch of the same SHA does not override
+#     it (a red re-dispatch of one commit is a flake signal, not a
+#     regression).
 #   * A run still queued or in progress is waited for, up to MAX_WAIT_SECONDS,
 #     so the gate can run while the candidate dispatch is still running.
 #   * Two consecutive checks that find completed runs and no passing one
