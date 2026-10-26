@@ -27,7 +27,9 @@ Two tests:
 Both need two non-loopback IPv4 addresses on the machine: the module treats
 a client as local when its address is loopback or equals the address it
 connected to, so a "remote" request is one made from one local address to
-another. A machine with fewer is a skip that lists the addresses it found.
+another. A machine with fewer, or whose addresses cannot reach
+each other, is a skip that lists the addresses it found and says no
+routable pair exists (unless a WSL guest can make the remote request).
 The site is restored and the application pool recycled on every exit path.
 
 Environment variables (all optional; the defaults match the standard lane):
@@ -141,15 +143,74 @@ def _recovery_entry_since(since: float) -> bool:
     return out.returncode == 0 and out.stdout.strip() not in ("", "0")
 
 
-def _two_addresses():
-    """(target, remote_source) or a skip that lists what was found."""
+def _connects(target: str, source: str, port: int) -> bool:
+    """True when a TCP connect to target:port from source succeeds."""
+    try:
+        probe = socket.create_connection((target, port), 2, source_address=(source, 0))
+    except OSError:
+        return False
+    probe.close()
+    return True
+
+
+def _wsl_available() -> bool:
+    if shutil.which("wsl.exe") is None:
+        return False
+    try:
+        return _run(["wsl.exe", "-e", "curl", "--version"]).returncode == 0
+    except OSError:
+        return False
+
+
+def _remote_route(port: int):
+    """(target, remote_source) for a request that counts as remote.
+
+    Windows refuses to send from one interface's address to another
+    interface's address (strong host model, WinError 10051), so pairs are
+    probed and the first that connects is used. With no routable pair the
+    request is made from a WSL guest (remote_source None), which has its own
+    network stack. Otherwise a skip that lists the addresses it found.
+    """
     addresses = _non_loopback_addresses()
-    if len(addresses) < 2:
-        pytest.skip(
-            "needs two non-loopback IPv4 addresses to make a remote request; "
-            f"found: {addresses or 'none'}"
-        )
-    return addresses[0], addresses[1]
+    for target in addresses:
+        for source in addresses:
+            if source != target and _connects(target, source, port):
+                return target, source
+    if addresses and _wsl_available():
+        return addresses[0], None
+    pytest.skip(
+        "no routable pair of non-loopback IPv4 addresses to make a remote "
+        f"request on port {port}; found: {addresses or 'none'}"
+    )
+
+
+class _WslResponse:
+    def __init__(self, status: int, headers):
+        self.status = status
+        self._headers = headers
+
+    def getheader(self, name: str):
+        return self._headers.get(name.lower())
+
+
+def _remote_get(target: str, port: int, path: str, source: Optional[str]):
+    """GET from the remote source, or from a WSL guest when source is None."""
+    if source is not None:
+        return _get(target, port, path, source=source)
+    out = _run(
+        ["wsl.exe", "-e", "curl", "-s", "-D", "-", "-o", "/dev/null",
+         "--max-time", "30", "-H", "Host: localhost",
+         f"http://{target}:{port}{path}"]
+    )
+    lines = out.stdout.replace("\r", "").splitlines()
+    match = re.match(r"HTTP/\S+ (\d+)", lines[0]) if lines else None
+    assert match, f"no status line from wsl curl: {out.stdout!r} {out.stderr!r}"
+    headers = {}
+    for line in lines[1:]:
+        name, sep, value = line.partition(":")
+        if sep:
+            headers[name.strip().lower()] = value.strip()
+    return _WslResponse(int(match.group(1)), headers)
 
 
 def _read_site_config() -> str:
@@ -193,7 +254,7 @@ def _assert_local_only(target: str, remote_source: str, port: int, path: str) ->
         primed = _get(target, port, path, source=target)
         assert primed.getheader(STATUS_HEADER) == STATUS_VALUE
     for _ in range(3):
-        remote = _get(target, port, path, source=remote_source)
+        remote = _remote_get(target, port, path, remote_source)
         assert remote.status == 200
         assert remote.getheader(STATUS_HEADER) is None, (
             f"a remote request carried {STATUS_HEADER}"
@@ -209,8 +270,8 @@ def test_unusable_service_reported_locally_never_remotely(server_config, example
             f"{SITE_CONFIG} already names an optimizer service; "
             "test_recovered_service_turns_the_header_off covers that setup"
         )
-    target, remote_source = _two_addresses()
     port = server_config.port
+    target, remote_source = _remote_route(port)
     path = f"{example_root}/combine_javascript1.js"
 
     # A pipe nothing listens on and a folder that holds no cache volume: the
@@ -246,8 +307,8 @@ def test_recovered_service_turns_the_header_off(server_config, example_root):
         pytest.skip(f"optimizer service {SERVICE} is not installed and running")
     if not _sets_daemon_paths(_read_site_config()):
         pytest.skip(f"{SITE_CONFIG} does not set DaemonSocketPath and DaemonVolumePath")
-    target, remote_source = _two_addresses()
     port = server_config.port
+    target, remote_source = _remote_route(port)
     path = f"{example_root}/combine_javascript1.js"
 
     try:
