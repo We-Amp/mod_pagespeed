@@ -83,3 +83,7 @@ class TestLocationInherit:
         assert response.header("X-Page-Speed"), (
             "the server must answer with an X-Page-Speed header outside "
             "the location")
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))
