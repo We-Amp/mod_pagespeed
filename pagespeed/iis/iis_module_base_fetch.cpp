@@ -6,6 +6,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/http/caching_headers.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/daemon_health.h"
@@ -30,6 +31,41 @@
 
 namespace net_instaweb {
 
+namespace {
+
+// CachingHeaders view of the base fetch's ResponseHeaders, so the port can
+// call the shared CachingHeaders::GenerateDisabledCacheControl on rewritten
+// HTML.  Mirrors ApacheCachingHeaders (pagespeed/apache/header_util.cc) and
+// NgxCachingHeaders (pagespeed/nginx/ngx_caching_headers.h); the two policy
+// methods are unused on this path.
+class IisModuleCachingHeaders : public CachingHeaders {
+ public:
+  explicit IisModuleCachingHeaders(const ResponseHeaders& headers)
+      : CachingHeaders(headers.status_code()), response_headers_(headers) {}
+
+  bool Lookup(const StringPiece& key, StringPieceVector* values) override {
+    ConstStringStarVector value_strings;
+    bool ret = response_headers_.Lookup(key, &value_strings);
+    if (ret) {
+      values->resize(value_strings.size());
+      for (int i = 0, n = value_strings.size(); i < n; ++i) {
+        (*values)[i] = *value_strings[i];
+      }
+    } else {
+      values->clear();
+    }
+    return ret;
+  }
+
+  bool IsLikelyStaticResourceType() const override { return false; }
+  bool IsCacheableResourceStatusCode() const override { return false; }
+
+ private:
+  const ResponseHeaders& response_headers_;
+};
+
+}  // namespace
+
 IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fetch_type, MessageHandler* handler,const RequestContextPtr &ptr, IisInnerRequestContext* ctx)
     : IisBaseFetch(ptr)
 	,http_context_(http_context)
@@ -42,6 +78,7 @@ IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fet
 	, pending_(false)
 	, alive(0x12345678)
 	, flush_html_(false)
+	, modify_cache_headers_(true)
 	, ctx_(ctx)
 	, handler_(handler)
 	, zc_data_(nullptr)
@@ -849,7 +886,14 @@ int IisModuleBaseFetch::CollectHeaders()
 	std::map<std::string,bool> headersSent;
 
 	auto modify_cache_headers = true;
-	if (this->ctx_ && this->ctx_->driver() && this->ctx_->driver()->options()) {
+	if (fetch_type_ == FetchType::kHtml) {
+		// The HTML base fetch carries the ModifyCachingHeaders value of the
+		// options resolved for the response being rewritten (set where the
+		// proxy fetch driver is created).  The driver on the inner context,
+		// when one is set, is the classic in-place driver, which resolved
+		// the begin-request options instead.
+		modify_cache_headers = modify_cache_headers_;
+	} else if (this->ctx_ && this->ctx_->driver() && this->ctx_->driver()->options()) {
 		modify_cache_headers = this->ctx_->driver()->options()->modify_caching_headers();
 	}
 
@@ -938,7 +982,14 @@ int IisModuleBaseFetch::CollectHeaders()
 		
 
 		if (modify_cache_headers) {
-			r->SetHeader(_HTTP_HEADER_ID::HttpHeaderCacheControl, HttpAttributes::kNoCache, strlen(HttpAttributes::kNoCache), true);
+			// The same disabled-caching value the other ports send (Apache
+			// header_util.cc, nginx ngx_pagespeed.cc): GenerateDisabledCacheControl
+			// disables caching while keeping directives such as no-store, where
+			// a bare no-cache dropped them.
+			GoogleString disabled_cache_control =
+				IisModuleCachingHeaders(*pagespeed_headers).GenerateDisabledCacheControl();
+			r->SetHeader(_HTTP_HEADER_ID::HttpHeaderCacheControl,
+				disabled_cache_control.c_str(), disabled_cache_control.length(), true);
 			r->DeleteHeader("ETag");
 			r->DeleteHeader("Expires");
 			r->DeleteHeader("Content-MD5");

@@ -1703,6 +1703,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				}
 				IisModuleBaseFetch* bf = (IisModuleBaseFetch*)innerContext->base_fetch();
 				driver->SetRequestHeaders(*innerContext->base_fetch()->request_headers());
+				// The HTML driver is not stored on the inner context (unlike
+				// the classic in-place driver), so CollectHeaders cannot read
+				// the flag from there: hand it the resolved options' value.
+				bf->set_modify_cache_headers(driver->options()->modify_caching_headers());
 #ifdef IISPEEDHASFLUSH
 				bf->set_flush_html(driver->options()->flush_html());
 #endif
