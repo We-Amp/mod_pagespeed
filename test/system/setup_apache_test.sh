@@ -538,6 +538,14 @@ ModPagespeedLoadFromFile \
     "http://localhost/mod_pagespeed_test/htaccess/" \
     "/var/www/html/mod_pagespeed_test/htaccess/"
 
+# The module's own 404s (an unknown .pagespeed. resource under this tree)
+# go through httpd's ap_die, so the tree's ErrorDocument applies to them
+# like it does to any other not-found. The .htaccess carries the
+# ErrorDocument; this block lets it run.
+<Directory "/var/www/html/mod_pagespeed_test/error_document" >
+    AllowOverride All
+</Directory>
+
 # debug.conf.template:52-54
 <Directory "/var/www/html/mod_pagespeed_test/max_html_parse_size" >
   ModPagespeedMaxHtmlParseBytes 5000
@@ -1231,6 +1239,33 @@ configure_fixture_vhosts() {
   ModPagespeedEnableFilters debug
   ModPagespeedSlurpDirectory /var/www/html/mod_pagespeed_test/bogus_content_encoding/
   ModPagespeedSlurpReadOnly on
+</VirtualHost>
+
+# TestProxy + ProxyAuth: the auth check runs before any fetch, so a
+# cookieless proxy request is answered without reaching an origin. The
+# 403 form (no redirect in ModPagespeedProxyAuth) must arrive at the
+# client as a real 403, not 200 with an empty body.
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName proxyauth.example.com
+  Header always set X-Test-Vhost "proxyauth.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedInPlaceResourceOptimization off
+  ModPagespeedTestProxy on
+  ModPagespeedProxyAuth psa-proxy-auth-cookie
+</VirtualHost>
+
+# ProxyAuth with a redirect: rejection answers 307 with the Location.
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName proxyauth-redirect.example.com
+  Header always set X-Test-Vhost "proxyauth-redirect.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedInPlaceResourceOptimization off
+  ModPagespeedTestProxy on
+  ModPagespeedProxyAuth psa-proxy-auth-cookie:http://proxyauth-redirect.example.com/login
 </VirtualHost>
 
 # debug.conf.template:794-807

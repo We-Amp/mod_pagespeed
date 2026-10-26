@@ -1421,6 +1421,15 @@ class RewriteOptions {
   // Caveat emptor.
   void SoftEnableFilterForTesting(Filter filter);
 
+  // Forget which deprecated filter names have already been warned about in
+  // this process.  Called when a configuration load completes, so a
+  // server-level deprecated filter warns again on the next load (Apache
+  // parses its configuration twice at startup and again on every graceful
+  // restart; nginx reparses on reload) instead of only once per process,
+  // and by tests that assert the warnings: they run in one process, in
+  // order, so they start from a known state.
+  static void ResetDeprecatedFilterWarnings();
+
   // Enables extend_cache_css, extend_cache_images, and extend_cache_scripts.
   // Does not enable extend_cache_pdfs.
   void EnableExtendCacheFilters();

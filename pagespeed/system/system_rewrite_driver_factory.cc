@@ -35,6 +35,7 @@
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
@@ -561,6 +562,13 @@ void SystemRewriteDriverFactory::PostConfig(
     const std::vector<SystemServerContext*>& server_contexts,
     GoogleString* error_message, int* error_index,
     Statistics** global_statistics) {
+  // A configuration load just finished parsing (Apache parses its config
+  // twice at startup and again on every graceful restart; nginx reparses on
+  // reload): let its deprecated filter names warn again, once per load.
+  // Per-request parses (.htaccess, query parameters) stay deduplicated
+  // per process.  IIS loads its configuration once per process, so its
+  // per-process latching is already once per load.
+  RewriteOptions::ResetDeprecatedFilterWarnings();
   for (int i = 0, n = server_contexts.size(); i < n; ++i) {
     server_contexts[i]->CollapseConfigOverlaysAndComputeSignatures();
     SystemRewriteOptions* options =

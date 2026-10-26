@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <memory>
 
+#include "apr_strings.h"  // for apr_pstrdup  // NOLINT
 #include "base/logging.h"
 #include "http_config.h"
 #include "http_core.h"
@@ -113,6 +114,10 @@ const char kResourceUrlYes[] = "<YES>";
 const size_t kMaxPostSizeBytes = 131072;
 
 }  // namespace
+
+// Declared extern in instaweb_handler.h; defined outside the anonymous
+// namespace so it has external linkage.
+const char kPagespeedNotFoundNote[] = "mod_pagespeed_not_found";
 
 InstawebHandler::InstawebHandler(request_rec* request)
     : request_(request),
@@ -440,10 +445,11 @@ void InstawebHandler::HandleAsPagespeedResource() {
   if (!fetch_->status_ok()) {
     if (!fetch_->response_committed()) {
       // Nothing was sent to the client: with handle_error disabled,
-      // ApacheFetch suppresses all output for error responses.  Send out
-      // the same 404 the buffered path produced (this also increments
-      // resource_404_count).
+      // ApacheFetch suppresses all output for error responses.  Count and
+      // log the 404 (resource_404_count) and let the handler return
+      // HTTP_NOT_FOUND, so the site's ErrorDocument applies.
       server_context_->ReportResourceNotFound(original_url_, request_);
+      apr_table_set(request_->notes, kPagespeedNotFoundNote, "1");
     } else {
       // Headers (and possibly an error body) already reached the client --
       // e.g. ApacheFetch's missing-Content-Type 403 -- so emitting a second
@@ -1091,6 +1097,12 @@ bool InstawebHandler::HandleAsProxy() {
     RewriteDriver* driver = MakeDriver();
     MakeFetch(mapped_url, true /* buffered */, "proxy");
     fetch_->set_is_proxy(true);
+    // Only this fetch hands third-party content to browsers under this
+    // server's own domain, so only it drops the origin's Set-Cookie and the
+    // other hop-by-hop headers.  The module's own cookies on proxied HTML
+    // (experiment assignment) ride the same fetch and are dropped with
+    // them; every other ApacheFetch serves module-generated responses.
+    fetch_->set_strip_cookies(true);
     DisownDriver();
     server_context_->proxy_fetch_factory()->StartNewProxyFetch(
         mapped_url, fetch_, driver, nullptr, nullptr);
@@ -1290,7 +1302,11 @@ bool InstawebHandler::instaweb_static_handler(
                                      &cache_header)) {
     write_handler_response(file_contents, request, content_type, cache_header);
   } else {
+    // A name under the static asset prefix the module does not know: count
+    // and log the 404 (resource_404_count) and let the handler return
+    // HTTP_NOT_FOUND, so the site's ErrorDocument applies.
     server_context->ReportResourceNotFound(request->parsed_uri.path, request);
+    apr_table_set(request->notes, kPagespeedNotFoundNote, "1");
   }
   return true;
 }
@@ -1784,6 +1800,16 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
       }
     }
   }
+
+  // A module-counted not-found that was not itself written to the client
+  // (unknown .pagespeed. resource, missing static asset, failed slurp):
+  // returning HTTP_NOT_FOUND sends the request through httpd's ap_die, so
+  // the site's ErrorDocument applies, as it already does for the
+  // static-asset prefix branch above.
+  if (ret == APACHE_OK &&
+      apr_table_get(request->notes, kPagespeedNotFoundNote) != nullptr) {
+    ret = HTTP_NOT_FOUND;
+  }
   return ret;
 }
 
@@ -1943,13 +1969,35 @@ apr_status_t InstawebHandler::instaweb_map_to_storage(request_rec* request) {
   // So: modify request->filename in place to cut it off after the last '/'
   // character and replace the whole leaf with 'A', and then call
   // ap_directory_walk to figure out custom options.
+  //
+  // Keep a copy of the full name first: ap_directory_walk replaces
+  // request->filename with a canonicalized path of its own (server/request.c
+  // assigns it a fresh pool string), so the truncation cannot be undone in
+  // place afterwards.  ap_file_walk below matches <Files> and <FilesMatch>
+  // sections against the leaf of request->filename, and it must see the
+  // real resource name: a stand-in leaf makes those sections match nothing,
+  // or, for a pattern matching "A", every .pagespeed. URL at once.
+  char* resource_filename = apr_pstrdup(request->pool, request->filename);
   char* filename_starting_at_last_slash = strrchr(request->filename, '/');
   if (filename_starting_at_last_slash != nullptr &&
       filename_starting_at_last_slash[1] != '\0') {
     filename_starting_at_last_slash[1] = 'A';
     filename_starting_at_last_slash[2] = '\0';
   }
-  ap_directory_walk(request);
+  // Mirror core_map_to_storage (server/core.c): directory walk, then file
+  // walk, and a non-OK from either is the answer to map_to_storage.  The
+  // file walk makes <Files> and <FilesMatch> sections apply to .pagespeed.
+  // resources; this hook returns OK below, so core's own walks never run.
+  apr_status_t access_status = ap_directory_walk(request);
+  // The directory walk left its own path in request->filename; put the real
+  // resource name back (ap_file_walk reads only its basename).
+  request->filename = resource_filename;
+  if (access_status == APACHE_OK) {
+    access_status = ap_file_walk(request);
+  }
+  if (access_status != APACHE_OK) {
+    return access_status;
+  }
 
   // mod_speling, if enabled, looks for the filename on the file system,
   // and tries to "correct" the spelling.  This is not desired for
@@ -1962,8 +2010,8 @@ apr_status_t InstawebHandler::instaweb_map_to_storage(request_rec* request) {
   // we are currently running instaweb_map_to_storage in map_to_storage
   // HOOK_FIRST-2, which is a couple of phases before hook_fixups.
   //
-  // If at some point we stop NULLing the filename here we need to modify the
-  // code above that mangles it to use a temporary buffer instead.
+  // Note that request->filename holds the full real resource name here
+  // (restored above for the file walk), not the truncated stand-in.
   request->filename = nullptr;
 
   // While setting request->filename helps get mod_speling (as well as
