@@ -58,6 +58,15 @@ check "duplicates" \
   "//a:b_test${TAB}test-failed\n//a:e_test${TAB}test-failed\n//src:lib${TAB}build-failed" \
   --mode test "${DATA}/duplicates.txt"
 check "empty" "" --mode test "${DATA}/empty.txt"
+# Cut from one real red job, fetched both ways: `gh run view --log-failed`
+# into a file renders the colour codes as caret text (`^[[31m`, no ESC byte);
+# the job log API (gh api --allow-escape-sequences) keeps the ESC bytes.
+check "caret-notation-log-extracts-target" \
+  "//test/pagespeed/system:system_caches_test${TAB}test-failed" \
+  --mode test "${DATA}/caret-notation-run-view.txt"
+check "esc-byte-log-extracts-target" \
+  "//test/pagespeed/system:system_caches_test${TAB}test-failed" \
+  --mode test "${DATA}/esc-byte-job-log-api.txt"
 
 # stdin when no file is named.
 set +e

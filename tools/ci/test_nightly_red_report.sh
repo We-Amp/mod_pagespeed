@@ -419,6 +419,17 @@ expect no-targets "exit 0" eq "${RC}" 0
 expect no-targets "none extracted" body_has "Failing targets: none extracted"
 done_case no-targets-extracted
 
+# --- a non-empty primary log that names no target: none extracted, no crash
+start
+run FAKE_JOBS_50="${RED_JOBS}" \
+  FAKE_LOG_502="$(printf 'Linux TSan\tRun the tests\t2026-10-26T04:12:30.0000000Z ^[[31mERROR: ^[[0msomething broke\nLinux TSan\tRun the tests\t2026-10-26T04:12:31.0000000Z ##[error]Process completed with exit code 1.')" \
+  FAKE_RUNS_NIGHTLY="${H40}" FAKE_JOBS_40="${J40_GREEN}"
+expect nonempty-no-targets "exit 0" eq "${RC}" 0
+expect nonempty-no-targets "none extracted" body_has "Failing targets: none extracted"
+expect nonempty-no-targets "not marked unavailable" no body_has "log not available"
+expect nonempty-no-targets "no fallback" eq "$(calls 'actions/jobs/')" 0
+done_case nonempty-primary-log-without-targets-says-none-extracted
+
 # --- timeout-only
 start
 run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502='//t:slow_test    TIMEOUT in 300.0s' FAKE_RUNS_NIGHTLY="${H40}" \

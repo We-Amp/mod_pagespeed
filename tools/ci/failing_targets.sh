@@ -10,7 +10,9 @@
 # Reads the file, or stdin when none is named: the output of
 # `gh run view --log` or `--log-failed` (lines prefixed `<job>\t<step>\t<ISO
 # timestamp> `), or a raw job log (lines prefixed `<ISO timestamp> `). ANSI
-# escape sequences, the prefix and a trailing CR are removed first. Then:
+# escape sequences, as ESC bytes or in the caret notation `gh run view` writes
+# when its output is not a terminal (`^[[31m`), the prefix and a trailing CR
+# are removed first. Then:
 #
 #   //<pkg>:<name>  FAILED in ... | FAILED          -> test-failed
 #   //<pkg>:<name>  TIMEOUT in ...                  -> test-timeout
@@ -58,6 +60,7 @@ LC_ALL=C awk -v mode="${mode}" '
   {
     line = $0
     gsub(/\033\[[0-9;]*[A-Za-z]/, "", line)
+    gsub(/\^\[\[[0-9;]*[A-Za-z]/, "", line)
     sub(/\r$/, "", line)
     sub(/^[^\t]*\t[^\t]*\t/, "", line)
     sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]+Z /, "", line)
