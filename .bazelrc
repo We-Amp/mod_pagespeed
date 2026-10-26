@@ -337,6 +337,26 @@ build:fuzz-coverage --run_under=@envoy//bazel/coverage:fuzz_coverage_wrapper.sh
 build:ci --noshow_progress
 build:ci --noshow_loading_progress
 
+# Full-tier Linux job configs (pipeline-full.yml); tools/ci/bisect-job.sh runs
+# the same configs. External services and the remote-cache choice stay on the
+# command line.
+build:ci-build --action_env=CC=clang --action_env=CXX=clang++
+
+build:ci-asan --config=clang-asan
+build:ci-asan --action_env=CC=clang --action_env=CXX=clang++
+build:ci-asan --keep_going
+# test: lines expand after the build: ones, so these win over build:asan's
+# ASAN_OPTIONS and UBSAN_OPTIONS.
+test:ci-asan --test_env=ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1
+test:ci-asan --test_env=LSAN_OPTIONS=suppressions=/workspace/tools/lsan_suppressions.txt
+test:ci-asan --test_env=UBSAN_OPTIONS=halt_on_error=true:print_stacktrace=1:suppressions=/workspace/tools/ubsan_suppressions.txt
+
+build:ci-tsan --config=clang-tsan
+build:ci-tsan --action_env=CC=clang --action_env=CXX=clang++
+build:ci-tsan --keep_going
+# Wins over build:clang-tsan's TSAN_OPTIONS (see test:ci-asan above).
+test:ci-tsan --test_env=TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/workspace/tools/tsan_suppressions.txt:external_symbolizer_path=/opt/llvm/bin/llvm-symbolizer
+
 # Fuzz builds
 
 # Shared fuzzing configuration.
