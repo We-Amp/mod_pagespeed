@@ -406,8 +406,9 @@ esac
 if [ "${ok}" != 1 ]; then
   fail "${CASE}" "step command: ${step_line}"
 elif [ -n "${BISECT_LINUX_ASAN_SERVICES}" ]; then
-  if grep -q -- "docker run -d --init --name ${CID}-redis --network ${CID}-net --cpus 1 --memory 1g --memory-swap 1g --cpu-shares 128 redis:7-alpine" "${FAKE_STATE}/docker.log" \
-    && grep -q -- "--test_env=REDIS_HOST=${CID}-redis" <<<"${step_line}" \
+  if grep -q -- "docker run -d --init --name ${CID}-redis --network ${CID}-net --network-alias redis --cpus 1 --memory 1g --memory-swap 1g --cpu-shares 128 redis:7-alpine" "${FAKE_STATE}/docker.log" \
+    && grep -q -- " --test_env=REDIS_HOST=redis " <<<"${step_line}" \
+    && grep -q -- " --test_env=MEMCACHED_HOST=memcached " <<<"${step_line}" \
     && grep -q -- "docker network rm ${CID}-net" "${FAKE_STATE}/docker.log" \
     && grep -q -- "docker rm -f ${CID}-memcached" "${FAKE_STATE}/docker.log"; then
     pass "${CASE}"
@@ -416,6 +417,28 @@ elif [ -n "${BISECT_LINUX_ASAN_SERVICES}" ]; then
   fi
 else
   if grep -q -- '-d --init' "${FAKE_STATE}/docker.log"; then fail "${CASE}" "unexpected service container"; else pass "${CASE}"; fi
+fi
+
+# A run id with a 7-digit pid makes "<id>-memcached" longer than a DNS
+# label (63); the test hosts must not depend on the id at all.
+CASE=service-hosts-are-short-aliases
+FAKE_STATE="${CULPRIT_STATE}"
+long_id="bisect-${BISECT_REPO_NAME}-linux-asan-20261026T020000Z-1234567"
+hosts=$(grep -oE -- '--test_env=[A-Z]+_HOST=[^ ]+' "${FAKE_STATE}/docker.log" | sed 's/.*_HOST=//' | sort -u || true)
+bad_hosts=""
+for h in ${hosts}; do
+  case " ${BISECT_LINUX_ASAN_SERVICES} " in *" ${h} "*) ;; *) bad_hosts="${bad_hosts} ${h}" ;; esac
+done
+if [ "${#long_id}" -le 53 ]; then
+  fail "${CASE}" "the long-id premise does not hold (${#long_id} chars)"
+elif [ -n "${BISECT_LINUX_ASAN_SERVICES}" ] && [ -z "${hosts}" ]; then
+  fail "${CASE}" "no --test_env host values"
+elif [ -n "${bad_hosts}" ]; then
+  fail "${CASE}" "host values are not the short aliases:${bad_hosts}"
+elif grep '^docker run -d ' "${FAKE_STATE}/docker.log" | grep -qv -- '--network-alias '; then
+  fail "${CASE}" "a service container without --network-alias"
+else
+  pass "${CASE}"
 fi
 
 new_case culprit-found-build-bisect
@@ -636,16 +659,43 @@ WF="${REPO_ROOT}/.github/workflows/pipeline-full.yml"
   . "${REPO_ROOT}/tools/ci/bisect-job-table.sh"
   bad=0
   report() { echo "     $1"; bad=1; }
+  # has_token TOKEN: TOKEN appears in the job block as a whole word
+  # (--config=ci does not match inside --config=ci-asan).
+  has_token() {
+    local re
+    re=$(printf '%s' "$1" | sed 's#[].*^$+?(){}|\\/[]#\\&#g')
+    grep -qE -- "(^|[^A-Za-z0-9_=-])${re}([^A-Za-z0-9_-]|$)" <<<"${block}"
+  }
   for job in ${BISECT_JOBS}; do
     block=$(awk -v j="  ${job}:" '$0 == j {on = 1; next} on && /^  [a-z0-9-]+:$/ {exit} on {print}' "${WF}")
     [ -n "${block}" ] || { report "${job}: no job block in pipeline-full.yml"; continue; }
     J=$(printf '%s' "${job}" | tr 'a-z-' 'A-Z_')
     v() { eval "printf '%s' \"\${BISECT_${J}_$1:-}\""; }
     grep -qxF "    name: $(v NAME)" <<<"${block}" || report "${job}: name '$(v NAME)'"
-    grep -qF -- "--config=$(v CONFIG)" <<<"${block}" || report "${job}: --config=$(v CONFIG)"
+    has_token "--config=$(v CONFIG)" || report "${job}: --config=$(v CONFIG)"
     grep -qF -- "--output_user_root=$(v OUTPUT_ROOT)" <<<"${block}" || report "${job}: output root $(v OUTPUT_ROOT)"
     for t in $(v BAZEL_FLAGS) $(v DOCKER_FLAGS); do
-      grep -qF -- "${t}" <<<"${block}" || report "${job}: flag ${t}"
+      has_token "${t}" || report "${job}: flag ${t}"
+    done
+    # And the other way: every docker flag, -e key and --test_env name of the
+    # job's docker runs is in the table (or one the driver sets itself).
+    run_lines=$(awk '/docker run --rm --init/ {on = 1} on {print} on && /DOCKER_IMAGE/ {on = 0}' <<<"${block}")
+    for t in $(grep -oE '(^|[[:space:]])--[a-z][a-z-]*(=[^[:space:]\\]*)?' < <(grep -v -- ' -e ' <<<"${run_lines}") | tr -d ' \t'); do
+      case "${t}" in
+        --rm|--init|--user|--memory=*|--memory-swap=*|--network=*) continue ;;
+        --security-opt) t="--security-opt" ;;
+      esac
+      case " $(v DOCKER_FLAGS) " in *" ${t} "*) ;; *) report "${job}: workflow docker flag ${t} not in the table" ;; esac
+    done
+    services_up=$(printf '%s' "$(v SERVICES)" | tr 'a-z' 'A-Z')
+    for k in $(grep -oE '(^|[[:space:]])-e [A-Z_][A-Z0-9_]*=' <<<"${run_lines}" | sed 's/.*-e //; s/=$//' | sort -u); do
+      case "${k}" in BAZEL_CONFIG) continue ;; esac
+      case " ${services_up} " in *" ${k%_HOST} "*) continue ;; esac
+      case " $(v ENV) " in *" ${k}="*) ;; *) report "${job}: workflow env ${k} not in the table" ;; esac
+    done
+    for k in $(grep -oE -- '--test_env=[A-Z_][A-Z0-9_]*' <<<"${block}" | sed 's/--test_env=//' | sort -u); do
+      case " ${services_up} " in *" ${k%_HOST} "*) continue ;; esac
+      case " $(v SERVICE_TEST_ENV) " in *" ${k}="*) ;; *) report "${job}: workflow --test_env=${k} not in the table" ;; esac
     done
     for e in $(v ENV); do
       grep -qF -- "-e ${e}" <<<"${block}" || report "${job}: env ${e}"
@@ -667,8 +717,8 @@ WF="${REPO_ROOT}/.github/workflows/pipeline-full.yml"
       report "${job}: job starts services, table lists none"
     fi
     case "$(v KIND)" in
-      test) grep -qE "(^|[[:space:]])test --config=$(v CONFIG)|test .*--config=$(v CONFIG)" <<<"${block}" || report "${job}: not a bazel test" ;;
-      build) grep -qE "build .*--config=$(v CONFIG)" <<<"${block}" || report "${job}: not a bazel build" ;;
+      test) grep -qE "(^|[[:space:]])test .*--config=$(v CONFIG)([^A-Za-z0-9_-]|$)" <<<"${block}" || report "${job}: not a bazel test" ;;
+      build) grep -qE "build .*--config=$(v CONFIG)([^A-Za-z0-9_-]|$)" <<<"${block}" || report "${job}: not a bazel build" ;;
       *) report "${job}: kind '$(v KIND)'" ;;
     esac
     keys=$(sed -n 's/.*vendor-.*hashFiles(\([^)]*\)).*/\1/p' <<<"${block}" | head -1 \

@@ -53,6 +53,10 @@
 # service containers get a small fixed cap. One bisect per host: flock on
 # BISECT_ROOT/.lock, held by the detached worker.
 #
+# Disk: each step copies the vendored tree into the work tree (cp -a), and
+# BISECT_ROOT (runs, vendor trees, disk caches) only grows: this script
+# never removes old runs from it; operators do.
+#
 # Environment: BISECT_ROOT (required, absolute), BISECT_MAX_TARGETS,
 # BISECT_STOP_AFTER=endpoints (stop after the endpoint checks; `resume`
 # continues).
@@ -392,7 +396,7 @@ cleanup() {
   if [ -n "${real}" ] && [ -f "${RUN_DIR}/vendor-obs" ]; then
     while IFS= read -r ob; do
       [ -n "${ob}" ] && [ -d "${ob}" ] || continue
-      (cd "${RUN_DIR}" && HOME="${RUN_DIR}/home" \
+      (cd "${SRC}" 2>/dev/null || cd "${RUN_DIR}" || exit; HOME="${RUN_DIR}/home" \
         "${real}" "--output_base=${ob}" shutdown) >/dev/null 2>&1 9>&-
     done < "${RUN_DIR}/vendor-obs"
   fi
@@ -591,7 +595,10 @@ start_services() {
     c="${RUN_ID}-${s}"
     record container "${c}"
     dk rm -f "${c}" >/dev/null 2>&1
-    dk run -d --init --name "${c}" --network "${NET}" \
+    # The test hosts reach it by the short alias (a run-id name can exceed
+    # the 63-character DNS label limit); the alias lives on the run's own
+    # network only.
+    dk run -d --init --name "${c}" --network "${NET}" --network-alias "${s}" \
       --cpus 1 --memory 1g --memory-swap 1g --cpu-shares 128 "${img}" >/dev/null \
       || { verdict 125 "cannot start ${c}"; return 1; }
   done
@@ -784,7 +791,7 @@ run_step() {
     local s S
     for s in ${SERVICES}; do
       S="$(printf '%s' "${s}" | tr 'a-z' 'A-Z')"
-      args+=("--test_env=${S}_HOST=${RUN_ID}-${s}")
+      args+=("--test_env=${S}_HOST=${s}")
     done
     set -f
     for t in $(job_var "${JOB}" SERVICE_TEST_ENV); do args+=("--test_env=${t}"); done

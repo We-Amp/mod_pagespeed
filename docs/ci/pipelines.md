@@ -647,7 +647,11 @@ How it decides:
 - Each step uses the commit's own `.bazelrc` config, vendored tree (kept per
   vendor key under `BISECT_ROOT/vendor/`) and content-hashed dev image (built
   only when the host lacks it; a rebuild is listed in `rebuilt_images`), with
-  `--nocache_test_results` and a private `--disk_cache`.
+  `--nocache_test_results` and a private `--disk_cache`. MOD's redis and
+  memcached run on the run's own network under their short names as network
+  aliases.
+- Disk: each step copies the vendored tree into the work tree, and the
+  script never prunes `BISECT_ROOT`; operators prune it.
 
 Host safety contract:
 
