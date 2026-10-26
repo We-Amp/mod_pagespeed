@@ -38,8 +38,12 @@ public class PageSpeedOptions
     public string? DisabledFilters { get; set; }
 
     /// <summary>
-    /// URL path patterns to exclude from PageSpeed processing.
-    /// Supports regex patterns. Example: ["^/api/", "^/signalr/"]
+    /// Request path patterns to exclude from PageSpeed processing. Each entry
+    /// is a path prefix ("/api/") or a glob where '*' matches any sequence and
+    /// '?' any single character ("/admin/*", "*.json"); matching against the
+    /// request path is case-insensitive. Entries are NOT regular expressions;
+    /// every entry is validated at startup, and the generated nginx
+    /// configuration excludes exactly the same paths.
     /// </summary>
     public List<string> ExcludePaths { get; set; } = [];
 
