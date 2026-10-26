@@ -81,8 +81,6 @@ LIBWEBP_COMMIT = "1.5.0"  # Updated Mar 2026 - CVE-2023-4863 fix (heap buffer ov
 LIBWEBP_SHA = "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37"
 GOOGLE_SPARSEHASH_COMMIT = "6ff8809259d2408cb48ae4fa694e80b15b151af3"
 GOOGLE_SPARSEHASH_SHA = "4ae105acb6b53f957b6005fa103a9fd342c39dbc7c87673663e782325b8296b3"
-GFLAGS_COMMIT = "de1b8d3daa40b5b07208ec9e82f223d430e2ecc1"  # v2.3.0 - Updated Jan 2026
-GFLAGS_SHA = "b563851a60342abc35281fa9c684de7e9604a2bf1982c85035180b9ce3afa774"
 # googleurl (gurl) — Chromium's URL parser, used by pagespeed/kernel/http for
 # URL parsing (parses attacker-controllable href/src/url()). Originally an
 # Envoy dep, but referenced directly by core PageSpeed code. Fully
@@ -700,13 +698,6 @@ filegroup(
         sha256 = GOOGLE_SPARSEHASH_SHA,
         patches = [Label("//bazel:sparsehash_cstring.patch")],
         patch_args = ["-p1"],
-    )
-
-    http_archive(
-        name = "com_github_gflags_gflags",
-        strip_prefix = "gflags-%s" % GFLAGS_COMMIT,
-        url = "https://github.com/gflags/gflags/archive/%s.tar.gz" % GFLAGS_COMMIT,
-        sha256 = GFLAGS_SHA,
     )
 
     http_archive(
