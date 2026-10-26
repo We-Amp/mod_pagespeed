@@ -4871,7 +4871,13 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
     }
 
     cfg_m->driver_factory->LoggingInit(cycle->log, true);
-    cfg_m->driver_factory->RootInit();
+    // A configuration test validates the configuration and must not create
+    // cache volumes or shared memory: RootInit registers every cache path and
+    // opens (creating and syncing, on a fresh directory) its volumes, which
+    // takes over a minute on a slow disk.  Nothing below depends on it.
+    if (!ngx_test_config) {
+      cfg_m->driver_factory->RootInit();
+    }
 
     // Interim mitigation for the native fetcher (#301): a remote
     // configuration refresh can only progress on the nginx event loop, so
