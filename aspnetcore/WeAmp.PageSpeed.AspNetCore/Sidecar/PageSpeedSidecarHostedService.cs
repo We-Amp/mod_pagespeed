@@ -87,7 +87,10 @@ public class PageSpeedSidecarHostedService : IHostedLifecycleService, IDisposabl
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_sidecarManager.State is SidecarState.Running or SidecarState.Unhealthy)
+        // Restarting included: a restart in flight still owns a child process that
+        // must not outlive the host (#295).
+        if (_sidecarManager.State is SidecarState.Running or SidecarState.Unhealthy
+            or SidecarState.Restarting)
         {
             await _sidecarManager.StopAsync(cancellationToken);
         }

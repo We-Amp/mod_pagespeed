@@ -804,7 +804,17 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
 
                 // Check health
                 var healthy = await CheckHealthAsync(cancellationToken);
-                if (healthy && State == SidecarState.Unhealthy)
+                if (healthy && State == SidecarState.Restarting)
+                {
+                    // A restart can leave the state here with a live child that
+                    // answers health probes after the startup wait already gave up
+                    // (slow module init on a loaded host): promote it instead of
+                    // parking in Restarting, from which nothing else recovers (#295).
+                    SetState(SidecarState.Running);
+                    RestartCount = 0;
+                    _logger.LogInformation("Sidecar finished restarting and is healthy");
+                }
+                else if (healthy && State == SidecarState.Unhealthy)
                 {
                     SetState(SidecarState.Running);
                     _logger.LogInformation("Sidecar recovered and is healthy");
@@ -879,7 +889,34 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
                 return;
             }
 
-            await WaitForHealthyAsync(opts.Sidecar.StartupTimeoutMs, cancellationToken);
+            try
+            {
+                await WaitForHealthyAsync(opts.Sidecar.StartupTimeoutMs, cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                // The startup deadline expired with the child still running: stop it
+                // with the same kill path StopAsync/Dispose use, so the next monitor
+                // tick observes the exit and re-enters this restart path (counting
+                // the attempt toward MaxRestartAttempts). Left alive it would park
+                // the manager in Restarting: the monitor neither retries (the child
+                // never exited) nor recovers (#295).
+                var child = CurrentProcess();
+                if (child is { HasExited: false })
+                {
+                    try
+                    {
+                        child.Kill(entireProcessTree: true);
+                        await child.WaitForExitAsync(CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // The child may have exited between the check and the kill.
+                    }
+                }
+
+                throw;
+            }
 
             SetState(SidecarState.Running);
             _logger.LogInformation("Sidecar restarted successfully");
@@ -889,7 +926,8 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to restart sidecar");
+            _logger.LogError(ex, "Failed to restart sidecar (attempt {Count}/{Max})",
+                RestartCount, opts.Sidecar.MaxRestartAttempts);
             // Will retry on next monitor cycle
         }
     }
