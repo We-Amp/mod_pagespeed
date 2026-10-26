@@ -457,6 +457,30 @@ else
   pass "${CASE}"
 fi
 
+# git 2.55 and later print "<sha> is the first 'bad' commit", older ones
+# "is the first bad commit". A git shim rewrites `git bisect run` output to
+# each wording, so both are pinned whatever git this runs on.
+REAL_GIT="$(command -v git)"
+export REAL_GIT
+mkdir -p "${WORK}/gitshim"
+cat > "${WORK}/gitshim/git" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = bisect ] && [ "${2:-}" = run ]; then
+  "${REAL_GIT}" "$@" 2>&1 | sed -E "s/ is the first '?bad'? commit\$/ is the first ${FAKE_GIT_BAD_WORDING} commit/"
+  exit "${PIPESTATUS[0]}"
+fi
+exec "${REAL_GIT}" "$@"
+EOF
+chmod +x "${WORK}/gitshim/git"
+for wording in "bad" "'bad'"; do
+  case "${wording}" in bad) new_case first-bad-wording-plain ;; *) new_case first-bad-wording-quoted ;; esac
+  PATH="${WORK}/gitshim:${PATH}" FAKE_GIT_BAD_WORDING="${wording}" start linux-asan
+  if expect_eq status "$(jget status)" culprit && expect_eq first_bad "$(jget first_bad)" "${SHA[7]}"; then
+    if grep -qF "is the first ${wording} commit" "${BISECT_ROOT}/${ID}/bisect-run.out"; then pass "${CASE}"
+    else fail "${CASE}" "the shim did not produce the wording"; fi
+  fi
+done
+
 new_case culprit-found-build-bisect
 printf 'linux-build\tBuild all targets\t2026-10-26T02:10:11.1Z ERROR: Target //rec:lib failed to build\n' > "${FAKE_STATE}/gh-log"
 set_map 7 12 buildfail

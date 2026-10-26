@@ -540,7 +540,14 @@ phase_bisect() {
   (cd "${SRC}" && git bisect run "${SELF}" _step "${RUN_ID}") 2>&1 | tee "${out}"
   rc="${PIPESTATUS[0]}"
   git -C "${SRC}" bisect log > "${RUN_DIR}/bisect.log" 2>/dev/null
-  first="$(sed -n 's/^\([0-9a-f]\{40,64\}\) is the first bad commit$/\1/p' "${out}" | head -n 1)"
+  # "<sha> is the first bad commit"; git 2.55 and later quote the term
+  # ("first 'bad' commit"). The match must also be what refs/bisect/bad
+  # names when the bisect ends.
+  first="$(sed -n -E "s/^([0-9a-f]{40,64}) is the first '?bad'? commit\$/\1/p" "${out}" | head -n 1)"
+  if [ -n "${first}" ] && [ "$(git -C "${SRC}" rev-parse -q --verify refs/bisect/bad 2>/dev/null)" != "${first}" ]; then
+    say "first bad commit ${first} is not refs/bisect/bad; treating the result as inconclusive"
+    first=""
+  fi
   git -C "${SRC}" bisect reset -q >/dev/null 2>&1
   if [ -n "${first}" ]; then
     write_result culprit "${first}"
