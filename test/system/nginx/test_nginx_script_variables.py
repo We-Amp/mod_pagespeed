@@ -19,7 +19,7 @@ from pagespeed_test_framework import PageSpeedClient
 #     location ^~ /mod_pagespeed_test/script_variables/ {
 #         pagespeed EnableFilters $arg_filters;
 #     }
-PAGE = "/mod_pagespeed_test/script_variables/combine_css.html"
+PAGE = "/mod_pagespeed_test/script_variables/remove_comments.html"
 
 
 @pytest.mark.nginx_only
@@ -50,16 +50,19 @@ class TestNginxScriptVariables:
 
     def test_valid_value_optimizes(self, client: PageSpeedClient):
         """A valid filter name reaches the rewrite pipeline (control)."""
-        response = client.fetch_until_contains(
-            f"{PAGE}?filters=combine_css",
-            pattern=r"\.pagespeed\.cc\.",
+        marker = "script-variable-marker"
+        assert marker in client.get(f"{PAGE}?filters=not_a_filter").text
+
+        response = client.fetch_until(
+            f"{PAGE}?filters=remove_comments",
+            lambda r: r.status == 200 and marker not in r.text,
             timeout=60.0,
         )
 
         assert response.status == 200
-        assert ".pagespeed.cc." in response.text, (
-            f"combine_css from a script variable must combine the page's "
-            f"stylesheets, got: {response.text[:200]!r}"
+        assert marker not in response.text, (
+            f"remove_comments from a script variable must strip the page's "
+            f"comment, got: {response.text[:200]!r}"
         )
 
 
