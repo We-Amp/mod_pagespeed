@@ -178,6 +178,11 @@ bool IsVolumeNameFor(StringPiece name, StringPiece stem) {
 // starts, and a daemon that exists but is not accepting (stopped, or its
 // accept queue full) must never hang a start.
 constexpr int64_t kSocketConnectDeadlineMs = 2000;
+
+// The deadline of the serving-health recheck, which runs on a request
+// thread: two POSIX backlog retries or one pipe wait.  A daemon that is up
+// but briefly busy is simply found by the next recheck.
+constexpr int64_t kServingRecheckDeadlineMs = 100;
 // How often a backlog-full connect (EAGAIN) is retried inside that deadline.
 constexpr int64_t kSocketConnectRetryMs = 50;
 // The deadline message below says "2 seconds"; keep the two in step.
@@ -1077,6 +1082,31 @@ void* DaemonAdapter::RecordCache() {
     return nullptr;
   }
   std::lock_guard<std::mutex> lock(record_cache_mutex_);
+  return RecordCacheLocked();
+}
+
+void* DaemonAdapter::RecordCacheForRequest() {
+  if (health_.load(std::memory_order_acquire) != DaemonHealth::kReady ||
+      abi_ == nullptr) {
+    return nullptr;
+  }
+  // Steady state: the published, unreplaced handle is exactly what the
+  // locked path would return without changing anything, so no lock.
+  if (void* handle = RecordCacheIfOpen()) {
+    return handle;
+  }
+  // Nothing usable is published.  Whoever gets the lock decides (first
+  // open, reopen after a replacement, retry after a backoff); a request
+  // that finds an open in flight does not queue behind it but goes to the
+  // origin, the same fail-closed direction a replaced volume already takes.
+  std::unique_lock<std::mutex> lock(record_cache_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    return nullptr;
+  }
+  return RecordCacheLocked();
+}
+
+void* DaemonAdapter::RecordCacheLocked() {
   if (record_cache_ != nullptr && !record_cache_closed_ &&
       VolumeWasReplaced()) {
     // Decided again under the lock, against the number this handle is held
@@ -1588,7 +1618,8 @@ DaemonAdapter::DirAccess DaemonAdapter::VolumeDirAccess(
 #endif
 }
 
-bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
+bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error,
+                                  int64_t deadline_budget_ms) {
 #ifdef _WIN32
   // The configured "socket path" on this platform is a PIPE BASE NAME; the
   // client library prepends the device prefix, verbatim, and so does the
@@ -1612,7 +1643,7 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     return false;
   }
 
-  const int64_t deadline_ms = MonotonicNowMs() + kSocketConnectDeadlineMs;
+  const int64_t deadline_ms = MonotonicNowMs() + deadline_budget_ms;
   bool connected = false;
   bool timed_out = false;
   DWORD last_error = 0;
@@ -1697,7 +1728,11 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
 
   if (timed_out) {
     AppendDaemonDeadlineMessage(error, spelled);
-    RecordSocketDeadline(spelled, MonotonicNowMs());
+    // Only the full-length probe latches: a short recheck that missed its
+    // 100 ms says nothing about the two seconds start-up checks allow.
+    if (deadline_budget_ms == kSocketConnectDeadlineMs) {
+      RecordSocketDeadline(spelled, MonotonicNowMs());
+    }
   } else if (!connected) {
     StrAppend(error, "the optimizer worker does not answer at ", spelled, ": ",
               WindowsErrorText(last_error));
@@ -1767,7 +1802,7 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     return false;
   }
 
-  const int64_t deadline_ms = MonotonicNowMs() + kSocketConnectDeadlineMs;
+  const int64_t deadline_ms = MonotonicNowMs() + deadline_budget_ms;
   bool connected = false;
   bool timed_out = false;
   int connect_errno = 0;
@@ -1856,7 +1891,11 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     // the interval answers from the latch instead of costing the deadline
     // again.  After the expiry the next probe is a real probe again.
     AppendDaemonDeadlineMessage(error, spelled);
-    RecordSocketDeadline(spelled, MonotonicNowMs());
+    // Only the full-length probe latches: a short recheck that missed its
+    // 100 ms says nothing about the two seconds start-up checks allow.
+    if (deadline_budget_ms == kSocketConnectDeadlineMs) {
+      RecordSocketDeadline(spelled, MonotonicNowMs());
+    }
   } else if (!connected) {
     StrAppend(error, "the optimizer worker does not answer at ", spelled, ": ",
               strerror(connect_errno));
@@ -2198,7 +2237,7 @@ DaemonHealth DaemonAdapter::ServingHealth() const {
           .empty()) {
     return verdict;
   }
-  if (!SocketAnswers(socket_path_, &why)) {
+  if (!SocketAnswers(socket_path_, &why, kServingRecheckDeadlineMs)) {
     return verdict;
   }
   // Stored only on the success path, immediately before the verdict flips:

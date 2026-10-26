@@ -227,10 +227,12 @@ class DaemonAdapter;
 // classic one: DoneAndSetHeaders deletes it.
 //
 // WHICH FACTORY FOR WHICH PORT.  MakeDaemonIproRecorderIfReady obtains the
-// handle through RecordCache(), which performs the open -- blocking file
-// lock, background threads -- on the calling thread when no handle is open.
-// That is right for a port whose caller may block (Apache's request
-// threads).  MakeDaemonIproRecorderIfOpen obtains it through
+// handle through RecordCacheForRequest(), which returns the published handle
+// without taking the lock and, when no handle is open, performs the open
+// only if it wins a try-lock; a caller that loses it records nothing this
+// time instead of waiting.  That is right for a port whose request thread
+// may do the open itself (Apache and IIS).  MakeDaemonIproRecorderIfOpen
+// obtains it through
 // RecordCacheIfOpen(), which never opens and never waits, and reports
 // nullptr whenever this process has no open handle: the only choice for a
 // caller that must not block, like nginx's event-loop thread.  The open

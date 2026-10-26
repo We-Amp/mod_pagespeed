@@ -1256,7 +1256,8 @@ DaemonServeReader* MakeDaemonServeReaderIfReady(DaemonAdapter* adapter) {
   // Asked for BEFORE the reader exists, not after: the volume handle is what
   // makes a reader able to answer at all, and one built without it would
   // classify every request as a cold cache.
-  return MakeDaemonServeReaderWithHandle(adapter, adapter->RecordCache());
+  return MakeDaemonServeReaderWithHandle(adapter,
+                                         adapter->RecordCacheForRequest());
 }
 
 DaemonServeReader* MakeDaemonServeReaderIfOpen(DaemonAdapter* adapter) {
