@@ -35,7 +35,11 @@ HtmlVaryFilter::~HtmlVaryFilter() {}
 void HtmlVaryFilter::HtmlVaryTokens(const RewriteOptions& options,
                                     StringVector* tokens) {
   tokens->clear();
-  const bool images = options.ImageRewriteFilterInHtmlChain();
+  // The image tokens apply when the image filter can change HTML URLs. With
+  // preserved URLs it only warms the in-place cache, so the markup does not
+  // depend on Accept or Save-Data (the filter being in the chain is not enough).
+  const bool images = options.ImageRewriteFilterInHtmlChain() &&
+                      options.ImageUrlsCanChangeInHtml();
   // WebP is also granted by User-Agent (the navigation-Accept fallback and the
   // legacy browser); AVIF is Accept-only.
   const bool webp = options.Enabled(RewriteOptions::kConvertJpegToWebp) ||

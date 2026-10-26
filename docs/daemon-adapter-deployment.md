@@ -518,8 +518,8 @@ default configuration (`CoreFilters`) therefore sends
 `Vary: Accept, Save-Data, User-Agent`. The list is a function of the
 configuration alone, so it is the same for every request to a URL whatever the
 request carries, the cache state or the response's `Cache-Control`; with
-`ImagePreserveURLs on` (and no in-place preemptive image rewriting) the image
-tokens are not added. `Sec-CH-DPR` is not in the list: the HTML rewriter does
+`ImagePreserveURLs on` the image tokens are not added (unless resizing or
+inlining is enabled explicitly, which needs URL rewriting). `Sec-CH-DPR` is not in the list: the HTML rewriter does
 not read it. The server merges its own `Accept-Encoding` into the same field.
 
 By default rewritten HTML is still not cacheable by shared caches

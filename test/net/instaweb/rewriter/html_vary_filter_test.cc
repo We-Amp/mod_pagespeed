@@ -185,14 +185,20 @@ TEST_F(HtmlVaryTokensTest, PreservedImageUrlsDropImageTokens) {
   options_.EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options_.set_image_jpeg_quality_for_save_data(40);
   EXPECT_EQ("Accept,Save-Data,User-Agent", Tokens(options_));
-  // Preserved URLs only leave the image rewriter out of the HTML chain when
-  // in-place preemptive image rewriting is off.
+  // Preserved URLs keep the HTML the same for every client, with preemptive
+  // in-place rewriting on (the default) or off.
   options_.set_image_preserve_urls(true);
+  EXPECT_EQ("", Tokens(options_));
   options_.set_in_place_preemptive_rewrite_images(false);
   EXPECT_EQ("", Tokens(options_));
-  // Preemptive in-place rewriting puts the image rewriter back in the chain.
-  options_.set_in_place_preemptive_rewrite_images(true);
-  EXPECT_EQ("Accept,Save-Data,User-Agent", Tokens(options_));
+}
+
+TEST_F(HtmlVaryTokensTest, CoreFiltersWithPreservedUrlsDropImageTokens) {
+  // The documented recipe: ImagePreserveURLs on at all other defaults.
+  RewriteOptions core(thread_system());
+  core.SetRewriteLevel(RewriteOptions::kCoreFilters);
+  core.set_image_preserve_urls(true);
+  EXPECT_EQ("", Tokens(core));
 }
 
 TEST_F(HtmlVaryTokensTest, ExplicitInlineOrDelayKeepUserAgentWhenPreserved) {
@@ -202,9 +208,6 @@ TEST_F(HtmlVaryTokensTest, ExplicitInlineOrDelayKeepUserAgentWhenPreserved) {
   EXPECT_EQ("User-Agent", Tokens(options_));
   RewriteOptions delay(thread_system());
   delay.set_image_preserve_urls(true);
-  delay.set_in_place_preemptive_rewrite_images(false);
-  delay.set_image_jpeg_quality_for_save_data(-1);
-  delay.set_image_webp_quality_for_save_data(-1);
   delay.EnableFilter(RewriteOptions::kDelayImages);
   EXPECT_EQ("User-Agent", Tokens(delay));
 }

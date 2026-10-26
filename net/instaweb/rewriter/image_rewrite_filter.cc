@@ -1731,10 +1731,7 @@ void ImageRewriteFilter::ComputePreserveUrls(const RewriteOptions* options,
   // the benefit of recompression via IPRO.  But we make an
   // exception for inlining and image-resizing directives since
   // those can only be done via url-rewriting.
-  if (options->image_preserve_urls() &&
-      !options->Enabled(RewriteOptions::kResizeImages) &&
-      !options->Enabled(RewriteOptions::kResizeToRenderedImageDimensions) &&
-      !options->Enabled(RewriteOptions::kInlineImages)) {
+  if (!options->ImageUrlsCanChangeInHtml()) {
     slot->set_preserve_urls(true);
   }
 }

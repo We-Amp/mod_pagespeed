@@ -1183,6 +1183,11 @@ bool RewriteOptions::ImageRewriteFilterInHtmlChain() const {
          (!image_preserve_urls() || in_place_preemptive_rewrite_images());
 }
 
+bool RewriteOptions::ImageUrlsCanChangeInHtml() const {
+  return !image_preserve_urls() || Enabled(kResizeImages) ||
+         Enabled(kResizeToRenderedImageDimensions) || Enabled(kInlineImages);
+}
+
 RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
     : modified_(false),
       frozen_(false),

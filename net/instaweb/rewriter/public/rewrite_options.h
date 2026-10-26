@@ -1177,6 +1177,13 @@ class RewriteOptions {
   // HtmlVaryFilter so the two cannot disagree.
   bool ImageRewriteFilterInHtmlChain() const;
 
+  // True when the image rewrite filter may change image URLs in the HTML: the
+  // URLs are not preserved, or an explicitly enabled resize_images,
+  // resize_to_rendered_image_dimensions or inline_images needs URL rewriting
+  // even then. Shared by ImageRewriteFilter (the preserve-URLs decision) and
+  // HtmlVaryFilter so the two cannot disagree.
+  bool ImageUrlsCanChangeInHtml() const;
+
   explicit RewriteOptions(ThreadSystem* thread_system);
   virtual ~RewriteOptions();
 
