@@ -46,6 +46,8 @@ const char kAutoCreateCachePath[] = "AutoCreateCachePath";
 const char kAutoCreateLogDir[] = "AutoCreateLogDir";
 const char kDaemonSocketPath[] = "DaemonSocketPath";
 const char kDaemonVolumePath[] = "DaemonVolumePath";
+const char kDaemonServeHonorRequestFreshness[] =
+    "DaemonServeHonorRequestFreshness";
 
 // TODO(oschaaf): 1.9 -> use these options server only stuff below.
 
@@ -183,6 +185,20 @@ void IisRewriteOptions::AddProperties() {
 		"With either of the two set, the classic in-place recorder is "
 		"not used. See docs/daemon-adapter-iis.md.",
 		true);
+	// Name, id and default match the Apache and nginx ports, pinned in
+	// test/pagespeed/nginx/ngx_daemon_options_pin_test.cc.
+	add_iis_option(
+		false, &IisRewriteOptions::daemon_serve_honor_request_freshness_, "dshrf",
+		kDaemonServeHonorRequestFreshness, kServerScope,
+		"Let a client's reload headers (Cache-Control: no-cache or max-age=0, "
+		"or Pragma: no-cache without a Cache-Control) bypass the optimizer "
+		"daemon's cached copy of a resource, so the origin's own bytes are "
+		"sent. Default off: a reload is served from the cache.",
+		true);
+	// Like the Apache and nginx switches, it decides which stored bytes are
+	// sent, not what the optimizer produces.
+	iis_properties_->property(iis_properties_->size() - 1)
+		->set_do_not_use_for_signature_computation(true);
 
 	MergeSubclassProperties(iis_properties_);
 	IisRewriteOptions dummy_config(nullptr);

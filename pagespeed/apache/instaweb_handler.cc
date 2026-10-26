@@ -582,15 +582,13 @@ void InstawebHandler::BuildDaemonServeRequest(DaemonServeRequest* request) {
   request->if_none_match = RequestHeader(HttpAttributes::kIfNoneMatch);
   request->if_modified_since = RequestHeader(HttpAttributes::kIfModifiedSince);
 
-  // A forced reload, in both of the spellings a client still sends.  It is
-  // handed to the peer's freshness evaluator rather than acted on here,
-  // because the peer distinguishes "the client asked" from "the bytes are
-  // old" and only the second means the entry expired.
-  const StringPiece cache_control =
-      RequestHeader(HttpAttributes::kCacheControl);
-  request->force_revalidate =
-      cache_control.find("no-cache") != StringPiece::npos ||
-      StringCaseEqual(RequestHeader(HttpAttributes::kPragma), "no-cache");
+  // The reload directives, handed over raw: whether they mean a forced
+  // reload, and whether that bypasses the cache at all, is the arm's call
+  // (ServeRequestForcesRevalidation and the host's
+  // ModPagespeedDaemonServeHonorRequestFreshness), so the three ports cannot
+  // drift.
+  request->cache_control = RequestHeader(HttpAttributes::kCacheControl);
+  request->pragma = RequestHeader(HttpAttributes::kPragma);
 }
 
 // Records ONE serve class against the peer's serve-stats mmap.  A no-op when
@@ -663,6 +661,10 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
   // Off, the arm selects and labels exactly as it always has.
   reader->set_serve_stored_encodings(options_ != nullptr &&
                                      options_->daemon_serve_stored_encodings());
+  // And its switch for letting a client's reload headers bypass that copy
+  // (ModPagespeedDaemonServeHonorRequestFreshness), off by default.
+  reader->set_honor_request_freshness(
+      options_ != nullptr && options_->daemon_serve_honor_request_freshness());
 
   // Lets the arm notice, while it serves a stored original, that the URL's
   // optimized copy has gone missing (DaemonServeDecision::lost_optimized_copy).

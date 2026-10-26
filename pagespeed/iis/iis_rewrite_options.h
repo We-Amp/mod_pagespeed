@@ -90,6 +90,12 @@ class IisRewriteOptions : public SystemRewriteOptions {
   const GoogleString& daemon_volume_path() const {
 	  return daemon_volume_path_.value();
   }
+  // Whether a client's reload headers (Cache-Control: no-cache or max-age=0,
+  // Pragma: no-cache) bypass the daemon-served copy
+  // (DaemonServeHonorRequestFreshness).  Off by default; per site.
+  bool daemon_serve_honor_request_freshness() const {
+	  return daemon_serve_honor_request_freshness_.value();
+  }
 
  private:
   OptionSettingResult ParseAndSetOptions0(
@@ -127,6 +133,7 @@ class IisRewriteOptions : public SystemRewriteOptions {
   Option<bool> auto_create_log_dir_;
   Option<GoogleString> daemon_socket_path_;
   Option<GoogleString> daemon_volume_path_;
+  Option<bool> daemon_serve_honor_request_freshness_;
 
   bool IsDirective(StringPiece config_directive, StringPiece compare_directive);
 

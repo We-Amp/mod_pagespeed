@@ -36,6 +36,8 @@ const char kDaemonSocketPath[] = "DaemonSocketPath";
 const char kDaemonVolumePath[] = "DaemonVolumePath";
 const char kDaemonApiSocketPath[] = "DaemonApiSocketPath";
 const char kDaemonServeStoredEncodings[] = "DaemonServeStoredEncodings";
+const char kDaemonServeHonorRequestFreshness[] =
+    "DaemonServeHonorRequestFreshness";
 
 }  // namespace
 
@@ -127,6 +129,19 @@ void ApacheConfig::AddProperties() {
   // It decides which stored bytes are sent, not what the optimizer
   // produces: turning it on must not change the configuration context the
   // optimizer files this host's work under.
+  apache_properties_->property(apache_properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+
+  AddApacheProperty(
+      false, &ApacheConfig::daemon_serve_honor_request_freshness_, "dshrf",
+      kDaemonServeHonorRequestFreshness,
+      "Let a client's reload headers (Cache-Control: no-cache or max-age=0, "
+      "or Pragma: no-cache without a Cache-Control) bypass the optimizer "
+      "daemon's cached copy of a resource, so the origin's own bytes are "
+      "sent. Default off: a reload is served from the cache.",
+      true /* safe_to_print */);
+  // Like the switch above, it decides which stored bytes are sent, not what
+  // the optimizer produces.
   apache_properties_->property(apache_properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
 

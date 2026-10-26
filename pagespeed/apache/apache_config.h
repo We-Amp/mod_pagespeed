@@ -87,6 +87,13 @@ class ApacheConfig : public SystemRewriteOptions {
   bool daemon_serve_stored_encodings() const {
     return daemon_serve_stored_encodings_.value();
   }
+  // Whether a client's reload headers (Cache-Control: no-cache or max-age=0,
+  // Pragma: no-cache) bypass the daemon-served copy
+  // (ModPagespeedDaemonServeHonorRequestFreshness).  Off by default; per
+  // server or virtual host.
+  bool daemon_serve_honor_request_freshness() const {
+    return daemon_serve_honor_request_freshness_.value();
+  }
 
   bool force_buffering() const { return force_buffering_.value(); }
   void set_force_buffering(bool x) { set_option(x, &force_buffering_); }
@@ -149,6 +156,7 @@ class ApacheConfig : public SystemRewriteOptions {
   Option<GoogleString> daemon_volume_path_;
   Option<GoogleString> daemon_api_socket_path_;
   Option<bool> daemon_serve_stored_encodings_;
+  Option<bool> daemon_serve_honor_request_freshness_;
 
   ApacheConfig(const ApacheConfig&) = delete;
   ApacheConfig& operator=(const ApacheConfig&) = delete;

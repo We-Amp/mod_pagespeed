@@ -185,6 +185,58 @@ TEST_F(ApacheConfigTest, ServingStoredEncodingsIsPerVirtualHost) {
   EXPECT_FALSE(config_.daemon_serve_stored_encodings());
 }
 
+// The switch for letting a client's reload headers bypass the optimizer's
+// copy.  Off unless an operator turns it on; per server or virtual host; and,
+// like the switch above, it never renames the configuration.
+TEST_F(ApacheConfigTest, HonoringRequestFreshnessIsOffByDefault) {
+  EXPECT_FALSE(config_.daemon_serve_honor_request_freshness());
+}
+
+TEST_F(ApacheConfigTest, HonoringRequestFreshnessParsesOnAndOff) {
+  GoogleString msg;
+  NullMessageHandler handler;
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1(
+                "DaemonServeHonorRequestFreshness", "on", &msg, &handler));
+  EXPECT_TRUE(config_.daemon_serve_honor_request_freshness());
+  EXPECT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1(
+                "DaemonServeHonorRequestFreshness", "off", &msg, &handler));
+  EXPECT_FALSE(config_.daemon_serve_honor_request_freshness());
+  EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
+            config_.ParseAndSetOptionFromName1(
+                "DaemonServeHonorRequestFreshness", "sometimes", &msg,
+                &handler));
+}
+
+TEST_F(ApacheConfigTest, HonoringRequestFreshnessIsPerVirtualHost) {
+  ApacheConfig vhost("vhost", &thread_system_);
+  GoogleString msg;
+  NullMessageHandler handler;
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            vhost.ParseAndSetOptionFromName1("DaemonServeHonorRequestFreshness",
+                                             "on", &msg, &handler));
+  std::unique_ptr<ApacheConfig> merged(config_.Clone());
+  merged->Merge(vhost);
+  EXPECT_TRUE(merged->daemon_serve_honor_request_freshness());
+  EXPECT_FALSE(config_.daemon_serve_honor_request_freshness());
+}
+
+TEST_F(ApacheConfigTest, HonoringRequestFreshnessDoesNotRenameTheConfiguration) {
+  GoogleString context_off, signature_off, context_on, signature_on;
+  ASSERT_EQ(OptionContextStatus::kOk,
+            OptionContext::Compute(config_, &context_off, &signature_off));
+  GoogleString msg;
+  NullMessageHandler handler;
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            config_.ParseAndSetOptionFromName1(
+                "DaemonServeHonorRequestFreshness", "on", &msg, &handler));
+  ASSERT_EQ(OptionContextStatus::kOk,
+            OptionContext::Compute(config_, &context_on, &signature_on));
+  EXPECT_EQ(context_off, context_on);
+  EXPECT_EQ(signature_off, signature_on);
+}
+
 TEST_F(ApacheConfigTest, ServingStoredEncodingsDoesNotRenameTheConfiguration) {
   // Every notification to the optimizer carries the configuration's
   // context; turning the switch on must not file new work under a second

@@ -158,7 +158,10 @@ struct DaemonServeRequest {
   // `if_none_match` is matched ONLY against the validator this arm derives;
   // see ServeDerivedValidatorMatches.
   //
-  // `if_modified_since` is matched ONLY on the ORIGIN plane, and therefore
+  // `if_modified_since` is IGNORED whenever `if_none_match` is non-empty
+  // (RFC 9110 13.1.3: a recipient MUST ignore If-Modified-Since if the
+  // request contains an If-None-Match header field), valid or not.  When it
+  // is evaluated it is matched ONLY on the ORIGIN plane, and therefore
   // only against a response this arm is emitting the origin's own
   // `Last-Modified` on -- i.e. a durable-original serve.  An optimized
   // variant carries no `Last-Modified` (it is not the representation the
@@ -169,9 +172,13 @@ struct DaemonServeRequest {
   StringPiece if_none_match;
   StringPiece if_modified_since;
 
-  // The client demanded revalidation (a forced reload).  Yields a
-  // fall-through without treating the entry as expired.
-  bool force_revalidate = false;
+  // The request's `Cache-Control` and `Pragma` field values, verbatim, with
+  // repeated lines comma-joined by the port.  The arm decides what they mean
+  // (ServeRequestForcesRevalidation), and only when the reader's
+  // set_honor_request_freshness switch is on, so the three ports cannot
+  // drift apart.  Empty when the request carries no such field.
+  StringPiece cache_control;
+  StringPiece pragma;
 };
 
 // The arm's answer, plus the response state a serving seam has to emit.
@@ -905,19 +912,22 @@ GoogleString ServeDerivedETag(uint32_t full_mask, uint8_t flags,
 // exactly when the answer is about to change planes.
 GoogleString ServeOriginPlaneETag(StringPiece origin_etag);
 
-// True when the client's `If-None-Match` names the validator THIS ARM
-// derived.
+// True when the client's `If-None-Match` is satisfied by the validator THIS
+// ARM derived (RFC 9110 13.1.2), so the serve answers 304.
 //
-// ON THE DERIVED PLANE ONLY.  The list is compared, entry by entry and under
-// the weak comparison RFC 9110 requires for GET, against `derived` and
-// against nothing else -- never against the origin's stored ETag.  A client
-// holding an ORIGIN-plane tag is holding a validator for a representation
-// this arm did not issue, and answering 304 to it would tell the client its
-// origin-plane copy is current for bytes that are not the origin's.
+// The field is `*` or a comma-separated list of entity tags.  The list is
+// split on commas OUTSIDE quotes only: etagc includes the comma, so a tag
+// such as "v1,gz" is one member.  A member is an optional `W/` and a quoted
+// opaque tag; a member that is not well formed (unquoted, unterminated) is
+// ignored and never invalidates the others.  Members are compared, under the
+// weak comparison RFC 9110 requires for GET, against `derived` and against
+// nothing else -- never against the origin's stored ETag on the other plane.
 //
-// `*` IS DELIBERATELY NOT HONOURED.  It is not a validator on any plane; a
-// 304 to it would validate whatever the client happens to hold, which is the
-// same cross-plane answer by a shorter route.
+// `*` as the WHOLE field value is satisfied whenever a representation is
+// being served, even one that carries no validator (`derived` empty): RFC
+// 9110 makes the condition false when a current representation exists.  The
+// caller asks only after selection, freshness and the declines, so there is
+// one.  A `*` inside a list is malformed and ignored.
 bool ServeDerivedValidatorMatches(StringPiece if_none_match,
                                   StringPiece derived);
 
@@ -931,6 +941,20 @@ bool ServeDerivedValidatorMatches(StringPiece if_none_match,
 // response, never a 304.
 bool ServeOriginDateIsUnmodified(StringPiece if_modified_since,
                                  uint32_t origin_last_modified);
+
+// Whether the request's own freshness directives ask for a forced reload.
+// Consulted only when the reader's set_honor_request_freshness switch is on.
+//
+// Directives are parsed, not searched for: the field is split on commas
+// outside quotes, names compare case-insensitively, and an argument may be a
+// token or a quoted string.  True for `no-cache` and for `max-age=0` (any
+// spelling of zero: `0`, `00`, `"0"`).  `Pragma: no-cache` counts only when
+// the request carries no `Cache-Control` field (RFC 7234 5.4).  `max-age`
+// above zero, `min-fresh` and `max-stale` are request preferences or
+// permissions this arm does not act on: it never serves a stale entry, and
+// the optimizer's own front end ignores them as well.
+bool ServeRequestForcesRevalidation(StringPiece cache_control,
+                                    StringPiece pragma);
 
 // ---------------------------------------------------------------------------
 // The I/O half.
@@ -1063,6 +1087,15 @@ class DaemonServeReader {
   // bytes go out in, which the response labels.
   void set_serve_stored_encodings(bool on) { serve_stored_encodings_ = on; }
 
+  // Whether a request that asks for a forced reload (`Cache-Control:
+  // no-cache`, `max-age=0`, or `Pragma: no-cache` without a Cache-Control;
+  // see ServeRequestForcesRevalidation) bypasses the optimizer's copy and
+  // falls through to the origin.  Off unless a seam turns it on from its
+  // port's directive, before Serve(): off, a reload is served from the
+  // optimizer's cache like any other request, which is also how the
+  // optimizer's own front end treats a resource by default.
+  void set_honor_request_freshness(bool on) { honor_request_freshness_ = on; }
+
   // Lets this reader recognise a lost optimized copy while it serves the
   // durable original (DaemonServeDecision::lost_optimized_copy).  Borrowed;
   // must outlive the reader.  Unset -- the default, and every port that has
@@ -1153,6 +1186,7 @@ class DaemonServeReader {
   void* cache_;
   void* result_ = nullptr;
   bool serve_stored_encodings_ = false;
+  bool honor_request_freshness_ = false;
   DaemonHealNotifyLimiter* heal_limiter_ = nullptr;
 };
 

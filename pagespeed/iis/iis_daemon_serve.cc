@@ -164,21 +164,17 @@ void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
   request->if_modified_since =
       StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
 
-  // A forced reload, in both spellings a client still sends. It is handed to
-  // the peer's freshness evaluator rather than acted on here: the peer
-  // distinguishes "the client asked" from "the bytes are old", and only the
-  // second means the entry expired.
+  // The reload directives, handed over raw: whether they mean a forced
+  // reload is the arm's call (ServeRequestForcesRevalidation), and whether
+  // it bypasses the cache at all is the site's DaemonServeHonorRequestFreshness.
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kCacheControl,
                                                 &length);
-  const StringPiece cache_control(value == nullptr ? "" : value,
-                                  value == nullptr ? 0 : length);
+  request->cache_control =
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
   value = http_context->GetRequest()->GetHeader(HttpAttributes::kPragma,
                                                 &length);
-  const StringPiece pragma(value == nullptr ? "" : value,
-                           value == nullptr ? 0 : length);
-  request->force_revalidate =
-      cache_control.find("no-cache") != StringPiece::npos ||
-      StringCaseEqual(pragma, "no-cache");
+  request->pragma =
+      StringPiece(value == nullptr ? "" : value, value == nullptr ? 0 : length);
 }
 
 #endif  // _WIN32
