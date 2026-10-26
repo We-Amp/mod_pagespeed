@@ -228,6 +228,27 @@ for r in "${PROTOC_REPOS[@]}"; do
     [ -d "$f" ] || { echo "    MISSING: protoc repo $r" >&2; MISSING=$((MISSING + 1)); }
 done
 
+# Registry files: module resolution reads every MODULE.bazel, source.json and
+# bazel_registry.json named in MODULE.bazel.lock through the repository cache,
+# content-addressed by the sha256 the lock records. Assert that all of them are
+# vendored so an offline resolution never needs the registry. "not found"
+# entries are recorded negative lookups with no file behind them.
+REG_REPORT=$(python3 -I - "$REPO_ROOT/MODULE.bazel.lock" "$REPO_CACHE" <<'PY'
+import json, os, sys
+lock, cache = sys.argv[1], sys.argv[2]
+hashes = json.load(open(lock))["registryFileHashes"]
+pinned = {u: s for u, s in hashes.items() if s != "not found"}
+miss = [u for u, s in pinned.items()
+        if not os.path.isfile(os.path.join(cache, "content_addressable", "sha256", s, "file"))]
+for u in miss[:5]:
+    print("    MISSING registry file: " + u, file=sys.stderr)
+print(len(pinned), len(miss))
+PY
+)
+read -r REG_PINNED REG_MISSING <<< "$REG_REPORT"
+echo "    Registry files vendored: $((REG_PINNED - REG_MISSING)) of $REG_PINNED (missing: $REG_MISSING)"
+MISSING=$((MISSING + REG_MISSING))
+
 if [ "$MISSING" -gt 0 ]; then
     echo "ERROR: $MISSING critical deps missing from repository cache." >&2
     echo "       The bazel fetch may have failed silently. Check output above." >&2
