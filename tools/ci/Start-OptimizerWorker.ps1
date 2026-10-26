@@ -11,7 +11,8 @@
     pin, the zip checked against SHA256SUMS), starts factory_worker.exe as a
     background process with a cache volume under -Root and the management API on
     127.0.0.1:<ApiPort> behind a token generated for this run, waits for
-    /v1/health, and exports to later steps of the job (GITHUB_ENV):
+    /v1/health, and exports to later steps of the job (GITHUB_ENV) and to the calling
+    session (the process environment), so a script run right after it sees them:
         PAGESPEED_OPTIMIZER_API         host:port of the management API
         PAGESPEED_OPTIMIZER_API_TOKEN   the run's token (masked in the log)
         PAGESPEED_OPTIMIZER_VOLUME      the volume path (DaemonVolumePath)
@@ -50,8 +51,12 @@ function Set-JobEnv([string]$Name, [string]$Value) {
 
 function Stop-Worker {
     if (Test-Path -LiteralPath $PidFile) {
-        $workerPid = [int](Get-Content -LiteralPath $PidFile -TotalCount 1)
-        $proc = Get-Process -Id $workerPid -ErrorAction SilentlyContinue
+        $workerPid = 0
+        try { $workerPid = [int](Get-Content -LiteralPath $PidFile -TotalCount 1) } catch { }
+        $proc = if ($workerPid -gt 0) { Get-Process -Id $workerPid -ErrorAction SilentlyContinue } else { $null }
+        if ($workerPid -gt 0 -and -not $proc) {
+            Write-Host "the optimizer worker (pid $workerPid) was already gone"
+        }
         # Only a worker of this lane: the number may have been reused since.
         if ($proc -and $proc.ProcessName -eq 'factory_worker' -and
             $proc.Path -and $proc.Path.StartsWith($Root, [System.StringComparison]::OrdinalIgnoreCase)) {

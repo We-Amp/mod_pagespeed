@@ -955,6 +955,24 @@ function Write-DaemonSiteDiagnostics {
         }
     } catch { Write-Host "no module log: $($_.Exception.Message)" }
 
+    Write-Host "-- worker liveness"
+    $livePid = $null
+    $pidFile = "C:\pagespeed_optimizer\worker.pid"
+    try {
+        if (Test-Path -LiteralPath $pidFile) { $livePid = [int](Get-Content -LiteralPath $pidFile -TotalCount 1) }
+    } catch { }
+    $liveProc = if ($livePid) { Get-Process -Id $livePid -ErrorAction SilentlyContinue } else { $null }
+    $pipeUp = Test-Path -LiteralPath "\\.\pipe\pagespeed-optimizer"
+    if ($liveProc) {
+        Write-Host ("   pid {0} alive ({1}), started {2}" -f $livePid, $liveProc.ProcessName, $liveProc.StartTime)
+    } else {
+        Write-Host "   pid file: $pidFile, pid: $livePid, process not running"
+    }
+    Write-Host "   pipe \\.\pipe\pagespeed-optimizer exists: $pipeUp"
+    if (-not $liveProc) {
+        Write-Host "   WORKER IS DEAD: the optimizer worker process is no longer running"
+    }
+
     Write-Host "-- named pipes of the worker"
     try {
         [System.IO.Directory]::GetFiles("\\.\pipe\") | Where-Object { $_ -match 'pagespeed' } | ForEach-Object { Write-Host "   $_" }
@@ -973,6 +991,7 @@ function Write-DaemonSiteDiagnostics {
         $path = Join-Path $evidence $f
         if (Test-Path -LiteralPath $path) {
             Write-Host "   $f"
+            Write-Host ("   last written {0} (now {1})" -f (Get-Item -LiteralPath $path).LastWriteTime, (Get-Date))
             Get-Content -LiteralPath $path -Tail 40 | ForEach-Object { Write-Host "   $_" }
         }
     }
