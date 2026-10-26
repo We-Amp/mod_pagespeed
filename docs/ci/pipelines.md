@@ -622,6 +622,10 @@ tools/ci/bisect-job.sh status <id>                  # state, last log lines, exi
 tools/ci/bisect-job.sh resume <id>                  # continue an interrupted run
 ```
 
+Host prerequisites: `docker`, `git`, `gh` (authenticated), `flock` and
+`setsid` (util-linux), `nice` (and `ionice` where present), and `bazel`
+(bazelisk) for vendoring; MOD vendoring (`tools/vendor-deps.sh`) also needs `python3`.
+
 `--targets-file <file>` (one label per line) replaces `--run`. `--cpus`,
 `--memory-gb`, `--runs-per-test` and `--remote-cache-url` (read-only use)
 are optional. The run writes `BISECT_ROOT/<id>/{state,log,result.json,exit}`.
@@ -633,8 +637,9 @@ refused, 3 when another bisect holds the lock.
 
 How it decides:
 
-- The targets come from the failed job's log (`gh run view --log-failed
-  --allow-escape-sequences` through `tools/ci/failing_targets.sh`). No target,
+- The targets come from the failed job's log (`gh run view --job <id>
+  --log-failed`, or when that gives nothing the job logs API with `gh api
+  --allow-escape-sequences`) through `tools/ci/failing_targets.sh`. No target,
   or more than 10 (`BISECT_MAX_TARGETS`), means no bisect.
 - The bad endpoint must fail and the good one pass first (otherwise
   `env-dependent` or `external-drift-or-stale-good`). Then `git bisect start

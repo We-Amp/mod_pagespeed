@@ -172,13 +172,28 @@ esac
 exit 0
 EOF
 
+# Fake gh, shaped like the real one: `run view` has no
+# --allow-escape-sequences flag (unknown flag, exit 1); `api .../logs`
+# prints a short refusal unless it gets that flag. FAKE_GH_RUN_VIEW=fail
+# fails `run view --log-failed`; FAKE_GH_API=refuse refuses even with it.
 cat > "${BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_STATE}/gh.log"
 case " $* " in
-  *" --log-failed "*) cat "${FAKE_STATE}/gh-log"; exit 0 ;;
-  *" --json jobs "*) echo 4242; exit 0 ;;
+  " run view "*" --allow-escape-sequences "*)
+    echo "unknown flag: --allow-escape-sequences" >&2; exit 1 ;;
+  " run view "*" --log-failed "*)
+    [ "${FAKE_GH_RUN_VIEW:-}" = fail ] && { echo "failed to get run log" >&2; exit 1; }
+    cat "${FAKE_STATE}/gh-log"; exit 0 ;;
+  " run view "*" --json jobs "*) echo 4242; exit 0 ;;
+  " api "*"/actions/jobs/4242/logs "*)
+    case " $* " in
+      *" --allow-escape-sequences "*) [ "${FAKE_GH_API:-}" = refuse ] || { cat "${FAKE_STATE}/gh-log"; exit 0; } ;;
+    esac
+    echo "the output contains terminal escape sequences; use --allow-escape-sequences to print them"
+    exit 0 ;;
 esac
+echo "fake gh: unexpected call: $*" >&2
 exit 1
 EOF
 
@@ -323,8 +338,9 @@ CULPRIT_RESULT="${RESULT}"
 CULPRIT_STATE="${FAKE_STATE}"
 
 # The log was fetched with escape sequences kept, then parsed.
-CASE=log-fetched-with-escape-sequences
-if grep -q -- '--job 4242 --log-failed --allow-escape-sequences' "${CULPRIT_STATE}/gh.log"; then
+CASE=log-fetched-with-run-view
+if grep -q -- '^gh run view 99 -R [^ ]* --job 4242 --log-failed$' "${CULPRIT_STATE}/gh.log" \
+  && ! grep -q '^gh api' "${CULPRIT_STATE}/gh.log"; then
   pass "${CASE}"; else fail "${CASE}" "$(cat "${CULPRIT_STATE}/gh.log")"; fi
 
 CASE=every-docker-call-carries-the-prefix
@@ -496,6 +512,29 @@ start linux-asan
 if expect_eq status "$(jget status)" too-many-targets; then
   if [ -e "${BISECT_ROOT}/${ID}/src" ] || grep -q '^docker run' "${FAKE_STATE}/docker.log"; then
     fail "${CASE}" "a bisect was started"; else pass "${CASE}"; fi
+fi
+
+new_case log-falls-back-to-jobs-api
+export FAKE_GH_RUN_VIEW=fail
+start linux-asan
+unset FAKE_GH_RUN_VIEW
+if expect_eq status "$(jget status)" culprit && expect_eq targets "$(jget targets)" '["//rec:a_test"]'; then
+  if grep -q -- '^gh api --allow-escape-sequences repos/[^ ]*/actions/jobs/4242/logs$' "${FAKE_STATE}/gh.log"; then
+    pass "${CASE}"; else fail "${CASE}" "no jobs API fallback: $(cat "${FAKE_STATE}/gh.log")"; fi
+fi
+
+new_case api-refusal-is-no-log
+export FAKE_GH_RUN_VIEW=fail FAKE_GH_API=refuse
+start linux-asan
+unset FAKE_GH_RUN_VIEW FAKE_GH_API
+if [ -e "${RESULT}" ]; then
+  fail "${CASE}" "a refusal body was parsed as a log: $(jget status)"
+elif ! expect_eq exit "$(cat "${BISECT_ROOT}/${ID}/exit" 2>/dev/null)" 1; then
+  :
+elif ! grep -q 'cannot fetch the job log' "${BISECT_ROOT}/${ID}/log"; then
+  fail "${CASE}" "the log does not say why"
+else
+  pass "${CASE}"
 fi
 
 new_case targets-file-input

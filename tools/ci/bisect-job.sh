@@ -442,8 +442,18 @@ phase_targets() {
       return 1
     fi
     say "fetching the failed log of run ${RUN} job ${job_id}"
-    gh run view "${RUN}" -R "${BISECT_GH_REPO}" --job "${job_id}" --log-failed --allow-escape-sequences \
-      > "${RUN_DIR}/job.log" || { say "cannot fetch the job log"; return 1; }
+    if ! gh run view "${RUN}" -R "${BISECT_GH_REPO}" --job "${job_id}" --log-failed \
+        > "${RUN_DIR}/job.log" 2>>"${RUN_DIR}/gh.err" || [ ! -s "${RUN_DIR}/job.log" ]; then
+      # The job logs API serves the whole job log (the parser finds the
+      # failures in it); gh prints a log that carries escape sequences only
+      # with --allow-escape-sequences, and a short refusal otherwise.
+      say "no failed-step log from gh run view; trying the job logs API"
+      if ! gh api --allow-escape-sequences "repos/${BISECT_GH_REPO}/actions/jobs/${job_id}/logs" \
+          > "${RUN_DIR}/job.log" 2>>"${RUN_DIR}/gh.err" || log_is_refusal "${RUN_DIR}/job.log"; then
+        say "cannot fetch the job log"
+        return 1
+      fi
+    fi
     bash "${FAILING_TARGETS}" --mode "${KIND}" "${RUN_DIR}/job.log" > "${extracted}" || return 1
   fi
   cut -f1 "${extracted}" | LC_ALL=C sort -u > "${RUN_DIR}/targets.tmp"
@@ -462,6 +472,11 @@ phase_targets() {
     write_result too-many-targets
   fi
   return 0
+}
+
+# log_is_refusal FILE: gh's short "escape sequences" refusal, not a log.
+log_is_refusal() {
+  [ "$(wc -c < "$1")" -lt 400 ] && grep -qi 'escape' "$1"
 }
 
 resolve_sha() {
