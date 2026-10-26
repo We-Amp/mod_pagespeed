@@ -29,8 +29,14 @@ def test_config_test_creates_no_cache_files(tmp_path):
     with open(test_conf, "w") as f:
         f.write(text)
     try:
+        # Same prefix and error-log flags as the harness's own `nginx -t`: the
+        # relative temp directories live under the config directory, and the
+        # compiled-in log path does not exist on the test host.
         r = subprocess.run(
-            [binary, "-t", "-c", test_conf], capture_output=True, text=True, timeout=60
+            [binary, "-t", "-p", os.path.dirname(conf), "-e", "stderr", "-c", test_conf],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
     finally:
         os.unlink(test_conf)
