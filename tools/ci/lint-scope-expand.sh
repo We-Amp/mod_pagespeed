@@ -28,7 +28,7 @@ set -uo pipefail
 
 CC_LIST="${1:?changed .cc list required}"
 HDR_LIST="${2:?changed header list required}"
-ROOTS="pagespeed net"
+ROOTS="base pagespeed net"
 
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT

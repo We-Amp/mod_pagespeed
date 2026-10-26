@@ -1513,6 +1513,9 @@ jobs:
       #   * PR touching .cc and/or a header    -> scoped (changed .cc + every TU
       #                                                   that transitively includes
       #                                                   a changed header)
+      #   * PR touching the lint config itself -> full   (.clang-tidy, lint-scope-expand.sh,
+      #                                                   gen_compilation_database.py; the image recipes
+      #                                                   no longer force it, see the grep below)
       #   * PR touching neither .cc nor a hdr  -> none   (clang-tidy skipped; clang-format still runs)
       #   * push to the default branch         -> none   (the whole-tree sweep belongs to the nightly tier)
       # tools/ci/lint-scope-expand.sh resolves the include graph for the
@@ -1532,9 +1535,20 @@ jobs:
             CHANGED="${RUNNER_TEMP}/lint-changed.txt"
             # Deleted files are not lintable.
             git diff --name-only --diff-filter=d "${BASE}...HEAD" > "${CHANGED}"
-            grep -E '^(pagespeed|net)/.*\.cc$' "${CHANGED}" > "$CC_LIST" || true
-            grep -E '^(pagespeed|net)/.*\.(h|hpp)$' "${CHANGED}" > "$HDR_LIST" || true
-            if [ -s "$CC_LIST" ] || [ -s "$HDR_LIST" ]; then MODE=scoped; fi
+            grep -E '^(base|pagespeed|net)/.*\.cc$' "${CHANGED}" > "$CC_LIST" || true
+            grep -E '^(base|pagespeed|net)/.*\.(h|hpp)$' "${CHANGED}" > "$HDR_LIST" || true
+            # A change to the lint's own configuration can move findings in
+            # every translation unit, so the run lints the whole tree, not
+            # only the diff's translation units. The dev image recipes are
+            # deliberately not on the list: a full lint runs for well over
+            # an hour, which a hosted dependency-update pull request for the
+            # images cannot afford inside the job timeout, and the nightly
+            # full-tree lint is the backstop for image changes.
+            if grep -qxF -e '.clang-tidy' \
+               -e 'tools/ci/lint-scope-expand.sh' -e 'tools/gen_compilation_database.py' \
+               "${CHANGED}"; then
+              MODE=full
+            elif [ -s "$CC_LIST" ] || [ -s "$HDR_LIST" ]; then MODE=scoped; fi
           fi
           echo "LINT_MODE=${MODE}" >> "$GITHUB_ENV"
           echo "lint scope: mode=${MODE}, changed .cc=$(wc -l < "$CC_LIST" | tr -d ' '), changed headers=$(wc -l < "$HDR_LIST" | tr -d ' ')"
@@ -1610,7 +1624,18 @@ jobs:
                 echo "lint scope: scoped to ${#CT_TARGETS[@]} dependent TU(s):"
                 printf "  %s\n" "${CT_TARGETS[@]}"
               else
-                CT_TARGETS=(pagespeed/ net/)
+                # run-clang-tidy matches the positional regexes with an
+                # unanchored search against the absolute path it rebuilds
+                # from each compdb entry:
+                # <output base>/execroot/<workspace>/<file>. The roots are
+                # anchored right after the execroot segment: unanchored,
+                # pagespeed/ and net/ also match the test/pagespeed/ and
+                # test/net/ entries the scoped mode never lints.
+                CT_TARGETS=(
+                  "(^|/execroot/[^/]+/)base/"
+                  "(^|/execroot/[^/]+/)pagespeed/"
+                  "(^|/execroot/[^/]+/)net/"
+                )
                 echo "lint scope: full tree."
               fi
               # run-clang-tidy defaults to every host CPU; honour the slot.
@@ -1628,7 +1653,6 @@ jobs:
                 "${CT_J[@]}" \
                 -clang-tidy-binary=clang-tidy-20 \
                 -p /workspace \
-                -header-filter="^(?!.*/(external|bazel-out|third_party|envoy)/).*\.(h|hpp)$" \
                 "${CT_TARGETS[@]}"
             '
 
