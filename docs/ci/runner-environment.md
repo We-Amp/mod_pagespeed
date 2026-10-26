@@ -179,9 +179,9 @@ full use fit in the memory available to the runner services.
 Anything that chooses a parallelism inside a job container must read the slot
 budget rather than the host CPU count, because `nproc` inside a container still
 reports every CPU of the host. Read `${CI_SLOT_CPUS:-$(nproc)}` and pass it as
-`make -j`, `cmake --build -j`, `--parallel`, `xargs -P` or the tool's own
-worker flag; the `nproc` fallback keeps developer machines unchanged. The job's `docker run` must pass
-`-e CI_SLOT_CPUS` (or `MAKE_JOBS`) for the script to see it.
+`make -j`, `cmake --build -j`, `--parallel`, `xargs -P` or the tool's own worker
+flag; the `nproc` fallback keeps developer machines unchanged. The job's `docker
+run` must pass `-e CI_SLOT_CPUS` (or `MAKE_JOBS`) for the script to see it.
 
 ## Adding a variable
 
