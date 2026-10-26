@@ -73,6 +73,15 @@ internal sealed class PageSpeedOptionsValidator : IValidateOptions<PageSpeedOpti
             errors.Add($"PageSpeed:Sidecar:MaxRestartAttempts {sc.MaxRestartAttempts} must be >= 0.");
         }
 
+        // The pre-launch nginx -t budget must be positive; a non-positive value would
+        // fire the timeout path before nginx even got a chance to run.
+        if (sc.ConfigValidationTimeoutMs <= 0)
+        {
+            errors.Add(
+                $"PageSpeed:Sidecar:ConfigValidationTimeoutMs {sc.ConfigValidationTimeoutMs} must be > 0 " +
+                "(the budget for the pre-launch nginx -t validation).");
+        }
+
         if (sc.Mode == SidecarMode.Inverse)
         {
             ValidateInverse(options, sc, errors);

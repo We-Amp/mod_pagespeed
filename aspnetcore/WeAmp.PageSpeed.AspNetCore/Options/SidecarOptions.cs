@@ -203,6 +203,15 @@ public class SidecarOptions
     public int StartupTimeoutMs { get; set; } = 30000;
 
     /// <summary>
+    /// Budget for the pre-launch <c>nginx -t</c> config validation, in milliseconds.
+    /// On a healthy host the test finishes well under a second; when the budget
+    /// expires anyway (a loaded or wedged host), the validation process is killed and
+    /// startup fails with a timeout reporting the elapsed time and the output
+    /// captured so far. Default: 60000.
+    /// </summary>
+    public int ConfigValidationTimeoutMs { get; set; } = 60000;
+
+    /// <summary>
     /// Graceful shutdown timeout in milliseconds. Default: 10000.
     /// </summary>
     public int ShutdownTimeoutMs { get; set; } = 10000;
