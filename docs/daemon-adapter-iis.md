@@ -40,6 +40,13 @@ again. If the service stops unexpectedly, Windows restarts it
 after one minute, then after one more minute, then after five minutes; the
 count resets after a day.
 
+The module also keeps a small hidden file, `.pagespeed-module-open.lock`,
+in the volume directory. Worker processes use it to coordinate their opens
+of the shared volume between themselves, so one worker cannot pick up a
+cache file another worker is discarding. It is expected, safe to leave in
+place, and safe to delete while the web server and the optimizer are both
+stopped.
+
 ## Turning it on
 
 1. **Start the optimizer and make it start with Windows.** From an elevated
