@@ -11,6 +11,9 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${HERE}/push_range_base.sh"
+# The cases set DEFAULT_BRANCH themselves; a value from the caller must not
+# leak into the default-branch case.
+unset DEFAULT_BRANCH
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
