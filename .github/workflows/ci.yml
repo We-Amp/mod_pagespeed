@@ -211,6 +211,8 @@ jobs:
         run: tools/ci/test_ensure_dev_image.sh
       - name: Build script supply-chain checks
         run: tools/ci/test_build_nginx_verify.sh
+      - name: Bisect driver
+        run: tools/ci/test_bisect_job.sh
       - name: Release lane tooling
         run: |
           tools/ci/release_version.sh --self-test
