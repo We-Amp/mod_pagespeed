@@ -120,11 +120,11 @@ struct FrameSpec {
 // preceding state as well as _CALL, if invoked. Note that this
 // snippet returns from the function in which it is embedded.
 #define IF_OK_RUN(_STATUS, _CALL) \
-  if (!_STATUS->Success()) {      \
+  if (!(_STATUS)->Success()) {    \
     return false;                 \
   }                               \
-  *_STATUS = _CALL;               \
-  return _STATUS->Success();
+  *(_STATUS) = (_CALL);           \
+  return (_STATUS)->Success();
 
 // Interface for reading both animated and static images.
 //

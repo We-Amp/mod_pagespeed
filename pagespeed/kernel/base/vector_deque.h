@@ -20,8 +20,8 @@
 #ifndef PAGESPEED_KERNEL_BASE_VECTOR_DEQUE_H_
 #define PAGESPEED_KERNEL_BASE_VECTOR_DEQUE_H_
 
-#include <cstddef>  // for size_t
-#include <cstring>  // for memcpy
+#include <algorithm>  // for std::copy_n
+#include <cstddef>    // for size_t
 
 #include "pagespeed/kernel/base/basictypes.h"
 
@@ -160,15 +160,15 @@ class VectorDeque {
       data_ = new T[capacity()];
       size_t sz = size();
       if (start_position_ == 0) {
-        memcpy(data_, old_data, sz * sizeof(*data_));
+        std::copy_n(old_data, sz, data_);
       } else {
         // TODO(jmarantz): jmaessen suggests rearranging the entries to
         // be contiguous on an expansion.
-        memcpy(data_, old_data, start_position_ * sizeof(*data_));
+        std::copy_n(old_data, start_position_, data_);
         size_t size_of_right_chunk = sz - start_position_;
         size_t new_start_position = start_position_ + sz;
-        memcpy(data_ + new_start_position, old_data + start_position_,
-               size_of_right_chunk * sizeof(*data_));
+        std::copy_n(old_data + start_position_, size_of_right_chunk,
+                    data_ + new_start_position);
         start_position_ = new_start_position;
       }
       delete[] old_data;
