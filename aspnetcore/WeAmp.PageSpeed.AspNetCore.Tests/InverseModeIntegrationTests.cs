@@ -116,6 +116,7 @@ public class InverseModeIntegrationTests
                         // Default OwnPublicPort=true → the package binds the public port
                         // (Any:ListenPort) AND the raw origin, both as code endpoints.
                         o.Sidecar.ListenPort = publicPort;
+                        TestTimeouts.Apply(o.Sidecar);
                         configure?.Invoke(o);
                     });
                 });
@@ -156,7 +157,11 @@ public class InverseModeIntegrationTests
                 web.UseKestrel();
                 web.ConfigureServices(services =>
                 {
-                    services.AddPageSpeedInverse(o => o.Sidecar.ListenPort = publicPort);
+                    services.AddPageSpeedInverse(o =>
+                    {
+                        o.Sidecar.ListenPort = publicPort;
+                        TestTimeouts.Apply(o.Sidecar);
+                    });
                 });
                 web.Configure(app =>
                 {
