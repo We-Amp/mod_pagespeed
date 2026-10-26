@@ -51,7 +51,16 @@ namespace net_instaweb
 		void Shutdown();
 		global_settings *  settings() { return &settings_; }
 		void AddRef() { reference_count_.fetch_add(1); }
-		void ReleaseRef() { if ( reference_count_.fetch_sub(1) == 1 )	{this->Shutdown();delete this;} }
+		// The last release never shuts down on the caller's thread: it can be one
+		// of this context's own worker threads, or hold a request or global lock.
+		// See ReleaseLast and DrainDeferredReleases.
+		void ReleaseRef() { if ( reference_count_.fetch_sub(1) == 1 )	{ ReleaseLast(this); } }
+		// Hands a context whose last reference is gone to the process-wide
+		// release thread, which shuts it down and deletes it.
+		static void ReleaseLast(IisProcessContext* context);
+		// Runs every pending shutdown and joins the release thread. Called
+		// once, from IisModuleFactory::Terminate.
+		static void DrainDeferredReleases();
 		bool ok() { return ok_; };
 
 		// Diagnostic surface for OnBeginRequest's local-only error page.

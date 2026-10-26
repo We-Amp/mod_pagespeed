@@ -160,9 +160,13 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 		
 	}
 	// read
-	if (old_context) old_context->ReleaseRef();
+	// The caller's reference is added under the lock, so the new context
+	// cannot be released between lookup and AddRef. The replaced context is
+	// released after the lock: its final release only queues the shutdown,
+	// but no request should wait on the lock for it either way.
 	if (process_context) process_context->AddRef();
 	LeaveCriticalSection(&mycs);
+	if (old_context) old_context->ReleaseRef();
 	return process_context;
 }
 
@@ -188,15 +192,19 @@ HRESULT IisModuleFactory::GetHttpModule(
 
 void IisModuleFactory::Terminate()
 {
-	DeleteCriticalSection(&mycs);
 	message_handler_->Message(kInfo, "IisModuleFactory::Terminate  -> delete process context");
 
 	for (auto key=site_contexts_.begin();key!=site_contexts_.end();key++)
 	{
 		auto current=*key;
-		current.second->ReleaseRef();
+		// A site whose configuration failed to parse (on first use, or after
+		// an edit) has a null slot.
+		if (current.second != nullptr) current.second->ReleaseRef();
 	}
 	site_contexts_.clear();
+	// Wait for the retired site states to finish shutting down.
+	IisProcessContext::DrainDeferredReleases();
+	DeleteCriticalSection(&mycs);
 	
 	message_handler_->Message(kInfo, "IisModuleFactory::Terminate delete message handler");
 	//delete message_handler_;
