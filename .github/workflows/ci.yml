@@ -78,13 +78,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          # Every failure (mkdir, fetch, read, run, output shape) takes the
+          # warning path and prints true; the step itself never goes red.
+          set +e
           set -uo pipefail
           dir="${RUNNER_TEMP}/full-tier-scope"
           out="${dir}/out.txt"
-          mkdir -p "${dir}"
-          git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
-            git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          if git show "origin/${DEFAULT_BRANCH}:tools/ci/full_tier_scope.sh" > "${dir}/full_tier_scope.sh" 2>/dev/null &&
+          if mkdir -p "${dir}" &&
+            { git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+              git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"; } &&
+            git show "origin/${DEFAULT_BRANCH}:tools/ci/full_tier_scope.sh" > "${dir}/full_tier_scope.sh" 2>/dev/null &&
             git show "origin/${DEFAULT_BRANCH}:tools/ci/push_range_base.sh" > "${dir}/push_range_base.sh" 2>/dev/null &&
             bash "${dir}/full_tier_scope.sh" > "${out}" &&
             [ "$(wc -l < "${out}")" -eq 1 ] && grep -qxE 'full_tier_change=(true|false)' "${out}"; then

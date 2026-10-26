@@ -15,7 +15,8 @@
 #     The newest push run that SUCCEEDED. Any other conclusion (cancelled,
 #     failure, startup_failure, timed_out, skipped, none) may never have
 #     evaluated its range. The cost: after a red push to the default branch,
-#     the next push covers the red push's range again.
+#     the next push covers the red push's range again. Kept for
+#     compatibility; it has no in-tree caller today.
 #   push_range_base.sh --require-job <job name>
 #     The newest push run that completed with success or failure (never
 #     cancelled, skipped or none) and whose job named exactly <job name>

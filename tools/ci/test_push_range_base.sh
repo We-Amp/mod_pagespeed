@@ -295,8 +295,9 @@ if [ -s "${WORK}/gh.log" ]; then fail "require-job without a name called gh"; el
 FULL_YML="${HERE}/../../.github/workflows/pipeline-full.yml"
 if ! grep -qF 'push_range_base.sh' "${FULL_YML}" 2>/dev/null; then
   pass "sidecar-filter-uses-require-job (no path filter uses the script)"
-elif grep -F 'push_range_base.sh' "${FULL_YML}" | grep -v '^[[:space:]]*#' \
-       | grep -vqF "base=\"\$(bash tools/ci/push_range_base.sh --require-job 'full / Detect changed paths (full tier)')\""; then
+elif calls="$(grep -F 'push_range_base.sh' "${FULL_YML}")" &&
+     calls="$(grep -v '^[[:space:]]*#' <<< "${calls}")" &&
+     grep -vqF "base=\"\$(bash tools/ci/push_range_base.sh --require-job 'full / Detect changed paths (full tier)')\"" <<< "${calls}"; then
   fail "sidecar-filter-uses-require-job: pipeline-full.yml calls push_range_base.sh without --require-job 'full / Detect changed paths (full tier)'"
 else
   pass "sidecar-filter-uses-require-job"
