@@ -1197,6 +1197,7 @@ jobs:
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/workspace -e USER=dev \
@@ -1407,6 +1408,7 @@ jobs:
             echo "::notice::BAZEL_CACHE_HOST not set: running without the remote cache (docs/ci/runner-environment.md)"
           fi
           docker run --rm --init "${EXTRA_DOCKER[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
             --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
             --network="${TEST_NET}" \
             --user "$(id -u):$(id -g)" \
@@ -1595,6 +1597,7 @@ jobs:
           slot_budget || exit 1
           MEM_ARGS=()
           [ -z "${SLOT_MEM}" ] || MEM_ARGS=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || MEM_ARGS+=(--cpus="${SLOT_CPUS}")
           docker run --rm --init \
             "${MEM_ARGS[@]}" \
             --user "$(id -u):$(id -g)" \
@@ -1783,6 +1786,7 @@ jobs:
           slot_budget || exit 1
           EXTRA_DOCKER=()
           [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
@@ -1818,6 +1822,7 @@ jobs:
           slot_budget || exit 1
           EXTRA_DOCKER=()
           [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
@@ -1942,6 +1947,7 @@ jobs:
           slot_budget || exit 1
           EXTRA_DOCKER=()
           [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
@@ -2048,6 +2054,7 @@ jobs:
           slot_budget || exit 1
           EXTRA_DOCKER=()
           [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
@@ -2103,6 +2110,7 @@ jobs:
           slot_budget || exit 1
           EXTRA_DOCKER=()
           [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
@@ -2158,6 +2166,7 @@ jobs:
           slot_budget || exit 1
           EXTRA_DOCKER=()
           [ -z "${SLOT_MEM}" ] || EXTRA_DOCKER+=(--memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}")
+          [ -z "${SLOT_CPUS}" ] || EXTRA_DOCKER+=(--cpus="${SLOT_CPUS}")
           BAZEL_CONFIG="--config=ci"
           if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
             EXTRA_DOCKER+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
