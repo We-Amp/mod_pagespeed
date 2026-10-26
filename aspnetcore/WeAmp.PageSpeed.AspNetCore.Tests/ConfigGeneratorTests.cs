@@ -175,8 +175,14 @@ public class ConfigGeneratorTests
         conf.Should().Contain("\\.pagespeed\\.([a-z]\\.)?[a-z]{2}\\.[^.]{10}\\.[^.]+");
         conf.Should().Contain("location ~ \"^/pagespeed_static/\"");
         conf.Should().Contain("location ~ \"^/ngx_pagespeed_beacon$\"");
-        conf.Should().Contain("location = /pagespeed/health { return 200 \"pagespeed-sidecar-ok\\n\"; }");
+        conf.Should().MatchRegex(HealthStubPattern,
+            "the health stub embeds the per-launch probe token so a probe answered by another listener on the same port is rejected");
     }
+
+    // The generated health stub carries the endpoint's per-launch probe token
+    // (lowercase hex), so the manager can recognize its own nginx's answer.
+    private const string HealthStubPattern =
+        @"location = /pagespeed/health \{ return 200 ""pagespeed-sidecar-ok [0-9a-f]{16}\\n""; \}";
 
     [Fact]
     public void AdminEndpoints_DefaultToLoopbackOnly_WithBearerMap()
@@ -524,7 +530,7 @@ public class ConfigGeneratorTests
         conf.Should().Contain("\\.pagespeed\\.([a-z]\\.)?[a-z]{2}\\.[^.]{10}\\.[^.]+");
         conf.Should().Contain("location ~ \"^/pagespeed_static/\"");
         conf.Should().Contain("location ~ \"^/ngx_pagespeed_beacon$\"");
-        conf.Should().Contain("location = /pagespeed/health { return 200 \"pagespeed-sidecar-ok\\n\"; }");
+        conf.Should().MatchRegex(HealthStubPattern);
     }
 
     [Fact]

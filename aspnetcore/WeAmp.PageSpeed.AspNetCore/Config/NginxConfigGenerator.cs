@@ -287,8 +287,14 @@ public class NginxConfigGenerator
         sb.AppendLine("    location ~ \"^/pagespeed_static/\" { }");
         sb.AppendLine("    location ~ \"^/ngx_pagespeed_beacon$\" { }");
 
-        // The GENERATED health stub the sidecar polls (D6) — NOT a stock route.
-        sb.AppendLine("    location = /pagespeed/health { return 200 \"pagespeed-sidecar-ok\\n\"; }");
+        // The GENERATED health stub the sidecar polls (D6), NOT a stock route.
+        // The body embeds the endpoint's per-launch probe token so the manager
+        // can tell its OWN nginx from another listener on the same port: on a
+        // port conflict the new nginx exits at bind while the foreign listener
+        // keeps answering probes, which previously counted as healthy and reset
+        // the restart counter forever.
+        sb.AppendLine(
+            $"    location = /pagespeed/health {{ return 200 \"pagespeed-sidecar-ok {_endpoint.HealthProbeToken}\\n\"; }}");
 
         // ExcludePaths: paths the operator does not want optimized. Each entry
         // is translated from the single prefix/glob definition

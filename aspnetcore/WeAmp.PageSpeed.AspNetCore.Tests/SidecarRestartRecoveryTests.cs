@@ -151,6 +151,7 @@ public class SidecarRestartRecoveryTests
         public readonly string PidFile;
         public readonly string Script;
         public readonly ControllableHttpClientFactory Health = new();
+        public readonly InternalSidecarEndpoint Endpoint = new();
         public readonly CapturingLogger Logger = new();
         public readonly ProcessSidecarManager Manager;
         public readonly ConcurrentQueue<SidecarState> SeenStates = new();
@@ -164,8 +165,11 @@ public class SidecarRestartRecoveryTests
             sidecar.Mode = SidecarMode.Process;
             sidecar.BinaryPath = Script;
 
-            var endpoint = new InternalSidecarEndpoint();
+            var endpoint = Endpoint;
             endpoint.SetPort(5000);
+            // The generated health stub embeds the endpoint's probe token and the
+            // manager only counts a probe healthy when the body carries it.
+            Health.Body = $"pagespeed-sidecar-ok {endpoint.HealthProbeToken}\n";
             Manager = new ProcessSidecarManager(
                 Logger,
                 Microsoft.Extensions.Options.Options.Create(new PageSpeedOptions
@@ -279,17 +283,27 @@ public class SidecarRestartRecoveryTests
             set => _handler.Healthy = value;
         }
 
+        public string Body
+        {
+            get => _handler.Body;
+            set => _handler.Body = value;
+        }
+
         public System.Net.Http.HttpClient CreateClient(string name) =>
             new(_handler, disposeHandler: false);
 
         private sealed class FakeHealthHandler : System.Net.Http.HttpMessageHandler
         {
             public volatile bool Healthy = true;
+            public volatile string Body = "pagespeed-sidecar-ok\n";
 
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request, CancellationToken cancellationToken) =>
                 Task.FromResult(new HttpResponseMessage(
-                    Healthy ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable));
+                    Healthy ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable)
+                {
+                    Content = new StringContent(Body),
+                });
         }
     }
 
