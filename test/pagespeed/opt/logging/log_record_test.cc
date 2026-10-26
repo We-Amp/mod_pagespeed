@@ -35,7 +35,8 @@ class LogRecordTest : public testing::Test {
 
   // Test that the rewriter_info array is |size| elements long, and that the
   // last element has the |last_id| id string and the |last_status| status.
-  void TestRewriterInfo(int size, GoogleString last_id, int last_status) {
+  void TestRewriterInfo(int size, const GoogleString& last_id,
+                        int last_status) {
     LoggingInfo* l = log_record_->logging_info();
     EXPECT_EQ(size, l->rewriter_info_size());
     EXPECT_EQ(last_id, l->rewriter_info(size - 1).id());

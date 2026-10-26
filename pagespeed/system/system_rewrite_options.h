@@ -21,6 +21,7 @@
 #define PAGESPEED_SYSTEM_SYSTEM_REWRITE_OPTIONS_H_
 
 #include <set>
+#include <utility>
 
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/static_asset_config.pb.h"
@@ -249,7 +250,9 @@ class SystemRewriteOptions : public RewriteOptions {
   const GoogleString& slurp_directory() const {
     return slurp_directory_.value();
   }
-  void set_slurp_directory(GoogleString x) { set_option(x, &slurp_directory_); }
+  void set_slurp_directory(const GoogleString& x) {
+    set_option(x, &slurp_directory_);
+  }
   bool disable_loopback_routing() const {
     return disable_loopback_routing_.value();
   }
@@ -463,8 +466,8 @@ class SystemRewriteOptions : public RewriteOptions {
                                 OptionClass SystemRewriteOptions::* offset,
                                 const char* id, StringPiece option_name,
                                 const char* help, bool safe_to_print) {
-    AddProperty(default_value, offset, id, option_name, kServerScope, help,
-                safe_to_print, system_properties_);
+    AddProperty(std::move(default_value), offset, id, option_name, kServerScope,
+                help, safe_to_print, system_properties_);
   }
 
   template <class OptionClass>
@@ -473,7 +476,7 @@ class SystemRewriteOptions : public RewriteOptions {
                                 const char* id, StringPiece option_name,
                                 OptionScope scope, const char* help,
                                 bool safe_to_print) {
-    AddProperty(default_value, offset, id, option_name, scope, help,
+    AddProperty(std::move(default_value), offset, id, option_name, scope, help,
                 safe_to_print, system_properties_);
   }
 

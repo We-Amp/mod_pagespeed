@@ -84,19 +84,19 @@ TEST(STATIC_STRLEN_Test, CorrectStaticStringLengths) {
 
 class IntegerToStringToIntTest : public testing::Test {
  protected:
-  void ValidateIntegerToString(int i, GoogleString s) {
+  void ValidateIntegerToString(int i, const GoogleString& s) {
     EXPECT_EQ(s, IntegerToString(i));
     ValidateInteger64ToString(static_cast<int64>(i), s);
   }
 
-  void ValidateStringToInt(GoogleString s, int i) {
+  void ValidateStringToInt(const GoogleString& s, int i) {
     int i2;
     EXPECT_TRUE(StringToInt(s, &i2));
     EXPECT_EQ(i, i2);
     ValidateStringToInt64(s, static_cast<int64>(i));
   }
 
-  void InvalidStringToInt(GoogleString s, int expected) {
+  void InvalidStringToInt(const GoogleString& s, int expected) {
     int i = -50;
     EXPECT_FALSE(StringToInt(s, &i));
     EXPECT_EQ(expected, i);
@@ -108,17 +108,17 @@ class IntegerToStringToIntTest : public testing::Test {
   }
 
   // Second verse, same as the first, a little more bits...
-  void ValidateInteger64ToString(int64 i, GoogleString s) {
+  void ValidateInteger64ToString(int64 i, const GoogleString& s) {
     EXPECT_EQ(s, Integer64ToString(i));
   }
 
-  void ValidateStringToInt64(GoogleString s, int64 i) {
+  void ValidateStringToInt64(const GoogleString& s, int64 i) {
     int64 i2;
     EXPECT_TRUE(StringToInt64(s, &i2));
     EXPECT_EQ(i, i2);
   }
 
-  void InvalidStringToInt64(GoogleString s) {
+  void InvalidStringToInt64(const GoogleString& s) {
     int64 i;
     EXPECT_FALSE(StringToInt64(s, &i));
   }

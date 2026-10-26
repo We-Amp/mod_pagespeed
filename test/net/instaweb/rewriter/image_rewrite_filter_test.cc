@@ -3025,7 +3025,7 @@ TEST_F(ImageRewriteTest, WebPQualityForSmallScreens) {
 }
 
 void SetNumberOfScans(int num_scans, int num_scans_small_screen,
-                      const ResourcePtr res_ptr, RewriteOptions* options,
+                      const ResourcePtr& res_ptr, RewriteOptions* options,
                       RewriteDriver* rewrite_driver,
                       ImageRewriteFilter* image_rewrite_filter,
                       ResourceContext* ctx,

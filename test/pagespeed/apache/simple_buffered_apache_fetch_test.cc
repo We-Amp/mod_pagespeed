@@ -21,6 +21,7 @@
 
 #include <functional>
 #include <memory>
+#include <utility>
 
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -133,7 +134,7 @@ class SimpleBufferedApacheFetchTest : public RewriteTestBase {
     ThreadRunner(RewriteTestBase* fixture, std::function<void()> fn)
         : Thread(fixture->server_context()->thread_system(), "run_function",
                  ThreadSystem::kJoinable),
-          fn_(fn) {
+          fn_(std::move(fn)) {
       Start();
     }
 

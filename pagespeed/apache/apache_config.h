@@ -20,6 +20,8 @@
 #ifndef PAGESPEED_APACHE_APACHE_CONFIG_H_
 #define PAGESPEED_APACHE_APACHE_CONFIG_H_
 
+#include <utility>
+
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -139,7 +141,7 @@ class ApacheConfig : public SystemRewriteOptions {
                                 OptionClass ApacheConfig::* offset,
                                 const char* id, StringPiece option_name,
                                 const char* help, bool safe_to_print) {
-    AddProperty(default_value, offset, id, option_name,
+    AddProperty(std::move(default_value), offset, id, option_name,
                 RewriteOptions::kServerScope, help, safe_to_print,
                 apache_properties_);
   }

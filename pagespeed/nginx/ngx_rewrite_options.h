@@ -28,6 +28,7 @@ extern "C" {
 #include <ngx_http.h>
 }
 
+#include <utility>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -318,7 +319,7 @@ class NgxRewriteOptions : public SystemRewriteOptions {
                              const char* id, StringPiece option_name,
                              OptionScope scope, const char* help,
                              bool safe_to_print) {
-    AddProperty(default_value, offset, id, option_name, scope, help,
+    AddProperty(std::move(default_value), offset, id, option_name, scope, help,
                 safe_to_print, ngx_properties_);
   }
 

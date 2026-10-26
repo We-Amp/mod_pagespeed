@@ -945,7 +945,8 @@ TEST_P(RulePackMultiFixtureTest, HoldsTheProperties) {
     for (const std::vector<unsigned>& state : states) {
       Chain ref_chain = base;
       SetPacks(run, &ref_chain,
-               [&](size_t i, std::shared_ptr<const pagespeed::packs::Pack> p) {
+               [&](size_t i,
+                   const std::shared_ptr<const pagespeed::packs::Pack>& p) {
                  return pagespeed::packs::ClaimOnlyPack(*p, state[i]);
                });
       refs.drop_runs.push_back(Run(ref_chain, run.url, run.input_html));

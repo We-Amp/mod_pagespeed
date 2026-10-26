@@ -490,7 +490,7 @@ OpaqueImageInfo kOpaqueImagesWithAlpha[] = {{"rgba_opaque", true, 6, 2},
 
 void AssertMatch(const GoogleString& in, const GoogleString& ref,
                  PngReaderInterface* reader, const ImageCompressionInfo& info,
-                 GoogleString in_rgba) {
+                 const GoogleString& in_rgba) {
   MockMessageHandler message_handler(new NullMutex);
   PngReader png_reader(&message_handler);
   int width, height, bit_depth, color_type;

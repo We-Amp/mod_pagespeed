@@ -29,7 +29,7 @@ namespace net_instaweb {
 class DocTypeTest : public testing::Test {
  protected:
   void TestParse(const StringPiece& directive, const ContentType& content_type,
-                 const DocType expected_doctype) {
+                 const DocType& expected_doctype) {
     DocType actual_doctype;
     EXPECT_TRUE(actual_doctype.Parse(TrimDirective(directive), content_type));
     EXPECT_EQ(expected_doctype, actual_doctype);
@@ -82,8 +82,8 @@ TEST_F(DocTypeTest, DetectHtml5AboutLegacyCompat) {
             DocType::kHTML5);
   TestParse("<!doctype html system \"about:legacy-compat\">", kContentTypeHtml,
             DocType::kHTML5);
-  TestParse("<!DOCTYPE html SYSTEM \"about:legacy-compat\">",
-            kContentTypeXhtml, DocType::kXHTML5);
+  TestParse("<!DOCTYPE html SYSTEM \"about:legacy-compat\">", kContentTypeXhtml,
+            DocType::kXHTML5);
   // A different system identifier is not about:legacy-compat.
   TestParse("<!DOCTYPE html SYSTEM \"http://example.com/foo.dtd\">",
             kContentTypeHtml, DocType::kUnknown);

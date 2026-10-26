@@ -753,11 +753,10 @@ TEST_F(RulePackFilterTest, ATitleSplitByAFlushIsSeenWhole) {
 std::string JsonRule(std::string_view on_present,
                      std::string_view type = "Organization",
                      std::string_view id = "j") {
-  return absl::StrCat(R"({"id":")", id,
-                      R"(","kind":"jsonld","enforce":true,"on_present":")",
-                      on_present, R"(","value":{"template":)",
-                      R"("{\"@type\":\")", type,
-                      R"(\",\"name\":\"{title}\"}"}})");
+  return absl::StrCat(
+      R"({"id":")", id, R"(","kind":"jsonld","enforce":true,"on_present":")",
+      on_present, R"(","value":{"template":)", R"("{\"@type\":\")", type,
+      R"(\",\"name\":\"{title}\"}"}})");
 }
 
 constexpr char kBlockOrg[] =
@@ -783,10 +782,11 @@ TEST_F(RulePackFilterTest, JsonLdFallsBackToTheEndOfHtmlWhenTheBodyWasSent) {
   o.chunks = {"<html><head></head><body><p>a</p></body>", "</html>"};
   FilterRun r = Run(MakePack(JsonRule("keep")), "https://t.test/x", "", o);
   EXPECT_EQ(r.skip, SkipReason::kNone);
-  EXPECT_EQ(r.html, absl::StrCat("<html><head></head><body><p>a</p></body>",
-                                 R"(<script type="application/ld+json">)"
-                                 R"({"@type":"Organization","name":""}</script>)",
-                                 "</html>"));
+  EXPECT_EQ(r.html,
+            absl::StrCat("<html><head></head><body><p>a</p></body>",
+                         R"(<script type="application/ld+json">)"
+                         R"({"@type":"Organization","name":""}</script>)",
+                         "</html>"));
   ASSERT_EQ(r.decisions.size(), 1u);
   EXPECT_EQ(r.decisions[0].action, Action::kInsert);
 }
@@ -803,8 +803,8 @@ TEST_F(RulePackFilterTest, JsonLdWithNowhereToGoIsNotRewritable) {
   // ... but in report mode nothing was going to change, so the plan stands.
   Options report;
   report.mode = Mode::kReport;
-  FilterRun rr = Run(MakePack(JsonRule("keep")), "https://t.test/x", html,
-                     report);
+  FilterRun rr =
+      Run(MakePack(JsonRule("keep")), "https://t.test/x", html, report);
   EXPECT_EQ(rr.skip, SkipReason::kNone);
   ASSERT_EQ(rr.decisions.size(), 1u);
   EXPECT_EQ(rr.decisions[0].action, Action::kInsert);
@@ -823,26 +823,25 @@ TEST_F(RulePackFilterTest, JsonLdSeesBlocksInTheHeadAndTheBody) {
 }
 
 TEST_F(RulePackFilterTest, JsonLdStaysOutOfInertSubtrees) {
-  const std::string html = absl::StrCat(
-      "<html><head></head><body><noscript>", kBlockOrg,
-      "</noscript></body></html>");
+  const std::string html = absl::StrCat("<html><head></head><body><noscript>",
+                                        kBlockOrg, "</noscript></body></html>");
   FilterRun r = Run(MakePack(JsonRule("keep")), "https://t.test/x", html);
   // The block in <noscript> is not the page's: the rule inserts its own.
   EXPECT_EQ(r.decisions.at(0).action, Action::kInsert);
 }
 
 TEST_F(RulePackFilterTest, JsonLdSeesTheValuesTheHeadRulesWrote) {
-  FilterRun r = Run(MakePack(absl::StrCat(kTitleKeep, ",", JsonRule("keep"))),
-                    "https://t.test/x",
-                    "<html><head></head><body></body></html>");
+  FilterRun r =
+      Run(MakePack(absl::StrCat(kTitleKeep, ",", JsonRule("keep"))),
+          "https://t.test/x", "<html><head></head><body></body></html>");
   EXPECT_NE(r.html.find(R"("name":"T /x")"), std::string::npos) << r.html;
   // The head rule only reports: an enforcing jsonld rule quotes what the page
   // has (nothing), not the title nobody wrote.
   auto pack = MakePack(absl::StrCat(
       R"({"id":"t","kind":"title","enforce":false,"value":{"template":"T"}},)",
       JsonRule("keep")));
-  FilterRun q = Run(pack, "https://t.test/x",
-                    "<html><head></head><body></body></html>");
+  FilterRun q =
+      Run(pack, "https://t.test/x", "<html><head></head><body></body></html>");
   EXPECT_NE(q.html.find(R"("name":"")"), std::string::npos) << q.html;
   EXPECT_EQ(q.html.find("<title>"), std::string::npos);
 }
@@ -883,18 +882,20 @@ TEST_F(RulePackFilterTest, AJsonLdBlockSplitByAFlushIsRemovedWholeOrNotAtAll) {
   Options split;
   split.flush_last = false;
   split.chunks = {head, absl::StrCat(R"(anization"} {junk</script>)", tail)};
-  FilterRun r = Run(MakePack(JsonRule("repair", "Thing")), "https://t.test/x",
-                    "", split);
+  FilterRun r =
+      Run(MakePack(JsonRule("repair", "Thing")), "https://t.test/x", "", split);
   Options one;
-  FilterRun whole = Run(MakePack(JsonRule("repair", "Thing")),
-                        "https://t.test/x", absl::StrCat(head, R"(anization"} {junk</script>)", tail), one);
+  FilterRun whole =
+      Run(MakePack(JsonRule("repair", "Thing")), "https://t.test/x",
+          absl::StrCat(head, R"(anization"} {junk</script>)", tail), one);
   // Either the whole-document result, or the page as sent with the rules
   // recording not_rewritable. Never a half-removed block.
   if (r.html == whole.html) {
     EXPECT_EQ(r.decisions, whole.decisions);
     EXPECT_EQ(r.html.find("{junk"), std::string::npos);
   } else {
-    EXPECT_EQ(r.html, absl::StrCat(head, R"(anization"} {junk</script>)", tail));
+    EXPECT_EQ(r.html,
+              absl::StrCat(head, R"(anization"} {junk</script>)", tail));
     ASSERT_EQ(r.decisions.size(), 1u);
     EXPECT_EQ(r.decisions[0].reason, Reason::kNotRewritable);
   }
@@ -905,9 +906,8 @@ TEST_F(RulePackFilterTest, AJsonLdBlockSplitByAFlushIsRemovedWholeOrNotAtAll) {
   // the start tag, then the text and the end tag) is the same story.
   Options after_start;
   after_start.flush_last = false;
-  after_start.chunks = {
-      R"(<html><head><script type="application/ld+json">)",
-      absl::StrCat(R"({junk</script>)", tail)};
+  after_start.chunks = {R"(<html><head><script type="application/ld+json">)",
+                        absl::StrCat(R"({junk</script>)", tail)};
   FilterRun s = Run(MakePack(JsonRule("repair", "Thing")), "https://t.test/x",
                     "", after_start);
   if (s.skip == SkipReason::kNone) {
@@ -930,7 +930,8 @@ TEST_F(RulePackFilterTest, JsonLdBlockInTheLastWindowIsRewrittenInPlace) {
       R"({"@type":"Organization","name":""}</script></body></html>)");
   EXPECT_EQ(r.decisions.at(0).action, Action::kReplace);
   // Rewritten again: nothing to do.
-  FilterRun again = Run(MakePack(JsonRule("replace")), "https://t.test/x", r.html);
+  FilterRun again =
+      Run(MakePack(JsonRule("replace")), "https://t.test/x", r.html);
   EXPECT_FALSE(again.modified);
   EXPECT_EQ(again.decisions.at(0).reason, Reason::kEqual);
 }
@@ -941,8 +942,7 @@ TEST_F(RulePackFilterTest, TheHeadPlanDroppedDoesNotStopTheDocumentPlan) {
   // title the page really has.
   Options o;
   o.flush_last = false;
-  o.chunks = {"<html><head><title>Old</title>",
-              "</head><body></body></html>"};
+  o.chunks = {"<html><head><title>Old</title>", "</head><body></body></html>"};
   auto pack = MakePack(absl::StrCat(
       R"({"id":"t","kind":"title","enforce":true,"on_present":"replace",)"
       R"("value":{"template":"New"}},)",
@@ -973,10 +973,9 @@ TEST_F(RulePackFilterTest, JsonLdDebugCommentSitsInFrontOfTheBlock) {
   o.debug = true;
   FilterRun r = Run(MakePack(JsonRule("keep")), "https://t.test/x",
                     "<html><head></head><body></body></html>", o);
-  EXPECT_NE(
-      r.html.find("<body><!-- pagespeed-pack edge-seo@0.1.0 rule=j "
-                  "action=insert mode=enforce --><script"),
-      std::string::npos)
+  EXPECT_NE(r.html.find("<body><!-- pagespeed-pack edge-seo@0.1.0 rule=j "
+                        "action=insert mode=enforce --><script"),
+            std::string::npos)
       << r.html;
 }
 
@@ -1055,7 +1054,8 @@ TEST_F(RulePackFilterTest, HreflangLinkInTheBodyIsRemovedUnderRepair) {
   EXPECT_EQ(host_->count(Counter::kLateRemoved), 1);
 }
 
-TEST_F(RulePackFilterTest, HreflangLateLinkForAnInsertedCodeIsRemovedUnderKeep) {
+TEST_F(RulePackFilterTest,
+       HreflangLateLinkForAnInsertedCodeIsRemovedUnderKeep) {
   FilterRun r = Run(MakePack(kHreflangKeep), "https://t.test/x",
                     "<html><head></head><body>"
                     "<link rel=alternate hreflang=de href=https://t.test/old>"
@@ -1098,8 +1098,9 @@ TEST_F(RulePackFilterTest, HeadAppliedAndDocumentPlanDroppedCountsAsModified) {
   // The head plan inserts the canonical; the JSON-LD block has nowhere to go
   // (no <body>, no <html>).
   const std::string html = "<head><title>T</title></head>";
-  FilterRun r = Run(MakePack(absl::StrCat(kCanonicalKeep, ",", JsonRule("keep"))),
-                    "https://t.test/x", html);
+  FilterRun r =
+      Run(MakePack(absl::StrCat(kCanonicalKeep, ",", JsonRule("keep"))),
+          "https://t.test/x", html);
   EXPECT_TRUE(r.modified);
   EXPECT_NE(r.html.find("canonical"), std::string::npos);
   EXPECT_EQ(r.html.find("ld+json"), std::string::npos);
@@ -1132,8 +1133,7 @@ TEST_F(RulePackFilterTest, HreflangRemovedListIsUtf8WhateverThePageHolds) {
   // (The attribute decoder already drops such bytes; the planner test
   // covers the replacement.)
   EXPECT_FALSE(r.decisions[0].removed.empty());
-  EXPECT_EQ(ReplaceInvalidUtf8(r.decisions[0].removed),
-            r.decisions[0].removed);
+  EXPECT_EQ(ReplaceInvalidUtf8(r.decisions[0].removed), r.decisions[0].removed);
 }
 
 TEST_F(RulePackFilterTest, HreflangAndJsonLdContract) {
@@ -1164,7 +1164,6 @@ TEST_F(RulePackFilterTest, HreflangAndJsonLdContract) {
         << rung;
   }
 }
-
 
 // The Link: rel=canonical response header (link_header: match)
 // ---------------------------------------------------------------------------
@@ -1423,7 +1422,7 @@ TEST(ClaimSetTest, FirstPackWinsAndNeverLosesToItself) {
 }
 
 // The same pack under another id, for a second pack on the document.
-std::shared_ptr<const Pack> WithId(std::shared_ptr<const Pack> pack,
+std::shared_ptr<const Pack> WithId(const std::shared_ptr<const Pack>& pack,
                                    std::string_view id) {
   Pack copy = *pack;
   copy.info.id = std::string(id);

@@ -22,12 +22,15 @@
 namespace net_instaweb {
 
 Matcher<ImageRewriteInfo> LogImageRewriteActivityMatcher(
-    Matcher<const char*> id, Matcher<const GoogleString&> url,
-    Matcher<RewriterApplication::Status> status, Matcher<bool> is_image_inlined,
-    Matcher<bool> is_critical_image, Matcher<bool> is_url_rewritten,
-    Matcher<int> size, Matcher<bool> try_low_res_src_insertion,
-    Matcher<bool> low_res_src_inserted, Matcher<ImageType> low_res_image_type,
-    Matcher<int> low_res_data_size) {
+    const Matcher<const char*>& id, const Matcher<const GoogleString&>& url,
+    const Matcher<RewriterApplication::Status>& status,
+    const Matcher<bool>& is_image_inlined,
+    const Matcher<bool>& is_critical_image,
+    const Matcher<bool>& is_url_rewritten, const Matcher<int>& size,
+    const Matcher<bool>& try_low_res_src_insertion,
+    const Matcher<bool>& low_res_src_inserted,
+    const Matcher<ImageType>& low_res_image_type,
+    const Matcher<int>& low_res_data_size) {
   // AllOf can only take 10 arguments. So split the 11 arguments into 7+4.
   return AllOf(
       AllOf(Field(&ImageRewriteInfo::id_, id),
