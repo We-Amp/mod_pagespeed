@@ -234,3 +234,21 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# Source pins for three request-path behaviours (the port cannot be linked
+# into a test; see above): an admin POST refused before its shared handler
+# ran must complete the base fetch created for it, a request whose
+# script-variable option value is rejected must free its option copies and
+# be served without optimization, and the messages handler's status and
+# Allow header must reach the client.
+pagespeed_cc_test(
+    name = "ngx_admin_options_messages_pin_test",
+    srcs = ["ngx_admin_options_messages_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)

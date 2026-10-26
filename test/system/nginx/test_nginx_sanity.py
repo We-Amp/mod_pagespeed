@@ -434,6 +434,40 @@ class TestNginxAdmin:
             f"Messages response must carry no ETag, got {response.header('ETag')!r}"
         )
 
+    @pytest.mark.nginx_only
+    def test_messages_grouped_non_get_answers_405_with_allow(
+        self, client: PageSpeedClient
+    ):
+        """A non-GET request to the grouped message history keeps its refusal.
+
+        The shared handler answers the grouped mode's method check with 405
+        and Allow: GET, HEAD; the module must pass both through instead of a
+        200 carrying the error JSON. A POST to the plain (non-grouped)
+        message history stays a 200: only the grouped mode checks the method.
+        """
+        response = client.post("/ngx_pagespeed_message?grouped=1")
+
+        require_no_auth_gate(response, "Messages handler /ngx_pagespeed_message")
+        assert response.status == 405, (
+            f"POST to the grouped message history must answer 405, got "
+            f"status {response.status}: {response.text[:200]!r}"
+        )
+        assert response.header("Allow") == "GET, HEAD", (
+            f"the 405 must name the allowed methods, got "
+            f"Allow: {response.header('Allow')!r}"
+        )
+        assert '"error":"method not allowed"' in response.text, (
+            f"Expected the shared handler's error JSON, got: "
+            f"{response.text[:200]!r}"
+        )
+
+        plain = client.post("/ngx_pagespeed_message")
+        require_no_auth_gate(plain, "Messages handler /ngx_pagespeed_message")
+        assert plain.status == 200, (
+            f"POST to the plain message history stays a 200, got "
+            f"status {plain.status}: {plain.text[:200]!r}"
+        )
+
 
 # ============================================================================
 # TestNginxCacheHeaders: Cache header tests
