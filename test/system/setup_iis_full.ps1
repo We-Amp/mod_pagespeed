@@ -54,6 +54,8 @@ param(
 
     [int]$Port = 8080,
 
+    [int]$DaemonPort = 8081,
+
     [string]$SourceRoot = "",
 
     [switch]$NoModule
@@ -66,10 +68,16 @@ $SiteName = "PageSpeedTestSite"
 $AppPoolName = "PageSpeedTestPool"
 $WebRoot = "C:\inetpub\pagespeed_test"
 $CacheDir = "C:\pagespeed_cache"
+# The extra site's own file cache: two sites in one worker process must not
+# share a cache directory (see New-DaemonSite).
+$DaemonCacheDir = "C:\pagespeed_cache_daemon"
 $LogDir = "C:\pagespeed_logs"
 # HTTPS test binding (loopback TLS coverage). Full IIS only -- run_iis_tests.ps1 exports the
 # matching PAGESPEED_HTTPS_PORT for the pytest HTTPS suite.
 $HttpsPort = 8443
+# Dedicated site for the optimizer worker (see New-DaemonSite).
+$DaemonSiteName = "PageSpeedDaemonSite"
+$DaemonRoot = "C:\inetpub\pagespeed_test_daemon"
 
 # Auto-detect source root if not provided
 if (-not $SourceRoot) {
@@ -206,7 +214,7 @@ function Reset-PageSpeedTestCache {
     }
 
     # Step 2: purge stale on-disk cache. Loud on partial failure.
-    foreach ($staleCache in @($CacheDir,
+    foreach ($staleCache in @($CacheDir, $DaemonCacheDir,
                               "C:\ProgramData\We-Amp\PageSpeed\cache",
                               "C:\PageSpeed\cache")) {
         if (Test-Path $staleCache) {
@@ -244,7 +252,7 @@ function Initialize-TestEnvironment {
     # schema defaulted fileCachePath to this path. The shipped install/iis/pagespeed.config
     # uses C:\ProgramData\We-Amp\PageSpeed\cache instead, but cold runners
     # may have either present.
-    @($WebRoot, $CacheDir, $LogDir, "C:\PageSpeed", "C:\PageSpeed\cache") | ForEach-Object {
+    @($WebRoot, $CacheDir, $DaemonCacheDir, $LogDir, "C:\PageSpeed", "C:\PageSpeed\cache") | ForEach-Object {
         if (-not (Test-Path $_)) {
             New-Item -ItemType Directory -Path $_ -Force | Out-Null
             Write-Status "Created directory: $_" "Gray"
@@ -257,7 +265,7 @@ function Initialize-TestEnvironment {
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
             "IIS_IUSRS", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
 
-        foreach ($dir in @($CacheDir, $LogDir, "C:\PageSpeed\cache")) {
+        foreach ($dir in @($CacheDir, $DaemonCacheDir, $LogDir, "C:\PageSpeed\cache")) {
             $acl = Get-Acl $dir
             $acl.AddAccessRule($rule)
             Set-Acl $dir $acl
@@ -792,6 +800,12 @@ pagespeed RulePackFile "$rulePackDir\multi\a.json"
 pagespeed RulePackFile "$rulePackDir\multi\b.json"
 "@
 
+        # Kept for New-DaemonSite, which derives the dedicated daemon site's
+        # configuration from it. The main site and the server-level config
+        # never carry the daemon directives: they keep classic in-place
+        # optimization covered.
+        $script:BasePagespeedConfig = $pagespeedConfig
+
         # Site-level config
         $pagespeedConfig | Set-Content "$WebRoot\pagespeed.config" -Encoding UTF8
         Write-Status "pagespeed.config written to $WebRoot\pagespeed.config" "Gray"
@@ -824,6 +838,200 @@ pagespeed RulePackFile "$rulePackDir\multi\b.json"
         }
     }
 }
+function New-DaemonSite {
+    # A second site, on its own port, for the daemon path. Only this site's
+    # pagespeed.config carries DaemonSocketPath and DaemonVolumePath (set both
+    # or neither, docs/daemon-adapter-iis.md); with them the module leaves the
+    # classic in-place path for the site. The main site keeps classic
+    # in-place optimization, so both are covered. Runs only when the lane
+    # started an optimizer worker (tools\ci\Start-OptimizerWorker.ps1), and
+    # exports the site's base URL as PAGESPEED_IIS_DAEMON_SITE_URL.
+    if (-not $env:PAGESPEED_OPTIMIZER_VOLUME -or -not $env:PAGESPEED_OPTIMIZER_DIR) {
+        if ($env:PAGESPEED_OPTIMIZER_VOLUME -or $env:PAGESPEED_OPTIMIZER_DIR) {
+            throw "PAGESPEED_OPTIMIZER_VOLUME and PAGESPEED_OPTIMIZER_DIR must be set together"
+        }
+        return
+    }
+    if (-not $script:BasePagespeedConfig) {
+        throw "the daemon site needs the PageSpeed module and its configuration"
+    }
+    Write-Status "Creating the daemon site: $DaemonSiteName on port $DaemonPort" "Gray"
+    Invoke-AppCmd delete site $DaemonSiteName | Out-Null
+    if (Test-Path $DaemonRoot) { Remove-Item $DaemonRoot -Recurse -Force }
+    New-Item -ItemType Directory -Path $DaemonRoot -Force | Out-Null
+    if (Test-Path "$WebRoot\mod_pagespeed_example") {
+        Copy-Item "$WebRoot\mod_pagespeed_example" "$DaemonRoot\mod_pagespeed_example" -Recurse
+    }
+    # The same web.config plus a one-hour client cache lifetime: the
+    # optimizer records a resource's lifetime from its Cache-Control header,
+    # and a resource with none is never served as a variant (the Apache arm
+    # sets max-age=3600 for the same reason). The main site is not changed.
+    $daemonWebConfig = Get-Content -LiteralPath "$WebRoot\web.config" -Raw
+    if (-not $daemonWebConfig.Contains("<staticContent>")) {
+        throw "the site web.config has no staticContent element to extend"
+    }
+    $daemonWebConfig = $daemonWebConfig.Replace("<staticContent>", "<staticContent>`r`n      <clientCache cacheControlMode=`"UseMaxAge`" cacheControlMaxAge=`"01:00:00`" />")
+    $daemonWebConfig | Set-Content "$DaemonRoot\web.config" -Encoding UTF8
+    Invoke-AppCmd add site /name:$DaemonSiteName /physicalPath:$DaemonRoot /bindings:"http/*:${DaemonPort}:" | Out-Null
+    Invoke-AppCmd set site $DaemonSiteName /applicationDefaults.applicationPool:$AppPoolName | Out-Null
+
+    $daemonSocket = if ($env:PAGESPEED_OPTIMIZER_SOCKET) { $env:PAGESPEED_OPTIMIZER_SOCKET } else { "pagespeed-optimizer" }
+    # The directives go first: the base configuration ends in host: sections,
+    # and a line after them would belong to the last one.
+    $daemonConfig = @"
+pagespeed DaemonSocketPath $daemonSocket
+pagespeed DaemonVolumePath "$($env:PAGESPEED_OPTIMIZER_VOLUME)"
+
+"@
+    # Its own file cache directory, not the main site's: both sites live in
+    # the same worker process.
+    $daemonBase = $script:BasePagespeedConfig -replace '(?m)^pagespeed FileCachePath .*$', "pagespeed FileCachePath $DaemonCacheDir"
+    if ($daemonBase -eq $script:BasePagespeedConfig) {
+        throw "the base pagespeed.config has no FileCachePath line to redirect"
+    }
+    # ASCII, not UTF8: Windows PowerShell writes a byte order mark with UTF8,
+    # the module's configuration reader has no BOM handling, and the mark
+    # glues itself to the first word of the first line. That line is then not
+    # the directive it looks like and is dropped, which here is
+    # DaemonSocketPath: with only DaemonVolumePath set the module leaves the
+    # daemon path off and answers X-Pagespeed-Init-Status=daemon-unavailable.
+    ($daemonConfig + $daemonBase) | Set-Content "$DaemonRoot\pagespeed.config" -Encoding ASCII
+
+    # The optimizer's client library goes beside the module, where the module
+    # resolves it.
+    $clientDll = Join-Path $env:PAGESPEED_OPTIMIZER_DIR "pagespeed.dll"
+    if (-not (Test-Path -LiteralPath $clientDll)) {
+        throw "PAGESPEED_OPTIMIZER_DIR is set but $clientDll does not exist"
+    }
+    Copy-Item -LiteralPath $clientDll -Destination "C:\Windows\System32\inetsrv\pagespeed.dll" -Force
+    Write-Status "Copied the optimizer client library beside the module" "Gray"
+
+    Invoke-AppCmd start site $DaemonSiteName | Out-Null
+    $env:PAGESPEED_IIS_DAEMON_SITE_URL = "http://localhost:$DaemonPort"
+    Write-Status "Daemon site created: $env:PAGESPEED_IIS_DAEMON_SITE_URL (pipe $daemonSocket, volume $($env:PAGESPEED_OPTIMIZER_VOLUME), cache $DaemonCacheDir)" "Cyan"
+}
+
+function Write-DaemonSiteDiagnostics {
+    # What the module and the worker say about why the daemon site is not
+    # usable. Everything is best effort; each part tolerates a missing source.
+    param([string]$Url)
+    Write-Host "---- daemon site diagnostics ----"
+    try {
+        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        Write-Host ("last probe: HTTP {0}, X-Pagespeed-Init-Status={1}" -f $r.StatusCode, $r.Headers["X-Pagespeed-Init-Status"])
+        $body = [string]$r.Content
+        if ($body.Length -gt 3000) { $body = $body.Substring(0, 3000) }
+        Write-Host $body
+    } catch { Write-Host "last probe failed: $($_.Exception.Message)" }
+
+    # The module writes the reason the daemon path is off (the check's own
+    # words) to the Application event log, source PageSpeed.
+    Write-Host "-- Application event log, source PageSpeed, last 30 minutes"
+    try {
+        Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'PageSpeed'; StartTime = (Get-Date).AddMinutes(-30) } -MaxEvents 10 -ErrorAction Stop |
+            ForEach-Object { Write-Host ("[{0}] {1}" -f $_.TimeCreated.ToString('o'), $_.Message) }
+    } catch { Write-Host "no PageSpeed event log entries: $($_.Exception.Message)" }
+
+    Write-Host "-- the module's message history (the check's own words)"
+    try {
+        $m = Invoke-WebRequest -Uri ($Url -replace '/pagespeed_admin/?$', '/pagespeed_message') -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        $mt = [string]$m.Content
+        if ($mt.Length -gt 6000) { $mt = $mt.Substring(0, 6000) }
+        Write-Host $mt
+    } catch { Write-Host "no message history: $($_.Exception.Message)" }
+
+    Write-Host "-- first bytes of the daemon site configuration"
+    try {
+        $b = [System.IO.File]::ReadAllBytes("$DaemonRoot\pagespeed.config")
+        Write-Host ("   " + (($b[0..15] | ForEach-Object { $_.ToString('x2') }) -join ' '))
+    } catch { Write-Host "cannot read the configuration: $($_.Exception.Message)" }
+
+    Write-Host "-- module log lines that mention the optimizer"
+    try {
+        Get-ChildItem -Path $LogDir -File -ErrorAction Stop | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object {
+            Write-Host "   $($_.Name)"
+            Select-String -Path $_.FullName -Pattern 'optimizer|daemon|pipe|volume' -ErrorAction SilentlyContinue |
+                Select-Object -Last 15 | ForEach-Object { Write-Host ("   " + $_.Line) }
+        }
+    } catch { Write-Host "no module log: $($_.Exception.Message)" }
+
+    Write-Host "-- worker liveness"
+    $livePid = $null
+    $pidFile = "C:\pagespeed_optimizer\worker.pid"
+    try {
+        if (Test-Path -LiteralPath $pidFile) { $livePid = [int](Get-Content -LiteralPath $pidFile -TotalCount 1) }
+    } catch { }
+    $liveProc = if ($livePid) { Get-Process -Id $livePid -ErrorAction SilentlyContinue } else { $null }
+    $pipeUp = Test-Path -LiteralPath "\\.\pipe\pagespeed-optimizer"
+    if ($liveProc) {
+        Write-Host ("   pid {0} alive ({1}), started {2}" -f $livePid, $liveProc.ProcessName, $liveProc.StartTime)
+    } else {
+        Write-Host "   pid file: $pidFile, pid: $livePid, process not running"
+    }
+    Write-Host "   pipe \\.\pipe\pagespeed-optimizer exists: $pipeUp"
+    if (-not $liveProc) {
+        Write-Host "   WORKER IS DEAD: the optimizer worker process is no longer running"
+    }
+
+    Write-Host "-- named pipes of the worker"
+    try {
+        [System.IO.Directory]::GetFiles("\\.\pipe\") | Where-Object { $_ -match 'pagespeed' } | ForEach-Object { Write-Host "   $_" }
+    } catch { Write-Host "cannot list pipes: $($_.Exception.Message)" }
+
+    Write-Host "-- worker volume directory"
+    $volDir = Split-Path -Parent $env:PAGESPEED_OPTIMIZER_VOLUME
+    try {
+        Get-ChildItem -LiteralPath $volDir -Force -ErrorAction Stop | ForEach-Object { Write-Host ("   {0} {1}" -f $_.Name, $_.Length) }
+        & icacls.exe $volDir | ForEach-Object { Write-Host "   $_" }
+    } catch { Write-Host "cannot read the volume directory: $($_.Exception.Message)" }
+
+    Write-Host "-- worker output (last 40 lines)"
+    $evidence = if ($env:PAGESPEED_EVIDENCE_DIR) { $env:PAGESPEED_EVIDENCE_DIR } else { Split-Path -Parent (Split-Path -Parent $env:PAGESPEED_OPTIMIZER_VOLUME) }
+    foreach ($f in @("optimizer-worker.out.log", "optimizer-worker.err.log")) {
+        $path = Join-Path $evidence $f
+        if (Test-Path -LiteralPath $path) {
+            Write-Host "   $f"
+            Write-Host ("   last written {0} (now {1})" -f (Get-Item -LiteralPath $path).LastWriteTime, (Get-Date))
+            Get-Content -LiteralPath $path -Tail 40 | ForEach-Object { Write-Host "   $_" }
+        }
+    }
+    Write-Host "---- end of daemon site diagnostics ----"
+}
+
+function Wait-DaemonSiteReady {
+    # Same readiness condition as the main site: the module's admin page
+    # answers 200 without X-Pagespeed-Init-Status. Fails the setup on timeout.
+    if (-not $env:PAGESPEED_IIS_DAEMON_SITE_URL) { return }
+    Invoke-AppCmd start site $DaemonSiteName | Out-Null
+    $url = "$($env:PAGESPEED_IIS_DAEMON_SITE_URL)/pagespeed_admin/"
+    Write-Status "Waiting for the daemon site to be ready ($url)..."
+    $maxWait = 120
+    $ready = $false
+    for ($waited = 1; $waited -le $maxWait; $waited++) {
+        Start-Sleep -Seconds 1
+        try {
+            $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
+            if ($response -and $response.StatusCode -eq 200) {
+                $initStatus = $null
+                if ($response.Headers -and $response.Headers.ContainsKey("X-Pagespeed-Init-Status")) {
+                    $initStatus = $response.Headers["X-Pagespeed-Init-Status"]
+                }
+                if (-not $initStatus) { $ready = $true; break }
+                if ($waited % 5 -eq 0) {
+                    Write-Status "Daemon site: module init not done (X-Pagespeed-Init-Status=$initStatus, attempt $waited/$maxWait)..." "Yellow"
+                }
+            }
+        } catch { }
+    }
+    if (-not $ready) {
+        Write-Host "::error::the daemon site did not become ready at $url within $maxWait seconds"
+        Write-DaemonSiteDiagnostics -Url $url
+        Get-ServerStatus
+        exit 1
+    }
+    Write-Status "Daemon site is ready on $url" "Green"
+}
+
 function Install-PageSpeedModule {
     if ($NoModule) {
         Write-Status "Skipping PageSpeed module installation (-NoModule)" "Yellow"
@@ -1143,6 +1351,10 @@ function Stop-IISSite {
     } catch { }
 
     try {
+        Invoke-AppCmd stop site $DaemonSiteName 2>$null | Out-Null
+    } catch { }
+
+    try {
         Invoke-AppCmd stop apppool $AppPoolName 2>$null | Out-Null
         Write-Status "Stopped app pool: $AppPoolName" "Gray"
     } catch { }
@@ -1266,6 +1478,10 @@ function Uninstall-IISSite {
         Write-Status "Deleted site: $SiteName" "Gray"
     } catch { }
 
+    try {
+        Invoke-AppCmd delete site $DaemonSiteName 2>$null | Out-Null
+    } catch { }
+
     # Remove app pool
     try {
         Invoke-AppCmd delete apppool $AppPoolName 2>$null | Out-Null
@@ -1285,7 +1501,9 @@ function Install-IISSiteComplete {
     New-IISSite
     New-HttpsBinding
     New-WebConfig
+    New-DaemonSite
     Start-IISSite
+    Wait-DaemonSiteReady
 }
 
 # Main entry point
