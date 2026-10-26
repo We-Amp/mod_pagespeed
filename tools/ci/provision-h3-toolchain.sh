@@ -22,7 +22,8 @@ set -euo pipefail
 
 H3_ROOT="${H3_ROOT:-$HOME/h3}"
 NGINX_SRC="${NGINX_SRC:-$HOME/nginx-src}"
-J=$(nproc)
+# CI_SLOT_CPUS: the runner's per-job CPU budget (tools/ci/slot-budget.sh).
+J="${CI_SLOT_CPUS:-$(nproc)}"
 SRC="$H3_ROOT/src"
 mkdir -p "$SRC"
 

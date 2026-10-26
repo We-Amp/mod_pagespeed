@@ -232,7 +232,7 @@ build() {
         echo "--- container arch: $(uname -m), glibc $(ldd --version | head -1 | grep -oE "[0-9]+\.[0-9]+$") ---"
         install/nginx/build_module_in_container.sh focal -o /out/ngx_pagespeed_module.so
         cd "/workspace/.ngx-module-build/focal/nginx-${NGXVER}"
-        make -f objs/Makefile objs/nginx -j"${MAKE_JOBS:-$(nproc)}"
+        make -f objs/Makefile objs/nginx -j"${MAKE_JOBS:-${CI_SLOT_CPUS:-$(nproc)}}"
         install -m 755 objs/nginx /out/nginx
         cd /workspace
         echo "--- pagespeed-nginx-launch ---"

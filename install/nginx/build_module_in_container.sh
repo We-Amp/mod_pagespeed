@@ -51,7 +51,8 @@
 #                       (release.yml fan-out). Unset = use all host cores (prior
 #                       behavior, uncapped).
 #   MAKE_JOBS           parallelism for the nginx `make modules` link
-#                       (default: BAZEL_CPUS if set, else nproc).
+#                       (default: BAZEL_CPUS if set, else CI_SLOT_CPUS,
+#                       else nproc).
 
 set -euo pipefail
 if [ "${VERBOSE:-}" ]; then set -x; fi
@@ -1329,7 +1330,7 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
       -e "s# -lstdc++# -Wl,-Bstatic,--start-group,${GCCDIR}/libstdc++.a,${GCCDIR}/libsupc++.a,--end-group,-Bdynamic#g" \
       objs/Makefile
   fi
-  make -j"${MAKE_JOBS:-${BAZEL_CPUS:-$(nproc)}}" modules
+  make -j"${MAKE_JOBS:-${BAZEL_CPUS:-${CI_SLOT_CPUS:-$(nproc)}}}" modules
 )
 
 BUILT_SO="${NGX_SRC}/objs/ngx_pagespeed.so"
