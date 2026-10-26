@@ -63,6 +63,11 @@ int AddResponseAttributeCallback(void* rec, const char* key,
   return 1;
 }
 
+int CollectCacheControlCallback(void* rec, const char* key, const char* value) {
+  static_cast<StringVector*>(rec)->push_back(value == nullptr ? "" : value);
+  return 1;
+}
+
 template <typename T>
 void FixUpH2Version(T* headers) {
   // mod_h2 sets protocol version to 2.0 when h2 (or h2c) are in use.
@@ -272,6 +277,40 @@ void DisableCacheControlHeader(request_rec* request) {
   apr_table_unset(request->err_headers_out, HttpAttributes::kCacheControl);
   apr_table_set(request->headers_out, HttpAttributes::kCacheControl,
                 value.c_str());
+}
+
+bool ApplyInPlaceSMaxAge(request_rec* request, int s_maxage_sec,
+                         bool* had_original, GoogleString* original) {
+  StringVector values;
+  // err_headers_out first, then headers_out: the order Apache uses when it
+  // merges the two tables.
+  if (request->err_headers_out != nullptr) {
+    apr_table_do(CollectCacheControlCallback, &values, request->err_headers_out,
+                 HttpAttributes::kCacheControl, nullptr);
+  }
+  apr_table_do(CollectCacheControlCallback, &values, request->headers_out,
+               HttpAttributes::kCacheControl, nullptr);
+  GoogleString existing;
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i != 0) {
+      existing += ", ";
+    }
+    existing += values[i];
+  }
+  GoogleString updated;
+  if (!ResponseHeaders::ApplySMaxAge(s_maxage_sec, existing, &updated)) {
+    return false;
+  }
+  *had_original = !values.empty();
+  *original = existing;
+  // Merge into a single header: drop the origin's copy from both tables.
+  apr_table_unset(request->headers_out, HttpAttributes::kCacheControl);
+  if (request->err_headers_out != nullptr) {
+    apr_table_unset(request->err_headers_out, HttpAttributes::kCacheControl);
+  }
+  apr_table_set(request->headers_out, HttpAttributes::kCacheControl,
+                updated.c_str());
+  return true;
 }
 
 void DisableCachingRelatedHeaders(request_rec* request) {

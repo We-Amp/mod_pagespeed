@@ -236,6 +236,93 @@ TEST_F(HeaderUtilTest, DisableCachingRelatedHeadersInErrHeaders) {
                GetCacheControl());
 }
 
+// In-place s-maxage must see Cache-Control in both header tables and leave a
+// single merged header behind.
+class InPlaceSMaxAgeTest : public HeaderUtilTest {
+ protected:
+  int CountCacheControl(apr_table_t* table) {
+    int count = 0;
+    apr_table_do(
+        [](void* rec, const char*, const char*) {
+          ++*static_cast<int*>(rec);
+          return 1;
+        },
+        &count, table, HttpAttributes::kCacheControl, nullptr);
+    return count;
+  }
+};
+
+TEST_F(InPlaceSMaxAgeTest, OnlyInHeadersOut) {
+  SetCacheControl("public, max-age=600");
+  bool had = false;
+  GoogleString original;
+  ASSERT_TRUE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_TRUE(had);
+  EXPECT_EQ("public, max-age=600", original);
+  EXPECT_STREQ("public, max-age=600, s-maxage=10", GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.headers_out));
+  EXPECT_EQ(0, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, OnlyInErrHeadersOut) {
+  apr_table_set(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "public, max-age=600");
+  bool had = false;
+  GoogleString original;
+  ASSERT_TRUE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_TRUE(had);
+  EXPECT_EQ("public, max-age=600", original);
+  EXPECT_STREQ("public, max-age=600, s-maxage=10", GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.headers_out));
+  EXPECT_EQ(0, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, InBothTables) {
+  SetCacheControl("public");
+  apr_table_set(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "max-age=600");
+  bool had = false;
+  GoogleString original;
+  ASSERT_TRUE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_TRUE(had);
+  EXPECT_EQ("max-age=600, public", original);
+  EXPECT_STREQ("max-age=600, public, s-maxage=10", GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.headers_out));
+  EXPECT_EQ(0, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, TwoEntriesInHeadersOut) {
+  apr_table_add(request_.headers_out, HttpAttributes::kCacheControl, "public");
+  apr_table_add(request_.headers_out, HttpAttributes::kCacheControl,
+                "max-age=600");
+  bool had = false;
+  GoogleString original;
+  ASSERT_TRUE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_TRUE(had);
+  EXPECT_EQ("public, max-age=600", original);
+  EXPECT_STREQ("public, max-age=600, s-maxage=10", GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.headers_out));
+  EXPECT_EQ(0, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, NoOriginalAddsSMaxAge) {
+  bool had = true;
+  GoogleString original;
+  ASSERT_TRUE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_FALSE(had);
+  EXPECT_STREQ("s-maxage=10", GetCacheControl());
+}
+
+TEST_F(InPlaceSMaxAgeTest, PrivateInErrHeadersOutLeavesTablesUntouched) {
+  apr_table_set(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "private");
+  bool had = false;
+  GoogleString original;
+  EXPECT_FALSE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_EQ(nullptr, GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.err_headers_out));
+}
+
 TEST_F(HeaderUtilTest, SelectiveRequestHeaders) {
   apr_table_set(request_.headers_in, "a", "b");
   apr_table_set(request_.headers_in, "c", "d");
