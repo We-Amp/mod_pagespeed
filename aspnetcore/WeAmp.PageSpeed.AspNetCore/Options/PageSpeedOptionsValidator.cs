@@ -68,6 +68,26 @@ internal sealed class PageSpeedOptionsValidator : IValidateOptions<PageSpeedOpti
                 "and the Kestrel origin cannot bind the same port.");
         }
 
+        // Sidecar timing options: a non-positive health interval makes the
+        // monitor throw and retry immediately (a busy loop flooding the log)
+        // or poll in a tight loop; a zero health timeout fails every probe so
+        // startup always times out. Ten minutes is far beyond any sane value,
+        // so anything past it is treated as a typo rather than a wish.
+        const int maxSidecarTimingMs = 600_000; // 10 minutes
+        foreach (var (optionName, optionValue) in new[]
+        {
+            ("HealthCheckIntervalMs", sc.HealthCheckIntervalMs),
+            ("HealthCheckTimeoutMs", sc.HealthCheckTimeoutMs),
+            ("ShutdownTimeoutMs", sc.ShutdownTimeoutMs),
+        })
+        {
+            if (optionValue is <= 0 or > maxSidecarTimingMs)
+            {
+                errors.Add(
+                    $"PageSpeed:Sidecar:{optionName} {optionValue} must be > 0 and at most {maxSidecarTimingMs} ms (10 minutes).");
+            }
+        }
+
         if (sc.MaxRestartAttempts < 0)
         {
             errors.Add($"PageSpeed:Sidecar:MaxRestartAttempts {sc.MaxRestartAttempts} must be >= 0.");
