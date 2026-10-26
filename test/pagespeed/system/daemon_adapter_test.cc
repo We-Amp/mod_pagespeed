@@ -2976,10 +2976,10 @@ TEST_F(DaemonAdapterTest, ARefusalWhoseRemovalFailsStillRefuses) {
   // The delete can fail in two ways that need OPPOSITE advice.  POSIX,
   // staged here by making the directory non-writable the moment the open
   // has created the file: our own failure, safe to remove by hand.  A
-  // sharing violation on Windows — staged by holding the file open
-  // without delete sharing — almost certainly means the OPTIMIZER holds
-  // it: its live volume, which an operator must leave in place.  The
-  // verdict stays refused on both.
+  // live holder on Windows (staged by holding the file open WITH
+  // delete sharing, as the cache library does) almost certainly means
+  // the OPTIMIZER holds it: its live volume, which an operator must
+  // leave in place.  The verdict stays refused on both.
   DaemonCreatedItsVolume(64ULL << 20);
   const GoogleString created =
       FakeDaemonAbi::VolumeFileFor(volume_, kDaemonSize);
@@ -2996,8 +2996,13 @@ TEST_F(DaemonAdapterTest, ARefusalWhoseRemovalFailsStillRefuses) {
   fake_after_open_ = [&](const GoogleString&) {
     std::wstring wide;
     if (Utf8ToWidePath(created, &wide)) {
-      held = CreateFileW(wide.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
-                         0, nullptr);
+      // Held the way the cache library holds a volume: delete sharing
+      // allowed, so a plain delete would succeed; only the share-mode
+      // probe in the removal can see this holder.
+      held = CreateFileW(
+          wide.c_str(), GENERIC_READ,
+          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+          OPEN_EXISTING, 0, nullptr);
     }
   };
 #else
