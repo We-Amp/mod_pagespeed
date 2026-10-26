@@ -525,7 +525,9 @@ TEST_F(NgxDaemonSeamTest, AnInPlaceLookupMissKeepsTheRequestsHeaders) {
   ASSERT_NE(GoogleString::npos, fn)
       << "ps_base_fetch_handler was renamed; this pin needs updating";
   const size_t miss = cc.find(
-      "if(ctx->base_fetch->base_fetch_type()==kIproLookup&&!status_ok){", fn);
+      "constboolipro_lookup_miss=ctx->base_fetch->base_fetch_type()=="
+      "kIproLookup&&!status_ok;if(ipro_lookup_miss){",
+      fn);
   ASSERT_NE(GoogleString::npos, miss)
       << "the in-place lookup-miss pass is no longer singled out";
   const size_t next_arm = cc.find(
