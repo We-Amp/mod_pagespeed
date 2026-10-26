@@ -166,11 +166,11 @@ struct ps_request_ctx_t {
   // by the in-place header filter, which builds the recorder there.
   // daemon_recorder marks ctx->recorder as daemon-side: its completion is
   // handed to the low-priority pool rather than run inline, and the s-maxage
-  // rewrite stays off.  daemon_body_bytes accumulates the streamed body size
-  // for the completion queue's byte cap.
+  // rewrite stays off.  record_body_bytes accumulates the streamed body size
+  // of either record arm for the completion queue's byte cap.
   bool daemon_record_pending;
   bool daemon_recorder;
-  int64_t daemon_body_bytes;
+  int64_t record_body_bytes;
 
   // We need to remember the URL here as well since we may modify what NGX
   // gets by stripping our special query params and honoring X-Forwarded-Proto.
