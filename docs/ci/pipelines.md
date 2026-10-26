@@ -36,7 +36,7 @@ since a fetched copy lives under `$RUNNER_TEMP`.
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
 | PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, the system-test framework's own unit tests, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. |
-| Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners. See "The full tier" |
+| Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners; the sidecar native pair for x64 and arm64 (path-filtered). See "The full tier" |
 | Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 21:30 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the offline rebuild of both server modules from the vendored tree with no network, the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane: build, package, smoke, the Windows installer, the release gates and validation, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`; a real run also signs and creates the release, in hosted jobs of the `release` environment. A dry run signs nothing and uses no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
@@ -56,12 +56,12 @@ tier.
 
 | Job | Class | Needs | What it does |
 |---|---|---|---|
-| `changes` | hosted | | path filters (see below) |
+| `changes` | hosted | | path filters (see below) and the fleet scope (see "CI_SCOPE: the fleet scope of the PR tier") |
 | `guards`, `blocking-dep-scan`, `dep-scan`, `browser-js-tests`, `regen-js-diff`, `console-tests` | hosted | | the hosted checks |
 | `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
 | `sidecar-tests` | hosted | `changes` | the xunit suite of the ASP.NET Core sidecar (`aspnetcore/`) under .NET 8 and .NET 10 (path-filtered, see "The sidecar native pair") |
 | `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |
-| `vendor` | `fleet-heavy` | | vendors the dependencies; publishes the tarball (hub channel) or caches `vendor/` (cache channel) |
+| `vendor` | `fleet-heavy` | `changes` | vendors the dependencies; publishes the tarball (hub channel) or caches `vendor/` (cache channel). Runs only when the fleet scope is on (`needs.changes.outputs.fleet`), so a push the merge queue already proved can skip every build runner leg |
 | `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
 | `linux-unit-tests` | `fleet-heavy` | `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
 | `lint` | `fleet-heavy` | `vendor` | clang-tidy (scoped to the pull request) and clang-format |
@@ -70,8 +70,6 @@ tier.
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
-| `sidecar-pair` | `fleet-heavy` | `changes` | builds the sidecar's native pair for x64, gates it and runs the sidecar tests with the live nginx tests against it (path-filtered, see "The sidecar native pair") |
-| `sidecar-pair-arm64` | hosted arm64 | `changes` | the same for arm64 |
 | `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS. Skipped (not failed) for fork and Dependabot pull requests, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
 | `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
 | `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
@@ -142,8 +140,7 @@ whole entries oldest first. Either directory may be absent.
 The `changes` job diffs a pull request against its base and publishes one
 boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`, `sidecar`). The jobs that only
 matter when their inputs change run when their filter is true, and are skipped
-otherwise; outside a pull request every filter is true, except `sidecar` on a
-push, which diffs the pushed range (see "The sidecar native pair"). The aggregate gate
+otherwise; outside a pull request every filter is true. The aggregate gate
 treats a skipped job as fine. A build runner job that depends on a filter
 narrows its guard as described under "The guard and the kill switch".
 
@@ -195,14 +192,25 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
 - **In the PR tier.** `sidecar-tests` (hosted, no pair) runs the suite and
   `live-guard` on every pull request that touches the `sidecar` filter:
   `aspnetcore/`, the recipe, the launch shim, the symbol gates, the pair smoke
-  and the script itself. `sidecar-pair` and `sidecar-pair-arm64` build the
-  pair on the same filter and run the whole sequence
-  (`release_sidecar.sh check`). The build is cold by design (the recipe uses
-  no Bazel disk cache, so that every object of the module is materialized),
-  which is why it is path-filtered, on a push to `master` as well: there the
-  filter compares the pushed range (`github.event.before` to the pushed
-  commit; a new branch or an unreachable `before` counts as everything
-  changed), while every other filter stays true on a push. With
+  and the script itself, and on every push to `master`.
+- **In the full tier.** `sidecar-pair` and `sidecar-pair-arm64` build the
+  pair and run the whole sequence (`release_sidecar.sh check`) once per merge,
+  after it, not in the pull request or the merge queue. The build is cold by
+  design (the recipe uses no Bazel disk cache, so that every object of the
+  module is materialized), which is why it is path-filtered: the full tier's
+  hosted `changes` job publishes `sidecar_pair` from the same paths (with
+  `pipeline-full.yml` in place of `pipeline-pr.yml`). On a push to `master` it
+  compares a cumulative range: from the head of the most recent push run of `CI`
+  on `master` that succeeded and whose head is an ancestor of the pushed commit (`tools/ci/push_range_base.sh`, which reads the
+  Actions runs API with `actions: read`) to the pushed commit. `github.event.before`
+  is not the base, because a newer push cancels an older pending run and
+  `before` then names a range nobody examined. After a red push to `master` the next push rebuilds the pair if the combined
+  range touches it. When the API fails, answers
+  nothing usable or no candidate is an ancestor, the filter counts everything as
+  changed and builds the pair; the log shows the reason and, as a shadow, what
+  the `before` range would have said. On a pull
+  request labelled `ci:full` the pull request against its base, and a
+  `workflow_dispatch` (the release candidate run) always builds the pair. With
   `FLEET_ENABLED` `false` the x64 leg runs on a hosted runner, and on a build
   runner it keeps to the slot's CPU and memory budget (`CI_SLOT_CPUS`,
   `CI_SLOT_MEM_GB`). The nightly tier builds the pair on hosted
@@ -469,6 +477,7 @@ legs) are not part of it.
 
 | Job | Class | Guard | Notes |
 |---|---|---|---|
+| `changes` | hosted | none | the `sidecar_pair` path filter (see "The sidecar native pair"); `true` on every `workflow_dispatch` |
 | `vendor` | `fleet-heavy` | general | vendors the dependency tree; publishes it through the hub when the runner environment provides one, else `actions/cache` |
 | `linux-build` | `fleet-heavy` | general | builds both server modules and the test targets, runs the module symbol checks, uploads the module bundle |
 | `linux-asan` | `fleet-heavy` | general | ASan, UBSan and LeakSan over the unit tests, with redis and memcached on a per-run network |
@@ -479,6 +488,8 @@ legs) are not part of it.
 | `win-asan` | `fleet-windows` | general | Windows ASan build and unit tests; skips with a notice when LLVM 19 with its sanitizer runtime is not found |
 | `win-appverif` | `fleet-iis` | only | Application Verifier, full page heap and concurrency fuzzing on the IIS worker process. Needs the IIS role, administrator rights and the Windows SDK debugging tools, so it has no hosted side and a fork or Dependabot pull request skips it |
 | `linux-arm64-build`, `linux-arm64-unit-tests`, `linux-arm64-apache-sys-tests`, `linux-arm64-nginx-sys-tests` | hosted (`ubuntu-24.04-arm`) | none | the arm64 build vendors for itself into `actions/cache` and uploads its module bundle; the other three reuse the vendored tree, the Bazel disk cache and the bundle |
+| `sidecar-pair` | `fleet-heavy` | switch, `sidecar_pair` filter | builds the sidecar's native pair for x64, gates it and runs the sidecar tests with the live nginx tests against it (see "The sidecar native pair") |
+| `sidecar-pair-arm64` | hosted (`ubuntu-24.04-arm`) | `sidecar_pair` filter | the same for arm64 |
 
 Notes on the full tier:
 
@@ -647,6 +658,57 @@ branch is restricted so that only administrators can update it (or the
 `@ci-dev` allow-list entries are removed), and `ci-dev` has been pushed again
 from the default branch. Until then the policy above applies.
 
+## CI_SCOPE: the fleet scope of the PR tier
+
+The `changes` job of `pipeline-pr.yml` decides, in its step `Decide the fleet
+scope`, whether the build runner legs of the PR tier run. It publishes two
+outputs, `fleet` and `heavy` (equal for now); `vendor` runs only when `fleet`
+is `true`, and every other build runner leg needs `vendor`, so `fleet=false`
+skips them all. The hosted jobs of the PR tier, the inline jobs of `ci.yml`
+and the whole full tier run as before.
+
+- `merge_group` and `workflow_dispatch` always run the whole PR tier. The step
+  decides them inline, whatever `CI_SCOPE` says, so a merge group and the
+  release candidate dispatch (`full: true`) never skip a fleet job.
+- For every other event the step reads `tools/ci/pr_tier_scope.sh` from
+  `origin/master` with `git show`, never from the tree under test, and runs
+  that copy. A missing script, a failing script or any output other than
+  exactly the two lines `fleet=<true|false>` and `heavy=<true|false>` runs the
+  whole tier and leaves a warning.
+- The repository variable `CI_SCOPE`, lowercased, sets the level. Unset,
+  `full` or any value the script does not know runs everything. `push`,
+  `pr-build` and `pr` turn on the push rule.
+- **The push rule.** A push to `master` skips the build runner legs when the
+  merge queue already proved the same commit and the commit does not change
+  the PR tier itself. Proof: the commit has a completed, successful GitHub
+  Actions check suite on a `gh-readonly-queue/` branch
+  (`gh api repos/<repo>/commits/<sha>/check-suites?app_id=15368`, up to 3
+  tries, 2 and 4 s apart; an empty or unparseable answer after the last try
+  counts as no proof). A change to the PR tier: any path under
+  `.github/actions/` or `tools/ci/`, or `.github/workflows/pipeline-pr.yml` or
+  `.github/workflows/ci.yml`, in the pushed commit; a commit without a parent
+  counts as one. The callers grant `checks: read` to the `pr` job for the
+  lookup.
+- **Log lines.** The script writes one line
+  `fleet scope: event=<event> scope=<level> fleet=<bool> heavy=<bool> reason=<text>`
+  and, on every push whatever the level,
+  `shadow: would_skip=<bool> proof=<true|false|error> pipeline_change=<bool>`:
+  what the push rule decides for this commit, so the rule can be measured
+  with `CI_SCOPE` unset before it acts. When the commit changes the PR tier,
+  the proof is not looked up and the line says `proof=false`.
+- **Rollback.** Set the variable back:
+  `gh variable set CI_SCOPE --body full --repo We-Amp/mod_pagespeed` (or
+  delete it). The next run takes it; nothing else changes.
+- **Coverage on a skipped push.** The build runner legs ran on the same
+  commit in the merge queue, so a skipped push loses no check of the merged
+  tree, with one difference: a push used to run `fuzz-smoke` and
+  `iis-sys-tests` whatever changed, while the merge queue runs them only when
+  their path filter (`fuzz`, `iis`) fires for the merge group. With the push
+  rule on, they therefore run once per merge only when their filter fires;
+  the nightly tier's fuzz lanes and IIS lanes cover the rest every night.
+  `tools/ci/test_pr_tier_scope.sh` covers the script against a fake `gh`, and
+  the workflow-shape gate (`fleet-scope`) pins the step.
+
 ## Required checks
 
 A check from a called workflow is named `<caller job> / <job name>`, so after
@@ -773,8 +835,16 @@ and fails the build when the shape breaks:
   `git show`) and only the guard's own env keys; no other line names the
   script in any spelling, and the job has no glob, `find`, `source` or
   `GITHUB_ENV` write under `tools/ci/`; `BASH_ENV`, `PATH`, `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CONFIG*` are not
-  set at workflow level or in that job; `vendor` has `needs: changes` and no
-  `if:` (see "Merge-queue runs");
+  set at workflow level or in that job; `vendor` has `needs: changes` and
+  either no `if:` or exactly `if: ${{ needs.changes.outputs.fleet == 'true' }}`
+  (see "Merge-queue runs");
+- **(fleet-scope)** in `pipeline-pr.yml`: the `changes` job holds the step
+  `Decide the fleet scope` right after the merge-queue guard step (so before
+  the path-filter diff), in exactly its spec text (comment and blank lines
+  aside): it decides `merge_group` and `workflow_dispatch` inline and reads
+  `tools/ci/pr_tier_scope.sh` from `origin/${DEFAULT_BRANCH}`. The job
+  publishes `fleet` and `heavy` from that step, and no other line names the
+  script (see "CI_SCOPE: the fleet scope of the PR tier");
 - **(e)** `.github/` and `tools/ci/` carry no LAN address literals, no
   `.home` names, no `:9090`, no `self-hosted` and none of the retired runner
   label words (the bare word `pool` is only checked under `.github/`, because

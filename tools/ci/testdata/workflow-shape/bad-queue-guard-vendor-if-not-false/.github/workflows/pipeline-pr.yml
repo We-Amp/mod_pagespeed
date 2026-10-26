@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: pipeline
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      fleet: ${{ steps.scope.outputs.fleet }}
+      heavy: ${{ steps.scope.outputs.heavy }}
+    steps:
+      - run: echo unlock
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # A push reaches this pipeline from the caller's own workflow, and the
+      # merge queue pushes a temporary branch: only the default branch (and
+      # ci-dev, for the pipeline development lane) may run it.
+      - name: Refuse pushes that are not on the default branch
+        if: github.event_name == 'push'
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          case "${REF}" in "refs/heads/${DEFAULT_BRANCH}"|refs/heads/ci-dev) ;; *) echo "::error::push on ${REF} is not allowed in this pipeline"; exit 1;; esac
+
+      - name: Refuse dispatches made with a workflow token
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          [ "${ACTOR}" != "github-actions[bot]" ] || { echo "::error::dispatches made with a workflow token are not allowed"; exit 1; }
+
+      - name: Refuse fork and Dependabot PRs in the merge queue
+        if: github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+            git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
+
+      - name: Decide the fleet scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_SCOPE: ${{ vars.CI_SCOPE }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SHA: ${{ github.sha }}
+          FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
+          PR_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}
+        # merge_group and workflow_dispatch always run the full PR tier; the
+        # decision script is read from the default branch, never the tree.
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/fleet-scope.txt"
+          case "${GITHUB_EVENT_NAME}" in
+            merge_group|workflow_dispatch) printf 'fleet=true\nheavy=true\n' > "${out}" ;;
+            *)
+              if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&
+                bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&
+                [ "$(grep -cxE '(fleet|heavy)=(true|false)' "${out}")" = 2 ] && [ "$(wc -l < "${out}")" -eq 2 ]; then
+                :
+              else
+                echo "::warning::fleet scope undecided; running the full PR tier"
+                printf 'fleet=true\nheavy=true\n' > "${out}"
+              fi ;;
+          esac
+          cat "${out}" >> "$GITHUB_OUTPUT"
+      - run: echo diff
+  vendor:
+    needs: changes
+    if: ${{ needs.changes.outputs.fleet != 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo vendor
+  other:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash tools/ci/test_queue_fork_guard.sh
