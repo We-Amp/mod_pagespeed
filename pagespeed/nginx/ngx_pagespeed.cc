@@ -137,6 +137,22 @@ bool process_context_cleanup_hooked = false;
 QueuedWorkerPool* g_daemon_record_pool = nullptr;
 QueuedWorkerPool::Sequence* g_daemon_record_sequence = nullptr;
 
+// This worker's pool and sequence for the classic in-place recorder's final
+// call: DoneAndSetHeaders ends in the HTTP cache write, which may compress
+// the body and wait on the cache's cross-process locks, so it is carried
+// here and run off the event thread.  Separate from the daemon pool so a
+// daemon commit stalled on a wedged peer never holds up classic writes.
+// Created in ps_init_child_process for a serving process with at least one
+// server that has no optimizer configured; the thread starts lazily on the
+// first Add.  ps_exit_child_process shuts it down after
+// NgxBaseFetch::Terminate() and before the factory's ShutDown(), so the
+// at most one active write finishes against live caches while everything
+// still queued is cancelled and stores nothing.  The sequence is deleted
+// with the pool.  nullptr where no pool exists, which the record path reads
+// as "no queue": the recording is counted as dropped.
+QueuedWorkerPool* g_classic_record_pool = nullptr;
+QueuedWorkerPool::Sequence* g_classic_record_sequence = nullptr;
+
 StringPiece str_to_string_piece(ngx_str_t s) {
   return StringPiece(reinterpret_cast<char*>(s.data), s.len);
 }
@@ -3030,7 +3046,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     ctx->recorder = nullptr;
     ctx->daemon_record_pending = false;
     ctx->daemon_recorder = false;
-    ctx->daemon_body_bytes = 0;
+    ctx->record_body_bytes = 0;
     ctx->url_string = url_string;
     ctx->location_field_set = false;
     ctx->psol_vary_accept_only = false;
@@ -3805,7 +3821,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
       if (recorder != nullptr) {
         ctx->recorder = recorder;
         ctx->daemon_recorder = true;
-        ctx->daemon_body_bytes = 0;
+        ctx->record_body_bytes = 0;
         r->filter_need_in_memory = 1;
         ResponseHeaders response_headers;
         copy_response_headers_from_ngx(r, &response_headers);
@@ -3927,6 +3943,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // is always taken today; it exists because a disposition that returns no
     // recorder must not force the response body into memory.
     if (ctx->recorder != nullptr) {
+      ctx->record_body_bytes = 0;
       // set in memory flag for in_place_body_filter
       r->filter_need_in_memory = 1;
     }
@@ -3971,9 +3988,7 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
       StringPiece contents(reinterpret_cast<char*>(cl->buf->pos),
                            ngx_buf_size(cl->buf));
       recorder->Write(contents, recorder->handler());
-      if (ctx->daemon_recorder) {
-        ctx->daemon_body_bytes += contents.size();
-      }
+      ctx->record_body_bytes += contents.size();
     }
 
     if (cl->buf->flush) {
@@ -4004,7 +4019,7 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
         // closure will actually hold never exceed it, and a reservation
         // larger than that only inflates the drop counter.
         const int64_t body_bytes =
-            std::min(ctx->daemon_body_bytes,
+            std::min(ctx->record_body_bytes,
                      static_cast<int64_t>(kDaemonOriginalContentCapBytes));
         if (g_daemon_record_sequence != nullptr &&
             TryQueueDaemonCompletion(body_bytes, dropped)) {
@@ -4023,7 +4038,48 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
         }
         ctx->recorder = nullptr;
         ctx->daemon_recorder = false;
+      } else if (cl->buf->last_buf && !recorder->failed()) {
+        // A complete classic recording ends in the HTTP cache write, which
+        // may compress the body and wait on cache locks: it runs on the
+        // classic record pool, not here.  The closure owns the recorder and
+        // a copy of the final headers from here on; the pool's shutdown
+        // completes the recorder even if the closure never runs.
+        ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
+        const SystemRewriteOptions* options =
+            SystemRewriteOptions::DynamicCast(ctx->driver->options());
+        ResponseHeaders* headers = new ResponseHeaders();
+        copy_response_headers_from_ngx(r, headers);
+        // Looked up per completion for the same reason as the daemon arm's
+        // counter: there are several statistics objects.
+        Variable* dropped = cfg_s->server_context->statistics()->FindVariable(
+            kIproClassicRecordDropped);
+        // Reserve no more than the recorder will buffer: Write() stops at
+        // the response cap.
+        int64_t body_bytes = ctx->record_body_bytes;
+        if (options != nullptr && options->ipro_max_response_bytes() > 0) {
+          body_bytes = std::min(
+              body_bytes,
+              static_cast<int64_t>(options->ipro_max_response_bytes()));
+        }
+        if (g_classic_record_sequence != nullptr &&
+            TryQueueDaemonCompletion(body_bytes, dropped)) {
+          g_classic_record_sequence->Add(
+              new DaemonRecordCompletion(recorder, headers, true, body_bytes));
+        } else {
+          // No queue room (or no pool): finish as incomplete, which stores
+          // nothing; the next request records again.  The caps already
+          // counted the no-room case; a missing pool counts here.
+          if (g_classic_record_sequence == nullptr && dropped != nullptr) {
+            dropped->Add(1);
+          }
+          recorder->DoneAndSetHeaders(nullptr, false);
+          delete headers;
+        }
+        ctx->recorder = nullptr;
       } else {
+        // Incomplete or failed: DoneAndSetHeaders does no I/O on this path
+        // (it counts the failure), so it stays inline and takes no queue
+        // slot.
         ResponseHeaders response_headers;
         copy_response_headers_from_ngx(r, &response_headers);
         ctx->recorder->DoneAndSetHeaders(
@@ -5069,6 +5125,17 @@ void ps_exit_child_process(ngx_cycle_t* cycle) {
   }
   g_key_directory_warmers.clear();
   NgxBaseFetch::Terminate();
+  // The classic record pool goes down after Terminate() and before the
+  // factory's ShutDown(): the one active cache write finishes against live
+  // caches, and queued completions are cancelled and store nothing.  Only
+  // the event thread posts to this sequence and the event loop has stopped
+  // by now, so nothing posts after this point.
+  if (g_classic_record_pool != nullptr) {
+    g_classic_record_pool->ShutDown();
+    delete g_classic_record_pool;
+    g_classic_record_pool = nullptr;
+    g_classic_record_sequence = nullptr;
+  }
   if (cfg_m != nullptr && cfg_m->driver_factory != nullptr) {
     cfg_m->driver_factory->ShutDown();
   }
@@ -5294,6 +5361,7 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
   std::set<GoogleString> warmer_seen;  // Dedup (host,url) per worker
   bool any_daemon_ready = false;
   bool any_daemon_retryable = false;
+  bool any_classic_record = false;
   for (s = 0; s < cmcf->servers.nelts; s++) {
     ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(
         cscfp[s]->ctx->srv_conf[ngx_pagespeed.ctx_index]);
@@ -5346,6 +5414,16 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
         any_daemon_retryable = true;
       }
 
+      // A serving process records in place on the classic substrate for
+      // every server with no optimizer configured; IPRO can be switched on
+      // per location, so this does not look at the option.
+      if ((ngx_process == NGX_PROCESS_WORKER ||
+           ngx_process == NGX_PROCESS_SINGLE) &&
+          cfg_s->server_context->daemon_health() ==
+              DaemonHealth::kNotConfigured) {
+        any_classic_record = true;
+      }
+
       // Start the background key-directory warmer(s) for any server
       // whose feature is enabled AND has a remote directory configured. No-op
       // (default-safe) otherwise. The curl fetcher's poll thread is already up
@@ -5387,6 +5465,13 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
     g_daemon_record_pool = new QueuedWorkerPool(
         1, "daemon_record", cfg_m->driver_factory->thread_system());
     g_daemon_record_sequence = g_daemon_record_pool->NewSequence();
+  }
+
+  // The classic record pool: see its globals for the lifetime.
+  if (any_classic_record) {
+    g_classic_record_pool = new QueuedWorkerPool(
+        1, "classic_record", cfg_m->driver_factory->thread_system());
+    g_classic_record_sequence = g_classic_record_pool->NewSequence();
   }
 
   cfg_m->driver_factory->StartThreads();

@@ -725,7 +725,7 @@ TEST_F(NgxDaemonSeamTest, TheDaemonCompletionRunsOffTheEventThread) {
       << "the drop counter is not looked up null-tolerantly from the "
          "request's own statistics object; GetVariable's CHECK would abort "
          "the worker if the counter were ever absent";
-  EXPECT_NE(GoogleString::npos, body.find("std::min(ctx->daemon_body_bytes,"))
+  EXPECT_NE(GoogleString::npos, body.find("std::min(ctx->record_body_bytes,"))
       << "the queue reservation is not clamped at the recorder's own "
          "content cap, so a response past it over-counts against the byte "
          "cap and inflates the drop counter";
