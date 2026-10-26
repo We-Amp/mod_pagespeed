@@ -36,8 +36,8 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/util/platform.h"
 #include "test/net/instaweb/rewriter/mock_critical_images_finder.h"
-#include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/http/user_agent_matcher_test_base.h"
@@ -62,9 +62,15 @@ GoogleString Tokens(const RewriteOptions& options) {
   return joined;
 }
 
-class HtmlVaryTokensTest : public RewriteOptionsTestBase<RewriteOptions> {
+// rewrite_test_base.h declares its own RewriteOptionsTestBase, so this fixture
+// does the RewriteOptions Initialize/Terminate bracketing itself.
+class HtmlVaryTokensTest : public testing::Test {
  protected:
-  HtmlVaryTokensTest() : options_(thread_system()) {}
+  HtmlVaryTokensTest()
+      : thread_system_(Platform::CreateThreadSystem()),
+        options_(thread_system_.get()) {}
+
+  ThreadSystem* thread_system() { return thread_system_.get(); }
 
   // Starts from a configuration with no filter enabled, so each case names
   // exactly the filters and qualities it wants.
@@ -78,6 +84,13 @@ class HtmlVaryTokensTest : public RewriteOptionsTestBase<RewriteOptions> {
     options_.set_image_webp_quality_for_save_data(-1);
   }
 
+  struct OptionsScope {
+    OptionsScope() { RewriteOptions::Initialize(); }
+    ~OptionsScope() { RewriteOptions::Terminate(); }
+  };
+
+  OptionsScope options_scope_;
+  std::unique_ptr<ThreadSystem> thread_system_;
   RewriteOptions options_;
 };
 
@@ -172,7 +185,10 @@ TEST_F(HtmlVaryTokensTest, PreservedImageUrlsDropImageTokens) {
   options_.EnableFilter(RewriteOptions::kConvertJpegToWebp);
   options_.set_image_jpeg_quality_for_save_data(40);
   EXPECT_EQ("Accept,Save-Data,User-Agent", Tokens(options_));
+  // Preserved URLs only leave the image rewriter out of the HTML chain when
+  // in-place preemptive image rewriting is off.
   options_.set_image_preserve_urls(true);
+  options_.set_in_place_preemptive_rewrite_images(false);
   EXPECT_EQ("", Tokens(options_));
   // Preemptive in-place rewriting puts the image rewriter back in the chain.
   options_.set_in_place_preemptive_rewrite_images(true);
@@ -186,6 +202,9 @@ TEST_F(HtmlVaryTokensTest, ExplicitInlineOrDelayKeepUserAgentWhenPreserved) {
   EXPECT_EQ("User-Agent", Tokens(options_));
   RewriteOptions delay(thread_system());
   delay.set_image_preserve_urls(true);
+  delay.set_in_place_preemptive_rewrite_images(false);
+  delay.set_image_jpeg_quality_for_save_data(-1);
+  delay.set_image_webp_quality_for_save_data(-1);
   delay.EnableFilter(RewriteOptions::kDelayImages);
   EXPECT_EQ("User-Agent", Tokens(delay));
 }
@@ -288,9 +307,8 @@ TEST_F(HtmlVaryFilterTest, SameVaryForEveryRequest) {
   EnableCore();
   const char kExpected[] = "Accept,Save-Data,User-Agent";
   // Chrome that accepts WebP.
-  EXPECT_EQ(kExpected,
-            VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
-                    "text/html,image/webp,*/*", false, nullptr));
+  EXPECT_EQ(kExpected, VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
+                               "text/html,image/webp,*/*", false, nullptr));
   // Safari 17 without WebP in the navigation Accept.
   EXPECT_EQ(kExpected,
             VaryFor("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -298,36 +316,31 @@ TEST_F(HtmlVaryFilterTest, SameVaryForEveryRequest) {
                     "Safari/605.1.15",
                     "text/html,*/*", false, nullptr));
   // An Android phone.
-  EXPECT_EQ(kExpected,
-            VaryFor("Mozilla/5.0 (Linux; Android 13; Pixel 7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Mobile Safari/537.36",
-                    "image/webp,*/*", false, nullptr));
+  EXPECT_EQ(kExpected, VaryFor("Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/120.0.0.0 Mobile Safari/537.36",
+                               "image/webp,*/*", false, nullptr));
   // Googlebot.
-  EXPECT_EQ(kExpected,
-            VaryFor("Mozilla/5.0 (compatible; Googlebot/2.1; "
-                    "+http://www.google.com/bot.html)",
-                    nullptr, false, nullptr));
+  EXPECT_EQ(kExpected, VaryFor("Mozilla/5.0 (compatible; Googlebot/2.1; "
+                               "+http://www.google.com/bot.html)",
+                               nullptr, false, nullptr));
   // Save-Data on and off, and a capability list that removes capabilities.
-  EXPECT_EQ(kExpected,
-            VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
-                    "image/webp", true, nullptr));
-  EXPECT_EQ(kExpected,
-            VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
-                    "image/webp", false, nullptr));
-  EXPECT_EQ(kExpected,
-            VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
-                    "image/webp", false, "none"));
+  EXPECT_EQ(kExpected, VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
+                               "image/webp", true, nullptr));
+  EXPECT_EQ(kExpected, VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
+                               "image/webp", false, nullptr));
+  EXPECT_EQ(kExpected, VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent,
+                               "image/webp", false, "none"));
 }
 
 TEST_F(HtmlVaryFilterTest, ColdAndWarmCacheAgree) {
   EnableCore();
   const GoogleString cold =
-      VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent, "image/webp",
-              false, nullptr);
+      VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent, "image/webp", false,
+              nullptr);
   const GoogleString warm =
-      VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent, "image/webp",
-              false, nullptr);
+      VaryFor(UserAgentMatcherTestBase::kChrome18UserAgent, "image/webp", false,
+              nullptr);
   EXPECT_EQ("Accept,Save-Data,User-Agent", cold);
   EXPECT_EQ(cold, warm);
 }
