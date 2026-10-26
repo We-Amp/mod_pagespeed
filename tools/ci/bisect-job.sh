@@ -39,11 +39,14 @@
 # BISECT_ROOT/<id>/names before it is created; only those names are ever
 # removed; a resumed worker first removes the containers an earlier worker
 # recorded. Host Bazel (vendoring) runs with HOME and --output_user_root
-# under BISECT_ROOT/<id>, and through a PATH shim that forces
-# --output_base=BISECT_ROOT/<id>/vendor-ob (a vendor script's own
-# --output_base is replaced); the exit trap shuts that server down and
-# removes both trees. Images are only ever added (content-hashed tags from
-# the commit's ensure-dev-image.sh), never retagged or removed.
+# (so the install base) under BISECT_ROOT/<id>, through a PATH shim that
+# keeps the vendor script's own --output_base (the script may read it),
+# records it, and shuts that server down when each call returns (a call
+# without one gets BISECT_ROOT/<id>/vendor-ob). The exit trap shuts down any
+# recorded output base that still exists and removes only the trees under
+# BISECT_ROOT/<id>; a vendor script's own directory stays its own. Images
+# are only ever added (content-hashed tags from the commit's
+# ensure-dev-image.sh), never retagged or removed.
 # Host-side work (docker clients, vendoring, image builds) runs under
 # nice/ionice. That does not carry into a container: a step container's
 # share comes from --cpu-shares 128 and its --cpus/--memory caps, and the
@@ -380,12 +383,18 @@ remove_recorded() {
 
 # Remove the run's docker objects and its host Bazel server and trees.
 cleanup() {
-  local real
+  local real ob
   remove_recorded
   real="$(cat "${RUN_DIR}/vendor-bin/real-bazel" 2>/dev/null)"
-  if [ -d "${RUN_DIR}/vendor-ob" ] && [ -n "${real}" ]; then
-    (cd "${SRC}" 2>/dev/null || cd "${RUN_DIR}" || exit; HOME="${RUN_DIR}/home" \
-      "${real}" "--output_base=${RUN_DIR}/vendor-ob" shutdown) >/dev/null 2>&1 9>&-
+  # A vendoring call that was interrupted may have left its server running:
+  # shut down every recorded output base that still exists (never delete
+  # one outside the run's own directory).
+  if [ -n "${real}" ] && [ -f "${RUN_DIR}/vendor-obs" ]; then
+    while IFS= read -r ob; do
+      [ -n "${ob}" ] && [ -d "${ob}" ] || continue
+      (cd "${RUN_DIR}" && HOME="${RUN_DIR}/home" \
+        "${real}" "--output_base=${ob}" shutdown) >/dev/null 2>&1 9>&-
+    done < "${RUN_DIR}/vendor-obs"
   fi
   remove_tree "${RUN_DIR}/vendor-ob"
   remove_tree "${RUN_DIR}/bazel-root"
@@ -609,33 +618,50 @@ prepare_home() {
 }
 
 # prepare_vendor_shim: <id>/vendor-bin/bazel, first on PATH while
-# vendoring, runs the real bazel with --output_base=<id>/vendor-ob in place
-# of any --output_base the vendor command passes (an older vendor script
-# keeps its own choice of directory, so the shim cannot rely on TMPDIR).
+# vendoring. It reads only the leading startup options (bazel [startup
+# options] <command> ...). It keeps a caller's --output_base (a vendor
+# script may read that directory itself) and gives a call without one
+# <id>/vendor-ob. It records the output base in <id>/vendor-obs and shuts
+# its server down when the call returns, so no vendoring server outlives
+# the call that started it.
 prepare_vendor_shim() {
   local bin="${RUN_DIR}/vendor-bin" real
   real="$(command -v bazel)" || return 1
   case "${real}" in "${bin}"/*) real="$(cat "${bin}/real-bazel")" ;; esac
-  mkdir -p "${bin}" "${RUN_DIR}/vendor-ob" || return 1
+  mkdir -p "${bin}" || return 1
   echo "${real}" > "${bin}/real-bazel"
   {
     echo '#!/usr/bin/env bash'
-    echo '# Vendoring-only bazel: the output base is always the run'"'"'s own.'
-    printf 'real=%q
-ob=%q
-' "${real}" "${RUN_DIR}/vendor-ob"
+    echo '# Vendoring-only bazel (written by bisect-job.sh).'
+    printf 'real=%q\n' "${real}"
+    printf 'default_ob=%q\n' "${RUN_DIR}/vendor-ob"
+    printf 'record=%q\n' "${RUN_DIR}/vendor-obs"
     cat <<'EOF'
-args=()
-skip=0
-for a in "$@"; do
-  if [ "${skip}" = 1 ]; then skip=0; continue; fi
+args=("$@")
+ob=""
+cmd=""
+i=0
+while [ "${i}" -lt "$#" ]; do
+  a="${args[${i}]}"
   case "${a}" in
-    --output_base=*) ;;
-    --output_base) skip=1 ;;
-    *) args+=("${a}") ;;
+    --output_base=*) ob="${a#--output_base=}" ;;
+    --output_base) i=$((i + 1)); ob="${args[${i}]:-}" ;;
+    --*) ;;
+    *) cmd="${a}"; break ;;
   esac
+  i=$((i + 1))
 done
-exec "${real}" "--output_base=${ob}" ${args[@]+"${args[@]}"}
+if [ -z "${ob}" ]; then
+  ob="${default_ob}"
+  mkdir -p "${ob}"
+  set -- "--output_base=${ob}" "$@"
+fi
+case "${ob}" in /*) abs="${ob}" ;; *) abs="${PWD}/${ob}" ;; esac
+grep -qxF -- "${abs}" "${record}" 2>/dev/null || echo "${abs}" >> "${record}"
+"${real}" "$@"
+rc=$?
+[ "${cmd}" = shutdown ] || "${real}" "--output_base=${abs}" shutdown >/dev/null 2>&1
+exit "${rc}"
 EOF
   } > "${bin}/bazel"
   chmod +x "${bin}/bazel"

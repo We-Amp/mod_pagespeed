@@ -663,10 +663,11 @@ Host safety contract:
   get a small fixed cap. Host-side work (the docker client, vendoring, image
   builds) runs under `nice` (and `ionice` where present); that does not carry
   into a container, so the share inside comes from the caps alone.
-- Host Bazel (vendoring) runs with `HOME`, `--output_user_root` and (through
-  a `PATH` shim that replaces any `--output_base` the vendor script passes)
-  `--output_base` under `BISECT_ROOT/<id>`; the exit trap shuts that server
-  down and removes both trees.
+- Host Bazel (vendoring) runs with `HOME` and `--output_user_root` (the
+  install base) under `BISECT_ROOT/<id>`. A `PATH` shim keeps the vendor
+  script's own `--output_base`, records it and shuts that server down when
+  each call returns; the exit trap shuts down any recorded one that is left
+  and removes only the trees under `BISECT_ROOT/<id>`.
 - `resume` first removes the containers the earlier worker recorded.
 
 ## The release ref guard

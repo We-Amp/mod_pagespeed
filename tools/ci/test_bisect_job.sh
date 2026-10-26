@@ -156,10 +156,15 @@ EOF
 cat > "${BIN}/bazel" <<'EOF'
 #!/usr/bin/env bash
 echo "HOME=${HOME} $*" >> "${FAKE_STATE}/bazel.log"
+ob=""
+for a in "$@"; do
+  case "${a}" in --output_base=*) ob="${a#--output_base=}" ;; --*) ;; *) break ;; esac
+done
 case " $* " in
   *" vendor "*)
     st=$(fixture-status "$(cat n 2>/dev/null)")
     [ "${st}" = vendorfail ] && { echo "ERROR: fetch failed" >&2; exit 1; }
+    [ -n "${ob}" ] && mkdir -p "${ob}/external/protobuf++protoc+linux-x86_64"
     dir=vendor
     for a in "$@"; do case "${a}" in --vendor_dir=*) dir="${a#--vendor_dir=}" ;; esac; done
     mkdir -p "${dir}" && echo "vendored $(cat n)" > "${dir}/marker"; exit 0 ;;
@@ -226,10 +231,15 @@ echo "build $*" >> "${FAKE_STATE}/ensure.log"
 echo "${name}" >> "${FAKE_STATE}/images"
 echo "${name}"
 EOF
-# Like an older vendor script: its own output base under /tmp.
+# Like the real vendor script: its own output base (a mktemp dir), which it
+# reads after the bazel call; it leaves the dir behind here, so the test can
+# see that the driver never deletes it.
 cat > "${ORIGIN}/tools/vendor-deps.sh" <<'EOF'
 #!/usr/bin/env bash
-exec bazel --output_base=/tmp/bazel-vendor-fixture vendor --vendor_dir="${1:-vendor}" //...
+ob="$(mktemp -d "${FAKE_TMP}/bazel-vendor-XXXXXX")"
+bazel --output_base="${ob}" vendor --vendor_dir="${1:-vendor}" //... || exit 1
+ls -d "${ob}"/external/protobuf++protoc+* >/dev/null 2>&1 \
+  || { echo "MISSING protoc repos under ${ob}" >&2; exit 1; }
 EOF
 cat > "${ORIGIN}/.github/workflows/pipeline-full.yml" <<'EOF'
 jobs:
@@ -264,7 +274,9 @@ new_case() {
   FAKE_STATE="${WORK}/cases/${CASE}"
   mkdir -p "${FAKE_STATE}/root"
   BISECT_ROOT="$(cd -P "${FAKE_STATE}/root" && pwd -P)"
-  export FAKE_STATE BISECT_ROOT
+  FAKE_TMP="${FAKE_STATE}/tmp"
+  mkdir -p "${FAKE_TMP}"
+  export FAKE_STATE BISECT_ROOT FAKE_TMP
   : > "${FAKE_STATE}/docker.log"; : > "${FAKE_STATE}/bazel.log"; : > "${FAKE_STATE}/images"
   printf 'linux-asan\tRun ASan\t2026-10-26T02:10:11.1234567Z \033[31m//rec:a_test\033[0m   FAILED in 2.1s\n' \
     > "${FAKE_STATE}/gh-log"
@@ -353,19 +365,30 @@ else
   pass "${CASE}"
 fi
 
-CASE=vendor-output-base-is-under-bisect-root
-OB="${BR}/${CID}/vendor-ob"
-if grep -v -- "--output_base=${OB} " "${FAKE_STATE}/bazel.log" >/dev/null; then
-  fail "${CASE}" "a host bazel call without the run's output base: $(grep -v -- "--output_base=${OB} " "${FAKE_STATE}/bazel.log" | head -2)"
-elif grep -q '/tmp/bazel-vendor' "${FAKE_STATE}/bazel.log"; then
-  fail "${CASE}" "the vendor script's own output base reached bazel"
-elif ! grep -q -- "--output_base=${OB} shutdown" "${FAKE_STATE}/bazel.log"; then
-  fail "${CASE}" "cleanup did not shut down the vendoring server"
-elif [ -e "${OB}" ]; then
-  fail "${CASE}" "the vendoring output base was left behind"
-else
-  pass "${CASE}"
+CASE=vendor-servers-shut-down-nothing-deleted-outside-root
+# Every host vendoring call names an output base; each one gets a shutdown
+# after its last use; the install base and HOME stay under BISECT_ROOT; an
+# output base outside BISECT_ROOT (the vendor script's own) is left alone;
+# the run's own vendor-ob is removed.
+BLOG="${FAKE_STATE}/bazel.log"
+problems=""
+if grep -v -- ' --output_base=' "${BLOG}" | grep -q .; then
+  problems="${problems} [a call without an output base]"
 fi
+# Each vendoring call is followed directly by the shutdown of its server.
+calls=$(awk '!/ shutdown$/ {ob = $0; sub(/.* --output_base=/, "", ob); sub(/ .*/, "", ob)
+  if ((getline nxt) <= 0 || nxt !~ (" --output_base=" ob " shutdown$")) print ob}' "${BLOG}")
+[ -z "${calls}" ] || problems="${problems} [no shutdown right after a call on: $(echo ${calls})]"
+for ob in $(grep -v ' shutdown$' "${BLOG}" | sed -n 's/.* --output_base=\([^ ]*\) .*/\1/p' | sort -u); do
+  case "${ob}" in
+    "${BR}"/*) ;;
+    *) [ -d "${ob}" ] || problems="${problems} [deleted outside the root: ${ob}]" ;;
+  esac
+done
+grep -qxF "startup --output_user_root=${BR}/${CID}/bazel-root" "${BR}/${CID}/home/.bazelrc" \
+  || problems="${problems} [install base not under the root]"
+[ -e "${BR}/${CID}/vendor-ob" ] && problems="${problems} [vendor-ob left behind]"
+if [ -n "${problems}" ]; then fail "${CASE}" "${problems}"; else pass "${CASE}"; fi
 
 CASE=host-vendoring-is-low-priority
 if grep -q 'bash -c .*bisect_vendor_cmd' "${FAKE_STATE}/ionice.log" 2>/dev/null; then
@@ -509,6 +532,10 @@ else
   st_out=$("${DRIVER}" status "${ID}" 2>&1 || true)
   # An orphan an earlier (killed) worker recorded: resume removes it first.
   echo "container ${ID}-step-99" >> "${BISECT_ROOT}/${ID}/names"
+  # And a vendoring output base an interrupted call left: cleanup shuts its
+  # server down and leaves the directory alone.
+  mkdir -p "${FAKE_TMP}/orphan-ob"
+  echo "${FAKE_TMP}/orphan-ob" >> "${BISECT_ROOT}/${ID}/vendor-obs"
   before=$(wc -l < "${FAKE_STATE}/docker.log")
   RC=0; "${DRIVER}" resume "${ID}" >/dev/null 2>"${FAKE_STATE}/resume.err" || RC=$?
   after_log=$(tail -n +"$((before + 1))" "${FAKE_STATE}/docker.log")
@@ -519,6 +546,10 @@ else
       fail "${CASE}" "status printed no state: ${st_out}"
     elif [ -z "${rm_at}" ] || [ -z "${run_at}" ] || [ "${rm_at}" -gt "${run_at}" ]; then
       fail "${CASE}" "the recorded orphan was not removed before new containers started"
+    elif ! grep -q -- "--output_base=${FAKE_TMP}/orphan-ob shutdown" "${FAKE_STATE}/bazel.log"; then
+      fail "${CASE}" "cleanup did not shut down a recorded vendoring output base"
+    elif [ ! -d "${FAKE_TMP}/orphan-ob" ]; then
+      fail "${CASE}" "cleanup deleted a directory outside BISECT_ROOT"
     elif cmp -s "${RESULT}" "${CULPRIT_RESULT}"; then
       pass "${CASE}"
     else
