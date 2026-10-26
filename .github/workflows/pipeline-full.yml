@@ -423,8 +423,7 @@ jobs:
               # BAZEL_CONFIG is an intentional flag list -> word-splitting.
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out \
-                build ${BAZEL_CONFIG} \
-                --action_env=CC=clang --action_env=CXX=clang++ \
+                build ${BAZEL_CONFIG} --config=ci-build \
                 -- //:libmod_pagespeed.so \
                 //pagespeed/nginx:ngx_pagespeed_module.so \
                 //test/pagespeed/kernel/... //test/net/... \
@@ -570,16 +569,11 @@ jobs:
               set -e
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out-asan \
-                test ${BAZEL_CONFIG} --config=clang-asan --nocache_test_results \
-                --action_env=CC=clang --action_env=CXX=clang++ \
-                --keep_going \
+                test ${BAZEL_CONFIG} --config=ci-asan --nocache_test_results \
                 --test_env=REDIS_HOST="${REDIS_HOST}" \
                 --test_env=REDIS_PORT=6379 \
                 --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
                 --test_env=MEMCACHED_PORT=11211 \
-                --test_env="ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1" \
-                --test_env="LSAN_OPTIONS=suppressions=/workspace/tools/lsan_suppressions.txt" \
-                --test_env="UBSAN_OPTIONS=halt_on_error=true:print_stacktrace=1:suppressions=/workspace/tools/ubsan_suppressions.txt" \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
@@ -699,14 +693,11 @@ jobs:
               set -e
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out-tsan \
-                test ${BAZEL_CONFIG} --config=clang-tsan --nocache_test_results \
-                --action_env=CC=clang --action_env=CXX=clang++ \
-                --keep_going \
+                test ${BAZEL_CONFIG} --config=ci-tsan --nocache_test_results \
                 --test_env=REDIS_HOST="${REDIS_HOST}" \
                 --test_env=REDIS_PORT=6379 \
                 --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
                 --test_env=MEMCACHED_PORT=11211 \
-                --test_env="TSAN_OPTIONS=report_atomic_races=0:detect_deadlocks=0:suppressions=/workspace/tools/tsan_suppressions.txt:external_symbolizer_path=/opt/llvm/bin/llvm-symbolizer" \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...

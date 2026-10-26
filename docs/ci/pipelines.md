@@ -580,6 +580,14 @@ a failed or undecided scope job, no usable base or an API failure runs it.
 
 Notes on the full tier:
 
+- The Bazel flags of `linux-build`, `linux-asan` and `linux-tsan` live in
+  `.bazelrc` as `--config=ci-build`, `--config=ci-asan` and `--config=ci-tsan`
+  (compiler, `--keep_going`, the sanitizer configs and their
+  `ASAN_OPTIONS`/`LSAN_OPTIONS`/`UBSAN_OPTIONS`/`TSAN_OPTIONS`). They are the
+  one definition CI and the bisect script share. The command line keeps only
+  the remote-cache and jobs choice, `--nocache_test_results`, the targets and
+  the redis/memcached `--test_env` values; container flags stay in the
+  workflow. Change a job's flags in `.bazelrc`, not in the YAML.
 - Sanitizer jobs wait for `linux-build` (not only for `vendor`), so they never
   compete with the build for a heavy slot.
 - Containers run as the host user. The job supplies a passwd file that names
