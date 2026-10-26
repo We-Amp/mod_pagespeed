@@ -158,7 +158,8 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
             // config surfaces as a clear error carrying nginx's own stderr rather than
             // an opaque "process exited with code N". nginx -t MUST pass before the
             // sidecar reports Running, with nginx's stderr captured on failure.
-            await ValidateGeneratedConfigAsync(binaryPath, _configPath, cancellationToken);
+            await ValidateGeneratedConfigAsync(
+                binaryPath, _configPath, opts.Sidecar.ConfigValidationTimeoutMs, cancellationToken);
 
             // Start process
             StartProcess(binaryPath);
@@ -515,10 +516,16 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
     /// the test fails (non-zero exit). This must pass
     /// before the sidecar reaches <see cref="SidecarState.Running"/>, so a malformed
     /// generated config is reported with a precise diagnostic instead of an opaque
-    /// "process exited" surfaced later by the health wait.
+    /// "process exited" surfaced later by the health wait. A validation that outlives
+    /// <paramref name="timeoutMs"/> is killed and reported as a
+    /// <see cref="TimeoutException"/> carrying the elapsed time and the output
+    /// captured so far; a cancelled <paramref name="cancellationToken"/> also kills
+    /// the child and still surfaces as
+    /// <see cref="OperationCanceledException"/>. Internal so the timeout
+    /// path is unit-testable directly, like <see cref="WaitForHealthyAsync"/>.
     /// </summary>
-    private async Task ValidateGeneratedConfigAsync(
-        string binaryPath, string configPath, CancellationToken cancellationToken)
+    internal async Task ValidateGeneratedConfigAsync(
+        string binaryPath, string configPath, int timeoutMs, CancellationToken cancellationToken)
     {
         var output = new System.Text.StringBuilder();
         using var proc = new Process { StartInfo = BuildConfigTestStartInfo(binaryPath, configPath) };
@@ -533,9 +540,41 @@ public class ProcessSidecarManager : ISidecarManager, IDisposable
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
 
+        var stopwatch = Stopwatch.StartNew();
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(15));
-        await proc.WaitForExitAsync(timeoutCts.Token);
+        timeoutCts.CancelAfter(timeoutMs);
+        try
+        {
+            await proc.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Either the budget expired or the caller cancelled: nginx -t may still
+            // be running and must not be left behind either way. Kill it, then decide
+            // what to surface.
+            try
+            {
+                proc.Kill(entireProcessTree: true);
+                await proc.WaitForExitAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // The process may have exited between the cancellation and the kill;
+                // the using-Dispose below still tears down our side of the handle.
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                // The caller cancelled: surface their cancellation promptly.
+                throw;
+            }
+
+            string captured;
+            lock (output) captured = output.ToString().Trim();
+            throw new TimeoutException(
+                $"nginx -t did not finish within {stopwatch.Elapsed.TotalSeconds:0.##} s; " +
+                $"output so far: {(captured.Length > 0 ? captured : "(none)")}");
+        }
 
         if (proc.ExitCode != 0)
         {
