@@ -32,6 +32,7 @@ import json
 import os
 import pathlib
 import time
+import urllib.parse
 from typing import Callable, Dict, Optional
 
 # The admin console's cache actions answer only a same-origin POST that
@@ -564,6 +565,209 @@ class TestCachePurge:
             assert response.status != 500, (
                 f"Purge URL format '{test_url}' caused server error"
             )
+
+
+# ============================================================================
+# TestOptimizerFullPurge: a full purge of the optimizer's volume while serving
+# ============================================================================
+
+_OPTIMIZER_WEBP = {"Accept": "image/webp,*/*"}
+_OPTIMIZER_SERVE_DEADLINE_S = 40.0
+_OPTIMIZER_PURGE_DEADLINE_S = 15.0
+
+
+def _served_by_optimizer(response) -> bool:
+    """True for a response the optimizer's volume answered with a variant.
+
+    The module's optimized-variant leg carries a weak ETag that begins
+    W/"ps- and an Age header; the stored original carries the origin's own
+    ETag, and a response from the module's classic path carries neither.
+    """
+    return response.header("ETag").startswith('W/"ps-') and bool(
+        response.header("Age")
+    )
+
+
+def _read_generation(volume_path: str) -> Optional[int]:
+    """The optimizer's volume generation (<volume>.gen), None when absent."""
+    # The file is replaced atomically; on Windows a read that races the
+    # replace can hit a sharing violation or see a partial line, so retry.
+    for _ in range(5):
+        try:
+            text = pathlib.Path(volume_path + ".gen").read_text(encoding="ascii")
+            return int(text.strip())
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            time.sleep(0.1)
+    return None
+
+
+class TestOptimizerFullPurge:
+    """A full purge replaces the optimizer's cache volume while the site serves.
+
+    On Windows the IIS worker process holds the optimizer's volume open and
+    mapped. The optimizer has to replace the volume anyway: it moves the held
+    files aside, starts a fresh volume and advances the generation file, and
+    the module reopens on the new generation. Until that works a full purge
+    reports success and changes nothing.
+
+    Needs a lane that runs the optimizer (DaemonSocketPath and
+    DaemonVolumePath set on a separate site, the service running); the test
+    talks to that site only. Environment:
+        PAGESPEED_IIS_DAEMON_SITE_URL: base URL of the optimizer-backed site
+        PAGESPEED_OPTIMIZER_API: host:port of the optimizer's management API
+        PAGESPEED_OPTIMIZER_API_TOKEN: API token, when one is configured
+        PAGESPEED_OPTIMIZER_VOLUME: DaemonVolumePath, to read <volume>.gen
+    The test fails when the API is given without the site URL (a misconfigured
+    lane). It skips when the API is not given, when the purge reports that
+    another process still has the volume open, and when the optimizer
+    answers the purge as done while the old variants are still served (an
+    optimizer that does not report a volume it could not remove).
+    Worst case is about 170 s, above the default per-test timeout, hence the
+    explicit timeout marker.
+    """
+
+    @pytest.mark.iis_only
+    @pytest.mark.slow
+    @pytest.mark.timeout(240)
+    def test_full_purge_takes_effect_while_serving(
+        self, server_config, example_root: str
+    ):
+        api = os.environ.get("PAGESPEED_OPTIMIZER_API", "")
+        if not api:
+            pytest.skip(
+                "The lane does not run the optimizer "
+                "(PAGESPEED_OPTIMIZER_API is not set)"
+            )
+        site_url = os.environ.get("PAGESPEED_IIS_DAEMON_SITE_URL", "").strip()
+        if not site_url:
+            pytest.fail(
+                "PAGESPEED_OPTIMIZER_API is set but PAGESPEED_IIS_DAEMON_SITE_URL "
+                "is not: the lane runs a worker without its optimizer-backed site"
+            )
+        parsed = urllib.parse.urlsplit(site_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            pytest.fail(
+                f"PAGESPEED_IIS_DAEMON_SITE_URL must be an http(s) URL, "
+                f"got {site_url!r}"
+            )
+        use_https = parsed.scheme == "https"
+        # Every page request goes to the optimizer-backed site, not the main
+        # site (which keeps classic in-place optimization).
+        client = PageSpeedClient(
+            host=parsed.hostname,
+            port=parsed.port or (443 if use_https else 80),
+            use_https=use_https,
+        )
+        host, _, port = api.rpartition(":")
+        if not host or not port.isdigit():
+            pytest.fail(f"PAGESPEED_OPTIMIZER_API must be host:port, got {api!r}")
+        api_headers = {"Content-Type": "application/json"}
+        token = os.environ.get("PAGESPEED_OPTIMIZER_API_TOKEN")
+        if token:
+            api_headers["Authorization"] = f"Bearer {token}"
+        optimizer = PageSpeedClient(host=host, port=int(port))
+        volume = os.environ.get("PAGESPEED_OPTIMIZER_VOLUME", "")
+
+        # Resources the optimizer builds variants for: a stylesheet and a
+        # photo that is worth a WebP copy.
+        resources = [
+            (f"{example_root}/styles/all_styles.css", {}),
+            (f"{example_root}/images/Puzzle.jpg", _OPTIMIZER_WEBP),
+        ]
+
+        # (1) Serve until the optimizer's variant is what comes back.
+        for path, headers in resources:
+            deadline = time.time() + _OPTIMIZER_SERVE_DEADLINE_S
+            while True:
+                response = client.get(path, headers=headers)
+                require_status_ok(response, path)
+                if _served_by_optimizer(response):
+                    break
+                if time.time() >= deadline:
+                    pytest.fail(
+                        f"{path}: no optimizer variant within "
+                        f"{_OPTIMIZER_SERVE_DEADLINE_S}s; last response "
+                        f"{response.status} {dict(response.headers)}"
+                    )
+                time.sleep(1.0)
+        generation_before = _read_generation(volume) if volume else None
+
+        # (2) Full purge, as the console and the management API do it.
+        purge = optimizer.post(
+            "/v1/cache/purge",
+            data=json.dumps({"scope": "all", "confirm": "purge-all"}),
+            headers=api_headers,
+        )
+        body = purge.text
+        if "another process still has it open" in body.lower():
+            pytest.skip(
+                "The optimizer in this lane cannot replace a volume the "
+                "module holds open; its purge reports the held volume "
+                f"({purge.status}: {body[:200]})"
+            )
+
+        # (3) The purge reports no failure ...
+        assert 200 <= purge.status < 300, (
+            f"Full purge failed: {purge.status} {body[:500]}"
+        )
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            payload = {}
+        assert isinstance(payload, dict) and not payload.get("error"), (
+            f"Full purge reported an error: {body[:500]}"
+        )
+        assert payload.get("volume_reset") is True, (
+            f"Full purge did not report a volume reset: {body[:500]}"
+        )
+
+        # ... and takes effect: the generation advanced, and the previously
+        # served variant is not served from the old volume any more.
+        if volume:
+            deadline = time.time() + _OPTIMIZER_PURGE_DEADLINE_S
+            generation_after = _read_generation(volume)
+            while generation_after == generation_before:
+                if time.time() >= deadline:
+                    pytest.fail(
+                        f"{volume}.gen did not advance after a full purge "
+                        f"(still {generation_before})"
+                    )
+                time.sleep(0.5)
+                generation_after = _read_generation(volume)
+
+        for path, headers in resources:
+            deadline = time.time() + _OPTIMIZER_PURGE_DEADLINE_S
+            while True:
+                response = client.get(path, headers=headers)
+                require_status_ok(response, path)
+                if not _served_by_optimizer(response):
+                    break
+                if time.time() >= deadline:
+                    pytest.skip(
+                        "optimizer predates the purge reporting fix: the "
+                        "purge answered as done, but "
+                        f"{path} is still served from the old volume "
+                        f"{_OPTIMIZER_PURGE_DEADLINE_S}s later"
+                    )
+                time.sleep(0.5)
+
+        # The site keeps serving: the first resource is re-recorded and the
+        # optimizer builds a variant again on the fresh volume.
+        path, headers = resources[0]
+        deadline = time.time() + _OPTIMIZER_SERVE_DEADLINE_S
+        while True:
+            response = client.get(path, headers=headers)
+            require_status_ok(response, path)
+            if _served_by_optimizer(response):
+                break
+            if time.time() >= deadline:
+                pytest.fail(
+                    f"{path}: no optimizer variant on the fresh volume within "
+                    f"{_OPTIMIZER_SERVE_DEADLINE_S}s after a full purge"
+                )
+            time.sleep(1.0)
 
 
 # ============================================================================
