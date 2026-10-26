@@ -280,6 +280,13 @@ bool InstawebHandler::ProxyUrl() {
 
   if (!fetch_succeeded || fetch.response_headers()->IsErrorStatus()) {
     server_context_->ReportSlurpNotFound(stripped_url, request_);
+    if (!fetch_succeeded) {
+      // Nothing was written to the client, so the handler can hand the
+      // request to httpd's error path and the site's ErrorDocument; with a
+      // successful fetch of an error status the origin's response was sent
+      // already and the handler must report the request handled.
+      apr_table_set(request_->notes, kPagespeedNotFoundNote, "1");
+    }
   }
   return true;
 }
@@ -295,6 +302,10 @@ bool InstawebHandler::AuthenticateProxy() {
       ResponseHeaders response_headers;
       if (redirect.empty()) {
         response_headers.SetStatusAndReason(HttpStatus::kForbidden);
+        // ProxyUrl() reports the request handled, so the 403 must be sent
+        // here: leaving it unsent answered the client with 200 and an
+        // empty body.
+        send_out_headers_and_body(request_, response_headers, "");
       } else {
         response_headers.SetStatusAndReason(HttpStatus::kTemporaryRedirect);
         response_headers.Add(HttpAttributes::kContentType, "text/html");

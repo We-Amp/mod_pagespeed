@@ -1188,12 +1188,15 @@ int pagespeed_modify_request(request_rec* r) {
       // very least is clearly not 127.0.0.1.
       apr_sockaddr_t* untrusted_sockaddr = nullptr;
 
+      // The rewrite is per request, so it is allocated from the request
+      // pool: the connection pool (client_addr->pool) lives as long as the
+      // keep-alive connection, and every loopback request on one grew it.
       // This builds a sockaddr object corresponding to 224.0.0.0
       CHECK_EQ(APR_SUCCESS,
                apr_sockaddr_info_get(&untrusted_sockaddr, "224.0.0.0", APR_INET,
-                                     80, 0, client_addr->pool));
+                                     80, 0, r->pool));
 
-      char* untrusted_ip_str = apr_pstrdup(client_addr->pool, "224.0.0.0");
+      char* untrusted_ip_str = apr_pstrdup(r->pool, "224.0.0.0");
 #ifdef MPS_APACHE_24
       r->useragent_ip = untrusted_ip_str;
       r->useragent_addr = untrusted_sockaddr;
@@ -1204,7 +1207,11 @@ int pagespeed_modify_request(request_rec* r) {
 
       // We set the remote host header to be an empty string --- Apache uses
       // that if there is an error, so it shouldn't pass through any ACLs.
-      c->remote_host = apr_pstrdup(client_addr->pool, "");
+      // remote_host is a conn_rec field that outlives this request (httpd
+      // reads it between keep-alive requests, e.g. from the scoreboard), so
+      // it must not point into r->pool: use a static string, as httpd's
+      // core does.
+      c->remote_host = const_cast<char*>("");
     }
   }
   return APACHE_OK;
