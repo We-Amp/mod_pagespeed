@@ -325,6 +325,11 @@ int ap_directory_walk(request_rec* r) {
   return APACHE_OK;
 }
 
+int ap_file_walk(request_rec* r) {
+  // Return APACHE_OK (0) to indicate success.
+  return APACHE_OK;
+}
+
 char* ap_construct_url(apr_pool_t* p, const char* uri, request_rec* r) {
   // Return a simple mock URL.
   return apr_pstrdup(p, uri);

@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <memory>
 
+#include "apr_strings.h"  // for apr_pstrdup  // NOLINT
 #include "base/logging.h"
 #include "http_config.h"
 #include "http_core.h"
@@ -103,7 +104,6 @@ const char kGenerateResponseWithOptionsHandler[] =
 const char kResourceUrlNote[] = "mod_pagespeed_resource";
 const char kResourceUrlNo[] = "<NO>";
 const char kResourceUrlYes[] = "<YES>";
-const char kPagespeedNotFoundNote[] = "mod_pagespeed_not_found";
 
 // Set the maximum size we allow for processing a POST body. The limit of 128k
 // is based on a best guess for the maximum size of beacons required for
@@ -114,6 +114,10 @@ const char kPagespeedNotFoundNote[] = "mod_pagespeed_not_found";
 const size_t kMaxPostSizeBytes = 131072;
 
 }  // namespace
+
+// Declared extern in instaweb_handler.h; defined outside the anonymous
+// namespace so it has external linkage.
+const char kPagespeedNotFoundNote[] = "mod_pagespeed_not_found";
 
 InstawebHandler::InstawebHandler(request_rec* request)
     : request_(request),
