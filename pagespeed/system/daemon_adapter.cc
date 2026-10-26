@@ -1636,9 +1636,10 @@ bool DaemonAdapter::SocketAnswers(StringPiece path, GoogleString* error) {
     // FILE_GENERIC_WRITE, which includes FILE_APPEND_DATA, and on a named
     // pipe that bit is FILE_CREATE_PIPE_INSTANCE, which the worker's DACL
     // withholds from other accounts. The probe only opens and closes.
-    HANDLE pipe = CreateFileW(
-        wide_spelled.c_str(), kPipeClientDesiredAccess, 0, nullptr, OPEN_EXISTING,
-        SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+    HANDLE pipe =
+        CreateFileW(wide_spelled.c_str(), kPipeClientDesiredAccess, 0, nullptr,
+                    OPEN_EXISTING,
+                    SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
     if (pipe != INVALID_HANDLE_VALUE) {
       CloseHandle(pipe);
       connected = true;
