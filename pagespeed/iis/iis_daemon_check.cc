@@ -121,6 +121,11 @@ struct IisDaemonCheckRegistry::SiteHandlerPool {
 	ForwardingHandler handler{this};
 };
 
+// An empty path is half a configuration; say so instead of printing nothing.
+static GoogleString PathOrNotSet(const GoogleString& path) {
+	return path.empty() ? GoogleString("(not set)") : path;
+}
+
 IisDaemonCheckRegistry::IisDaemonCheckRegistry()
     : pool_(new SiteHandlerPool) {}
 
@@ -153,6 +158,14 @@ IisDaemonCheckRegistry::Result IisDaemonCheckRegistry::GetOrCreate(
 		pool_->SetCapture(nullptr);
 		entry.split = (status == DaemonStartupStatus::kRefuseToStart);
 		entry.adapter = std::move(adapter);
+		// The adapter announces each distinct message once per process, so a
+		// second configuration that hits the same cause captures nothing. Its
+		// entry still names the cause: the adapter keeps its own verdict text,
+		// whether or not it was announced. Empty when the check left the arm
+		// ready, so a healthy check's notes never become a cause.
+		if (check_error.empty()) {
+			check_error = entry.adapter->startup_refusal();
+		}
 
 		if (entry.split) {
 			// ONE event-log entry per distinct split message per process,
@@ -202,7 +215,8 @@ IisDaemonCheckRegistry::Result IisDaemonCheckRegistry::GetOrCreate(
 			// warned_sockets_ so the recovery note can answer this entry.
 			GoogleString message = StrCat(
 			    "The pagespeed module started without the optimizer service "
-			    "it is configured to use (DaemonSocketPath ", socket_path,
+			    "it is configured to use (DaemonSocketPath ",
+			    PathOrNotSet(socket_path),
 			    "): in-place optimization through the service is off for "
 			    "every site configured with this socket. Start the optimizer "
 			    "service, or correct DaemonSocketPath / DaemonVolumePath if "
@@ -240,12 +254,12 @@ IisDaemonCheckRegistry::Result IisDaemonCheckRegistry::GetOrCreate(
 			// never recover, so no recovery note can follow anyway.
 			GoogleString message = StrCat(
 			    "The pagespeed module is configured to use the optimizer "
-			    "service (DaemonSocketPath ", socket_path,
-			    ", DaemonVolumePath ", volume_path,
+			    "service (DaemonSocketPath ", PathOrNotSet(socket_path),
+			    ", DaemonVolumePath ", PathOrNotSet(volume_path),
 			    ") but cannot use it: in-place optimization through the "
 			    "service is off for every site configured with these paths "
 			    "until the application pool recycles. The module does not "
-			    "check again; correct the cause reported below, then "
+			    "check again; correct the cause, then "
 			    "recycle the application pool.");
 			std::lock_guard<std::mutex> event_lock(event_mu_);
 			if (event_logged_.insert(message).second) {
@@ -272,7 +286,8 @@ void IisDaemonCheckRegistry::NoteDaemonRecovered(
 	// per-request volume, and like the warning it ignores UseEventLog.
 	GoogleString message = StrCat(
 	    "The pagespeed module attached to the optimizer service it is "
-	    "configured to use (DaemonSocketPath ", adapter->socket_path(),
+	    "configured to use (DaemonSocketPath ",
+	    PathOrNotSet(adapter->socket_path()),
 	    "): the service answered a later check, in-place optimization "
 	    "through it is on again, and no restart was needed.");
 	std::lock_guard<std::mutex> lock(event_mu_);
