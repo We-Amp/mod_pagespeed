@@ -63,7 +63,9 @@ class NgxEventConnection {
   // Creates the file descriptors and ngx_connection_t required for event
   // messaging between pagespeed and nginx.
   bool Init(ngx_cycle_t* cycle);
-  // Shuts down the underlying file descriptors and connection created in Init()
+  // Shuts down the underlying file descriptors and connection created in
+  // Init(): the write side directly, the read side through nginx so the
+  // event registration goes away with the fd.
   void Shutdown();
   // Constructs a ps_event_data and writes it to the underlying named pipe.
   bool WriteEvent(char type, void* sender);
@@ -73,7 +75,7 @@ class NgxEventConnection {
   void Drain();
 
  private:
-  static bool CreateNgxConnection(ngx_cycle_t* cycle, ngx_fd_t pipe_fd);
+  bool CreateNgxConnection(ngx_cycle_t* cycle, ngx_fd_t pipe_fd);
   static void ReadEventHandler(ngx_event_t* e);
   static bool ReadAndNotify(ngx_fd_t fd);
   // Invokes the receiving callback for one event; skips internal wake markers
@@ -92,12 +94,24 @@ class NgxEventConnection {
   ngx_fd_t pipe_write_fd_;
   ngx_fd_t pipe_read_fd_;
 
-  // Guards overflow_mode_ and overflow_, and serializes pipe writes so that
-  // the "no event may enter the pipe while older events wait in the overflow
-  // queue" ordering invariant holds.
+  // The nginx connection object carrying pipe_read_fd_ in the event loop,
+  // captured when it is registered (CreateNgxConnection) so Shutdown() can
+  // close the read side through nginx.
+  ngx_connection_t* connection_;
+
+  // Guards overflow_mode_, overflow_ and closed_, and serializes pipe
+  // writes so that the "no event may enter the pipe while older events wait
+  // in the overflow queue" ordering invariant holds.
   pthread_mutex_t write_mutex_;
   bool overflow_mode_;
   std::deque<ps_event_data> overflow_;
+
+  // Set under write_mutex_ by Shutdown() together with the write-fd close.
+  // WriteEvent() checks it under the same mutex before writing or queueing:
+  // after the close, the fd number can be reused by an unrelated file or
+  // socket (worker-exit teardown opens some), and a write would land a
+  // ps_event_data, heap pointers included, in it.
+  bool closed_;
 
   NgxEventConnection(const NgxEventConnection&) = delete;
   NgxEventConnection& operator=(const NgxEventConnection&) = delete;

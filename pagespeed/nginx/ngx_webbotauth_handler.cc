@@ -463,9 +463,16 @@ class LazyFileKeyDirectory : public webbotauth::KeyDirectoryProvider {
       // An empty/unreadable file yields an empty directory -> kNotFound ->
       // Verdict::kUnknown, the honest result when no key is available. The
       // path comes ONLY from operator config, never the request.
-      directory_ =
-          g_key_directory_files.Get(server_context_->file_system(), kd_file_,
-                                    server_context_->message_handler());
+      //
+      // The cache has no clock of its own: callers inject now_ms. Take it
+      // from the factory's timer, which exists before child initialization
+      // where the context's own timer is still null, and from its monotonic
+      // clock: the recheck interval is an elapsed-time comparison, which a
+      // backwards wall-clock step would freeze until the clock caught up.
+      directory_ = g_key_directory_files.Get(
+          server_context_->file_system(),
+          server_context_->factory()->timer()->NowMonotonicMs(), kd_file_,
+          server_context_->message_handler());
     }
     return directory_->GetKey(host, keyid, now_unix_sec);
   }
@@ -716,7 +723,11 @@ ngx_int_t ps_webbotauth_preaccess_handler(ngx_http_request_t* r) {
   }
   NgxRewriteOptions* options = server_context->config();
   // Default OFF: zero-cost fast path when the operator has not enabled it.
-  if (options == nullptr || !options->web_bot_auth()) {
+  // A context that was never child-initialized (a refused single-process
+  // reload) lacks the machinery the classifier may touch, so it declines
+  // the same way.
+  if (options == nullptr || !options->web_bot_auth() ||
+      !server_context->initialized()) {
     return NGX_DECLINED;
   }
 
@@ -810,8 +821,13 @@ ngx_int_t ps_rsl_cap_preaccess_handler(ngx_http_request_t* r) {
   NgxRewriteOptions* options = server_context->config();
   // Default OFF: zero-cost fast path when the operator has not enabled
   // enforcement. This is the PAID, demand-gated sibling of A1; it stays inert
-  // until explicitly turned on.
-  if (options == nullptr || !options->rsl_cap_enforcement()) {
+  // until explicitly turned on. A context that was never child-initialized
+  // (a refused single-process reload, or pagespeed unplugged, which skips
+  // child init entirely) lacks the timer, caches and statistics the
+  // validator path touches, so it declines like the Web Bot Auth handler
+  // above.
+  if (options == nullptr || !options->rsl_cap_enforcement() ||
+      !server_context->initialized()) {
     return NGX_DECLINED;
   }
 
@@ -860,8 +876,10 @@ ngx_int_t ps_rsl_cap_preaccess_handler(ngx_http_request_t* r) {
   webbotauth::RslCapToken token;
   // Use the engine's injectable Timer (unix seconds) rather than time(), so the
   // clock is the single mockable time source the rest of the engine uses.
+  // The factory's timer is the same object the context's timer() resolves
+  // to after child init, and exists before it.
   const int64_t now_unix_sec =
-      server_context->timer()->NowMs() / Timer::kSecondMs;
+      server_context->factory()->timer()->NowMs() / Timer::kSecondMs;
   webbotauth::RslCapStatus status = validator.Validate(
       auth, options->rsl_cap_requested_license(),
       options->rsl_cap_requested_scope(), options->rsl_cap_directory_host(),
@@ -888,6 +906,7 @@ ngx_int_t ps_x_verified_bot_variable(ngx_http_request_t* r,
                                      uintptr_t /*data*/) {
   NgxServerContext* server_context = ps_get_server_context(r);
   if (server_context == nullptr || server_context->config() == nullptr ||
+      !server_context->initialized() ||
       !server_context->config()->web_bot_auth()) {
     v->not_found = 1;
     return NGX_OK;
