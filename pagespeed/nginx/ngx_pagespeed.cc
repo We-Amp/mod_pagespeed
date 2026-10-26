@@ -4073,22 +4073,17 @@ ngx_int_t ps_in_place_body_filter(ngx_http_request_t* r, ngx_chain_t* in) {
         // a copy of the final headers from here on; the pool's shutdown
         // completes the recorder even if the closure never runs.
         ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
-        const SystemRewriteOptions* options =
-            SystemRewriteOptions::DynamicCast(ctx->driver->options());
         ResponseHeaders* headers = new ResponseHeaders();
         copy_response_headers_from_ngx(r, headers);
         // Looked up per completion for the same reason as the daemon arm's
         // counter: there are several statistics objects.
         Variable* dropped = cfg_s->server_context->statistics()->FindVariable(
             kIproClassicRecordDropped);
-        // Reserve no more than the recorder will buffer: Write() stops at
-        // the response cap.
-        int64_t body_bytes = ctx->record_body_bytes;
-        if (options != nullptr && options->ipro_max_response_bytes() > 0) {
-          body_bytes = std::min(
-              body_bytes,
-              static_cast<int64_t>(options->ipro_max_response_bytes()));
-        }
+        // No clamp at the response cap is needed here: a recording that
+        // reached the cap has failed and does not take this arm.  Nor is
+        // ctx->driver available for the options: the request declined to
+        // nginx when the recorder was created, which released the driver.
+        const int64_t body_bytes = ctx->record_body_bytes;
         if (g_classic_record_sequence != nullptr &&
             TryQueueDaemonCompletion(body_bytes, dropped)) {
           g_classic_record_sequence->Add(
