@@ -824,7 +824,7 @@ done
 # eg_refs_for); a file not named there may list only push, schedule and
 # workflow_dispatch events and exact refs/heads refs, refs/tags/* and refs/pull/*/merge.
 # pipeline-full.yml also allows pull_request (the caller runs it for the
-# ci:full label).
+# ci:full label) and schedule (the nightly calls it), and no other event.
 #   - "Reaches" means a path of needs edges to event-guard along which no job
 #     can run after a failed guard. Job keys (if, needs, runs-on,
 #     continue-on-error, uses) match quoted or with space before the colon.
@@ -854,7 +854,7 @@ done
 EG_DEFAULT_BRANCH="master"
 eg_allowed_for() { # workflow file base name
   case "$1" in
-    pipeline-full.yml) printf '%s' "push workflow_dispatch pull_request" ;;
+    pipeline-full.yml) printf '%s' "push workflow_dispatch pull_request schedule" ;;
     pipeline-nightly.yml) printf '%s' "schedule workflow_dispatch" ;;
     pipeline-tidy-sweep.yml) printf '%s' "workflow_dispatch" ;;
     gate-*.yml|pipeline-release-*.yml) printf '%s' "push workflow_dispatch" ;;

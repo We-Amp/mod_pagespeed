@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# pipeline-full.yml: the full tier, as a reusable workflow. It runs on a push
-# to master, on a workflow_dispatch with `full: true`, and on a pull request
-# labelled `ci:full` (the caller decides; see docs/ci/pipelines.md).
+# pipeline-full.yml: the full tier, as a reusable workflow. ci.yml calls it
+# on a push to master, on a workflow_dispatch with `full: true`, and on a pull
+# request labelled `ci:full`; nightly.yml calls it on the scheduled nightly
+# and on a nightly dispatch with `full_tier: true` (the callers decide; see
+# docs/ci/pipelines.md).
 #
 # The tier is self-contained: it vendors and builds for itself instead of
 # waiting for the PR tier, so the two run side by side. The artifacts it
@@ -55,7 +57,7 @@ jobs:
           PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
-          ALLOWED: "push workflow_dispatch pull_request"
+          ALLOWED: "push workflow_dispatch pull_request schedule"
           ALLOWED_REFS: "refs/heads/master refs/heads/ci-dev refs/pull/*/merge"
         run: |
           set -euo pipefail
@@ -72,12 +74,11 @@ jobs:
 
   # Path filter for the sidecar pair: a hosted job diffs what this run
   # covers and publishes `sidecar_pair`. A dispatch (the release candidate
-  # run) always builds the pair, so no fleet job of it is skipped; a pull
-  # request labelled ci:full diffs against its base; a push diffs from the
-  # head of the last push run of CI that succeeded
-  # (tools/ci/push_range_base.sh), and no usable base counts as everything
-  # changed. The weekly nightly run covers drift outside
-  # the paths.
+  # run) and the scheduled nightly always build the pair, so no fleet job of
+  # it is skipped; a pull request labelled ci:full diffs against its base; a
+  # push diffs from the head of the last push run of CI in which this job
+  # succeeded (tools/ci/push_range_base.sh --require-job), and no usable base
+  # counts as everything changed. The nightly covers drift outside the paths.
   changes:
     name: Detect changed paths (full tier)
     needs: event-guard
@@ -111,9 +112,11 @@ jobs:
               sidecar_pair=false
             fi
           elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            # Cumulative base: the last push run that succeeded, so a run that
-            # was cancelled or failed leaves its range to the next one. No usable base counts as everything changed.
-            base="$(bash tools/ci/push_range_base.sh)" || base=""
+            # Cumulative base: the last push run in which the full tier's change
+            # detection (this job) succeeded, so a run that was cancelled or
+            # skipped the full tier leaves its range to the next one. No usable
+            # base counts as everything changed.
+            base="$(bash tools/ci/push_range_base.sh --require-job 'full / Detect changed paths (full tier)')" || base=""
             if [ -n "${base}" ]; then
               git diff --name-only "${base}" "${GITHUB_SHA}" > "${changed}"
               if ! grep -qE "${paths}" "${changed}"; then

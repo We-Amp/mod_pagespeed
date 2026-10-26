@@ -183,6 +183,10 @@ expect_bad bad-yaml-alias 'yaml-alias'
 expect_bad bad-yaml-anchor 'yaml-alias'
 expect_bad bad-yaml-merge-key 'yaml-alias'
 expect_good good-event-guard-relay-bare-success
+# pipeline-full.yml admits schedule (the nightly calls it) and no other new event.
+expect_good good-event-guard-full-schedule
+expect_bad bad-event-guard-full-extra-event 'event-guard'
+expect_bad bad-event-guard-full-old-list 'event-guard'
 expect_bad bad-token 'rule e'
 expect_bad bad-ip 'rule e'
 expect_bad bad-home 'rule e'

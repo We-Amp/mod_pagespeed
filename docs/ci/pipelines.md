@@ -36,8 +36,8 @@ since a fetched copy lives under `$RUNNER_TEMP`.
 | Tier | Workflow | Runs on | Holds |
 |---|---|---|---|
 | PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, the system-test framework's own unit tests, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. |
-| Full | `pipeline-full.yml`, called by `ci.yml` | push to `master`, `workflow_dispatch` with `full: true`, or a pull request labelled `ci:full` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners; the sidecar native pair for x64 and arm64 (path-filtered). See "The full tier" |
-| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` | 04:00 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the offline rebuild of both server modules from the vendored tree with no network, the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
+| Full | `pipeline-full.yml`, called by `ci.yml` and `nightly.yml` | push to `master` (unless `FULL_TIER_TRIGGER` is `nightly`), `workflow_dispatch` with `full: true`, a pull request labelled `ci:full`, the scheduled nightly, or a nightly `workflow_dispatch` with `full_tier: true` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners; the sidecar native pair for x64 and arm64 (path-filtered). See "The full tier" |
+| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` (which also calls the full tier) | 04:00 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the offline rebuild of both server modules from the vendored tree with no network, the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane: build, package, smoke, the Windows installer, the release gates and validation, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`; a real run also signs and creates the release, in hosted jobs of the `release` environment. A dry run signs nothing and uses no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 | Tidy sweep | `pipeline-tidy-sweep.yml`, called by `tidy-sweep.yml` | on dispatch | one clang-tidy check full-tree with `-fix`, or a census of several checks with `fix` off; uploads the patch and the log as artifacts |
@@ -201,20 +201,24 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   hosted `changes` job publishes `sidecar_pair` from the same paths (with
   `pipeline-full.yml` in place of `pipeline-pr.yml`). On a push to `master` it
   compares a cumulative range: from the head of the most recent push run of `CI`
-  on `master` that succeeded and whose head is an ancestor of the pushed commit (`tools/ci/push_range_base.sh`, which reads the
-  Actions runs API with `actions: read`) to the pushed commit. `github.event.before`
+  on `master` in which this job, `full / Detect changed paths (full tier)`,
+  succeeded and whose head is an ancestor of the pushed commit
+  (`tools/ci/push_range_base.sh --require-job`, which reads the Actions runs
+  and jobs API with `actions: read`) to the pushed commit. A push run that
+  skipped the full tier (see "The full tier") or was cancelled before the job
+  ran leaves its range to the next push. `github.event.before`
   is not the base, because a newer push cancels an older pending run and
-  `before` then names a range nobody examined. After a red push to `master` the next push rebuilds the pair if the combined
-  range touches it. When the API fails, answers
+  `before` then names a range nobody examined. When the API fails, answers
   nothing usable or no candidate is an ancestor, the filter counts everything as
   changed and builds the pair; the log shows the reason and, as a shadow, what
   the `before` range would have said. On a pull
   request labelled `ci:full` the pull request against its base, and a
-  `workflow_dispatch` (the release candidate run) always builds the pair. With
+  `workflow_dispatch` (the release candidate run) and the scheduled nightly
+  always build the pair. With
   `FLEET_ENABLED` `false` the x64 leg runs on a hosted runner, and on a build
   runner it keeps to the slot's CPU and memory budget (`CI_SLOT_CPUS`,
-  `CI_SLOT_MEM_GB`). The nightly tier builds the pair on hosted
-  runners once a week.
+  `CI_SLOT_MEM_GB`). The nightly calls the full tier, so the pair is built
+  every night; there is no separate weekly sidecar lane.
 
 ## The shape
 
@@ -397,13 +401,22 @@ later jobs (`docs/ci/release.md`).
 `nightly.yml` holds the schedule (04:00 UTC, two cron entries: Monday to
 Saturday and Sunday) and `workflow_dispatch`, takes the run-wide `nightly`
 concurrency group (one nightly at a time, never cancelled) and calls
-`pipeline-nightly.yml@master`. Its inputs reach the jobs as strings and every
-one is validated before use: `fuzz_seconds` and
+`pipeline-nightly.yml@master` (job `nightly`) and `pipeline-full.yml@master`
+(job `full`, so its checks are named `full / <job name>` as in the push
+tier). The full tier runs on every scheduled night, and on a dispatch only
+with the boolean input `full_tier` (default `false`) on `master`: that is the
+make-up path for a missed or late night, and a dispatch on any other ref
+never reaches it. A release-candidate nightly dispatch leaves `full_tier` off,
+because the candidate's `CI` dispatch with `full: true` covers the full tier.
+The `full` job grants `actions: read` and `contents: read`, what the full
+tier's `changes` job requests. The other inputs reach the jobs as strings and
+every one is validated before use: `fuzz_seconds` and
 `duration` (1 to 1800 seconds), `concurrency`, `protocols`, `arms` and
 `severity`.
 
 Nothing in this tier writes to GitHub and nothing reads a secret. Both the
-caller and the called workflow hold `contents: read` only, which is why the
+caller and the called workflow hold `contents: read` only (the full tier's
+call adds `actions: read`), which is why the
 tier has no report jobs: a lane that finds something goes red, writes the
 job summary and uploads its evidence (kept three days, seven for the IIS
 matrix). Opening a tracking issue for a finding, or proposing the refreshed
@@ -429,7 +442,6 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `envoy-filter` | fleet-heavy, fleet only | builds the Envoy filter against Envoy 1.40 and runs its four unit tests (`tools/ci/envoy-filter-build.sh`), every night. The filter is an experimental port that no package ships and its build is long, so this is its only CI job (not in the PR or full tier). No hosted twin; it fetches into a per-runner repository cache, pruned at job start. A cold run is about an hour on 8 cores |
 | `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
 | `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
-| `sidecar-pair-weekly`, `sidecar-pair-weekly-arm64` | hosted | the Sunday 04:00 UTC run (the `0 4 * * 0` schedule string, compared in `sidecar-weekly` against `github.event.schedule` so the choice does not depend on when the run starts) and on a manual dispatch: vendor fresh and run `tools/ci/release_sidecar.sh check` for the ASP.NET Core sidecar's native pair, x64 and arm64, to catch drift the path-filtered pull request jobs cannot see (see "The sidecar native pair") |
 
 **Where the pin staleness check lives.** The blocking dependency gate of the
 pull request tier scans against the pinned grype database in
@@ -475,9 +487,35 @@ instead of waiting for the PR tier, so the two run side by side. Its
 artifacts carry the `full-` prefix. The IIS system tests (the PR tier's IIS
 legs) are not part of it.
 
+**When it runs.** Two callers name it `full`:
+
+- `ci.yml`: a `workflow_dispatch` with `full: true` (every release
+  candidate), a pull request labelled `ci:full`, and a push to `master`.
+- `nightly.yml`: every scheduled nightly, and a nightly `workflow_dispatch`
+  with `full_tier: true` on `master` (see "The nightly tier").
+
+The repository variable `FULL_TIER_TRIGGER` decides the push: unset, or any
+value other than `nightly`, runs the full tier on every push to `master`.
+With `nightly`, a push runs it only when the pushed range changes the full
+tier's own definition: `.github/workflows/pipeline-full.yml`, `nightly.yml`,
+`pipeline-nightly.yml`, `ci.yml` (it holds this trigger, so a change to it
+proves itself at once), anything under `.github/actions/`, every
+`tools/ci/` file `pipeline-full.yml` names (as `tools/ci/<file>` or
+`tools\ci\<file>`), and the `tools/ci/` files those files name in turn
+(one level). The hosted `Full tier scope` job (`full-scope` in `ci.yml`)
+decides it with `tools/ci/full_tier_scope.sh`, read from `master`, never
+from the tree under test, and publishes `full_tier_change`. The range is
+not the last commit: it starts at the head of the last push run of `CI` on
+`master` in which `Full tier scope` succeeded (`tools/ci/push_range_base.sh
+--require-job`), because GitHub replaces pending push runs in a merge burst
+and a full-tier change in a replaced run must still be seen. The full tier
+is skipped on a push only when `full-scope` succeeded and printed `false`;
+a failed or undecided scope job, no usable base or an API failure runs it.
+`CI gate` accepts `full-scope` and `full` as skipped.
+
 | Job | Class | Guard | Notes |
 |---|---|---|---|
-| `changes` | hosted | none | the `sidecar_pair` path filter (see "The sidecar native pair"); `true` on every `workflow_dispatch` |
+| `changes` | hosted | none | the `sidecar_pair` path filter (see "The sidecar native pair"); `true` on every `workflow_dispatch` and scheduled nightly |
 | `vendor` | `fleet-heavy` | general | vendors the dependency tree; publishes it through the hub when the runner environment provides one, else `actions/cache` |
 | `linux-build` | `fleet-heavy` | general | builds both server modules and the test targets, runs the module symbol checks, uploads the module bundle |
 | `linux-asan` | `fleet-heavy` | general | ASan, UBSan and LeakSan over the unit tests, with redis and memcached on a per-run network |
@@ -634,7 +672,7 @@ workflow). Every one of those pipelines therefore opens with a hosted job
 `refs/heads/gh-readonly-queue/` or outside the pipeline's allowed refs; a
 `workflow_dispatch` made by `github-actions[bot]` (a dispatch with a workflow
 token); and a pull request from a fork or from another repository. The allowed
-events and refs are `pipeline-full.yml` (events `push`, `workflow_dispatch`, `pull_request`; refs `refs/heads/master`, `refs/heads/ci-dev`, `refs/pull/*/merge`: the caller runs it for a push to `master`, a dispatch with `full: true` and the `ci:full` label), `pipeline-nightly.yml` (`schedule`, `workflow_dispatch`; `refs/heads/master`), `pipeline-tidy-sweep.yml` (`workflow_dispatch`; `refs/heads/master`), and `pipeline-release-module.yml` plus the two gate workflows it calls (`push`, `workflow_dispatch`; `refs/tags/*` and `refs/heads/master` for dry runs). Every fleet job reaches `event-guard` through `needs`,
+events and refs are `pipeline-full.yml` (events `push`, `workflow_dispatch`, `pull_request`, `schedule`; refs `refs/heads/master`, `refs/heads/ci-dev`, `refs/pull/*/merge`: `ci.yml` runs it for a push to `master`, a dispatch with `full: true` and the `ci:full` label, and `nightly.yml` for the scheduled nightly and a `full_tier` dispatch), `pipeline-nightly.yml` (`schedule`, `workflow_dispatch`; `refs/heads/master`), `pipeline-tidy-sweep.yml` (`workflow_dispatch`; `refs/heads/master`), and `pipeline-release-module.yml` plus the two gate workflows it calls (`push`, `workflow_dispatch`; `refs/tags/*` and `refs/heads/master` for dry runs). Every fleet job reaches `event-guard` through `needs`,
 so a refusal skips the whole fleet. The workflow-shape gate (`event-guard`)
 pins the job text, the per-pipeline lists and the edges, scans every workflow file that has a fleet `runs-on` (not a fixed list), and rejects a job between the guard and a fleet job that can still run after the guard failed. Job keys (`if`, `needs`, `runs-on`, `continue-on-error`, `uses`) are matched quoted or with whitespace before the colon. Each job's `if:` is normalised first (folded, literal and plain multi-line forms joined, where a plain value continues on every line indented more than its key and a `#`-led line inside a block scalar is content; lowercased, whitespace collapsed, the space between a function name and its `(` removed). Then, for every job on a `needs` path between `event-guard` and a fleet job (and the fleet jobs themselves, unless the routing-guard rule pins their `if:`), an `if:` that contains `always(`, `failure(`, `cancelled(`, `success(` (unless the whole `if:` is a bare `success()`), `||`, `!` (a negation anywhere, so `!=` and `!= true` too) or `== false` must be exactly `needs.event-guard.result == 'success' && (<inner>)`, optionally inside `${{ }}`, where the parentheses around `<inner>` are one balanced group (parentheses inside string literals do not count) and `<inner>` does not mention `event-guard`; the job must also need `event-guard`, and a block scalar holding the condition must strip its final newline (`|-` or `>-`), since a kept newline is text around `${{ }}`. Otherwise the gate rejects the job by name. Because `!` covers `!=`, an `if:` such as `${{ needs.event-guard.result != 'failure' }}` or `${{ vars.FLEET_ENABLED != 'true' }}` on such a job is rejected as well, although it would be safe; write it as `${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true') }}`. Any other `if:` is accepted as today (GitHub adds `success()` implicitly unless the expression names a status function). The gate also refuses, in every workflow's `jobs:` section, a YAML anchor or alias on a job or on a job-level key other than `steps:` and `env:`, and any `<<:` merge key, because it reads the text and cannot resolve them (anchored step lists and env maps stay allowed).
 
@@ -719,9 +757,11 @@ console drift, placement, pytest exit, bazelrc, git_repository, PR policy)`,
 `Public-tree hygiene gate` and `CI tooling self-tests`, and `CI gate`.
 
 The full tier's jobs are named `full / <job name>` (for example
-`full / Linux Build`). They run only on a push to `master`, a dispatch with
-`full: true` or a labelled pull request, so none of them is a required check;
-`CI gate` covers them whenever they run.
+`full / Linux Build`). They run only on a push to `master` (see "The full
+tier" for `FULL_TIER_TRIGGER`), a dispatch with `full: true`, a labelled
+pull request or the nightly, so none of them is a required check, and
+neither is `Full tier scope`, which runs on a push only; `CI gate` covers
+them whenever they run.
 
 `ci.yml` runs in the concurrency group `ci-<ref>-run` for every event except
 `workflow_dispatch`, which runs in `ci-<ref>-dispatch`. A candidate dispatch
@@ -845,6 +885,11 @@ and fails the build when the shape breaks:
   `tools/ci/pr_tier_scope.sh` from `origin/${DEFAULT_BRANCH}`. The job
   publishes `fleet` and `heavy` from that step, and no other line names the
   script (see "CI_SCOPE: the fleet scope of the PR tier");
+- **(event-guard)** every reusable workflow with a fleet `runs-on` holds the
+  `event-guard` job in its fixed text, with the per-pipeline `ALLOWED` and
+  `ALLOWED_REFS` lists (for `pipeline-full.yml`: `push workflow_dispatch
+  pull_request schedule`, and no other event), and every fleet job reaches it
+  (see "Merge-queue runs");
 - **(e)** `.github/` and `tools/ci/` carry no LAN address literals, no
   `.home` names, no `:9090`, no `self-hosted` and none of the retired runner
   label words (the bare word `pool` is only checked under `.github/`, because
