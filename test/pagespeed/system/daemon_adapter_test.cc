@@ -1363,7 +1363,11 @@ class DaemonAdapterTest : public testing::Test {
       EXPECT_TRUE(adapter_b->RecordCache() != nullptr);
       EXPECT_EQ(1, abi_b->opens);
       EXPECT_TRUE(adapter_b->RecordCacheIfOpen() != nullptr);
-      EXPECT_EQ(1, handler_.MessagesOfType(kInfo)) << Messages();
+      // The "answers again" line plus the once-per-process note that the
+      // open cannot be coordinated (the lock is off).
+      EXPECT_EQ(2, handler_.MessagesOfType(kInfo)) << Messages();
+      EXPECT_NE(GoogleString::npos, Messages().find("cannot coordinate"))
+          << Messages();
     } else {
       const GoogleString dump_before = DumpedMessages();
       EXPECT_TRUE(adapter_b->RecordCache() == nullptr);
