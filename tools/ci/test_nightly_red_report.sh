@@ -28,7 +28,12 @@ mkdir -p "${BIN}"
 #   api [--paginate] .../actions/runs/<id>/jobs...  FAKE_JOBS_<id> (HTTP 500
 #                                                    when FAKE_JOBS_FAIL_<id>=1)
 #   api .../actions/workflows/nightly.yml/runs...   FAKE_RUNS_NIGHTLY
-#   api .../actions/workflows/ci.yml/runs...        FAKE_RUNS_CI
+#   api .../actions/workflows/ci.yml/runs...&event=workflow_dispatch...
+#                                                   FAKE_RUNS_CI_DISPATCH
+#   api .../actions/workflows/ci.yml/runs...&event=push...
+#                                                   FAKE_RUNS_CI_PUSH
+#   api .../actions/runs/<id> --jq .created_at      FAKE_RUN_CREATED (fails
+#                                                    when FAKE_RUN_FAIL=1)
 #   api .../actions/jobs/<id>/logs                  FAKE_RAWLOG_<id> (HTTP 404
 #                                                    when unset)
 #   run view <run> --job <id> ...                   FAKE_LOG_<id> (fails when
@@ -59,7 +64,12 @@ case "$1 $2" in
         answer "FAKE_JOBS_${id}"
         ;;
       */actions/workflows/nightly.yml/runs*) answer FAKE_RUNS_NIGHTLY ;;
-      */actions/workflows/ci.yml/runs*) answer FAKE_RUNS_CI ;;
+      */actions/workflows/ci.yml/runs*event=workflow_dispatch*) answer FAKE_RUNS_CI_DISPATCH ;;
+      */actions/workflows/ci.yml/runs*event=push*) answer FAKE_RUNS_CI_PUSH ;;
+      */actions/runs/*" --jq .created_at")
+        if [ "${FAKE_RUN_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+        echo "${FAKE_RUN_CREATED}"
+        ;;
       */actions/jobs/*/logs)
         id="${path#*/actions/jobs/}"
         id="${id%%/*}"
@@ -142,7 +152,8 @@ run() { # [env assignments...]
     FAKE_BODIES="${WORK}/bodies" GITHUB_REPOSITORY=We-Amp/example \
     GITHUB_RUN_ID=50 GITHUB_RUN_ATTEMPT=1 GITHUB_SHA="${C4}" \
     DEFAULT_BRANCH=main GH_TOKEN=fake FAKE_RUNS_NIGHTLY="${NO_RUNS}" \
-    FAKE_RUNS_CI="${NO_RUNS}" "$@" bash "${SCRIPT}" > "${WORK}/out" 2> "${WORK}/err")
+    FAKE_RUNS_CI_DISPATCH="${NO_RUNS}" FAKE_RUNS_CI_PUSH="${NO_RUNS}" \
+    FAKE_RUN_CREATED=2026-10-26T04:00:00Z "$@" bash "${SCRIPT}" > "${WORK}/out" 2> "${WORK}/err")
   RC=$?
   set -e
 }
@@ -191,8 +202,16 @@ expect red-creates-issue "green job not listed" no body_has "full / Linux ASan +
 expect red-creates-issue "no comment/edit" eq "$(calls '^gh issue (comment|edit|close)')" 0
 expect red-creates-issue "this run's jobs paginated" \
   grep -qF -- "gh api --paginate repos/We-Amp/example/actions/runs/50/jobs?filter=latest&per_page=100" "${WORK}/gh.log"
-expect red-creates-issue "both history lists read" \
-  eq "$(calls 'actions/workflows/(nightly|ci)\.yml/runs\?branch=main&status=completed&per_page=20')" 2
+for q in "nightly.yml/runs?branch=main&status=completed&per_page=20" \
+  "ci.yml/runs?branch=main&status=completed&event=workflow_dispatch&per_page=20" \
+  "ci.yml/runs?branch=main&status=completed&event=push&per_page=20"; do
+  expect red-creates-issue "history list ${q}" grep -qxF -- "gh api repos/We-Amp/example/actions/workflows/${q}" "${WORK}/gh.log"
+done
+expect red-creates-issue "three history lists" eq "$(calls 'actions/workflows/')" 3
+expect red-creates-issue "run object read for the cutoff" \
+  grep -qxF -- "gh api repos/We-Amp/example/actions/runs/50 --jq .created_at" "${WORK}/gh.log"
+expect red-creates-issue "uniform skipped line" body_has "Skipped (neither failed nor green): none"
+expect red-creates-issue "primary log path is not marked" no body_has "from the whole job log"
 expect red-creates-issue "issue list shape" \
   grep -qF -- "gh issue list --label nightly-red --state open --json number,body --limit 5" "${WORK}/gh.log"
 done_case red-creates-issue
@@ -255,7 +274,8 @@ done_case runtime-step-check-unset-job-is-green
 start
 run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" \
   FAKE_RUNS_NIGHTLY="$(runs "46|workflow_dispatch|${C3}|2026-10-25T09:00:00Z" "30|schedule|${C1}|2026-10-20T04:00:00Z")" \
-  FAKE_RUNS_CI="$(runs "48|push|${C3}|2026-10-25T12:00:00Z" "47|push|${C3}|2026-10-25T11:00:00Z" "41|workflow_dispatch|${C2}|2026-10-25T08:00:00Z")" \
+  FAKE_RUNS_CI_PUSH="$(runs "48|push|${C3}|2026-10-25T12:00:00Z" "47|push|${C3}|2026-10-25T11:00:00Z")" \
+  FAKE_RUNS_CI_DISPATCH="$(runs "41|workflow_dispatch|${C2}|2026-10-25T08:00:00Z")" \
   FAKE_JOBS_48="$(jobs "481|pr / Linux Build|success|")" FAKE_JOBS_47="$(jobs "471|pr / Linux Build|success|")" \
   FAKE_JOBS_46="$(jobs "461|nightly / Fuzz CSS|success|")" \
   FAKE_JOBS_41="$(jobs "411|full / Linux TSan|success|")" FAKE_JOBS_30="$(jobs "301|full / Linux TSan|success|")"
@@ -286,7 +306,7 @@ run REPORT_MAX_LOOKUPS=2 FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" \
   FAKE_JOBS_44="$(jobs "441|full / Linux TSan|failure|")" FAKE_JOBS_43="$(jobs "431|full / Linux TSan|failure|")"
 expect lookup-cap "exit 0" eq "${RC}" 0
 expect lookup-cap "at most 2 history lookups" le "$(grep -E 'actions/runs/[0-9]+/jobs' "${WORK}/gh.log" | grep -vc 'actions/runs/50/jobs' || true)" 2
-expect lookup-cap "body says the cap" body_has "no green within 2 completed runs"
+expect lookup-cap "body says the cap" body_has "no green within 2 completed full-tier runs"
 done_case lookup-cap
 
 # --- green-closes-issue
@@ -405,7 +425,7 @@ done_case mixed-kinds-are-not-timeout-only
 start
 run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}"
 expect no-history "exit 0" eq "${RC}" 0
-expect no-history "no green within 0" body_has "no green within 0 completed runs"
+expect no-history "no green within 0" body_has "no green within 0 completed full-tier runs"
 done_case no-history-says-no-green
 
 # --- log-fetch-uses-escape-flag
@@ -423,6 +443,7 @@ run FAKE_VIEW_FAIL=1 FAKE_JOBS_50="${RED_JOBS}" \
 expect log-fallback "exit 0" eq "${RC}" 0
 expect log-fallback "job log API read" grep -qxF -- "gh api repos/We-Amp/example/actions/jobs/502/logs" "${WORK}/gh.log"
 expect log-fallback "target extracted" body_has "//t:race_test"
+expect log-fallback "marked as from the whole job log" body_has "- Failing targets (from the whole job log):"
 done_case log-fetch-falls-back-to-the-job-log-api
 
 start
@@ -438,6 +459,52 @@ run FAKE_JOBS_50="$(jobs "501|nightly / Fuzz CSS|success|")$(jobs "502|full / Li
 expect paginated "exit 0" eq "${RC}" 0
 expect paginated "second page's job reported" body_has "<!-- nightly-red-job: full / Linux TSan -->"
 done_case paginated-jobs-are-merged
+
+# --- rerun-all-jobs-keeps-original-cutoff: a re-run of all jobs gives every
+# job a new created_at; the run object keeps the original one.
+start
+run GITHUB_RUN_ATTEMPT=2 FAKE_RUN_CREATED=2026-10-26T04:00:00Z \
+  FAKE_JOBS_50="$(jobs "502|full / Linux TSan|failure|" | sed 's/2026-10-26T04:00:00Z/2026-10-27T09:00:00Z/g')" \
+  FAKE_LOG_502="${TSAN_LOG}" \
+  FAKE_RUNS_CI_PUSH="$(runs "60|push|${C4}|2026-10-26T20:00:00Z")" FAKE_JOBS_60="$(jobs "601|full / Linux TSan|success|")" \
+  FAKE_RUNS_NIGHTLY="${H40}" FAKE_JOBS_40="${J40_GREEN}"
+expect rerun-cutoff "exit 0" eq "${RC}" 0
+expect rerun-cutoff "newer run not picked" no body_has "actions/runs/60"
+expect rerun-cutoff "newer run never looked up" eq "$(calls 'actions/runs/60/jobs')" 0
+expect rerun-cutoff "last green is run 40" body_has "[run 40]"
+done_case rerun-all-jobs-keeps-original-cutoff
+
+start
+run FAKE_RUN_FAIL=1 FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}"
+expect run-object-failure "exit 1" eq "${RC}" 1
+expect run-object-failure "no writes" eq "$(calls '^gh (issue (create|edit|comment|close)|label create)')" 0
+done_case run-object-failure-exits-1
+
+# --- push-runs-without-full-tier-do-not-consume-cap
+PUSH15=()
+for n in $(seq 70 84); do
+  PUSH15+=("${n}|push|${C3}|2026-10-25T$((n - 60)):00:00Z")
+  export "FAKE_JOBS_${n}=$(jobs "${n}1|pr / Linux Build|success|")"
+done
+start
+run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" \
+  FAKE_RUNS_CI_PUSH="$(runs "${PUSH15[@]}")" \
+  FAKE_RUNS_NIGHTLY="$(runs "40|schedule|${C1}|2026-10-25T04:00:00Z")" FAKE_JOBS_40="${J40_GREEN}"
+expect push-cap "exit 0" eq "${RC}" 0
+expect push-cap "all 15 push runs looked up" eq "$(grep -cE 'actions/runs/(7[0-9]|8[0-4])/jobs' "${WORK}/gh.log" || true)" 15
+expect push-cap "the nightly is found" body_has "[run 40](https://github.com/We-Amp/example/actions/runs/40) (schedule"
+done_case push-runs-without-full-tier-do-not-consume-cap
+
+# --- api-call-ceiling-stops-search
+start
+run REPORT_MAX_API_CALLS=5 FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" \
+  FAKE_RUNS_CI_PUSH="$(runs "${PUSH15[@]}")" \
+  FAKE_RUNS_NIGHTLY="$(runs "40|schedule|${C1}|2026-10-25T04:00:00Z")" FAKE_JOBS_40="${J40_GREEN}"
+expect ceiling "exit 0" eq "${RC}" 0
+expect ceiling "5 history jobs calls" eq "$(grep -E 'actions/runs/[0-9]+/jobs' "${WORK}/gh.log" | grep -vc 'actions/runs/50/jobs' || true)" 5
+expect ceiling "body says so" body_has "no green within 0 completed full-tier runs (API call ceiling reached)"
+done_case api-call-ceiling-stops-search
+for n in $(seq 70 84); do unset "FAKE_JOBS_${n}"; done
 
 # --- missing-env
 start

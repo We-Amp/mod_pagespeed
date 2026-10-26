@@ -22,9 +22,12 @@
 # failing targets from its log (tools/ci/failing_targets.sh), the last green
 # run of that job and the commit count since, and a marker line
 # `<!-- nightly-red-job: <job name> -->`. The last green run is searched in
-# the completed runs of nightly.yml and ci.yml on the default branch (a
-# schedule, a full_tier or full=true dispatch, or a push), newest first, one
-# jobs call per run, at most REPORT_MAX_LOOKUPS runs.
+# the completed runs on the default branch of nightly.yml, of ci.yml's
+# workflow_dispatch and of ci.yml's push (a schedule, a full_tier or full=true
+# dispatch, or a push), created before this run, newest first, one jobs call
+# per run. REPORT_MAX_LOOKUPS counts only the runs whose job list has a
+# `full / ` job, so push runs without the full tier do not use it up;
+# REPORT_MAX_API_CALLS caps the jobs calls of the search as a whole.
 #
 # No failed job: on attempt 1, when every job named by a marker line of the
 # open issue is green in this run, the issue gets a comment and is closed. A
@@ -34,7 +37,8 @@
 # Env: GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_SHA,
 # DEFAULT_BRANCH, GH_TOKEN (actions: read, issues: write); optional DRY_RUN
 # (`true`: reads only, every write is printed as `dry run: would <verb> ...`),
-# REPORT_MAX_LOOKUPS (default 12), RUNTIME_STEP_CHECKS (newline separated
+# REPORT_MAX_LOOKUPS (default 12), REPORT_MAX_API_CALLS (default 40),
+# RUNTIME_STEP_CHECKS (newline separated
 # `<job name>=<step name>`), GITHUB_SERVER_URL. Run from a checkout with full
 # history (for the commit count).
 #
@@ -58,6 +62,8 @@ dry=false
 [ "${DRY_RUN:-false}" = "true" ] && dry=true
 max="${REPORT_MAX_LOOKUPS:-12}"
 case "${max}" in ''|*[!0-9]*) max=12 ;; esac
+ceiling="${REPORT_MAX_API_CALLS:-40}"
+case "${ceiling}" in ''|*[!0-9]*) ceiling=40 ;; esac
 case "${attempt}" in ''|*[!0-9]*) attempt=1 ;; esac
 
 if [ -z "${repo}" ] || [ -z "${run}" ] || [ -z "${sha}" ] || [ -z "${branch}" ]; then
@@ -124,7 +130,6 @@ if [ -z "${rows}" ]; then
   log "run ${run} has no 'full / ' jobs: nothing to report"
   exit 0
 fi
-cutoff="$(printf '%s' "${jobs}" | jq -r '[ .[] | (.created_at // .started_at // empty) ] | min // ""')"
 greens="$(green_names "${jobs}")"
 
 nfailed=0
@@ -216,6 +221,7 @@ fi
 for ((i = 0; i < nfailed; i++)); do
   logf="${TMP}/log-${i}"
   f_note[i]=""
+  f_whole[i]=""
   if ! gh run view "${run}" --job "${f_id[i]}" --log-failed --allow-escape-sequences \
       < /dev/null > "${logf}" 2> "${TMP}/err"; then
     log "gh run view failed for job ${f_id[i]}: $(head -c 300 "${TMP}/err"); trying the job log API"
@@ -223,35 +229,56 @@ for ((i = 0; i < nfailed; i++)); do
       echo "::warning::no log for job ${f_id[i]} (${f_name[i]}): $(head -c 300 "${TMP}/err")" >&2
       : > "${logf}"
       f_note[i]=" (log not available)"
+    else
+      f_whole[i]="from the whole job log"
     fi
   fi
   bash "${HERE}/failing_targets.sh" --mode test "${logf}" > "${TMP}/targets-${i}"
 done
 
 # Last green per failed job: completed runs of both callers of the full tier,
-# newest first, without this run and anything created after it.
+# newest first, without this run and anything created after it. The cutoff is
+# the run's own creation time, which every re-run attempt keeps (its jobs get
+# new times).
+if ! cutoff="$(gh api "repos/${repo}/actions/runs/${run}" --jq .created_at < /dev/null)" \
+    || [ -z "${cutoff}" ] || [ "${cutoff}" = "null" ]; then
+  die "the run API call for run ${run} failed or named no created_at"
+fi
 hist="[]"
-for wf in nightly.yml ci.yml; do
-  if ! body="$(gh api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed&per_page=20" < /dev/null)"; then
-    die "the runs API call for ${wf} failed"
+for src in "nightly.yml|" "ci.yml|&event=workflow_dispatch" "ci.yml|&event=push"; do
+  wf="${src%%|*}"
+  if ! body="$(gh api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" < /dev/null)"; then
+    die "the runs API call for ${wf}${src#*|} failed"
   fi
   hist="$(jq -c -n --argjson a "${hist}" --argjson b "${body:-null}" '$a + [ ($b.workflow_runs // error("no runs"))[] ]' 2> /dev/null)" \
-    || die "the runs API answer for ${wf} is unusable"
+    || die "the runs API answer for ${wf}${src#*|} is unusable"
 done
 candidates="$(printf '%s' "${hist}" | jq -r --arg run "${run}" --arg cut "${cutoff}" '
   [ .[] | select(((.id // "") | tostring | test("^[0-9]+$")) and (.id | tostring) != $run
-                 and ($cut == "" or (.created_at // "") <= $cut)) ]
+                 and (.created_at // "") < $cut) ]
   | unique_by(.id) | sort_by(.created_at) | reverse | .[]
   | [ (.id | tostring), (.event // "unknown"), (.head_sha // ""), (.html_url // "") ] | @tsv')"
 
 remaining="${nfailed}"
 lookups=0
+calls=0
+ceiling_hit=0
 while IFS="$(printf '\t')" read -r hid hevent hsha hurl; do
   [ -n "${hid}" ] || continue
   [ "${remaining}" -gt 0 ] || break
   [ "${lookups}" -lt "${max}" ] || break
-  lookups=$((lookups + 1))
+  if [ "${calls}" -ge "${ceiling}" ]; then
+    ceiling_hit=1
+    log "API call ceiling (${ceiling}) reached after ${lookups} full-tier run(s)"
+    break
+  fi
+  calls=$((calls + 1))
   hjobs="$(run_jobs "${hid}")" || exit 1
+  has_full="$(printf '%s' "${hjobs}" | jq -r 'any(.[]; (.name // "") | startswith("full / "))')"
+  if [ "${has_full}" != "true" ]; then
+    continue
+  fi
+  lookups=$((lookups + 1))
   hgreens="$(green_names "${hjobs}")"
   for ((i = 0; i < nfailed; i++)); do
     [ -z "${g_run[i]}" ] || continue
@@ -282,23 +309,25 @@ report="${TMP}/report.md"
     echo "- SHA: \`${sha}\`"
     tf="${TMP}/targets-${i}"
     if [ ! -s "${tf}" ]; then
-      echo "- Failing targets: none extracted${f_note[i]}"
+      echo "- Failing targets: none extracted${f_note[i]}${f_whole[i]:+ (${f_whole[i]})}"
     else
+      tags="${f_whole[i]}"
       if ! cut -f2 "${tf}" | grep -vqx 'test-timeout'; then
-        echo "- Failing targets (timeout-only):"
-      else
-        echo "- Failing targets:"
+        tags="timeout-only${tags:+, ${tags}}"
       fi
+      echo "- Failing targets${tags:+ (${tags})}:"
       while IFS="$(printf '\t')" read -r label kind; do
         echo "  - \`${label}\` (${kind})"
       done < "${tf}"
     fi
     if [ -z "${g_run[i]}" ]; then
       if [ "${lookups}" -eq 1 ]; then
-        echo "- Last green: no green within 1 completed run"
+        why="no green within 1 completed full-tier run"
       else
-        echo "- Last green: no green within ${lookups} completed runs"
+        why="no green within ${lookups} completed full-tier runs"
       fi
+      [ "${ceiling_hit}" = 0 ] || why="${why} (API call ceiling reached)"
+      echo "- Last green: ${why}"
     else
       if git merge-base --is-ancestor "${g_sha[i]}" "${sha}" 2> /dev/null \
           && count="$(git rev-list --count "${g_sha[i]}..${sha}" 2> /dev/null)"; then
@@ -313,10 +342,8 @@ report="${TMP}/report.md"
       echo "- Last green: [run ${g_run[i]}](${g_url[i]}) (${g_event[i]}, \`${g_sha[i]}\`), ${since}"
     fi
   done
-  if [ -n "${skipped}" ]; then
-    echo
-    echo "Skipped (neither failed nor green): ${skipped}"
-  fi
+  echo
+  echo "Skipped (neither failed nor green): ${skipped:-none}"
 } > "${report}"
 
 load_issue

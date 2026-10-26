@@ -504,14 +504,21 @@ with the label `nightly-red` (created on first use), or comments on the open
 one and replaces its body. Per failed job the body lists the job, the SHA,
 the failing targets from its log (`tools/ci/failing_targets.sh`; `none
 extracted` when the log names none, `timeout-only` when every one timed
-out), the last completed run in which that job was green and the commit
-count since, and a marker line `<!-- nightly-red-job: <job name> -->`. The
-last green is searched in the completed runs of `nightly.yml` and `ci.yml`
-on `master`, newest first, whatever their event (a scheduled night, a
-`full_tier` or `full: true` dispatch, a push), so a missed night does not
-hide it; at most `REPORT_MAX_LOOKUPS` (12) runs are looked up, and the body
-says `no green within <N> completed runs` when none is found. The body names
-jobs, SHAs, targets and run links only.
+out, `from the whole job log` when the failed-steps log was not available
+and the whole job log was read instead, so a line from a retried step can
+appear), the last completed run in which that job was green and the commit
+count since, and a marker line `<!-- nightly-red-job: <job name> -->`. A
+`Skipped` line lists the skipped jobs, or `none`. The last green is searched
+in the completed runs on `master` of `nightly.yml`, of `ci.yml`'s
+`workflow_dispatch` and of `ci.yml`'s push, created before this run (the
+run's own creation time, which a re-run keeps), newest first, whatever their
+event (a scheduled night, a `full_tier` or `full: true` dispatch, a push), so
+a missed night does not hide it. `REPORT_MAX_LOOKUPS` (12) counts only runs
+that ran a `full / ` job, so a day of push runs without the full tier does
+not use it up; `REPORT_MAX_API_CALLS` (40) caps the jobs calls of the search.
+When none is found the body says `no green within <N> completed full-tier
+runs`, with `(API call ceiling reached)` when the ceiling ended the search.
+The body names jobs, SHAs, targets and run links only.
 
 When no job failed, the open issue is closed, with a comment, once every job
 named by a marker line is green in this run. **A re-run never closes it:** on
