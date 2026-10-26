@@ -37,12 +37,18 @@
 # Host safety: BISECT_ROOT is required and never defaulted. Every container
 # and network name starts with the run id and is recorded in
 # BISECT_ROOT/<id>/names before it is created; only those names are ever
-# removed. Host Bazel (vendoring) runs with HOME and --output_user_root
-# under BISECT_ROOT/<id>, and the exit trap shuts that server down and
-# removes its output root. Images are only ever added (content-hashed tags
-# from the commit's ensure-dev-image.sh), never retagged or removed.
-# Docker clients run at the lowest CPU and I/O priority. One bisect per
-# host: flock on BISECT_ROOT/.lock, held by the detached worker.
+# removed; a resumed worker first removes the containers an earlier worker
+# recorded. Host Bazel (vendoring) runs with HOME and --output_user_root
+# under BISECT_ROOT/<id>, and through a PATH shim that forces
+# --output_base=BISECT_ROOT/<id>/vendor-ob (a vendor script's own
+# --output_base is replaced); the exit trap shuts that server down and
+# removes both trees. Images are only ever added (content-hashed tags from
+# the commit's ensure-dev-image.sh), never retagged or removed.
+# Host-side work (docker clients, vendoring, image builds) runs under
+# nice/ionice. That does not carry into a container: a step container's
+# share comes from --cpu-shares 128 and its --cpus/--memory caps, and the
+# service containers get a small fixed cap. One bisect per host: flock on
+# BISECT_ROOT/.lock, held by the detached worker.
 #
 # Environment: BISECT_ROOT (required, absolute), BISECT_MAX_TARGETS,
 # BISECT_STOP_AFTER=endpoints (stop after the endpoint checks; `resume`
@@ -97,8 +103,23 @@ check_root() {
     /*) ;;
     *) err "BISECT_ROOT must be an absolute path: ${BISECT_ROOT}"; return 2 ;;
   esac
+  case "/${BISECT_ROOT}/" in
+    */../*|*/./*) err "BISECT_ROOT must not contain . or .. components: ${BISECT_ROOT}"; return 2 ;;
+  esac
   if in_runner_tree "${BISECT_ROOT}"; then
     err "refusing BISECT_ROOT inside a runner work tree: ${BISECT_ROOT}"
+    return 2
+  fi
+  # Before creating anything: resolve the nearest existing ancestor, so a
+  # not-yet-existing path behind a symlink into a runner tree is refused.
+  local anc="${BISECT_ROOT}" rest=""
+  while [ ! -d "${anc}" ]; do
+    rest="/$(basename "${anc}")${rest}"
+    anc="$(dirname "${anc}")"
+  done
+  resolved="$(cd -P "${anc}" && pwd -P)" || return 2
+  if in_runner_tree "${resolved}${rest}"; then
+    err "refusing BISECT_ROOT inside a runner work tree: ${resolved}${rest}"
     return 2
   fi
   mkdir -p "${BISECT_ROOT}" || return 2
@@ -135,13 +156,22 @@ valid_id() {
 
 # --- Small helpers ---------------------------------------------------------
 
-# Docker client at the lowest CPU (and, when available, I/O) priority.
-dk() {
+# lowprio CMD...: a host command at the lowest CPU (and, when available,
+# I/O) priority. A container started by a docker client does not inherit it.
+lowprio() {
   if command -v ionice >/dev/null 2>&1; then
-    nice -n 19 ionice -c3 docker "$@"
+    nice -n 19 ionice -c3 "$@"
   else
-    nice -n 19 docker "$@"
+    nice -n 19 "$@"
   fi
+}
+
+dk() { lowprio docker "$@"; }
+
+# posint VALUE: a positive whole number without leading zeros.
+posint() {
+  case "$1" in ''|0*|*[!0-9]*) return 1 ;; esac
+  return 0
 }
 
 host_cpus() {
@@ -246,9 +276,9 @@ cmd_start() {
   fi
   local v
   for v in "${cpus}" "${mem}" "${runs_per_test}"; do
-    case "${v}" in *[!0-9]*) err "--cpus, --memory-gb and --runs-per-test take whole numbers"; return 2 ;; esac
+    [ -z "${v}" ] || posint "${v}" \
+      || { err "--cpus, --memory-gb and --runs-per-test take positive whole numbers (got '${v}')"; return 2; }
   done
-  [ "${cpus}" != 0 ] && [ "${mem}" != 0 ] || { err "--cpus and --memory-gb must be positive"; return 2; }
   if [ -z "${cpus}" ]; then
     cpus=$(( $(host_cpus) / 4 ))
     [ "${cpus}" -ge 1 ] || cpus=1
@@ -334,21 +364,30 @@ worker_exit() {
   say "exit ${rc}"
 }
 
-# Remove the run's own docker objects (recorded names only) and its host
-# Bazel output root.
-cleanup() {
+# remove_recorded [containers]: remove the run's own docker objects, by the
+# names recorded in <id>/names only (containers, then networks).
+remove_recorded() {
   local name
   if [ -f "${RUN_DIR}/names" ]; then
     for name in $(awk '$1 == "container" {print $2}' "${RUN_DIR}/names" | awk '!seen[$0]++'); do
       dk rm -f "${name}" >/dev/null 2>&1
     done
     for name in $(awk '$1 == "network" {print $2}' "${RUN_DIR}/names" | awk '!seen[$0]++'); do
-      dk network rm "${name}" >/dev/null 2>&1
+      [ "${1:-}" = containers ] || dk network rm "${name}" >/dev/null 2>&1
     done
   fi
-  if [ -f "${RUN_DIR}/home/.bazelrc" ] && command -v bazel >/dev/null 2>&1 && [ -d "${SRC}" ]; then
-    (cd "${SRC}" && HOME="${RUN_DIR}/home" bazel shutdown) >/dev/null 2>&1 9>&-
+}
+
+# Remove the run's docker objects and its host Bazel server and trees.
+cleanup() {
+  local real
+  remove_recorded
+  real="$(cat "${RUN_DIR}/vendor-bin/real-bazel" 2>/dev/null)"
+  if [ -d "${RUN_DIR}/vendor-ob" ] && [ -n "${real}" ]; then
+    (cd "${SRC}" 2>/dev/null || cd "${RUN_DIR}" || exit; HOME="${RUN_DIR}/home" \
+      "${real}" "--output_base=${RUN_DIR}/vendor-ob" shutdown) >/dev/null 2>&1 9>&-
   fi
+  remove_tree "${RUN_DIR}/vendor-ob"
   remove_tree "${RUN_DIR}/bazel-root"
 }
 
@@ -490,6 +529,9 @@ cmd_worker() {
   load_run "$1"
   take_lock || exit $?
   trap 'worker_exit $?' EXIT
+  # A resumed run: containers an earlier worker started (and could not
+  # remove, e.g. after it was killed) go first, by recorded name.
+  remove_recorded containers
   say "worker for ${RUN_ID}: job ${JOB} (${KIND}, --config=${CONFIG}), bad ${BAD}, good ${GOOD}, ${CPUS} cpus, ${MEM_GB} GiB"
   [ -f "${RUN_DIR}/result.json" ] && exit 0
   phase_targets || exit 1
@@ -540,7 +582,8 @@ start_services() {
     c="${RUN_ID}-${s}"
     record container "${c}"
     dk rm -f "${c}" >/dev/null 2>&1
-    dk run -d --init --name "${c}" --network "${NET}" "${img}" >/dev/null \
+    dk run -d --init --name "${c}" --network "${NET}" \
+      --cpus 1 --memory 1g --memory-swap 1g --cpu-shares 128 "${img}" >/dev/null \
       || { verdict 125 "cannot start ${c}"; return 1; }
   done
   case " ${SERVICES} " in
@@ -565,6 +608,39 @@ prepare_home() {
   } > "${RUN_DIR}/home/.bazelrc"
 }
 
+# prepare_vendor_shim: <id>/vendor-bin/bazel, first on PATH while
+# vendoring, runs the real bazel with --output_base=<id>/vendor-ob in place
+# of any --output_base the vendor command passes (an older vendor script
+# keeps its own choice of directory, so the shim cannot rely on TMPDIR).
+prepare_vendor_shim() {
+  local bin="${RUN_DIR}/vendor-bin" real
+  real="$(command -v bazel)" || return 1
+  case "${real}" in "${bin}"/*) real="$(cat "${bin}/real-bazel")" ;; esac
+  mkdir -p "${bin}" "${RUN_DIR}/vendor-ob" || return 1
+  echo "${real}" > "${bin}/real-bazel"
+  {
+    echo '#!/usr/bin/env bash'
+    echo '# Vendoring-only bazel: the output base is always the run'"'"'s own.'
+    printf 'real=%q
+ob=%q
+' "${real}" "${RUN_DIR}/vendor-ob"
+    cat <<'EOF'
+args=()
+skip=0
+for a in "$@"; do
+  if [ "${skip}" = 1 ]; then skip=0; continue; fi
+  case "${a}" in
+    --output_base=*) ;;
+    --output_base) skip=1 ;;
+    *) args+=("${a}") ;;
+  esac
+done
+exec "${real}" "--output_base=${ob}" ${args[@]+"${args[@]}"}
+EOF
+  } > "${bin}/bazel"
+  chmod +x "${bin}/bazel"
+}
+
 # step_vendor STEPLOG: the commit's vendored tree in SRC/vendor, built once
 # per vendor key and kept under BISECT_ROOT/vendor/<key>.
 step_vendor() {
@@ -578,8 +654,12 @@ step_vendor() {
     return 0
   fi
   prepare_home
+  prepare_vendor_shim || { verdict 125 "no host bazel for vendoring"; return 1; }
   say "vendoring (key ${key})"
-  if ! (cd "${SRC}" && HOME="${RUN_DIR}/home" && export HOME && bisect_vendor_cmd) >>"$1" 2>&1 9>&-; then
+  if ! (cd "${SRC}" && HOME="${RUN_DIR}/home" && PATH="${RUN_DIR}/vendor-bin:${PATH}" \
+    && export HOME PATH \
+    && lowprio bash -c '. "$1" && bisect_vendor_cmd' bisect-vendor "${SELF_DIR}/bisect-job-table.sh") \
+    >>"$1" 2>&1 9>&-; then
     verdict 125 "vendoring failed"
     return 1
   fi
@@ -600,7 +680,7 @@ step_image() {
     return 0
   fi
   say "building ${IMAGE}"
-  (cd "${SRC}" && nice -n 19 bash tools/ci/ensure-dev-image.sh "${IMAGE_ARCH}" docker) >>"$1" 2>&1 9>&- \
+  (cd "${SRC}" && lowprio bash tools/ci/ensure-dev-image.sh "${IMAGE_ARCH}" docker) >>"$1" 2>&1 9>&- \
     || { verdict 125 "dev image build failed"; return 1; }
   grep -qxF "${IMAGE}" "${RUN_DIR}/rebuilt_images" 2>/dev/null || echo "${IMAGE}" >> "${RUN_DIR}/rebuilt_images"
 }

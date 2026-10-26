@@ -656,14 +656,18 @@ Host safety contract:
   Cleanup removes only those names. Nothing else is stopped, removed or
   pruned, no image is retagged or removed, and no process is signalled.
 - `BISECT_ROOT` must be absolute and outside any `actions-runner*/_work`
-  tree. One bisect runs per host (`flock` on `BISECT_ROOT/.lock`).
-- Containers run with `--cpus` and `--memory` caps (defaults: a quarter of
-  the host's CPUs, at most 16; 2 GiB per CPU, at least 16 GiB) and Bazel
-  `--jobs` equal to the CPU cap; the docker client runs under `nice` (and
-  `ionice` where present).
-- Host Bazel (vendoring) runs with `HOME` and `--output_user_root` under
-  `BISECT_ROOT/<id>`; the exit trap shuts that server down and removes its
-  output root.
+  tree (checked on the resolved path before anything is created). One bisect runs per host (`flock` on `BISECT_ROOT/.lock`).
+- A step container runs with `--cpu-shares 128` and `--cpus`/`--memory` caps
+  (defaults: a quarter of the host's CPUs, at most 16; 2 GiB per CPU, at
+  least 16 GiB), and Bazel `--jobs` equals the CPU cap. Service containers
+  get a small fixed cap. Host-side work (the docker client, vendoring, image
+  builds) runs under `nice` (and `ionice` where present); that does not carry
+  into a container, so the share inside comes from the caps alone.
+- Host Bazel (vendoring) runs with `HOME`, `--output_user_root` and (through
+  a `PATH` shim that replaces any `--output_base` the vendor script passes)
+  `--output_base` under `BISECT_ROOT/<id>`; the exit trap shuts that server
+  down and removes both trees.
+- `resume` first removes the containers the earlier worker recorded.
 
 ## The release ref guard
 

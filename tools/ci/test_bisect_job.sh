@@ -7,7 +7,8 @@
 # commits (commit 7 introduces the failure; commit 4 has no ci-* line in
 # its .bazelrc), and fakes on PATH for docker, bazel, gh, nohup, setsid,
 # nproc, ionice and sleep. The fake docker logs every call and refuses
-# (exit 97) any container or network name outside the run's own prefix; a
+# (exit 97) any container or network name outside the run's own prefix,
+# and any verb it does not know (exit 98); a
 # step container reads the mounted work tree's commit index and a per-case
 # map (<index>=pass|testfail|timeout|buildfail|otherbuild|vendorfail).
 # The fake nohup and setsid run in the foreground, so every case is
@@ -148,7 +149,7 @@ case "${sub}" in
     [ "${1:-}" = inspect ] || refuse "image $*"
     grep -qxF -- "${2:-}" "${FAKE_STATE}/images" 2>/dev/null; exit $? ;;
   rmi|kill|system|prune|stop|container|volume) refuse "${sub} $*" ;;
-  *) exit 0 ;;
+  *) echo "UNKNOWN(98) ${sub} $*" >> "${log}"; exit 98 ;;
 esac
 EOF
 
@@ -196,6 +197,7 @@ EOF
 
 cat > "${BIN}/ionice" <<'EOF'
 #!/usr/bin/env bash
+echo "ionice $*" >> "${FAKE_STATE}/ionice.log"
 [ "${1:-}" = -c3 ] || { echo "fake ionice: unexpected $*" >&2; exit 1; }
 shift; exec "$@"
 EOF
@@ -224,9 +226,10 @@ echo "build $*" >> "${FAKE_STATE}/ensure.log"
 echo "${name}" >> "${FAKE_STATE}/images"
 echo "${name}"
 EOF
+# Like an older vendor script: its own output base under /tmp.
 cat > "${ORIGIN}/tools/vendor-deps.sh" <<'EOF'
 #!/usr/bin/env bash
-exec bazel vendor --vendor_dir="${1:-vendor}" //...
+exec bazel --output_base=/tmp/bazel-vendor-fixture vendor --vendor_dir="${1:-vendor}" //...
 EOF
 cat > "${ORIGIN}/.github/workflows/pipeline-full.yml" <<'EOF'
 jobs:
@@ -314,8 +317,8 @@ if grep -q -- '--job 4242 --log-failed --allow-escape-sequences' "${CULPRIT_STAT
 
 CASE=every-docker-call-carries-the-prefix
 FAKE_STATE="${CULPRIT_STATE}"
-if grep -q 'REFUSED' "${FAKE_STATE}/docker.log"; then
-  fail "${CASE}" "$(grep REFUSED "${FAKE_STATE}/docker.log" | head -3)"
+if grep -qE 'REFUSED|UNKNOWN' "${FAKE_STATE}/docker.log"; then
+  fail "${CASE}" "$(grep -E 'REFUSED|UNKNOWN' "${FAKE_STATE}/docker.log" | head -3)"
 elif ! grep -q -- "--name bisect-.*-step-" "${FAKE_STATE}/docker.log"; then
   fail "${CASE}" "no step container was named"
 else
@@ -350,6 +353,24 @@ else
   pass "${CASE}"
 fi
 
+CASE=vendor-output-base-is-under-bisect-root
+OB="${BR}/${CID}/vendor-ob"
+if grep -v -- "--output_base=${OB} " "${FAKE_STATE}/bazel.log" >/dev/null; then
+  fail "${CASE}" "a host bazel call without the run's output base: $(grep -v -- "--output_base=${OB} " "${FAKE_STATE}/bazel.log" | head -2)"
+elif grep -q '/tmp/bazel-vendor' "${FAKE_STATE}/bazel.log"; then
+  fail "${CASE}" "the vendor script's own output base reached bazel"
+elif ! grep -q -- "--output_base=${OB} shutdown" "${FAKE_STATE}/bazel.log"; then
+  fail "${CASE}" "cleanup did not shut down the vendoring server"
+elif [ -e "${OB}" ]; then
+  fail "${CASE}" "the vendoring output base was left behind"
+else
+  pass "${CASE}"
+fi
+
+CASE=host-vendoring-is-low-priority
+if grep -q 'bash -c .*bisect_vendor_cmd' "${FAKE_STATE}/ionice.log" 2>/dev/null; then
+  pass "${CASE}"; else fail "${CASE}" "vendoring did not run under ionice/nice"; fi
+
 CASE=services-and-step-command
 FAKE_STATE="${CULPRIT_STATE}"
 . "${TOOLS}/bisect-job-table.sh"
@@ -362,7 +383,7 @@ esac
 if [ "${ok}" != 1 ]; then
   fail "${CASE}" "step command: ${step_line}"
 elif [ -n "${BISECT_LINUX_ASAN_SERVICES}" ]; then
-  if grep -q -- "docker run -d --init --name ${CID}-redis --network ${CID}-net redis:7-alpine" "${FAKE_STATE}/docker.log" \
+  if grep -q -- "docker run -d --init --name ${CID}-redis --network ${CID}-net --cpus 1 --memory 1g --memory-swap 1g --cpu-shares 128 redis:7-alpine" "${FAKE_STATE}/docker.log" \
     && grep -q -- "--test_env=REDIS_HOST=${CID}-redis" <<<"${step_line}" \
     && grep -q -- "docker network rm ${CID}-net" "${FAKE_STATE}/docker.log" \
     && grep -q -- "docker rm -f ${CID}-memcached" "${FAKE_STATE}/docker.log"; then
@@ -486,10 +507,18 @@ elif ! grep -q stopped "${BISECT_ROOT}/${ID}/state"; then
   fail "${CASE}" "state after the stop: $(cat "${BISECT_ROOT}/${ID}/state")"
 else
   st_out=$("${DRIVER}" status "${ID}" 2>&1 || true)
+  # An orphan an earlier (killed) worker recorded: resume removes it first.
+  echo "container ${ID}-step-99" >> "${BISECT_ROOT}/${ID}/names"
+  before=$(wc -l < "${FAKE_STATE}/docker.log")
   RC=0; "${DRIVER}" resume "${ID}" >/dev/null 2>"${FAKE_STATE}/resume.err" || RC=$?
+  after_log=$(tail -n +"$((before + 1))" "${FAKE_STATE}/docker.log")
+  rm_at=$(grep -n -- "^docker rm -f ${ID}-step-99\$" <<<"${after_log}" | head -1 | cut -d: -f1)
+  run_at=$(grep -n '^docker run' <<<"${after_log}" | head -1 | cut -d: -f1)
   if expect_eq rc "${RC}" 0 && expect_eq status "$(jget status)" culprit; then
     if ! grep -q 'state' <<<"${st_out}"; then
       fail "${CASE}" "status printed no state: ${st_out}"
+    elif [ -z "${rm_at}" ] || [ -z "${run_at}" ] || [ "${rm_at}" -gt "${run_at}" ]; then
+      fail "${CASE}" "the recorded orphan was not removed before new containers started"
     elif cmp -s "${RESULT}" "${CULPRIT_RESULT}"; then
       pass "${CASE}"
     else
@@ -525,6 +554,17 @@ esac
 unset FAKE_NPROC
 
 # --- Refusals and the lock -----------------------------------------------
+new_case refuses-bad-budget-values
+bad_values=""
+for v in "--cpus 00" "--cpus 0" "--cpus -1" "--cpus 1.5" "--memory-gb 0" "--memory-gb 08" "--runs-per-test 0"; do
+  # shellcheck disable=SC2086 # flag and value
+  start linux-asan ${v}
+  [ "${RC}" = 2 ] || bad_values="${bad_values} [${v}: ${RC}]"
+done
+if [ -n "${bad_values}" ]; then fail "${CASE}" "accepted:${bad_values}"
+elif ls -d "${BISECT_ROOT}"/bisect-* >/dev/null 2>&1; then fail "${CASE}" "a run dir was created"
+else pass "${CASE}"; fi
+
 new_case refuses-without-bisect-root
 unset BISECT_ROOT
 RC=0; "${DRIVER}" start --job linux-asan --bad "${SHA[12]}" --good "${SHA[1]}" --run 1 --repo "${ORIGIN}" >/dev/null 2>&1 || RC=$?
@@ -541,7 +581,8 @@ RC=0; BISECT_ROOT="${RUNNER_DIR}" "${DRIVER}" start --job linux-asan --bad "${SH
 mkdir -p "${WORK}/srv/actions-runner-3/_work/y"
 ln -s "${WORK}/srv/actions-runner-3/_work/y" "${WORK}/link-root"
 RC2=0; BISECT_ROOT="${WORK}/link-root" "${DRIVER}" start --job linux-asan --bad "${SHA[12]}" --good "${SHA[1]}" --run 1 --repo "${ORIGIN}" >/dev/null 2>&1 || RC2=$?
-if expect_eq rc "${RC}" 2 && expect_eq rc-symlink "${RC2}" 2; then
+RC3=0; BISECT_ROOT="${WORK}/link-root/new/deeper" "${DRIVER}" start --job linux-asan --bad "${SHA[12]}" --good "${SHA[1]}" --run 1 --repo "${ORIGIN}" >/dev/null 2>&1 || RC3=$?
+if expect_eq rc "${RC}" 2 && expect_eq rc-symlink "${RC2}" 2 && expect_eq rc-symlink-new "${RC3}" 2; then
   if [ -e "${RUNNER_DIR}" ] || [ -n "$(ls -A "${WORK}/srv/actions-runner-3/_work/y")" ]; then
     fail "${CASE}" "something was written inside the runner tree"; else pass "${CASE}"; fi
 fi
