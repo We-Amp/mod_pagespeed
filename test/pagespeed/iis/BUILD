@@ -444,6 +444,30 @@ pagespeed_cc_test(
     ],
 )
 
+# The release queue that retires a replaced site state (header-only, no IIS
+# headers): builds on any platform, runs only in the Windows lane today.
+pagespeed_cc_test(
+    name = "iis_deferred_release_test",
+    srcs = ["iis_deferred_release_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_deferred_release",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# Pins that a replaced site state is shut down on the release thread, never
+# inline in ReleaseRef or under the factory lock (reads the port source as
+# data).
+pagespeed_cc_test(
+    name = "iis_process_context_release_pin_test",
+    srcs = ["iis_process_context_release_pin_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The per-request cleanup pin: every early return between building the
 # request context and handing it to IIS frees the state through the one
 # cleanup helper, and the recorder's final response headers are not
