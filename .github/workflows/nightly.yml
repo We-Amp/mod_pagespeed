@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# Nightly caller: schedule and manual dispatch. All jobs live in
-# pipeline-nightly.yml, pinned to master. See docs/ci/pipelines.md.
+# Nightly caller: schedule and manual dispatch. The nightly jobs live in
+# pipeline-nightly.yml and the full tier in pipeline-full.yml (job `full`),
+# both pinned to master. Every scheduled night runs both; a dispatch runs the
+# full tier only with full_tier set. The hosted `nightly-red` job reports a
+# red full tier in one issue. See docs/ci/pipelines.md.
 
 name: Nightly
 
@@ -36,6 +39,10 @@ on:
         description: Severity floor of the NVD scan (low, medium, high, critical)
         required: false
         default: "medium"
+      full_tier:
+        description: Also run the full tier (default branch only)
+        type: boolean
+        default: false
 
 # One nightly at a time; a running nightly is never cancelled.
 concurrency:
@@ -59,3 +66,55 @@ jobs:
       protocols: ${{ inputs.protocols || '' }}
       arms: ${{ inputs.arms || 'cuzz-nopageheap:5,cuzz-pageheap:3' }}
       severity: ${{ inputs.severity || 'medium' }}
+
+  # The full tier, named `full` like the push tier's call in ci.yml, so its
+  # checks read `full / <job name>` in both. It runs on every scheduled night
+  # and on a dispatch with full_tier set: the make-up path for a missed or
+  # late night. The dispatch path also needs the default branch, so a
+  # dispatch on ci-dev or any other ref never reaches it. It shares the
+  # `nightly` concurrency group above, so it never starts while another
+  # nightly is pending or running. A release-candidate nightly dispatch keeps
+  # full_tier false: the candidate's CI dispatch with full=true covers the
+  # full tier. actions: read is what the callee's change-detection job
+  # (`changes`, the runs and jobs API) requests; a called workflow cannot
+  # exceed what its caller grants, and a missing grant fails the whole run at
+  # startup.
+  full:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.full_tier && github.ref == 'refs/heads/master')
+    permissions:
+      actions: read
+      contents: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@master
+
+  # The nightly-red issue (docs/ci/pipelines.md, "The nightly-red issue").
+  # Hosted, no secret: it reads this run's own job list, because the caller
+  # sees one result for `full` and a continue-on-error job never turns it
+  # red, and opens, updates or closes one issue labelled nightly-red. The
+  # issue body carries job names, SHAs, failing targets and run links only.
+  # The script comes from master; on any other ref it is a dry run that
+  # prints what it would write.
+  nightly-red:
+    name: Nightly full-tier report
+    needs: [full]
+    if: always() && needs.full.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open, update or close the nightly-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: master
+          DRY_RUN: ${{ github.ref != 'refs/heads/master' }}
+          RUNTIME_STEP_CHECKS: "full / Windows ASan=Run the unit tests under ASan"
+        run: bash tools/ci/nightly_red_report.sh

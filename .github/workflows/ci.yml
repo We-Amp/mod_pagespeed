@@ -51,13 +51,71 @@ jobs:
       pull-requests: read
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-pr.yml@master
 
-  # The ci:full label is read when the pull request run starts (open, push,
-  # reopen); after adding it, push or re-run to get the full tier.
+  # Does this push change the full tier's own definition? A hosted job reads
+  # tools/ci/full_tier_scope.sh (and the push_range_base.sh it calls) from
+  # the default branch, never from the tree under test, and prints
+  # full_tier_change. Anything other than one clean line counts as true.
+  full-scope:
+    name: Full tier scope
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # actions: read for the runs and jobs API (the base of the push range).
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      full_tier_change: ${{ steps.scope.outputs.full_tier_change }}
+    steps:
+      # fetch-depth: 0 so the diff can reach the base commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the push changes the full tier
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # Every failure (mkdir, fetch, read, run, output shape) takes the
+          # warning path and prints true; the step itself never goes red.
+          set +e
+          set -uo pipefail
+          dir="${RUNNER_TEMP}/full-tier-scope"
+          out="${dir}/out.txt"
+          if mkdir -p "${dir}" &&
+            { git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
+              git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"; } &&
+            git show "origin/${DEFAULT_BRANCH}:tools/ci/full_tier_scope.sh" > "${dir}/full_tier_scope.sh" 2>/dev/null &&
+            git show "origin/${DEFAULT_BRANCH}:tools/ci/push_range_base.sh" > "${dir}/push_range_base.sh" 2>/dev/null &&
+            bash "${dir}/full_tier_scope.sh" > "${out}" &&
+            [ "$(wc -l < "${out}")" -eq 1 ] && grep -qxE 'full_tier_change=(true|false)' "${out}"; then
+            cat "${out}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::full tier scope undecided; running the full tier"
+            echo "full_tier_change=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The full tier runs on a dispatch with full=true, on a pull request
+  # labelled ci:full, and on a push to master. The ci:full label is read when
+  # the pull request run starts (open, push, reopen); after adding it, push or
+  # re-run to get the full tier. A push skips the full tier only when the
+  # repository variable FULL_TIER_TRIGGER is `nightly`, full-scope succeeded
+  # and it printed false; then the scheduled nightly (nightly.yml) carries it.
+  # Unset or any other value runs it on every push. !cancelled() keeps the
+  # implicit success() off, which would skip this job on every dispatch and
+  # ci:full pull request, where full-scope is skipped.
   full:
+    needs: [full-scope]
     if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
-      (github.event_name == 'workflow_dispatch' && inputs.full) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full'))
+      !cancelled() && (
+        (github.event_name == 'workflow_dispatch' && inputs.full) ||
+        (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full')) ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+          (vars.FULL_TIER_TRIGGER != 'nightly' ||
+           needs.full-scope.result != 'success' ||
+           needs.full-scope.outputs.full_tier_change != 'false')))
     # actions: read for the full tier's path filter (reads the push runs of
     # the default branch); a called workflow cannot exceed what its caller grants.
     permissions:
@@ -124,6 +182,12 @@ jobs:
         run: tools/ci/test_pr_tier_scope.sh
       - name: Push range base
         run: tools/ci/test_push_range_base.sh
+      - name: Full tier scope
+        run: tools/ci/test_full_tier_scope.sh
+      - name: Failing target extraction
+        run: tools/ci/test_failing_targets.sh
+      - name: Nightly red report
+        run: tools/ci/test_nightly_red_report.sh
       - name: Post-merge tests never reuse cached results
         run: tools/ci/test_post_merge_nocache.sh --selftest && tools/ci/test_post_merge_nocache.sh
       - name: Artifact staging and bundle validation
@@ -166,11 +230,12 @@ jobs:
   # per-job ones. A called workflow cannot read needs.*.result of its
   # siblings, so this job runs inline, on a hosted label only.
   # A job skipped by its FLEET_ENABLED or FLEET_IIS_ENABLED term (the
-  # fleet-iis class jobs) is accepted as skipped; failure and cancelled still
-  # fail the gate.
+  # fleet-iis class jobs) is accepted as skipped, and so are full-scope (it
+  # runs on a push only) and full (off unless its trigger matches); failure
+  # and cancelled still fail the gate.
   gate:
     name: CI gate
-    needs: [rat, public-hygiene, ci-tooling-tests, pr, full]
+    needs: [rat, public-hygiene, ci-tooling-tests, pr, full-scope, full]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
