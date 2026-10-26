@@ -222,10 +222,15 @@ for ((i = 0; i < nfailed; i++)); do
   logf="${TMP}/log-${i}"
   f_note[i]=""
   f_whole[i]=""
-  if ! gh run view "${run}" --job "${f_id[i]}" --log-failed --allow-escape-sequences \
+  if ! gh run view "${run}" --job "${f_id[i]}" --log-failed \
       < /dev/null > "${logf}" 2> "${TMP}/err"; then
     log "gh run view failed for job ${f_id[i]}: $(head -c 300 "${TMP}/err"); trying the job log API"
-    if ! gh api "repos/${repo}/actions/jobs/${f_id[i]}/logs" < /dev/null > "${logf}" 2> "${TMP}/err"; then
+    # A job log carries ANSI colour codes, which gh api refuses to print
+    # without --allow-escape-sequences; its short refusal is no log either.
+    if ! gh api --allow-escape-sequences "repos/${repo}/actions/jobs/${f_id[i]}/logs" \
+        < /dev/null > "${logf}" 2> "${TMP}/err" \
+        || { [ "$(wc -c < "${logf}")" -lt 512 ] \
+             && grep -q 'pass --allow-escape-sequences' "${logf}" "${TMP}/err"; }; then
       echo "::warning::no log for job ${f_id[i]} (${f_name[i]}): $(head -c 300 "${TMP}/err")" >&2
       : > "${logf}"
       f_note[i]=" (log not available)"
