@@ -1721,6 +1721,49 @@ TEST_F(DaemonAdapterTest, TheRecoveryRetryNeverProbesALatchedPathAgain) {
   EXPECT_EQ(0, handler_.MessagesOfType(kInfo)) << Messages();
 }
 
+TEST_F(DaemonAdapterTest, AServingRecheckOfABackloggedListenerCostsTheShortDeadline) {
+  // The optimizer was down at start, and now its socket exists but accepts
+  // nothing.  The recheck runs on a request thread, so it spends the short
+  // deadline, not the two seconds a start-up probe may spend, and it does
+  // not latch that miss for the start-up probes.
+  DaemonCreatedItsVolume(kDaemonSize);
+  const GoogleString socket_path = SocketPath("recheck-short.sock");
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
+
+  std::unique_ptr<BacklogFillGuard> fill = FillBackloggedQueue(socket_path);
+  ASSERT_TRUE(fill->bound());
+  if (!QueueFilledWithEagain(*fill)) {
+    GTEST_SKIP() << "this kernel answers a full queue with "
+                 << fill->fill_errno();
+  }
+
+  now_ms_ += DaemonAdapter::kUnavailableRetryIntervalMs;
+  const std::chrono::steady_clock::time_point start =
+      std::chrono::steady_clock::now();
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->ServingHealth());
+  const int64_t elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count();
+  // Far under the 2000 ms deadline, with a full second of headroom for a
+  // loaded host (issues #208, #241).
+  EXPECT_LT(elapsed_ms, 1000) << elapsed_ms;
+
+  // The short miss was not latched: a start-up probe of the same path still
+  // pays the full deadline (the lower bound is the load-immune half).
+  std::unique_ptr<DaemonAdapter> second(MakeAdapter(socket_path));
+  const std::chrono::steady_clock::time_point second_start =
+      std::chrono::steady_clock::now();
+  EXPECT_EQ(DaemonStartupStatus::kOk, second->StartupCheck());
+  const int64_t second_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - second_start)
+          .count();
+  EXPECT_GE(second_ms, 1900) << second_ms;
+}
+
 TEST_F(DaemonAdapterTest, TheVolumeSplitIsNeverRechecked) {
   // The refusal is final by design: the split is a setup fault an operator
   // must fix, not a race that time heals.  The recheck leaves it alone even
@@ -4452,6 +4495,146 @@ TEST_F(DaemonAdapterTest, RecordCacheIfOpenNeverWaitsOnAnOpenInFlight) {
   // passes a right one through any stall short of the 30 s guard.
   EXPECT_EQ(0, open_gate.load())
       << "RecordCacheIfOpen() waited for the in-flight open";
+}
+
+TEST_F(DaemonAdapterTest, ARequestPathHandleNeverWaitsOnAnOpenInFlight) {
+  const GoogleString socket_path = SocketPath("reqpath1.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+
+  std::atomic<int> open_gate(0);
+  std::atomic<bool> open_reached(false);
+  last_abi_->open_gate = &open_gate;
+  last_abi_->open_gate_witness = &open_reached;
+  std::mutex finished_mutex;
+  std::condition_variable finished_cv;
+  bool finished = false;
+  std::thread opening([&]() { adapter->RecordCache(); });
+  // Bounds the OPEN: releases the gate after 1500 ms at the latest, or at
+  // once when the measurement below is over.
+  std::thread watchdog([&]() {
+    std::unique_lock<std::mutex> lock(finished_mutex);
+    finished_cv.wait_for(lock, std::chrono::milliseconds(1500),
+                         [&]() { return finished; });
+    open_gate.store(1);
+  });
+  // Declared AFTER both threads, so it is destroyed first: on every way out
+  // of this body -- a fatal assertion included -- it wakes the watchdog,
+  // opens the gate and joins both threads, and no joinable thread is ever
+  // destroyed.
+  struct FinishAndJoin {
+    ~FinishAndJoin() {
+      {
+        std::lock_guard<std::mutex> lock(*mutex);
+        *finished = true;
+      }
+      cv->notify_all();
+      gate->store(1);
+      opening->join();
+      watchdog->join();
+    }
+    std::mutex* mutex;
+    std::condition_variable* cv;
+    bool* finished;
+    std::atomic<int>* gate;
+    std::thread* opening;
+    std::thread* watchdog;
+  } finish_and_join{&finished_mutex, &finished_cv, &finished,
+                    &open_gate,      &opening,     &watchdog};
+
+  // Bounds the WAIT FOR the open: a RecordCache() that returns without ever
+  // reaching the fake's open (a backoff window, a closed or given-up
+  // adapter) must fail this case, not spin it into the suite's timeout.
+  const std::chrono::steady_clock::time_point reached_by =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!open_reached.load() &&
+         std::chrono::steady_clock::now() < reached_by) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  // A is demonstrably inside the slow open, holding the adapter's mutex.
+  ASSERT_TRUE(open_reached.load()) << "the fake's open was never reached";
+  const std::chrono::steady_clock::time_point start =
+      std::chrono::steady_clock::now();
+  void* answer = adapter->RecordCacheForRequest();
+  const int64_t elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start)
+          .count();
+  EXPECT_TRUE(answer == nullptr);
+  // Only RecordCacheForRequest() is timed, and the bound is its cost plus a
+  // full second of headroom: a loaded CI host or a sanitizer build can
+  // stall even a call that must not wait (issue #208).
+  EXPECT_LT(elapsed_ms, 1000) << elapsed_ms;
+}
+
+
+TEST_F(DaemonAdapterTest, ARequestPathHandleIsTheOpenHandle) {
+  const GoogleString socket_path = SocketPath("reqpath2.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+
+  void* cache = adapter->RecordCache();
+  ASSERT_TRUE(cache != nullptr);
+  const int opens = last_abi_->opens;
+  EXPECT_EQ(cache, adapter->RecordCacheForRequest());
+  EXPECT_EQ(cache, adapter->RecordCacheForRequest());
+  EXPECT_EQ(opens, last_abi_->opens) << "a steady-state call opened again";
+}
+
+TEST_F(DaemonAdapterTest, ARequestPathHandleOpensWhenNothingIsOpen) {
+  // First use keeps its semantics: the request that finds nothing open and
+  // no open in flight performs the open itself.
+  const GoogleString socket_path = SocketPath("reqpath3.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  const int opens_after_startup = last_abi_->opens;
+
+  void* cache = adapter->RecordCacheForRequest();
+  EXPECT_TRUE(cache != nullptr);
+  EXPECT_EQ(opens_after_startup + 1, last_abi_->opens);
+  EXPECT_EQ(cache, adapter->RecordCacheIfOpen());
+}
+
+TEST_F(DaemonAdapterTest, ARequestPathHandleFollowsAVolumeReplacement) {
+  const GoogleString socket_path = SocketPath("reqpath4.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  ASSERT_TRUE(adapter->RecordCacheForRequest() != nullptr);
+  const int opens = last_abi_->opens;
+  const int closes = last_abi_->closes;
+
+  DaemonPublishedGeneration(1);
+  // Inside the check interval nothing has been looked at yet.
+  EXPECT_TRUE(adapter->RecordCacheForRequest() != nullptr);
+  EXPECT_EQ(opens, last_abi_->opens);
+
+  // The replacement is seen: the lock is free, so this request reopens on
+  // its own thread, and the old handle is set aside, not closed.
+  now_ms_ += DaemonAdapter::kVolumeGenerationCheckIntervalMs;
+  EXPECT_TRUE(adapter->RecordCacheForRequest() != nullptr);
+  EXPECT_EQ(opens + 1, last_abi_->opens);
+  EXPECT_EQ(closes, last_abi_->closes);
+  EXPECT_TRUE(adapter->RecordCacheIfOpen() != nullptr);
+}
+
+TEST_F(DaemonAdapterTest, ARequestPathHandleIsNullOutsideReady) {
+  DaemonAdapter unconfigured("", "", &handler_);
+  EXPECT_TRUE(unconfigured.RecordCacheForRequest() == nullptr);
+
+  library_available_ = false;
+  const GoogleString socket_path = SocketPath("reqpath5.sock");
+  std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
+  EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
+  EXPECT_EQ(DaemonHealth::kUnavailable, adapter->health());
+  EXPECT_TRUE(adapter->RecordCacheForRequest() == nullptr);
 }
 
 TEST_F(DaemonAdapterTest, RecordCacheIfOpenIsNullOutsideReady) {

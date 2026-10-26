@@ -1250,10 +1250,12 @@ class Variable;
 // it, so it must outlive the response.
 //
 // WHICH FACTORY FOR WHICH PORT.  MakeDaemonServeReaderIfReady obtains the
-// handle through RecordCache(), which performs the open -- blocking file
-// lock, background threads -- on the calling thread when no handle is open.
-// That is right for a port whose caller may block (Apache's request
-// threads).  MakeDaemonServeReaderIfOpen obtains it through
+// handle through RecordCacheForRequest(), which returns the published handle
+// without taking the lock and, when no handle is open, performs the open
+// only if it wins a try-lock; a caller that loses it goes to the origin
+// instead of waiting.  That is right for a port whose request thread may
+// do the open itself (Apache and IIS).  MakeDaemonServeReaderIfOpen obtains
+// it through
 // RecordCacheIfOpen(), which never opens, never waits, and logs nothing when
 // there is no handle: the only choice for a caller that must not block, like
 // nginx's event-loop thread.  The open itself stays with RecordCache(); such
