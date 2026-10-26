@@ -93,7 +93,7 @@ TEST(UnclaimedRefTest, TheModuleHoldsItsProcessContextReferenceThisWay) {
   NullMessageHandler handler;
   GoogleString header;
   GoogleString source;
-  const GoogleString dir = StrCat(GTestSrcDir(), "/pagespeed/iis/");
+  const GoogleString dir = RunfilePath("pagespeed/iis/");
   ASSERT_TRUE(file_system.ReadFile(StrCat(dir, "iis_http_module.h").c_str(),
                                    &header, &handler));
   ASSERT_TRUE(file_system.ReadFile(StrCat(dir, "iis_http_module.cpp").c_str(),

@@ -38,11 +38,13 @@
 
 #include <algorithm>  // For std::replace
 #include <cstdlib>    // For getenv
+#include <memory>
 #include <vector>
 
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "rules_cc/cc/runfiles/runfiles.h"
 
 namespace net_instaweb {
 
@@ -59,6 +61,33 @@ GoogleString GTestSrcDir() {
   // Previously checked that "third_party" and "pagespeed" directories existed
   // to verify we're running from the checkout root.
   return cwd;
+}
+
+GoogleString RunfilePath(const GoogleString& path) {
+  // Rlocation answers from the runfiles manifest first, so the caller gets
+  // the real output file rather than a link in the runfiles tree.  On
+  // Windows Bazel materialises the tree before remotely cached outputs are
+  // downloaded and links a still-missing target as a directory junction;
+  // the tree is only rebuilt when its manifest changes, so the junction
+  // stays and a later open of that path (LoadLibrary) fails with "Access is
+  // denied".  The manifest names the real file, which Bazel has fetched by
+  // the time the test runs.
+  std::string error;
+  std::unique_ptr<rules_cc::cc::runfiles::Runfiles> runfiles(
+      rules_cc::cc::runfiles::Runfiles::CreateForTest(&error));
+  if (runfiles != nullptr) {
+    // _main is the main repository's canonical name under bzlmod, which is
+    // how the runfiles manifest spells the key, so no mapping is involved.
+    const GoogleString resolved = runfiles->Rlocation(StrCat("_main/", path));
+    if (!resolved.empty()) {
+      return resolved;
+    }
+  }
+  // Outside Bazel, or for a runfile the library cannot find: a test's
+  // working directory under Bazel is the main repository's runfiles tree,
+  // so the plain relative path is the pre-Rlocation behaviour and a missing
+  // file still fails with a path that names it.
+  return StrCat(GTestSrcDir(), "/", path);
 }
 
 GoogleString GTestTempDir() {
