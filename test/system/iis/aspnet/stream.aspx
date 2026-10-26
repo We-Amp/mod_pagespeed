@@ -1,12 +1,14 @@
 <%@ Page Language="C#" %>
 <script runat="server">
+    // SPDX-License-Identifier: Apache-2.0
     // Streamed-HTML fixture for the PageSpeed IIS module (issue #314).
     // The page writes one HTML document in ten Response.Write +
     // Response.Flush steps with 50 ms sleeps, so the module sees a single
     // response delivered across several sends. The output is a valid HTML
     // document the rewrite pipeline can parse. The long runs of spaces are
-    // collapsible whitespace: collapse_whitespace (CoreFilters) removes
-    // them when the page is rewritten. ASCII only. No caching headers are
+    // collapsible whitespace: collapse_whitespace removes them
+    // when the test requests that filter with
+    // ?PageSpeedFilters=+collapse_whitespace. ASCII only. No caching headers are
     // set here; rewritten-HTML cache headers come from the module.
     private const int ChunkDelayMs = 50;
 

@@ -20,8 +20,8 @@ from pagespeed_test_framework import PageSpeedClient, assert_http_status
 
 STREAM_URL = "/aspnet/stream.aspx"
 CLOSING_MARKER = "<!-- stream-end -->"
-# stream.aspx writes runs of 40+ spaces; collapse_whitespace (CoreFilters)
-# must reduce them to at most one space.
+# stream.aspx writes runs of 40+ spaces; collapse_whitespace (not a core
+# filter, so the request adds it) must reduce them to at most one space.
 LONG_WHITESPACE_RUN = " " * 24
 # Enough parallel clients and fetches to overlap sends across worker threads.
 STRESS_CLIENTS = 20
@@ -30,7 +30,7 @@ STRESS_FETCHES_PER_CLIENT = 10
 
 def _assert_streamed_page(client: PageSpeedClient) -> None:
     """Fetch stream.aspx once and assert the rewrite contract."""
-    response = client.get(STREAM_URL)
+    response = client.get(STREAM_URL + "?PageSpeedFilters=+collapse_whitespace")
     assert_http_status(response, 200)
 
     text = response.text
@@ -102,3 +102,7 @@ class TestStreamedHtml:
             futures = [pool.submit(fetch_all) for _ in range(STRESS_CLIENTS)]
             for future in futures:
                 future.result()
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))
