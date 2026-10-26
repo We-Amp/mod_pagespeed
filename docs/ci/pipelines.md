@@ -604,6 +604,81 @@ Notes on the full tier:
   and page heap settings for the worker process are machine-global, so the job
   clears them before arming and again at the end, even on failure.
 
+### Bisecting a red full-tier job
+
+`tools/ci/bisect-job.sh` bisects a red `linux-asan`, `linux-tsan` (test
+bisect) or `linux-build` (build bisect) on one Linux build host. Other
+full-tier jobs are out of its scope. Per-repository values (job names,
+container flags and environment, services, the vendor command) are in
+`tools/ci/bisect-job-table.sh`; `tools/ci/test_bisect_job.sh` checks them
+against `pipeline-full.yml`, so a workflow change that is not mirrored there
+fails CI.
+
+```bash
+export BISECT_ROOT=/absolute/path/for/bisect/runs   # required, never defaulted
+tools/ci/bisect-job.sh start --job linux-asan --bad <sha> --good <sha> \
+  --run <run-id> --repo <clone url or path>         # prints <id>, returns at once
+tools/ci/bisect-job.sh status <id>                  # state, last log lines, exit
+tools/ci/bisect-job.sh resume <id>                  # continue an interrupted run
+```
+
+Host prerequisites: `docker`, `git`, `gh` (authenticated), `flock` and
+`setsid` (util-linux), `nice` (and `ionice` where present), and `bazel`
+(bazelisk) for vendoring; MOD vendoring (`tools/vendor-deps.sh`) also needs `python3`.
+
+`--targets-file <file>` (one label per line) replaces `--run`. `--cpus`,
+`--memory-gb`, `--runs-per-test` and `--remote-cache-url` (read-only use)
+are optional. The run writes `BISECT_ROOT/<id>/{state,log,result.json,exit}`.
+`result.json` has `status` (`culprit`, `inconclusive`, `env-dependent`,
+`external-drift-or-stale-good`, `no-targets`, `too-many-targets`),
+`first_bad`, `skips`, `targets`, `timeout_only`, `rebuilt_images`, `steps`,
+`bad`, `good` and `job`. `start` and `resume` exit 0 when launched, 2 when
+refused, 3 when another bisect holds the lock.
+
+How it decides:
+
+- The targets come from the failed job's log (`gh run view --job <id>
+  --log-failed`, or when that gives nothing the job logs API with `gh api
+  --allow-escape-sequences`) through `tools/ci/failing_targets.sh`. No target,
+  or more than 10 (`BISECT_MAX_TARGETS`), means no bisect.
+- The bad endpoint must fail and the good one pass first (otherwise
+  `env-dependent` or `external-drift-or-stale-good`). Then `git bisect start
+  --first-parent` and `git bisect run`.
+- A step is bad when a recorded target fails the same way (a compile failure
+  of a recorded target counts in a test bisect too), good when all recorded
+  targets pass or build, and skipped for anything else: a commit whose
+  `.bazelrc` predates the job's `ci-*` config, a vendoring or image failure, a
+  build error in another target.
+- Each step uses the commit's own `.bazelrc` config, vendored tree (kept per
+  vendor key under `BISECT_ROOT/vendor/`) and content-hashed dev image (built
+  only when the host lacks it; a rebuild is listed in `rebuilt_images`), with
+  `--nocache_test_results` and a private `--disk_cache`. MOD's redis and
+  memcached run on the run's own network under their short names as network
+  aliases.
+- Disk: each step copies the vendored tree into the work tree, and the
+  script never prunes `BISECT_ROOT`; operators prune it.
+
+Host safety contract:
+
+- Every container and network name starts with the run id
+  (`bisect-<repo>-<job>-<utc>-<pid>`) and is recorded before it is created.
+  Cleanup removes only those names. Nothing else is stopped, removed or
+  pruned, no image is retagged or removed, and no process is signalled.
+- `BISECT_ROOT` must be absolute and outside any `actions-runner*/_work`
+  tree (checked on the resolved path before anything is created). One bisect runs per host (`flock` on `BISECT_ROOT/.lock`).
+- A step container runs with `--cpu-shares 128` and `--cpus`/`--memory` caps
+  (defaults: a quarter of the host's CPUs, at most 16; 2 GiB per CPU, at
+  least 16 GiB), and Bazel `--jobs` equals the CPU cap. Service containers
+  get a small fixed cap. Host-side work (the docker client, vendoring, image
+  builds) runs under `nice` (and `ionice` where present); that does not carry
+  into a container, so the share inside comes from the caps alone.
+- Host Bazel (vendoring) runs with `HOME` and `--output_user_root` (the
+  install base) under `BISECT_ROOT/<id>`. A `PATH` shim keeps the vendor
+  script's own `--output_base`, records it and shuts that server down when
+  each call returns; the exit trap shuts down any recorded one that is left
+  and removes only the trees under `BISECT_ROOT/<id>`.
+- `resume` first removes the containers the earlier worker recorded.
+
 ## The release ref guard
 
 Release pipelines start with the `ref-guard` action
