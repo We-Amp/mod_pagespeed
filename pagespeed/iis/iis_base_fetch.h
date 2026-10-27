@@ -28,6 +28,10 @@ namespace net_instaweb {
 		~IisBaseFetch() override;
   
 		void ReleaseRef();
+
+		// The request this fetch writes to is going away before the fetch is
+		// done.  Nothing to drop here; IisModuleBaseFetch overrides it.
+		virtual void DetachFromRequest() {}
   
 		protected:
   

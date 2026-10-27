@@ -17,6 +17,13 @@ IisInnerRequestContext::~IisInnerRequestContext()
 
 void IisInnerRequestContext::CleanupStoredContext()
 {
+	// IIS is done with the request, but the rewriter may still be producing
+	// output for it on its own threads: cut the fetch off from the request
+	// first, so nothing it does from here on can reach IIS.
+	if (base_fetch_ != nullptr)
+	{
+		base_fetch_->DetachFromRequest();
+	}
 	if (proxy_fetch_ != nullptr)
 	{
 		//CHECK(false);

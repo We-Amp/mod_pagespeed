@@ -8,11 +8,13 @@ test/system/iis/aspnet/ to <web root>/aspnet and runs it in its own app
 pool with managed runtime v4.0) serves stream.aspx: one HTML document
 written in ten Response.Write + Response.Flush steps with 50 ms sleeps.
 The module therefore sees several sends for a single rewritten response,
-which is the path issue #314 hardens.
+which is the path issue #314 hardens. Every step ends with an ordered marker
+paragraph (c0 .. c9); ?padKb=N pads each step with an N KB comment so the
+rewriter flushes before the page is complete.
 """
 
 import concurrent.futures
-import os
+import re
 
 import pytest
 
@@ -26,11 +28,20 @@ LONG_WHITESPACE_RUN = " " * 24
 # Enough parallel clients and fetches to overlap sends across worker threads.
 STRESS_CLIENTS = 20
 STRESS_FETCHES_PER_CLIENT = 10
+# Each of the ten steps carries this much padding in the concurrent test:
+# above the rewriter's 100 KB flush limit, so output is produced while the
+# page is still being sent.
+STRESS_PAD_KB = 128
+STEP_MARKERS = [f"c{i}" for i in range(10)]
+MARKER_PATTERN = re.compile(r'<p id="(c\d+)">')
 
 
-def _assert_streamed_page(client: PageSpeedClient) -> None:
+def _assert_streamed_page(client: PageSpeedClient, pad_kb: int = 0) -> None:
     """Fetch stream.aspx once and assert the rewrite contract."""
-    response = client.get(STREAM_URL + "?PageSpeedFilters=+collapse_whitespace")
+    query = "?PageSpeedFilters=+collapse_whitespace"
+    if pad_kb:
+        query += f"&padKb={pad_kb}"
+    response = client.get(STREAM_URL + query)
     assert_http_status(response, 200)
 
     text = response.text
@@ -39,6 +50,10 @@ def _assert_streamed_page(client: PageSpeedClient) -> None:
     # tags follow it (whitespace-insensitive: collapse_whitespace may have
     # reflowed them).
     assert CLOSING_MARKER in text, "streamed page truncated before closing marker"
+    # Every step arrived once and in order.
+    assert MARKER_PATTERN.findall(text) == STEP_MARKERS, (
+        "step markers missing, repeated or out of order"
+    )
     tail = text.rsplit(CLOSING_MARKER, 1)[1]
     assert "".join(tail.split()) == "</body></html>", (
         f"unexpected content after closing marker: {tail!r}"
@@ -76,17 +91,14 @@ class TestStreamedHtml:
     @pytest.mark.iis_only
     @pytest.mark.requires_fixture("aspnet_stream")
     @pytest.mark.slow
-    @pytest.mark.skipif(
-        os.environ.get("PAGESPEED_IIS_STREAM_STRESS") != "1",
-        reason="enabled by the streamed-HTML fix",
-    )
     def test_streamed_html_concurrent_fetches(self, server_config):
         """Concurrent fetches keep the streamed rewrite contract.
 
-        20 clients x 10 fetches: overlapping multi-send responses are what
-        issue #314 fixes; this is the proof. Gated behind
-        PAGESPEED_IIS_STREAM_STRESS until that fix lands so the lane stays
-        green; the fix PR removes the gate.
+        20 clients x 10 fetches, each page padded to about 1.3 MB: output is
+        produced by the rewriter while the application is still sending, and
+        overlapping multi-send responses multiply the chances of two threads
+        touching one response, which is what issue #314 fixes. Every fetch
+        must carry the markers c0 to c9 exactly once and in order.
         """
 
         def fetch_all() -> None:
@@ -94,7 +106,7 @@ class TestStreamedHtml:
                 host=server_config.host, port=server_config.port
             )
             for _ in range(STRESS_FETCHES_PER_CLIENT):
-                _assert_streamed_page(worker)
+                _assert_streamed_page(worker, pad_kb=STRESS_PAD_KB)
 
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=STRESS_CLIENTS
