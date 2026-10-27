@@ -1546,7 +1546,7 @@ void* DaemonAdapter::RecordCacheLocked(int64_t lock_wait_ms) {
     // Opened, or done trying.  Either way there is nothing left to decide.
     return record_cache_;
   }
-  const int64_t now_ms = monotonic_clock_();
+  int64_t now_ms = monotonic_clock_();
   if (record_cache_attempts_ > 0 && now_ms < record_cache_next_attempt_ms_) {
     // Inside a backoff window.  This is the common path once something is
     // wrong -- it is what keeps a durable failure from costing an open
@@ -1566,14 +1566,18 @@ void* DaemonAdapter::RecordCacheLocked(int64_t lock_wait_ms) {
   // event loop), so a held lock answers nullptr at once and is tried again
   // after kVolumeOpenLockBusyRetryMs.  Only the worker-start open
   // (RecordCacheAtWorkerStart) passes a wait budget; it runs off the event
-  // loop, before the worker serves.  Held, it spans the scan
-  // below, the open and the scan after it, so a sibling process of this
-  // server cannot attach to a stray file this open is about to remove (see
-  // VolumeOpenLock); RAII releases it on every way out of this function.
+  // loop, before the worker serves.  Held, it spans the scan below, the open
+  // and the scan after it, so a sibling process of this server cannot attach
+  // to a stray file this open is about to remove (see VolumeOpenLock); RAII
+  // releases it on every way out of this function.
   VolumeOpenLock open_lock;
-  const VolumeOpenLock::Result open_lock_result =
-      VolumeOpenLock::Acquire(volume_path_, lock_wait_ms, monotonic_clock_,
-                              &open_lock);
+  const VolumeOpenLock::Result open_lock_result = VolumeOpenLock::Acquire(
+      volume_path_, lock_wait_ms, monotonic_clock_, &open_lock);
+  if (lock_wait_ms > 0) {
+    // A waited acquire can take seconds; the retry and backoff stamps below
+    // must count from now, not from before the wait.
+    now_ms = monotonic_clock_();
+  }
   if (open_lock_result == VolumeOpenLock::Result::kBusy) {
     open_lock_retry_ms_ = now_ms + kVolumeOpenLockBusyRetryMs;
     return nullptr;

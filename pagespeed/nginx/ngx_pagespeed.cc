@@ -5468,10 +5468,10 @@ ngx_int_t ps_init_child_process(ngx_cycle_t* cycle) {
       // seconds) for the volume-open lock that workers starting together
       // take in turn, so it happens here -- in a serving worker, after
       // fork and off the event loop -- never lazily inside a request, and
-      // never in the master (the master only resolved the verdict) or in nginx's
-      // cache manager and cache loader, which run this hook too but serve
-      // no request.  A null result is fine: the adapter has its own retry
-      // schedule.
+      // never in the master (the master only resolved the verdict) or in
+      // nginx's cache manager and cache loader, which run this hook too but
+      // serve no request.  A null result is fine: the adapter has its own
+      // retry schedule.
       if ((ngx_process == NGX_PROCESS_WORKER ||
            ngx_process == NGX_PROCESS_SINGLE) &&
           cfg_s->server_context->daemon_health() == DaemonHealth::kReady) {
