@@ -1614,8 +1614,12 @@ jobs:
 
   # ---------------------------------------------------------------------
   # Linux arm64 on hosted arm64 runners (there is no arm64 class). The
-  # build job vendors for itself into actions/cache; the other arm64 jobs
-  # restore that. All of them keep a Bazel disk cache in actions/cache.
+  # build and unit-test jobs restore the vendored tree from actions/cache and
+  # vendor for themselves on a miss. They share one Bazel disk cache entry in
+  # actions/cache per ISO week: the first job of the week that misses it
+  # saves it, capped at 3G, and every other job restores it. A key per run
+  # would add a multi-GB entry each run and evict the vendored trees from the
+  # repository's cache quota.
   # ---------------------------------------------------------------------
   linux-arm64-build:
     name: Linux arm64 Build
@@ -1656,11 +1660,16 @@ jobs:
           GIT_TERMINAL_PROMPT: "0"
         run: bash tools/vendor-deps.sh vendor
 
+      - name: Name the disk cache week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
       - name: Restore the Bazel disk cache
+        id: disk-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/mod-pagespeed-bazel-disk-arm64
-          key: mod-pagespeed-bazel-disk-arm64-build-${{ github.run_id }}-${{ github.run_attempt }}
+          key: mod-pagespeed-bazel-disk-arm64-${{ steps.week.outputs.week }}
           restore-keys: |
             mod-pagespeed-bazel-disk-arm64-
 
@@ -1717,6 +1726,12 @@ jobs:
                     /workspace/.build-artifacts/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
             '
 
+      # Bazel never collects this cache (its container exits right after the
+      # last command), so cap it before actions/cache saves a new entry.
+      - name: Cap the Bazel disk cache
+        if: steps.disk-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G
+
       - name: Upload the build bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -1741,18 +1756,42 @@ jobs:
       - name: Stamp GIT_COMMIT
         run: echo -n "$GITHUB_SHA" > GIT_COMMIT
 
+      # The build job saved this key, but the cache quota can evict it before
+      # this job starts: vendor again on a miss rather than fail.
       - name: Restore vendored dependencies
+        id: vendor-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: vendor
           key: mod-pagespeed-vendor-${{ runner.arch }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'bazel/**', 'third_party/**', 'tools/vendor-deps.sh') }}
-          fail-on-cache-miss: true
+
+      - name: Ensure bazel
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        run: |
+          if command -v bazel >/dev/null 2>&1; then bazel --version; bash tools/ci/check-bazel-version.sh; exit 0; fi
+          npm install -g @bazel/bazelisk@1.28.1 2>/dev/null || sudo npm install -g @bazel/bazelisk@1.28.1
+          bazel --version
+          bash tools/ci/check-bazel-version.sh
+
+      - name: Vendor all dependencies
+        if: steps.vendor-cache.outputs.cache-hit != 'true'
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_TERMINAL_PROMPT: "0"
+        run: bash tools/vendor-deps.sh vendor
+
+      - name: Name the disk cache week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Bazel disk cache
+        id: disk-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/mod-pagespeed-bazel-disk-arm64
-          key: mod-pagespeed-bazel-disk-arm64-test-${{ github.run_id }}-${{ github.run_attempt }}
+          key: mod-pagespeed-bazel-disk-arm64-${{ steps.week.outputs.week }}
           restore-keys: |
             mod-pagespeed-bazel-disk-arm64-
 
@@ -1832,6 +1871,12 @@ jobs:
         run: |
           [ -n "${CI_REDIS:-}" ] && docker rm -f "${CI_REDIS}" "${CI_MEMCACHED}" 2>/dev/null || true
           [ -n "${CI_NET:-}" ] && docker network rm "${CI_NET}" 2>/dev/null || true
+
+      # Bazel never collects this cache (its container exits right after the
+      # last command), so cap it before actions/cache saves a new entry.
+      - name: Cap the Bazel disk cache
+        if: steps.disk-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G
 
   linux-arm64-apache-sys-tests:
     name: Linux arm64 Apache System Tests
