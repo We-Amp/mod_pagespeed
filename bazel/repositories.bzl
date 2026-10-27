@@ -553,7 +553,17 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # use per-function target attributes and runtime dispatch, and
 # CYCLONE_USE_BUNDLED_SHA256 (a source-level switch this build leaves unset;
 # the CMake default flipped) still hashes through @boringssl//:crypto.
-CYCLONE_COMMIT = "22f65531115913ab7ce836639823df6c07281219"
+#
+# Bumped to cyclone b081e22 (2 commits past 22f6553), in lockstep with the
+# optimizer.  No on-disk format or shared-mapping change, no public API or
+# ABI change, no new source file, define or link flag; //bazel:cyclone.bzl
+# needs no change.  What is new, on Windows only: the cache volume handles
+# (and the volume's file descriptor) are now opened with delete sharing, so
+# another process can delete or rename the volume file while this module has
+# it open, as on POSIX.  A full purge of the optimizer's cache relies on
+# that to replace the volume without waiting for the module to let go.  The
+# other commit changes a fuzz harness only.  POSIX builds are unaffected.
+CYCLONE_COMMIT = "b081e22a4b8e5accf541e856ae908424901a2df1"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)

@@ -837,7 +837,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_bcr_deps": {
       "general": {
-        "bzlTransitiveDigest": "VKXqccum4ZTR8/alhhPMm0NCFb3yEegf08FxI8ZEvNY=",
+        "bzlTransitiveDigest": "zLk7hfl65Nt9KMH1x9HQ/GKUcIAWkxz4RCHj1hWlQFg=",
         "usagesDigest": "Ba3C/QSRWx/cj/SHNe4MyHopX+FuysaxdGMyG9CHa7E=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools"
@@ -949,7 +949,7 @@
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:git.bzl%git_repository",
             "attributes": {
               "remote": "https://github.com/We-Amp/cyclone-cache.git",
-              "commit": "22f65531115913ab7ce836639823df6c07281219",
+              "commit": "b081e22a4b8e5accf541e856ae908424901a2df1",
               "build_file_content": "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n# Core Cyclone library (C++23)\n# This library contains the actual cache implementation.\n#\n# IMPORTANT: Cyclone requires C++23. The per_file_copt in pagespeed.bazelrc\n# overrides the default standard for cyclone source files. We also include\n# -std=c++23 in copts as a fallback.\ncc_library(\n    name = \"cyclone\",\n    srcs = glob([\n        \"src/core/*.cpp\",\n        \"src/io/*.cpp\",\n        \"src/ram_cache/*.cpp\",\n        \"src/plugin/*.cpp\",\n        \"src/optimization/*.cpp\",\n    ], exclude = [\n        \"src/**/*_test.cpp\",\n        \"src/**/*_benchmark.cpp\",\n    ]),\n    hdrs = glob([\n        \"include/cyclone/*.hpp\",\n        \"include/cyclone/detail/*.hpp\",\n        \"include/cyclone/plugin/*.hpp\",\n        \"src/core/*.hpp\",\n        \"src/io/*.hpp\",\n        \"src/ram_cache/*.hpp\",\n        \"src/optimization/*.hpp\",\n    ]),\n    includes = [\"include\", \"src\"],\n    copts = select({\n        \"@platforms//os:windows\": [\n            \"/std:c++latest\",\n            \"/FImutex\",\n            \"/FIshared_mutex\",\n            \"/FIexpected\",\n            \"/FIalgorithm\",  # For std::clamp\n        ],\n        \"//conditions:default\": [\n            \"-std=c++23\",\n            \"-Wno-deprecated-declarations\",\n            # Force-include standard library headers that cyclone relies on via\n            # indirect includes. The Bazel build order differs from CMake.\n            \"-include\", \"mutex\",\n            \"-include\", \"shared_mutex\",\n            \"-include\", \"expected\",\n        ],\n    }),\n    local_defines = select({\n        \"@platforms//os:windows\": [\n            \"CYCLONE_PLATFORM_WINDOWS\",\n        ],\n        \"//conditions:default\": [],\n    }),\n    linkopts = select({\n        \"@platforms//os:linux\": [\"-lpthread\"],\n        \"//conditions:default\": [],\n    }),\n    deps = [\n        # BoringSSL provides OpenSSL-compatible API for SHA-256\n        \"@boringssl//:crypto\",\n    ],\n    visibility = [\"//visibility:public\"],\n)\n"
             }
           },
