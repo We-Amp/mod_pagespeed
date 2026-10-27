@@ -68,6 +68,8 @@ tier.
 | `js-minify-corpus` | `fleet-heavy` | `vendor` | JS minifier oracles and goldens freshness gate |
 | `html-parse-corpus` | `fleet-heavy` | `vendor` | HTML parse goldens freshness gate |
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
+| `nginx-sys-tests` | `fleet-light` | `changes`, `linux-build` | the nginx system tests (`test/system/run_nginx_tests.sh`) against the module from the `ci-artifacts-linux-x64` bundle, x64 only, with the same container, capabilities and failure diagnostics as the full tier's job. Runs only when the `nginx_sys` path filter fires (`pagespeed/nginx/`, `test/pagespeed/nginx/`, `test/system/nginx/`, `pagespeed/system/`, the nginx run script, the diagnostics collector); skipped otherwise, and with `linux-build` when the fleet scope skips the build runner legs |
+| `apache-sys-tests` | `fleet-light` | `changes`, `linux-build` | the same for the Apache module (`test/system/run_system_tests.sh`). Runs only when the `apache_sys` path filter fires (`pagespeed/apache/`, `test/pagespeed/apache/`, `test/system/automatic/`, `test/system/system/`, `test/system/apache/`, `pagespeed/system/`, the Apache run script, the diagnostics collector) |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
 | `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
@@ -138,7 +140,7 @@ whole entries oldest first. Either directory may be absent.
 ### Path-filtered hosted guards
 
 The `changes` job diffs a pull request against its base and publishes one
-boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`, `sidecar`). The jobs that only
+boolean per filter (`signing_key`, `serf`, `cve`, `upgrade`, `fuzz`, `iis`, `sidecar`, `nginx_sys`, `apache_sys`). The jobs that only
 matter when their inputs change run when their filter is true, and are skipped
 otherwise; outside a pull request every filter is true. The aggregate gate
 treats a skipped job as fine. A build runner job that depends on a filter

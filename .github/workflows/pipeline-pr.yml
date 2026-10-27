@@ -73,6 +73,8 @@ jobs:
       fuzz: ${{ steps.diff.outputs.fuzz }}
       iis: ${{ steps.diff.outputs.iis }}
       sidecar: ${{ steps.diff.outputs.sidecar }}
+      nginx_sys: ${{ steps.diff.outputs.nginx_sys }}
+      apache_sys: ${{ steps.diff.outputs.apache_sys }}
     steps:
       # fetch-depth: 0 so the diff can reach the pull request's base commit.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,6 +159,8 @@ jobs:
           fuzz=true
           iis=true
           sidecar=true
+          nginx_sys=true
+          apache_sys=true
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] || [ "${GITHUB_EVENT_NAME}" = "merge_group" ]; then
             signing_key=false
             serf=false
@@ -165,6 +169,8 @@ jobs:
             fuzz=false
             iis=false
             sidecar=false
+            nginx_sys=false
+            apache_sys=false
             changed="${RUNNER_TEMP}/changed-files.txt"
             git diff --name-only "${BASE}...HEAD" > "${changed}"
             wf='\.github/workflows/pipeline-pr\.yml'
@@ -194,6 +200,15 @@ jobs:
             if grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|${wf})" "${changed}"; then
               sidecar=true
             fi
+            # The ported servers' system tests: the port's sources and tests,
+            # the shared daemon adapter and serve arm, the system-test run
+            # scripts and the diagnostics collector they call.
+            if grep -qE "^(pagespeed/nginx/|test/pagespeed/nginx/|test/system/nginx/|pagespeed/system/|test/system/run_nginx_tests\.sh|tools/ci/collect-systest-diagnostics\.sh|${wf})" "${changed}"; then
+              nginx_sys=true
+            fi
+            if grep -qE "^(pagespeed/apache/|test/pagespeed/apache/|test/system/automatic/|test/system/system/|test/system/apache/|pagespeed/system/|test/system/run_system_tests\.sh|tools/ci/collect-systest-diagnostics\.sh|${wf})" "${changed}"; then
+              apache_sys=true
+            fi
           fi
           {
             echo "signing_key=${signing_key}"
@@ -203,8 +218,10 @@ jobs:
             echo "fuzz=${fuzz}"
             echo "iis=${iis}"
             echo "sidecar=${sidecar}"
+            echo "nginx_sys=${nginx_sys}"
+            echo "apache_sys=${apache_sys}"
           } >> "$GITHUB_OUTPUT"
-          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz} iis=${iis} sidecar=${sidecar}"
+          echo "path filters: signing_key=${signing_key} serf=${serf} cve=${cve} upgrade=${upgrade} fuzz=${fuzz} iis=${iis} sidecar=${sidecar} nginx_sys=${nginx_sys} apache_sys=${apache_sys}"
 
   # One checkout serves every group. Each step runs even when an earlier one
   # failed (`!cancelled()`), so one red run lists every broken guard.
@@ -3127,6 +3144,237 @@ jobs:
           path: ${{ runner.temp }}/upgrade-rehearsal-${{ matrix.distro }}/logs
           if-no-files-found: ignore
           retention-days: 3
+
+  # ---------------------------------------------------------------------
+  # Apache and nginx system tests, for a pull request that touches the port
+  # (or the shared daemon adapter and serve arm) they exercise. Same bodies as
+  # the full tier's jobs, against this tier's own linux-build bundle, x64
+  # only. Skipped (not failed) when the path filter finds nothing, and with
+  # linux-build when the fleet scope skips the build runner legs.
+  # ---------------------------------------------------------------------
+  apache-sys-tests:
+    name: Apache System Tests (changed port)
+    needs: [changes, linux-build]
+    if: ${{ needs.changes.outputs.apache_sys == 'true' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
+    timeout-minutes: 90
+    env:
+      # Names this job's diagnostics tarball (job, run and attempt), so only
+      # this job's own tarball is ever collected and uploaded.
+      SYSTEST_DIAG_TAG: apache-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle
+
+      # The bundle holds the two modules flat, with a checksum list; the
+      # system-test scripts look for them under bazel-bin/.
+      - name: Place the modules
+        run: |
+          set -euo pipefail
+          (cd "${RUNNER_TEMP}/bundle" && sha256sum -c checksums.sha256)
+          rm -rf bazel-bin
+          mkdir -p bazel-bin/pagespeed/nginx
+          cp "${RUNNER_TEMP}/bundle/libmod_pagespeed.so" bazel-bin/libmod_pagespeed.so
+          cp "${RUNNER_TEMP}/bundle/ngx_pagespeed_module.so" bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Check the modules are present
+        run: ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
+      - name: Container identity
+        run: |
+          u="$(id -u)"; g="$(id -g)"
+          if [ "$u" = 0 ]; then
+            u=1000; g=1000
+            chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          fi
+          echo "CI_UID=${u}" >> "$GITHUB_ENV"
+          echo "CI_GID=${g}" >> "$GITHUB_ENV"
+          echo "dev:x:${u}:${g}::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Run Apache system tests
+        id: systest
+        run: |
+          NAME="ci-systest-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          docker run --rm --init \
+            --name "${NAME}" \
+            --user "${CI_UID}:${CI_GID}" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            --cap-add NET_BIND_SERVICE \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -e HOME=/workspace -e USER=dev \
+            -e SYSTEST_DIAG_TAG \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              # Do not let a failing test run end this script before the
+              # diagnostics: capture the exit status, run the collector (crash
+              # lines into the job log; on failure one tarball of an allow-list
+              # of logs, see tools/ci/collect-systest-diagnostics.sh), then exit
+              # with the saved status. The collector always exits 0.
+              rc=0
+              ./test/system/run_system_tests.sh --skip-build || rc=$?
+              bash tools/ci/collect-systest-diagnostics.sh apache "$rc" /workspace/_systest-logs || true
+              exit "$rc"
+            '
+
+      # Only when the test step itself failed: take this job's own tarball
+      # into the job's scratch directory and upload it from there. Neither
+      # step can change the job's result; a refused upload (artifact storage
+      # full) must not add a failure of its own.
+      - name: Collect system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/systest-diag"
+          cp "${GITHUB_WORKSPACE}/_systest-logs/systest-diagnostics-${SYSTEST_DIAG_TAG}.tar.gz" \
+            "${RUNNER_TEMP}/systest-diag/" \
+            || echo "No diagnostics tarball for ${SYSTEST_DIAG_TAG}"
+
+      - name: Upload system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: apache-systest-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/systest-diag/
+          if-no-files-found: warn
+          retention-days: 3
+          # Already gzip-compressed.
+          compression-level: 0
+
+  nginx-sys-tests:
+    name: nginx System Tests (changed port)
+    needs: [changes, linux-build]
+    if: ${{ needs.changes.outputs.nginx_sys == 'true' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
+    timeout-minutes: 90
+    env:
+      SYSTEST_DIAG_TAG: nginx-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Download the build bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ci-artifacts-linux-x64
+          path: ${{ runner.temp }}/bundle
+
+      # The bundle holds the two modules flat, with a checksum list; the
+      # system-test scripts look for them under bazel-bin/.
+      - name: Place the modules
+        run: |
+          set -euo pipefail
+          (cd "${RUNNER_TEMP}/bundle" && sha256sum -c checksums.sha256)
+          rm -rf bazel-bin
+          mkdir -p bazel-bin/pagespeed/nginx
+          cp "${RUNNER_TEMP}/bundle/libmod_pagespeed.so" bazel-bin/libmod_pagespeed.so
+          cp "${RUNNER_TEMP}/bundle/ngx_pagespeed_module.so" bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Check the modules are present
+        run: ls -la bazel-bin/libmod_pagespeed.so bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so
+
+      - name: Docker daemon gate
+        run: |
+          for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; echo "docker daemon not ready ($i/30)"; sleep 2; done
+          docker info >/dev/null 2>&1 || { echo "::error::the container daemon is unreachable after 60s"; exit 1; }
+
+      - name: Ensure the dev image
+        run: |
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
+      - name: Container identity
+        run: |
+          u="$(id -u)"; g="$(id -g)"
+          if [ "$u" = 0 ]; then
+            u=1000; g=1000
+            chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          fi
+          echo "CI_UID=${u}" >> "$GITHUB_ENV"
+          echo "CI_GID=${g}" >> "$GITHUB_ENV"
+          echo "dev:x:${u}:${g}::/workspace:/bin/bash" > "${RUNNER_TEMP}/ci-passwd"
+          cat /etc/passwd >> "${RUNNER_TEMP}/ci-passwd"
+
+      - name: Run Nginx system tests
+        id: systest
+        run: |
+          NAME="ci-systest-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker rm -f "${NAME}" 2>/dev/null || true
+          docker run --rm --init \
+            --name "${NAME}" \
+            --user "${CI_UID}:${CI_GID}" \
+            -v "${RUNNER_TEMP}/ci-passwd:/etc/passwd:ro" \
+            --cap-add NET_BIND_SERVICE \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+            -e HOME=/workspace -e USER=dev \
+            -e SYSTEST_DIAG_TAG \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              rc=0
+              ./test/system/run_nginx_tests.sh --skip-build || rc=$?
+              bash tools/ci/collect-systest-diagnostics.sh nginx "$rc" /workspace/_systest-logs || true
+              exit "$rc"
+            '
+
+      - name: Collect system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          mkdir -p "${RUNNER_TEMP}/systest-diag"
+          cp "${GITHUB_WORKSPACE}/_systest-logs/systest-diagnostics-${SYSTEST_DIAG_TAG}.tar.gz" \
+            "${RUNNER_TEMP}/systest-diag/" \
+            || echo "No diagnostics tarball for ${SYSTEST_DIAG_TAG}"
+
+      - name: Upload system-test diagnostics
+        if: failure() && steps.systest.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nginx-systest-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/systest-diag/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
 
   # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
   # every build runner job here runs on its hosted twin, and the jobs that
