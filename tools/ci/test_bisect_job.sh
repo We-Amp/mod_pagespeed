@@ -512,6 +512,38 @@ for wording in "bad" "'bad'"; do
   fi
 done
 
+# The printed line counts only with git bisect run's success and
+# refs/bisect/bad. This shim prints a decoy culprit line ahead of git's
+# output (FAKE_GIT_DECOY) or replaces its exit status (FAKE_GIT_RC).
+mkdir -p "${WORK}/gitshim-decoy"
+cat > "${WORK}/gitshim-decoy/git" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = bisect ] && [ "${2:-}" = run ]; then
+  [ -n "${FAKE_GIT_DECOY:-}" ] && echo "${FAKE_GIT_DECOY} is the first bad commit"
+  "${REAL_GIT}" "$@"
+  rc=$?
+  exit "${FAKE_GIT_RC:-${rc}}"
+fi
+exec "${REAL_GIT}" "$@"
+EOF
+chmod +x "${WORK}/gitshim-decoy/git"
+
+new_case culprit-not-refs-bisect-bad-is-inconclusive
+PATH="${WORK}/gitshim-decoy:${PATH}" FAKE_GIT_DECOY="${SHA[3]}" start linux-asan
+if expect_eq status "$(jget status)" inconclusive && expect_eq first_bad "$(jget first_bad)" null; then
+  if grep -qF "first bad commit ${SHA[3]} is not refs/bisect/bad" "${BISECT_ROOT}/${ID}/log"; then pass "${CASE}"
+  else fail "${CASE}" "the log does not name the rejected sha"; fi
+fi
+
+new_case culprit-after-failed-bisect-run-is-inconclusive
+PATH="${WORK}/gitshim-decoy:${PATH}" FAKE_GIT_RC=1 start linux-asan
+if expect_eq status "$(jget status)" inconclusive && expect_eq first_bad "$(jget first_bad)" null; then
+  if ! grep -qE "^${SHA[7]} is the first '?bad'? commit\$" "${BISECT_ROOT}/${ID}/bisect-run.out"; then
+    fail "${CASE}" "git printed no culprit line to reject"
+  elif grep -qF "first bad commit ${SHA[7]} printed, but git bisect run exited 1" "${BISECT_ROOT}/${ID}/log"; then pass "${CASE}"
+  else fail "${CASE}" "the log does not say why"; fi
+fi
+
 new_case step-output-ends-with-newline
 set_map 7 12 testfail-unterminated
 start linux-asan

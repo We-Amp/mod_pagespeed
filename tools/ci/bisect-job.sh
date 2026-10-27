@@ -545,11 +545,14 @@ phase_bisect() {
   git -C "${SRC}" bisect log > "${RUN_DIR}/bisect.log" 2>/dev/null
   # "<sha> is the first bad commit"; git 2.55 and later quote the term
   # ("first 'bad' commit"). It can follow unterminated step output, so
-  # colour codes go and the sha need not start the line. The match must
-  # also be what refs/bisect/bad names when the bisect ends.
-  first="$(sed -E "s/(${ESC}|\^\[)\[[0-9;]*m//g" "${out}" \
-    | sed -n -E "s/^(.*[^0-9a-f])?([0-9a-f]{40,64}) is the first '?bad'? commit\$/\2/p" | head -n 1)"
-  if [ -n "${first}" ] && [ "$(git -C "${SRC}" rev-parse -q --verify refs/bisect/bad 2>/dev/null)" != "${first}" ]; then
+  # colour codes go and the sha need not start the line. It counts only
+  # when git bisect run succeeded and refs/bisect/bad names the same sha.
+  first="$(LC_ALL=C sed -E "s/(${ESC}|\^\[)\[[0-9;]*m//g" "${out}" \
+    | LC_ALL=C sed -n -E "s/^(.*[^0-9a-f])?([0-9a-f]{40}|[0-9a-f]{64}) is the first '?bad'? commit\$/\2/p" | head -n 1)"
+  if [ -n "${first}" ] && [ "${rc}" != 0 ]; then
+    say "first bad commit ${first} printed, but git bisect run exited ${rc}; treating the result as inconclusive"
+    first=""
+  elif [ -n "${first}" ] && [ "$(git -C "${SRC}" rev-parse -q --verify refs/bisect/bad 2>/dev/null)" != "${first}" ]; then
     say "first bad commit ${first} is not refs/bisect/bad; treating the result as inconclusive"
     first=""
   fi
