@@ -19,7 +19,6 @@
 
 #include "pagespeed/kernel/http/content_type.h"
 
-#include <iterator>
 #include <vector>
 
 #include "base/logging.h"
@@ -112,7 +111,6 @@ const ContentType kTypes[] = {
 
     {"binary/octet-stream", ".bin", ContentType::kOctetStream},
 };
-const int kNumTypes = std::size(kTypes);
 
 }  // namespace
 
