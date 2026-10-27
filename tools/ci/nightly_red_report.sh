@@ -249,20 +249,27 @@ if ! cutoff="$(gh api "repos/${repo}/actions/runs/${run}" --jq .created_at < /de
     || [ -z "${cutoff}" ] || [ "${cutoff}" = "null" ]; then
   die "the run API call for run ${run} failed or named no created_at"
 fi
-hist="[]"
+# A runs answer is a few hundred KB, more than one argument may carry, so
+# the answers stay in files: each is cut down to the fields read below and
+# appended to ${TMP}/hist as one array a line.
+hist="${TMP}/hist"
+: > "${hist}"
 for src in "nightly.yml|" "ci.yml|&event=workflow_dispatch" "ci.yml|&event=push"; do
   wf="${src%%|*}"
-  if ! body="$(gh api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" < /dev/null)"; then
+  if ! gh api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" \
+      < /dev/null > "${TMP}/runs"; then
     die "the runs API call for ${wf}${src#*|} failed"
   fi
-  hist="$(jq -c -n --argjson a "${hist}" --argjson b "${body:-null}" '$a + [ ($b.workflow_runs // error("no runs"))[] ]' 2> /dev/null)" \
-    || die "the runs API answer for ${wf}${src#*|} is unusable"
+  jq -c -n '[ (input.workflow_runs // error("no runs"))[]
+              | { id, event, head_sha, html_url, created_at } ]' "${TMP}/runs" \
+      >> "${hist}" 2> "${TMP}/err" \
+    || die "the runs API answer for ${wf}${src#*|} is unusable: $(head -c 300 "${TMP}/err")"
 done
-candidates="$(printf '%s' "${hist}" | jq -r --arg run "${run}" --arg cut "${cutoff}" '
-  [ .[] | select(((.id // "") | tostring | test("^[0-9]+$")) and (.id | tostring) != $run
+candidates="$(jq -r -s --arg run "${run}" --arg cut "${cutoff}" '
+  [ add[] | select(((.id // "") | tostring | test("^[0-9]+$")) and (.id | tostring) != $run
                  and (.created_at // "") < $cut) ]
   | unique_by(.id) | sort_by(.created_at) | reverse | .[]
-  | [ (.id | tostring), (.event // "unknown"), (.head_sha // ""), (.html_url // "") ] | @tsv')"
+  | [ (.id | tostring), (.event // "unknown"), (.head_sha // ""), (.html_url // "") ] | @tsv' "${hist}")"
 
 remaining="${nfailed}"
 lookups=0
