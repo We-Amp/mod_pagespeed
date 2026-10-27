@@ -1727,10 +1727,11 @@ jobs:
             '
 
       # Bazel never collects this cache (its container exits right after the
-      # last command), so cap it before actions/cache saves a new entry.
+      # last command), so cap it before actions/cache saves a new entry. It
+      # never fails the job.
       - name: Cap the Bazel disk cache
         if: steps.disk-cache.outputs.cache-hit != 'true'
-        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G || true
 
       - name: Upload the build bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1873,10 +1874,13 @@ jobs:
           [ -n "${CI_NET:-}" ] && docker network rm "${CI_NET}" 2>/dev/null || true
 
       # Bazel never collects this cache (its container exits right after the
-      # last command), so cap it before actions/cache saves a new entry.
+      # last command), so cap it before actions/cache saves a new entry. It
+      # never fails the job. This job normally hits the build's entry and
+      # skips this; it runs only when the week turned between the two jobs
+      # or the build's save did not land.
       - name: Cap the Bazel disk cache
         if: steps.disk-cache.outputs.cache-hit != 'true'
-        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G
+        run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G || true
 
   linux-arm64-apache-sys-tests:
     name: Linux arm64 Apache System Tests
