@@ -24,6 +24,7 @@ extern "C" {
 #include "pagespeed/iis/iis_zerocopy_serve.h"
 #include <atomic>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace net_instaweb {
@@ -48,12 +49,16 @@ class IisModuleBaseFetch : public IisBaseFetch {
   static void PopulateResponseHeaders(IHttpContext* http_context, ResponseHeaders* response_headers);
 
   int CollectHeaders();
-  bool headers_collected() { return headers_collected_; }
+  bool headers_collected() {
+    Lock();
+    bool collected = headers_collected_;
+    Unlock();
+    return collected;
+  }
   void SetLastWrite(DWORD lastwrite) {this->lastwritetime=lastwrite;}
   DWORD RequestTime() {return lastwritetime-donetime;}
   bool need_flush() { return need_flush_; }
   void set_need_flush(bool x) { need_flush_ = x; }
-  void set_pending(bool x) { pending_ = x; }
   void set_flush_html(bool x) { flush_html_ = x; }  
   bool get_flush_html() { return flush_html_; }  
   // Caching-header policy for CollectHeaders.  Set on the HTML base fetch
@@ -62,6 +67,28 @@ class IisModuleBaseFetch : public IisBaseFetch {
   // read the flag from there).
   void set_modify_cache_headers(bool x) { modify_cache_headers_ = x; }
   void SendData(MessageHandler* handler, bool flush);  
+
+  // ==== Thread rule for rewritten HTML (kHtml) =============================
+  // IIS request objects are not thread safe and IIS itself uses them between
+  // notifications.  For an HTML response they are touched only by the thread
+  // that is running this module's OnSendResponse before it calls Done()
+  // (EnterNotification .. LeaveNotification), or by HandleDone after the
+  // hand-off (HandOffToCompletion).  PSOL worker threads only append to a
+  // module-owned buffer under the fetch lock; HandleDone copies that buffer
+  // into request memory.  Other fetch types are not subject to the rule and
+  // these calls do nothing for them.
+  //
+  // The calling thread becomes the one that may touch IIS.
+  void EnterNotification();
+  // The calling thread gives the right up again.
+  void LeaveNotification();
+  // The final send is done: HandleDone, on whichever thread runs it, is now
+  // the only code that touches IIS.  Call once, before Done().
+  void HandOffToCompletion();
+  // The request is going away without HandleDone having run (IIS cleaned the
+  // request up first): drop the request pointer so later worker output can
+  // never reach IIS.  HandleDone then only releases its reference.
+  void DetachFromRequest() override;
   bool HasChunk(HTTP_DATA_CHUNK* chunk);
 
   // ==== Zero-copy aliased serve (CycloneZeroCopyServe) ====================
@@ -104,6 +131,15 @@ class IisModuleBaseFetch : public IisBaseFetch {
   void AddChunk(char *data,int len,bool lock=true);
   void log(const char * msg, ...) override;
 
+  // Request-memory buffering of body bytes.  Caller holds the fetch lock;
+  // sp is copied into blocks from the request pool.  Returns false (and
+  // latches write_failed_) when the pool cannot satisfy an allocation.
+  bool BufferIntoRequestMemory(const StringPiece& sp);
+  // True when the calling thread may call into IIS for this fetch (always for
+  // fetch types other than kHtml).  Caller holds the fetch lock.
+  bool MayTouchIisLocked() const;
+  bool MayTouchIis();
+
   // Zero-copy serve internals (see the public section above).
   enum class ZcDrive {
     kPending,   // an async flush is in flight; a completion will resume
@@ -119,7 +155,16 @@ class IisModuleBaseFetch : public IisBaseFetch {
   ZcDrive AbortZeroCopyServe(const char* reason, bool epoch_torn);
 
   IHttpContext* http_context_;
-  
+
+  // kHtml thread rule state; written only under the fetch lock.
+  GoogleString html_body_;       // rewritten bytes not yet in request memory
+  DWORD iis_owner_thread_;       // thread inside OnSendResponse, 0 if none
+  bool detached_;                // request is gone; never touch IIS again
+  // Log indentation and root context, computed on construction so log() never
+  // walks the IIS context from another thread.
+  std::string log_indent_;
+  void* log_root_;
+
   FetchType fetch_type_;
   bool keep_alive_;
   bool headers_collected_;

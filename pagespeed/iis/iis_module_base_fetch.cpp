@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 #include "pagespeed/iis/iis_module_base_fetch.h"
+#include "base/logging.h"
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -70,6 +71,9 @@ IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fet
     : IisBaseFetch(ptr)
 	,http_context_(http_context)
 	
+	, iis_owner_thread_(0)
+	, detached_(false)
+	, log_root_(nullptr)
 	, fetch_type_(fetch_type)
 	, keep_alive_(false)
 	, headers_collected_(false)
@@ -99,6 +103,24 @@ IisModuleBaseFetch::IisModuleBaseFetch(IHttpContext* http_context, FetchType fet
 	currentblocksize=0;
 	write_failed_=false;
 	PopulateRequestHeaders(http_context_, request_headers());
+	// log() runs on PSOL threads too and must not walk the IIS context there:
+	// the indentation is fixed for the life of the request, so work it out
+	// here, on the request's own thread.
+	{
+		int lvl = 1;
+		IHttpContext* p = http_context_;
+		while (p != nullptr && p != p->GetRootContext())
+		{
+			lvl++;
+			p = p->GetParentContext();
+		}
+		log_root_ = p;
+		while (lvl > 0)
+		{
+			log_indent_.append("    ");
+			--lvl;
+		}
+	}
 }
 
 IisModuleBaseFetch::~IisModuleBaseFetch() 
@@ -241,15 +263,15 @@ void IisModuleBaseFetch::AddChunk(char *data,int len,bool lock)
 	if (lock) Unlock();
 }
 
-bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
-                               MessageHandler* handler) 
+// Copies sp into blocks of request memory.  The caller holds the fetch lock.
+// Safe on any thread only where the caller may touch IIS (see the thread rule
+// in the header): it allocates from the request pool.
+bool IisModuleBaseFetch::BufferIntoRequestMemory(const StringPiece& sp)
 {
-	Lock();
 	if (write_failed_)
 	{
 		// An earlier block could not be allocated; the body already has a
 		// hole, so nothing more is buffered.
-		Unlock();
 		return false;
 	}
 	const char *data=sp.data();
@@ -279,7 +301,6 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 				currentblocksize=0;
 				currentblockpos=0;
 				write_failed_=true;
-				Unlock();
 				return false;
 			}
 			if (currentblocksize<=sizetowrite)
@@ -295,35 +316,98 @@ bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
 		
 		
 	}
-	Unlock();
-
-	/*while(data!=end)
-	{		
-		if (!currentblock)
-		{
-			currentblocksize=(todo+1024)<4096 ? 4096 : todo;
-			currentblockpos=0;
-			currentblock=(char *) http_context_->AllocateRequestMemory(currentblocksize);
-		}
-
-		
-	}
-	auto size=sp.size();
-	if(currentblock)
-	{
-
-	}
-
-	HTTP_DATA_CHUNK* dataChunk = new HTTP_DATA_CHUNK();
-	dataChunk->DataChunkType = HttpDataChunkFromMemory;
-	PVOID buf = http_context_->AllocateRequestMemory(sp.size());
-	memcpy(buf, sp.data(), sp.size());
-	dataChunk->FromMemory.pBuffer = buf;
-	dataChunk->FromMemory.BufferLength =(ULONG) sp.size();
-	//http_context_->GetResponse()->WriteEntityChunkByReference(dataChunk);
-	*/
 	return true;
 }
+
+bool IisModuleBaseFetch::HandleWrite(const StringPiece& sp,
+                               MessageHandler* handler) 
+{
+	if (fetch_type_ == FetchType::kHtml)
+	{
+		// Rewritten HTML is produced on PSOL worker threads, while the request
+		// is on an IIS thread.  Keep the bytes in module memory; HandleDone
+		// moves them into request memory on the thread that completes the
+		// request.
+		Lock();
+		if (!detached_)
+		{
+			html_body_.append(sp.data(), sp.size());
+		}
+		Unlock();
+		return true;
+	}
+	Lock();
+	bool ok = BufferIntoRequestMemory(sp);
+	Unlock();
+	return ok;
+}
+
+bool IisModuleBaseFetch::MayTouchIisLocked() const
+{
+	if (fetch_type_ != FetchType::kHtml)
+	{
+		return true;
+	}
+	if (detached_ || http_context_ == nullptr)
+	{
+		return false;
+	}
+	return pending_ || iis_owner_thread_ == GetCurrentThreadId();
+}
+
+bool IisModuleBaseFetch::MayTouchIis()
+{
+	Lock();
+	bool ok = MayTouchIisLocked();
+	Unlock();
+	return ok;
+}
+
+void IisModuleBaseFetch::EnterNotification()
+{
+	if (fetch_type_ != FetchType::kHtml) return;
+	Lock();
+	iis_owner_thread_ = GetCurrentThreadId();
+	Unlock();
+}
+
+void IisModuleBaseFetch::LeaveNotification()
+{
+	if (fetch_type_ != FetchType::kHtml) return;
+	Lock();
+	if (iis_owner_thread_ == GetCurrentThreadId())
+	{
+		iis_owner_thread_ = 0;
+	}
+	Unlock();
+}
+
+void IisModuleBaseFetch::HandOffToCompletion()
+{
+	if (fetch_type_ != FetchType::kHtml) return;
+	Lock();
+	DCHECK(!pending_) << "hand-off happens once per request";
+	pending_ = true;
+	iis_owner_thread_ = 0;
+	Unlock();
+}
+
+void IisModuleBaseFetch::DetachFromRequest()
+{
+	// The thread rule, and with it the detach, covers rewritten HTML only:
+	// resource and in-place fetches keep writing through the request pointer.
+	if (fetch_type_ != FetchType::kHtml) return;
+	Lock();
+	detached_ = true;
+	http_context_ = nullptr;
+	GoogleString().swap(html_body_);
+	Unlock();
+}
+
+// Debug builds: every IIS call on an HTML fetch must come from the thread the
+// rule allows.  The lock-taking form is for call sites that do not hold it.
+#define DCHECK_IIS_ACCESS() DCHECK(MayTouchIis()) << "IIS touched from a thread the HTML thread rule does not allow"
+#define DCHECK_IIS_ACCESS_LOCKED() DCHECK(MayTouchIisLocked()) << "IIS touched from a thread the HTML thread rule does not allow"
 
 // ==== Zero-copy aliased serve (CycloneZeroCopyServe) ======================
 
@@ -792,6 +876,7 @@ int IisModuleBaseFetch::CollectHeaders()
 		Unlock();
 		return -1;
 	}
+	DCHECK_IIS_ACCESS_LOCKED();
 	headers_collected_=true;
 	if (http_context_->GetResponse()->GetHeadersSuppressed())
 	{
@@ -1017,11 +1102,19 @@ int IisModuleBaseFetch::CollectHeaders()
 
 void IisModuleBaseFetch::HandleHeadersComplete() 
 {	
+	if (fetch_type_ == FetchType::kHtml)
+	{
+		// Runs on a PSOL worker thread while the request is on an IIS thread.
+		// The headers are applied by the thread that owns the request: the
+		// forced collect in OnSendResponse, or HandleDone.
+		return;
+	}
 	CollectHeaders();
 }
 
 void IisModuleBaseFetch::SendData(MessageHandler* handler, bool flush) { 
 	Lock();
+	DCHECK_IIS_ACCESS_LOCKED();
 	DWORD bytessent=0;
 	log("SendData()");
 	if (currentblock && currentblockpos) // last block
@@ -1091,9 +1184,39 @@ bool IisModuleBaseFetch::HandleFlush(MessageHandler* handler) {
 
 void IisModuleBaseFetch::HandleDone(bool success) 
 {
+	// Each fetch is done exactly once.
+	DCHECK_EQ(alive, 0x12345678u) << "HandleDone ran twice";
 	alive=0;
 	donetime=GetTickCount();	
 	log("handle done [%s]!", success? "true" : "false");
+	Lock();
+	bool detached = detached_;
+	Unlock();
+	if (detached)
+	{
+		// The request was cleaned up while the rewrite was still running
+		// (DetachFromRequest): there is no response left to complete, and
+		// IIS must not be called.  Drop what the fetch holds.
+		zc_pin_ = MappedSharedString();
+		ReleaseRef();
+		return;
+	}
+	if (fetch_type_ == FetchType::kHtml)
+	{
+		// The hand-off came first (OnSendResponse), so this thread may touch
+		// IIS from here on.
+		DCHECK_IIS_ACCESS();
+		if (!headers_collected())
+		{
+			// No forced collect happened (IIS had not started the response
+			// when the final send came): apply the rewritten headers now.
+			CollectHeaders();
+		}
+		Lock();
+		BufferIntoRequestMemory(html_body_);
+		GoogleString().swap(html_body_);
+		Unlock();
+	}
 	if (write_failed_)
 	{
 		// Part of the body was dropped. Completing the response would serve
@@ -1192,8 +1315,13 @@ void IisModuleBaseFetch::HandleDone(bool success)
 	}
 
 	log("base fetch -> indicate completion");
+	// The lock is not held across IndicateCompletion: it can re-enter the
+	// module (OnSendResponse) and tear the request down.
+	DCHECK_IIS_ACCESS();
 	http_context_->IndicateCompletion(next_status);
+	Lock();
 	http_context_=nullptr;
+	Unlock();
 	//ctx_->set_base_fetch(NULL);
 	ReleaseRef(); 
 }
@@ -1202,29 +1330,18 @@ void IisModuleBaseFetch::log(const char * msg, ...)
 {
 	if (REDUCE_LOG)
 		return;
-	// start at level one, so this indents one further
-	int lvl = 1;
-	IHttpContext * p = this->http_context_;
-	if (!p) 
+	// May run on any thread: the indentation and root context were fixed on
+	// construction, so no IIS context is touched here.
+	if (!log_root_)
 		return ;
-	while (p != p->GetRootContext())
-	{
-		lvl++;
-		p = p->GetParentContext();
-	}
-
-	std::string tabs;
-	while  ( lvl > 0) {
-		tabs.append("    "); 
-		--lvl;
-	}
+	const std::string& tabs = log_indent_;
 	char *m=new char[1024*32];
 	va_list vl;
 	va_start(vl, msg);
 	vsnprintf(m, 1024*32, msg, vl);
 	va_end(vl);
 	
-	handler_->Message(net_instaweb::kInfo, "%s[%p] - iis_base_fetch: %s", tabs.c_str(), p, m);	
+	handler_->Message(net_instaweb::kInfo, "%s[%p] - iis_base_fetch: %s", tabs.c_str(), log_root_, m);	
 	delete[] m;
 }
 }	

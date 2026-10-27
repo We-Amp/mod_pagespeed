@@ -150,6 +150,10 @@ class IisModuleBaseFetchCacheControlTest : public testing::Test {
         context, kHtml, &handler_,
         RequestContext::NewTestRequestContext(&thread_system_), nullptr));
     fetch->response_headers()->set_status_code(200);
+    // These tests drive CollectHeaders from the test thread, which plays the
+    // thread inside OnSendResponse: the only one allowed to touch IIS for an
+    // HTML response.
+    fetch->EnterNotification();
     return fetch;
   }
 

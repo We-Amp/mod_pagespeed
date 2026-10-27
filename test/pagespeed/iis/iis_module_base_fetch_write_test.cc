@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-// Buffering of rewritten response bytes in request memory: when the request
-// pool cannot satisfy an allocation, the write fails instead of storing
-// through the missing block.
+// Buffering of response bytes in request memory: when the request pool cannot
+// satisfy an allocation, the write fails instead of storing through the
+// missing block.  Resource fetches buffer at write time; rewritten HTML is
+// buffered in module memory and reaches request memory at completion
+// (iis_module_base_fetch_thread_test.cc covers that arm).
 
 #include <cstdlib>
 #include <memory>
@@ -102,7 +104,7 @@ class IisModuleBaseFetchWriteTest : public testing::Test {
 
   FetchPtr NewFetch(FakeContext* context) {
     FetchPtr fetch(new IisModuleBaseFetch(
-        context, kHtml, &handler_,
+        context, kResource, &handler_,
         RequestContext::NewTestRequestContext(&thread_system_), nullptr));
     fetch->response_headers()->set_status_code(200);
     return fetch;
@@ -145,7 +147,7 @@ TEST_F(IisModuleBaseFetchWriteTest, FailedFollowUpAllocationFailsTheWrite) {
 TEST_F(IisModuleBaseFetchWriteTest, FailedWriteFailsTheResponse) {
   FakeContext context(0);
   IisModuleBaseFetch* fetch = new IisModuleBaseFetch(
-      &context, kHtml, &handler_,
+      &context, kResource, &handler_,
       RequestContext::NewTestRequestContext(&thread_system_), nullptr);
   fetch->response_headers()->set_status_code(200);
   EXPECT_FALSE(fetch->Write("hello", &handler_));

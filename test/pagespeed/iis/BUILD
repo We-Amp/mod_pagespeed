@@ -119,6 +119,24 @@ pagespeed_cc_test(
     ],
 )
 
+# The thread rule for rewritten HTML: PSOL worker output stays in module
+# memory, only the request's owning thread calls IIS, and the completion
+# hands the buffered body over.  Fakes record the thread of every IIS call.
+pagespeed_cc_test(
+    name = "iis_module_base_fetch_thread_test",
+    srcs = [
+        "iis_module_base_fetch_thread_test.cc",
+        "stub_iis_http_context.h",
+    ],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/thread:win_thread",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # CollectHeaders' caching-header policy on rewritten HTML against a
 # recording stub IHttpResponse.
 pagespeed_cc_test(

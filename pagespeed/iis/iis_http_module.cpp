@@ -1340,6 +1340,32 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		return RQ_NOTIFICATION_CONTINUE;
 	}
 
+	// Marks the thread running OnSendResponse as the one that may call into IIS
+	// for an HTML base fetch (see the thread rule in iis_module_base_fetch.h).
+	// Release() before the final hand-off: after Done() the fetch may be gone.
+	class ScopedIisOwner
+	{
+	public:
+		ScopedIisOwner() : fetch_(nullptr) {}
+		~ScopedIisOwner() { Release(); }
+		void Arm(IisModuleBaseFetch* fetch)
+		{
+			Release();
+			fetch_ = fetch;
+			if (fetch_ != nullptr) fetch_->EnterNotification();
+		}
+		void Release()
+		{
+			IisModuleBaseFetch* fetch = fetch_;
+			fetch_ = nullptr;
+			if (fetch != nullptr) fetch->LeaveNotification();
+		}
+	private:
+		IisModuleBaseFetch* fetch_;
+		ScopedIisOwner(const ScopedIisOwner&) = delete;
+		ScopedIisOwner& operator=(const ScopedIisOwner&) = delete;
+	};
+
 	// Request memory for a response body chunk: lives as long as the request.
 	static void* AllocateResponseChunk(void* context, DWORD size)
 	{
@@ -1361,6 +1387,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		if (innerContext == nullptr) {
 			log(pHttpContext, "OnSendResponse - no innerContext, bail");
 			return RQ_NOTIFICATION_CONTINUE;
+		}
+
+		// A later send of a response already handed to the rewriter: from here
+		// on this thread, and only this one, may touch the response until the
+		// final send hands it over. (The first send arms once the rewriter
+		// exists, below.)
+		ScopedIisOwner iis_owner;
+		if (innerContext->proxy_fetch() != nullptr) {
+			iis_owner.Arm(request_context->base_fetch());
 		}
 
 		SetDaemonInitStatusHeaderIfLocal(pHttpContext, innerContext);
@@ -1399,6 +1434,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				// and free innerContext (HandleDone -> IndicateCompletion ->
 				// CleanupStoredContext). Clear state first, Done() last, never
 				// touch innerContext afterwards. See iis_proxy_fetch_completion.h.
+				// The hand-off precedes the owner release, which precedes Done().
+				if (request_context->base_fetch() != nullptr) {
+					request_context->base_fetch()->HandOffToCompletion();
+				}
+				iis_owner.Release();
 				FinishProxyFetchAndLeave<IisInnerRequestContext, ProxyFetch>(innerContext);
 				return RQ_NOTIFICATION_PENDING;
 			}
@@ -1721,6 +1761,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					nullptr /* original_content_fetch */);
 
 				innerContext->set_proxy_fetch(f);
+				// The rewriter now exists and may produce output on its own
+				// threads; this thread keeps the right to touch the response.
+				iis_owner.Arm(bf);
 				log(pHttpContext, "OnSendResponse ---  proxy fetch set - [%p]", innerContext->proxy_fetch());
 				} // if (innerContext->proxy_fetch() == NULL && innerContext->base_fetch() != NULL) 
 
@@ -1991,9 +2034,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 				if (!more_data)/*not chunked, seen final chunk*/
 				{
 					log(pHttpContext, "OnSendResponse: call proxy_fetch->Done(), return pending");
-					// set_pending() must precede Done(): it reads innerContext's
+					// The hand-off must precede Done(): it reads innerContext's
 					// base_fetch, and Done() can synchronously free innerContext.
-					request_context->base_fetch()->set_pending(true);
+					// After it only HandleDone touches the response, so this
+					// thread gives up its right before Done() (the fetch may be
+					// freed by then).
+					request_context->base_fetch()->HandOffToCompletion();
+					iis_owner.Release();
 					// proxy_fetch()->Done() can synchronously run the request
 					// teardown (HandleDone -> IndicateCompletion ->
 					// CleanupStoredContext) which deletes innerContext. Clear state
