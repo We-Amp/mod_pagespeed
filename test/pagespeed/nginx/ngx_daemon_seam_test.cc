@@ -412,15 +412,16 @@ TEST_F(NgxDaemonSeamTest, TheWorkerOpensItsOwnVolumeHandleAfterFork) {
   const size_t child_init = cc.find("ChildInit(", fn);
   ASSERT_NE(GoogleString::npos, child_init)
       << "ps_init_child_process no longer ChildInit()s the driver factory";
-  const size_t record = cc.find("RecordCache()", child_init);
+  const size_t record = cc.find("RecordCacheAtWorkerStart()", child_init);
   EXPECT_NE(GoogleString::npos, record)
       << "the worker no longer opens its own daemon volume handle after "
-         "fork; the first open takes a blocking file lock and starts "
+         "fork; the first open waits for the volume-open lock and starts "
          "background threads, so it cannot happen lazily inside a request";
   const size_t fn_end = cc.find("}//namespacenet_instaweb", fn);
   ASSERT_NE(GoogleString::npos, fn_end);
   EXPECT_LT(record, fn_end)
-      << "the RecordCache() call is not inside ps_init_child_process";
+      << "the RecordCacheAtWorkerStart() call is not inside "
+         "ps_init_child_process";
 }
 
 TEST_F(NgxDaemonSeamTest, TheVolumeHandleOpensOnlyInAServingProcess) {
@@ -434,9 +435,9 @@ TEST_F(NgxDaemonSeamTest, TheVolumeHandleOpensOnlyInAServingProcess) {
             cc.find("if((ngx_process==NGX_PROCESS_WORKER||ngx_process=="
                     "NGX_PROCESS_SINGLE)&&cfg_s->server_context->daemon_"
                     "health()==DaemonHealth::kReady){cfg_s->server_context->"
-                    "daemon_adapter()->RecordCache();",
+                    "daemon_adapter()->RecordCacheAtWorkerStart();",
                     fn))
-      << "RecordCache() is not gated to a serving process";
+      << "RecordCacheAtWorkerStart() is not gated to a serving process";
 }
 
 TEST_F(NgxDaemonSeamTest, TheMasterNeverOpensTheVolumeHandle) {
@@ -451,6 +452,8 @@ TEST_F(NgxDaemonSeamTest, TheMasterNeverOpensTheVolumeHandle) {
   ASSERT_NE(GoogleString::npos, fn_end)
       << "the marker after ps_init_module moved; this pin needs updating";
   const GoogleString body = cc.substr(fn, fn_end - fn);
+  EXPECT_EQ(GoogleString::npos, body.find("RecordCacheAtWorkerStart("))
+      << "the master opens the daemon volume handle at worker start";
   EXPECT_EQ(GoogleString::npos, body.find("RecordCache("))
       << "the master opens the daemon volume handle; the first open must "
          "happen in a worker, after fork";
@@ -658,6 +661,8 @@ TEST_F(NgxDaemonSeamTest, TheFiltersNeverOpenTheVolumeHandle) {
   const size_t filters_end = cc.find("voidps_in_place_filter_init(", body_fn);
   ASSERT_NE(GoogleString::npos, filters_end);
   const GoogleString both = cc.substr(header_fn, filters_end - header_fn);
+  EXPECT_EQ(GoogleString::npos, both.find("RecordCacheAtWorkerStart("))
+      << "a request filter takes the waiting worker-start open";
   EXPECT_EQ(GoogleString::npos, both.find("RecordCache("))
       << "a request filter opens the daemon volume handle inline";
   const GoogleString header_body = cc.substr(header_fn, body_fn - header_fn);
@@ -795,8 +800,8 @@ TEST_F(NgxDaemonSeamTest, TheCompletionPoolIsOwnedByTheRecordArm) {
       << "the retryable pool-gate flag no longer starts closed";
   EXPECT_NE(GoogleString::npos,
             body.find("DaemonHealth::kReady){cfg_s->server_context->"
-                      "daemon_adapter()->RecordCache();any_daemon_ready="
-                      "true;}"))
+                      "daemon_adapter()->RecordCacheAtWorkerStart();any_daemon_"
+                      "ready=true;}"))
       << "the pool gate is no longer set under the serving-process, "
          "ready-verdict condition";
   EXPECT_NE(GoogleString::npos,
