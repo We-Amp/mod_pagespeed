@@ -279,6 +279,9 @@ function Run-Tests {
             $env:PAGESPEED_LANE_FIXTURES = "rule_packs"
         }
         $env:PAGESPEED_RULE_PACKS_PORT = $env:PAGESPEED_PORT
+        # Lane fixture aspnet_stream: setup_iis_full.ps1 creates the /aspnet
+        # application serving stream.aspx.
+        $env:PAGESPEED_LANE_FIXTURES = "$($env:PAGESPEED_LANE_FIXTURES),aspnet_stream"
     }
     # Force unbuffered output so CI runners see pytest progress in real-time
     $env:PYTHONUNBUFFERED = "1"

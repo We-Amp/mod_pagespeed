@@ -110,6 +110,9 @@ KNOWN_LANE_FIXTURES = frozenset({
     # option response headers (PageSpeed / ModPagespeed / PageSpeedFilters)
     # set by the server on option_headers/{off,modpagespeed_off,on}.html
     "option_response_headers",
+    # the /aspnet application serving test/system/iis/aspnet/stream.aspx
+    # (IIS full-site lane only)
+    "aspnet_stream",
     # the rulepacks*.example.com virtual hosts on PAGESPEED_RULE_PACKS_PORT
     # (rule_packs on, install/mod_pagespeed_test/rule_packs/pack.json)
     "rule_packs",
