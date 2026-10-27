@@ -65,7 +65,9 @@ set -uo pipefail
 # Every fleet job of the PR tier (pipeline-pr.yml) and every job of the full
 # tier (pipeline-full.yml) but its bookkeeping jobs (event guard, path filter,
 # fleet-off notice), under their caller prefixes. tools/ci/test_ci_release_gate.sh
-# compares this list with the two workflows.
+# compares this list with the two workflows. The path-gated PR-tier jobs (the
+# two changed-port system tests) are listed too: the candidate dispatch sets
+# every path filter true, so they run there, and skipped still fails.
 REQUIRED=(
   'pr / Vendor Dependencies'
   'pr / Linux Build'
@@ -77,6 +79,8 @@ REQUIRED=(
   'pr / Windows Build'
   'pr / Windows Unit Tests'
   'pr / IIS System Tests'
+  'pr / Apache System Tests (changed port)'
+  'pr / nginx System Tests (changed port)'
   'full / Vendor Dependencies'
   'full / Linux Build'
   'full / Linux ASan + UBSan'
