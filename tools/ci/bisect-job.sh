@@ -68,6 +68,7 @@ SELF="${SELF_DIR}/$(basename "$0")"
 FAILING_TARGETS="${SELF_DIR}/failing_targets.sh"
 IMAGE_ARCH=x64
 MAX_TARGETS="${BISECT_MAX_TARGETS:-10}"
+ESC="$(printf '\033')"
 
 # shellcheck source=tools/ci/bisect-job-table.sh
 . "${SELF_DIR}/bisect-job-table.sh"
@@ -539,11 +540,15 @@ phase_bisect() {
   fi
   (cd "${SRC}" && git bisect run "${SELF}" _step "${RUN_ID}") 2>&1 | tee "${out}"
   rc="${PIPESTATUS[0]}"
+  # git's last line can lack a newline; the next log line starts afresh.
+  [ -n "$(tail -c 1 "${out}" 2>/dev/null)" ] && echo
   git -C "${SRC}" bisect log > "${RUN_DIR}/bisect.log" 2>/dev/null
   # "<sha> is the first bad commit"; git 2.55 and later quote the term
-  # ("first 'bad' commit"). The match must also be what refs/bisect/bad
-  # names when the bisect ends.
-  first="$(sed -n -E "s/^([0-9a-f]{40,64}) is the first '?bad'? commit\$/\1/p" "${out}" | head -n 1)"
+  # ("first 'bad' commit"). It can follow unterminated step output, so
+  # colour codes go and the sha need not start the line. The match must
+  # also be what refs/bisect/bad names when the bisect ends.
+  first="$(sed -E "s/(${ESC}|\^\[)\[[0-9;]*m//g" "${out}" \
+    | sed -n -E "s/^(.*[^0-9a-f])?([0-9a-f]{40,64}) is the first '?bad'? commit\$/\2/p" | head -n 1)"
   if [ -n "${first}" ] && [ "$(git -C "${SRC}" rev-parse -q --verify refs/bisect/bad 2>/dev/null)" != "${first}" ]; then
     say "first bad commit ${first} is not refs/bisect/bad; treating the result as inconclusive"
     first=""
@@ -855,7 +860,8 @@ cmd_step() {
   echo "${n} ${sha} ${STEP_CODE} ${STEP_REASON}" >> "${RUN_DIR}/steps.log"
   [ "${STEP_CODE}" = 125 ] && echo "${sha}" >> "${RUN_DIR}/skips"
   say "step ${n} at ${sha}: ${STEP_CODE} (${STEP_REASON})"
-  tail -n 40 "${steplog}" | sed 's/^/    | /'
+  # awk ends every line, so git's next line never lands on the last one.
+  tail -n 40 "${steplog}" | awk '{ print "    | " $0 }'
   exit "${STEP_CODE}"
 }
 

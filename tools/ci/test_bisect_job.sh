@@ -122,6 +122,9 @@ case "${sub}" in
         for t in ${targets}; do printf '%s   PASSED in 0.4s\n' "${t}"; done; exit 0 ;;
       testfail)
         printf '%s   FAILED in 1.2s\n' "${first}"; exit 3 ;;
+      testfail-unterminated)
+        printf '%s   FAILED in 1.2s\n' "${first}"
+        printf 'Executed 1 out of 1 test: \033[0m\033[31m\033[1m1 fails locally\033[0m.\n\033[0m'; exit 3 ;;
       timeout)
         printf '%s   TIMEOUT in 300.0s\n' "${first}"; exit 3 ;;
       buildfail)
@@ -480,6 +483,42 @@ for wording in "bad" "'bad'"; do
     else fail "${CASE}" "the shim did not produce the wording"; fi
   fi
 done
+
+# Bazel's colour output can end without a newline, and so can git's own
+# last line. This shim prints the culprit the way it then lands in the run
+# output, after a step line and a colour reset, and drops the final
+# newline: the culprit must still be read and the log lines kept apart.
+mkdir -p "${WORK}/gitshim-glued"
+cat > "${WORK}/gitshim-glued/git" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = bisect ] && [ "${2:-}" = run ]; then
+  "${REAL_GIT}" "$@" 2>&1 \
+    | sed -E "s/^([0-9a-f]{40,64}) is the first '?bad'? commit\$/    | $(printf '\033')[0m\1 is the first ${FAKE_GIT_BAD_WORDING} commit/" \
+    | awk 'NR > 1 { print prev } { prev = $0 } END { printf "%s", prev }'
+  exit "${PIPESTATUS[0]}"
+fi
+exec "${REAL_GIT}" "$@"
+EOF
+chmod +x "${WORK}/gitshim-glued/git"
+for wording in "bad" "'bad'"; do
+  case "${wording}" in bad) new_case culprit-glued-after-colour-plain ;; *) new_case culprit-glued-after-colour-quoted ;; esac
+  PATH="${WORK}/gitshim-glued:${PATH}" FAKE_GIT_BAD_WORDING="${wording}" start linux-asan
+  if expect_eq status "$(jget status)" culprit && expect_eq first_bad "$(jget first_bad)" "${SHA[7]}"; then
+    if ! grep -qF "| $(printf '\033')[0m${SHA[7]} is the first ${wording} commit" "${BISECT_ROOT}/${ID}/bisect-run.out"; then
+      fail "${CASE}" "the shim did not produce the glued line"
+    elif grep -qE '.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z bisect-job: ' "${BISECT_ROOT}/${ID}/log"; then
+      fail "${CASE}" "a log line was appended to the unterminated run output"
+    else pass "${CASE}"; fi
+  fi
+done
+
+new_case step-output-ends-with-newline
+set_map 7 12 testfail-unterminated
+start linux-asan
+if expect_eq status "$(jget status)" culprit && expect_eq first_bad "$(jget first_bad)" "${SHA[7]}"; then
+  if grep -qE "^${SHA[7]} is the first '?bad'? commit\$" "${BISECT_ROOT}/${ID}/bisect-run.out"; then pass "${CASE}"
+  else fail "${CASE}" "the culprit line is not on a line of its own"; fi
+fi
 
 new_case culprit-found-build-bisect
 printf 'linux-build\tBuild all targets\t2026-10-26T02:10:11.1Z ERROR: Target //rec:lib failed to build\n' > "${FAKE_STATE}/gh-log"
