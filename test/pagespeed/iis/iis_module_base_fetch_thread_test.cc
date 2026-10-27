@@ -484,5 +484,16 @@ TEST_F(IisModuleBaseFetchThreadTest, ResourceFetchStillAllocatesAtWrite) {
   ReleaseWithoutDone();
 }
 
+// A detach only concerns rewritten HTML: a resource fetch keeps its request
+// pointer and still buffers into request memory.
+TEST_F(IisModuleBaseFetchThreadTest, DetachLeavesResourceFetchWritable) {
+  FakeContext context(10);
+  NewFetch(&context, kResource);
+  fetch_->DetachFromRequest();
+  EXPECT_TRUE(fetch_->Write("body", &handler_));
+  EXPECT_EQ(1, context.log()->Count("AllocateRequestMemory"));
+  ReleaseWithoutDone();
+}
+
 }  // namespace
 }  // namespace net_instaweb

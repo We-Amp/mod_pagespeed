@@ -394,6 +394,9 @@ void IisModuleBaseFetch::HandOffToCompletion()
 
 void IisModuleBaseFetch::DetachFromRequest()
 {
+	// The thread rule, and with it the detach, covers rewritten HTML only:
+	// resource and in-place fetches keep writing through the request pointer.
+	if (fetch_type_ != FetchType::kHtml) return;
 	Lock();
 	detached_ = true;
 	http_context_ = nullptr;
