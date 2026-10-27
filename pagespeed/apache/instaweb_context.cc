@@ -34,6 +34,7 @@
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/header_util.h"
+#include "pagespeed/apache/instaweb_handler.h"
 #include "pagespeed/apache/mod_instaweb.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
@@ -374,10 +375,20 @@ const char* InstawebContext::MakeRequestUrl(
     // chain more than once (MakeRequestUrl will already have been
     // called for request->prev, before this request is created).
     // However, max out at 5 iterations, just in case.
+    //
+    // The exception is a request that follows one the module answered with
+    // a not-found (kPagespeedNotFoundNote): that is httpd serving the site's
+    // ErrorDocument, an unrelated URL.  Taking the failed URL as its
+    // original would make the module answer the error document with the same
+    // not-found again, so the redirect stops here and the request's own URL
+    // is used.
     request_rec* prev = request->prev;
     for (int i = 0;
          (url == nullptr) && (prev != nullptr) && (i < kRequestChainLimit);
          ++i, prev = prev->prev) {
+      if (apr_table_get(prev->notes, kPagespeedNotFoundNote) != nullptr) {
+        break;
+      }
       url = apr_table_get(prev->notes, kPagespeedOriginalUrl);
     }
 
