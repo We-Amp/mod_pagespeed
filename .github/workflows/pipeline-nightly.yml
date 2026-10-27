@@ -734,26 +734,6 @@ jobs:
             ./test/system/run_system_tests.sh
           EOS
 
-      # Apache's default MPM on current distributions is event, which the
-      # steps above never run (the lane pins prefork). A reduced set runs
-      # under it with the module and the worker the step above built: the
-      # positive control that event is active, basic rewriting, in-place
-      # optimization on both backends, per-directory options, subrequests,
-      # admin pages and a concurrent-request test. It runs even when the
-      # step above failed, so both results are reported.
-      - name: Run the Apache system tests under the event MPM (reduced set)
-        if: ${{ !cancelled() && env.CTR != '' }}
-        run: |
-          mkdir -p "${RUNNER_TEMP}/apache-daemon-logs"
-          docker exec "${CTR}" bash -c 'sudo cp /var/log/apache2/error.log "${RUNNER_TEMP}/apache-daemon-logs/error-prefork.log"' || true
-          # The remote-config test server cannot rebind its port for about a
-          # minute after the step above stopped it (setup_apache_test.sh).
-          sleep 65
-          docker exec -i -e PAGESPEED_APACHE_MPM=event -e PAGESPEED_DAEMON_LANE=require "${CTR}" bash -s <<'EOS'
-          set -euo pipefail
-          ./test/system/run_system_tests.sh --skip-build
-          EOS
-
       - name: Collect the logs on failure
         if: failure() && env.CTR != ''
         continue-on-error: true

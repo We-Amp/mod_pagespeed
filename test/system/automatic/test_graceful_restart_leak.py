@@ -234,7 +234,6 @@ def _wait_for_pids_to_exit(pids: Set[int], timeout_s: float) -> Set[int]:
 @pytest.mark.apache_only
 @pytest.mark.process_leak
 @pytest.mark.requires_module
-@pytest.mark.requires_fixture("prefork_pool")
 @pytest.mark.slow
 class TestGracefulRestartThreadLeak:
     """Cyclone HitTracker thread must not leak Apache children on graceful."""

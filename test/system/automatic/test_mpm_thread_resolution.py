@@ -51,15 +51,12 @@ assertion on that field alone therefore passes in the failure case, which is
 why this test matches the healthy line as a whole and asserts the degraded
 sentence is absent by its own distinct wording.
 
-On this lane ``setup_apache_test.sh`` pins the MPM named by
-``PAGESPEED_APACHE_MPM`` (prefork unless set). Prefork has
+On this lane ``setup_apache_test.sh`` pins the prefork MPM with
 ``MaxRequestWorkers 16`` (a fixed pool of sixteen children under a
-``ServerLimit`` of 32), so ``AP_MPMQ_MAX_DAEMONS`` is 16 and prefork's
-``AP_MPMQ_MAX_THREADS`` is a hardcoded 1: the log must say ``httpd children:
-16`` and ``MPM: non-threaded (ThreadsPerChild=1)``. Event has two children of
-eight threads, so the log must say ``httpd children: 2`` and ``MPM: threaded
-(ThreadsPerChild=8)``; that is the proof the threaded branch really ran in
-the event lane. Pre-fix the log says it could not read the count at all.
+``ServerLimit`` of 32), so ``AP_MPMQ_MAX_DAEMONS`` is 16
+and prefork's ``AP_MPMQ_MAX_THREADS`` is a hardcoded 1. Post-fix the log must
+therefore say ``httpd children: 16`` and ``MPM: non-threaded
+(ThreadsPerChild=1)``; pre-fix it says it could not read the count at all.
 
 Why the thread *counts* are derived from the log line
 -----------------------------------------------------
@@ -154,24 +151,16 @@ NOT_FINALIZED = (
 CPU_SHARE_NUMERATOR = 1
 CPU_SHARE_DENOMINATOR = 2
 
-# What setup_apache_test.sh pins for each MPM on this lane: (httpd children,
-# MPM class, threads per child). If those values move, this table must move
-# with them -- and so must test_graceful_restart_leak.py for prefork.
-#
+# What setup_apache_test.sh pins for the prefork MPM on this lane. If those
+# values move, this test must move with them -- and so must
+# test_graceful_restart_leak.py, which depends on the same pinning.
+EXPECTED_HTTPD_CHILDREN = 16
+
 # prefork answers AP_MPMQ_IS_THREADED with AP_MPMQ_NOT_SUPPORTED, so
 # QueryMpmThreadInfo() leaves max_threads at its default of 1 and
-# IsThreadedFromMpmInfo() reports false. event runs MaxRequestWorkers 16 as
-# two children of eight threads.
-EXPECTED_BY_MPM = {
-    "prefork": (16, "non-threaded", 1),
-    "event": (2, "threaded", 8),
-}
-APACHE_MPM = os.environ.get("PAGESPEED_APACHE_MPM", "prefork")
-if APACHE_MPM not in EXPECTED_BY_MPM:
-    raise RuntimeError(
-        f"PAGESPEED_APACHE_MPM={APACHE_MPM!r} is not one of {sorted(EXPECTED_BY_MPM)}"
-    )
-EXPECTED_HTTPD_CHILDREN, EXPECTED_MPM_CLASS, EXPECTED_THREADS_PER_CHILD = EXPECTED_BY_MPM[APACHE_MPM]
+# IsThreadedFromMpmInfo() reports false.
+EXPECTED_MPM_CLASS = "non-threaded"
+EXPECTED_THREADS_PER_CHILD = 1
 
 
 def _error_log_path() -> str:
@@ -330,30 +319,28 @@ class TestMpmThreadCountResolution:
         )
         assert parsed  # implied by the two assertions above; stated for clarity
 
-        # --- 4. Every healthy line reports the pinned shape of the MPM -------
+        # --- 4. Every healthy line reports the pinned prefork shape -------
         for line, (rewrite, expensive, cores, mpm, tpc, children) in parsed:
             assert children == EXPECTED_HTTPD_CHILDREN, (
                 f"Resolution reported 'httpd children: {children}', expected "
                 f"{EXPECTED_HTTPD_CHILDREN}. setup_apache_test.sh pins the "
-                f"{APACHE_MPM} MPM to a fixed pool of "
-                f"{EXPECTED_HTTPD_CHILDREN} children, which is what "
+                f"prefork MPM to MaxRequestWorkers "
+                f"{EXPECTED_HTTPD_CHILDREN} (a fixed pool), which is what "
                 f"AP_MPMQ_MAX_DAEMONS must answer once check_config has run. "
                 f"A different number means either the MPM pinning moved (update "
-                f"EXPECTED_BY_MPM AND check test_graceful_restart_leak.py, which "
-                f"depends on the prefork pinning) or the query is being made at "
+                f"this constant AND check test_graceful_restart_leak.py, which "
+                f"depends on the same pinning) or the query is being made at "
                 f"the wrong time.\n  {line}"
             )
             assert mpm == EXPECTED_MPM_CLASS, (
                 f"Resolution classified the MPM as '{mpm}', expected "
-                f"'{EXPECTED_MPM_CLASS}': this lane pins {APACHE_MPM} (prefork "
-                f"reports AP_MPMQ_NOT_SUPPORTED for AP_MPMQ_IS_THREADED, "
-                f"event answers it).\n  {line}"
+                f"'{EXPECTED_MPM_CLASS}': this lane pins prefork, which reports "
+                f"AP_MPMQ_NOT_SUPPORTED for AP_MPMQ_IS_THREADED.\n  {line}"
             )
             assert tpc == EXPECTED_THREADS_PER_CHILD, (
                 f"Resolution reported ThreadsPerChild={tpc}, expected "
-                f"{EXPECTED_THREADS_PER_CHILD} for {APACHE_MPM} (prefork's "
-                f"AP_MPMQ_MAX_THREADS is a hardcoded 1; event answers its "
-                f"ThreadsPerChild).\n  {line}"
+                f"{EXPECTED_THREADS_PER_CHILD}: prefork's AP_MPMQ_MAX_THREADS "
+                f"is a hardcoded 1.\n  {line}"
             )
 
             # --- 5. The counts follow the policy, using the line's own

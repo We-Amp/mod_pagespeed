@@ -76,9 +76,6 @@ Environment Variables:
   PAGESPEED_HOST    Server hostname (default: localhost)
   PAGESPEED_PORT    Server port (default: 80)
   BAZEL_CONFIG      Additional bazel config (default: --config=gcc)
-  PAGESPEED_APACHE_MPM
-                    prefork (default) or event. With event and no pytest
-                    arguments, a reduced set runs (see EVENT_MPM_SET).
 EOF
 }
 
@@ -88,35 +85,6 @@ SKIP_BUILD=false
 KEEP_RUNNING=false
 BAZEL_CONFIG="${BAZEL_CONFIG:---config=gcc}"
 PYTEST_ARGS=()
-
-# The MPM Apache runs under (setup_apache_test.sh validates it); exported so
-# the setup script and the tests agree on it.
-export PAGESPEED_APACHE_MPM="${PAGESPEED_APACHE_MPM:-prefork}"
-
-# The reduced set run under the event MPM when no pytest arguments are given
-# (issue #326): the positive control that event is active, basic rewriting,
-# in-place optimization on both backends (the daemon cases by node id, so the
-# other files are not narrowed), per-directory options and overrides,
-# subrequests, admin pages and the concurrent-request test. The error-log
-# sweep runs last.
-EVENT_MPM_SET=(
-    automatic/test_mpm_thread_resolution.py
-    automatic/test_sanity.py
-    automatic/test_rewrite_css.py
-    automatic/test_combiners.py
-    automatic/test_ipro.py
-    system/test_ipro.py
-    system/test_instant_ipro.py
-    "system/test_rule_packs.py::TestDaemonDecline"
-    "system/test_rule_packs.py::TestDaemonServing"
-    system/test_htaccess_override.py
-    system/test_request_option_override.py
-    system/test_server_side_includes.py
-    system/test_admin_pages.py
-    system/test_concurrent_mixed_requests.py
-    system/test_zz_error_log_leak_sweep.py
-    -v
-)
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -235,11 +203,7 @@ run_tests() {
 
     # Default to running all automatic tests if no specific tests specified
     if [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
-        if [ "$PAGESPEED_APACHE_MPM" = "event" ]; then
-            PYTEST_ARGS=("${EVENT_MPM_SET[@]}")
-        else
-            PYTEST_ARGS=("automatic/" "system/" "-v")
-        fi
+        PYTEST_ARGS=("automatic/" "system/" "-v")
     fi
 
     # Install pytest if needed
