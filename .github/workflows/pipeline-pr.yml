@@ -201,12 +201,14 @@ jobs:
               sidecar=true
             fi
             # The ported servers' system tests: the port's sources and tests,
-            # the shared daemon adapter and serve arm, the system-test run
-            # scripts and the diagnostics collector they call.
-            if grep -qE "^(pagespeed/nginx/|test/pagespeed/nginx/|test/system/nginx/|pagespeed/system/|test/system/run_nginx_tests\.sh|tools/ci/collect-systest-diagnostics\.sh|${wf})" "${changed}"; then
+            # the shared daemon adapter and serve arm, the test sets and
+            # fixtures both runners use, the run and rig scripts and the
+            # diagnostics collector. Not ${wf}: a pull request never runs its
+            # own pipeline edit, so that is proven by the ci-dev dispatch.
+            if grep -qE "^(pagespeed/nginx/|test/pagespeed/nginx/|test/system/nginx/|test/system/automatic/|test/system/system/|pagespeed/system/|test/system/run_nginx_tests\.sh|test/system/pagespeed_test_framework/|test/system/conftest\.py|test/system/pytest\.ini|test/system/requirements\.txt|install/mod_pagespeed_test/|install/mod_pagespeed_example/|install/do_not_modify/|tools/ci/collect-systest-diagnostics\.sh)" "${changed}"; then
               nginx_sys=true
             fi
-            if grep -qE "^(pagespeed/apache/|test/pagespeed/apache/|test/system/automatic/|test/system/system/|test/system/apache/|pagespeed/system/|test/system/run_system_tests\.sh|tools/ci/collect-systest-diagnostics\.sh|${wf})" "${changed}"; then
+            if grep -qE "^(pagespeed/apache/|test/pagespeed/apache/|test/system/automatic/|test/system/system/|pagespeed/system/|test/system/run_system_tests\.sh|test/system/setup_apache_test\.sh|test/system/pagespeed_test_framework/|test/system/conftest\.py|test/system/pytest\.ini|test/system/requirements\.txt|install/mod_pagespeed_test/|install/mod_pagespeed_example/|install/do_not_modify/|install/debug\.conf\.template|tools/ci/collect-systest-diagnostics\.sh)" "${changed}"; then
               apache_sys=true
             fi
           fi
@@ -3161,7 +3163,7 @@ jobs:
     env:
       # Names this job's diagnostics tarball (job, run and attempt), so only
       # this job's own tarball is ever collected and uploaded.
-      SYSTEST_DIAG_TAG: apache-${{ github.run_id }}-${{ github.run_attempt }}
+      SYSTEST_DIAG_TAG: pr-apache-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         run: |
@@ -3219,7 +3221,7 @@ jobs:
       - name: Run Apache system tests
         id: systest
         run: |
-          NAME="ci-systest-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NAME="ci-systest-pr-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker rm -f "${NAME}" 2>/dev/null || true
           docker run --rm --init \
             --name "${NAME}" \
@@ -3270,6 +3272,10 @@ jobs:
           # Already gzip-compressed.
           compression-level: 0
 
+      - name: Remove the test container
+        if: always()
+        run: docker rm -f "ci-systest-pr-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 2>/dev/null || true
+
   nginx-sys-tests:
     name: nginx System Tests (changed port)
     needs: [changes, linux-build]
@@ -3277,7 +3283,7 @@ jobs:
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
     timeout-minutes: 90
     env:
-      SYSTEST_DIAG_TAG: nginx-${{ github.run_id }}-${{ github.run_attempt }}
+      SYSTEST_DIAG_TAG: pr-nginx-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         run: |
@@ -3335,7 +3341,7 @@ jobs:
       - name: Run Nginx system tests
         id: systest
         run: |
-          NAME="ci-systest-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NAME="ci-systest-pr-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker rm -f "${NAME}" 2>/dev/null || true
           docker run --rm --init \
             --name "${NAME}" \
@@ -3375,6 +3381,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
+
+      - name: Remove the test container
+        if: always()
+        run: docker rm -f "ci-systest-pr-nginx-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 2>/dev/null || true
 
   # Kill switch notice. While the repository variable FLEET_ENABLED is 'false'
   # every build runner job here runs on its hosted twin, and the jobs that
