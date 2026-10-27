@@ -5328,6 +5328,50 @@ TEST_F(DaemonAdapterTest, ABusyOpenLockIsQuiet) {
   EXPECT_EQ(opens + 1, last_abi_->opens);
 }
 
+TEST_F(DaemonAdapterTest, AWorkerStartOpenWaitsForTheOpenLock) {
+  // The worker-start open meets a held lock, waits, and opens once the
+  // holder lets go inside the budget.
+  const GoogleString socket_path = SocketPath("startwait.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  const int opens = last_abi_->opens;
+
+  DaemonAdapter::VolumeOpenLockSlot holder;
+  ASSERT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &holder));
+  std::atomic<bool> done(false);
+  void* handle = nullptr;
+  std::thread opener([&]() {
+    handle = adapter->RecordCacheAtWorkerStart();
+    done.store(true);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_FALSE(done.load()) << "the open did not wait for the held lock";
+  holder.reset();
+  opener.join();
+  EXPECT_TRUE(handle != nullptr);
+  EXPECT_EQ(opens + 1, last_abi_->opens);
+}
+
+TEST_F(DaemonAdapterTest, ARequestPathOpenStillAnswersAtOnceOnABusyLock) {
+  const GoogleString socket_path = SocketPath("reqnowait.sock");
+  ListeningSocket listener(socket_path);
+  ASSERT_TRUE(listener.bound());
+  std::unique_ptr<DaemonAdapter> adapter(ReadyAdapter(socket_path));
+  ASSERT_TRUE(last_abi_ != nullptr);
+  const int opens = last_abi_->opens;
+
+  DaemonAdapter::VolumeOpenLockSlot holder;
+  ASSERT_TRUE(DaemonAdapter::HoldVolumeOpenLockForTesting(volume_, &holder));
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_TRUE(adapter->RecordCacheForRequest() == nullptr);
+  EXPECT_TRUE(adapter->RecordCache() == nullptr);
+  EXPECT_LT(std::chrono::steady_clock::now() - start,
+            std::chrono::milliseconds(1000));
+  EXPECT_EQ(opens, last_abi_->opens);
+}
+
 TEST_F(DaemonAdapterTest, AnUnsupportedOpenLockFallsBackToTodaysOpen) {
   // A filesystem with no usable lock (some NFS mounts; a cache directory
   // the lock file cannot be created in): the open proceeds exactly as it

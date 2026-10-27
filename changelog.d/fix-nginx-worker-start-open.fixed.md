@@ -1,0 +1,1 @@
+- **nginx workers that start together no longer serve the original pages, without optimization, during the first seconds after a restart.**

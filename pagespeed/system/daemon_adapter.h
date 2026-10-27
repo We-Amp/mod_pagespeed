@@ -380,6 +380,13 @@ class DaemonAdapter {
   // and is tried again after kVolumeOpenLockBusyRetryMs.
   void* RecordCache();
 
+  // RecordCache() for a worker's start-up hook, where the open is off the
+  // event loop and before any request: a held volume-open lock is waited
+  // for up to kVolumeOpenLockStartupWaitMs instead of answered with
+  // nullptr, so workers that start together all end with a handle.  A lock
+  // still held after the budget behaves like RecordCache()'s busy try.
+  void* RecordCacheAtWorkerStart();
+
   // RecordCache() for a request thread (the Apache and IIS serve and record
   // factories).  Same result in steady state, but without taking the lock:
   // the published handle is returned directly.  When nothing usable is
@@ -664,7 +671,7 @@ class DaemonAdapter {
                             int64_t deadline_budget_ms = 2000);
 
   // The body of RecordCache(); the caller holds record_cache_mutex_.
-  void* RecordCacheLocked();
+  void* RecordCacheLocked(int64_t lock_wait_ms);
 
   DaemonStartupStatus Resolve(GoogleString* error);
 
