@@ -540,15 +540,16 @@ class FakeDaemonAbi : public DaemonAbi {
   bool publishes_generation = true;
   uint32_t published_generation = DaemonAdapter::kCacheDirGeneration;
 
-  mutable size_t observed_ram_cache_size = 0;
-  mutable uint64_t observed_volume_size = 0;
+  // Written by every open, and opens can overlap on several threads.
+  mutable std::atomic<size_t> observed_ram_cache_size{0};
+  mutable std::atomic<uint64_t> observed_volume_size{0};
   mutable size_t observed_write_bytes = 0;
   // Times the shared config's generation was read: once per start-up check
   // and once per serving-recheck probe, so a test can count probes across
   // threads without sleeping.
   mutable std::atomic<int> generation_reads{0};
-  mutable int opens = 0;
-  mutable int closes = 0;
+  mutable std::atomic<int> opens{0};
+  mutable std::atomic<int> closes{0};
   // Set by a test that needs to count closes after the fake itself is gone
   // (adapter destruction frees the fake; the pointee must outlive it).
   int* external_closes = nullptr;
@@ -2075,7 +2076,7 @@ TEST_F(DaemonAdapterTest, OnlyDaemonNotRunningVerdictsAreRetried) {
     std::unique_ptr<DaemonAdapter> adapter(MakeAdapter(socket_path));
     EXPECT_EQ(DaemonStartupStatus::kOk, adapter->StartupCheck());
     ASSERT_EQ(DaemonHealth::kUnavailable, adapter->health());
-    const int opens = last_abi_ != nullptr ? last_abi_->opens : 0;
+    const int opens = last_abi_ != nullptr ? last_abi_->opens.load() : 0;
 
     // Everything the recheck asks for now answers, and the interval is far
     // behind: a verdict wrongly marked retryable would flip here.
