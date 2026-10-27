@@ -26,7 +26,8 @@
 # rest) while leaving the system drive room.
 #
 # GNU find/stat/sort/xargs (the Linux runners); `gstat` stands in for stat on
-# a Mac.
+# a Mac, and without either perl lists the same records (the hosted macOS
+# image has perl but no GNU coreutils).
 
 set -uo pipefail
 
@@ -66,11 +67,11 @@ if [ "${#ROOTS[@]}" -eq 0 ]; then
   exit 0
 fi
 
-STAT=stat
-if ! stat -c %Y / >/dev/null 2>&1; then
-  if command -v gstat >/dev/null 2>&1; then STAT=gstat; else
-    echo "disk cache prune: no GNU stat, skipping" >&2; exit 0
-  fi
+if stat -c %Y / >/dev/null 2>&1; then STAT=stat
+elif command -v gstat >/dev/null 2>&1; then STAT=gstat
+elif command -v perl >/dev/null 2>&1; then STAT=perl
+else
+  echo "disk cache prune: no GNU stat and no perl, skipping" >&2; exit 0
 fi
 
 export LC_ALL=C
@@ -81,9 +82,18 @@ NOW="$(date +%s)"
 # "<mtime> <size> <path>" records, NUL-terminated (a symlink is listed as the
 # link itself, never followed), oldest first, ac/ before cas/ on equal mtime.
 # NUL separation holds a name containing a newline together end to end, so it
-# can never yield a delete path outside the cache.
-find "${ROOTS[@]}" \( -type f -o -type l \) -exec "$STAT" --printf '%Y %s %n\0' {} + 2>/dev/null \
-  | sort -z -t ' ' -k1,1n -k3 > "$T/list"
+# can never yield a delete path outside the cache. The perl lister writes
+# the same records from lstat (mtime, size, path).
+list_records() {
+  if [ "$STAT" = perl ]; then
+    # shellcheck disable=SC2016
+    find "${ROOTS[@]}" \( -type f -o -type l \) -exec perl -e \
+      'for (@ARGV) { my @s = lstat($_) or next; printf "%d %d %s\0", $s[9], $s[7], $_ }' {} +
+  else
+    find "${ROOTS[@]}" \( -type f -o -type l \) -exec "$STAT" --printf '%Y %s %n\0' {} +
+  fi
+}
+list_records 2>/dev/null | sort -z -t ' ' -k1,1n -k3 > "$T/list"
 
 # Age first, then oldest-first until what is left fits MAX.
 M=() S=() P=() K=() nrec=0 total=0

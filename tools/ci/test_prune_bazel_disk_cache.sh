@@ -16,6 +16,10 @@
 #   8. a candidate name containing a newline is removed as one file and never
 #      yields a delete path outside the cache.
 #   9. numbers with leading zeros are read base 10 (08d is 8 days, 02500 bytes).
+#  10. with no GNU stat on PATH the perl lister enforces the same age and
+#      size policy, and a name containing a newline is still removed whole.
+#  11. with neither GNU stat nor perl on PATH the prune skips, exits 0 and
+#      deletes nothing.
 #
 # Run: tools/ci/test_prune_bazel_disk_cache.sh
 
@@ -114,6 +118,33 @@ mk "$D/cas/c1" 1000 5; mk "$D/cas/c2" 1000 4; mk "$D/cas/c3" 1000 3; mk "$D/cas/
 "$PRUNE" "$D" 08d 02500 >/dev/null 2>&1; rc=$?
 if [ "$rc" -eq 0 ] && ! exists "$D/cas/c1" && ! exists "$D/cas/c2" && exists "$D/cas/c3" && exists "$D/cas/c4"; then
   pass "leading zeros are read base 10 for age and size"; else fail "leading zeros (rc=$rc)"; fi
+
+# 10/11. hide GNU stat (and gstat): PATH holds only the tools the prune needs
+BIN="$T/bin"; mkdir -p "$BIN"
+for tool in find sort xargs rm mktemp date; do
+  ln -s "$(command -v "$tool")" "$BIN/$tool"
+done
+BASH_BIN="$(command -v bash)"
+D="$T/perl"; OUT="$T/perl-outside"; mkdir -p "$OUT"
+mk "$OUT/innocent" 100 1
+mk "$D/ac/old" 100 10; mk "$D/cas/c1" 1000 5; mk "$D/cas/c2" 1000 4
+mk "$D/cas/c3" 1000 3; mk "$D/cas/c4" 1000 2
+EVIL="$D/cas/evil
+1000000000 0 $OUT/innocent"
+mk "$EVIL" 100 6
+ln -s "$(command -v perl)" "$BIN/perl"
+LOG="$(PATH="$BIN" "$BASH_BIN" "$PRUNE" "$D" 7d 2500 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && ! exists "$D/ac/old" && ! exists "$EVIL" && ! exists "$D/cas/c1" \
+   && ! exists "$D/cas/c2" && exists "$D/cas/c3" && exists "$D/cas/c4" && exists "$OUT/innocent" \
+   && [[ $LOG == *"removed 4 files"* ]]; then
+  pass "without GNU stat the perl lister enforces the age and size caps"
+else fail "perl lister (rc=$rc): $LOG"; fi
+rm -f "$BIN/perl"
+D="$T/noperl"; mk "$D/cas/old" 1000 30
+LOG="$(PATH="$BIN" "$BASH_BIN" "$PRUNE" "$D" 7d 1 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && exists "$D/cas/old" && [[ $LOG == *skipping* ]]; then
+  pass "without GNU stat and perl the prune skips and exits 0"
+else fail "no lister (rc=$rc): $LOG"; fi
 
 if [ "$FAILS" -ne 0 ]; then echo "$FAILS failure(s)"; exit 1; fi
 echo "All prune-bazel-disk-cache cases passed"
