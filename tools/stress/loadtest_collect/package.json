@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "puppeteer-core": "25.6.0"
+  },
+  "overrides": {
+    "zod": "4.6.6"
   }
 }
