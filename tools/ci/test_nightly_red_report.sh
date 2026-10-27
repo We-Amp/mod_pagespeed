@@ -46,6 +46,8 @@ mkdir -p "${BIN}"
 #   issue list ...                                  FAKE_ISSUES (fails when
 #                                                    FAKE_ISSUES_FAIL=1)
 #   issue create|edit|comment|close, label create   nothing, exit 0
+# An answer variable X can instead be a file: X_FILE names it (an answer too
+# large for an environment variable).
 cat > "${BIN}/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_LOG}"
@@ -56,7 +58,10 @@ for a in "$@"; do
   fi
   prev="${a}"
 done
-answer() { local var="$1"; printf '%s' "${!var-}"; }
+answer() {
+  local var="$1" file="$1_FILE"
+  if [ -n "${!file-}" ]; then cat "${!file}"; else printf '%s' "${!var-}"; fi
+}
 case "$1 $2" in
   "api --paginate"|"api repos/"*|"api --allow-escape-sequences")
     path="$*"
@@ -400,6 +405,7 @@ done_case history-jobs-api-failure-exits-1
 start
 run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" FAKE_RUNS_NIGHTLY='{"message":"Server Error"}'
 expect runs-unusable "exit 1" eq "${RC}" 1
+expect runs-unusable "names jq's error" grep -qF "is unusable: jq: error" "${WORK}/err"
 done_case runs-answer-unusable-exits-1
 
 start
@@ -544,6 +550,37 @@ expect push-cap "exit 0" eq "${RC}" 0
 expect push-cap "all 15 push runs looked up" eq "$(grep -cE 'actions/runs/(7[0-9]|8[0-4])/jobs' "${WORK}/gh.log" || true)" 15
 expect push-cap "the nightly is found" body_has "[run 40](https://github.com/We-Amp/example/actions/runs/40) (schedule"
 done_case push-runs-without-full-tier-do-not-consume-cap
+
+# --- large-runs-answers: real runs answers are a few hundred KB each, more
+# than one argument may carry on Linux (128 KiB); they come from files here.
+big_runs() { # <first id> <event> <sha> <day>  ->  20 padded runs, ids first..first+19
+  jq -c -n --argjson first "$1" --arg event "$2" --arg sha "$3" --arg day "$4" \
+    --arg pad "$(head -c 2500 /dev/zero | tr '\0' x)" '
+    { total_count: 20, workflow_runs: [ range(0; 20) as $h | ($first + $h) as $id
+      | { id: $id, name: "Nightly", node_id: ("WFR_" + $pad[:40]), head_branch: "main",
+          head_sha: $sha, path: ".github/workflows/nightly.yml", event: $event,
+          status: "completed", conclusion: "failure", workflow_id: 1, run_attempt: 1,
+          created_at: ($day + "T" + (if $h < 10 then "0" else "" end) + ($h | tostring) + ":00:00Z"),
+          html_url: "https://github.com/We-Amp/example/actions/runs/\($id)",
+          actor: { login: "example", url: $pad }, triggering_actor: { login: "example", url: $pad },
+          head_commit: { id: $sha, message: $pad, author: { name: "t", email: "t@example.invalid" } },
+          repository: { full_name: "We-Amp/example", description: $pad },
+          head_repository: { full_name: "We-Amp/example", description: $pad } } ] }'
+}
+big_runs 100 schedule "${C1}" 2026-10-25 > "${WORK}/runs-nightly.json"
+big_runs 200 push "${C1}" 2026-10-24 > "${WORK}/runs-push.json"
+start
+expect large-runs "the faked nightly answer is over 200 KB" \
+  le 200000 "$(wc -c < "${WORK}/runs-nightly.json")"
+run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" \
+  FAKE_RUNS_NIGHTLY_FILE="${WORK}/runs-nightly.json" FAKE_RUNS_CI_PUSH_FILE="${WORK}/runs-push.json" \
+  FAKE_JOBS_119="${J40_GREEN}"
+expect large-runs "exit 0" eq "${RC}" 0
+expect large-runs "one issue create" eq "$(calls '^gh issue create ')" 1
+expect large-runs "last green is the newest run" \
+  body_has "- Last green: [run 119](https://github.com/We-Amp/example/actions/runs/119) (schedule, \`${C1}\`), 3 commits since"
+done_case large-runs-answers
+unset -f big_runs
 
 # --- api-call-ceiling-stops-search
 start
