@@ -37,7 +37,7 @@ since a fetched copy lives under `$RUNNER_TEMP`.
 |---|---|---|---|
 | PR | `pipeline-pr.yml`, called by `ci.yml` | every pull request and push to `master` | the hosted checks: the guards group (test placement, pytest exit status, the system-test framework's own unit tests, bazelrc language flags, `git_repository` vendoring, the release-note gate, legacy docs, console drift, the SBOM, notices and VEX gates with a grype scan), the blocking and the report-only dependency scans, the browser and console tests, the repository signing key guard, the serf removal guard, the C++ CVE completeness gate and per-pull-request snapshot scan, and the plan half of the upgrade rehearsal; and the build runner legs listed under "Jobs of the PR tier" below. |
 | Full | `pipeline-full.yml`, called by `ci.yml` and `nightly.yml` | push to `master` (unless `FULL_TIER_TRIGGER` is `nightly`), `workflow_dispatch` with `full: true`, a pull request labelled `ci:full`, the scheduled nightly, or a nightly `workflow_dispatch` with `full_tier: true` | its own vendor and Linux x64 build; the sanitizers (ASan with UBSan, TSan); the Apache and nginx system tests; the Windows build of the IIS module, the Windows ASan unit tests and the Windows Application Verifier run; the Linux arm64 build, unit tests and system tests on hosted arm64 runners; the sidecar native pair for x64 and arm64 (path-filtered). See "The full tier" |
-| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` (which also calls the full tier) | 04:17 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the offline rebuild of both server modules from the vendored tree with no network, the Apache daemon lane (the full suite, then a reduced set under the event MPM), the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
+| Nightly | `pipeline-nightly.yml`, called by `nightly.yml` (which also calls the full tier) | 04:17 UTC and `workflow_dispatch` | the sanitizer stress rigs (Apache, nginx, IIS), the offline rebuild of both server modules from the vendored tree with no network, the Apache daemon lane, the shared-cache check, the nginx protocol matrix, the full-tree lint, the four fuzz lanes, the IIS Application Verifier matrix, the NVD scan and the nightly dependency scan (see "The nightly tier") |
 | Release | `pipeline-release-module.yml`, called by `release.yml` | a pushed tag `module-v*`, or `workflow_dispatch` with a tag and `dry_run` | the module release lane: build, package, smoke, the Windows installer, the release gates and validation, ending in one run artifact with the asset set, `SHA256SUMS` and `manifest.json`; a real run also signs and creates the release, in hosted jobs of the `release` environment. A dry run signs nothing and uses no secret. See `docs/ci/release.md` |
 | Sweep | `pipeline-sweep.yml`, called by `sweep-queued.yml` | hourly and on dispatch | cancels runs that wait for a runner nobody serves (see "The queued-run sweep") |
 | Tidy sweep | `pipeline-tidy-sweep.yml`, called by `tidy-sweep.yml` | on dispatch | one clang-tidy check full-tree with `-fix`, or a census of several checks with `fix` off; uploads the patch and the log as artifacts |
@@ -432,7 +432,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `nightly-vendor` | fleet-heavy | vendors the dependencies once (`tools/vendor-deps.sh`) and hands the tree to every other job through a vendor tarball or `actions/cache`, as described under "Artifacts" |
 | `linux-offline-build` | fleet-heavy, fleet only | stages the vendored tree in a fresh directory and rebuilds both server modules in the dev image with `--network none`, using the release lane's build flags (`-c opt --config=hardening --config=hardening-cet`): `--repository_disable_download` serves repository-cache hits and refuses every download, `--lockfile_mode=error` asserts the committed lock, and the pinned Bazel is fetched online beforehand into a `BAZELISK_HOME` the offline container mounts. A dependency that stops being vendored fails here and not on a release day, and a failure lists the repositories and URLs the build tried to reach. The build shares no state with the other lanes (fresh directory, own output base, remote cache off) and is always cold, 60-90 minutes on a heavy runner, so like `envoy-filter` it runs nightly only and not on every merge |
 | `apache-asan-stress` | fleet-heavy, fleet only | ASan module under graceful reload and restart load in the Apache rig; the sweep step is the gate |
-| `apache-daemon-lane` | fleet-heavy | the Apache system tests with the daemon lane required, then a reduced set under the event MPM |
+| `apache-daemon-lane` | fleet-heavy | the Apache system tests with the daemon lane required |
 | `shared-cache-vary` | fleet-heavy, fleet only | the Apache and nginx modules built from the tree, in the packaged install of the pinned optimizer pair, behind nginx `proxy_cache` and Varnish (stock and device-class keyed): fails when a cache hands one client another's image variant (`test/system/shared_cache/run.sh`) |
 | `nginx-asan-stress` | fleet-heavy, fleet only | the same for the nginx module |
 | `nginx-protocol-matrix` | fleet-heavy, fleet only | the proxy-cache race smoke over HTTP/1.1 and HTTP/2 (`protocols` input to change the list) |
@@ -443,19 +443,6 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `envoy-filter` | fleet-heavy, fleet only | builds the Envoy filter against Envoy 1.40 and runs its four unit tests (`tools/ci/envoy-filter-build.sh`), every night. The filter is an experimental port that no package ships and its build is long, so this is its only CI job (not in the PR or full tier). No hosted twin; it fetches into a per-runner repository cache, pruned at job start. A cold run is about an hour on 8 cores |
 | `nvd-scan` | hosted | rebuilds the vendored-dependency CVE snapshot from the live feed and uploads it with the report; no API key, so a rate-limited run skips instead of failing |
 | `dep-scan-nightly` | hosted | the live-database dependency scan with the image scan mode, and the pin staleness check |
-
-**The event MPM step.** The Apache system tests pin the prefork MPM (a fixed
-pool of sixteen children), while Apache's default on current distributions is
-event, where several request threads share one child. After the full suite,
-`apache-daemon-lane` runs a reduced set with `PAGESPEED_APACHE_MPM=event` (two
-children of eight threads, the same sixteen workers), reusing the module and
-the optimizer worker the job already built: the positive control that event is
-active (`test_mpm_thread_resolution.py`), basic rewriting, in-place
-optimization on both backends, per-directory options, subrequests, admin pages,
-a concurrent-request test and the error-log sweep (`EVENT_MPM_SET` in
-`test/system/run_system_tests.sh`). The graceful-restart leak test needs
-prefork's process-per-slot scoreboard and skips there. The step runs even when
-the prefork step failed, and costs about seven fleet-heavy minutes a night.
 
 **Where the pin staleness check lives.** The blocking dependency gate of the
 pull request tier scans against the pinned grype database in

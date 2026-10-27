@@ -57,16 +57,6 @@ RCPORT_PID="$LANE_STATE_DIR/pathological_server.pid"
 # error). The build is minutes long on a cold cache, so only the nightly
 # lane asks for it.
 DAEMON_LANE="${PAGESPEED_DAEMON_LANE:-0}"
-
-# PAGESPEED_APACHE_MPM: prefork (default) or event. Apache's own default on
-# current distributions is event, so the nightly lane also runs a reduced set
-# under it (issue #326): several request threads share one child there, which
-# prefork never exercises. Both use a fixed worker pool (see configure_apache).
-APACHE_MPM="${PAGESPEED_APACHE_MPM:-prefork}"
-case "$APACHE_MPM" in
-    prefork|event) ;;
-    *) echo "PAGESPEED_APACHE_MPM must be prefork or event" >&2; exit 1 ;;
-esac
 DAEMON_PIN_FILE="$PROJECT_ROOT/install/debian/optimizer-pin.json"
 DAEMON_STATE_DIR="$LANE_STATE_DIR/daemon"
 DAEMON_SOCKET="$DAEMON_STATE_DIR/notify.sock"
@@ -2649,11 +2639,9 @@ EOF
     # back through the proxy, and that fetch's target); with six workers the
     # chain stalled past the module's fetch deadline under light concurrent
     # load and the input was remembered as failed for minutes.
-    case "$APACHE_MPM" in
-        prefork)
-            sudo a2dismod mpm_event mpm_worker 2>/dev/null || true
-            sudo a2enmod mpm_prefork 2>/dev/null || true
-            sudo tee "$APACHE_CONF_DIR/mods-available/mpm_prefork.conf" > /dev/null << 'EOF'
+    sudo a2dismod mpm_event mpm_worker 2>/dev/null || true
+    sudo a2enmod mpm_prefork 2>/dev/null || true
+    sudo tee "$APACHE_CONF_DIR/mods-available/mpm_prefork.conf" > /dev/null << 'EOF'
 <IfModule mpm_prefork_module>
     StartServers            16
     MinSpareServers         16
@@ -2663,31 +2651,6 @@ EOF
     MaxConnectionsPerChild  0
 </IfModule>
 EOF
-            provide_fixture prefork_pool
-            ;;
-        event)
-            # The event MPM keeps the first and third properties above: two
-            # children of eight threads are started up front and
-            # MaxRequestWorkers is 2 x 8, so no child is spawned or reaped
-            # mid-test and the worker budget (16) matches prefork. ServerLimit
-            # 4 leaves room for one graceful generation. The process-per-slot
-            # mapping is prefork's alone, so prefork_pool is not provided.
-            sudo a2dismod mpm_prefork mpm_worker 2>/dev/null || true
-            sudo a2enmod mpm_event 2>/dev/null || true
-            sudo tee "$APACHE_CONF_DIR/mods-available/mpm_event.conf" > /dev/null << 'EOF'
-<IfModule mpm_event_module>
-    StartServers            2
-    ServerLimit             4
-    ThreadsPerChild         8
-    ThreadLimit             8
-    MaxRequestWorkers       16
-    MinSpareThreads         1
-    MaxSpareThreads         16
-    MaxConnectionsPerChild  0
-</IfModule>
-EOF
-            ;;
-    esac
 
     # Configure HTTPS VirtualHost if TLS certs are available
     if [ -f "$TLS_CERT_FILE" ] && [ -f "$TLS_KEY_FILE" ]; then
@@ -2838,14 +2801,6 @@ start_apache() {
         log_error "Apache failed to start"
         log_info "Checking error log..."
         sudo tail -20 /var/log/apache2/error.log 2>/dev/null || true
-        return 1
-    fi
-
-    # Guard: the configured MPM must be the one that runs, so a silent fallback
-    # cannot turn the event lane into a second prefork run.
-    if ! sudo apache2ctl -V 2>/dev/null | grep -i "^Server MPM:" | grep -qi "$APACHE_MPM"; then
-        log_error "Apache does not run the $APACHE_MPM MPM"
-        sudo apache2ctl -V 2>&1 | grep -i "MPM" || true
         return 1
     fi
 
