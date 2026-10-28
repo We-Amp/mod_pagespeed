@@ -369,7 +369,7 @@ packages 1.16.0 to 1.19.0 shipped with product versions 2.1.0 to 2.4.0;
   appearance's size was used, so a larger appearance could get a smaller
   image that the browser scaled up. Affected: 1.9.32 to 2.5.2.
 
-## Upgrade notes
+## Action required when upgrading
 
 - **nginx: check nested `location`, `if` and `limit_except` blocks.** A
   nested block that sets no `pagespeed` directives now inherits the
