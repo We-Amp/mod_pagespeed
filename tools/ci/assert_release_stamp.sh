@@ -5,30 +5,41 @@
 
 # Release assertion: every shipped Linux module carries the release commit.
 #
-#   assert_release_stamp.sh [--require-families [--prerelease]] <assets-dir> <release-sha>
+#   assert_release_stamp.sh [--require-families [--prerelease]] [--version V]
+#                           <assets-dir> <release-sha>
 #
 # For each Linux module asset in <assets-dir> (the Apache module .deb and .rpm,
 # the el10 Apache rpm, the standalone Apache module .so files, the nginx module
 # tarballs, .deb and .rpm, and the cPanel (ea4) rpms, x64 and arm64) every *.so
-# is extracted (a standalone .so is read as it is) and
-# must contain the full 40-character <release-sha> (GIT_COMMIT_FULL_STRING from
-# version.h.in). Prints "stamp ok: <asset> <so>" per module; exits 1 with
-# "not stamped: <asset> <so>" on a miss, and also when no module .so was found
-# at all (fail closed). Self-test: tools/ci/test_assert_release_stamp.sh
+# is extracted (a standalone .so is read as it is) and must carry the 7-character
+# prefix of <release-sha>. A module carries it in the user agent it sends when it
+# fetches resources, "(<name>/<version>-<sha7>)", where <version> is the module
+# version of the stamped tree (the release version, a pre-release suffix
+# included) and <sha7> is LASTCHANGE_STRING. Only that form counts, so a bare
+# 7-character match elsewhere in the binary, or another commit's stamp, is not
+# accepted. With --version V the version part must be exactly V; without it any
+# X.Y.Z[-pre-release] version is accepted. Prints "stamp ok: <asset> <so>" per
+# module; exits 1 with "not stamped: <asset> <so>" on a miss, and also when no
+# module .so was found at all (fail closed). Self-test:
+# tools/ci/test_assert_release_stamp.sh
 
 set -euo pipefail
 
 REQUIRE=0
 PRERELEASE=0
+VERSION=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --require-families) REQUIRE=1; shift ;;
     --prerelease) PRERELEASE=1; shift ;;
+    --version)
+      [ "$#" -ge 2 ] || { echo "error: --version needs a value" >&2; exit 2; }
+      VERSION="$2"; shift 2 ;;
     *) break ;;
   esac
 done
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 [--require-families [--prerelease]] <assets-dir> <release-sha>" >&2
+  echo "usage: $0 [--require-families [--prerelease]] [--version V] <assets-dir> <release-sha>" >&2
   exit 2
 fi
 DIR="$1"
@@ -37,6 +48,17 @@ SHA="$2"
 if ! printf '%s' "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
   echo "error: release sha must be 40 lowercase hex characters, got '${SHA}'" >&2
   exit 1
+fi
+if [ -n "$VERSION" ] && ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+  echo "error: --version must be X.Y.Z[-pre-release], got '${VERSION}'" >&2
+  exit 1
+fi
+SHA7="${SHA:0:7}"
+# The stamp as the code emits it: "/<version>-<sha7>)" (user agent suffix).
+if [ -n "$VERSION" ]; then
+  STAMP_RE="/${VERSION//./\\.}-${SHA7}\\)"
+else
+  STAMP_RE="/[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.]+)?-${SHA7}\\)"
 fi
 [ -d "$DIR" ] || { echo "error: no such directory: ${DIR}" >&2; exit 1; }
 
@@ -102,7 +124,7 @@ for asset in "${assets[@]+"${assets[@]}"}"; do
     found=1
     modules=$((modules + 1))
     rel="${so#"$t"/}"
-    if [ "$(grep -caF -- "$SHA" "$so" || true)" -gt 0 ]; then
+    if [ "$(LC_ALL=C grep -caE -- "$STAMP_RE" "$so" || true)" -gt 0 ]; then
       echo "stamp ok: ${name} ${rel}"
     else
       echo "not stamped: ${name} ${rel}"
@@ -124,7 +146,7 @@ if [ "$modules" -eq 0 ]; then
   exit 1
 fi
 if [ "$missed" -ne 0 ]; then
-  echo "error: a shipped module does not carry the release commit ${SHA}" >&2
+  echo "error: a shipped module does not carry the release commit stamp ${SHA7} (${SHA})" >&2
   exit 1
 fi
-echo "every Linux module carries ${SHA}"
+echo "every Linux module carries the commit stamp ${SHA7} (${SHA})"

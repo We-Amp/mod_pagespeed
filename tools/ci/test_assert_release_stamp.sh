@@ -13,6 +13,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${HERE}/assert_release_stamp.sh"
 SHA="0123456789abcdef0123456789abcdef01234567"
 OTHER="fedcba9876543210fedcba9876543210fedcba98"
+VER="2.6.0-pre.1"
+# What a stamped module holds: the fetch user agent suffix the code builds from
+# MOD_PAGESPEED_FULL_VERSION_STRING and LASTCHANGE_STRING.
+stamp() { printf 'prefix (mod_pagespeed/%s-%s) suffix' "$1" "${2:0:7}"; }
+STAMP="$(stamp "$VER" "$SHA")"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -68,11 +73,11 @@ expect() {
   echo "ok $name"
 }
 
-d="${WORK}/c1"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$SHA"
+d="${WORK}/c1"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$STAMP"
 expect stamped-tarball-passes 0 "stamp ok:" "$d" "$SHA"
 
 if command -v dpkg-deb >/dev/null 2>&1; then
-  d="${WORK}/c2"; make_deb "$d" mod-pagespeed_1.0-1_amd64.deb "$SHA"
+  d="${WORK}/c2"; make_deb "$d" mod-pagespeed_1.0-1_amd64.deb "$STAMP"
   expect stamped-deb-passes 0 "stamp ok:" "$d" "$SHA"
 else
   echo "skip: no dpkg-deb"
@@ -84,7 +89,7 @@ fi
 d="${WORK}/c3"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "ci"
 expect literal-ci-refused 1 "not stamped" "$d" "$SHA"
 
-d="${WORK}/c4"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$OTHER"
+d="${WORK}/c4"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$(stamp "$VER" "$OTHER")"
 expect wrong-sha-refused 1 "not stamped" "$d" "$SHA"
 
 d="${WORK}/c5"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "${SHA:0:7}"
@@ -94,13 +99,13 @@ d="${WORK}/c6"; mkdir -p "$d"; echo "deadbeef  file" > "${d}/SHA256SUMS"
 expect no-module-asset-refused 1 "no Linux module" "$d" "$SHA"
 
 d="${WORK}/c7"
-make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$SHA"
+make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$STAMP"
 make_tarball "$d" ngx_pagespeed-1.0-linux-arm64.tar.gz "ci"
 expect one-of-two-unstamped-refused 1 "not stamped: ngx_pagespeed-1.0-linux-arm64.tar.gz" "$d" "$SHA"
 
 # Optimizer packages are not module assets: an unstamped optimizer deb beside
 # a stamped module neither fails the run nor counts as a module asset.
-d="${WORK}/c8"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$SHA"
+d="${WORK}/c8"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$STAMP"
 printf 'not a real deb, never opened\n' > "${d}/pagespeed-optimizer_1.0-1_amd64.deb"
 printf 'not a real rpm\n' > "${d}/pagespeed-optimizer-1.0-1.x86_64.rpm"
 expect optimizer-deb-ignored 0 "stamp ok:" "$d" "$SHA"
@@ -110,6 +115,26 @@ if bash "$SCRIPT" "$d" "$SHA" 2>&1 | grep -q 'pagespeed-optimizer'; then
 else
   echo "ok optimizer-deb-ignored (not counted)"
 fi
+
+# A bare 7-character match that is not in the user agent form is refused, as is
+# the full hash alone, a stamp with another commit's short sha, and a stamp
+# whose version is not the release version when --version names it.
+d="${WORK}/c13"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "junk ${SHA:0:7} junk -${SHA:0:7} ${SHA:0:7})"
+expect bare-sha7-not-ua-format-refused 1 "not stamped" "$d" "$SHA"
+d="${WORK}/c14"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$SHA"
+expect full-hash-alone-refused 1 "not stamped" "$d" "$SHA"
+d="${WORK}/c15"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$(stamp "$VER" "$OTHER") (mod_pagespeed/${VER}-0000000)"
+expect other-commit-short-sha-refused 1 "not stamped" "$d" "$SHA"
+d="${WORK}/c16"; make_tarball "$d" ngx_pagespeed-1.0-linux-x64.tar.gz "$STAMP"
+n=$((n + 1))
+out="$(bash "$SCRIPT" --version "$VER" "$d" "$SHA" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF 'stamp ok:'; then echo "ok version-pinned-passes"; else echo "FAIL version-pinned-passes: rc=$rc"; fail=1; fi
+n=$((n + 1))
+out="$(bash "$SCRIPT" --version 2.6.0 "$d" "$SHA" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -qF 'not stamped'; then echo "ok wrong-version-refused"; else echo "FAIL wrong-version-refused: rc=$rc"; fail=1; fi
+n=$((n + 1))
+out="$(bash "$SCRIPT" --version 2x6x0-pre.1 "$d" "$SHA" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 1 ]; then echo "ok malformed-version-refused"; else echo "FAIL malformed-version-refused: rc=$rc"; fail=1; fi
 
 # nginx module deb, unstamped
 if command -v dpkg-deb >/dev/null 2>&1; then
@@ -121,7 +146,7 @@ fi
 
 # ea4 rpm, stamped
 if command -v rpm2cpio >/dev/null 2>&1 && command -v rpmbuild >/dev/null 2>&1; then
-  d="${WORK}/c10"; make_rpm "$d" ea-apache24-mod_pagespeed-1-1.el9.noarch.rpm "$SHA"
+  d="${WORK}/c10"; make_rpm "$d" ea-apache24-mod_pagespeed-1-1.el9.noarch.rpm "$STAMP"
   expect ea4-rpm-stamped-passes 0 "stamp ok: ea-apache24" "$d" "$SHA"
 else
   if command -v rpm2cpio >/dev/null 2>&1; then echo "skip: no rpmbuild"; else echo "skip: no rpm2cpio"; fi
@@ -147,7 +172,7 @@ done
 if [ "$ok" -eq 1 ]; then echo "ok prerelease-ea4-not-required"; else echo "FAIL prerelease-ea4-not-required"; fail=1; fi
 
 # Standalone module .so assets are read as they are.
-d="${WORK}/c11"; mkdir -p "$d"; printf 'x%sx\n' "$SHA" > "${d}/libmod_pagespeed-linux-x86_64.so"
+d="${WORK}/c11"; mkdir -p "$d"; printf 'x%sx\n' "$STAMP" > "${d}/libmod_pagespeed-linux-x86_64.so"
 expect standalone-so-stamped-passes 0 "stamp ok: libmod_pagespeed-linux-x86_64.so" "$d" "$SHA"
 d="${WORK}/c12"; mkdir -p "$d"; printf 'xcix\n' > "${d}/libmod_pagespeed-linux-aarch64.so"
 expect standalone-so-unstamped-refused 1 "not stamped: libmod_pagespeed-linux-aarch64.so" "$d" "$SHA"
