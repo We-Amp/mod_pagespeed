@@ -3166,8 +3166,9 @@ jobs:
 
       # The commit stamp is what ties a shipped module to the release commit.
       # Every Linux module (Apache deb, rpm, el10 rpm and standalone .so; nginx
-      # tarballs, deb and rpm; cPanel rpm; x64 and arm64) must hold the full
-      # commit hash, so a build that was not stamped can
+      # tarballs, deb and rpm; cPanel rpm; x64 and arm64) must carry the short
+      # commit stamp of the release commit next to the module version (the
+      # fetch user agent), so a build that was not stamped can
       # never be published. This asserts a property of the build, so it also
       # fails a dry run.
       - name: Every Linux module carries the release commit
@@ -3177,7 +3178,7 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends rpm2cpio cpio >/dev/null
           pre=()
           [ "$IS_PRERELEASE" = "true" ] && pre=(--prerelease)
-          bash tools/ci/assert_release_stamp.sh --require-families "${pre[@]+"${pre[@]}"}" "${RUNNER_TEMP}/release-assets" "$RELEASE_SHA"
+          bash tools/ci/assert_release_stamp.sh --require-families "${pre[@]+"${pre[@]}"}" --version "$VERSION" "${RUNNER_TEMP}/release-assets" "$RELEASE_SHA"
 
       # What the names promise, the packages must contain: the version of
       # every package, and the serving pair (the module packages require the
