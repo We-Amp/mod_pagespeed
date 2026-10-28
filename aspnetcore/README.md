@@ -287,13 +287,13 @@ some other way.
 
 ## Versions
 
-The package will move to the mod_pagespeed product version: it will carry the native pair
-of the module release of the same version (nginx, the module built against it and the launch
-shim, built and tested by that release), and the fourth-digit packaging revisions of
-1.15.0.x end. Module release 2.5.2 publishes that native pair as release assets; the package
-on the product version follows in a later release. Until then 1.17.0 remains the latest
-package. NuGet orders a 2.x package after 1.17.0, so a reference pinned to `1.*` will not
-pick it up.
+From 2.6 on the package version is the mod_pagespeed product version: the package carries
+the native pair of the module release of the same version (nginx, the module built against
+it and the launch shim, built and tested by that release). The fourth-digit packaging
+revisions of 1.15.0.x have ended. The first package on the product version is 2.6.0
+(module releases 2.5.0 and 2.5.2 published no package of this version line). NuGet
+orders 2.6.0 after 1.17.0; a reference pinned to
+`1.*` does not pick it up.
 
 ## License
 

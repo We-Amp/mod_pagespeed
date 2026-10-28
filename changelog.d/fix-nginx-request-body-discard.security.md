@@ -1,1 +1,0 @@
-- **nginx: fixed an HTTP request handling issue on persistent connections that could affect deployments behind a reverse proxy.** Update recommended.
