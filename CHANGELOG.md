@@ -5,7 +5,11 @@ All notable changes to mod_pagespeed are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.6.0] - 2026-10-28
+
+### Security
+
+- **nginx: fixed an HTTP request handling issue on persistent connections that could affect deployments behind a reverse proxy.** Update recommended.
 
 ### Added
 
@@ -107,6 +111,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with BoringSSL 0.20260929.0 (was 0.20260508.0), Abseil 20260817.0 (was
   20260107.1), Protocol Buffers 35.1 (was 31.1), GoogleTest 1.18.0 (was
   1.17.0, tests only) and fmt 12.2.0 (was 12.1.0).
+- **A client reload no longer bypasses the optimizer's cached copy of a
+  resource unless you ask for it.** Before, on Apache, nginx and IIS, a
+  request with `Cache-Control: no-cache` or `Pragma: no-cache` was sent to
+  the origin instead of being served from the optimizer's cache (Apache and
+  IIS missed the capitalised `No-Cache`), and `Cache-Control: max-age=0`
+  never was. Now all of these are served from the cache by default. The
+  new option `DaemonServeHonorRequestFreshness` (Apache:
+  `ModPagespeedDaemonServeHonorRequestFreshness`; nginx:
+  `pagespeed DaemonServeHonorRequestFreshness on;`; IIS:
+  `pagespeed DaemonServeHonorRequestFreshness on`; per server or site, default off)
+  turns the bypass back on: with it on, `Cache-Control: no-cache` in any
+  letter case, `Cache-Control: max-age=0` and `Pragma: no-cache` (only when
+  the request carries no `Cache-Control`) go to the origin on every port.
+- **Cyclone cache library updated: on Windows the cache volume can now be
+  replaced by a full purge while the module has it open.**
 
 ### Fixed
 
@@ -190,6 +209,282 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of its first appearance was used even when a later one was larger, so the
   larger appearance could be served a smaller image that the browser scaled
   up.
+- nginx: fixed a denial-of-service issue in the admin endpoints; update recommended.
+- **Apache subrequests, such as server-side includes, no longer go through
+  in-place optimization under the including page's URL.** The page and its
+  included resources are handled only on their own requests.
+- **IIS no longer risks a worker process failure when a site whose module
+  startup failed is recycled or its configuration is fixed.** A site that
+  started with a `pagespeed.config` that failed initialization (for example
+  a missing or unwritable `FileCachePath`) kept its half-initialized state
+  in the worker process. Repairing the file or recycling the application
+  pool released that state and could take the worker process down,
+  counting towards rapid-fail protection. The state now starts out empty,
+  so a failed startup is released cleanly.
+- **Resources recorded from sites that share a host name but use different
+  ports are no longer served to each other.** The host half of the
+  optimizer cache key now carries the site's port, so a site on
+  `http://example.com/` and a site on `http://example.com:8080/` no longer
+  resolve to the same entry; before, either could be served the other's
+  script, stylesheet or image out of the shared cache. Operators serving
+  one host name on several ports should purge the optimizer cache once
+  after upgrading, because existing entries may already be mixed.
+- **A failed read of a stored original no longer lets an optimized variant
+  through without the origin's headers.** Before serving from the optimizer
+  cache, the module reads the stored original to learn whether the origin
+  sent headers a cached response cannot reproduce (for example
+  `Access-Control-Allow-Origin`) or `Vary: Accept`. When that read failed
+  with busy, an I/O error or a corrupted entry, the failure was treated as
+  "the origin sent no such headers" and the optimized variant was served
+  without them, for its full cache lifetime. Any such read failure now
+  falls through to the origin for that request, like a cache miss. Applies
+  to Apache, nginx and IIS with the optimizer worker.
+- **Resources whose origin states its lifetime only with `Expires` are
+  served with that lifetime, not a default.** When recording a response,
+  the module stored the origin's lifetime from `Cache-Control` only; a
+  response that stated it only with `Expires` was stored as if it had none,
+  and the optimizer's freshness evaluation then applied its type defaults
+  (300 seconds for CSS and JavaScript, 3600 seconds for images), so a
+  change at the origin could stay hidden behind a much longer emitted
+  `Cache-Control` lifetime. The recorded entry now carries the lifetime
+  derived from `Expires` relative to the response `Date` (an `Expires`
+  already in the past is recorded as not freshly cacheable), so the served
+  `Cache-Control` matches what the origin granted. Applies to Apache,
+  nginx and IIS with the optimizer worker.
+- IIS: native memory no longer grows with every response recorded for
+  in-place optimization.
+- IIS: the per-request context is freed on every early-exit path.
+- **Lower request latency on Apache and IIS with the optimizer worker.**
+  Requests no longer wait on one another to reach the optimizer cache. While
+  the cache is being opened, for example right after a full cache purge,
+  other requests are answered by the origin instead of waiting. When the
+  optimizer worker was not running at server start, the periodic check for it
+  no longer holds a request for up to two seconds.
+- **The ASP.NET Core sidecar no longer leaks a stuck `nginx -t` config
+  validation.** When the pre-launch `nginx -t` did not finish within its
+  budget, startup failed with a bare cancellation error, the validation process
+  was left running and whatever it had printed was discarded. The sidecar now
+  kills the process (a cancelled application shutdown kills it too) and fails
+  with a timeout message that reports the elapsed time and the output captured
+  so far. The budget is configurable through
+  `PageSpeed:Sidecar:ConfigValidationTimeoutMs` (default 60 seconds, previously
+  a fixed 15 seconds); `nginx -t` on a healthy host finishes well under a
+  second, so the new default only changes behaviour on hosts too loaded to
+  finish at all. Non-positive values are rejected at startup.
+- **IIS: the module can now reach an optimizer worker that runs under
+  another account.** The module's check for the worker's pipe asked for
+  more access than the worker grants other accounts, so with the module in
+  an application pool identity and the worker under a service account every
+  daemon-backed request reported `X-Pagespeed-Init-Status:
+  daemon-unavailable`. The check now asks only for read and write access.
+- **Apache: rewritten HTML no longer keeps an origin Cache-Control or Expires
+  set by php-fpm, CGI or "Header always set".** Such values sit in
+  `err_headers_out`, which httpd merges into the response at send time, so a
+  rewritten page could carry the origin's `Cache-Control: public, max-age=600`
+  (and an `s-maxage`) next to the module's `max-age=0, no-cache`, plus the
+  origin's `Expires`: a shared cache taking the first `max-age` it saw could
+  store the page for the origin's lifetime. The module now computes its
+  no-cache value from both tables, unsets Cache-Control, Expires, ETag and
+  Last-Modified in both, and skips HTML already rewritten upstream when the
+  `X-Mod-Pagespeed` header arrives in `err_headers_out`. mod_php, which
+  writes `headers_out` directly, was never affected.
+- **`nginx -t` no longer creates the file cache's volume files.** A
+  configuration test now only validates the configuration, so it no longer
+  takes a minute on a slow disk or times out the ASP.NET Core sidecar's startup
+  validation. Normal startup still creates and checks the volumes.
+- **IIS event-log entries for an unusable optimizer service always name
+  the cause.** A second configuration that hits an already announced cause
+  now gets an entry naming its own cause, and an unset
+  `DaemonSocketPath` or `DaemonVolumePath` is shown as `(not set)`.
+- **ASP.NET Core sidecar: a restart that misses its startup deadline is
+  stopped and retried, and shutdown stops a restarting sidecar.** A restart
+  that missed its startup deadline while the new optimizer process was still
+  running used to leave the manager parked in "restarting" for the life of
+  the app: requests bypassed optimization, health checks reported degraded
+  and shutdown skipped the graceful stop. The slow process is now stopped and
+  restarted again, each attempt counting toward the restart-attempt limit, so
+  a host whose restarts are always slow ends in the failed state instead of
+  a silent bypass: raise `StartupTimeoutMs` on such hosts. A restarting
+  sidecar is stopped on shutdown like any other state.
+- **nginx: reload, worker exit and Web Bot Auth key-file robustness.**
+  Reloading with `master_process off` no longer crashes: the reload is
+  refused with an error and pagespeed stays off until nginx is restarted; a
+  worker exiting with work outstanding no longer crashes; the Web Bot Auth
+  key file is rechecked at most every 5 seconds instead of on every signed
+  request.
+- **nginx stores newly seen resources from a background thread when
+  in-place optimization runs without the optimizer service.** Recording a
+  cache miss no longer adds latency for other clients on the same worker.
+  Under heavy load a recording may be skipped (counted in
+  `ipro_classic_record_dropped`); the resource is recorded on a later
+  request.
+- **On IIS, rewritten HTML keeps the origin's no-store and related caching
+  directives, and ModifyCachingHeaders off is honoured for HTML.** Rewritten
+  HTML went out with a bare `Cache-Control: no-cache`, dropping the
+  `no-store` (and `no-transform`) the origin had sent, so pages marked
+  never-store could land in browser disk and back/forward caches; IIS now
+  sends the same disabled-caching `Cache-Control` as the Apache and nginx
+  ports, which keeps those directives. `ModifyCachingHeaders off` was
+  ignored for HTML requests that did not go through the classic in-place
+  lookup (optimizer-service sites, in-place optimization off, POST
+  requests): those still received `no-cache` and lost `Expires` and
+  `Last-Modified`. The option now comes from the options resolved for the
+  response, as on the other ports.
+- **ASP.NET Core (Inverse mode): optimized requests keep the client's scheme
+  behind a TLS terminator.** When the middleware forwarded an optimizable
+  request to the bundled nginx, it replaced any inbound
+  `X-Forwarded-Proto` with the loopback connection's `http`. An app deployed
+  behind a TLS terminator or load balancer (the documented HTTPS setup, with
+  `UsePageSpeed()` before `UseForwardedHeaders()`) therefore saw `http` on
+  every optimized request: with `UseHttpsRedirection()` every optimized page
+  redirected to itself in a loop, and absolute URLs the app built (canonical
+  links, OAuth redirect URIs, `Location` headers) came out as `http`. The
+  middleware now passes an inbound `X-Forwarded-Proto` through unchanged on a
+  plain-HTTP connection and uses the request's own scheme when the header is
+  absent; on an HTTPS connection the request's real scheme always wins, so a
+  client-supplied header cannot downgrade it. Local HTTP testing was never
+  affected.
+- **ASP.NET Core: `ExcludePaths` now means one thing.** The option was
+  documented as regular expressions, but the middleware matched each entry as
+  a path prefix or a glob while the generated nginx configuration pasted it
+  verbatim into a regex `location`. Which syntax an operator followed decided
+  the failure: `*.json` produced an invalid nginx configuration so the
+  application refused to start; `/admin/*` also turned optimization off for
+  unrelated paths such as `/docs/administration`; and the documented
+  `^/api/` never matched in the middleware, so those requests paid the extra
+  loopback hop for nothing. Every entry is now a path prefix (`/api/`) or a
+  glob (`/admin/*`, `*.json`; `*` matches any sequence, `?` any single
+  character), and the middleware and the generated nginx configuration
+  apply every entry the same way, excluding exactly the same paths.
+  **Action required on upgrade:** regular-expression entries are no longer
+  supported. An entry that starts with `^`, ends with `$`, or uses
+  characters outside the allowed set is rejected at startup with a clear
+  message naming the accepted syntax; the documented example `^/api/`
+  becomes `/api/`. A regular expression built only from allowed characters
+  is not rejected: it is read as a glob, in which `.` is a literal dot, so
+  the regex form `/api/.*` matches only paths starting with `/api/.` and
+  must be rewritten as the prefix `/api/`; a startup warning flags entries
+  containing `.*` or `.+`.
+- **Conditional requests to resources served from the optimizer cache
+  follow HTTP more closely.** If a request carries both `If-None-Match`
+  and `If-Modified-Since`, only the entity tag is used, as HTTP requires.
+  Before, a resource that had changed but kept an older modification date
+  could be answered `304 Not Modified`, and the client kept the outdated
+  copy. Entity tags that contain a comma are now recognized, so such a
+  resource is revalidated with a `304` instead of being sent in full, and
+  `If-None-Match: *` is answered with `304 Not Modified` when the resource
+  is served from the cache. Applies to Apache, nginx and IIS with the
+  optimizer worker. Update recommended.
+- **A stored original that is re-recorded while it is being served goes
+  out with the headers of the copy actually sent.** In a narrow timing
+  window the response could miss `Vary: Accept`, or go out when the new
+  copy should have been passed to the origin. Applies to Apache, nginx
+  and IIS with the optimizer worker.
+- **Apache: in-place `s-maxage` no longer produces two `Cache-Control`
+  headers when the origin sets it outside the normal header table.** A
+  `Cache-Control` written by php-fpm, CGI or `Header always set` was not
+  seen when the module added `s-maxage` to a static resource, so the response
+  carried both the origin's header and the module's. The origin's directives
+  are now merged with `s-maxage` into a single `Cache-Control` header.
+- **On IIS, editing `pagespeed.config` while the site is serving traffic no
+  longer risks a stalled or failed worker process.** The previous
+  configuration is now retired in the background once its last request has
+  finished, and other requests no longer wait while that happens. Also
+  fixed: a worker process could fail at application pool recycle after a
+  site whose `pagespeed.config` could not be read, either on first use or
+  after an edit.
+- **nginx: an admin POST refused for its body no longer strands the request's
+  fetch.** An oversized or unreadable body on an admin POST was answered
+  413, but the fetch object created for the request was never completed: it
+  leaked a little memory per request and held every later graceful stop or
+  reload of that worker for the full 30-second shutdown budget. The fetch is
+  now completed on the refusal path.
+- **nginx: a request whose scripted option value is invalid is served without
+  optimization instead of dropped.** With `ProcessScriptVariables` on and a
+  `pagespeed` directive whose value comes from an nginx variable, a value the
+  configuration rejects for that request (for example one derived from a
+  `$arg_*` or `$http_*` variable) closed the connection and leaked the
+  request's option copies. The request is now served unoptimized.
+- **nginx: the message-history endpoint reports its refusals.** A non-GET
+  request to the grouped message history, or a second one while a grouped
+  read was in flight, answered 200 with the error JSON. The endpoint now
+  sends the status the shared handler produced (405 with
+  `Allow: GET, HEAD`, or 429 when busy), so monitoring and scripts see the
+  failure.
+- **IIS: requests no longer stall for one second when another module
+  raises a custom notification.** The module subscribed to custom
+  notifications and its handler slept one second on every one another
+  module raised, although it never raises a custom notification itself;
+  the subscription and the handler are gone.
+- **nginx: in-place optimization of images and resources no longer stalls.**
+  A worker could exit while finishing the recording of a newly seen
+  resource without the optimizer service, which dropped the connections it
+  was serving and kept the resource from being optimized.
+- **A second web server process can no longer pick up the cache file
+  another one is discarding.** When the module and the optimizer disagree
+  on the cache layout, the module discards the cache file its check
+  created; until now a second worker process starting at that same moment
+  could attach to that file instead and run without in-place optimization
+  until it restarted. Opens of the shared cache volume are now coordinated
+  between the web server's processes, so no process can pick up a file
+  that is being discarded. On Windows a small hidden lock file
+  (`.pagespeed-module-open.lock`) now appears in the optimizer's cache
+  directory; it is expected and can be left in place.
+- **Apache: a proxy request that fails `ModPagespeedProxyAuth` is now
+  rejected with a real 403.** With the directive set to a cookie name and
+  no redirect, a client without the cookie was answered with `200` and an
+  empty body, which downstream caches could store. The response now
+  carries status 403.
+- **Apache: the module's own 404 responses now use the site's
+  `ErrorDocument`.** Unknown `.pagespeed.` resources and missing static
+  assets were answered with Apache's built-in error page, ignoring an
+  `ErrorDocument 404` configured for the site. Those requests now return
+  `HTTP_NOT_FOUND`, so the error document applies; the
+  `resource_404_count` and `slurp_404_count` statistics are still counted.
+- **Apache: responses proxied with `ModPagespeedMapProxyDomain` no longer
+  pass the origin's cookies to browsers.** The origin's `Set-Cookie` and
+  other hop-by-hop headers were copied through to the client under the
+  proxying site's own domain. They are now removed before the response
+  headers are handed to Apache; on proxied HTML this also drops the
+  module's own experiment-assignment cookie, which shares that response
+  with the origin's headers.
+- **Apache: `<Files>` and `<FilesMatch>` sections now apply to `.pagespeed.`
+  URLs.** The module's map-to-storage hook ran only the directory walk, so
+  per-file configuration was skipped when a resource was served through its
+  rewritten URL. The file walk runs as well now, with the real resource
+  name in place of the one-character stand-in the directory walk truncates
+  it to.
+- **Apache: no per-request memory growth on keep-alive loopback
+  connections, and deprecated-filter warnings are logged once.** The
+  loopback request rewrite allocated from the connection pool on every
+  request, so long-lived keep-alive connections grew without bound with
+  `MaxKeepAliveRequests 0`; the allocations now come from the request pool.
+  A deprecated filter enabled in `.htaccess` also logged a warning on every
+  request to that directory; the warning now fires once per filter name per
+  configuration load, and once per process for per-request configuration
+  such as `.htaccess` files and `PageSpeedFilters` query parameters.
+- **ASP.NET Core sidecar: invalid timing options fail at startup, a failed
+  sidecar stops repeating its error, health probes only accept this app's own
+  sidecar, and the per-start socket temp directory is removed on shutdown.**
+  `PageSpeed:Sidecar:HealthCheckIntervalMs`, `HealthCheckTimeoutMs` and
+  `ShutdownTimeoutMs` must be positive and at most ten minutes.
+- **Rewritten HTML now names every request header that changes it in `Vary`.**
+  With image optimization on, the markup chosen for a page can differ by the
+  browser's image-format support (`Accept`), its data-saver preference
+  (`Save-Data`) and its device (`User-Agent`). Pages rewritten with these
+  optimizations now carry `Vary` naming exactly those headers. The value
+  depends only on your configuration, not on the request or on cache state.
+  With the default settings HTML is still served as not cacheable by shared
+  caches, so most sites see no change. If you let a CDN or shared cache store
+  rewritten HTML (for example with `ModifyCachingHeaders off` and a public
+  `Cache-Control`), this stops one visitor's page from being served to
+  another. Expect fewer HTML hits on caches that key on the full
+  `User-Agent`. To keep HTML hit rates high, use `ImagePreserveURLs on` with
+  the optimizer worker installed so images are selected at their own URLs, or
+  normalize these headers at the cache as described in the deployment guide.
+  Update recommended for sites that cache HTML at a CDN or proxy.
+- **nginx workers that start together no longer serve the original pages, without optimization, during the first seconds after a restart.**
+- IIS: rewriting pages that the application flushes in several parts could crash the worker process or corrupt the response under load. Affected: all releases with the IIS port up to 2.5.2. Update recommended.
 
 ### Removed
 

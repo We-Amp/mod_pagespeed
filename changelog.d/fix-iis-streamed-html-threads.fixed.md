@@ -1,1 +1,0 @@
-- IIS: rewriting pages that the application flushes in several parts could crash the worker process or corrupt the response under load. Affected: all releases with the IIS port up to 2.5.2. Update recommended.

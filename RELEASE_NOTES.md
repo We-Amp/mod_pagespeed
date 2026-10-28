@@ -1,3 +1,657 @@
+# mod_pagespeed 2.6.0 Release Notes
+
+**Release date:** 2026-10-28
+**Status:** Stable
+**Packages:** `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS
+installer and the cPanel package, with the matching `pagespeed-optimizer`;
+the container images, the NuGet packages including the ASP.NET Core sidecar
+packages (`WeAmp.PageSpeed.Sidecar`,
+`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) and the Helm chart's
+application version carry the same version.
+
+## Highlights
+
+- **Security: two fixes for the nginx module and two for the Apache module.
+  Update recommended.** See Security below.
+
+- **The module picks up an optimizer service that starts after the web
+  server, without a restart.** IIS and Apache check again every 30 seconds
+  and turn in-place optimization back on once the optimizer answers. nginx
+  checks again at most once every 30 seconds, and only while requests
+  arrive. On IIS, an optimizer service the module cannot use is now
+  reported in the Windows event log, and a worker process crash that could
+  occur while rewriting HTML under load is fixed.
+
+- **More accurate caching headers.** Rewritten HTML names in `Vary` the
+  request headers its markup depends on, an optimized response whose
+  content identity is unknown no longer carries an `ETag` that could confirm
+  a stale copy, and conditional requests to the optimizer cache follow HTTP
+  more closely. Sites that let a CDN or shared cache store rewritten HTML
+  should read Upgrade notes.
+
+- **nginx: `pagespeed` settings in a `location` now apply inside its nested
+  locations and `if` blocks.** If you relied on a nested block escaping the
+  enclosing location's settings, see Upgrade notes.
+
+- **Statistics and ETags no longer make an optimizer outage look healthy.**
+  Responses answered with the stored original are counted in a new
+  `ipro_daemon_served_original` statistic and carry the origin's own ETag;
+  `ipro_daemon_served` counts optimized responses only. If you monitor
+  `ipro_daemon_served`, see Upgrade notes.
+
+- **The `mobilize` and `insert_ga` filters are now no-ops that log a
+  warning.** Existing configurations keep loading. See Deprecations.
+
+- **Building from source: Bazel 8 with bzlmod, and no Java.** The build uses
+  Bazel 8.8.1 with every dependency declared in `MODULE.bazel`; the Closure
+  Compiler is gone, so Java is no longer needed. The experimental Envoy
+  filter builds again, against Envoy 1.40.1. Packages and images need no
+  action.
+
+Affected ranges use package version numbers. Module and optimizer host
+packages 1.16.0 to 1.19.0 shipped with product versions 2.1.0 to 2.4.0;
+2.0.x versions were NuGet-only releases.
+
+## Security
+
+- nginx: fixed a denial-of-service issue in the admin endpoints. Affected:
+  1.15.0 to 2.5.2. Update recommended.
+- nginx: fixed a request-handling security issue. Affected: 1.5.27 to
+  2.5.2. Update recommended.
+- Apache: fixed an issue that could expose origin data to browsers in some
+  proxy configurations (security fix). Affected: 1.4.26 to 2.5.2. Update
+  recommended.
+- Apache: fixed a memory-safety issue that could be triggered in some
+  configurations (security fix). Affected: 1.3.25 to 2.5.2. Update
+  recommended.
+
+## Changed behaviour
+
+- **IIS reports an optimizer service it cannot use in the Windows event
+  log.** When a worker process starts with a configured optimizer service it
+  cannot use (the service stopped, `DaemonSocketPath` or `DaemonVolumePath`
+  missing, a missing or outdated client library, a package fault), it serves
+  normally with in-place optimization off and now writes one event-log
+  warning per configuration, whatever `UseEventLog` says. For a stopped
+  service the entry says the module checks again every 30 seconds (an
+  informational entry follows when the service is reattached); for the other
+  causes it names both configured paths and says to correct the cause and
+  recycle the application pool. Each entry names its own cause, and an unset
+  path is shown as `(not set)`. Local requests also carry
+  `X-Pagespeed-Init-Status: daemon-unavailable`, and responses carrying it
+  are never cached. Apache and nginx already logged this in their error log.
+
+- **nginx: `pagespeed` settings in a `location` block now also apply inside
+  its nested locations and its `if` and `limit_except` blocks.** Before, such
+  a nested block ran with the server-level settings only, so pages excluded
+  with `pagespeed off` on the location, or narrowed with `pagespeed Allow`,
+  `pagespeed Disallow`, filter or caching settings, could still be optimized.
+  A nested block that sets no `pagespeed` directives of its own now inherits
+  the enclosing location's settings, as other nginx modules' directives do.
+  See Upgrade notes.
+
+- **Rewritten HTML names the request headers that change it in `Vary`.**
+  With image optimization on, the markup chosen for a page can differ by the
+  browser's image-format support (`Accept`), its data-saver preference
+  (`Save-Data`) and its device (`User-Agent`). Pages rewritten with such
+  optimizations now carry `Vary` naming exactly the headers the configured
+  filters depend on; the value depends only on your configuration, not on
+  the request or on cache state. With the default settings HTML is still
+  served as not cacheable by shared caches, so most sites see no change. If
+  you let a CDN or shared cache store rewritten HTML, this lets a cache that
+  honours Vary keep each variant separate. Update recommended for those
+  sites; see Upgrade notes.
+
+- **A client reload no longer bypasses the optimizer's cached copy of a
+  resource unless you ask for it.** Before, a request with
+  `Cache-Control: no-cache` or `Pragma: no-cache` was sent to the origin
+  instead of being served from the optimizer's cache, while
+  `Cache-Control: max-age=0` never was. Now all of these are served from the
+  cache by default. The new option `DaemonServeHonorRequestFreshness` (per
+  server or site, default off) turns the bypass back on for all three forms,
+  in any letter case. Apache: `ModPagespeedDaemonServeHonorRequestFreshness
+  on`; nginx: `pagespeed DaemonServeHonorRequestFreshness on;`; IIS:
+  `pagespeed DaemonServeHonorRequestFreshness on`. Apache, nginx and IIS
+  with the optimizer.
+
+- **New option `PublicAdminAccess` for an intentionally public admin
+  console.** Process scope, default off. When on, the module logs one
+  informational line instead of the "intended for loopback" warning for
+  admin handlers, and the console's Overview shows "This console is public
+  by configuration" instead of "Admin console reachable from the network".
+  Access control is unchanged. Apache: `ModPagespeedPublicAdminAccess on`;
+  nginx: `pagespeed PublicAdminAccess on;` in the main context.
+
+- **Statistics for responses served from the optimizer's stored original.**
+  With the optimizer service stopped, recorded URLs were answered with the
+  stored original while `ipro_daemon_served` kept climbing and the response
+  carried the `W/"ps-` ETag that marks optimized output. `ipro_daemon_served`
+  now counts optimized variants only; the new `ipro_daemon_served_original`
+  counts responses answered with the stored original, and those carry the
+  origin's own weak ETag. An origin that sent no ETag, or a malformed one,
+  now yields a response with no ETag. Apache, nginx and IIS.
+
+- **`prioritize_critical_images` sends `Vary: Save-Data` consistently.**
+  With Save-Data image qualities in effect, HTML handled by this filter now
+  carries `Vary: Save-Data` whenever the filter and critical-image reporting
+  are enabled. Before, the header appeared only once browsers had reported
+  critical images, so right after a cache purge a shared cache could key the
+  page inconsistently.
+
+- **Messages say "optimizer" instead of "daemon".** Module log and error
+  messages (split cache volume, volume open, socket reachability, in-place
+  serve lines, admin proxy errors) and the admin console's headings, alerts
+  and help text now say "the optimizer" or "the optimizer worker".
+  Directives (`DaemonSocketPath`, `DaemonVolumePath`, ...), statistics, the
+  `/v1/daemon/*` endpoints and their error codes are unchanged. If you match
+  log lines by text, check your patterns.
+
+- **Package descriptions name the product mod_pagespeed.** `apt show` and
+  `dnf info` describe `mod-pagespeed` and `nginx-module-pagespeed` as the
+  mod_pagespeed web page optimization module for Apache httpd and for nginx.
+
+- **The admin console no longer lists `inserted_ga_snippets`.** Only
+  `insert_ga` could increase it, and that filter is now a no-op.
+
+- **Building from source.**
+  - The Bazel build uses Bazel 8.8.1 and is bzlmod only: every dependency is
+    declared in `MODULE.bazel` with a committed `MODULE.bazel.lock`. The
+    `WORKSPACE` files and `scripts/use-envoy-workspace.sh` are removed.
+  - The Closure Compiler is no longer a build dependency; the client scripts
+    are built with a pinned esbuild, so Java is not needed. The shipped
+    scripts behave the same and keep their public names; the
+    deferred-JavaScript script grew by about 8 KB uncompressed and 1 KB
+    gzipped (from about 12 KB to about 20 KB uncompressed, and from about
+    4.2 KB to about 5.2 KB gzipped).
+  - The Envoy filter builds again, against Envoy 1.40.1:
+    `bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed
+    //pagespeed/envoy:pagespeed_filter.so`. It remains experimental and
+    ships in no package.
+  - `pagespeed_libraries.conf` now lives at
+    `install/common/pagespeed_libraries.conf` in the source tree (the old
+    `net/instaweb/genfiles/` tree is removed). The installed file and its
+    location are unchanged; update any script or link that fetched it from
+    the repository.
+  - The Debian and RPM package build scripts now stop with an error when
+    `pagespeed_libraries.conf` is missing, instead of producing a package
+    without it.
+
+## Fixed
+
+- **IIS and Apache pick up an optimizer service that starts or restarts
+  after the web server, without a restart.** A worker process that started
+  while the service was not running kept in-place optimization off until
+  the application pool was recycled or the server restarted. The module now
+  checks again every 30 seconds and turns in-place optimization back on once
+  the service answers, with one info line. A split cache volume and other
+  configuration or package faults are still final until a restart. Affected:
+  1.16.0 to 2.5.2.
+
+- **nginx picks up an optimizer that starts after nginx, without a
+  reload.** A worker process that started while the optimizer was not
+  running kept in-place optimization off until nginx was reloaded or
+  restarted. While requests arrive, each nginx worker process now checks
+  for the optimizer again at most once every 30 seconds, off the request
+  path, and turns in-place optimization back on once the optimizer answers,
+  with one info line in the error log. A split cache volume and other
+  configuration or package faults remain final until a restart. Affected:
+  1.17.0 to 2.5.2.
+
+- **A web server process can no longer attach to a cache file that another
+  process is discarding.** When the module and the optimizer disagree on the
+  cache layout (for example during an upgrade), a second process starting at
+  the same moment could attach to the file being discarded and run without
+  in-place optimization until it restarted. Opens of the optimizer's cache
+  are now coordinated between the web server's processes. On Windows a small
+  hidden lock file (`.pagespeed-module-open.lock`) appears in the
+  optimizer's cache directory; it is expected and can be left in place.
+  Affected: 1.16.0 to 2.5.2.
+
+- **A changed optimized resource is no longer answered `304 Not Modified`
+  when its origin sends neither `ETag` nor `Last-Modified`.** Its validator
+  was derived from the response length alone, so a new version of the same
+  optimized length could be confirmed as unchanged and the browser kept the
+  old script, stylesheet, image or page. Such a response now carries no
+  `ETag` when its content identity is unknown. Apache, nginx and IIS with the
+  optimizer. Update recommended; no configuration change and no cache purge
+  required. See Upgrade notes. Affected: 1.16.0 to 2.5.2.
+
+- **Conditional requests to resources served from the optimizer cache
+  follow HTTP more closely.** If a request carries both `If-None-Match` and
+  `If-Modified-Since`, only the entity tag is used, as HTTP requires; before,
+  a resource that had changed but kept an older modification date could be
+  answered `304 Not Modified` and the client kept the outdated copy. Entity
+  tags that contain a comma are recognized, so such a resource is
+  revalidated with a `304` instead of being sent in full, and
+  `If-None-Match: *` is answered with `304 Not Modified`. A stored original
+  that is re-recorded while it is being served now goes out with the
+  headers of the copy actually sent. Apache, nginx and IIS with the
+  optimizer. Update recommended. Affected: 1.16.0 to 2.5.2.
+
+- **Optimizer cache entries are now kept apart per site.** The optimizer
+  cache key now includes the site's port. See Upgrade notes. Affected: 1.16.0
+  to 2.5.2.
+
+- **A failed read of a stored original no longer lets an optimized variant
+  through without the origin's headers** (for example
+  `Access-Control-Allow-Origin` or `Vary: Accept`); such a request now goes
+  to the origin, like a cache miss. Apache, nginx and IIS with the
+  optimizer. Affected: 1.16.0 to 2.5.2.
+
+- **Resources whose origin states its lifetime only with `Expires` are
+  served with that lifetime**, not the optimizer's type default (300 seconds
+  for CSS and JavaScript, 3600 seconds for images). An `Expires` already in
+  the past is treated as not freshly cacheable. Apache, nginx and IIS with
+  the optimizer. Affected: 1.16.0 to 2.5.2.
+
+- **Lower request latency on Apache and IIS with the optimizer.** Requests
+  no longer wait on one another to reach the optimizer cache. While the
+  cache is being opened, for example right after a full cache purge, other
+  requests are answered by the origin instead of waiting. Affected: 1.16.0
+  to 2.5.2.
+
+- **Apache: caching headers on rewritten HTML and static resources.**
+  `Cache-Control` and `Expires` set by php-fpm, CGI or `Header always set`
+  are now handled like any other origin header: rewritten HTML no longer
+  carries the origin's `Cache-Control` (with a `max-age` or `s-maxage` a
+  shared cache could honour) next to the module's `max-age=0, no-cache`, and
+  in-place `s-maxage` on a static resource is merged into a single
+  `Cache-Control` header instead of a second one. mod_php setups never
+  had this problem. Affected: 0.9.13 to 2.5.2.
+
+- **Apache with the optimizer: stylesheets and scripts compressed by
+  mod_deflate or mod_brotli are now recorded and optimized.** Before, such
+  responses were refused as content-encoded, so browser traffic never fed
+  the optimizer. The compressor still compresses the response on the way
+  out. Affected: 1.16.0 to 2.5.2.
+
+- **Apache: smaller correctness fixes.**
+  - The module's own 404 responses (unknown `.pagespeed.` resources, missing
+    static assets) now use the site's `ErrorDocument` instead of Apache's
+    built-in error page. The `resource_404_count` and `slurp_404_count`
+    statistics are still counted. Affected: 0.9.1 to 2.5.2.
+  - A proxy request that fails `ModPagespeedProxyAuth` is now rejected with
+    403. Affected: 1.10.33 to 2.5.2.
+  - `<Files>` and `<FilesMatch>` sections now apply to `.pagespeed.` URLs.
+    Affected: 1.1.23 to 2.5.2.
+  - Memory use on long-lived connections no longer grows over time.
+    Affected: 0.10.22 to 2.5.2.
+  - A deprecated filter enabled in `.htaccess` logs its warning once instead
+    of on every request. Affected: 1.15.0 (from revision r20) to
+    2.5.2.
+
+- **IIS: a worker process crash or corrupted response that could occur
+  while rewriting HTML under load is fixed.** Affected: 1.15.0 to 2.5.2.
+  Update recommended.
+
+- **IIS: rewritten HTML keeps the origin's `no-store` and `no-transform`, and
+  `ModifyCachingHeaders off` is honoured for HTML**, as on Apache and nginx.
+  Before, pages marked never-store could land in browser disk and
+  back/forward caches, and HTML that did not go through the classic in-place
+  lookup lost `Expires` and `Last-Modified` despite
+  `ModifyCachingHeaders off`. Affected: 1.15.0 to 2.5.2.
+
+- **IIS: the entity tag travels under its standard `ETag` name.** It was
+  sent as `E-Tag`, so clients did not get a usable validator, and rewritten
+  HTML kept the origin's `ETag` for a body it no longer describes. A `HEAD`
+  request for a resource not in the in-place cache is no longer counted and
+  logged as a failed recording. Affected: 1.15.0 to 2.5.2.
+
+- **IIS: the module can reach an optimizer worker that runs under another
+  account**, for example with the module in an application pool identity
+  and the worker under a service account. Before, every request that needed
+  the optimizer reported `X-Pagespeed-Init-Status: daemon-unavailable`.
+  Affected: 1.17.0 to 2.5.2.
+
+- **IIS: no worker process failure when a site whose module startup failed
+  is recycled or its configuration is fixed** (for example after a missing
+  or unwritable `FileCachePath`); such failures counted towards rapid-fail
+  protection. Editing `pagespeed.config` while the site is serving traffic
+  no longer risks a stalled or failed worker process: the previous
+  configuration is retired in the background once its last request has
+  finished. Affected: 1.15.0 to 2.5.2.
+
+- **Windows: a full cache purge takes effect while IIS or an ASP.NET Core
+  application is serving.** Before, a full purge (`POST /v1/cache/purge`
+  with `"scope": "all"`) could report success without removing anything
+  while the web server had the cache open. The module and the
+  `WeAmp.PageSpeed` package (the ASP.NET Core middleware) now open the cache
+  volume so that a full purge can replace it while open, as on Linux; the
+  web server picks up the empty cache within about a second. If an
+  application with an older module or an older `WeAmp.PageSpeed` package
+  still holds the volume, the purge reports that the cache volume could not
+  be removed instead of success; the cache keeps serving and its generation
+  is not advanced. A failed full purge also no longer risks stopping the
+  optimizer. Other platforms are unchanged. Affected: 1.17.0 to 2.5.2.
+
+- **IIS: requests no longer stall for one second when another module raises
+  a custom notification.** Affected: 1.15.0 to 2.5.2.
+
+- **IIS: native memory no longer grows with every response recorded for
+  in-place optimization.** Affected: 1.15.0 to 2.5.2.
+
+- **nginx: in-place optimization without the optimizer service no longer
+  slows other clients.** Newly seen resources are stored from a
+  background thread, so recording a cache miss no longer adds latency for
+  other clients on the same worker. Under heavy load a recording may be
+  skipped (counted in `ipro_classic_record_dropped`); the resource is
+  recorded on a later request. Affected: 1.7.30 to 2.5.2.
+
+- **nginx: a remote configuration refresh no longer pauses the worker when
+  the native fetcher is in use.** With `RemoteConfigurationUrl` and
+  `UseNativeFetcher on` and the default file cache, requests during a
+  refresh use the local configuration and later requests the refreshed
+  copy. With an external cache (memcached or redis) the module still waits
+  up to `RemoteConfigurationTimeoutMs` and warns about the combination at
+  startup; with the default fetcher a refresh can still delay requests by up
+  to the timeout. Affected: 1.10.33 to 2.5.2.
+
+- **nginx: `nginx -t` no longer creates the file cache's volume files.** A
+  configuration test only validates the configuration, so it no longer takes
+  a minute on a slow disk. Normal startup still creates and checks the
+  volumes. Affected: 1.15.0 to 2.5.2.
+
+- **nginx: admin and request-path fixes.** A request whose scripted option
+  value (`ProcessScriptVariables on`) is invalid is served without
+  optimization instead of having its connection closed, and the
+  message-history endpoint answers its refusals with 405 or 429 instead of
+  200. Affected: 1.9.32 to 2.5.2.
+
+- **nginx: reload and shutdown fixes.** Reloading with
+  `master_process off` no longer crashes (the reload is refused with an
+  error and pagespeed stays off until nginx is restarted), a worker exiting
+  with work outstanding no longer crashes, and the Web Bot Auth key file is
+  rechecked at most every 5 seconds instead of on every signed request.
+  Affected: 1.5.27 to 2.5.2.
+
+- **`resize_rendered_image_dimensions` uses the largest size of an image that
+  appears more than once on a page, as documented.** Before, the first
+  appearance's size was used, so a larger appearance could get a smaller
+  image that the browser scaled up. Affected: 1.9.32 to 2.5.2.
+
+## Upgrade notes
+
+- **nginx: check nested `location`, `if` and `limit_except` blocks.** A
+  nested block that sets no `pagespeed` directives now inherits the
+  enclosing location's settings. If you relied on a nested block escaping
+  them (for example to keep optimization on below a location with
+  `pagespeed off`), set the directives in the nested block itself.
+
+- **CDN or shared cache in front of rewritten HTML: expect fewer HTML hits
+  on caches that key on the full `User-Agent`.** Rewritten HTML now carries
+  `Vary: Accept, Save-Data, User-Agent` (with the default `CoreFilters`), or
+  the subset your filters depend on. To keep HTML hit rates high, use
+  `ImagePreserveURLs on` with the optimizer worker installed so images are
+  selected at their own URLs, or normalize these headers at the cache as
+  described in the deployment guide. Sites whose HTML is not stored by a
+  shared cache, the default, see no change.
+
+- **Client reloads and the optimizer cache.** A browser reload
+  (`Cache-Control: no-cache`, `max-age=0` or `Pragma: no-cache`) is now
+  answered from the optimizer's cache. Set
+  `DaemonServeHonorRequestFreshness on` if you want those requests to go to
+  the origin.
+
+- **ETags after the upgrade.** Clients may download some optimized
+  resources once more, because their validators change; resources whose
+  origin sends no validator are revalidated with a full response until the
+  optimizer has processed them again. No configuration change and no cache
+  purge are needed.
+
+- **One host name on several ports: purge the optimizer cache once.** If you
+  serve one host name on several ports (for example `http://example.com/`
+  and `http://example.com:8080/`), purge the optimizer cache once after
+  upgrading, because existing entries may already be mixed between the
+  sites.
+
+- **nginx and an optimizer that starts after nginx.** No reload is needed
+  any more: each nginx worker process checks again at most once every 30
+  seconds while requests arrive and turns in-place optimization back on by
+  itself, logging one info line. A split cache volume or other
+  configuration fault still needs a restart.
+
+- **Apache: `ErrorDocument 404` now applies to the module's own 404s.** If a
+  site has an `ErrorDocument 404`, requests for unknown `.pagespeed.`
+  resources and missing static assets now receive that page.
+
+- **Windows: a lock file in the cache directory.** A small hidden
+  `.pagespeed-module-open.lock` file appears in the optimizer's cache
+  directory; leave it in place.
+
+- **Monitoring `ipro_daemon_served`.** After the upgrade this statistic
+  counts optimized responses only. Add `ipro_daemon_served_original` to
+  dashboards or alerts that used it as a health signal; a rising
+  `ipro_daemon_served_original` with a flat `ipro_daemon_served` means the
+  optimizer is not producing variants.
+
+- **Remove `mobilize`, `insert_ga`, `LogMobilizationSamples`, `AnalyticsID`
+  and `UseAnalyticsJs` from your configuration** to silence the new
+  warnings, and the `ga=` component from experiment specs. If you relied on
+  `insert_ga` for analytics, add your own analytics snippet.
+
+- **Log matching.** Module messages now say "optimizer" where they said
+  "daemon"; update log filters or alerts that match the old text.
+
+- **Shared caches and Save-Data.** Pages handled by
+  `prioritize_critical_images` with Save-Data qualities now always carry
+  `Vary: Save-Data`, so a shared cache keeps a copy per Save-Data value.
+
+- **Building from source:** install Bazel 8.8.1 (or use bazelisk with the
+  repository's `.bazelversion`); scripts that called
+  `scripts/use-envoy-workspace.sh` or relied on `WORKSPACE` need updating.
+  Java is no longer required. If you fetch `pagespeed_libraries.conf` from
+  the repository, use `install/common/pagespeed_libraries.conf`.
+
+## Deprecations
+
+- **`mobilize` is a no-op.** It had no rewriting behaviour of its own. It can
+  still be named and now logs a warning that it has no effect;
+  `LogMobilizationSamples` is accepted and ignored with a warning. Enabling
+  `mobilize` no longer adds a `head` element to pages without one, and no
+  longer makes the server look up a per-origin property cache page per
+  request.
+- **`insert_ga` is a no-op.** It injected a Universal Analytics tracker, and
+  Universal Analytics was discontinued in July 2023. It can still be named
+  and now logs a warning; `AnalyticsID`, `UseAnalyticsJs` and the `ga=`
+  component of an experiment spec are accepted and ignored with a warning.
+
+---
+
+## pagespeed-optimizer
+
+The optimizer worker, the container images and the `WeAmp.PageSpeed` NuGet
+package.
+
+### Added
+
+- **Software bill of materials, VEX and signed checksums.** Releases of the
+  host packages include an SPDX 2.3 software bill of materials
+  (`pagespeed-optimizer-<version>.spdx.json`) and an OpenVEX file
+  (`pagespeed-optimizer-<version>.vex.json`) listing known vulnerabilities
+  in bundled components that do not affect these packages, with the reason
+  for each; both are listed in `SHA256SUMS`. Each package has a build
+  provenance attestation and an SBOM attestation in the public Sigstore
+  transparency log, and `SHA256SUMS` has a Sigstore signature
+  (`SHA256SUMS.sigstore.json`) next to the existing PGP signature. The
+  existing `gpg` and `sha256sum` check works as before; RELEASING.md lists
+  the `gh attestation verify` and `cosign verify-blob` commands.
+
+### Changed
+
+- **More browsers get WebP and AVIF.** When a WebP or AVIF image comes out
+  larger than the optimized image in the original format, the optimizer now
+  tries up to two smaller WebP encodes, or one AVIF encode, at the same
+  visual quality target before falling back to the original format; a
+  browser is not sent a larger image than the original-format one. This
+  applies
+  when an image is optimized afresh, not to an image whose original-format
+  copy is already cached, until that copy expires or is purged. `/v1/stats`
+  and the Prometheus metrics report `image_size_refused` and
+  `image_budget_rescued`.
+
+- **The worker's log lines and `--version` output, and the nginx module's
+  load notice, name the product mod_pagespeed.** The version number and
+  build commit are unchanged.
+
+### Fixed
+
+- **ETags on optimized responses.** An optimized script, stylesheet, image
+  or page whose origin sends neither `ETag` nor `Last-Modified` could be
+  answered `304 Not Modified` after it changed, when the new optimized
+  version had the same size. Optimized responses now carry a validator
+  derived from the source content, and none when no content identity is
+  available, so a stale copy is no longer confirmed as unchanged. Pages,
+  stylesheets and scripts the optimizer leaves unchanged carry an `ETag`
+  again and answer a matching `If-None-Match` with `304 Not Modified`. With
+  the nginx module, a
+  response revalidated with the origin now carries the same `ETag` as a
+  cache hit for the same bytes, so the browser gets a `304` instead of a
+  full response. Update recommended; see Upgrade notes. Affected: 2.0.0 to
+  2.5.2.
+
+- **nginx: a compressed optimized response served right after a 304
+  revalidation keeps its `Content-Encoding`.** Before, a gzip or Brotli
+  response marked `X-PageSpeed: REVALIDATED` could be sent without the
+  header, so clients received compressed bytes labelled as plain content.
+
+- **Proactive image variants: desktop and tablet browsers get the optimized
+  image again.** With the nginx module and
+  `PAGESPEED_PROACTIVE_IMAGE_VARIANTS=true` or `--proactive-image-variants`,
+  since 2.5.1 desktop browsers could be served the original image in its
+  original format for images up to 768 pixels wide, and tablet browsers
+  that accept only JPEG for images up to 480 pixels wide. An affected image
+  is rebuilt the next time a desktop browser requests it; no purge is
+  needed. Affected: 2.5.1 to 2.5.2, only with proactive image variants
+  enabled (off by default).
+
+- **When an origin starts sending `Vary: Accept` for a URL, the optimized
+  copies stored before the change are dropped at the next origin refresh**
+  instead of being served until a purge. Affected: 2.1.0 to 2.5.2.
+
+- **The default worker thread count follows the container's CPU limit.** It
+  is now the smallest of the CPUs the worker may run on and the container's
+  CPU limit (`docker run --cpus`, a Kubernetes CPU limit), between 2 and
+  128; an explicit `--num-threads` still wins. Affected: 2.0.0 to 2.5.2.
+
+- **Recovery of a cache volume that failed to open removes the damaged
+  volume files.** Before, it removed nothing, and the site ran without
+  optimization on every restart until the file was removed by hand. For a
+  permission, symlink or I/O error, or a volume another running process
+  still holds, nothing is deleted: the reason is logged and the worker
+  starts in degraded mode.
+
+- **Windows: a full cache purge replaces the cache volume while a 2.6.0 web
+  server module or `WeAmp.PageSpeed` package has it open.** See "Windows: a
+  full cache purge takes effect while IIS or an ASP.NET Core application is
+  serving" under mod_pagespeed, Fixed. Affected: 2.0.0 to 2.5.2.
+
+- **Windows: the client library and the ASP.NET Core middleware can notify
+  an optimizer worker that runs under another account**, for example an IIS
+  application pool identity with the worker under a service account. Before,
+  the connection failed with access denied. Affected: 2.2.0 to 2.5.2.
+
+- **Configuration updates through `PATCH /v1/config` no longer pause the
+  worker while the settings are saved to disk.** The update still returns
+  once the change is saved; if saving fails, for example because the disk is
+  full, the response carries a warning and the change stays in force until
+  the next restart. Affected: 2.0.0 to 2.5.2.
+
+- **A crashed browser renderer during a screenshot or waterfall capture is
+  reported as 502 Bad Gateway** (`BAD_GATEWAY`) with a message naming the
+  crashed target; 504 is kept for captures that really time out.
+
+- **Smaller fixes.**
+  - With gzip (or brotli) compression turned off, the optimizer no longer
+    recompresses and rewrites the stored copy of an image type it cannot
+    optimize after a restart.
+  - Request headers the nginx module adds for conditional revalidation are
+    handled like every other request header. Affected: 2.0.0 to 2.5.2.
+  - The `--help` text says `--agent-optimize-llms-txt` requires
+    `--agent-optimize`.
+  - C API: `ps_notify_worker` reports an invalid-argument error for a
+    notification it cannot serialize, including a scheme other than `http`
+    or `https`, instead of success; the nginx module does not use this entry
+    point.
+
+### Upgrade notes
+
+- **ETags change once.** Clients may download some optimized resources once
+  more after the upgrade; resources without any validator are revalidated
+  with a full response until the optimizer has processed them again. No
+  purge is needed.
+- **Worker threads in containers with a CPU limit.** The default thread
+  count may now be lower; set `--num-threads` to keep the previous size.
+- **Windows full purge.** The 2.6.0 web server modules and `WeAmp.PageSpeed`
+  package let a full purge replace the cache volume while the application
+  that uses them has it open. If a full purge reports that the cache volume
+  could not be removed, an application with an older module or an older
+  `WeAmp.PageSpeed` package holds it: update that application, then purge
+  again.
+
+---
+
+## ASP.NET Core sidecar (`WeAmp.PageSpeed.Sidecar`, `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`)
+
+The sidecar NuGet packages are published with this release.
+
+- **The sidecar packages now carry the product version.**
+- **Changed: user-visible strings name the product mod_pagespeed.** The
+  NuGet description, the options validator's error for use off Linux and the
+  build warning for an unsupported runtime identifier say mod_pagespeed
+  instead of "ModPageSpeed 2.0".
+- **Fixed: optimized requests keep the client's scheme behind a TLS
+  terminator (Inverse mode).** An inbound `X-Forwarded-Proto` is passed
+  through on a plain-HTTP connection and the request's own scheme is used
+  when it is absent; on HTTPS the real scheme always wins. This ends the
+  redirect loop with `UseHttpsRedirection()` and `http` absolute URLs
+  (canonical links, OAuth redirect URIs, `Location` headers) on optimized
+  requests. Affected: 1.15.0 to 1.17.0.
+- **Fixed: `ExcludePaths` means one thing.** Every entry is a path prefix
+  (`/api/`) or a glob (`/admin/*`, `*.json`; `*` matches any sequence, `?`
+  any single character), and the middleware and the generated nginx
+  configuration exclude exactly the same paths. Before, `*.json` produced an
+  invalid nginx configuration, `/admin/*` also excluded unrelated paths such
+  as `/docs/administration`, and the documented `^/api/` never matched in
+  the middleware. Affected: 1.15.0 to 1.17.0.
+- **Fixed: a stuck `nginx -t` validation is killed and reported** with the
+  elapsed time and the output captured so far, instead of a bare
+  cancellation error and a leftover process. New option
+  `PageSpeed:Sidecar:ConfigValidationTimeoutMs` (default 60 seconds, was a
+  fixed 15 seconds); non-positive values are rejected at startup. The
+  validation also no longer creates cache volume files, so it finishes
+  faster on a slow disk. Affected: 1.15.0 to 1.17.0.
+- **Fixed: a restart that misses its startup deadline is stopped and
+  retried, and shutdown stops a restarting sidecar.** Before, such a restart
+  could leave the sidecar in "restarting" for the life of the app: requests
+  bypassed optimization, health checks reported degraded and shutdown
+  skipped the graceful stop. Each retry counts toward the restart-attempt
+  limit, so a host whose restarts are always slow ends in the failed state
+  instead of a silent bypass. Affected: 1.15.0 to 1.17.0.
+- **Fixed: housekeeping.** Invalid timing options fail at startup, a failed
+  sidecar stops repeating its error, health probes are more reliable, and
+  the per-start socket temp directory is removed on shutdown. Affected: 1.15.0
+  to 1.17.0.
+
+### Sidecar upgrade notes
+
+- **Action required: check your `ExcludePaths` entries before upgrading.**
+  Regular-expression entries such as `^/api/`, which the option was
+  documented to accept, now fail at startup with a message naming the
+  accepted syntax. Rewrite them as prefixes or globs. A regular expression
+  built only from allowed characters is read as a glob, so `/api/.*` must
+  become `/api/`; a startup warning flags entries containing `.*` or `.+`.
+- **Check the timing options.** `PageSpeed:Sidecar:HealthCheckIntervalMs`,
+  `HealthCheckTimeoutMs` and `ShutdownTimeoutMs` must be positive and at
+  most ten minutes, or the app fails at startup.
+- **Slow hosts: raise `StartupTimeoutMs`** if sidecar restarts regularly
+  miss their startup deadline; such restarts now end in the failed state
+  instead of bypassing optimization silently.
+- **`nginx -t` validation timeout** is configurable through
+  `PageSpeed:Sidecar:ConfigValidationTimeoutMs` (default 60 seconds); the new
+  default only changes behaviour on hosts too loaded to finish validation.
+
+---
+
 # mod_pagespeed 2.5.2 Release Notes
 
 **Release date:** 2026-10-22

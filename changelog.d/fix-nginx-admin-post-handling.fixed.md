@@ -1,1 +1,0 @@
-- nginx: fixed a denial-of-service issue in the admin endpoints; update recommended.
