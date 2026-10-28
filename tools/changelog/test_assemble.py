@@ -331,8 +331,11 @@ def test_golden_current_unreleased_round_trips():
         real = f.read()
     lines = real.split("\n")
     sec = asm.find_section(lines, asm.BRACKET_UNRELEASED)
-    assert sec is not None, "CHANGELOG.md has no [Unreleased] section"
+    if sec is None:
+        return  # right after a release cut the section is absent: nothing to round-trip
     start, end = sec
+    if not any(l.strip() for l in lines[start + 1:end]):
+        return  # right after a release cut the section is empty: nothing to round-trip
     pre = "\n".join(lines[:start + 1] + [""] + lines[end:])
     with tempfile.TemporaryDirectory() as td:
         def g(*a):
