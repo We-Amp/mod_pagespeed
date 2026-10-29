@@ -900,7 +900,7 @@ queueing a pull request. A merge group's `ci.yml` comes from the queued tree,
 but the pipeline it calls at `@master` is the default branch's file, and that
 file reads the classifier from the default branch.
 
-Maintainers do not queue a fork pull request that changes `.github/` or `tools/ci/`; such changes are re-landed from a branch.
+Contributors cannot add their own pull requests to the merge queue. A maintainer reads the full diff of a pull request from a fork, including any `.github/` or `tools/ci/` changes, before adding it to the queue; fork pull requests that change those paths are re-landed from a branch instead.
 
 This narrows the merge-queue boundary; it does not close it. The `@ci-dev`
 allow-list entries stay. Pushing `ci-dev` from a `master`-based branch gives its
