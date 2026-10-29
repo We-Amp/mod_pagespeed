@@ -897,7 +897,7 @@ done
 #     only a same-repository pull request or a branch dispatch, and no
 #     `id-token` permission appears.
 RT_STEP="Decide the runner route"
-LOCK_PUSH_IF="    if: \${{ always() && github.actor != 'github-actions[bot]' && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}"
+LOCK_PUSH_IF="    if: \${{ always() && !(github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]') && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}"
 rt_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${...}
   printf '%s\n' \
