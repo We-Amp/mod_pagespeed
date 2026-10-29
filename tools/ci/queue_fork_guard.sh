@@ -14,7 +14,9 @@
 # GH_TOKEN. Run from a checkout that holds BASE..HEAD_SHA.
 #
 # The PR-number rule depends on the queue's SQUASH merge method: one squash
-# commit per pull request, its subject ending in "(#N)". A different merge
+# commit per pull request, its subject ending in "(#N)". The shape is
+# enforced: no merge commits, each commit maps to a distinct pull request, and
+# the head commit's number equals the one in HEAD_REF. A different merge
 # method (merge commits, rebase) must change this classifier first; until
 # then a group without that shape is refused.
 #
@@ -31,31 +33,38 @@ set -euo pipefail
 
 refuse() { echo "refusing: $*" >&2; exit 1; }
 
-# PR numbers: the last "(#N)" of each commit subject in BASE..HEAD_SHA, plus
-# N from HEAD_REF.
+# PR numbers: the last "(#N)" of each commit subject in BASE..HEAD_SHA.
 ref_n="$(printf '%s\n' "${HEAD_REF:-}" | sed -nE 's|.*/pr-([0-9]+)-.*|\1|p')"
 [ -n "${ref_n}" ] || refuse "unparseable merge group head ref"
 
 shas="$(git rev-list "${BASE}..${HEAD_SHA}")"
 [ -n "${shas}" ] || refuse "empty merge group (${BASE}..${HEAD_SHA} holds no commits)"
 
+merges="$(git rev-list --min-parents=2 "${BASE}..${HEAD_SHA}")"
+[ -z "${merges}" ] || refuse "merge group holds a merge commit; the queue must squash"
+
 prs=""
 pr_shas=""
-add_pr() {
-  case " ${prs} " in *" $1 "*) ;; *) prs="${prs} $1" ;; esac
-}
-
+n_commits=0
 for sha in ${shas}; do
   subject="$(git log -1 --format=%s "${sha}")"
   n="$(printf '%s\n' "${subject}" | grep -oE '\(#[0-9]+\)' | tail -n 1 | tr -dc '0-9' || true)"
   [ -n "${n}" ] || refuse "commit ${sha} has no PR number in its subject"
-  add_pr "${n}"
+  case " ${prs} " in *" ${n} "*) refuse "PR #${n} maps to more than one commit" ;; esac
+  prs="${prs} ${n}"
   pr_shas="${pr_shas}${n} ${sha}"$'\n'
+  n_commits=$((n_commits + 1))
 done
 
-add_pr "${ref_n}"
+n_prs="$(printf '%s\n' ${prs} | wc -l | tr -dc '0-9')"
+[ "${n_prs}" = "${n_commits}" ] || refuse "${n_commits} commits map to ${n_prs} pull requests"
+
+head_subject="$(git log -1 --format=%s "${HEAD_SHA}")"
+head_n="$(printf '%s\n' "${head_subject}" | grep -oE '\(#[0-9]+\)' | tail -n 1 | tr -dc '0-9' || true)"
+[ "${head_n}" = "${ref_n}" ] || refuse "head commit is PR #${head_n:-?} but the head ref names PR #${ref_n}"
 
 untrusted=0
+want_lc="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
 
 for n in ${prs}; do
   out=""
@@ -79,24 +88,32 @@ for n in ${prs}; do
   case "${rest}" in *$'\t'*) full="${rest#*$'\t'}" ;; esac
   [ "${fork}" != "null" ] || refuse "PR #${n} has no head repository (deleted fork)"
   [ "${fork}" = "true" ] || [ "${fork}" = "false" ] || refuse "PR #${n} has an unreadable fork flag"
-  want_lc="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
   full_lc="$(printf '%s' "${full}" | tr '[:upper:]' '[:lower:]')"
 
-  if [ "${login}" = "dependabot[bot]" ]; then
+  foreign=0
+  if [ "${fork}" = "true" ] || [ "${full_lc}" != "${want_lc}" ]; then
+    foreign=1
+  fi
+
+  # Same-repo Dependabot: untrusted, and exempt from the path check (its
+  # github-actions bumps touch .github/workflows).
+  if [ "${login}" = "dependabot[bot]" ] && [ "${foreign}" = "0" ]; then
     echo "PR #${n}: untrusted (dependabot[bot])"
     untrusted=1
     continue
   fi
 
-  if [ "${fork}" = "true" ] || [ "${full_lc}" != "${want_lc}" ]; then
+  if [ "${foreign}" = "1" ]; then
     # Fork code may run on hosted runners, but a change to the CI definitions
     # themselves is never queued from a fork: a maintainer re-lands it.
     sha_list="$(printf '%s' "${pr_shas}" | awk -v n="${n}" '$1 == n { print $2 }')"
     [ -n "${sha_list}" ] || refuse "PR #${n} is from a fork but has no commit in the group to inspect"
     for sha in ${sha_list}; do
-      files="$(git diff-tree --no-commit-id --name-only -r -z --root "${sha}" | tr '\0' '\n')" ||
+      files="$(git diff-tree -z --no-commit-id --name-only -r --root "${sha}" | tr '\0' '\n')" ||
         refuse "could not list the files of commit ${sha} (PR #${n})"
-      if printf '%s\n' "${files}" | grep -qE '^(\.github/|tools/ci/)'; then
+      # A here-string, not a pipe: under pipefail a pipe into grep -q can
+      # report SIGPIPE (141) on a long list and be read as "no match".
+      if grep -qiE '^(\.github|tools/ci)(/|$)' <<<"${files}"; then
         refuse "fork PR #${n} changes .github/ or tools/ci/; a maintainer must re-land it"
       fi
     done

@@ -115,9 +115,32 @@ jobs:
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     steps:
       - run: echo build
+  fuzz-smoke:
+    needs: [changes, vendor]
+    runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet' }}
+    steps:
+      - run: echo fuzz
   iis-sys-tests:
     needs: [changes, linux-build]
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
     if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.changes.outputs.iis == 'true' }}
     steps:
       - run: echo iis
+  lock-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      stale: ${{ steps.diff.outputs.stale }}
+    steps:
+      - id: diff
+        run: echo stale=false >> "$GITHUB_OUTPUT"
+  lock-push:
+    needs: lock-check
+    if: ${{ always() && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: echo push

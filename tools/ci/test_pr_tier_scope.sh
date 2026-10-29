@@ -27,6 +27,12 @@ if [ "${FAKE_GH_FAIL:-0}" = "1" ]; then
   echo "HTTP 500" >&2
   exit 1
 fi
+case "$*" in
+  *"/pulls/"*)
+    if [ "${FAKE_PR_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+    printf '%b' "${FAKE_PR_OUT-}"
+    exit 0 ;;
+esac
 printf '%s' "${FAKE_GH_BODY-}"
 GH
 cat > "${BIN}/sleep" <<'SL'
@@ -54,7 +60,7 @@ make_repo() {
     mkdir -p "${REPO}/$(dirname "$1")"
     echo x > "${REPO}/$1"
     git -C "${REPO}" add -A
-    git -C "${REPO}" commit -q -m "change $1"
+    git -C "${REPO}" commit -q -m "change $1 (#12)"
   fi
   SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
 }
@@ -84,6 +90,7 @@ run_scope() {
   (cd "${REPO}" && env PATH="${BIN}:${PATH}" FAKE_LOG="${WORK}/gh.log" SLEEP_LOG="${WORK}/sleep.log" \
     GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=We-Amp/example SHA="${SHA_VAL}" GH_TOKEN=x \
     FORK_OR_BOT=false PR_FULL=false CI_SCOPE= FAKE_GH_BODY="${PROOF_TRUE}" \
+    FAKE_PR_OUT='false\toschaaf\tWe-Amp/example\n' \
     "$@" bash "${SCOPE}" > "${OUT}" 2> "${ERR}")
   RC=$?
   set -e
@@ -160,6 +167,49 @@ CUR=push-queue-suite-in-progress-runs
 run_scope CI_SCOPE=push FAKE_GH_BODY="${PROOF_RUNNING}"
 check "${CUR}" true "proof=false"
 
+# The pushed commit's pull request must be a same-repository, non-Dependabot one.
+CUR=push-queue-fork-pr-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='true\tsomeone\tsomeone/example\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-foreign-head-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='false\tsomeone\tsomeone/example\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-dependabot-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='false\tdependabot[bot]\tWe-Amp/example\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-null-head-repo-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='null\toschaaf\t\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-pr-lookup-fails-runs
+run_scope CI_SCOPE=push FAKE_PR_FAIL=1
+check "${CUR}" true "proof=error"
+
+CUR=push-queue-pr-empty-output-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT=
+check "${CUR}" true "proof=error"
+
+CUR=push-queue-same-repo-case-skips
+run_scope CI_SCOPE=push FAKE_PR_OUT='false\toschaaf\twe-amp/EXAMPLE\n'
+check "${CUR}" false "proof=true"
+
+CUR=push-subject-without-pr-number-runs
+git -C "${REPO}" commit -q --amend -m "no number here"
+SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
+run_scope CI_SCOPE=push
+check "${CUR}" true "proof=false"
+
+CUR=push-subject-last-number-is-looked-up
+git -C "${REPO}" commit -q --amend -m "title (#201) more (#12)"
+SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
+run_scope CI_SCOPE=push
+check "${CUR}" false "proof=true"
+if grep -qF 'pulls/12' "${WORK}/gh.log"; then pass "${CUR}: looked up #12"; else fail "${CUR}: gh log: $(cat "${WORK}/gh.log")"; fi
+
+make_repo src/a.cc
 CUR=push-api-error-runs
 run_scope CI_SCOPE=push FAKE_GH_FAIL=1
 check "${CUR}" true "proof=error"

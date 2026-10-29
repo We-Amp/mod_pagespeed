@@ -98,7 +98,8 @@ System tests: `./test/system/run_system_tests.sh` (Apache),
   runners, in the pull request and again in the merge queue, so their checks
   take longer than a branch in this repository. A fork pull request that
   changes `.github/` or `tools/ci/` is re-landed by a maintainer from a branch
-  in this repository.
+  in this repository: maintainers do not queue a fork pull request that
+  changes `.github/` or `tools/ci/`.
 - Describe the problem, the change and how you verified it.
 
 ## Licensing

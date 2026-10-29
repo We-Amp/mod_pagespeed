@@ -126,7 +126,8 @@ jobs:
           set -euo pipefail
           git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
             git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          rc=0; git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash || rc=$?
+          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" > "${RUNNER_TEMP}/qfg.sh"
+          rc=0; bash "${RUNNER_TEMP}/qfg.sh" || rc=$?
           case "${rc}" in 0) echo route=fleet;; 3) echo route=hosted;; *) exit 1;; esac >> "$GITHUB_OUTPUT"
 
       - name: Decide the fleet scope
@@ -899,18 +900,22 @@ jobs:
     name: Bzlmod lockfile is current
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # contents: write only to push a regenerated MODULE.bazel.lock back to a
-    # same-repository pull request branch (see the last step).
+    # Read-only and without stored credentials: this job runs the tree's code
+    # (Bazel, the scripts) in every event, merge groups included. A stale lock
+    # is handed to the separate lock-push job as an artifact.
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      stale: ${{ steps.diff.outputs.stale }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: false
+          persist-credentials: false
           # The PR head commit from the head repository, not the merge commit
           # and not a branch name resolved in this repository: a fork PR has
           # no such branch here, and a same-named one would check the wrong
-          # tree. The push step below only runs for same-repository PRs.
+          # tree.
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Ensure bazel
@@ -932,7 +937,14 @@ jobs:
           bazel mod explain rules_cc abseil-cpp protobuf zlib apple_support || true
       - name: Lockfile unchanged
         id: diff
-        run: git diff --stat --exit-code MODULE.bazel.lock
+        run: |
+          if git diff --quiet --exit-code MODULE.bazel.lock; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            git diff --stat MODULE.bazel.lock
+            exit 1
+          fi
       # The versions Bazel resolved (boringssl included) must be the pinned
       # ones, and the lock must agree with the resolved graph.
       - name: Resolved module versions match the pins
@@ -940,37 +952,60 @@ jobs:
           bazel mod graph --output=json > "${RUNNER_TEMP}/mod-graph.json"
           python3 tools/check-module-versions.py --graph "${RUNNER_TEMP}/mod-graph.json"
       - name: Upload regenerated lock
-        if: ${{ failure() && steps.diff.conclusion == 'failure' }}
+        if: ${{ failure() && steps.diff.outputs.stale == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: MODULE.bazel.lock
           path: MODULE.bazel.lock
-      # Same-repository PRs only (a fork's token cannot push), plus a manual
-      # dispatch on a branch of this repository (ci-dev), and never on top of a
-      # lock commit this job made itself (loop guard). The run still fails: a
-      # push made with GITHUB_TOKEN does not start a new run, so the branch
-      # stays red until the next push or a re-run checks the new lock.
+
+  # Commits the regenerated lock to a same-repository pull request branch (or
+  # to the branch of a manual dispatch). It holds the only write token of this
+  # pipeline, runs only for those two events (never a merge group, never a
+  # fork) and runs none of the tree's code: it takes one file from the
+  # artifact. Never on top of a lock commit it made itself (loop guard). The
+  # push, made with the workflow token, does not start a new run; lock-check
+  # has already failed, so the branch stays red until the next push or a re-run
+  # checks the new lock.
+  lock-push:
+    name: Commit the regenerated lockfile
+    needs: lock-check
+    if: ${{ always() && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Download the regenerated lock
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: MODULE.bazel.lock
+          path: ${{ runner.temp }}/regenerated-lock
       - name: Commit regenerated lock to the branch
-        if: >-
-          failure() && steps.diff.conclusion == 'failure' &&
-          ((github.event_name == 'pull_request' &&
-            github.event.pull_request.head.repo.full_name == github.repository) ||
-           (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch'))
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
+          set -euo pipefail
+          new="${RUNNER_TEMP}/regenerated-lock/MODULE.bazel.lock"
+          if [ ! -f "${new}" ] || [ -L "${new}" ]; then
+            echo "::error::the regenerated lock artifact is missing or not a regular file"
+            exit 1
+          fi
           last_author="$(git log -1 --format=%an)"
           if [ "${last_author}" = "github-actions[bot]" ]; then
             echo "::error::the last commit already regenerated the lock and it is still stale; regenerate it locally"
             exit 1
           fi
+          cp -- "${new}" MODULE.bazel.lock
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add MODULE.bazel.lock
           git commit -m "Build: regenerate MODULE.bazel.lock"
           git push origin "HEAD:refs/heads/${HEAD_REF}"
           echo "::error::MODULE.bazel.lock was stale; pushed a regenerated lock to ${HEAD_REF}. Re-run CI on the new commit."
-          exit 1
 
   vendor:
     name: Vendor Dependencies

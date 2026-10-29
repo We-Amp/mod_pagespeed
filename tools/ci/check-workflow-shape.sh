@@ -119,6 +119,7 @@ FLEET_IIS_SWITCH_GUARD="\${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENA
 # Dependabot pull request is routed to hosted runners, so the fleet-iis job,
 # which has no hosted twin, also requires the fleet route.
 FLEET_IIS_QUEUE_GUARD="\${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet' }}"
+FLEET_ONLY_QUEUE_GUARD="\${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet' }}"
 # 1 while a pipeline-pr.yml is being checked (queue routing forms only).
 PR_WF=0
 
@@ -389,12 +390,13 @@ is_fleet_queue_route() {
   return 1
 }
 
-# The queue form of the fork routing expression, for the fleet-iis and
-# fleet-hyperv classes.
+# The queue form of the fork routing expression, for the fleet-only classes
+# (no hosted twin, or a hosted twin that is not a degraded copy): fleet-iis and
+# fleet-hyperv, and any other class a fleet-only job names.
 is_fleet_iis_queue_route() {
   local v="$1" h f want
   for h in ${HOSTED_LABELS}; do
-    for f in fleet-iis fleet-hyperv; do
+    for f in ${FLEET_CLASSES}; do
       want="\${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && '${h}' || '${f}' }}"
       [ "${v}" = "${want}" ] && return 0
     done
@@ -497,6 +499,10 @@ EOT
             fi
           elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
             err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
+          fi
+        elif [ "${PR_WF}" = 1 ]; then
+          if [ "${if_val}" != "${FLEET_ONLY_QUEUE_GUARD}" ]; then
+            err "${wf}:${lineno}: fleet job '${job}' in pipeline-pr.yml must carry the fleet-only queue guard (the fleet route term) verbatim as its if: (rule d)"
           fi
         elif ! is_fleet_guard "${if_val}" \
            && [ "${if_val}" != "${FLEET_ONLY_GUARD}" ] \
@@ -633,12 +639,14 @@ QG_REV='git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null
 # shellcheck disable=SC2016
 QG_FETCH='  git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"'
 # shellcheck disable=SC2016
-QG_SHOW='rc=0; git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash || rc=$?'
+QG_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" > "${RUNNER_TEMP}/qfg.sh"'
+# shellcheck disable=SC2016
+QG_RUN='rc=0; bash "${RUNNER_TEMP}/qfg.sh" || rc=$?'
 # Exit 0 = trusted (fleet), 3 = untrusted (hosted), anything else refuses.
 # shellcheck disable=SC2016
 QG_CASE='case "${rc}" in 0) echo route=fleet;; 3) echo route=hosted;; *) exit 1;; esac >> "$GITHUB_OUTPUT"'
-QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "${QG_SHOW}" "${QG_CASE}")"
-QG_BODY_MIN="$(printf '%s\n%s\n%s' "${QG_SET}" "${QG_SHOW}" "${QG_CASE}")"
+QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "${QG_SHOW}" "${QG_RUN}" "${QG_CASE}")"
+QG_BODY_MIN="$(printf '%s\n%s\n%s\n%s' "${QG_SET}" "${QG_SHOW}" "${QG_RUN}" "${QG_CASE}")"
 # shellcheck disable=SC2016
 VENDOR_IF='    if: ${{ needs.changes.outputs.fleet == '"'true'"' }}'
 QG_PUSH_STEP="Refuse pushes that are not on the default branch"
@@ -714,7 +722,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     $0 == "        run: |" { inrun = 1; next }
     inrun { if ($0 ~ /^          /) print; else if ($0 !~ /^[[:space:]]*$/) inrun = 0 }' | sed -E 's/^          //')"
   if [ "${body}" != "${QG_BODY_FULL}" ] && [ "${body}" != "${QG_BODY_MIN}" ]; then
-    qg_err "the guard step's run: block must be only: ${QG_SET}, the optional default-branch fetch, ${QG_SHOW} and ${QG_CASE}"
+    qg_err "the guard step's run: block must be only: ${QG_SET}, the optional default-branch fetch, ${QG_SHOW}, ${QG_RUN} and ${QG_CASE}"
   fi
 
   # Position: right after actions/checkout come the push-ref step, the
@@ -880,8 +888,13 @@ done
 #   - the `changes` job publishes `route: ${{ steps.route.outputs.route }}`
 #     and no other job defines an output named `route`;
 #   - in pipeline-pr.yml every job whose runs-on is not a plain hosted label
-#     lists `changes` in its `needs:`.
+#     lists `changes` in its `needs:` (compared by exact job name);
+#   - in pipeline-pr.yml (which runs on merge groups) only the job `lock-push`
+#     may hold a write permission, with exactly the pinned if: that admits
+#     only a same-repository pull request or a branch dispatch, and no
+#     `id-token` permission appears.
 RT_STEP="Decide the runner route"
+LOCK_PUSH_IF="    if: \${{ always() && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}"
 rt_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${...}
   printf '%s\n' \
@@ -905,10 +918,17 @@ rt_expected() {
 rt_err() { err "${wf}: $1 (queue-route)"; }
 
 # job_needs_changes <job-block>: true when its needs: lists `changes`.
+# The job name is compared whole (`changes-x` does not count).
 job_needs_changes() {
-  printf '%s\n' "$1" | grep -qE '^    needs:[[:space:]]*(changes|\[.*\bchanges\b.*\])[[:space:]]*$' && return 0
-  if printf '%s\n' "$1" | grep -qE '^    needs:[[:space:]]*$' && printf '%s\n' "$1" | grep -qxE '      - changes'; then return 0; fi
-  return 1
+  printf '%s\n' "$1" | awk '
+    /^    needs:[[:space:]]*$/ { blk = 1; next }
+    blk && /^      - / { v = $0; sub(/^      - /, "", v); gsub(/[ \t\r]|["\047]/, "", v); if (v == "changes") f = 1; next }
+    blk { blk = 0 }
+    /^    needs:/ {
+      v = $0; sub(/^    needs:[ \t]*/, "", v); gsub(/[\[\] \t\r"\047]/, "", v)
+      n = split(v, a, ","); for (i = 1; i <= n; i++) if (a[i] == "changes") f = 1
+    }
+    END { exit f ? 0 : 1 }'
 }
 
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
@@ -940,6 +960,25 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     rt_err "the changes job must publish 'route: \${{ steps.route.outputs.route }}'"
   fi
   if [ "$(basename "${wf}")" = "pipeline-pr.yml" ]; then
+    # No job that can run on a merge group holds a write token or id-token. The
+    # one write job, lock-push, carries the pinned if: that excludes merge
+    # groups and forks.
+    while IFS=$'\t' read -r wjob wline; do
+      [ -n "${wjob}" ] || continue
+      if [ "${wjob}" != "lock-push" ]; then
+        rt_err "line ${wline}: job '${wjob}' holds a write permission; pipeline-pr.yml runs on merge groups and only lock-push may write"
+        continue
+      fi
+      wif="$(job_block "${wf}" lock-push | grep -E '^    ["'\'']?if["'\'']?[[:space:]]*:' || true)"
+      if [ "${wif}" != "${LOCK_PUSH_IF}" ]; then
+        rt_err "job 'lock-push' must carry exactly: ${LOCK_PUSH_IF# } (never on a merge group or a fork)"
+      fi
+    done <<EOT
+$(write_perm_records "${wf}")
+EOT
+    if grep -vE '^[[:space:]]*#' "${wf}" | grep -qE '^[[:space:]]*["'\'']?id-token["'\'']?[[:space:]]*:'; then
+      rt_err "id-token permission is forbidden in pipeline-pr.yml"
+    fi
     # No other job defines a `route` output; every fleet-capable job needs changes.
     while IFS= read -r oj; do
       [ -n "${oj}" ] || continue

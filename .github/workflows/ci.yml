@@ -41,10 +41,11 @@ permissions:
 jobs:
   pr:
     # The called pipeline requests pull-requests: read for the release-note
-    # gate, contents: write for its lock-check job (pushes a regenerated
-    # MODULE.bazel.lock to a same-repository PR branch) and checks: read for
-    # its fleet scope (reads the commit's check suites); a called workflow
-    # cannot exceed what its caller grants.
+    # gate, contents: write for its lock-push job alone (pushes a regenerated
+    # MODULE.bazel.lock to a same-repository PR branch; it never runs for a
+    # merge group or a fork, and every other job is read-only) and checks:
+    # read for its fleet scope (reads the commit's check suites); a called
+    # workflow cannot exceed what its caller grants.
     permissions:
       checks: read
       contents: write

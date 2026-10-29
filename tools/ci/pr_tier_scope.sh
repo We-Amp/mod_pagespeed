@@ -21,7 +21,10 @@
 # The push rule: a push whose commit the merge queue already proved (a
 # completed, successful check suite of GitHub Actions on a gh-readonly-queue/
 # branch for the same SHA) skips the fleet jobs, unless the push changes the
-# pipeline itself. It is on only when CI_SCOPE is push, pr-build or pr; any
+# pipeline itself or the commit's pull request (the last `(#N)` of its subject,
+# looked up through the API) is from a fork, from another repository or from
+# dependabot[bot]: such a group ran on hosted runners. An unreadable or
+# missing pull request means no skip. It is on only when CI_SCOPE is push, pr-build or pr; any
 # other value, or none, is `full` and runs everything. Every other event runs
 # everything. Anything unexpected fails safe to the full tier.
 
@@ -52,6 +55,43 @@ pipeline_change() {
   grep -qE '^(\.github/workflows/(pipeline-pr|ci)\.yml$|\.github/actions/|tools/ci/)' <<< "${changed}"
 }
 
+# pr_trusted: prints true, false or error. The pushed commit's pull request
+# (the last `(#N)` of its subject) must be from this repository, not from a
+# fork and not authored by dependabot[bot]. A merge group that held any other
+# pull request ran on hosted runners, so its proof does not cover the fleet.
+# Anything unknown is not trusted.
+pr_trusted() {
+  local subject n out="" tries=0 delay=2 fork login full
+  subject="$(git log -1 --format=%s HEAD 2>/dev/null)" || { echo error; return; }
+  n="$(printf '%s\n' "${subject}" | sed -nE 's/.*\(#([0-9]+)\).*/\1/p' | head -n 1)"
+  if [ -z "${n}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
+    echo false
+    return
+  fi
+  while :; do
+    tries=$((tries + 1))
+    if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" \
+      --jq '[(.head.repo.fork | tostring), (.user.login // ""), (.head.repo.full_name // "")] | @tsv')" &&
+      [ -n "${out}" ]; then
+      break
+    fi
+    if [ "${tries}" -ge 3 ]; then
+      echo error
+      return
+    fi
+    sleep "${delay}"
+    delay=$((delay * 2))
+  done
+  IFS=$'\t' read -r fork login full <<< "${out}"
+  if [ "${fork}" = false ] && [ -n "${login}" ] && [ "${login}" != "dependabot[bot]" ] &&
+    [ -n "${full}" ] &&
+    [ "$(printf '%s' "${full}" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" ]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
 # queue_proof: prints true, false or error.
 queue_proof() {
   local path="repos/${GITHUB_REPOSITORY:-}/commits/${SHA:-}/check-suites?app_id=15368&per_page=100"
@@ -69,6 +109,9 @@ queue_proof() {
                    and .status == "completed" and .conclusion == "success") ]
         | if length > 0 then "true" else "false" end' 2>/dev/null)" &&
       { [ "${result}" = true ] || [ "${result}" = false ]; }; then
+      if [ "${result}" = true ]; then
+        result="$(pr_trusted)"
+      fi
       echo "${result}"
       return
     fi

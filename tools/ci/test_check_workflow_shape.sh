@@ -129,6 +129,13 @@ expect_good good-queue-route
 expect_bad bad-queue-route-old-switch 'queue routing expression'
 expect_bad bad-queue-route-no-needs 'does not list changes in its needs'
 expect_bad bad-queue-route-iis-old-route 'queue routing expression'
+expect_bad bad-queue-route-needs-prefix 'does not list changes in its needs'
+expect_bad bad-queue-route-plain-fleet-only 'queue routing expression'
+expect_bad bad-queue-route-fleet-only-no-route-guard 'fleet-only queue guard'
+expect_bad bad-queue-route-write-job 'only lock-push may write'
+expect_bad bad-queue-route-lock-push-if "job 'lock-push' must carry exactly"
+expect_bad bad-queue-route-id-token 'id-token'
+expect_bad bad-queue-guard-pipe-to-bash 'queue-guard-reads-default-branch'
 expect_bad bad-queue-route-iis-no-route-term 'fleet-iis queue guard'
 expect_bad bad-queue-route-iis-switch-guard 'fleet-iis queue guard'
 expect_bad bad-queue-route-missing-fails-open 'queue-route'

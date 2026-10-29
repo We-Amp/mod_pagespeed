@@ -61,18 +61,20 @@ tier.
 | `signing-key`, `serf-removed`, `cpp-cve-completeness`, `cpp-cve-snapshot-scan`, `upgrade-rehearsal-plan` | hosted | `changes` | the path-filtered hosted checks |
 | `sidecar-tests` | hosted | `changes` | the xunit suite of the ASP.NET Core sidecar (`aspnetcore/`) under .NET 8 and .NET 10 (path-filtered, see "The sidecar native pair") |
 | `upgrade-rehearsal` | hosted | `upgrade-rehearsal-plan` | previous release to the version under test, per distro, in a booted systemd container (hosted because it needs a privileged container, which a build runner never runs); reads the public release assets only |
+| `lock-check` | hosted | | the Bazel module lock is current and the resolved versions match the pins. Read-only, with no stored credentials, because it runs the tree's code in every event including merge groups; a stale lock goes to `lock-push` as an artifact |
+| `lock-push` | hosted | `lock-check` | commits a stale lock to the branch of a same-repository pull request (or a branch dispatch). Holds the only write token of the pipeline, never runs for a merge group or a fork, and runs none of the tree's code |
 | `vendor` | `fleet-heavy` | `changes` | vendors the dependencies and asserts that every registry file `MODULE.bazel.lock` pins is in the repository cache; publishes the tarball (hub channel) or caches `vendor/` (cache channel). Runs only when the fleet scope is on (`needs.changes.outputs.fleet`), so a push the merge queue already proved can skip every build runner leg |
-| `linux-build` | `fleet-heavy` | `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
-| `linux-unit-tests` | `fleet-heavy` | `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
-| `lint` | `fleet-heavy` | `vendor` | clang-tidy (scoped to the pull request) and clang-format |
-| `js-minify-corpus` | `fleet-heavy` | `vendor` | JS minifier oracles and goldens freshness gate |
-| `html-parse-corpus` | `fleet-heavy` | `vendor` | HTML parse goldens freshness gate |
+| `linux-build` | `fleet-heavy` | `changes`, `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
+| `linux-unit-tests` | `fleet-heavy` | `changes`, `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
+| `lint` | `fleet-heavy` | `changes`, `vendor` | clang-tidy (scoped to the pull request) and clang-format |
+| `js-minify-corpus` | `fleet-heavy` | `changes`, `vendor` | JS minifier oracles and goldens freshness gate |
+| `html-parse-corpus` | `fleet-heavy` | `changes`, `vendor` | HTML parse goldens freshness gate |
 | `fuzz-smoke` | `fleet-heavy` | `changes`, `vendor` | CSS, HTML, rule-pack and JS fuzz harnesses: deterministic replay plus 60 s libFuzzer runs (path-filtered) |
 | `nginx-sys-tests` | `fleet-light` | `changes`, `linux-build` | the nginx system tests (`test/system/run_nginx_tests.sh`) against the module from the `ci-artifacts-linux-x64` bundle, x64 only, with the same container, capabilities and failure diagnostics as the full tier's job (container and diagnostics names carry a `pr` prefix so the two tiers cannot collide in one run). Runs only when the `nginx_sys` path filter fires: `pagespeed/nginx/`, `test/pagespeed/nginx/`, `test/system/nginx/`, `pagespeed/system/`, the test sets and fixtures both runners use (`test/system/automatic/`, `test/system/system/`, `test/system/pagespeed_test_framework/`, `conftest.py`, `pytest.ini`, `requirements.txt`, `install/mod_pagespeed_test/`, `install/mod_pagespeed_example/`, `install/do_not_modify/`), the nginx run script and the diagnostics collector. Skipped otherwise, and with `linux-build` when the fleet scope skips the build runner legs. Runs on the merge queue as well as on the pull request. The optimizer daemon lane is off, so the daemon adapter's serve arm is not covered here (the nightly tier covers it). A fork pull request runs it on a hosted runner with a cold dev image build (degraded mode, not yet exercised) |
 | `apache-sys-tests` | `fleet-light` | `changes`, `linux-build` | the same for the Apache module (`test/system/run_system_tests.sh`). Runs only when the `apache_sys` path filter fires: `pagespeed/apache/`, `test/pagespeed/apache/`, `pagespeed/system/`, the test sets and fixtures both runners use (`test/system/automatic/`, `test/system/system/`, `test/system/pagespeed_test_framework/`, `conftest.py`, `pytest.ini`, `requirements.txt`, `install/mod_pagespeed_test/`, `install/mod_pagespeed_example/`, `install/do_not_modify/`), `install/debug.conf.template`, the Apache run script, `test/system/setup_apache_test.sh` and the diagnostics collector |
-| `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
-| `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
-| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
+| `windows-build` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
+| `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor`, `windows-build` | Windows unit tests |
+| `iis-sys-tests` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
 | `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
 | `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, a merge group routed to hosted runners, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
 
@@ -842,6 +844,8 @@ that skip with the notice "merge group holds a fork or Dependabot PR".
 | `pull_request` from this repository | `fleet` | fleet | runs (when its other conditions hold) |
 | `push`, `workflow_dispatch` | `fleet` | fleet | runs (when its other conditions hold) |
 
+The post-merge push may skip the fleet jobs only when the merge queue already proved the commit. The scope script (`tools/ci/pr_tier_scope.sh`) therefore looks up the pushed commit's pull request (the last `(#N)` of its subject) and allows that skip only for a pull request from this repository that is not from Dependabot; any other or unreadable lookup runs the full fleet tier on the push, so a group that ran on hosted runners is never taken as fleet proof.
+
 A hosted merge-group run is much slower than a fleet one (the hosted legs have
 no hub or remote cache, and the Windows unit tests dominate), and a group of up
 to three entries runs fully hosted when any of them is a fork pull request. Fork
@@ -889,11 +893,14 @@ this text.
 
 What keeps fork code off the build runners is the runner group, which accepts
 jobs only from the listed pipeline files on the default branch (and `ci-dev`),
-not any check in the queued tree. The guards above bind runs whose caller
+together with the classifier in the default branch's pipeline; no check in the
+queued tree is relied on. The guards above bind runs whose caller
 workflow is unmodified; maintainers review changes under `.github/` before
 queueing a pull request. A merge group's `ci.yml` comes from the queued tree,
 but the pipeline it calls at `@master` is the default branch's file, and that
 file reads the classifier from the default branch.
+
+Maintainers do not queue a fork pull request that changes `.github/` or `tools/ci/`; such changes are re-landed from a branch.
 
 This narrows the merge-queue boundary; it does not close it. The `@ci-dev`
 allow-list entries stay. Pushing `ci-dev` from a `master`-based branch gives its
@@ -1078,7 +1085,7 @@ and fails the build when the shape breaks:
 - **(queue-route)** in `pipeline-pr.yml`: the `changes` job holds the step
   `Decide the runner route` right after `Decide the fleet scope`, in exactly
   its spec text, and publishes `route`; no other job defines a `route`
-  output; every build runner job lists `changes` in its `needs:`, and its
+  output; every build runner job lists `changes` in its `needs:` (by exact job name), fleet-only jobs carry the fleet-only queue guard (the route term), only `lock-push` may hold a write permission (with its pinned `if:`), no `id-token` appears, and its
   `runs-on` (and, for `iis-sys-tests`, its `if:`) is the queue form with the
   route term (the old form is rejected there);
 - **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`

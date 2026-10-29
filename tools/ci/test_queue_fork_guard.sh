@@ -125,11 +125,13 @@ make_repo "a (#201)" "fix things"
 run_case no-pr-number 1 "no PR number"
 
 make_repo "a (#201)" "b (#202)"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-202-abc"
 run_case api-500 1 "refusing" FAKE_GH_FAIL=1
 n="$(calls_for 202)"
 if [ "${n}" = "5" ]; then pass "api-500 made exactly 5 calls"; else fail "api-500 made ${n} calls, want 5"; fi
 if [ "$(tr '\n' ' ' < "${WORK}/sleep.log")" = "2 4 8 16 " ]; then pass "api-500 backoff 2 4 8 16"; else fail "api-500 backoff: $(tr '\n' ' ' < "${WORK}/sleep.log")"; fi
 
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-203-abc"
 make_repo "a (#201)"
 TIP_SHA="${BASE_SHA}"
 run_case empty-range 1 "empty merge group"
@@ -139,6 +141,59 @@ HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-210-abc"
 run_case head-ref-only-pr 0 "PR #210"
 n="$(calls_for 210)"
 if [ "${n}" = "1" ]; then pass "head-ref-only-pr looked up #210 once"; else fail "#210 looked up ${n} times, want 1"; fi
+
+# Hardening cases.
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-202-abc"
+make_repo "a (#200)" "b (#201) (#202)"
+run_case title-injected-number 3 "PR #202: untrusted" "FAKE_PR_202=${FORK}"
+
+make_repo "a (#200)" "b (#201) (#202)|.github/workflows/ci.yml"
+run_case title-injected-number-touching-workflow 1 "fork PR #202 changes" "FAKE_PR_202=${FORK}"
+
+# More than 64 KiB of paths, .github/ sorting first: a pipe into grep -q would
+# be killed by SIGPIPE under pipefail and read as "no match".
+make_repo "a (#200)" "b (#202)"
+mkdir -p "${REPO}/.github" "${REPO}/zzzz"
+echo x > "${REPO}/.github/a"
+i=0
+while [ "${i}" -lt 3000 ]; do
+  echo x > "${REPO}/zzzz/a-long-file-name-to-fill-the-listing-quickly-${i}.txt"
+  i=$((i + 1))
+done
+git -C "${REPO}" add -A
+git -C "${REPO}" commit -q -m "big (#203)"
+TIP_SHA="$(git -C "${REPO}" rev-parse HEAD)"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-203-abc"
+run_case huge-file-list-fork-touches-github 1 "fork PR #203 changes" "FAKE_PR_203=${FORK}"
+
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-202-abc"
+make_repo "a (#201)" "b (#202)|.GitHub/x.yml"
+run_case fork-case-variant-path 1 "fork PR #202 changes" "FAKE_PR_202=${FORK}"
+
+make_repo "a (#201)" "b (#202)"
+git -C "${REPO}" checkout -q "${BASE_SHA}"
+git -C "${REPO}" checkout -q -b side
+git -C "${REPO}" commit -q --allow-empty -m "side (#203)"
+git -C "${REPO}" checkout -q -
+git -C "${REPO}" merge -q --no-ff side -m "Merge (#204)"
+TIP_SHA="$(git -C "${REPO}" rev-parse HEAD)"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-204-abc"
+run_case merge-commit-refused 1 "merge commit"
+
+make_repo "a (#201)" "b (#201)"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-201-abc"
+run_case two-commits-one-pr 1 "more than one commit"
+
+make_repo "a (#201)" "b (#202)"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-201-abc"
+run_case head-ref-subject-mismatch 1 "head ref names PR #201"
+
+DEP="false${TAB}dependabot[bot]${TAB}We-Amp/example"
+DEP_FOREIGN="false${TAB}dependabot[bot]${TAB}other/example"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-202-abc"
+make_repo "a (#201)" "b (#202)|.github/workflows/ci.yml"
+run_case dependabot-same-repo-touching-workflow 3 "PR #202: untrusted (dependabot[bot])" "FAKE_PR_202=${DEP}"
+run_case dependabot-foreign-head-touching-workflow 1 "fork PR #202 changes" "FAKE_PR_202=${DEP_FOREIGN}"
 
 if [ "${FAILS}" -ne 0 ]; then
   echo "${FAILS} case(s) failed"
