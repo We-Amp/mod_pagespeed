@@ -187,7 +187,9 @@ write_perm_records() {
   awk -v tab="${TAB}" '
     function haswrite(line) {
       sub(/[[:space:]]+#.*$/, "", line)
-      return (line ~ /write-all/ || line ~ /:[[:space:]]*[\047"]?write[\047"]?[[:space:]]*([,}]|$)/)
+      # Also a value written on the line after its key (`contents:` then an
+      # indented `write`).
+      return (line ~ /write-all/ || line ~ /:[[:space:]]*[\047"]?write[\047"]?[[:space:]]*([,}]|$)/ || line ~ /^[[:space:]]*[\047"]?write[\047"]?[[:space:]]*$/)
     }
     /^[[:space:]]*#/ { next }
     /^jobs:[[:space:]]*$/ { injobs=1; inperm=0; job="-"; next }
@@ -813,6 +815,7 @@ fs_expected() {
     '          CI_SCOPE: ${{ vars.CI_SCOPE }}' \
     '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' \
     '          SHA: ${{ github.sha }}' \
+    '          BEFORE_SHA: ${{ github.event.before }}' \
     "          FORK_OR_BOT: \${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}" \
     "          PR_FULL: \${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}" \
     '        run: |' \
@@ -894,7 +897,7 @@ done
 #     only a same-repository pull request or a branch dispatch, and no
 #     `id-token` permission appears.
 RT_STEP="Decide the runner route"
-LOCK_PUSH_IF="    if: \${{ always() && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}"
+LOCK_PUSH_IF="    if: \${{ always() && github.actor != 'github-actions[bot]' && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}"
 rt_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${...}
   printf '%s\n' \
@@ -914,6 +917,54 @@ rt_expected() {
     '            *) echo "::error::event ${GITHUB_EVENT_NAME} has no route"; exit 1 ;;' \
     '          esac' \
     '          echo "route=${route}" >> "$GITHUB_OUTPUT"'
+}
+# The lock-push job, in full (comment and blank lines aside; action pins
+# normalised to @PIN). It runs none of the tree's code: a checkout, an artifact
+# download and one step that copies a single regular file and pushes it.
+lp_expected() {
+  # shellcheck disable=SC2016  # the text to match carries literal ${...}
+  printf '%s\n' \
+    '  lock-push:' \
+    '    name: Commit the regenerated lockfile' \
+    '    needs: lock-check' \
+    "${LOCK_PUSH_IF}" \
+    '    runs-on: ubuntu-latest' \
+    '    timeout-minutes: 10' \
+    '    permissions:' \
+    '      contents: write' \
+    '    steps:' \
+    '      - uses: actions/checkout@PIN' \
+    '        with:' \
+    '          submodules: false' \
+    '          ref: ${{ github.event.pull_request.head.sha || github.sha }}' \
+    '      - name: Download the regenerated lock' \
+    '        uses: actions/download-artifact@PIN' \
+    '        with:' \
+    '          name: MODULE.bazel.lock' \
+    '          path: ${{ runner.temp }}/regenerated-lock' \
+    '      - name: Commit regenerated lock to the branch' \
+    '        env:' \
+    '          HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}' \
+    '        run: |' \
+    '          set -euo pipefail' \
+    '          new="${RUNNER_TEMP}/regenerated-lock/MODULE.bazel.lock"' \
+    '          if [ ! -f "${new}" ] || [ -L "${new}" ]; then' \
+    '            echo "::error::the regenerated lock artifact is missing or not a regular file"' \
+    '            exit 1' \
+    '          fi' \
+    '          last_author="$(git log -1 --format=%an)"' \
+    '          if [ "${last_author}" = "github-actions[bot]" ]; then' \
+    '            echo "::error::the last commit already regenerated the lock and it is still stale; regenerate it locally"' \
+    '            exit 1' \
+    '          fi' \
+    '          rm -f -- MODULE.bazel.lock' \
+    '          cp -- "${new}" MODULE.bazel.lock' \
+    '          git config user.name "github-actions[bot]"' \
+    '          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"' \
+    '          git add MODULE.bazel.lock' \
+    '          git commit -m "Build: regenerate MODULE.bazel.lock"' \
+    '          git push origin "HEAD:refs/heads/${HEAD_REF}"' \
+    '          echo "::error::MODULE.bazel.lock was stale; pushed a regenerated lock to ${HEAD_REF}. Re-run CI on the new commit."'
 }
 rt_err() { err "${wf}: $1 (queue-route)"; }
 
@@ -973,10 +1024,14 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
       if [ "${wif}" != "${LOCK_PUSH_IF}" ]; then
         rt_err "job 'lock-push' must carry exactly: ${LOCK_PUSH_IF# } (never on a merge group or a fork)"
       fi
+      lpblk="$(job_block "${wf}" lock-push | grep -vE '^[[:space:]]*(#|$)' | sed -E 's#(uses: actions/[a-z-]+)@[0-9a-f]{40}.*#\1@PIN#')"
+      if [ "${lpblk}" != "$(lp_expected)" ]; then
+        rt_err "job 'lock-push' must be exactly its spec text: a checkout, an artifact download and one commit step, running none of the tree's code"
+      fi
     done <<EOT
 $(write_perm_records "${wf}")
 EOT
-    if grep -vE '^[[:space:]]*#' "${wf}" | grep -qE '^[[:space:]]*["'\'']?id-token["'\'']?[[:space:]]*:'; then
+    if grep -vE '^[[:space:]]*#' "${wf}" | grep -qE 'id-token'; then
       rt_err "id-token permission is forbidden in pipeline-pr.yml"
     fi
     # No other job defines a `route` output; every fleet-capable job needs changes.

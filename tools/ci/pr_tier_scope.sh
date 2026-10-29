@@ -11,7 +11,8 @@
 # the full tier).
 #
 # Env: GITHUB_EVENT_NAME, GITHUB_REPOSITORY, CI_SCOPE (the repository
-# variable), SHA (the commit under test), GH_TOKEN (checks: read),
+# variable), SHA (the commit under test), BEFORE_SHA (the push's previous
+# tip), GH_TOKEN (checks: read),
 # FORK_OR_BOT, PR_FULL. Run from a checkout of SHA with its parent commit.
 #
 # Stdout: exactly two lines, `fleet=<true|false>` and `heavy=<true|false>`.
@@ -21,8 +22,8 @@
 # The push rule: a push whose commit the merge queue already proved (a
 # completed, successful check suite of GitHub Actions on a gh-readonly-queue/
 # branch for the same SHA) skips the fleet jobs, unless the push changes the
-# pipeline itself or the commit's pull request (the last `(#N)` of its subject,
-# looked up through the API) is from a fork, from another repository or from
+# pipeline itself or the pull request of ANY commit in the push (the last `(#N)` of each
+# subject, looked up through the API) is from a fork, from another repository or from
 # dependabot[bot]: such a group ran on hosted runners. An unreadable or
 # missing pull request means no skip. It is on only when CI_SCOPE is push, pr-build or pr; any
 # other value, or none, is `full` and runs everything. Every other event runs
@@ -49,25 +50,41 @@ pipeline_change() {
   local changed
   git rev-parse -q --verify "HEAD^{commit}" >/dev/null 2>&1 || return 0
   git rev-parse -q --verify "HEAD^^{commit}" >/dev/null 2>&1 || return 0
-  changed="$(git diff --name-only HEAD^ HEAD 2>/dev/null)" || return 0
+  # The whole push when its range is usable (a merge group lands up to 3
+  # commits at once), else the tip commit alone.
+  if range_commits >/dev/null 2>&1; then
+    changed="$(git diff --name-only "${BEFORE_SHA}" HEAD 2>/dev/null)" || return 0
+  else
+    changed="$(git diff --name-only HEAD^ HEAD 2>/dev/null)" || return 0
+  fi
   # A here-string, not a pipe: grep -q exits at the first match, and under
   # pipefail a writer killed by SIGPIPE would turn a match into a miss.
   grep -qE '^(\.github/workflows/(pipeline-pr|ci)\.yml$|\.github/actions/|tools/ci/)' <<< "${changed}"
 }
 
-# pr_trusted: prints true, false or error. The pushed commit's pull request
-# (the last `(#N)` of its subject) must be from this repository, not from a
-# fork and not authored by dependabot[bot]. A merge group that held any other
-# pull request ran on hosted runners, so its proof does not cover the fleet.
-# Anything unknown is not trusted.
-pr_trusted() {
-  local subject n out="" tries=0 delay=2 fork login full
-  subject="$(git log -1 --format=%s HEAD 2>/dev/null)" || { echo error; return; }
-  n="$(printf '%s\n' "${subject}" | sed -nE 's/.*\(#([0-9]+)\).*/\1/p' | head -n 1)"
-  if [ -z "${n}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
-    echo false
-    return
-  fi
+# range_commits: prints the commits of the push (BEFORE_SHA..HEAD), newest
+# first, and succeeds only for a usable range: BEFORE_SHA set, not all zeros,
+# a commit of this repository, no merge commit in the range, and between 1 and
+# MAX_PUSH_COMMITS commits (a merge group holds at most 3 entries).
+MAX_PUSH_COMMITS=3
+range_commits() {
+  local before="${BEFORE_SHA:-}" list n
+  [ -n "${before}" ] || return 1
+  [ -n "$(printf '%s' "${before}" | tr -d '0')" ] || return 1
+  git rev-parse -q --verify "${before}^{commit}" >/dev/null 2>&1 || return 1
+  [ -z "$(git rev-list --min-parents=2 "${before}..HEAD" 2>/dev/null)" ] || return 1
+  list="$(git rev-list "${before}..HEAD" 2>/dev/null)" || return 1
+  [ -n "${list}" ] || return 1
+  n="$(printf '%s\n' "${list}" | wc -l | tr -d ' ')"
+  [ "${n}" -le "${MAX_PUSH_COMMITS}" ] || return 1
+  printf '%s\n' "${list}"
+}
+
+# pr_lookup_trusted <number>: prints true, false or error. The pull request
+# must be from this repository (head repository not null, not a fork) and not
+# authored by dependabot[bot].
+pr_lookup_trusted() {
+  local n="$1" out="" tries=0 delay=2 fork login full
   while :; do
     tries=$((tries + 1))
     if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" \
@@ -90,6 +107,35 @@ pr_trusted() {
   else
     echo false
   fi
+}
+
+# pr_trusted: prints true, false or error. EVERY commit of the push (a merge
+# group can land up to 3 entries in one push) must name, as the last `(#N)` of
+# its subject, a pull request that passes pr_lookup_trusted. A group that held
+# any other pull request ran on hosted runners, so its proof does not cover the
+# fleet. An unusable range, a missing number or an unknown lookup is not
+# trusted.
+pr_trusted() {
+  local commits sha subject n r
+  if [ -z "${GITHUB_REPOSITORY:-}" ]; then
+    echo false
+    return
+  fi
+  commits="$(range_commits)" || { echo false; return; }
+  for sha in ${commits}; do
+    subject="$(git log -1 --format=%s "${sha}" 2>/dev/null)" || { echo error; return; }
+    n="$(printf '%s\n' "${subject}" | sed -nE 's/.*\(#([0-9]+)\).*/\1/p' | head -n 1)"
+    if [ -z "${n}" ]; then
+      echo false
+      return
+    fi
+    r="$(pr_lookup_trusted "${n}")"
+    if [ "${r}" != true ]; then
+      echo "${r}"
+      return
+    fi
+  done
+  echo true
 }
 
 # queue_proof: prints true, false or error.

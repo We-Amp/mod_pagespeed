@@ -844,7 +844,7 @@ that skip with the notice "merge group holds a fork or Dependabot PR".
 | `pull_request` from this repository | `fleet` | fleet | runs (when its other conditions hold) |
 | `push`, `workflow_dispatch` | `fleet` | fleet | runs (when its other conditions hold) |
 
-The post-merge push may skip the fleet jobs only when the merge queue already proved the commit. The scope script (`tools/ci/pr_tier_scope.sh`) therefore looks up the pushed commit's pull request (the last `(#N)` of its subject) and allows that skip only for a pull request from this repository that is not from Dependabot; any other or unreadable lookup runs the full fleet tier on the push, so a group that ran on hosted runners is never taken as fleet proof.
+The post-merge push may skip the fleet jobs only when the merge queue already proved the commit. The scope script (`tools/ci/pr_tier_scope.sh`) therefore looks up each commit's pull request in the push (the last `(#N)` of every subject in `before..after`; a merge group can land up to three entries at once) and allows that skip only when every one is a pull request from this repository that is not from Dependabot; an unreadable range (no previous tip, more than three commits, a merge commit), a commit without a number, or any other or unreadable lookup runs the full fleet tier on the push, so a group that ran on hosted runners is never taken as fleet proof.
 
 A hosted merge-group run is much slower than a fleet one (the hosted legs have
 no hub or remote cache, and the Windows unit tests dominate), and a group of up

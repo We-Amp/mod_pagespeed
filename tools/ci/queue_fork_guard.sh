@@ -73,7 +73,7 @@ for n in ${prs}; do
   while :; do
     tries=$((tries + 1))
     if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" \
-      --jq '[(.head.repo.fork | tostring), (.user.login // ""), (.head.repo.full_name // "")] | @tsv')"; then
+      --jq '[(.head.repo.fork | tostring), (.user.login // ""), (.head.repo.full_name // ""), (.state // "")] | @tsv')"; then
       break
     fi
     [ "${tries}" -lt 5 ] || refuse "could not look up PR #${n} after 5 tries"
@@ -84,8 +84,12 @@ for n in ${prs}; do
   fork="${out%%$'\t'*}"
   rest="${out#*$'\t'}"
   login="${rest%%$'\t'*}"
-  full=""
-  case "${rest}" in *$'\t'*) full="${rest#*$'\t'}" ;; esac
+  rest="${rest#*$'\t'}"
+  full="${rest%%$'\t'*}"
+  state="${rest#*$'\t'}"
+  # A pull request in a merge group is always open; anything else names an old
+  # or closed pull request.
+  [ "${state}" = "open" ] || refuse "PR #${n} is not open (state '${state}')"
   [ "${fork}" != "null" ] || refuse "PR #${n} has no head repository (deleted fork)"
   [ "${fork}" = "true" ] || [ "${fork}" = "false" ] || refuse "PR #${n} has an unreadable fork flag"
   full_lc="$(printf '%s' "${full}" | tr '[:upper:]' '[:lower:]')"

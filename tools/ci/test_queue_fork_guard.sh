@@ -17,7 +17,8 @@ trap 'rm -rf "${WORK}"' EXIT
 
 BIN="${WORK}/bin"
 mkdir -p "${BIN}"
-# Fake gh: FAKE_PR_<n> holds "<fork>\t<login>\t<head repo full name>"; FAKE_GH_FAIL=1 fails every call.
+# Fake gh: FAKE_PR_<n> holds "<fork>\t<login>\t<head repo full name>" and
+# FAKE_STATE_<n> the state (default open); FAKE_GH_FAIL=1 fails every call.
 cat > "${BIN}/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_LOG}"
@@ -27,7 +28,8 @@ if [ "${FAKE_GH_FAIL:-0}" = "1" ]; then
 fi
 n="${2##*/}"
 var="FAKE_PR_${n}"
-printf '%s\n' "${!var-false$(printf '\t')oschaaf$(printf '\t')We-Amp/example}"
+svar="FAKE_STATE_${n}"
+printf '%s\t%s\n' "${!var-false$(printf '\t')oschaaf$(printf '\t')We-Amp/example}" "${!svar-open}"
 GH
 cat > "${BIN}/sleep" <<'SL'
 #!/usr/bin/env bash
@@ -194,6 +196,12 @@ HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-202-abc"
 make_repo "a (#201)" "b (#202)|.github/workflows/ci.yml"
 run_case dependabot-same-repo-touching-workflow 3 "PR #202: untrusted (dependabot[bot])" "FAKE_PR_202=${DEP}"
 run_case dependabot-foreign-head-touching-workflow 1 "fork PR #202 changes" "FAKE_PR_202=${DEP_FOREIGN}"
+
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-202-abc"
+make_repo "a (#201)" "b (#202)"
+run_case closed-pr-refused 1 "PR #201 is not open" "FAKE_STATE_201=closed"
+run_case merged-pr-refused 1 "is not open" "FAKE_STATE_202=merged"
+run_case missing-state-refused 1 "is not open" "FAKE_STATE_202="
 
 if [ "${FAILS}" -ne 0 ]; then
   echo "${FAILS} case(s) failed"

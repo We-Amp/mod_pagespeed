@@ -135,6 +135,12 @@ expect_bad bad-queue-route-fleet-only-no-route-guard 'fleet-only queue guard'
 expect_bad bad-queue-route-write-job 'only lock-push may write'
 expect_bad bad-queue-route-lock-push-if "job 'lock-push' must carry exactly"
 expect_bad bad-queue-route-id-token 'id-token'
+expect_bad bad-queue-route-id-token-bare 'id-token'
+expect_bad bad-queue-route-write-next-line 'only lock-push may write'
+expect_bad bad-queue-route-write-all-next-line 'only lock-push may write'
+expect_bad bad-queue-route-lock-push-runs-tree-code "job 'lock-push' must be exactly its spec text"
+expect_bad bad-queue-route-lock-push-extra-step "job 'lock-push' must be exactly its spec text"
+expect_bad bad-queue-route-lock-push-no-actor-term "job 'lock-push' must carry exactly"
 expect_bad bad-queue-guard-pipe-to-bash 'queue-guard-reads-default-branch'
 expect_bad bad-queue-route-iis-no-route-term 'fleet-iis queue guard'
 expect_bad bad-queue-route-iis-switch-guard 'fleet-iis queue guard'

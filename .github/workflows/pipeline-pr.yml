@@ -137,6 +137,7 @@ jobs:
           CI_SCOPE: ${{ vars.CI_SCOPE }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
           FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
           PR_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}
         # merge_group and workflow_dispatch always run the full PR tier; the
@@ -898,6 +899,8 @@ jobs:
   # ---------------------------------------------------------------------
   lock-check:
     name: Bzlmod lockfile is current
+    # Not for the bot's own lock commit (the loop guard also checks the author).
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Read-only and without stored credentials: this job runs the tree's code
@@ -969,7 +972,7 @@ jobs:
   lock-push:
     name: Commit the regenerated lockfile
     needs: lock-check
-    if: ${{ always() && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}
+    if: ${{ always() && github.actor != 'github-actions[bot]' && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -999,6 +1002,9 @@ jobs:
             echo "::error::the last commit already regenerated the lock and it is still stale; regenerate it locally"
             exit 1
           fi
+          # Remove the tracked file first so that a symlink in the checked-out
+          # tree is replaced, never written through.
+          rm -f -- MODULE.bazel.lock
           cp -- "${new}" MODULE.bazel.lock
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
