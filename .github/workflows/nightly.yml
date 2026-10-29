@@ -9,6 +9,10 @@
 
 name: Nightly
 
+# A full-tier dispatch is titled `Nightly (full)`: the schedule guard and the
+# external dispatcher count it as a real night. Any other dispatch is `Nightly`.
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.full_tier && 'Nightly (full)' || 'Nightly' }}
+
 on:
   schedule:
     - cron: "17 4 * * 1-6"
@@ -53,7 +57,76 @@ permissions:
   contents: read
 
 jobs:
+  # The schedule guard. GitHub's cron is best effort, and an external
+  # scheduler also dispatches this workflow every night. A first-attempt
+  # scheduled run skips all its work when a real night started in the
+  # previous 20 hours, and cancels itself so that a skipped night reads
+  # `cancelled`. A real night is a run on the default branch that is not
+  # cancelled and is either a scheduled run or a full-tier dispatch (titled
+  # `Nightly (full)`); other dispatches and skipped runs never count. A
+  # dispatch and a re-run never skip. The guard runs inside the `nightly`
+  # concurrency group, so a late cron run that waited for a running dispatch
+  # sees that run. A queued dispatch can be replaced by a newer queued run in
+  # the group; it then reads `cancelled`, is not counted, and the cron run
+  # proceeds. Any error in the check leaves skip=false: a night that runs
+  # twice is better than a night that is lost.
+  guard:
+    name: Schedule guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Skip a scheduled run when a real night started in the last 20 hours
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "${EVENT}" = schedule ] && [ "${ATTEMPT}" = 1 ]; then
+            recent="$(gh api "repos/${REPO}/actions/workflows/nightly.yml/runs?per_page=50" 2>/dev/null \
+              | jq -r --arg run "${RUN_ID}" --arg br "${DEFAULT_BRANCH}" --argjson now "$(date -u +%s)" \
+                  '[.workflow_runs[]
+                    | select((.id | tostring) != $run and .head_branch == $br and .conclusion != "cancelled"
+                             and (.event == "schedule" or ((.display_title // "") | endswith("(full)")))
+                             and ((.created_at | fromdateiso8601) > ($now - 72000)))] | length' 2>/dev/null || true)"
+            case "${recent}" in
+              ''|*[!0-9]*) echo "::notice::the guard could not read the run list; running" ;;
+              0) echo "no real night in the last 20 hours; running" ;;
+              *) skip=true; echo "::notice::${recent} real night(s) started in the last 20 hours; skipping this scheduled run" ;;
+            esac
+          fi
+          echo "skip=${skip}" >> "${GITHUB_OUTPUT}"
+      # A separate step, so the output is recorded before the run is
+      # cancelled. If the cancel cannot be made to work the step fails, so a
+      # skipped run never ends `success` and counts as a real night.
+      - name: Cancel this skipped run
+        if: steps.check.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          for _ in 1 2 3; do
+            if gh run cancel "${RUN_ID}"; then sleep 30; exit 0; fi
+            sleep 5
+          done
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/force-cancel"; then sleep 30; exit 0; fi
+          echo "::error::could not cancel this skipped run"
+          exit 1
+
   nightly:
+    needs: [guard]
+    if: ${{ !cancelled() && needs.guard.outputs.skip != 'true' }}
     # Nothing in the nightly tier writes to GitHub: read access is both the
     # ceiling the called workflow may narrow and everything it uses.
     permissions:
@@ -80,9 +153,11 @@ jobs:
   # exceed what its caller grants, and a missing grant fails the whole run at
   # startup.
   full:
+    needs: [guard]
     if: >-
+      !cancelled() && needs.guard.outputs.skip != 'true' && (
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.full_tier && github.ref == 'refs/heads/master')
+      (github.event_name == 'workflow_dispatch' && inputs.full_tier && github.ref == 'refs/heads/master'))
     permissions:
       actions: read
       contents: read
@@ -97,8 +172,8 @@ jobs:
   # prints what it would write.
   nightly-red:
     name: Nightly full-tier report
-    needs: [full]
-    if: always() && needs.full.result != 'skipped'
+    needs: [guard, full]
+    if: always() && needs.guard.outputs.skip != 'true' && needs.full.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

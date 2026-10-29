@@ -483,6 +483,25 @@ the split (rule f): every reusable workflow declares a top-level
 not) is allowed only on a job with a hosted `runs-on`. Report jobs check out
 `master` for the tools they run, because they hold a write token.
 
+### The schedule guard
+
+GitHub's cron is best effort, so an external scheduler also dispatches
+`nightly.yml` every night (with `full_tier` set, which reproduces what a
+scheduled night runs). The hosted `guard` job makes a first-attempt scheduled
+run skip all its work, and cancel itself, when a real night started in the
+previous 20 hours. A real night is a run on the default branch that is not
+cancelled and is either a scheduled run or a full-tier dispatch; the run
+title (`run-name`) marks the latter `Nightly (full)`. Other dispatches and
+skipped (cancelled) runs never count, so they cannot suppress a night. A
+dispatch and a re-run never skip. The guard runs inside the `nightly`
+concurrency group, so a late cron run that waited for a running dispatch sees
+it and skips. A queued dispatch can be replaced by a newer queued run of the
+group; it then reads `cancelled`, is not counted, and the cron run proceeds.
+If the guard cannot read the run list it lets the run proceed, and if the
+guard job itself fails the jobs still run. A skipped run has no `full` job,
+so `nightly-red` stays silent for it and still reports a real red.
+One edge remains: a queued full-tier dispatch that the guard counted and a non-full hand dispatch then replaces in the group is a lost night, so avoid hand dispatches during the nightly window.
+
 ### The nightly-red issue
 
 `nightly.yml` ends with the hosted job `nightly-red` (`Nightly full-tier
