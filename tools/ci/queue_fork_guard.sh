@@ -73,7 +73,7 @@ for n in ${prs}; do
   while :; do
     tries=$((tries + 1))
     if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" \
-      --jq '[(.head.repo.fork | tostring), (.user.login // ""), (.head.repo.full_name // ""), (.state // "")] | @tsv')"; then
+      --jq '[(.head.repo.fork | tostring), (.user.login // ""), (.head.repo.full_name // ""), (.state // ""), ((.merged // false) | tostring), (.merge_commit_sha // "")] | @tsv')"; then
       break
     fi
     [ "${tries}" -lt 5 ] || refuse "could not look up PR #${n} after 5 tries"
@@ -86,12 +86,23 @@ for n in ${prs}; do
   login="${rest%%$'\t'*}"
   rest="${rest#*$'\t'}"
   full="${rest%%$'\t'*}"
-  state="${rest#*$'\t'}"
-  # A pull request in a merge group is always open; anything else names an old
-  # or closed pull request.
-  [ "${state}" = "open" ] || refuse "PR #${n} is not open (state '${state}')"
+  rest="${rest#*$'\t'}"
+  state="${rest%%$'\t'*}"
+  rest="${rest#*$'\t'}"
+  merged="${rest%%$'\t'*}"
+  merge_sha="${rest#*$'\t'}"
   [ "${fork}" != "null" ] || refuse "PR #${n} has no head repository (deleted fork)"
   [ "${fork}" = "true" ] || [ "${fork}" = "false" ] || refuse "PR #${n} has an unreadable fork flag"
+  # A pull request in a merge group is open, or it already merged earlier in
+  # the same queue run: then it merged as exactly the commit attributed to it
+  # in this group (the queue fast-forwards to the tested commit). Anything
+  # else names an old or closed pull request.
+  if [ "${state}" != "open" ]; then
+    in_group="$(printf '%s' "${pr_shas}" | awk -v n="${n}" -v m="${merge_sha}" '$1 == n && $2 == m { print "y" }')"
+    if [ "${merged}" != "true" ] || [ -z "${merge_sha}" ] || [ -z "${in_group}" ]; then
+      refuse "PR #${n} is not open (state '${state}')"
+    fi
+  fi
   full_lc="$(printf '%s' "${full}" | tr '[:upper:]' '[:lower:]')"
 
   foreign=0

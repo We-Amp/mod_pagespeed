@@ -77,7 +77,10 @@ body() { # <suite>...
   printf '{"total_count":%d,"check_suites":[%s]}' "$#" "$*"
 }
 
-PROOF_TRUE="$(body "$(suite gh-readonly-queue/master/pr-12-abc completed '"success"')")"
+# proof_for <base sha>: a successful queue suite built on that base commit.
+proof_for() {
+  body "$(suite "gh-readonly-queue/master/pr-12-$1" completed '"success"')"
+}
 PROOF_MASTER="$(body "$(suite master completed '"success"')")"
 PROOF_FAILED="$(body "$(suite gh-readonly-queue/master/pr-12-abc completed '"failure"')")"
 PROOF_RUNNING="$(body "$(suite gh-readonly-queue/master/pr-12-abc in_progress null)")"
@@ -93,7 +96,7 @@ run_scope() {
   set +e
   (cd "${REPO}" && env PATH="${BIN}:${PATH}" FAKE_LOG="${WORK}/gh.log" SLEEP_LOG="${WORK}/sleep.log" \
     GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=We-Amp/example SHA="${SHA_VAL}" BEFORE_SHA="${BEFORE_VAL}" GH_TOKEN=x \
-    FORK_OR_BOT=false PR_FULL=false CI_SCOPE= FAKE_GH_BODY="${PROOF_TRUE}" \
+    FORK_OR_BOT=false PR_FULL=false CI_SCOPE= FAKE_GH_BODY="$(proof_for "${BEFORE_VAL}")" \
     FAKE_PR_OUT='false\toschaaf\tWe-Amp/example\n' \
     "$@" bash "${SCOPE}" > "${OUT}" 2> "${ERR}")
   RC=$?
@@ -301,6 +304,41 @@ add_commit "tip (#11)"
 CUR=push-pipeline-change-in-earlier-commit-runs
 run_scope CI_SCOPE=push
 check "${CUR}" true "pipeline_change=true"
+
+# The proof covers the whole group, so its base comes from the queue suite's
+# branch, not from the push range: group [fork #551, same-repo #12] pushed after
+# [fork #551] alone has a push range of just #12.
+make_repo
+ROOT_VAL="${BEFORE_VAL}"
+add_commit "fork change (#551)"
+FORK_SHA="$(git -C "${REPO}" rev-parse HEAD)"
+add_commit "same repo change (#12)"
+BEFORE_VAL="${FORK_SHA}"
+CUR=push-group-base-before-push-range-fork-runs
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${ROOT_VAL}")" FAKE_PR_OUT_551="${FORK_OUT}"
+check "${CUR}" true "proof=false"
+CUR=push-group-base-equals-push-range-skips
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${FORK_SHA}")" FAKE_PR_OUT_551="${FORK_OUT}"
+check "${CUR}" false "proof=true"
+CUR=push-group-base-trusted-group-skips
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${ROOT_VAL}")"
+check "${CUR}" false "proof=true"
+
+CUR=push-suite-branch-without-base-runs
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(body "$(suite gh-readonly-queue/master/pr-12-abc completed '"success"')")"
+check "${CUR}" true "proof=false"
+CUR=push-suite-base-not-ancestor-runs
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for 1234567890123456789012345678901234567890)"
+check "${CUR}" true "proof=false"
+CUR=push-suites-disagree-runs
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(body "$(suite "gh-readonly-queue/master/pr-12-${ROOT_VAL}" completed '"success"')" "$(suite "gh-readonly-queue/master/pr-13-${FORK_SHA}" completed '"success"')")"
+check "${CUR}" true "proof=false"
+CUR=push-two-suites-same-branch-skips
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(body "$(suite "gh-readonly-queue/master/pr-12-${ROOT_VAL}" completed '"success"')" "$(suite "gh-readonly-queue/master/pr-12-${ROOT_VAL}" completed '"success"')")"
+check "${CUR}" false "proof=true"
+CUR=push-before-sha-not-ancestor-runs
+run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${ROOT_VAL}")" BEFORE_SHA=1234567890123456789012345678901234567890
+check "${CUR}" true "proof=false"
 
 make_repo src/a.cc
 CUR=push-api-error-runs

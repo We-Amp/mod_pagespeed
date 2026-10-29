@@ -18,7 +18,8 @@ trap 'rm -rf "${WORK}"' EXIT
 BIN="${WORK}/bin"
 mkdir -p "${BIN}"
 # Fake gh: FAKE_PR_<n> holds "<fork>\t<login>\t<head repo full name>" and
-# FAKE_STATE_<n> the state (default open); FAKE_GH_FAIL=1 fails every call.
+# FAKE_STATE_<n> the state (default open), FAKE_MERGED_<n> (default false) and
+# FAKE_MSHA_<n> (merge_commit_sha, default empty); FAKE_GH_FAIL=1 fails every call.
 cat > "${BIN}/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_LOG}"
@@ -29,7 +30,8 @@ fi
 n="${2##*/}"
 var="FAKE_PR_${n}"
 svar="FAKE_STATE_${n}"
-printf '%s\t%s\n' "${!var-false$(printf '\t')oschaaf$(printf '\t')We-Amp/example}" "${!svar-open}"
+mvar="FAKE_MERGED_${n}"; hvar="FAKE_MSHA_${n}"
+printf '%s\t%s\t%s\t%s\n' "${!var-false$(printf '\t')oschaaf$(printf '\t')We-Amp/example}" "${!svar-open}" "${!mvar-false}" "${!hvar-}"
 GH
 cat > "${BIN}/sleep" <<'SL'
 #!/usr/bin/env bash
@@ -202,6 +204,15 @@ make_repo "a (#201)" "b (#202)"
 run_case closed-pr-refused 1 "PR #201 is not open" "FAKE_STATE_201=closed"
 run_case merged-pr-refused 1 "is not open" "FAKE_STATE_202=merged"
 run_case missing-state-refused 1 "is not open" "FAKE_STATE_202="
+
+# A pull request that merged earlier in the same queue run is accepted only
+# when its merge_commit_sha is the commit attributed to it in the group.
+make_repo "a (#201)" "b (#202)"
+SHA_201="$(git -C "${REPO}" rev-parse HEAD~1)"
+run_case merged-pr-matching-commit-ok 0 "PR #201" "FAKE_STATE_201=closed" "FAKE_MERGED_201=true" "FAKE_MSHA_201=${SHA_201}"
+run_case merged-pr-other-commit-refused 1 "PR #201 is not open" "FAKE_STATE_201=closed" "FAKE_MERGED_201=true" "FAKE_MSHA_201=1111111111111111111111111111111111111111"
+run_case closed-unmerged-pr-matching-sha-refused 1 "PR #201 is not open" "FAKE_STATE_201=closed" "FAKE_MERGED_201=false" "FAKE_MSHA_201=${SHA_201}"
+run_case merged-fork-pr-still-hosted 3 "PR #201: untrusted" "FAKE_PR_201=${FORK}" "FAKE_STATE_201=closed" "FAKE_MERGED_201=true" "FAKE_MSHA_201=${SHA_201}"
 
 if [ "${FAILS}" -ne 0 ]; then
   echo "${FAILS} case(s) failed"
