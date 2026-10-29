@@ -17,7 +17,8 @@
   import { isBusyAnswer } from "$lib/api/poller";
   import { useConsole } from "$lib/api/context";
   import { router } from "$lib/router.svelte";
-  import { ApiError } from "$lib/api/client";
+  import { ApiError, isUnavailable } from "$lib/api/client";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
   import LoadError from "$lib/LoadError.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import SortableHeader from "$lib/SortableHeader.svelte";
@@ -92,7 +93,7 @@
             if (
               alternates.status === "rejected" &&
               alternates.reason instanceof Error &&
-              errorCode(alternates.reason) === "whole_server_console_only"
+              (errorCode(alternates.reason) === "whole_server_console_only" || isUnavailable(alternates.reason))
             ) {
               poll.stop();
             }
@@ -207,6 +208,8 @@
           {/if}
         </p>
       </div>
+    {:else if isUnavailable(altError)}
+      <UnavailableCard testid="url-detail-unavailable" />
     {:else if belowFloor && altError instanceof ApiError && (altError.status === 404 || altError.status === 501)}
       <div class="empty-state" data-testid="url-detail-below-floor">
         <p class="empty-title">The optimizer is too old for this view</p>

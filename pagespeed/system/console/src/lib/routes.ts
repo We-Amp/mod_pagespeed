@@ -25,6 +25,11 @@ export interface Route {
   globalOnly?: boolean;
   /** The page narrows itself to the host lens; on any other page the shell says the lens does not apply. */
   hostAware?: boolean;
+  /**
+   * The leaves (path without query) the page reads. The sidebar marks the
+   * entry "off" when the server has refused every one of them.
+   */
+  leaves?: string[];
   component: () => Promise<{ default: Component }>;
 }
 
@@ -74,6 +79,7 @@ export const routes: Route[] = [
     group: "overview",
     globalOnly: true,
     hostAware: true,
+    leaves: ["/v1/daemon/cache/urls"],
     component: () => import("../pages/Urls.svelte"),
   },
   {
@@ -123,6 +129,7 @@ export const routes: Route[] = [
     label: "Configuration",
     icon: "cog",
     group: "module",
+    leaves: ["/config"],
     component: () => import("../pages/Config.svelte"),
   },
   {
@@ -131,6 +138,7 @@ export const routes: Route[] = [
     icon: "package",
     group: "module",
     hostAware: true,
+    leaves: ["/rule_packs"],
     component: () => import("../pages/RulePacks.svelte"),
   },
   {
@@ -147,6 +155,7 @@ export const routes: Route[] = [
     icon: "scroll",
     group: "optimizer",
     hostAware: true,
+    leaves: ["/message_history", "/v1/daemon/logs"],
     component: () => import("../pages/Logs.svelte"),
   },
   {

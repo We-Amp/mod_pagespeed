@@ -20,7 +20,8 @@
   import { activeLensHost } from "$lib/host-lens.svelte";
   import { isBusyAnswer } from "$lib/api/poller";
   import { useConsole } from "$lib/api/context";
-  import { ApiError } from "$lib/api/client";
+  import { ApiError, isUnavailable } from "$lib/api/client";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
   import LoadError from "$lib/LoadError.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import SortableHeader from "$lib/SortableHeader.svelte";
@@ -79,7 +80,7 @@
         if (
           urls.status === "rejected" &&
           urls.reason instanceof Error &&
-          errorCode(urls.reason) === "whole_server_console_only"
+          (errorCode(urls.reason) === "whole_server_console_only" || isUnavailable(urls.reason))
         ) {
           poll.stop();
         }
@@ -192,6 +193,8 @@
           {/if}
         </p>
       </div>
+    {:else if isUnavailable(urlsError)}
+      <UnavailableCard testid="urls-unavailable" />
     {:else if urlsError instanceof ApiError && (urlsError.status === 404 || urlsError.status === 501)}
       <div class="empty-state" data-testid="urls-no-support">
         <p class="empty-title">The URL index is not available here</p>
