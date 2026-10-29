@@ -487,13 +487,19 @@ not) is allowed only on a job with a hosted `runs-on`. Report jobs check out
 
 GitHub's cron is best effort, so an external scheduler also dispatches
 `nightly.yml` every night (with `full_tier` set, which reproduces what a
-scheduled night runs). The hosted `guard` job makes a scheduled run skip all
-its work when another run of `nightly.yml` (any event, any status) was
-created in the previous 20 hours, so the two triggers never run the night
-twice. A dispatch never skips. The guard runs inside the `nightly`
+scheduled night runs). The hosted `guard` job makes a first-attempt scheduled
+run skip all its work, and cancel itself, when a real night started in the
+previous 20 hours. A real night is a run on the default branch that is not
+cancelled and is either a scheduled run or a full-tier dispatch; the run
+title (`run-name`) marks the latter `Nightly (full)`. Other dispatches and
+skipped (cancelled) runs never count, so they cannot suppress a night. A
+dispatch and a re-run never skip. The guard runs inside the `nightly`
 concurrency group, so a late cron run that waited for a running dispatch sees
-it and skips. If the guard cannot read the run list it lets the run proceed.
-A skipped run has no `full` job, so `nightly-red` is skipped too.
+it and skips. A queued dispatch can be replaced by a newer queued run of the
+group; it then reads `cancelled`, is not counted, and the cron run proceeds.
+If the guard cannot read the run list it lets the run proceed, and if the
+guard job itself fails the jobs still run. A skipped run has no `full` job,
+so `nightly-red` stays silent for it and still reports a real red.
 
 ### The nightly-red issue
 
