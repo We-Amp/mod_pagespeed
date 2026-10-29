@@ -388,5 +388,54 @@ class TestNginxIproContentType:
         ]), f"Content-Type should be JavaScript type, got: {content_type}"
 
 
+class TestNginxIproMessageHistory:
+    """Per-request in-place lines must not flood the admin message history."""
+
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_ipro_requests_do_not_fill_message_history(
+        self,
+        client: PageSpeedClient,
+        server_config,
+        test_root: str,
+        stats_snapshot,
+    ):
+        """N in-place requests add at most one line to the message history,
+        while the ipro_served statistic still counts every request."""
+        requests = 20
+        url = f"{test_root}/ipro/cc200/example.css?r={random.randint(1, 100000)}"
+        history_url = f"{server_config.admin_path}/message_history"
+
+        def in_place_lines() -> int:
+            body = client.get(history_url).text
+            return len(re.findall(r"resource in-place", body))
+
+        # Warm: wait until the optimized copy is served, so the loop below
+        # is all in-place hits.
+        client.fetch_until(
+            url, condition=lambda r: len(r.body) < 43, timeout=60.0
+        )
+
+        lines_before = in_place_lines()
+        stats_before = stats_snapshot()
+
+        for _ in range(requests):
+            assert_http_status(client.get(url), 200)
+
+        lines_after = in_place_lines()
+        stats_after = stats_snapshot()
+
+        assert lines_after - lines_before <= 1, (
+            f"{requests} in-place requests added "
+            f"{lines_after - lines_before} message-history lines"
+        )
+        served = stats_after.get("ipro_served", 0) - stats_before.get(
+            "ipro_served", 0
+        )
+        assert served >= requests, (
+            f"ipro_served grew by {served} for {requests} in-place requests"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

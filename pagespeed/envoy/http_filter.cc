@@ -876,11 +876,12 @@ void HttpPageSpeedDecoderFilter::prepareForIproRecording() {
           : *pristine_url_;
 
   server_context_->rewrite_stats()->ipro_not_in_cache()->Add(1);
-  server_context_->message_handler()->Message(
-      net_instaweb::kInfo,
-      "Could not rewrite resource in-place "
-      "because URL is not in cache: %s",
-      recording_url.spec_c_str());
+  // Per-request line: debug level only, so it stays out of the shared
+  // message history.  The ipro_* statistics are the counters.
+  ENVOY_LOG_MISC(debug,
+                 "Could not rewrite resource in-place "
+                 "because URL is not in cache: {}",
+                 recording_url.spec_c_str());
 
   // Use options_ directly instead of rewrite_driver_->options() because
   // this callback may run on a worker thread, while rewrite_driver_ was

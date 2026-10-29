@@ -3953,8 +3953,9 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     ctx->in_place = false;
 
     server_context->rewrite_stats()->ipro_served()->Add(1);
-    message_handler->Message(kInfo, "Serving rewritten resource in-place: %s",
-                             url.c_str());
+    // Per-request lines stay out of the shared message history: the
+    // ipro_* statistics are the counters.  Visible with error_log debug.
+    VLOG(1) << "Serving rewritten resource in-place: " << url;
 
     return ngx_http_next_header_filter(r);
   }
@@ -3962,11 +3963,9 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
   if (status_code == CacheUrlAsyncFetcher::kNotInCacheStatus &&
       !r->header_only) {
     server_context->rewrite_stats()->ipro_not_in_cache()->Add(1);
-    server_context->message_handler()->Message(
-        kInfo,
-        "Could not rewrite resource in-place "
-        "because URL is not in cache: %s",
-        cache_url.c_str());
+    VLOG(1) << "Could not rewrite resource in-place "
+               "because URL is not in cache: "
+            << cache_url;
     // A HEAD is a miss like any other, but it gets no recorder: it has no
     // body to record, so a recorder could only end in an
     // incomplete-recording failure at teardown.  The guard is the METHOD,
@@ -4013,8 +4012,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // to the backend.
   } else {
     server_context->rewrite_stats()->ipro_not_rewritable()->Add(1);
-    message_handler->Message(kInfo, "Could not rewrite resource in-place: %s",
-                             url.c_str());
+    VLOG(1) << "Could not rewrite resource in-place: " << url;
   }
 
   return ps_decline_request(r);
