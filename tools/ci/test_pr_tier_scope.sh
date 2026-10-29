@@ -27,6 +27,14 @@ if [ "${FAKE_GH_FAIL:-0}" = "1" ]; then
   echo "HTTP 500" >&2
   exit 1
 fi
+case "$*" in
+  *"/pulls/"*)
+    if [ "${FAKE_PR_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+    all="$*"; n="${all##*/pulls/}"; n="${n%% *}"
+    v="FAKE_PR_OUT_${n}"
+    if [ -n "${!v+x}" ]; then printf '%b' "${!v}"; else printf '%b' "${FAKE_PR_OUT-}"; fi
+    exit 0 ;;
+esac
 printf '%s' "${FAKE_GH_BODY-}"
 GH
 cat > "${BIN}/sleep" <<'SL'
@@ -41,6 +49,7 @@ fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 
 REPO="${WORK}/repo"
 SHA_VAL=""
+BEFORE_VAL=""
 
 # make_repo <changed path>: a root commit and one child commit that adds the
 # path. make_repo with no argument leaves only the root commit.
@@ -49,12 +58,13 @@ make_repo() {
   git init -q "${REPO}"
   git -C "${REPO}" config user.email t@example.invalid
   git -C "${REPO}" config user.name t
-  git -C "${REPO}" commit -q --allow-empty -m "root"
+  git -C "${REPO}" commit -q --allow-empty -m "root (#1)"
+  BEFORE_VAL="$(git -C "${REPO}" rev-parse HEAD)"
   if [ $# -gt 0 ]; then
     mkdir -p "${REPO}/$(dirname "$1")"
     echo x > "${REPO}/$1"
     git -C "${REPO}" add -A
-    git -C "${REPO}" commit -q -m "change $1"
+    git -C "${REPO}" commit -q -m "change $1 (#12)"
   fi
   SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
 }
@@ -67,7 +77,10 @@ body() { # <suite>...
   printf '{"total_count":%d,"check_suites":[%s]}' "$#" "$*"
 }
 
-PROOF_TRUE="$(body "$(suite gh-readonly-queue/master/pr-12-abc completed '"success"')")"
+# proof_for <base sha>: a successful queue suite built on that base commit.
+proof_for() {
+  body "$(suite "gh-readonly-queue/master/pr-12-$1" completed '"success"')"
+}
 PROOF_MASTER="$(body "$(suite master completed '"success"')")"
 PROOF_FAILED="$(body "$(suite gh-readonly-queue/master/pr-12-abc completed '"failure"')")"
 PROOF_RUNNING="$(body "$(suite gh-readonly-queue/master/pr-12-abc in_progress null)")"
@@ -82,8 +95,9 @@ run_scope() {
   : > "${WORK}/sleep.log"
   set +e
   (cd "${REPO}" && env PATH="${BIN}:${PATH}" FAKE_LOG="${WORK}/gh.log" SLEEP_LOG="${WORK}/sleep.log" \
-    GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=We-Amp/example SHA="${SHA_VAL}" GH_TOKEN=x \
-    FORK_OR_BOT=false PR_FULL=false CI_SCOPE= FAKE_GH_BODY="${PROOF_TRUE}" \
+    GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=We-Amp/example SHA="${SHA_VAL}" BEFORE_SHA="${BEFORE_VAL}" GH_TOKEN=x \
+    FORK_OR_BOT=false PR_FULL=false CI_SCOPE= FAKE_GH_BODY="$(proof_for "${BEFORE_VAL}")" \
+    FAKE_PR_OUT='false\toschaaf\tWe-Amp/example\n' \
     "$@" bash "${SCOPE}" > "${OUT}" 2> "${ERR}")
   RC=$?
   set -e
@@ -160,6 +174,163 @@ CUR=push-queue-suite-in-progress-runs
 run_scope CI_SCOPE=push FAKE_GH_BODY="${PROOF_RUNNING}"
 check "${CUR}" true "proof=false"
 
+# The pushed commit's pull request must be a same-repository, non-Dependabot one.
+CUR=push-queue-fork-pr-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='true\tsomeone\tsomeone/example\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-foreign-head-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='false\tsomeone\tsomeone/example\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-dependabot-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='false\tdependabot[bot]\tWe-Amp/example\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-null-head-repo-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT='null\toschaaf\t\n'
+check "${CUR}" true "proof=false"
+
+CUR=push-queue-pr-lookup-fails-runs
+run_scope CI_SCOPE=push FAKE_PR_FAIL=1
+check "${CUR}" true "proof=error"
+
+CUR=push-queue-pr-empty-output-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT=
+check "${CUR}" true "proof=error"
+
+CUR=push-queue-same-repo-case-skips
+run_scope CI_SCOPE=push FAKE_PR_OUT='false\toschaaf\twe-amp/EXAMPLE\n'
+check "${CUR}" false "proof=true"
+
+CUR=push-subject-without-pr-number-runs
+git -C "${REPO}" commit -q --amend -m "no number here"
+SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
+run_scope CI_SCOPE=push
+check "${CUR}" true "proof=false"
+
+CUR=push-subject-last-number-is-looked-up
+git -C "${REPO}" commit -q --amend -m "title (#201) more (#12)"
+SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
+run_scope CI_SCOPE=push
+check "${CUR}" false "proof=true"
+if grep -qF 'pulls/12' "${WORK}/gh.log"; then pass "${CUR}: looked up #12"; else fail "${CUR}: gh log: $(cat "${WORK}/gh.log")"; fi
+
+# Every commit of the push counts, not the tip alone (a merge group lands up
+# to 3 entries at once).
+add_commit() { # <subject>
+  echo "$RANDOM$1" > "${REPO}/f-${RANDOM}-${RANDOM}.cc"
+  git -C "${REPO}" add -A
+  git -C "${REPO}" commit -q -m "$1"
+  SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
+}
+FORK_OUT='true\tsomeone\tsomeone/example\n'
+
+make_repo
+add_commit "fork change (#551)"
+add_commit "same repo change (#12)"
+CUR=push-fork-first-same-repo-tip-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT_551="${FORK_OUT}"
+check "${CUR}" true "proof=false"
+
+make_repo
+add_commit "one (#10)"
+add_commit "two (#11)"
+add_commit "three (#12)"
+CUR=push-three-trusted-skips
+run_scope CI_SCOPE=push
+check "${CUR}" false "proof=true"
+n="$(grep -c 'pulls/' "${WORK}/gh.log")"
+if [ "${n}" = 4 ]; then pass "${CUR}: looked up all 4 pull requests (3 entries and the root)"; else fail "${CUR}: ${n} pull lookups, want 4"; fi
+
+CUR=push-three-last-is-fork-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT_12="${FORK_OUT}"
+check "${CUR}" true "proof=false"
+
+CUR=push-middle-lookup-fails-runs
+run_scope CI_SCOPE=push FAKE_PR_FAIL=1
+check "${CUR}" true "proof=error"
+
+make_repo
+add_commit "one (#10)"
+add_commit "no number"
+CUR=push-one-commit-without-number-runs
+run_scope CI_SCOPE=push
+check "${CUR}" true "proof=false"
+
+make_repo
+add_commit "one (#10)"
+CUR=push-before-sha-missing-runs
+run_scope CI_SCOPE=push BEFORE_SHA=
+check "${CUR}" true "proof=false"
+CUR=push-before-sha-zero-runs
+run_scope CI_SCOPE=push BEFORE_SHA=0000000000000000000000000000000000000000
+check "${CUR}" true "proof=false"
+CUR=push-before-sha-unknown-runs
+run_scope CI_SCOPE=push BEFORE_SHA=1234567890123456789012345678901234567890
+check "${CUR}" true "proof=false"
+CUR=push-before-sha-equals-tip-runs
+run_scope CI_SCOPE=push BEFORE_SHA="${SHA_VAL}"
+check "${CUR}" true "proof=false"
+
+# A push range of exactly 10 trusted commits skips; 11 never does.
+make_repo
+i=0
+while [ "${i}" -lt 10 ]; do i=$((i + 1)); add_commit "entry ${i} (#$((100 + i)))"; done
+CUR=push-ten-trusted-commits-skips
+run_scope CI_SCOPE=push
+check "${CUR}" false "proof=true"
+add_commit "entry 11 (#111)"
+BEFORE_VAL="$(git -C "${REPO}" rev-parse HEAD~11)"
+CUR=push-over-ten-commits-runs
+run_scope CI_SCOPE=push
+check "${CUR}" true "proof=false"
+
+# A merge commit in the range is never queue-shaped.
+make_repo
+git -C "${REPO}" checkout -q -b side
+add_commit "side (#10)"
+git -C "${REPO}" checkout -q -
+add_commit "main (#11)"
+git -C "${REPO}" merge -q --no-ff side -m "merge (#12)"
+SHA_VAL="$(git -C "${REPO}" rev-parse HEAD)"
+CUR=push-merge-commit-in-range-runs
+run_scope CI_SCOPE=push
+check "${CUR}" true "proof=false"
+
+# A pipeline change in an earlier commit of the push is seen.
+make_repo
+mkdir -p "${REPO}/tools/ci"
+echo x > "${REPO}/tools/ci/a.sh"
+git -C "${REPO}" add -A
+git -C "${REPO}" commit -q -m "pipeline (#10)"
+add_commit "tip (#11)"
+CUR=push-pipeline-change-in-earlier-commit-runs
+run_scope CI_SCOPE=push
+check "${CUR}" true "pipeline_change=true"
+
+# The proof covers the whole group, and a stacked group's own base is the
+# previous entry's commit, so the group is the union of the push range and the
+# last 10 first-parent commits: a fork two commits below the tip, with the push
+# range holding only the tip, is seen.
+make_repo
+add_commit "fork change (#551)"
+add_commit "middle (#11)"
+add_commit "tip (#12)"
+BEFORE_VAL="$(git -C "${REPO}" rev-parse HEAD~1)"
+CUR=push-fork-below-tip-outside-push-range-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT_551="${FORK_OUT}"
+check "${CUR}" true "proof=false"
+CUR=push-three-trusted-below-tip-skips
+run_scope CI_SCOPE=push
+check "${CUR}" false "proof=true"
+n="$(grep -c 'pulls/' "${WORK}/gh.log")"
+if [ "${n}" = 4 ]; then pass "${CUR}: looked up 4 pull requests (union, no duplicates)"; else fail "${CUR}: ${n} pull lookups, want 4"; fi
+CUR=push-before-sha-not-ancestor-runs
+run_scope CI_SCOPE=push BEFORE_SHA=1234567890123456789012345678901234567890
+check "${CUR}" true "proof=false"
+
+make_repo src/a.cc
 CUR=push-api-error-runs
 run_scope CI_SCOPE=push FAKE_GH_FAIL=1
 check "${CUR}" true "proof=error"

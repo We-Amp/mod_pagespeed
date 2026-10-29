@@ -124,6 +124,36 @@ expect_bad bad-queue-guard-push-step-wide 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-dispatch-step-missing 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-dispatch-step-extra-command 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-steps-misordered 'queue-guard-reads-default-branch'
+# queue-route: fork pull requests in a merge group run on hosted runners.
+expect_good good-queue-route
+expect_bad bad-queue-route-old-switch 'queue routing expression'
+expect_bad bad-queue-route-no-needs 'does not list changes in its needs'
+expect_bad bad-queue-route-iis-old-route 'queue routing expression'
+expect_bad bad-queue-route-needs-prefix 'does not list changes in its needs'
+expect_bad bad-queue-route-plain-fleet-only 'queue routing expression'
+expect_bad bad-queue-route-fleet-only-no-route-guard 'fleet-only queue guard'
+expect_bad bad-queue-route-write-job 'only lock-push may write'
+expect_bad bad-queue-route-lock-push-if "job 'lock-push' must carry exactly"
+expect_bad bad-queue-route-id-token 'id-token'
+expect_bad bad-queue-route-id-token-bare 'id-token'
+expect_bad bad-queue-route-write-next-line 'only lock-push may write'
+expect_bad bad-queue-route-write-all-next-line 'only lock-push may write'
+expect_bad bad-queue-route-lock-push-runs-tree-code "job 'lock-push' must be exactly its spec text"
+expect_bad bad-queue-route-lock-push-extra-step "job 'lock-push' must be exactly its spec text"
+expect_bad bad-queue-route-lock-push-no-actor-term "job 'lock-push' must carry exactly"
+expect_bad bad-queue-guard-pipe-to-bash 'queue-guard-reads-default-branch'
+expect_bad bad-queue-route-iis-no-route-term 'fleet-iis queue guard'
+expect_bad bad-queue-route-iis-switch-guard 'fleet-iis queue guard'
+expect_bad bad-queue-route-missing-fails-open 'queue-route'
+expect_bad bad-queue-route-step-absent 'queue-route'
+expect_bad bad-queue-route-output-missing 'queue-route'
+expect_bad bad-queue-route-vendor-output 'defines an output named route'
+expect_bad bad-queue-route-after-diff 'queue-route'
+expect_bad bad-queue-guard-case-ignores-exit 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-no-id 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-stale-fetch 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-no-fetch 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-plain-bash 'queue-guard-reads-default-branch'
 # vendor-if-fleet-only: good-queue-guard has vendor with exactly
 # `if: ${{ needs.changes.outputs.fleet == 'true' }}` (accepted above); any other if: is rejected.
 expect_bad bad-queue-guard-vendor-if-always 'queue-guard-reads-default-branch'
