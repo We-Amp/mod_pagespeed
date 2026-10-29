@@ -9,13 +9,17 @@
 # tools/ci/check-workflow-shape.sh:
 #   * a pull request from a fork, or from Dependabot, runs on a
 #     GitHub-hosted runner;
+#   * so does a merge group that holds such a pull request: the `changes` job
+#     classifies the group and publishes `route` (fleet or hosted), every
+#     build runner job reads it from `needs.changes.outputs.route` directly,
+#     and a missing or empty value means hosted;
 #   * so does every run while the repository variable FLEET_ENABLED is
 #     'false' (the kill switch; unset means on);
 #   * everything else runs on a runner class label;
 #   * the choice is made from the event payload and the variable here, never
 #     from inputs.
 # Jobs with no hosted twin (the IIS system tests) are skipped while the switch
-# is off. No job here holds a secret or a write token.
+# is off, and in a run routed to hosted runners. No job here holds a secret or a write token.
 #
 # Every build runner job also works on the hosted side in a degraded mode: no
 # hub, no remote cache, no host paths. Anything host-specific is read from the
@@ -28,7 +32,8 @@
 # (the bundles) otherwise.
 #
 # The IIS system tests run on the fleet-iis class and are skipped, not failed,
-# for fork and Dependabot pull requests (no hosted twin). The full, nightly
+# for fork and Dependabot pull requests and for hosted-routed merge groups (no
+# hosted twin). The full, nightly
 # and release tiers follow in later steps.
 #
 # The parity guard of the former pipeline is dropped on purpose: the corpus
@@ -66,6 +71,7 @@ jobs:
     outputs:
       fleet: ${{ steps.scope.outputs.fleet }}
       heavy: ${{ steps.scope.outputs.heavy }}
+      route: ${{ steps.route.outputs.route }}
       signing_key: ${{ steps.diff.outputs.signing_key }}
       serf: ${{ steps.diff.outputs.serf }}
       cve: ${{ steps.diff.outputs.cve }}
@@ -101,10 +107,13 @@ jobs:
           set -euo pipefail
           [ "${ACTOR}" != "github-actions[bot]" ] || { echo "::error::dispatches made with a workflow token are not allowed"; exit 1; }
 
-      # A merge group is built on the fleet, so a fork or Dependabot pull
-      # request in it is refused here, on a hosted runner, before any fleet job
-      # starts: `vendor` needs this job, and every fleet job needs `vendor`.
-      - name: Refuse fork and Dependabot PRs in the merge queue
+      # A merge group is classified here, on a hosted runner, before any fleet
+      # job starts. The guard exits 0 when every pull request in the group is
+      # trusted (fleet), 3 when the group holds a fork or Dependabot pull
+      # request (hosted), and anything else refuses the group. The decision is
+      # published as `route` on this job and read by each fleet job directly.
+      - name: Classify the merge group
+        id: queue
         if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -117,7 +126,8 @@ jobs:
           set -euo pipefail
           git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
             git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash
+          rc=0; git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash || rc=$?
+          case "${rc}" in 0) echo route=fleet;; 3) echo route=hosted;; *) exit 1;; esac >> "$GITHUB_OUTPUT"
 
       - name: Decide the fleet scope
         id: scope
@@ -146,6 +156,25 @@ jobs:
               fi ;;
           esac
           cat "${out}" >> "$GITHUB_OUTPUT"
+
+      # The runner route of this run: `fleet` or `hosted`. Fleet jobs read it
+      # from this job's outputs; a missing or empty value means hosted.
+      - name: Decide the runner route
+        id: route
+        env:
+          QUEUE_ROUTE: ${{ steps.queue.outputs.route }}
+          FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
+        run: |
+          set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            merge_group)
+              case "${QUEUE_ROUTE}" in fleet|hosted) route="${QUEUE_ROUTE}" ;; *) echo "::error::the merge group has no valid route"; exit 1 ;; esac ;;
+            pull_request)
+              if [ "${FORK_OR_BOT}" = true ]; then route=hosted; else route=fleet; fi ;;
+            push|workflow_dispatch) route=fleet ;;
+            *) echo "::error::event ${GITHUB_EVENT_NAME} has no route"; exit 1 ;;
+          esac
+          echo "route=${route}" >> "$GITHUB_OUTPUT"
 
       - name: Diff against the base commit
         id: diff
@@ -947,7 +976,7 @@ jobs:
     name: Vendor Dependencies
     needs: changes
     if: ${{ needs.changes.outputs.fleet == 'true' }}
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:
       short_sha: ${{ steps.stamp.outputs.short_sha }}
@@ -1133,8 +1162,8 @@ jobs:
 
   linux-build:
     name: Linux Build
-    needs: vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    needs: [changes, vendor]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1320,8 +1349,8 @@ jobs:
 
   linux-unit-tests:
     name: Linux Unit Tests
-    needs: [vendor, linux-build]
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    needs: [changes, vendor, linux-build]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1489,8 +1518,8 @@ jobs:
 
   lint:
     name: Lint (clang-tidy + clang-format)
-    needs: vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    needs: [changes, vendor]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1730,8 +1759,8 @@ jobs:
 
   js-minify-corpus:
     name: JS Minify Corpus
-    needs: vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    needs: [changes, vendor]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 60
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1892,8 +1921,8 @@ jobs:
 
   html-parse-corpus:
     name: HTML Parse Corpus Goldens
-    needs: vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    needs: [changes, vendor]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 45
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -1999,7 +2028,7 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke (deterministic replay plus 60s libFuzzer)
     needs: [changes, vendor]
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ needs.changes.outputs.fuzz == 'true' }}
     timeout-minutes: 90
     steps:
@@ -2258,8 +2287,8 @@ jobs:
 
   windows-build:
     name: Windows Build
-    needs: vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
+    needs: [changes, vendor]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-windows' }}
     timeout-minutes: 120
     defaults:
       run:
@@ -2571,8 +2600,8 @@ jobs:
 
   windows-unit-tests:
     name: Windows Unit Tests
-    needs: [vendor, windows-build]
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
+    needs: [changes, vendor, windows-build]
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-windows' }}
     timeout-minutes: 120
     defaults:
       run:
@@ -2860,8 +2889,8 @@ jobs:
   iis-sys-tests:
     name: IIS System Tests
     needs: [changes, windows-build, windows-unit-tests]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
-    if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && needs.changes.outputs.iis == 'true' }}
+    runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
+    if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.changes.outputs.iis == 'true' }}
     timeout-minutes: 50
     defaults:
       run:
@@ -3158,7 +3187,7 @@ jobs:
     name: Apache System Tests (changed port)
     needs: [changes, linux-build]
     if: ${{ needs.changes.outputs.apache_sys == 'true' }}
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-light' }}
     timeout-minutes: 90
     env:
       # Names this job's diagnostics tarball (job, run and attempt), so only
@@ -3280,7 +3309,7 @@ jobs:
     name: nginx System Tests (changed port)
     needs: [changes, linux-build]
     if: ${{ needs.changes.outputs.nginx_sys == 'true' }}
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-light' }}
     timeout-minutes: 90
     env:
       SYSTEST_DIAG_TAG: pr-nginx-${{ github.run_id }}-${{ github.run_attempt }}
@@ -3409,8 +3438,9 @@ jobs:
             echo "Set FLEET_ENABLED back to 'true' to use the build runners again."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The IIS system tests may be skipped for five reasons only: the switch is
-  # off, the event is a fork or Dependabot pull request, the class is not
+  # The IIS system tests may be skipped for six reasons only: the switch is
+  # off, the event is a fork or Dependabot pull request, the run is routed to
+  # hosted runners (a merge group that holds one), the class is not
   # registered (FLEET_IIS_ENABLED is not 'true'), the path filter found no
   # IIS-relevant change, or a job they need failed.
   # Any other skip is a routing mistake and fails here, so the CI gate never
@@ -3429,6 +3459,7 @@ jobs:
       FLEET_IIS: ${{ vars.FLEET_IIS_ENABLED }}
       IIS_FILTER: ${{ needs.changes.outputs.iis }}
       FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
+      ROUTE: ${{ needs.changes.outputs.route }}
     steps:
       - name: Check the IIS system tests
         run: |
@@ -3439,6 +3470,8 @@ jobs:
             echo "::notice::IIS system tests skipped: FLEET_ENABLED is 'false'"
           elif [ "${FORK_OR_BOT}" = true ]; then
             echo "::notice::IIS system tests skipped: fork or Dependabot pull request"
+          elif [ "${ROUTE}" != fleet ]; then
+            echo "::notice::IIS system tests skipped: merge group holds a fork or Dependabot PR"
           elif [ "${FLEET_IIS}" != true ]; then
             echo "::notice::IIS system tests skipped: FLEET_IIS_ENABLED is not 'true'"
           elif [ "${IIS_FILTER}" = false ]; then

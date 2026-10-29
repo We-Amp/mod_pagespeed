@@ -94,6 +94,11 @@ System tests: `./test/system/run_system_tests.sh` (Apache),
   message or the pull request description (editing the description does not
   re-run the check; re-run the job). Check it locally with
   `bash tools/ci/check_release_note.sh --base origin/master --head HEAD`.
+- Pull requests from forks are welcome. They are built on GitHub-hosted
+  runners, in the pull request and again in the merge queue, so their checks
+  take longer than a branch in this repository. A fork pull request that
+  changes `.github/` or `tools/ci/` is re-landed by a maintainer from a branch
+  in this repository.
 - Describe the problem, the change and how you verified it.
 
 ## Licensing

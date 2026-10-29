@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 #
-# Merge-queue classifier: refuses a merge group that holds a fork or a
-# Dependabot pull request, so no such code reaches a fleet runner. Fails closed.
+# Merge-queue classifier: decides whether a merge group may run on the build
+# fleet or must run on GitHub-hosted runners. Fails closed.
 #
 # The workflow reads this file from the default branch and pipes it to bash
 # (`git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash`),
@@ -18,8 +18,14 @@
 # method (merge commits, rebase) must change this classifier first; until
 # then a group without that shape is refused.
 #
-# Exit 0: every pull request in the group is same-repo and not authored by
-# dependabot[bot]. Exit 1: refuse.
+# Exit 0: trusted. Every pull request in the group is same-repo and not
+# authored by dependabot[bot]; the group may use the fleet.
+# Exit 3: untrusted. The group holds a fork pull request, a pull request whose
+# head repository is not this one, or a dependabot[bot] pull request; the
+# group must run on GitHub-hosted runners. A fork pull request (not
+# Dependabot) that touches .github/ or tools/ci/ is refused instead (exit 1).
+# Any other exit status: refuse. Callers must treat only 0 as trusted and
+# only 3 as hosted. This script never writes GITHUB_OUTPUT itself.
 
 set -euo pipefail
 
@@ -34,6 +40,7 @@ shas="$(git rev-list "${BASE}..${HEAD_SHA}")"
 [ -n "${shas}" ] || refuse "empty merge group (${BASE}..${HEAD_SHA} holds no commits)"
 
 prs=""
+pr_shas=""
 add_pr() {
   case " ${prs} " in *" $1 "*) ;; *) prs="${prs} $1" ;; esac
 }
@@ -43,9 +50,12 @@ for sha in ${shas}; do
   n="$(printf '%s\n' "${subject}" | grep -oE '\(#[0-9]+\)' | tail -n 1 | tr -dc '0-9' || true)"
   [ -n "${n}" ] || refuse "commit ${sha} has no PR number in its subject"
   add_pr "${n}"
+  pr_shas="${pr_shas}${n} ${sha}"$'\n'
 done
 
 add_pr "${ref_n}"
+
+untrusted=0
 
 for n in ${prs}; do
   out=""
@@ -67,12 +77,39 @@ for n in ${prs}; do
   login="${rest%%$'\t'*}"
   full=""
   case "${rest}" in *$'\t'*) full="${rest#*$'\t'}" ;; esac
-  [ "${fork}" != "true" ] || refuse "PR #${n} is from a fork"
   [ "${fork}" != "null" ] || refuse "PR #${n} has no head repository (deleted fork)"
-  [ "${fork}" = "false" ] || refuse "PR #${n} has an unreadable fork flag"
-  [ "${login}" != "dependabot[bot]" ] || refuse "PR #${n} is authored by dependabot[bot]"
+  [ "${fork}" = "true" ] || [ "${fork}" = "false" ] || refuse "PR #${n} has an unreadable fork flag"
   want_lc="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
   full_lc="$(printf '%s' "${full}" | tr '[:upper:]' '[:lower:]')"
-  [ "${full_lc}" = "${want_lc}" ] || refuse "PR #${n} head repository ${full} is not ${GITHUB_REPOSITORY}"
+
+  if [ "${login}" = "dependabot[bot]" ]; then
+    echo "PR #${n}: untrusted (dependabot[bot])"
+    untrusted=1
+    continue
+  fi
+
+  if [ "${fork}" = "true" ] || [ "${full_lc}" != "${want_lc}" ]; then
+    # Fork code may run on hosted runners, but a change to the CI definitions
+    # themselves is never queued from a fork: a maintainer re-lands it.
+    sha_list="$(printf '%s' "${pr_shas}" | awk -v n="${n}" '$1 == n { print $2 }')"
+    [ -n "${sha_list}" ] || refuse "PR #${n} is from a fork but has no commit in the group to inspect"
+    for sha in ${sha_list}; do
+      files="$(git diff-tree --no-commit-id --name-only -r -z --root "${sha}" | tr '\0' '\n')" ||
+        refuse "could not list the files of commit ${sha} (PR #${n})"
+      if printf '%s\n' "${files}" | grep -qE '^(\.github/|tools/ci/)'; then
+        refuse "fork PR #${n} changes .github/ or tools/ci/; a maintainer must re-land it"
+      fi
+    done
+    echo "PR #${n}: untrusted (fork or foreign head repository ${full}), author ${login}"
+    untrusted=1
+    continue
+  fi
+
   echo "PR #${n}: same-repo, author ${login}"
 done
+
+if [ "${untrusted}" = "1" ]; then
+  echo "group is untrusted: hosted runners" >&2
+  exit 3
+fi
+exit 0

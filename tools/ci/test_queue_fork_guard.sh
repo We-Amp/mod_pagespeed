@@ -43,6 +43,8 @@ TAB="$(printf '\t')"
 REPO="${WORK}/repo"
 
 # make_repo <subject>...  -> a base commit plus one commit per subject.
+# A subject may carry a file to touch: "subject|path/in/repo". Commits are real
+# (not --allow-empty) when a path is given, so diff-tree has something to list.
 make_repo() {
   rm -rf "${REPO}"
   git init -q "${REPO}"
@@ -52,7 +54,15 @@ make_repo() {
   BASE_SHA="$(git -C "${REPO}" rev-parse HEAD)"
   local s
   for s in "$@"; do
-    git -C "${REPO}" commit -q --allow-empty -m "${s}"
+    case "${s}" in
+      *'|'*)
+        mkdir -p "${REPO}/$(dirname "${s#*|}")"
+        echo "${s}" >> "${REPO}/${s#*|}"
+        git -C "${REPO}" add -A
+        git -C "${REPO}" commit -q -m "${s%%|*}"
+        ;;
+      *) git -C "${REPO}" commit -q --allow-empty -m "${s}" ;;
+    esac
   done
   TIP_SHA="$(git -C "${REPO}" rev-parse HEAD)"
 }
@@ -86,12 +96,30 @@ HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-203-abc"
 make_repo "a (#201)" "b (#202)" "c (#203)"
 run_case same-repo-group-of-3 0 "PR #203"
 
-run_case fork-in-middle 1 "refusing: PR #202 is from a fork" "FAKE_PR_202=true${TAB}someone${TAB}someone/example"
-run_case dependabot 1 "refusing: PR #203 is authored by dependabot[bot]" "FAKE_PR_203=false${TAB}dependabot[bot]${TAB}We-Amp/example"
+run_case fork-in-middle 3 "PR #202: untrusted" "FAKE_PR_202=true${TAB}someone${TAB}someone/example"
+run_case dependabot 3 "PR #203: untrusted (dependabot[bot])" "FAKE_PR_203=false${TAB}dependabot[bot]${TAB}We-Amp/example"
 run_case null-head-repo 1 "refusing: PR #202" "FAKE_PR_202=null${TAB}someone${TAB}"
-run_case foreign-head-repo 1 "refusing: PR #202 head repository other/Example is not We-Amp/example" "FAKE_PR_202=false${TAB}someone${TAB}other/Example"
+run_case foreign-head-repo 3 "PR #202: untrusted" "FAKE_PR_202=false${TAB}someone${TAB}other/Example"
 run_case head-repo-case-insensitive 0 "PR #202" "FAKE_PR_202=false${TAB}someone${TAB}we-amp/EXAMPLE"
+FORK="true${TAB}someone${TAB}someone/example"
+run_case group-of-only-forks 3 "untrusted" "FAKE_PR_201=${FORK}" "FAKE_PR_202=${FORK}" "FAKE_PR_203=${FORK}"
+run_case mixed-same-repo-and-fork 3 "PR #201: same-repo" "FAKE_PR_203=${FORK}"
+run_case fork-plus-null-head 1 "refusing: PR #201 has no head repository" "FAKE_PR_202=${FORK}" "FAKE_PR_201=null${TAB}someone${TAB}"
+run_case fork-plus-lookup-500 1 "refusing" "FAKE_PR_201=${FORK}" "FAKE_GH_FAIL=1"
 run_case bad-head-ref 1 "refusing: unparseable merge group head ref" HEAD_REF=
+
+make_repo "a (#201)" "b (#202)|src/b.txt" "c (#203)|.github/workflows/ci.yml"
+run_case fork-touches-workflow 1 "fork PR #203 changes .github/" "FAKE_PR_203=${FORK}"
+run_case two-forks-one-touches-workflow 1 "refusing" "FAKE_PR_202=${FORK}" "FAKE_PR_203=${FORK}"
+run_case same-repo-touches-workflow 0 "PR #203"
+run_case dependabot-touches-workflow 3 "PR #203: untrusted (dependabot[bot])" "FAKE_PR_203=false${TAB}dependabot[bot]${TAB}We-Amp/example"
+run_case fork-clean-files 3 "PR #202: untrusted" "FAKE_PR_202=${FORK}"
+
+make_repo "a (#201)" "b (#202)|tools/ci/x.sh" "c (#203)"
+run_case fork-touches-tools-ci 1 "fork PR #202 changes .github/ or tools/ci/" "FAKE_PR_202=${FORK}"
+
+make_repo "a (#201)" "b (#202)|tools/cis/x.sh" "c (#203)|docs/.github/y.md"
+run_case fork-lookalike-paths-ok 3 "PR #203: untrusted" "FAKE_PR_203=${FORK}" "FAKE_PR_202=${FORK}"
 
 make_repo "a (#201)" "fix things"
 run_case no-pr-number 1 "no PR number"

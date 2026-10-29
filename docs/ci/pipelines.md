@@ -72,9 +72,9 @@ tier.
 | `apache-sys-tests` | `fleet-light` | `changes`, `linux-build` | the same for the Apache module (`test/system/run_system_tests.sh`). Runs only when the `apache_sys` path filter fires: `pagespeed/apache/`, `test/pagespeed/apache/`, `pagespeed/system/`, the test sets and fixtures both runners use (`test/system/automatic/`, `test/system/system/`, `test/system/pagespeed_test_framework/`, `conftest.py`, `pytest.ini`, `requirements.txt`, `install/mod_pagespeed_test/`, `install/mod_pagespeed_example/`, `install/do_not_modify/`), `install/debug.conf.template`, the Apache run script, `test/system/setup_apache_test.sh` and the diagnostics collector |
 | `windows-build` | `fleet-windows` (`windows-2022` for forks) | `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks) | `vendor`, `windows-build` | Windows unit tests |
-| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
+| `iis-sys-tests` | `fleet-iis`, no hosted side | `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
 | `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
-| `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
+| `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, a merge group routed to hosted runners, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
 
 Application Verifier and the other IIS lanes that run longer belong to the
 later tiers. `iis-sys-tests` clears stale verifier settings before the run and
@@ -281,6 +281,14 @@ side for a fork or Dependabot pull request and also while the switch is off:
 
 ```yaml
 runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+```
+
+In `pipeline-pr.yml` the expression has one more term, so a merge group that
+holds a fork or Dependabot pull request also runs hosted (see "Merge-queue
+runs"):
+
+```yaml
+runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
 ```
 
 Such a job carries no `if:` guard (it always runs, on one side or the other),
@@ -786,28 +794,68 @@ Hits under `pagespeed/envoy`, `pagespeed/windows`, `pagespeed/iis`,
 
 ## Merge-queue runs
 
-A `merge_group` run is routed to the fleet unconditionally, so a fork or
-Dependabot pull request in a merge group would build its code on a fleet
-runner. The `changes` job (hosted) therefore starts with the step `Refuse fork
-and Dependabot PRs in the merge queue`, which runs only on `merge_group`. It
-resolves every pull request in the group, taking the last `(#N)` of each
-commit subject in `base_sha..head_sha` plus the number in the group's
-`head_ref`, and looks each one up with `gh api` (5 tries, 2, 4, 8 and 16 s
-apart). It refuses (the job fails) when a pull request comes from a fork, is
-authored by `dependabot[bot]`, has lost its head repository, or has a head
-repository other than this one (compared case-insensitively); when the range
-is empty, a commit subject has no `(#N)` or the `head_ref` cannot be parsed;
-or when a lookup still fails after the last try. `vendor` needs `changes`, and
-every other fleet job needs `vendor` or `changes`, so a refusal skips the
-whole fleet and `CI gate` goes red.
+A `merge_group` run is classified, not refused. The `changes` job (hosted)
+starts with the step `Classify the merge group`, which runs only on
+`merge_group`. It resolves every pull request in the group, taking the last
+`(#N)` of each commit subject in `base_sha..head_sha` plus the number in the
+group's `head_ref`, and looks each one up with `gh api` (5 tries, 2, 4, 8 and
+16 s apart). The classifier's exit code decides the route:
+
+| Exit code | Meaning | Route |
+|---|---|---|
+| 0 | every pull request in the group is from this repository and not from Dependabot | `fleet` |
+| 3 | the group holds a pull request from a fork, from `dependabot[bot]` or from another repository | `hosted` |
+| anything else | the group cannot be classified | the step fails and `CI gate` goes red |
+
+The classifier refuses (exit 1) when a pull request has lost its head
+repository or its fork flag cannot be read, when the range is empty, a commit
+subject has no `(#N)`, the `head_ref` cannot be parsed, or a lookup still
+fails after the last try. It also refuses a group in which a fork pull request
+(not a Dependabot one) changes a file under `.github/` or `tools/ci/`.
+
+The step publishes the exit code as `route=fleet` or `route=hosted`. The step
+`Decide the runner route` then settles one `route` output of the `changes`
+job for every event: a merge group takes the classifier's value (a missing or
+invalid one fails the step); a pull request from a fork or from Dependabot is
+`hosted`; any other pull request, a push and a dispatch are `fleet`; every
+other event fails.
+
+Every build runner job reads `needs.changes.outputs.route` directly and lists
+`changes` in its `needs:`. Its `runs-on` adds `|| needs.changes.outputs.route
+!= 'fleet'` to the hosted condition, so a missing or empty route means hosted:
+
+```yaml
+runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
+```
+
+The route is never passed through `vendor` or any other job that runs the
+queued tree's code. The IIS system tests have no hosted twin: `iis-sys-tests`
+is skipped when the route is not `fleet`, and `fleet-only-skip-check` accepts
+that skip with the notice "merge group holds a fork or Dependabot PR".
+
+| Event | `route` | Build runner jobs | `iis-sys-tests` |
+|---|---|---|---|
+| `merge_group`, classifier exit 0 | `fleet` | fleet | runs (when its other conditions hold) |
+| `merge_group`, classifier exit 3 | `hosted` | hosted | skipped, accepted by the skip check |
+| `merge_group`, route missing or invalid | step fails | hosted (the run is red anyway) | skipped |
+| `pull_request` from a fork or Dependabot | `hosted` | hosted | skipped |
+| `pull_request` from this repository | `fleet` | fleet | runs (when its other conditions hold) |
+| `push`, `workflow_dispatch` | `fleet` | fleet | runs (when its other conditions hold) |
+
+A hosted merge-group run is much slower than a fleet one (the hosted legs have
+no hub or remote cache, and the Windows unit tests dominate), and a group of up
+to three entries runs fully hosted when any of them is a fork pull request. Fork
+pull requests are rare enough for that to be acceptable.
 
 The classifier is `tools/ci/queue_fork_guard.sh`. The step reads it from
 `origin/master` and pipes it to `bash`; it never runs the copy in the
 queued tree, and a script missing on the default branch fails the step. The
 workflow-shape gate (`queue-guard-reads-default-branch`) requires the step in
-the `changes` job, restricts its `run:` block to that read (plus `set -euo
-pipefail` and the default-branch fetch) and rejects any other read of the
-script in a workflow file.
+the `changes` job, restricts its `run:` block to that read, the exit-code case
+that publishes the route (plus `set -euo pipefail` and the default-branch
+fetch) and rejects any other read of the script in a workflow file; the
+`queue-route` check pins the route step, the `route` output and the `needs:` of
+every build runner job.
 `tools/ci/test_queue_fork_guard.sh` covers the classifier against a fake `gh`.
 
 The PR-number rule depends on the queue's **squash** merge method: one squash
@@ -839,8 +887,15 @@ a dispatch made by `github-actions[bot]`. The shape gate
 step, in this order, as the first steps after the checkout, each in exactly
 this text.
 
-This narrows the merge-queue boundary; it does not close it. The policy stays:
-no fork or Dependabot pull request is added to the merge queue. The `@ci-dev`
+What keeps fork code off the build runners is the runner group, which accepts
+jobs only from the listed pipeline files on the default branch (and `ci-dev`),
+not any check in the queued tree. The guards above bind runs whose caller
+workflow is unmodified; maintainers review changes under `.github/` before
+queueing a pull request. A merge group's `ci.yml` comes from the queued tree,
+but the pipeline it calls at `@master` is the default branch's file, and that
+file reads the classifier from the default branch.
+
+This narrows the merge-queue boundary; it does not close it. The `@ci-dev`
 allow-list entries stay. Pushing `ci-dev` from a `master`-based branch gives its
 copies of `pipeline-pr.yml` and `pipeline-full.yml` the queue fork guard and
 this guard, but that alone does not close the `@ci-dev` path: it stays open
@@ -1020,8 +1075,14 @@ and fails the build when the shape breaks:
 - **(f)** a reusable workflow has a top-level `permissions:` block with no
   write access, and a `write` permission at job level is allowed only on a
   job with a hosted `runs-on`;
+- **(queue-route)** in `pipeline-pr.yml`: the `changes` job holds the step
+  `Decide the runner route` right after `Decide the fleet scope`, in exactly
+  its spec text, and publishes `route`; no other job defines a `route`
+  output; every build runner job lists `changes` in its `needs:`, and its
+  `runs-on` (and, for `iis-sys-tests`, its `if:`) is the queue form with the
+  route term (the old form is rejected there);
 - **(queue-guard-reads-default-branch)** in `pipeline-pr.yml`: the `changes`
-  job holds the merge-queue guard step as the third of three fixed steps
+  job holds the merge-queue guard step (`Classify the merge group`, `id: queue`) as the third of three fixed steps
   after the checkout step (after the push-ref and token-dispatch refusal
   steps; the checkout sets no `env:`), with fixed keys (compared unquoted), `if:`,
   `run:` block (the classifier is read from `origin/${DEFAULT_BRANCH}` with
