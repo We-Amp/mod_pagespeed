@@ -483,6 +483,18 @@ the split (rule f): every reusable workflow declares a top-level
 not) is allowed only on a job with a hosted `runs-on`. Report jobs check out
 `master` for the tools they run, because they hold a write token.
 
+### The schedule guard
+
+GitHub's cron is best effort, so an external scheduler also dispatches
+`nightly.yml` every night (with `full_tier` set, which reproduces what a
+scheduled night runs). The hosted `guard` job makes a scheduled run skip all
+its work when another run of `nightly.yml` (any event, any status) was
+created in the previous 20 hours, so the two triggers never run the night
+twice. A dispatch never skips. The guard runs inside the `nightly`
+concurrency group, so a late cron run that waited for a running dispatch sees
+it and skips. If the guard cannot read the run list it lets the run proceed.
+A skipped run has no `full` job, so `nightly-red` is skipped too.
+
 ### The nightly-red issue
 
 `nightly.yml` ends with the hosted job `nightly-red` (`Nightly full-tier

@@ -53,7 +53,48 @@ permissions:
   contents: read
 
 jobs:
+  # The schedule guard. GitHub's cron is best effort, and an external
+  # scheduler also dispatches this workflow every night. A scheduled run skips
+  # all its work when another run of this workflow (any event, any status) was
+  # created in the previous 20 hours. A dispatch never skips. The guard runs
+  # inside the `nightly` concurrency group, so a late cron run that waited for
+  # a running dispatch sees that run and skips. Any error in the check leaves
+  # skip=false: a night that runs twice is better than a night that is lost.
+  guard:
+    name: Schedule guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Skip a scheduled run when a nightly started in the last 20 hours
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          skip=false
+          if [ "${EVENT}" = schedule ]; then
+            recent="$(gh api "repos/${REPO}/actions/workflows/nightly.yml/runs?per_page=50" 2>/dev/null \
+              | jq -r --arg run "${RUN_ID}" --argjson now "$(date -u +%s)" \
+                  '[.workflow_runs[] | select((.id | tostring) != $run and ((.created_at | fromdateiso8601) > ($now - 72000)))] | length' 2>/dev/null || true)"
+            case "${recent}" in
+              ''|*[!0-9]*) echo "::notice::the guard could not read the run list; running" ;;
+              0) echo "no other nightly run in the last 20 hours; running" ;;
+              *) skip=true; echo "::notice::${recent} other nightly run(s) started in the last 20 hours; skipping this scheduled run" ;;
+            esac
+          fi
+          echo "skip=${skip}" >> "${GITHUB_OUTPUT}"
+
   nightly:
+    needs: [guard]
+    if: needs.guard.outputs.skip != 'true'
     # Nothing in the nightly tier writes to GitHub: read access is both the
     # ceiling the called workflow may narrow and everything it uses.
     permissions:
@@ -80,9 +121,11 @@ jobs:
   # exceed what its caller grants, and a missing grant fails the whole run at
   # startup.
   full:
+    needs: [guard]
     if: >-
+      needs.guard.outputs.skip != 'true' && (
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && inputs.full_tier && github.ref == 'refs/heads/master')
+      (github.event_name == 'workflow_dispatch' && inputs.full_tier && github.ref == 'refs/heads/master'))
     permissions:
       actions: read
       contents: read
@@ -97,7 +140,7 @@ jobs:
   # prints what it would write.
   nightly-red:
     name: Nightly full-tier report
-    needs: [full]
+    needs: [guard, full]
     if: always() && needs.full.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 15
