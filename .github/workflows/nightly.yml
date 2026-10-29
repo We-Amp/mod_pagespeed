@@ -106,10 +106,23 @@ jobs:
             esac
           fi
           echo "skip=${skip}" >> "${GITHUB_OUTPUT}"
-          if [ "${skip}" = true ]; then
-            gh run cancel "${RUN_ID}" || echo "::notice::could not cancel this run"
-            sleep 30
-          fi
+      # A separate step, so the output is recorded before the run is
+      # cancelled. If the cancel cannot be made to work the step fails, so a
+      # skipped run never ends `success` and counts as a real night.
+      - name: Cancel this skipped run
+        if: steps.check.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          for _ in 1 2 3; do
+            if gh run cancel "${RUN_ID}"; then sleep 30; exit 0; fi
+            sleep 5
+          done
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/force-cancel"; then sleep 30; exit 0; fi
+          echo "::error::could not cancel this skipped run"
+          exit 1
 
   nightly:
     needs: [guard]

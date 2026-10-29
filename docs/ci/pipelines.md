@@ -500,6 +500,7 @@ group; it then reads `cancelled`, is not counted, and the cron run proceeds.
 If the guard cannot read the run list it lets the run proceed, and if the
 guard job itself fails the jobs still run. A skipped run has no `full` job,
 so `nightly-red` stays silent for it and still reports a real red.
+One edge remains: a queued full-tier dispatch that the guard counted and a non-full hand dispatch then replaces in the group is a lost night, so avoid hand dispatches during the nightly window.
 
 ### The nightly-red issue
 
