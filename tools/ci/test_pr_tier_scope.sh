@@ -58,7 +58,7 @@ make_repo() {
   git init -q "${REPO}"
   git -C "${REPO}" config user.email t@example.invalid
   git -C "${REPO}" config user.name t
-  git -C "${REPO}" commit -q --allow-empty -m "root"
+  git -C "${REPO}" commit -q --allow-empty -m "root (#1)"
   BEFORE_VAL="$(git -C "${REPO}" rev-parse HEAD)"
   if [ $# -gt 0 ]; then
     mkdir -p "${REPO}/$(dirname "$1")"
@@ -305,39 +305,25 @@ CUR=push-pipeline-change-in-earlier-commit-runs
 run_scope CI_SCOPE=push
 check "${CUR}" true "pipeline_change=true"
 
-# The proof covers the whole group, so its base comes from the queue suite's
-# branch, not from the push range: group [fork #551, same-repo #12] pushed after
-# [fork #551] alone has a push range of just #12.
+# The proof covers the whole group, and a stacked group's own base is the
+# previous entry's commit, so the group is the union of the push range and the
+# last 3 first-parent commits: a fork two commits below the tip, with the push
+# range holding only the tip, is seen.
 make_repo
-ROOT_VAL="${BEFORE_VAL}"
 add_commit "fork change (#551)"
-FORK_SHA="$(git -C "${REPO}" rev-parse HEAD)"
-add_commit "same repo change (#12)"
-BEFORE_VAL="${FORK_SHA}"
-CUR=push-group-base-before-push-range-fork-runs
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${ROOT_VAL}")" FAKE_PR_OUT_551="${FORK_OUT}"
+add_commit "middle (#11)"
+add_commit "tip (#12)"
+BEFORE_VAL="$(git -C "${REPO}" rev-parse HEAD~1)"
+CUR=push-fork-below-tip-outside-push-range-runs
+run_scope CI_SCOPE=push FAKE_PR_OUT_551="${FORK_OUT}"
 check "${CUR}" true "proof=false"
-CUR=push-group-base-equals-push-range-skips
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${FORK_SHA}")" FAKE_PR_OUT_551="${FORK_OUT}"
+CUR=push-three-trusted-below-tip-skips
+run_scope CI_SCOPE=push
 check "${CUR}" false "proof=true"
-CUR=push-group-base-trusted-group-skips
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${ROOT_VAL}")"
-check "${CUR}" false "proof=true"
-
-CUR=push-suite-branch-without-base-runs
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(body "$(suite gh-readonly-queue/master/pr-12-abc completed '"success"')")"
-check "${CUR}" true "proof=false"
-CUR=push-suite-base-not-ancestor-runs
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for 1234567890123456789012345678901234567890)"
-check "${CUR}" true "proof=false"
-CUR=push-suites-disagree-runs
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(body "$(suite "gh-readonly-queue/master/pr-12-${ROOT_VAL}" completed '"success"')" "$(suite "gh-readonly-queue/master/pr-13-${FORK_SHA}" completed '"success"')")"
-check "${CUR}" true "proof=false"
-CUR=push-two-suites-same-branch-skips
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(body "$(suite "gh-readonly-queue/master/pr-12-${ROOT_VAL}" completed '"success"')" "$(suite "gh-readonly-queue/master/pr-12-${ROOT_VAL}" completed '"success"')")"
-check "${CUR}" false "proof=true"
+n="$(grep -c 'pulls/' "${WORK}/gh.log")"
+if [ "${n}" = 3 ]; then pass "${CUR}: looked up 3 pull requests (union, no duplicates)"; else fail "${CUR}: ${n} pull lookups, want 3"; fi
 CUR=push-before-sha-not-ancestor-runs
-run_scope CI_SCOPE=push FAKE_GH_BODY="$(proof_for "${ROOT_VAL}")" BEFORE_SHA=1234567890123456789012345678901234567890
+run_scope CI_SCOPE=push BEFORE_SHA=1234567890123456789012345678901234567890
 check "${CUR}" true "proof=false"
 
 make_repo src/a.cc

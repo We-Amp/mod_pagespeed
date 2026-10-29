@@ -798,10 +798,16 @@ Hits under `pagespeed/envoy`, `pagespeed/windows`, `pagespeed/iis`,
 
 A `merge_group` run is classified, not refused. The `changes` job (hosted)
 starts with the step `Classify the merge group`, which runs only on
-`merge_group`. It resolves every pull request in the group, taking the last
-`(#N)` of each commit subject in `base_sha..head_sha` plus the number in the
-group's `head_ref`, and looks each one up with `gh api` (5 tries, 2, 4, 8 and
-16 s apart). The classifier's exit code decides the route:
+`merge_group`. The group is every commit between the default branch, fetched
+fresh by the step, and the group head. The group's own `base_sha` is not the
+range base: in a stacked queue it is the previous entry's queue commit, which
+would hide the entries ahead of it. The classifier refuses unless the default
+branch is an ancestor of the group head, and a range of more than three entries
+or one with a merge commit. It resolves every pull request in the group, taking
+the last `(#N)` of each commit subject plus the number in the group's
+`head_ref` (which must match the head commit), and looks each one up with
+`gh api` (5 tries, 2, 4, 8 and 16 s apart); each must be open, or merged into
+the default branch by its own group commit. The classifier's exit code decides the route:
 
 | Exit code | Meaning | Route |
 |---|---|---|
@@ -844,7 +850,7 @@ that skip with the notice "merge group holds a fork or Dependabot PR".
 | `pull_request` from this repository | `fleet` | fleet | runs (when its other conditions hold) |
 | `push`, `workflow_dispatch` | `fleet` | fleet | runs (when its other conditions hold) |
 
-The post-merge push may skip the fleet jobs only when the merge queue already proved the commit. The scope script (`tools/ci/pr_tier_scope.sh`) therefore looks up the pull request of every commit in the merge group (the last `(#N)` of each subject in `base..after`, where the base is the commit named in the proof's queue branch, `gh-readonly-queue/<branch>/pr-N-<base>`; a group holds up to three entries and the proof covers all of them, not just this push) and allows that skip only when every one is a pull request from this repository that is not from Dependabot; an unreadable or unparseable base, a base that is not an ancestor of the pushed commit, several differing proof branches, an unusable push range (no previous tip, a merge commit, more than three commits), a commit without a number, or any other or unreadable lookup runs the full fleet tier on the push, so a group that ran on hosted runners is never taken as fleet proof.
+The post-merge push may skip the fleet jobs only when the merge queue already proved the commit. The scope script (`tools/ci/pr_tier_scope.sh`) therefore looks up the pull request of every commit in the merge group, taken as every commit between the default branch and the group head (the union of the push range and the last three first-parent commits; the proof's own queue branch names the previous entry's commit in a stacked group, so no base is taken from it; a group holds up to three entries and the proof covers all of them, not just this push), and allows that skip only when every one is a pull request from this repository that is not from Dependabot; an unusable push range (no previous tip, not an ancestor, a merge commit, more than three commits), a commit without a number, or any other or unreadable lookup runs the full fleet tier on the push, so a group that ran on hosted runners is never taken as fleet proof.
 
 A hosted merge-group run is much slower than a fleet one (the hosted legs have
 no hub or remote cache, and the Windows unit tests dominate), and a group of up

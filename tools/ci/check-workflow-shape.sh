@@ -637,9 +637,7 @@ QG_ENV_ALLOWED=" GH_TOKEN BASE HEAD_SHA HEAD_REF DEFAULT_BRANCH GITHUB_REPOSITOR
 # shellcheck disable=SC2016  # the text to match carries literal ${...}
 QG_SET='set -euo pipefail'
 # shellcheck disable=SC2016
-QG_REV='git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||'
-# shellcheck disable=SC2016
-QG_FETCH='  git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"'
+QG_FETCH='git fetch --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"'
 # shellcheck disable=SC2016
 QG_SHOW='git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" > "${RUNNER_TEMP}/qfg.sh"'
 # shellcheck disable=SC2016
@@ -647,8 +645,8 @@ QG_RUN='rc=0; bash "${RUNNER_TEMP}/qfg.sh" || rc=$?'
 # Exit 0 = trusted (fleet), 3 = untrusted (hosted), anything else refuses.
 # shellcheck disable=SC2016
 QG_CASE='case "${rc}" in 0) echo route=fleet;; 3) echo route=hosted;; *) exit 1;; esac >> "$GITHUB_OUTPUT"'
-QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s\n%s\n%s' "${QG_SET}" "${QG_REV}" "${QG_FETCH}" "${QG_SHOW}" "${QG_RUN}" "${QG_CASE}")"
-QG_BODY_MIN="$(printf '%s\n%s\n%s\n%s' "${QG_SET}" "${QG_SHOW}" "${QG_RUN}" "${QG_CASE}")"
+QG_BODY_FULL="$(printf '%s\n%s\n%s\n%s\n%s' "${QG_SET}" "${QG_FETCH}" "${QG_SHOW}" "${QG_RUN}" "${QG_CASE}")"
+QG_BODY_MIN="${QG_BODY_FULL}"
 # shellcheck disable=SC2016
 VENDOR_IF='    if: ${{ needs.changes.outputs.fleet == '"'true'"' }}'
 QG_PUSH_STEP="Refuse pushes that are not on the default branch"
@@ -724,7 +722,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
     $0 == "        run: |" { inrun = 1; next }
     inrun { if ($0 ~ /^          /) print; else if ($0 !~ /^[[:space:]]*$/) inrun = 0 }' | sed -E 's/^          //')"
   if [ "${body}" != "${QG_BODY_FULL}" ] && [ "${body}" != "${QG_BODY_MIN}" ]; then
-    qg_err "the guard step's run: block must be only: ${QG_SET}, the optional default-branch fetch, ${QG_SHOW}, ${QG_RUN} and ${QG_CASE}"
+    qg_err "the guard step's run: block must be only: ${QG_SET}, the fresh default-branch fetch, ${QG_SHOW}, ${QG_RUN} and ${QG_CASE}"
   fi
 
   # Position: right after actions/checkout come the push-ref step, the

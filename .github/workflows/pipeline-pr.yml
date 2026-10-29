@@ -107,6 +107,9 @@ jobs:
           set -euo pipefail
           [ "${ACTOR}" != "github-actions[bot]" ] || { echo "::error::dispatches made with a workflow token are not allowed"; exit 1; }
 
+      # The group is every commit between a freshly fetched default branch and
+      # the group head (a stacked group's base_sha is the previous entry's
+      # commit, so it is not the range base).
       # A merge group is classified here, on a hosted runner, before any fleet
       # job starts. The guard exits 0 when every pull request in the group is
       # trusted (fleet), 3 when the group holds a fork or Dependabot pull
@@ -124,8 +127,7 @@ jobs:
         # The guard is read from the default branch, never from the queued tree.
         run: |
           set -euo pipefail
-          git rev-parse -q --verify "origin/${DEFAULT_BRANCH}^{commit}" >/dev/null ||
-            git fetch --no-tags --depth=1 origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          git fetch --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
           git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" > "${RUNNER_TEMP}/qfg.sh"
           rc=0; bash "${RUNNER_TEMP}/qfg.sh" || rc=$?
           case "${rc}" in 0) echo route=fleet;; 3) echo route=hosted;; *) exit 1;; esac >> "$GITHUB_OUTPUT"

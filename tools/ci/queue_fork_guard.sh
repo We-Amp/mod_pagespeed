@@ -9,9 +9,13 @@
 # (`git show "origin/${DEFAULT_BRANCH}:tools/ci/queue_fork_guard.sh" | bash`),
 # never from the queued tree.
 #
-# Env: BASE (merge group base sha), HEAD_SHA (merge group head sha), HEAD_REF
+# Env: DEFAULT_BRANCH, HEAD_SHA (merge group head sha), HEAD_REF
 # (refs/heads/gh-readonly-queue/<base>/pr-<N>-<sha>), GITHUB_REPOSITORY,
-# GH_TOKEN. Run from a checkout that holds BASE..HEAD_SHA.
+# GH_TOKEN. Run from a checkout whose origin/<DEFAULT_BRANCH> was fetched
+# just before, with full history. The group is every commit between
+# origin/<DEFAULT_BRANCH> and HEAD_SHA: in a stacked queue the group's own
+# base_sha is the previous entry's queue commit, which would hide the entries
+# ahead of it, so base_sha is not used.
 #
 # The PR-number rule depends on the queue's SQUASH merge method: one squash
 # commit per pull request, its subject ending in "(#N)". The shape is
@@ -33,14 +37,22 @@ set -euo pipefail
 
 refuse() { echo "refusing: $*" >&2; exit 1; }
 
-# PR numbers: the last "(#N)" of each commit subject in BASE..HEAD_SHA.
+# PR numbers: the last "(#N)" of each commit subject in origin/<DEFAULT_BRANCH>..HEAD_SHA.
 ref_n="$(printf '%s\n' "${HEAD_REF:-}" | sed -nE 's|.*/pr-([0-9]+)-.*|\1|p')"
 [ -n "${ref_n}" ] || refuse "unparseable merge group head ref"
 
-shas="$(git rev-list "${BASE}..${HEAD_SHA}")"
-[ -n "${shas}" ] || refuse "empty merge group (${BASE}..${HEAD_SHA} holds no commits)"
+[ -n "${DEFAULT_BRANCH:-}" ] || refuse "DEFAULT_BRANCH is not set"
+main_ref="origin/${DEFAULT_BRANCH}"
+git rev-parse -q --verify "${main_ref}^{commit}" >/dev/null 2>&1 || refuse "${main_ref} is not available"
+git merge-base --is-ancestor "${main_ref}" "${HEAD_SHA}" 2>/dev/null ||
+  refuse "${main_ref} is not an ancestor of the merge group head"
 
-merges="$(git rev-list --min-parents=2 "${BASE}..${HEAD_SHA}")"
+shas="$(git rev-list "${main_ref}..${HEAD_SHA}")"
+[ -n "${shas}" ] || refuse "empty merge group (${main_ref}..${HEAD_SHA} holds no commits)"
+n_range="$(printf '%s\n' ${shas} | wc -l | tr -dc '0-9')"
+[ "${n_range}" -le 3 ] || refuse "merge group holds ${n_range} commits; the queue builds at most 3 entries"
+
+merges="$(git rev-list --min-parents=2 "${main_ref}..${HEAD_SHA}")"
 [ -z "${merges}" ] || refuse "merge group holds a merge commit; the queue must squash"
 
 prs=""

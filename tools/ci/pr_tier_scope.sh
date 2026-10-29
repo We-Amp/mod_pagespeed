@@ -23,11 +23,11 @@
 # completed, successful check suite of GitHub Actions on a gh-readonly-queue/
 # branch for the same SHA) skips the fleet jobs, unless the push changes the
 # pipeline itself or the pull request of ANY commit of the merge group (the
-# last `(#N)` of each subject in base..SHA, where the base is the suffix of the
-# queue suite's branch name `gh-readonly-queue/<branch>/pr-N-<base sha>`, looked
-# up through the API) is from a fork, from another repository or from
-# dependabot[bot]: such a group ran on hosted runners. An unreadable or
-# missing base, pull request or lookup means no skip. It is on only when CI_SCOPE is push, pr-build or pr; any
+# last `(#N)` of each subject, looked up through the API; the group is the
+# union of the push range and the last 3 first-parent commits, because a
+# stacked group's base is the previous entry) is from a fork, from another
+# repository or from dependabot[bot]: such a group ran on hosted runners. An
+# unreadable range, pull request or lookup means no skip. It is on only when CI_SCOPE is push, pr-build or pr; any
 # other value, or none, is `full` and runs everything. Every other event runs
 # everything. Anything unexpected fails safe to the full tier.
 
@@ -113,23 +113,25 @@ pr_lookup_trusted() {
   fi
 }
 
-# pr_trusted <group base>: prints true, false or error. EVERY commit of the
-# merge group, base..HEAD, where the base is the commit the successful queue
-# suite was built on (a merge group lands up to 3 entries in one push, and the
-# proof covers the whole group, not just this push's range), must name, as the
-# last `(#N)` of its subject, a pull request that passes pr_lookup_trusted. The
-# push's own range (BEFORE_SHA) must be usable too. A group that held
-# any other pull request ran on hosted runners, so its proof does not cover the
-# fleet. An unusable range, a missing number or an unknown lookup is not
-# trusted.
+# pr_trusted: prints true, false or error. The proof covers the whole merge
+# group, and in a stacked group the suite's own base is the previous entry's
+# commit, so no base is taken from the proof. EVERY commit of the union of the
+# push range (BEFORE_SHA..HEAD, which must be usable) and the last 3
+# first-parent commits ending at HEAD (a group holds at most 3 entries) must
+# name, as the last `(#N)` of its subject, a pull request that passes
+# pr_lookup_trusted. A group that held any other pull request ran on hosted
+# runners, so its proof does not cover the fleet. An unusable range, a missing
+# number or an unknown lookup is not trusted.
 pr_trusted() {
-  local commits sha subject n r
+  local commits tail sha subject n r
   if [ -z "${GITHUB_REPOSITORY:-}" ]; then
     echo false
     return
   fi
-  range_commits >/dev/null || { echo false; return; }
-  commits="$(range_commits "${1-}")" || { echo false; return; }
+  commits="$(range_commits)" || { echo false; return; }
+  tail="$(git rev-list --first-parent -n "${MAX_PUSH_COMMITS}" HEAD 2>/dev/null)" || { echo false; return; }
+  [ -n "${tail}" ] || { echo false; return; }
+  commits="$(printf '%s\n%s\n' "${commits}" "${tail}" | awk 'NF && !seen[$0]++')"
   for sha in ${commits}; do
     subject="$(git log -1 --format=%s "${sha}" 2>/dev/null)" || { echo error; return; }
     n="$(printf '%s\n' "${subject}" | sed -nE 's/.*\(#([0-9]+)\).*/\1/p' | head -n 1)"
@@ -144,24 +146,6 @@ pr_trusted() {
     fi
   done
   echo true
-}
-
-# queue_group_trusted <suite branch>...: the group base is the suffix of the
-# queue suite's head_branch, `gh-readonly-queue/<branch>/pr-N-<base sha>`. Prints
-# true, false or error. Several differing suite branches, a missing or
-# unparseable base, or a base that is not an ancestor of HEAD mean no proof.
-queue_group_trusted() {
-  local base
-  if [ "$(printf '%s' "${1-}" | wc -w | tr -d ' ')" != 1 ]; then
-    echo false
-    return
-  fi
-  base="$(printf '%s\n' "$1" | sed -nE 's#^gh-readonly-queue/.+/pr-[0-9]+-([0-9a-f]{40})$#\1#p')"
-  if [ -z "${base}" ]; then
-    echo false
-    return
-  fi
-  pr_trusted "${base}"
 }
 
 # queue_proof: prints true, false or error.
@@ -179,11 +163,10 @@ queue_proof() {
         [ (.check_suites? // [])[]?
           | select(((.head_branch // "") | startswith("gh-readonly-queue/"))
                    and .status == "completed" and .conclusion == "success") ]
-        | [ .[].head_branch ] | unique
-        | if length > 0 then "true " + join(" ") else "false" end' 2>/dev/null)" &&
-      { [ "${result}" = false ] || [ "${result%% *}" = true ]; }; then
-      if [ "${result}" != false ]; then
-        result="$(queue_group_trusted "${result#true }")"
+        | if length > 0 then "true" else "false" end' 2>/dev/null)" &&
+      { [ "${result}" = true ] || [ "${result}" = false ]; }; then
+      if [ "${result}" = true ]; then
+        result="$(pr_trusted)"
       fi
       echo "${result}"
       return

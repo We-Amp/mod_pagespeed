@@ -151,6 +151,8 @@ expect_bad bad-queue-route-vendor-output 'defines an output named route'
 expect_bad bad-queue-route-after-diff 'queue-route'
 expect_bad bad-queue-guard-case-ignores-exit 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-no-id 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-stale-fetch 'queue-guard-reads-default-branch'
+expect_bad bad-queue-guard-no-fetch 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-plain-bash 'queue-guard-reads-default-branch'
 # vendor-if-fleet-only: good-queue-guard has vendor with exactly
 # `if: ${{ needs.changes.outputs.fleet == 'true' }}` (accepted above); any other if: is rejected.

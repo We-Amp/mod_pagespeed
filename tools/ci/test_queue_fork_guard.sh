@@ -56,6 +56,7 @@ make_repo() {
   git -C "${REPO}" config user.name t
   git -C "${REPO}" commit -q --allow-empty -m "base (#1)"
   BASE_SHA="$(git -C "${REPO}" rev-parse HEAD)"
+  git -C "${REPO}" update-ref refs/remotes/origin/main "${BASE_SHA}"
   local s
   for s in "$@"; do
     case "${s}" in
@@ -80,7 +81,7 @@ run_case() {
   : > "${WORK}/sleep.log"
   set +e
   out="$(cd "${REPO}" && env PATH="${BIN}:${PATH}" FAKE_LOG="${WORK}/gh.log" SLEEP_LOG="${WORK}/sleep.log" \
-    GITHUB_REPOSITORY=We-Amp/example BASE="${BASE_SHA}" HEAD_SHA="${TIP_SHA}" \
+    GITHUB_REPOSITORY=We-Amp/example DEFAULT_BRANCH=main BASE="${BASE_SHA}" HEAD_SHA="${TIP_SHA}" \
     HEAD_REF="${HEAD_REF_VAL:-refs/heads/gh-readonly-queue/main/pr-999-abc}" "$@" bash < "${GUARD}" 2>&1)"
   rc=$?
   set -e
@@ -213,6 +214,35 @@ run_case merged-pr-matching-commit-ok 0 "PR #201" "FAKE_STATE_201=closed" "FAKE_
 run_case merged-pr-other-commit-refused 1 "PR #201 is not open" "FAKE_STATE_201=closed" "FAKE_MERGED_201=true" "FAKE_MSHA_201=1111111111111111111111111111111111111111"
 run_case closed-unmerged-pr-matching-sha-refused 1 "PR #201 is not open" "FAKE_STATE_201=closed" "FAKE_MERGED_201=false" "FAKE_MSHA_201=${SHA_201}"
 run_case merged-fork-pr-still-hosted 3 "PR #201: untrusted" "FAKE_PR_201=${FORK}" "FAKE_STATE_201=closed" "FAKE_MERGED_201=true" "FAKE_MSHA_201=${SHA_201}"
+
+# Stacked queue: merge_group.base_sha is the previous entry's queue commit, so
+# BASE is not the range base. The group is origin/main..HEAD.
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-552-abc"
+make_repo "fork (#551)" "same (#552)"
+STACKED_BASE="$(git -C "${REPO}" rev-parse HEAD~1)"
+run_case stacked-base-fork-ahead-untrusted 3 "PR #551: untrusted" "FAKE_PR_551=${FORK}" "BASE=${STACKED_BASE}"
+make_repo "fork (#551)|.github/workflows/ci.yml" "same (#552)"
+STACKED_BASE="$(git -C "${REPO}" rev-parse HEAD~1)"
+run_case stacked-base-fork-ahead-touching-workflow 1 "fork PR #551 changes" "FAKE_PR_551=${FORK}" "BASE=${STACKED_BASE}"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-553-abc"
+make_repo "a (#551)" "b (#552)" "c (#553)"
+STACKED_BASE="$(git -C "${REPO}" rev-parse HEAD~1)"
+run_case stacked-chain-of-three-trusted 0 "PR #553" "BASE=${STACKED_BASE}"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-554-abc"
+make_repo "a (#551)" "b (#552)" "c (#553)" "d (#554)"
+run_case four-entries-refused 1 "at most 3 entries"
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-553-abc"
+make_repo "a (#551)" "b (#552)" "c (#553)"
+git -C "${REPO}" commit -q --allow-empty -m "unrelated main"
+git -C "${REPO}" update-ref refs/remotes/origin/main "$(git -C "${REPO}" rev-parse HEAD)"
+git -C "${REPO}" checkout -q "${BASE_SHA}"
+git -C "${REPO}" commit -q --allow-empty -m "other (#553)"
+TIP_SHA="$(git -C "${REPO}" rev-parse HEAD)"
+run_case main-not-an-ancestor-refused 1 "not an ancestor"
+make_repo "a (#551)"
+git -C "${REPO}" update-ref -d refs/remotes/origin/main
+HEAD_REF_VAL="refs/heads/gh-readonly-queue/main/pr-551-abc"
+run_case main-ref-missing-refused 1 "not available"
 
 if [ "${FAILS}" -ne 0 ]; then
   echo "${FAILS} case(s) failed"
