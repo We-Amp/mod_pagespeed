@@ -22,6 +22,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "pagespeed/kernel/base/gtest_prod.h"
@@ -741,11 +742,26 @@ class Declaration {
   void set_values(Values* values) { values_.reset(values); }
   void set_important(bool important) { important_ = important; }
 
+  // Trimmed source text of the value of a custom property (--*), set by the
+  // parser. Custom property values are opaque token streams, so serializers
+  // write this text instead of re-serializing values(). Empty (and
+  // has_verbatim_value() false) for every other declaration, and for custom
+  // properties whose value contains url() or escapes (those keep the
+  // structured values so that URLs can still be rewritten).
+  bool has_verbatim_value() const { return has_verbatim_value_; }
+  const string& verbatim_value() const { return verbatim_value_; }
+  void set_verbatim_value(string value) {
+    verbatim_value_ = std::move(value);
+    has_verbatim_value_ = true;
+  }
+
   string ToString() const;
 
  private:
   Property property_;
   std::unique_ptr<Values> values_;
+  string verbatim_value_;
+  bool has_verbatim_value_ = false;
   bool important_;  // Whether !important is declared on this declaration.
 
   // Verbatim bytes parsed for the declaration. Currently this is only stored

@@ -3451,6 +3451,38 @@ TEST_F(ParserTest, CalcAdditionOperator) {
 // its own right, and nothing these tests check requires it.
 // =============================================================================
 
+TEST_F(ParserTest, CustomPropertyNamesAreCaseSensitive) {
+  Parser p(":root { --Test: 1; --test: 2; COLOR: red; Foo-Bar: 3; }");
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  ASSERT_EQ(1, t->rulesets().size());
+  const Declarations& decls = t->ruleset(0).declarations();
+  ASSERT_EQ(4, decls.size());
+  EXPECT_EQ("--Test", decls[0]->prop_text());
+  EXPECT_EQ("--test", decls[1]->prop_text());
+  // Ordinary names are still lowercased.
+  EXPECT_EQ(Property::COLOR, decls[2]->prop());
+  EXPECT_EQ("foo-bar", decls[3]->prop_text());
+}
+
+TEST_F(ParserTest, CustomPropertyValuesAreVerbatim) {
+  Parser p(
+      ":root { --gap: 0px; --c:   #ff0 ; --w: calc(var(--gap) + 1px) ; "
+      "--n: 0.50em !important; --e:; --u: url(a.png) }");
+  std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+  ASSERT_EQ(1, t->rulesets().size());
+  const Declarations& decls = t->ruleset(0).declarations();
+  ASSERT_EQ(6, decls.size());
+  EXPECT_EQ("--gap: 0px", decls[0]->ToString());
+  EXPECT_EQ("--c: #ff0", decls[1]->ToString());
+  EXPECT_EQ("--w: calc(var(--gap) + 1px)", decls[2]->ToString());
+  EXPECT_EQ("--n: 0.50em !important", decls[3]->ToString());
+  EXPECT_EQ("--e: ", decls[4]->ToString());
+  // url() values keep the structured form so URLs can still be rewritten.
+  EXPECT_FALSE(decls[5]->has_verbatim_value());
+  EXPECT_EQ("--u: url(a.png)", decls[5]->ToString());
+}
+
 TEST_F(ParserTest, ModernCssCustomProperties) {
   // Optimizer suite: CssCustomProperties, CssVarUsage, CssVarWithFallback.
   for (bool preserve : {false, true}) {
@@ -3466,8 +3498,8 @@ TEST_F(ParserTest, ModernCssCustomProperties) {
     const Declaration* decl = t->ruleset(0).declarations()[0];
     EXPECT_EQ(Property::OTHER, decl->prop());
     EXPECT_EQ("--my-color", decl->prop_text());
-    // Note: colors are canonicalized on serialization (#ff0 -> #ffff00).
-    EXPECT_EQ(":root {--my-color: #ffff00}", t->ruleset(0).ToString());
+    // Custom property values are opaque: kept as written, not canonicalized.
+    EXPECT_EQ(":root {--my-color: #ff0}", t->ruleset(0).ToString());
 
     Parser q("h1 { color: var(--my-color); }");
     q.set_preservation_mode(preserve);

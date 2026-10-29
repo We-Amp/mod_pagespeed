@@ -272,6 +272,38 @@ TEST_F(CssMinifyTest, CalcFunctionWithZeroValueAndUnit) {
   EXPECT_HAS_SUBSTR("width:calc(600px - 0px)", minified);
 }
 
+// Custom properties (--*) are opaque: names are case-sensitive and values are
+// written as the trimmed source text, with no zero-unit elision or colour
+// shortening.
+TEST_F(CssMinifyTest, CustomPropertiesKeptVerbatim) {
+  static const char kCss[] =
+      ":root {\n"
+      "  --Test: 1;\n"
+      "  --test: 2;\n"
+      "  --gap: 0px;\n"
+      "  --c:   #ffff00 ;\n"
+      "  --d: #ff0;\n"
+      "  --pct: 0%;\n"
+      "  --w: calc(var(--gap) + 1px);\n"
+      "}\n"
+      ".a { margin: var(--gap) 0px; width: calc(var(--gap) + 1px);"
+      " color: #ffff00 }";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_HAS_SUBSTR(
+      ":root{--Test:1;--test:2;--gap:0px;--c:#ffff00;--d:#ff0;--pct:0%;"
+      "--w:calc(var(--gap) + 1px)}",
+      minified);
+  // Ordinary properties still minify as before.
+  EXPECT_HAS_SUBSTR(".a{margin:var(--gap) 0;width:calc(var(--gap) + 1px);"
+                    "color:#ff0}",
+                    minified);
+}
+
 // checking unit is retained for zero value in calc with nested var()
 TEST_F(CssMinifyTest, CalcFunctionNestedVarKeepsZeroUnit) {
   static const char kCss[] =

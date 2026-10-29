@@ -24,6 +24,7 @@
 #include <cmath>      // std::isnan
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/strings/str_format.h"
@@ -1697,6 +1698,20 @@ static void ExpandShorthandProperties(Declarations* declarations,
   }
 }
 
+namespace {
+
+bool ContainsUrlFunction(std::string_view text) {
+  for (size_t i = 0; i + 3 < text.size(); ++i) {
+    if ((text[i] | 0x20) == 'u' && (text[i + 1] | 0x20) == 'r' &&
+        (text[i + 2] | 0x20) == 'l' && text[i + 3] == '(') {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 // Parse declarations like "background: white; color: #333; line-height: 1.3;"
 Declarations* Parser::ParseRawDeclarations() {
   Tracer trace(__func__, this);
@@ -1738,6 +1753,7 @@ Declarations* Parser::ParseRawDeclarations() {
         }
         DCHECK_EQ(':', *in_);
         in_++;
+        const char* value_start = in_;
 
         std::unique_ptr<Values> vals;
         switch (prop.prop()) {
@@ -1785,6 +1801,8 @@ Declarations* Parser::ParseRawDeclarations() {
           break;
         }
 
+        const char* value_end = in_;
+
         bool important = false;
         if (in_ < end_ && *in_ == '!') {
           in_++;
@@ -1805,8 +1823,26 @@ Declarations* Parser::ParseRawDeclarations() {
         // Don't add Declaration if it is not ended with a ';' or '}'.
         // For example: "foo: bar !important really;" is not valid.
         if (Done() || *in_ == ';' || *in_ == '}') {
-          declarations->push_back(
+          std::unique_ptr<Declaration> declaration(
               new Declaration(prop, vals.release(), important));
+          // mod_pagespeed local change: a custom property (--*) value is an
+          // opaque token stream. Keep its trimmed source text so that
+          // serialization does not minify it (no zero-unit elision, no
+          // colour shortening). Values containing url() or escapes keep the
+          // structured form so that URL rewriting still sees them.
+          if (prop.is_custom_property() &&
+              errors_seen_mask_ == start_errors_seen_mask) {
+            const char* b = value_start;
+            const char* e = value_end;
+            while (b < e && IsSpace(*b)) ++b;
+            while (e > b && IsSpace(e[-1])) --e;
+            std::string_view raw(b, e - b);
+            if (raw.find('\\') == std::string_view::npos &&
+                !ContainsUrlFunction(raw)) {
+              declaration->set_verbatim_value(std::string(raw));
+            }
+          }
+          declarations->push_back(declaration.release());
         } else {
           ReportParsingError(
               kDeclarationError,

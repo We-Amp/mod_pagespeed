@@ -383,6 +383,11 @@ string Selectors::ToString() const {
 
 string Declaration::ToString() const {
   string result = prop_text() + ": ";
+  if (has_verbatim_value()) {
+    result += verbatim_value();
+    if (IsImportant()) result += " !important";
+    return result;
+  }
   switch (prop()) {
     case Property::UNPARSEABLE:
       result = "/* Unparsed declaration: */ ";

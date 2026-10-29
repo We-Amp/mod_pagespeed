@@ -246,6 +246,14 @@ class Property {
       return TextFromProp(prop_);
   }
 
+  // True for a custom property (a name starting with "--"). Custom property
+  // names are case-sensitive and are stored as written; all other unknown
+  // names are lowercased.
+  bool is_custom_property() const {
+    return prop_ == OTHER && other_.utf8_length() >= 2 &&
+           other_.utf8_data()[0] == '-' && other_.utf8_data()[1] == '-';
+  }
+
   // Static methods mapping between Prop and strings:
   //
   // Given the text of a CSS property, PropFromText returns the
