@@ -241,7 +241,7 @@ CUR=push-three-trusted-skips
 run_scope CI_SCOPE=push
 check "${CUR}" false "proof=true"
 n="$(grep -c 'pulls/' "${WORK}/gh.log")"
-if [ "${n}" = 3 ]; then pass "${CUR}: looked up all 3 pull requests"; else fail "${CUR}: ${n} pull lookups, want 3"; fi
+if [ "${n}" = 4 ]; then pass "${CUR}: looked up all 4 pull requests (3 entries and the root)"; else fail "${CUR}: ${n} pull lookups, want 4"; fi
 
 CUR=push-three-last-is-fork-runs
 run_scope CI_SCOPE=push FAKE_PR_OUT_12="${FORK_OUT}"
@@ -273,12 +273,16 @@ CUR=push-before-sha-equals-tip-runs
 run_scope CI_SCOPE=push BEFORE_SHA="${SHA_VAL}"
 check "${CUR}" true "proof=false"
 
+# A push range of exactly 10 trusted commits skips; 11 never does.
 make_repo
-add_commit "one (#10)"
-add_commit "two (#11)"
-add_commit "three (#12)"
-add_commit "four (#13)"
-CUR=push-over-three-commits-runs
+i=0
+while [ "${i}" -lt 10 ]; do i=$((i + 1)); add_commit "entry ${i} (#$((100 + i)))"; done
+CUR=push-ten-trusted-commits-skips
+run_scope CI_SCOPE=push
+check "${CUR}" false "proof=true"
+add_commit "entry 11 (#111)"
+BEFORE_VAL="$(git -C "${REPO}" rev-parse HEAD~11)"
+CUR=push-over-ten-commits-runs
 run_scope CI_SCOPE=push
 check "${CUR}" true "proof=false"
 
@@ -307,7 +311,7 @@ check "${CUR}" true "pipeline_change=true"
 
 # The proof covers the whole group, and a stacked group's own base is the
 # previous entry's commit, so the group is the union of the push range and the
-# last 3 first-parent commits: a fork two commits below the tip, with the push
+# last 10 first-parent commits: a fork two commits below the tip, with the push
 # range holding only the tip, is seen.
 make_repo
 add_commit "fork change (#551)"
@@ -321,7 +325,7 @@ CUR=push-three-trusted-below-tip-skips
 run_scope CI_SCOPE=push
 check "${CUR}" false "proof=true"
 n="$(grep -c 'pulls/' "${WORK}/gh.log")"
-if [ "${n}" = 3 ]; then pass "${CUR}: looked up 3 pull requests (union, no duplicates)"; else fail "${CUR}: ${n} pull lookups, want 3"; fi
+if [ "${n}" = 4 ]; then pass "${CUR}: looked up 4 pull requests (union, no duplicates)"; else fail "${CUR}: ${n} pull lookups, want 4"; fi
 CUR=push-before-sha-not-ancestor-runs
 run_scope CI_SCOPE=push BEFORE_SHA=1234567890123456789012345678901234567890
 check "${CUR}" true "proof=false"

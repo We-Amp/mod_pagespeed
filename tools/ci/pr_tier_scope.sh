@@ -24,7 +24,7 @@
 # branch for the same SHA) skips the fleet jobs, unless the push changes the
 # pipeline itself or the pull request of ANY commit of the merge group (the
 # last `(#N)` of each subject, looked up through the API; the group is the
-# union of the push range and the last 3 first-parent commits, because a
+# union of the push range and the last 10 first-parent commits, because a
 # stacked group's base is the previous entry) is from a fork, from another
 # repository or from dependabot[bot]: such a group ran on hosted runners. An
 # unreadable range, pull request or lookup means no skip. It is on only when CI_SCOPE is push, pr-build or pr; any
@@ -52,7 +52,7 @@ pipeline_change() {
   local changed
   git rev-parse -q --verify "HEAD^{commit}" >/dev/null 2>&1 || return 0
   git rev-parse -q --verify "HEAD^^{commit}" >/dev/null 2>&1 || return 0
-  # The whole push when its range is usable (a merge group lands up to 3
+  # The whole push when its range is usable (a merge group lands up to 10
   # commits at once), else the tip commit alone.
   if range_commits >/dev/null 2>&1; then
     changed="$(git diff --name-only "${BEFORE_SHA}" HEAD 2>/dev/null)" || return 0
@@ -67,9 +67,9 @@ pipeline_change() {
 # range_commits: prints the commits of the push (BEFORE_SHA..HEAD), newest
 # first, and succeeds only for a usable range: BEFORE_SHA set, not all zeros,
 # a commit of this repository, no merge commit in the range, and between 1 and
-# MAX_PUSH_COMMITS commits (a merge group holds at most 3 entries). The base is
+# MAX_PUSH_COMMITS commits (a merge group holds at most 10 entries). The base is
 # the first argument (default BEFORE_SHA) and must be an ancestor of HEAD.
-MAX_PUSH_COMMITS=3
+MAX_PUSH_COMMITS=10
 range_commits() {
   local before="${1-${BEFORE_SHA:-}}" list n
   [ -n "${before}" ] || return 1
@@ -116,8 +116,8 @@ pr_lookup_trusted() {
 # pr_trusted: prints true, false or error. The proof covers the whole merge
 # group, and in a stacked group the suite's own base is the previous entry's
 # commit, so no base is taken from the proof. EVERY commit of the union of the
-# push range (BEFORE_SHA..HEAD, which must be usable) and the last 3
-# first-parent commits ending at HEAD (a group holds at most 3 entries) must
+# push range (BEFORE_SHA..HEAD, which must be usable) and the last 10
+# first-parent commits ending at HEAD (a group holds at most 10 entries) must
 # name, as the last `(#N)` of its subject, a pull request that passes
 # pr_lookup_trusted. A group that held any other pull request ran on hosted
 # runners, so its proof does not cover the fleet. An unusable range, a missing

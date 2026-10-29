@@ -50,7 +50,7 @@ git merge-base --is-ancestor "${main_ref}" "${HEAD_SHA}" 2>/dev/null ||
 shas="$(git rev-list "${main_ref}..${HEAD_SHA}")"
 [ -n "${shas}" ] || refuse "empty merge group (${main_ref}..${HEAD_SHA} holds no commits)"
 n_range="$(printf '%s\n' ${shas} | wc -l | tr -dc '0-9')"
-[ "${n_range}" -le 3 ] || refuse "merge group holds ${n_range} commits; the queue builds at most 3 entries"
+[ "${n_range}" -le 10 ] || refuse "merge group holds ${n_range} commits; more than 10 is not a queue group"
 
 merges="$(git rev-list --min-parents=2 "${main_ref}..${HEAD_SHA}")"
 [ -z "${merges}" ] || refuse "merge group holds a merge commit; the queue must squash"
