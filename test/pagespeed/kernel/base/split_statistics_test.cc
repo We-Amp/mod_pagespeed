@@ -424,8 +424,8 @@ TEST(SplitStatisticsGlobalRead, PrefixedVariablesReadTheGlobalObject) {
   std::unique_ptr<ThreadSystem> threads(Platform::CreateThreadSystem());
   SimpleStats global(threads.get());
   SimpleStats* local = new SimpleStats(threads.get());  // owned by split
-  for (Statistics* s : {static_cast<Statistics*>(&global),
-                        static_cast<Statistics*>(local)}) {
+  for (Statistics* s :
+       {static_cast<Statistics*>(&global), static_cast<Statistics*>(local)}) {
     s->AddVariable("shared_hits");
     s->AddVariable("own_hits");
   }

@@ -47,10 +47,10 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
-#include "pagespeed/kernel/base/string.h"
-#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/split_statistics.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/cyclone_cache.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -489,8 +489,7 @@ TEST(SystemCachesSharedStats, DiskCacheCountersVisibleInPerHostView) {
   SystemCaches::MarkSharedStats(&split);
   SystemCaches::InitStats(&split);
 
-  const GoogleString file_hits =
-      StrCat(SystemCachePath::kFileCache, "_hits");
+  const GoogleString file_hits = StrCat(SystemCachePath::kFileCache, "_hits");
   const GoogleString small_hits =
       StrCat(SystemCachePath::kFileCacheSmall, "_hits");
   global.GetVariable(CycloneCache::kHits)->Add(7);
