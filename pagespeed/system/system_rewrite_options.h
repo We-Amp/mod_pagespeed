@@ -54,6 +54,8 @@ class SystemRewriteOptions : public RewriteOptions {
   static const char kRedisTimeoutUs[];
   static const char kRedisDatabaseIndex[];
   static const char kRedisTTLSec[];
+  static const char kRedisPassword[];
+  static const char kRedisUser[];
 
   static constexpr int kMemcachedDefaultPort = 11211;
   static constexpr int kRedisDefaultPort = 6379;
@@ -206,6 +208,8 @@ class SystemRewriteOptions : public RewriteOptions {
   }
   int redis_ttl_sec() const { return redis_ttl_sec_.value(); }
   bool has_redis_ttl_sec() const { return redis_ttl_sec_.was_set(); }
+  const GoogleString& redis_password() const { return redis_password_.value(); }
+  const GoogleString& redis_user() const { return redis_user_.value(); }
   int64 slow_file_latency_threshold_us() const {
     return slow_file_latency_threshold_us_.value();
   }
@@ -554,6 +558,8 @@ class SystemRewriteOptions : public RewriteOptions {
   Option<int64> redis_timeout_us_;
   Option<int> redis_database_index_;
   Option<int> redis_ttl_sec_;
+  Option<GoogleString> redis_password_;
+  Option<GoogleString> redis_user_;
 
   Option<int64> slow_file_latency_threshold_us_;
   Option<int64> file_cache_clean_size_kb_;

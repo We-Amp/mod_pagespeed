@@ -109,12 +109,15 @@ bool MemcachedCache::Connect() {
 
   bool success = true;
   for (const ExternalServerSpec& spec : cluster_spec_.servers) {
-    memcached_return_t rc = memcached_server_add(
-        memc_, spec.host.c_str(), static_cast<in_port_t>(spec.port));
+    memcached_return_t rc =
+        spec.is_unix_socket()
+            ? memcached_server_add_unix_socket(memc_, spec.host.c_str())
+            : memcached_server_add(memc_, spec.host.c_str(),
+                                   static_cast<in_port_t>(spec.port));
     if (rc != MEMCACHED_SUCCESS) {
       message_handler_->Message(
-          kError, "MemcachedCache: Failed to add server %s:%d: %s",
-          spec.host.c_str(), spec.port, memcached_strerror(memc_, rc));
+          kError, "MemcachedCache: Failed to add server %s: %s",
+          spec.ToString().c_str(), memcached_strerror(memc_, rc));
       success = false;
     }
   }

@@ -254,6 +254,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewRedis(
       factory_->message_handler(), factory_->timer(),
       config->redis_reconnection_delay_ms(), config->redis_timeout_us(),
       factory_->statistics(), redis_database_index, redis_ttl_sec);
+  redis_server->SetCredentials(config->redis_user(), config->redis_password());
   factory_->TakeOwnership(redis_server);
   redis_servers_.push_back(redis_server);
   if (redis_pool_.get() == nullptr) {
@@ -294,12 +295,17 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
   // Some unique signature to distinguish server configurations.
   GoogleString spec_signature;
   if (use_redis) {
-    spec_signature =
-        StrCat("r;", config->redis_server().ToString(), ";",
-               IntegerToString(config->redis_database_index()), ";",
-               IntegerToString(config->redis_reconnection_delay_ms()), ";",
-               IntegerToString(config->redis_timeout_us()), ";",
-               IntegerToString(config->redis_ttl_sec()));
+    spec_signature = StrCat(
+        "r;", config->redis_server().ToString(), ";",
+        IntegerToString(config->redis_database_index()), ";",
+        IntegerToString(config->redis_reconnection_delay_ms()), ";",
+        IntegerToString(config->redis_timeout_us()), ";",
+        IntegerToString(config->redis_ttl_sec()), ";",
+        // Credentials are length-prefixed (so no value can mimic another
+        // pair) and the password enters only as a hash.  This key must
+        // never be logged or printed.
+        IntegerToString(config->redis_user().size()), ":", config->redis_user(),
+        ";", cache_hasher_.Hash(config->redis_password()));
 #if PAGESPEED_ENABLE_MEMCACHED
   } else if (use_memcached) {
     spec_signature = StrCat("m;", config->memcached_servers().ToString(), ";",

@@ -57,6 +57,23 @@ TEST(ExternalServerSpecTest, ToString) {
   EXPECT_EQ("example.com:1234", spec.ToString());
 }
 
+TEST(ExternalServerSpecTest, UnixSocket) {
+  GoogleString msg;
+  ExternalServerSpec spec;
+  EXPECT_TRUE(spec.SetFromString("unix:/run/redis/redis.sock",
+                                 kDefaultPortForTesting, &msg));
+  EXPECT_EQ("", msg);
+  EXPECT_TRUE(spec.is_unix_socket());
+  EXPECT_FALSE(spec.empty());
+  EXPECT_EQ("/run/redis/redis.sock", spec.host);
+  EXPECT_EQ("unix:/run/redis/redis.sock", spec.ToString());
+}
+
+TEST(ExternalServerSpecTest, TcpIsNotUnixSocket) {
+  ExternalServerSpec spec("example.com", 1234);
+  EXPECT_FALSE(spec.is_unix_socket());
+}
+
 class ExternalServerSpecTestInvalid : public ::testing::Test {
  protected:
   void TestInvalidSpec(const GoogleString& value) {
@@ -93,6 +110,18 @@ TEST_F(ExternalServerSpecTestInvalid, EmptyHostWithPort) {
 
 TEST_F(ExternalServerSpecTestInvalid, EmptyPortWithHost) {
   TestInvalidSpec("host:");
+}
+
+TEST_F(ExternalServerSpecTestInvalid, UnixSocketWithoutPath) {
+  TestInvalidSpec("unix:");
+}
+
+TEST_F(ExternalServerSpecTestInvalid, UnixSocketWithPort) {
+  TestInvalidSpec("unix:/run/redis.sock:6379");
+}
+
+TEST_F(ExternalServerSpecTestInvalid, UnixSocketWithRelativePath) {
+  TestInvalidSpec("unix:redis.sock");
 }
 
 TEST_F(ExternalServerSpecTestInvalid, MultipleColons) {

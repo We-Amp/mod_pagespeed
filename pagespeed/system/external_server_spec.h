@@ -29,6 +29,10 @@
 namespace net_instaweb {
 
 struct ExternalServerSpec {
+  // Port value of a spec that names a Unix domain socket; `host` then holds
+  // the socket path.  Written as "unix:<path>" in configuration.
+  static constexpr int kUnixSocketPort = -1;
+
   ExternalServerSpec() : host(), port(0) {}
   ExternalServerSpec(GoogleString host_, int port_)
       : host(std::move(host_)), port(port_) {}
@@ -36,9 +40,16 @@ struct ExternalServerSpec {
                      GoogleString* error_detail);
 
   bool empty() const { return host.empty() && port == 0; }
+  bool is_unix_socket() const { return port == kUnixSocketPort; }
   GoogleString ToString() const {
     // Should be 1:1 representation of value held, used to generate signature.
-    return empty() ? "" : StrCat(host, ":", IntegerToString(port));
+    if (empty()) {
+      return "";
+    }
+    if (is_unix_socket()) {
+      return StrCat("unix:", host);
+    }
+    return StrCat(host, ":", IntegerToString(port));
   }
 
   GoogleString host;

@@ -53,6 +53,8 @@ const char SystemRewriteOptions::kRedisReconnectionDelayMs[] =
 const char SystemRewriteOptions::kRedisTimeoutUs[] = "RedisTimeoutUs";
 const char SystemRewriteOptions::kRedisDatabaseIndex[] = "RedisDatabaseIndex";
 const char SystemRewriteOptions::kRedisTTLSec[] = "RedisTTLSec";
+const char SystemRewriteOptions::kRedisPassword[] = "RedisPassword";
+const char SystemRewriteOptions::kRedisUser[] = "RedisUser";
 
 RewriteOptions::Properties* SystemRewriteOptions::system_properties_ = nullptr;
 
@@ -118,7 +120,9 @@ void SystemRewriteOptions::AddProperties() {
                     true);
   AddSystemProperty(ExternalServerSpec(), &SystemRewriteOptions::redis_server_,
                     "rds", SystemRewriteOptions::kRedisServer,
-                    "Redis server to use in format: <host>[:<port>]", false);
+                    "Redis server to use in format: <host>[:<port>] or "
+                    "unix:/<socket path>",
+                    false);
   AddSystemProperty(Timer::kSecondMs,
                     &SystemRewriteOptions::redis_reconnection_delay_ms_, "rdr",
                     SystemRewriteOptions::kRedisReconnectionDelayMs,
@@ -137,6 +141,15 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty(kDefaultRedisTTLSec, &SystemRewriteOptions::redis_ttl_sec_,
                     "rdx", SystemRewriteOptions::kRedisTTLSec,
                     "Redis key TTL to use (seconds)", true);
+  AddSystemProperty("", &SystemRewriteOptions::redis_password_, "rdp",
+                    SystemRewriteOptions::kRedisPassword,
+                    "Password sent with AUTH after every Redis connect", false);
+  MarkOptionSecret(system_properties_, SystemRewriteOptions::kRedisPassword);
+  AddSystemProperty("", &SystemRewriteOptions::redis_user_, "rdu",
+                    SystemRewriteOptions::kRedisUser,
+                    "Redis ACL user for AUTH (used together with "
+                    "RedisPassword)",
+                    false);
   AddSystemProperty(50 * Timer::kMsUs,  // 50 ms
                     &SystemRewriteOptions::slow_file_latency_threshold_us_,
                     "asflt", "SlowFileLatencyUs",

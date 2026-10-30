@@ -71,7 +71,6 @@ namespace net_instaweb {
 //
 // TODO(yeputons): consider extracting a common interface with MemcachedCache.
 // TODO(yeputons): consider making Redis-reported errors treated as failures.
-// TODO(yeputons): add redis AUTH command support.
 class RedisCache : public CacheInterface {
  public:
   // Uses ThreadSystem to generate several mutexes in constructor only.
@@ -86,6 +85,14 @@ class RedisCache : public CacheInterface {
   static void InitStats(Statistics* stats);
 
   GoogleString ServerDescription() const;
+
+  // Credentials sent with AUTH right after every (re)connect to any node.  An
+  // empty password disables AUTH; a non-empty user selects the two-argument
+  // (ACL) form.  Call before StartUp().  The password is never logged.
+  void SetCredentials(StringPiece user, StringPiece password) {
+    auth_user_ = user.as_string();
+    auth_password_ = password.as_string();
+  }
 
   void StartUp(bool connect_now = true);
 
@@ -147,7 +154,7 @@ class RedisCache : public CacheInterface {
     void ShutDown() LOCKS_EXCLUDED(redis_mutex_, state_mutex_);
 
     GoogleString ToString() {
-      return StrCat(host_, ":", IntegerToString(port_));
+      return ExternalServerSpec(host_, port_).ToString();
     }
 
     AbstractMutex* GetOperationMutex() const LOCK_RETURNED(redis_mutex_) {
@@ -192,6 +199,10 @@ class RedisCache : public CacheInterface {
         EXCLUSIVE_LOCKS_REQUIRED(redis_mutex_);
 
     RedisContext TryConnect() LOCKS_EXCLUDED(redis_mutex_, state_mutex_);
+
+    // Sends AUTH on a freshly connected context.  Returns false (after logging
+    // without the password) if the server rejects it.
+    bool Authenticate(redisContext* context);
 
     void LogRedisContextError(redisContext* redis, const char* cause);
 
@@ -295,6 +306,10 @@ class RedisCache : public CacheInterface {
 
   const int database_index_;
   const int ttl_sec_;
+
+  // Set once by SetCredentials() before StartUp(); read-only afterwards.
+  GoogleString auth_user_;
+  GoogleString auth_password_;
 
   friend class RedisCacheTest;
   RedisCache(const RedisCache&) = delete;
