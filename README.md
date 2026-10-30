@@ -104,6 +104,10 @@ how to report bugs and send pull requests.
 - [CONTRIBUTING.md](CONTRIBUTING.md) -- Reporting bugs and sending pull requests
 - [docs/](docs/) -- Installation guides, platform limitations, test catalog
 
+## Security
+
+mod_pagespeed is enrolled in [Anthropic's OSS Scanner](https://github.com/anthropics/oss-scanner/blob/main/projects/mod_pagespeed/project.yaml). The [threat model](.oss-scanner/threat_model.md) is in this repository.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) for details.
