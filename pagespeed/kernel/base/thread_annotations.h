@@ -94,17 +94,13 @@
 #define ASSERT_SHARED_LOCK(...) ABSL_ASSERT_SHARED_LOCK(__VA_ARGS__)
 #endif
 
-// Asserts that the caller holds the given capability. Clang's
-// -Wthread-safety analysis tracks assert_capability; absl's
-// ABSL_ASSERT_EXCLUSIVE_LOCK spellings (assert_exclusive_lock and
-// friends) clang accepts but does not analyze. Applied to a nullary
-// helper whose argument names the capability in a callee-rooted form,
-// a call lets the analysis adopt a lock the caller provably holds
-// through a different expression. No runtime effect.
-#if defined(__clang__)
-#define ASSERT_CAPABILITY(...)   __attribute__((assert_capability(__VA_ARGS__)))
-#else
-#define ASSERT_CAPABILITY(...)
+// Documents that the caller holds the given lock. A caller that holds
+// a mutex through a different expression than a callee's rooted
+// EXCLUSIVE_LOCKS_REQUIRED form (the same mutex reached via another
+// pointer path) can call a nullary helper annotated with this so the
+// analysis adopts the lock in the callee's form. No runtime effect.
+#ifndef ASSERT_EXCLUSIVE_LOCK
+#define ASSERT_EXCLUSIVE_LOCK(...) ABSL_ASSERT_EXCLUSIVE_LOCK(__VA_ARGS__)
 #endif
 
 #ifndef NO_THREAD_SAFETY_ANALYSIS

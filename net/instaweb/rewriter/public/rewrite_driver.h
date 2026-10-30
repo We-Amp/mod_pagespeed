@@ -974,7 +974,7 @@ class RewriteDriver : public HtmlParse {
   // mutex in the driver-rooted form SwitchToQueuedWorkerPool annotates,
   // for callers that hold the same mutex through their own scheduler
   // pointer.
-  void AssertRewriteMutexHeld() ASSERT_CAPABILITY(rewrite_mutex()) {}
+  void AssertRewriteMutexHeld() ASSERT_EXCLUSIVE_LOCK(rewrite_mutex()) {}
 
   Scheduler* scheduler() { return scheduler_; }
 

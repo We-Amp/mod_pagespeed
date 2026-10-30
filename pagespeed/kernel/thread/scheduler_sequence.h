@@ -70,7 +70,7 @@ class Scheduler::Sequence : public net_instaweb::Sequence {
   // form (scheduler_->mutex()); a caller holding the same mutex through
   // its own Scheduler* cannot be seen to hold that form and asserts it
   // here.
-  void AssertSchedulerMutexHeld() ASSERT_CAPABILITY(scheduler_->mutex()) {}
+  void AssertSchedulerMutexHeld() ASSERT_EXCLUSIVE_LOCK(scheduler_->mutex()) {}
 
  private:
   VectorDeque<Function*> work_queue_ GUARDED_BY(scheduler_->mutex());
