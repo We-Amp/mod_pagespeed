@@ -80,7 +80,7 @@ class GoogleFontServiceInputResourceTest : public RewriteTestBase {
 
     ResponseHeaders non_css;
     SetDefaultLongCacheHeaders(&kContentTypeText, &non_css);
-    SetFetchResponse(StrCat(kNonCss, "?display=swap&UA=Chromezilla"), non_css,
+    SetFetchResponse(StrCat(kNonCss, "?UA=Chromezilla"), non_css,
                      "something weird");
   }
 
@@ -156,6 +156,24 @@ TEST_F(GoogleFontServiceInputResourceTest, DisplaySwapAddedWhenMissing) {
   EXPECT_EQ(
       "http://fonts.googleapis.com/css?family=Roboto&displayx=1&display=swap",
       resource->url());
+}
+
+TEST_F(GoogleFontServiceInputResourceTest, CssPathsOnly) {
+  ResetUserAgent("Chromezilla");
+  std::unique_ptr<GoogleFontServiceInputResource> resource;
+
+  // Icon fonts rely on ligatures, so /icon is fetched unchanged.
+  GoogleUrl icon("https://fonts.googleapis.com/icon?family=Material+Icons");
+  resource.reset(GoogleFontServiceInputResource::Make(icon, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ("https://fonts.googleapis.com/icon?family=Material+Icons",
+            resource->url());
+
+  GoogleUrl css2("https://fonts.googleapis.com/css2?family=Roboto");
+  resource.reset(GoogleFontServiceInputResource::Make(css2, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ("https://fonts.googleapis.com/css2?family=Roboto&display=swap",
+            resource->url());
 }
 
 TEST_F(GoogleFontServiceInputResourceTest, ExplicitDisplayKept) {

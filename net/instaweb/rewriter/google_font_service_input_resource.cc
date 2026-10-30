@@ -81,7 +81,11 @@ GoogleFontServiceInputResource* GoogleFontServiceInputResource::Make(
   // Ask for swap instead; an explicit display= is left as the author wrote it.
   // The query is extended textually; the rest of the URL stays as written.
   GoogleUrl swap_url;
-  if (!HasDisplayParam(original_url.Query())) {
+  // Only the CSS loader paths take display=; /icon (Material Icons) relies on
+  // ligatures that would show as words under swap, so it is left alone.
+  StringPiece path = original_url.PathSansQuery();
+  if ((path == "/css" || path == "/css2") &&
+      !HasDisplayParam(original_url.Query())) {
     StringPiece query = original_url.Query();
     swap_url.Reset(StrCat(original_url.AllExceptQuery(), "?",
                           query.empty() ? "" : StrCat(query, "&"),

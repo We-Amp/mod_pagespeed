@@ -87,6 +87,7 @@ class GoogleFontCssInlineFilterTestBase : public RewriteTestBase {
                        "font_safieri");
 
     // If other filters will try to fetch this, they won't have a UA.
+    SetFontCssResponse(StrCat(kRoboto, "&UA=unknown"), "font_huh");
     SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=unknown"), "font_huh");
     SetCurrentUserAgent(user_agent);
   }
