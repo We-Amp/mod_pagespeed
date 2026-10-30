@@ -23,6 +23,7 @@
 #include <mutex>
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
 namespace net_instaweb {
@@ -36,8 +37,11 @@ class StdMutex : public ThreadSystem::CondvarCapableMutex {
   StdMutex();
   ~StdMutex() override;
   bool TryLock() override;
-  void Lock() override;
-  void Unlock() override;
+  // Lock/Unlock transfer ownership of the wrapped std::mutex capability to
+  // and from the caller; the annotations express that transfer so the
+  // thread-safety analysis does not flag the wrapper itself.
+  void Lock() override EXCLUSIVE_LOCK_FUNCTION(mutex_);
+  void Unlock() override UNLOCK_FUNCTION(mutex_);
   ThreadSystem::Condvar* NewCondvar() override;
 
  private:
