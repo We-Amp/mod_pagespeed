@@ -148,7 +148,7 @@ TEST_F(MemcachedCacheTest, PutGetDeleteOverUnixSocket) {
   }
   cluster_spec_.servers = {
       ExternalServerSpec(socket_path, ExternalServerSpec::kUnixSocketPort)};
-  ASSERT_TRUE(InitMemcachedOrSkip(false));
+  ASSERT_TRUE(InitMemcachedOrSkip(true));
   CheckPut("Name", "Value");
   CheckGet("Name", "Value");
   CheckNotFound("Another Name");
