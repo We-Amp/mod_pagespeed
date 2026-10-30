@@ -69,8 +69,7 @@ on:
         type: string
         default: "medium"
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   event-guard:
@@ -109,6 +108,8 @@ jobs:
   # one, and through actions/cache otherwise.
   # ---------------------------------------------------------------------
   nightly-vendor:
+    permissions:
+      contents: read
     name: Vendor Dependencies (nightly)
     needs: event-guard
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -291,6 +292,8 @@ jobs:
   # envoy-filter.
   # ---------------------------------------------------------------------
   linux-offline-build:
+    permissions:
+      contents: read
     name: Linux Offline Build
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -461,6 +464,8 @@ jobs:
   # The sweep step is the gate; evidence is kept briefly on failure.
   # ---------------------------------------------------------------------
   apache-asan-stress:
+    permissions:
+      contents: read
     name: Apache ASan graceful-restart stress
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -642,6 +647,8 @@ jobs:
           fi
 
   apache-daemon-lane:
+    permissions:
+      contents: read
     name: Apache system tests (daemon lane)
     needs: nightly-vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -780,6 +787,8 @@ jobs:
   # the caches from public container images.
   # ---------------------------------------------------------------------
   shared-cache-vary:
+    permissions:
+      contents: read
     name: Shared-cache check (Apache, nginx)
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -924,6 +933,8 @@ jobs:
           fi
 
   nginx-asan-stress:
+    permissions:
+      contents: read
     name: nginx ASan reload stress
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1095,6 +1106,8 @@ jobs:
           fi
 
   nginx-protocol-matrix:
+    permissions:
+      contents: read
     name: IPRO proxy race smoke (h1/h2)
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1258,6 +1271,8 @@ jobs:
   # the "of N" in the job name together.
   # ---------------------------------------------------------------------
   full-tree-lint:
+    permissions:
+      contents: read
     name: clang-tidy (full tree, shard ${{ matrix.shard }} of 3)
     needs: nightly-vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1456,6 +1471,8 @@ jobs:
   # reproducers and the corpus are uploaded on failure.
   # ---------------------------------------------------------------------
   fuzz-css:
+    permissions:
+      contents: read
     name: CSS parser fuzz (corpus floor + libFuzzer)
     needs: nightly-vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1688,6 +1705,8 @@ jobs:
           fi
 
   fuzz-html:
+    permissions:
+      contents: read
     name: HTML parse fuzz (libFuzzer)
     needs: nightly-vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1917,6 +1936,8 @@ jobs:
           fi
 
   fuzz-packs:
+    permissions:
+      contents: read
     name: Pack loader + filter fuzz (libFuzzer)
     needs: nightly-vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -2183,6 +2204,8 @@ jobs:
           fi
 
   fuzz-js:
+    permissions:
+      contents: read
     name: JS minify fuzz (libFuzzer + classified findings)
     needs: nightly-vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -2468,6 +2491,8 @@ jobs:
   # (docs/ci/runner-environment.md).
   # ---------------------------------------------------------------------
   iis-asan-systest:
+    permissions:
+      contents: read
     name: IIS ASan recycle stress
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
@@ -2786,6 +2811,8 @@ jobs:
           if ($env:RIG_DIR) { & "$env:GITHUB_WORKSPACE\tools\stress\iis\cleanup_iis_asan_rig.ps1" -RigDir $env:RIG_DIR }
 
   iis-appverif-matrix:
+    permissions:
+      contents: read
     name: IIS AppVerif provider matrix
     needs: nightly-vendor
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
@@ -3066,6 +3093,8 @@ jobs:
   # reports are uploaded instead.
   # ---------------------------------------------------------------------
   nvd-scan:
+    permissions:
+      contents: read
     name: NVD CVE scan (report only)
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -3142,6 +3171,8 @@ jobs:
   # the pinned grype database, and the image scan mode. Scan findings never
   # fail the job; the pin staleness check does, on purpose.
   dep-scan-nightly:
+    permissions:
+      contents: read
     name: Dependency scan (nightly, pin age and images)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -3204,6 +3235,8 @@ jobs:
   # does not fit a hosted runner), so it runs on the fleet or not at all.
   # ---------------------------------------------------------------------
   envoy-filter:
+    permissions:
+      contents: read
     name: Envoy Filter Build and Tests
     needs: event-guard
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -3251,6 +3284,7 @@ jobs:
   # privileged stress rigs) are skipped. This job only says so, in an
   # annotation and the job summary, so a skipped check is never a silent one.
   fleet-off-notice:
+    permissions: {}
     name: Shared build runners are switched off
     if: ${{ vars.FLEET_ENABLED == 'false' }}
     runs-on: ubuntu-latest

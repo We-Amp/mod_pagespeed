@@ -12,7 +12,7 @@ on:
     branches: [ "master" ]
 
 # Default to no permissions; the job requests what it needs.
-permissions: read-all
+permissions: {}
 
 jobs:
   analysis:

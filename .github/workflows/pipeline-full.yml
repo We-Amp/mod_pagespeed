@@ -41,8 +41,7 @@ name: pipeline-full
 on:
   workflow_call:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   event-guard:
@@ -145,6 +144,8 @@ jobs:
   # Shared inputs: the vendored tree and the Linux x64 build bundle.
   # ---------------------------------------------------------------------
   vendor:
+    permissions:
+      contents: read
     name: Vendor Dependencies
     needs: event-guard
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -331,6 +332,8 @@ jobs:
         run: echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
   linux-build:
+    permissions:
+      contents: read
     name: Linux Build
     needs: vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -464,6 +467,8 @@ jobs:
   # sanitizer configurations never race the build for a heavy slot.
   # ---------------------------------------------------------------------
   linux-asan:
+    permissions:
+      contents: read
     name: Linux ASan + UBSan
     needs: [vendor, linux-build]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -586,6 +591,8 @@ jobs:
           [ -n "${CI_NET:-}" ] && docker network rm "${CI_NET}" 2>/dev/null || true
 
   linux-tsan:
+    permissions:
+      contents: read
     name: Linux TSan
     needs: [vendor, linux-build]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -716,6 +723,8 @@ jobs:
   # works too (degraded mode: it builds the dev image cold).
   # ---------------------------------------------------------------------
   apache-sys-tests:
+    permissions:
+      contents: read
     name: Apache System Tests
     needs: linux-build
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
@@ -822,6 +831,8 @@ jobs:
           compression-level: 0
 
   nginx-sys-tests:
+    permissions:
+      contents: read
     name: Nginx System Tests
     needs: linux-build
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-light' }}
@@ -925,6 +936,8 @@ jobs:
   # Release build of the IIS module. It feeds win-appverif and is the full
   # tier's own Windows build (the PR tier builds it separately).
   windows-build:
+    permissions:
+      contents: read
     name: Windows Build
     needs: vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
@@ -1140,6 +1153,8 @@ jobs:
   # runtime library comes with LLVM 19, found at the standard install location
   # or CI_WIN_LLVM_DIR; a runner that has neither skips the job with a notice.
   win-asan:
+    permissions:
+      contents: read
     name: Windows ASan
     needs: vendor
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'windows-2022' || 'fleet-windows' }}
@@ -1358,6 +1373,8 @@ jobs:
   # rights and the Windows SDK debugging tools, and cannot run on a hosted
   # runner, so a fork or Dependabot pull request skips it.
   win-appverif:
+    permissions:
+      contents: read
     name: Windows AppVerif
     needs: windows-build
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
@@ -1622,6 +1639,8 @@ jobs:
   # repository's cache quota.
   # ---------------------------------------------------------------------
   linux-arm64-build:
+    permissions:
+      contents: read
     name: Linux arm64 Build
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
@@ -1742,6 +1761,8 @@ jobs:
           include-hidden-files: true
 
   linux-arm64-unit-tests:
+    permissions:
+      contents: read
     name: Linux arm64 Unit Tests
     needs: linux-arm64-build
     runs-on: ubuntu-24.04-arm
@@ -1883,6 +1904,8 @@ jobs:
         run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G || true
 
   linux-arm64-apache-sys-tests:
+    permissions:
+      contents: read
     name: Linux arm64 Apache System Tests
     needs: linux-arm64-build
     runs-on: ubuntu-24.04-arm
@@ -1966,6 +1989,8 @@ jobs:
           compression-level: 0
 
   linux-arm64-nginx-sys-tests:
+    permissions:
+      contents: read
     name: Linux arm64 Nginx System Tests
     needs: linux-arm64-build
     runs-on: ubuntu-24.04-arm
@@ -2065,6 +2090,8 @@ jobs:
   # and the pair is built once per merge, after it.
   # ---------------------------------------------------------------------
   sidecar-pair:
+    permissions:
+      contents: read
     name: Sidecar pair and live tests (x64)
     needs: changes
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -2148,6 +2175,8 @@ jobs:
             || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
 
   sidecar-pair-arm64:
+    permissions:
+      contents: read
     name: Sidecar pair and live tests (arm64)
     needs: changes
     if: ${{ needs.changes.outputs.sidecar_pair == 'true' }}
@@ -2163,6 +2192,7 @@ jobs:
   # privileged stress rigs) are skipped. This job only says so, in an
   # annotation and the job summary, so a skipped check is never a silent one.
   fleet-off-notice:
+    permissions: {}
     name: Shared build runners are switched off
     if: ${{ vars.FLEET_ENABLED == 'false' }}
     runs-on: ubuntu-latest

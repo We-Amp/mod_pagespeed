@@ -53,8 +53,7 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   # The schedule guard. GitHub's cron is best effort, and an external
