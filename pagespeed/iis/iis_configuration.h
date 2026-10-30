@@ -77,4 +77,13 @@ public:
 	ConfigurationFile *GetConfiguration(std::string path,net_instaweb::MessageHandler *mh,net_instaweb::global_settings& global_config);
 	
 };
+
+// Sets out->num_rewrite_threads and out->num_expensive_rewrite_threads from
+// the machine-wide file and the site's own file (either path may be empty; the
+// site's value wins). Reads the files afresh, never from a cache, and logs
+// nothing to the real message handler (|quiet| gets any parse messages).
+void ReadPoolThreadSettings(const std::string& machine_path,
+                            const std::string& site_path,
+                            net_instaweb::MessageHandler* quiet,
+                            net_instaweb::global_settings* out);
 #endif 

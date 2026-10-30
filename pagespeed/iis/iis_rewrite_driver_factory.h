@@ -155,18 +155,16 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
 
 	int expires();
 	void reset_expired();
+	// Logs the pool-size line again. The line logged while the factory
+	// initialises is written before the message history and the event-log
+	// setting exist, so the process context repeats it once they do.
+	void ReportPoolSizes() { LogThreadCountResolution(); }
+
 protected:
-  // Reports the pool sizes this worker process builds, and where they came
-  // from, instead of the base class's process-count based wording.
+  // Reports the pool sizes this site builds, and where they came from,
+  // instead of the base class's process-count based wording.
   void LogThreadCountResolution() override;
 
-public:
-  // Logs the same line again. The line logged while the factory initialises
-  // is written before the message history and the event-log setting exist, so
-  // the process context repeats it once they do.
-  void ReportPoolSizes() { LogThreadCountResolution(); }
-
-protected:
 
   QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory pool,
                                      StringPiece name) override;

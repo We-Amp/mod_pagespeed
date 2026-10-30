@@ -980,8 +980,16 @@ gzip_http_version 1.0;
       and <code>NumExpensiveRewriteThreads</code> options.
     </p>
     <p>
-      Note that this is a global setting, and cannot be done in a per virtual
-      host manner.
+      Note that on Apache and nginx this is a global setting, and cannot be
+      done in a per virtual host manner.
+    </p>
+    <p>
+      On IIS the two options are read from the machine-wide
+      <code>pagespeed.config</code>, and a site's own
+      <code>pagespeed.config</code> overrides them for that site. The counts
+      apply per site, in each worker process. Unset or <code>auto</code>
+      keeps the built-in size (half the CPUs, at least 4); the HTML pool is
+      not affected.
     </p>
 
     <h2 id="image_rewrite_max">Limiting the number of concurrent image

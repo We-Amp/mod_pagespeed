@@ -233,6 +233,12 @@ private:
 		set_message_handler(iis_message_handler_);
 		set_html_parse_message_handler(iis_html_parse_message_handler_);
 
+		// TODO(#457): the built-in size is passed in here as if it were an
+		// explicit count, which keeps the old IIS default and bypasses the
+		// shared core-budget policy. Delete this block, PoolThreadCount and
+		// the *_configured_ flags when IIS reports ConcurrentProcessCount()
+		// (the divisor has to count site contexts per worker process).
+		//
 		// The pool sizes come from the directives, or from the built-in
 		// size.  They are set before Init() resolves the thread counts, so the
 		// counts that are logged are the counts the pools are built with.
@@ -731,12 +737,10 @@ private:
 			GetSystemInfo( &sysinfo );
 			return new QueuedWorkerPool(__max(4, sysinfo.dwNumberOfProcessors), name, thread_system());
 		}
-		case kRewriteWorkers:
-			return new QueuedWorkerPool(num_rewrite_threads(), name, thread_system());
-		case kLowPriorityRewriteWorkers:
-			return new QueuedWorkerPool(num_expensive_rewrite_threads(), name, thread_system());
 		default:
-		  return RewriteDriverFactory::CreateWorkerPool(pool, name);
+		  // The rewrite and expensive-rewrite pools: sized by
+		  // num_rewrite_threads() and num_expensive_rewrite_threads().
+		  return SystemRewriteDriverFactory::CreateWorkerPool(pool, name);
 	  }
 	}
 
@@ -745,7 +749,7 @@ private:
 		message_handler()->Message(
 			kWarning,
 			"PageSpeed optimization threads: %d rewrite (%s), %d expensive rewrite (%s), "
-			"per worker process. Set NumRewriteThreads and NumExpensiveRewriteThreads "
+			"per site, in each worker process. Set NumRewriteThreads and NumExpensiveRewriteThreads "
 			"to choose the counts.",
 			num_rewrite_threads(), rewrite_threads_configured_ ? "NumRewriteThreads" : "built-in size",
 			num_expensive_rewrite_threads(),
