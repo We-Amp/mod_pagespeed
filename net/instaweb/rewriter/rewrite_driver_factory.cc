@@ -734,6 +734,9 @@ void RewriteDriverFactory::InitStats(Statistics* statistics) {
   // (allocation / submit failures); torn borrows stay in
   // zerocopy_serve_renew_fail_reset so its meaning matches nginx.
   statistics->AddVariable("zerocopy_serve_aborted");
+  // nginx: HTTP/2 streams ended because the client stopped
+  // reading for send_timeout while a zero-copy response was in flight.
+  statistics->AddVariable("zerocopy_serve_stall_timeouts");
   statistics->AddVariable("zerocopy_serve_ring_refills");
   RewriteDriver::InitStats(statistics);
   RewriteStats::InitStats(statistics);

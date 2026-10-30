@@ -284,5 +284,6 @@
   "zerocopy_serve_copied_out",
   "zerocopy_serve_ineligible",
   "zerocopy_serve_renew_fail_reset",
-  "zerocopy_serve_ring_refills"
+  "zerocopy_serve_ring_refills",
+  "zerocopy_serve_stall_timeouts"
 ]

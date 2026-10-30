@@ -219,6 +219,20 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pins for the zero-copy HTTP/2 stall handling (the port
+# cannot be linked into a test; see above).
+pagespeed_cc_test(
+    name = "ngx_zerocopy_stall_pin_test",
+    srcs = ["ngx_zerocopy_stall_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:nginx_sources",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Source pins for the admin POST request-body handoff: the body post handler
 # must finish the request with a definite result, and the content phase must
 # not arm the body read twice (the port cannot be linked into a test; see

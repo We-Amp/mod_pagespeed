@@ -2,17 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 
-# Smoke for slow-client protection on the zero-copy HTTP/2 serve path
+# Smoke for slow-client handling on the zero-copy HTTP/2 serve path
 # (issue #307).
 #
 # With CycloneZeroCopy on, a large cached response over HTTP/2 is served
 # through a bounded ring of small windows that a periodic timer refills.
-# The concern is that this timer keeps pushing back nginx's send_timeout, so
-# a client that stops granting flow-control window is never timed out.
+# A client that stops granting flow-control window must be ended after
+# send_timeout, and a client that keeps reading, however slowly, must not.
+#
+# The ring runs only where nginx can hand out in-memory buffers, so this smoke
+# speaks cleartext HTTP/2 (h2c, prior knowledge): over TLS nginx marks every
+# response as needing in-memory bodies unless kernel TLS sendfile is on, and
+# the whole-body copy is used instead.
 #
 # The zero-copy ring is only used for cache hits on rewritten (.pagespeed.)
-# resources, so the script enables extend_cache, serves a page that
-# references a large script, reads the rewritten script URL out of that page
+# resources whose optimized output is stored in the cache, so the script
+# enables rewrite_javascript, serves a page that references a large script,
+# reads the rewritten script URL out of that page
 # and uses that URL for every phase below.
 #
 # This script runs an h2 client (h2_stall_client.py) against its own nginx:
@@ -22,30 +28,29 @@
 #   stall         a stream whose window is never reopened must be ended by
 #                 the server (RST_STREAM, GOAWAY or close) within
 #                 send_timeout plus a margin, measured from the last DATA
-#                 frame the client received.
+#                 frame the client received, and zerocopy_serve_stall_timeouts
+#                 must move by exactly one.
 #   control       a client that reopens the window more often than
-#                 send_timeout must receive the whole body and must not be
-#                 reset.
+#                 send_timeout must receive the whole body, must not be
+#                 reset, and zerocopy_serve_stall_timeouts must not move.
 #
 # Reading the result of a manual run:
-#   PASS            current master already times the stalled stream out:
-#                   the concern in #307 does not reproduce and the issue can
-#                   be closed with this output as the evidence.
+#   PASS            the stalled stream is ended and counted, the progressing
+#                   stream is untouched.
 #   FAIL (stall)    the stalled stream was still open long after
-#                   send_timeout: the concern is real and the fix described
-#                   in #307 is needed.
+#                   send_timeout, or was not counted.
 #   FAIL (control)  the progressing client was cut off or did not finish:
 #                   the timeout is too eager (or the setup is wrong); look
 #                   at the error log before drawing conclusions about stall.
 #
 # Standalone smoke: CI does not run it. Run it by hand on a host that has
-# a built module.
+# a built module (SEND_TIMEOUT, BODY_KB and PORT can be overridden).
 #
 # Usage:
 #   ./test/system/nginx/zerocopy_ring_stall_smoke.sh
 #
 # Requires: a built ngx_pagespeed_module.so in bazel-bin (or MODULE=... env),
-# nginx built with SSL and HTTP/2, openssl, curl with HTTP/2, python3.
+# nginx built with HTTP/2, curl with HTTP/2, python3.
 # Runs its own nginx and only stops the nginx it started.
 set -u
 
@@ -71,22 +76,26 @@ stop_nginx() {
   fi
 }
 
-mkdir -p "$D/logs" "$D/certs" "$D/cache" "$D/www/stall"
+mkdir -p "$D/logs" "$D/cache" "$D/www/stall"
 
-openssl req -x509 -newkey rsa:2048 -keyout "$D/certs/server.key" \
-  -out "$D/certs/server.crt" -days 2 -nodes -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null \
-  || { echo "FAIL: could not generate a certificate"; exit 1; }
-
-# Incompressible-looking text so size on the wire equals size on disk.
-head -c $((BODY_KB * 1024 * 3 / 4)) /dev/urandom | base64 -w0 2>/dev/null \
-  > "$D/www$SOURCE" \
-  || head -c $((BODY_KB * 1024 * 3 / 4)) /dev/urandom | base64 \
-     | tr -d '\n' > "$D/www$SOURCE"
+# Valid JavaScript made of random string literals: the minifier keeps them,
+# so the optimized body is about as large as the source.
+python3 - "$D/www$SOURCE" "$BODY_KB" <<'PY'
+import base64, os, sys
+out, kb = sys.argv[1], int(sys.argv[2])
+lines, size, i = [], 0, 0
+while size < kb * 1024:
+    lit = base64.b64encode(os.urandom(90)).decode().replace("+", "a").replace("/", "b")
+    line = 'var v%d = "%s";\n' % (i, lit)
+    lines.append(line)
+    size += len(line)
+    i += 1
+open(out, "w").write("".join(lines))
+PY
 cat > "$D/www/index.html" <<HTML
 <html><head><script src="$SOURCE"></script></head><body>zero-copy stall smoke</body></html>
 HTML
-BODY_BYTES=$(wc -c < "$D/www$SOURCE" | tr -d ' ')
+BODY_BYTES=unknown  # taken from the first fetch of the optimized script
 
 cat > "$D/nginx.conf" <<CONF
 worker_processes 1;
@@ -104,23 +113,25 @@ http {
     proxy_temp_path $D/proxy_temp;
 
     pagespeed FileCachePath $D/cache;
+    pagespeed UseNativeFetcher on;
     pagespeed StatisticsPath /pagespeed_statistics;
+    pagespeed GlobalStatisticsPath /pagespeed_global_statistics;
+    pagespeed HttpCacheCompressionLevel 0;
     pagespeed CycloneZeroCopy on;
     pagespeed CycloneZeroCopyServe on;
 
     server {
-        listen $PORT ssl;
+        listen $PORT;
         http2 on;
         server_name localhost;
-        ssl_certificate $D/certs/server.crt;
-        ssl_certificate_key $D/certs/server.key;
         root $D/www;
 
         pagespeed on;
         pagespeed RewriteLevel PassThrough;
-        pagespeed EnableFilters extend_cache;
+        pagespeed EnableFilters rewrite_javascript;
 
         location /pagespeed_statistics { }
+        location /pagespeed_global_statistics { }
         location / { add_header Cache-Control "public, max-age=3600"; }
     }
 }
@@ -131,32 +142,38 @@ CONF
 trap stop_nginx EXIT
 sleep 1
 
-BASE="https://localhost:$PORT"
-ring_refills() {
-  curl -sk --http2 "$BASE/pagespeed_statistics" \
-    | awk '/^zerocopy_serve_ring_refills:/ {print $2}'
+BASE="http://localhost:$PORT"
+stat_value() { # name; the statistics page is JSON ("name": 12)
+  curl -s --http2-prior-knowledge "$BASE/pagespeed_global_statistics" \
+    | grep -oE "\"$1\": *[0-9]+" | head -n 1 | grep -oE '[0-9]+$'
 }
+ring_refills() { stat_value zerocopy_serve_ring_refills; }
 
 # Fetch the page over HTTP/1.1 until the rewritten script URL appears; the
 # first fetches only start the rewrite.
 RESOURCE=""
 for _ in $(seq 1 30); do
-  FOUND=$(curl -sk --http1.1 --max-time 20 "$BASE/index.html" \
-          | grep -oE '/?stall/big\.js\.pagespeed\.ce\.[A-Za-z0-9_-]+\.js' \
+  FOUND=$(curl -s --http1.1 --max-time 20 "$BASE/index.html" \
+          | grep -oE '/?stall/big\.js\.pagespeed\.jm\.[A-Za-z0-9_-]+\.js' \
           | head -n 1)
   if [ -n "$FOUND" ]; then RESOURCE="/${FOUND#/}"; break; fi
   sleep 1
 done
 if [ -z "$RESOURCE" ]; then
-  echo "FAIL: the page never referenced a rewritten script URL (check extend_cache and the module build)"
+  echo "FAIL: the page never referenced a rewritten script URL (check rewrite_javascript and the module build)"
   echo "error log: $D/logs/error.log"
   exit 1
 fi
 echo "rewritten resource: $RESOURCE"
-# Warm the rewritten URL into the cache.
-for _ in 1 2; do
-  curl -sk --http1.1 --max-time 20 -o /dev/null "$BASE$RESOURCE"
+# Warm the rewritten URL into the cache and learn the optimized body size.
+for _ in 1 2 3; do
+  BODY_BYTES=$(curl -s --http1.1 --max-time 20 -o /dev/null \
+               -w '%{size_download}' "$BASE$RESOURCE")
 done
+if [ "${BODY_BYTES:-0}" -le 131072 ]; then
+  echo "FAIL: the optimized script is $BODY_BYTES bytes; the ring needs more than 128 KB (raise BODY_KB)"
+  exit 1
+fi
 
 # Precondition: a fast HTTP/2 fetch of the cached rewritten URL must return
 # the whole body through the ring.
@@ -164,7 +181,7 @@ BEFORE=0
 GOT=0
 for _ in $(seq 1 10); do
   BEFORE=$(ring_refills); BEFORE=${BEFORE:-0}
-  GOT=$(curl -sk --http2 --max-time 20 -o /dev/null -w '%{size_download}' \
+  GOT=$(curl -s --http2-prior-knowledge --max-time 20 -o /dev/null -w '%{size_download}' \
         "$BASE$RESOURCE")
   AFTER=$(ring_refills); AFTER=${AFTER:-0}
   [ "$AFTER" -gt "$BEFORE" ] && break
@@ -190,9 +207,16 @@ result_field() { # field, line
 ge() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a >= b) }'; }
 le() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a <= b) }'; }
 
+STALLS_BEFORE=$(stat_value zerocopy_serve_stall_timeouts)
+STALLS_BEFORE=${STALLS_BEFORE:-missing}
+if [ "$STALLS_BEFORE" = missing ]; then
+  fail "zerocopy_serve_stall_timeouts is not exported"
+  STALLS_BEFORE=0
+fi
+
 # Stall: window never reopened. The server has 4x send_timeout to end it.
 MAX_STALL=$((SEND_TIMEOUT * 4))
-LINE=$(python3 "$CLIENT" --port "$PORT" --path "$RESOURCE" --mode stall \
+LINE=$(python3 "$CLIENT" --plaintext --port "$PORT" --path "$RESOURCE" --mode stall \
        --max-wait "$MAX_STALL" | tail -n 1)
 echo "stall:   $LINE"
 OUTCOME=$(result_field outcome "$LINE")
@@ -210,7 +234,7 @@ case "$OUTCOME" in
     fi
     ;;
   alive)
-    fail "stall: the stalled stream was still open ${MAX_STALL}s after it stopped (send_timeout ${SEND_TIMEOUT}s): the stall is never timed out (#307)"
+    fail "stall: the stalled stream was still open ${MAX_STALL}s after it stopped (send_timeout ${SEND_TIMEOUT}s)"
     ;;
   complete)
     fail "stall: the response completed although the window was never reopened; the test setup is wrong"
@@ -223,10 +247,17 @@ if [ -n "$SBYTES" ] && [ "$SBYTES" -ge "$BODY_BYTES" ]; then
   fail "stall: client received the whole body despite the 1 KB window"
 fi
 
+STALLS_AFTER=$(stat_value zerocopy_serve_stall_timeouts)
+echo "stall counter: $STALLS_BEFORE -> ${STALLS_AFTER:-missing}"
+if [ "$STALLS_AFTER" != "$((STALLS_BEFORE + 1))" ]; then
+  fail "stall: zerocopy_serve_stall_timeouts did not move by one ($STALLS_BEFORE -> ${STALLS_AFTER:-missing})"
+fi
+
 # Control: progressing slowly (a grant every 0.5 s, well under send_timeout).
 # Must finish with the whole body and must not be reset.
-LINE=$(python3 "$CLIENT" --port "$PORT" --path "$RESOURCE" --mode slow \
-       --grant-bytes 32768 --grant-interval 0.5 \
+LINE=$(python3 "$CLIENT" --plaintext --port "$PORT" --path "$RESOURCE" --mode slow \
+       --grant-bytes 32768 --grant-interval \
+       "$(awk -v t="$SEND_TIMEOUT" 'BEGIN { print t * 0.75 }')" \
        --max-wait $((SEND_TIMEOUT * 15)) | tail -n 1)
 echo "control: $LINE"
 OUTCOME=$(result_field outcome "$LINE")
@@ -235,11 +266,16 @@ if [ "$OUTCOME" != "complete" ] || [ "$CBYTES" != "$BODY_BYTES" ]; then
   fail "control: a slowly progressing client did not receive the full body (outcome=$OUTCOME bytes=$CBYTES, want complete $BODY_BYTES)"
 fi
 
+STALLS_END=$(stat_value zerocopy_serve_stall_timeouts)
+if [ "$STALLS_END" != "$STALLS_AFTER" ]; then
+  fail "control: a progressing client moved zerocopy_serve_stall_timeouts ($STALLS_AFTER -> ${STALLS_END:-missing})"
+fi
+
 CRASH=$(grep -cE "exited on signal|signal [0-9]+ .SIG(SEGV|ABRT|BUS|ILL|FPE)|Check failed|CRITICAL" "$D/logs/error.log" || true)
 [ "$CRASH" -eq 0 ] || fail "$CRASH crash markers in error.log"
 
 if [ "$FAILURES" -eq 0 ]; then
-  echo "PASS: a stalled zero-copy HTTP/2 stream is ended within send_timeout and a progressing stream is not (#307 does not reproduce)"
+  echo "PASS: a stalled zero-copy HTTP/2 stream is ended within send_timeout and a progressing stream is not, and the stall is counted"
   exit 0
 fi
 echo "$FAILURES failure(s); error log preserved at $D/logs/error.log"
