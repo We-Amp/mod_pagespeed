@@ -386,7 +386,9 @@ TEST_F(DaemonSeamTest, ALostOptimizedCopyIsAskedForOnceAfterTheServe) {
 
   const size_t served = body.find("RecordDaemonServeCounters(");
   ASSERT_NE(GoogleString::npos, served);
-  const size_t gate = body.find("if (decision.lost_optimized_copy) {");
+  const size_t gate = body.find(
+      "if (decision.lost_optimized_copy || decision.renotify_original_only) "
+      "{");
   ASSERT_NE(GoogleString::npos, gate)
       << "the ask is no longer conditioned on the arm's detection";
   const size_t ask = body.find("DaemonServeLostCopyNotify(");

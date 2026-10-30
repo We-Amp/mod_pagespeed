@@ -95,6 +95,7 @@ class DaemonServeNotify : public Function {
   bool fallback_hit_;
   bool stale_variant_expired_by_age_;
   bool lost_optimized_copy_;
+  bool renotify_original_only_;
   bool vary_accept_origin_declared_;
   int ps_content_type_;
   uint32_t client_mask_;

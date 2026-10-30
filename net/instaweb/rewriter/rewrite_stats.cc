@@ -126,14 +126,26 @@ const char kIproDaemonRefreshNotified[] = "ipro_daemon_refresh_notified";
 const char kIproDaemonRefreshNotifyFailed[] =
     "ipro_daemon_refresh_notify_failed";
 
+// Durable-original serves where the cache holds no variant of any kind for
+// the URL.  Every one is already inside `ipro_daemon_served_original`.  A
+// count that keeps climbing while the optimizer worker is healthy means the
+// worker is not producing variants for those URLs.
+// A stylesheet or script is counted once per URL per window per process (only
+// on the request that does the gzip look), while an image is counted on every
+// serve.
+const char kIproDaemonServedOriginalOnly[] = "ipro_daemon_served_original_only";
+
 // THE THIRD NOTIFICATION PAIR, and likewise NOT part of the partition: this
-// counts notifications sent after the substrate served a stylesheet's or
-// script's stored original and found that the optimized copy the optimizer
-// had written for it is gone while its compressed copies remain.  Every one
-// of those serves is already inside `ipro_daemon_served_original`.  It
+// counts notifications sent after the substrate served a stored original and
+// either found that the optimized copy the optimizer had written for a
+// stylesheet or script is gone while its compressed copies remain, or found
+// no variant of any kind in the cache (an original recorded while the worker
+// was down, images included).  Every one of those serves is already inside
+// `ipro_daemon_served_original`.  It
 // counts ASKS, not heals: how often this server asked for a copy to be made
-// again.  It stays flat for content the optimizer left unoptimized on
-// purpose, and it keeps climbing -- about once per URL per window per
+// again.  It keeps climbing, about once per URL per window, for an original
+// the worker never turns into a variant (for example content with nothing to
+// gain), and it keeps climbing -- about once per URL per window per
 // process -- for a URL whose copy the optimizer does not write back, for
 // instance because its content type was switched off after the compressed
 // copies were stored.
@@ -262,6 +274,7 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproDaemonFallbackNotifyFailed);
   statistics->AddVariable(kIproDaemonRefreshNotified);
   statistics->AddVariable(kIproDaemonRefreshNotifyFailed);
+  statistics->AddVariable(kIproDaemonServedOriginalOnly);
   statistics->AddVariable(kIproDaemonHealNotified);
   statistics->AddVariable(kIproDaemonHealNotifyFailed);
   statistics->AddVariable(kDownstreamCachePurgeAttempts);
@@ -339,6 +352,8 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
           stats->GetVariable(kIproDaemonRefreshNotified)),
       ipro_daemon_refresh_notify_failed_(
           stats->GetVariable(kIproDaemonRefreshNotifyFailed)),
+      ipro_daemon_served_original_only_(
+          stats->GetVariable(kIproDaemonServedOriginalOnly)),
       ipro_daemon_heal_notified_(stats->GetVariable(kIproDaemonHealNotified)),
       ipro_daemon_heal_notify_failed_(
           stats->GetVariable(kIproDaemonHealNotifyFailed)),

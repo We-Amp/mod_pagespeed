@@ -876,13 +876,15 @@ bool InstawebHandler::ServeFromDaemonSubstrate() {
   // it was purged (or, with a worker that looks for missing copies itself,
   // until its stored original expired).  One ordinary notification, fire
   // and forget; the arm's limiter has already held it to about once per URL
-  // per window, and its detection never fires for content the optimizer left
-  // unoptimized on purpose (DaemonServeLostCopyNotify).
+  // per window (DaemonServeLostCopyNotify).  The same single ask answers an
+  // original recorded while the worker was down: a stored original with no
+  // variant in the cache (renotify_original_only), which an exact hit never
+  // re-notifies.
   //
   // Asked only when the decision SAYS there is something to ask for, with
   // the request's own configuration named, and counted on SEND OUTCOMES
   // only -- exactly the fallback re-notify's terms.
-  if (decision.lost_optimized_copy) {
+  if (decision.lost_optimized_copy || decision.renotify_original_only) {
     DaemonAdapter* adapter = server_context_->daemon_adapter();
     GoogleString option_context, option_signature;
     if (adapter != nullptr && adapter->abi() != nullptr &&
