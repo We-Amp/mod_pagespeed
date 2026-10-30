@@ -99,6 +99,10 @@ common --experimental_allow_tags_propagation
 # Linux hosts and build images ship both tools, so use the preinstalled ones.
 build:linux --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
 build:linux --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
+# Same for macOS: the BCR m4's generated gnulib spawn.h redeclares
+# posix_spawn_file_actions_addchdir, which the macOS SDK also declares,
+# so it fails to compile there. macOS ships m4, so use the preinstalled one.
+build:macos --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
 
 # Enable position independent code (this is the default on macOS and Windows)
 # (Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/421)
