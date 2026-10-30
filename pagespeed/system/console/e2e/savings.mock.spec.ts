@@ -382,7 +382,7 @@ test("the module table heads its percentage column", async ({ page }) => {
 test("stamps each card with its own time base", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", goldenReplies());
   await openConsole(page, "pagespeed_global_admin", "#/savings");
-  await expect(page.getByTestId("since-module")).toContainText("(web server restart)");
+  await expect(page.getByTestId("since-module")).toContainText("(web server restart or reload)");
   await expect(page.getByTestId("since-optimizer")).toContainText("(optimizer restart)");
   // Each stamp carries its own base: the module's and the optimizer's
   // start times differ in the goldens, and so do their tooltips.
@@ -400,7 +400,7 @@ test("the hit rate carries the module's time base, not the optimizer's", async (
   await expect(card.getByTestId("savings-hit-rate")).toContainText("%");
   // The rate is computed from module counters, so its stamp is the module's.
   const stamp = card.getByTestId("since-hit-rate");
-  await expect(stamp).toContainText("(web server restart)");
+  await expect(stamp).toContainText("(web server restart or reload)");
   await expect(stamp).toHaveText(await page.getByTestId("since-module").innerText());
   expect(await stamp.getAttribute("title")).toEqual(
     await page.getByTestId("since-module").getAttribute("title"),
@@ -415,7 +415,7 @@ test("the hit rate carries the module's time base, not the optimizer's", async (
 test("an older module and optimizer read 'since restart'", async ({ page }) => {
   await mockAdmin(page, "pagespeed_global_admin", HEALTHY);
   await openConsole(page, "pagespeed_global_admin", "#/savings");
-  await expect(page.getByTestId("since-module")).toHaveText(/^\s*since restart \(web server restart\)\s*$/);
+  await expect(page.getByTestId("since-module")).toHaveText(/^\s*since restart \(web server restart or reload\)\s*$/);
   await expect(page.getByTestId("since-optimizer")).toHaveText(/^\s*since restart \(optimizer restart\)\s*$/);
   await expect(page.getByTestId("warming-pill")).toHaveCount(0);
 });

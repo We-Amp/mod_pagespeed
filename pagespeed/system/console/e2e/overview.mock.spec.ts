@@ -223,7 +223,7 @@ test.describe("Overview time bases and scope", () => {
     await openConsole(page, "pagespeed_global_admin", "#/overview");
     await expect(page.getByTestId("module-card").locator(".scope-chip")).toHaveCount(0);
     await expect(page.getByTestId("optimizer-card").locator(".scope-chip")).toHaveCount(0);
-    await expect(page.getByTestId("since-module")).toContainText("(web server restart)");
+    await expect(page.getByTestId("since-module")).toContainText("(web server restart or reload)");
     await expect(page.getByTestId("since-optimizer")).toContainText("(optimizer restart)");
   });
 
