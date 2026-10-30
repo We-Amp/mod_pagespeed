@@ -1,0 +1,911 @@
+{
+ "entries": [
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1402,
+   "source": "worker",
+   "timestamp": 1793330540352,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1403,
+   "source": "worker",
+   "timestamp": 1793330540352,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1404,
+   "source": "worker",
+   "timestamp": 1793330540353,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1405,
+   "source": "worker",
+   "timestamp": 1793330540353,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1406,
+   "source": "worker",
+   "timestamp": 1793330540353,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1407,
+   "source": "worker",
+   "timestamp": 1793330540353,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1408,
+   "source": "worker",
+   "timestamp": 1793330540354,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1409,
+   "source": "worker",
+   "timestamp": 1793330540354,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1410,
+   "source": "worker",
+   "timestamp": 1793330540354,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1411,
+   "source": "worker",
+   "timestamp": 1793330540355,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1412,
+   "source": "worker",
+   "timestamp": 1793330540355,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1413,
+   "source": "worker",
+   "timestamp": 1793330540355,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1414,
+   "source": "worker",
+   "timestamp": 1793330540356,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1415,
+   "source": "worker",
+   "timestamp": 1793330540356,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1416,
+   "source": "worker",
+   "timestamp": 1793330540356,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1417,
+   "source": "worker",
+   "timestamp": 1793330540356,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1418,
+   "source": "worker",
+   "timestamp": 1793330540357,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1419,
+   "source": "worker",
+   "timestamp": 1793330540357,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/Beach.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1420,
+   "source": "worker",
+   "timestamp": 1793330540357,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/Beach.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1421,
+   "source": "worker",
+   "timestamp": 1793330540357,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1422,
+   "source": "worker",
+   "timestamp": 1793330540394,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1423,
+   "source": "worker",
+   "timestamp": 1793330540394,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1424,
+   "source": "worker",
+   "timestamp": 1793330540395,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1425,
+   "source": "worker",
+   "timestamp": 1793330540395,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1426,
+   "source": "worker",
+   "timestamp": 1793330540395,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1427,
+   "source": "worker",
+   "timestamp": 1793330540395,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1428,
+   "source": "worker",
+   "timestamp": 1793330540396,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1429,
+   "source": "worker",
+   "timestamp": 1793330540396,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1430,
+   "source": "worker",
+   "timestamp": 1793330540396,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1431,
+   "source": "worker",
+   "timestamp": 1793330540396,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1432,
+   "source": "worker",
+   "timestamp": 1793330540397,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1433,
+   "source": "worker",
+   "timestamp": 1793330540397,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1434,
+   "source": "worker",
+   "timestamp": 1793330540397,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1435,
+   "source": "worker",
+   "timestamp": 1793330540397,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1436,
+   "source": "worker",
+   "timestamp": 1793330540398,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1437,
+   "source": "worker",
+   "timestamp": 1793330540398,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1438,
+   "source": "worker",
+   "timestamp": 1793330540398,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1439,
+   "source": "worker",
+   "timestamp": 1793330540398,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1440,
+   "source": "worker",
+   "timestamp": 1793330540398,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1441,
+   "source": "worker",
+   "timestamp": 1793330540398,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1442,
+   "source": "worker",
+   "timestamp": 1793330540399,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1443,
+   "source": "worker",
+   "timestamp": 1793330540399,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1444,
+   "source": "worker",
+   "timestamp": 1793330540399,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1445,
+   "source": "worker",
+   "timestamp": 1793330540399,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1446,
+   "source": "worker",
+   "timestamp": 1793330540399,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1447,
+   "source": "worker",
+   "timestamp": 1793330540399,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1448,
+   "source": "worker",
+   "timestamp": 1793330540400,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1449,
+   "source": "worker",
+   "timestamp": 1793330540400,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1450,
+   "source": "worker",
+   "timestamp": 1793330540400,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1451,
+   "source": "worker",
+   "timestamp": 1793330540400,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1452,
+   "source": "worker",
+   "timestamp": 1793330540401,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1453,
+   "source": "worker",
+   "timestamp": 1793330540401,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1454,
+   "source": "worker",
+   "timestamp": 1793330540401,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1455,
+   "source": "worker",
+   "timestamp": 1793330540401,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1456,
+   "source": "worker",
+   "timestamp": 1793330540401,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1457,
+   "source": "worker",
+   "timestamp": 1793330540401,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1458,
+   "source": "worker",
+   "timestamp": 1793330540402,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1459,
+   "source": "worker",
+   "timestamp": 1793330540402,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/OptPuzzle.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1460,
+   "source": "worker",
+   "timestamp": 1793330540402,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/OptPuzzle.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1461,
+   "source": "worker",
+   "timestamp": 1793330540402,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1462,
+   "source": "worker",
+   "timestamp": 1793330540425,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1463,
+   "source": "worker",
+   "timestamp": 1793330540425,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1464,
+   "source": "worker",
+   "timestamp": 1793330540426,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1465,
+   "source": "worker",
+   "timestamp": 1793330540426,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1466,
+   "source": "worker",
+   "timestamp": 1793330540426,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1467,
+   "source": "worker",
+   "timestamp": 1793330540426,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1468,
+   "source": "worker",
+   "timestamp": 1793330540427,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1469,
+   "source": "worker",
+   "timestamp": 1793330540427,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1470,
+   "source": "worker",
+   "timestamp": 1793330540427,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1471,
+   "source": "worker",
+   "timestamp": 1793330540427,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000089)",
+   "module": "worker",
+   "seq": 1472,
+   "source": "worker",
+   "timestamp": 1793330540427,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000089), skipping",
+   "module": "worker",
+   "seq": 1473,
+   "source": "worker",
+   "timestamp": 1793330540427,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1474,
+   "source": "worker",
+   "timestamp": 1793330540428,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1475,
+   "source": "worker",
+   "timestamp": 1793330540428,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1476,
+   "source": "worker",
+   "timestamp": 1793330540428,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1477,
+   "source": "worker",
+   "timestamp": 1793330540428,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1478,
+   "source": "worker",
+   "timestamp": 1793330540429,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1479,
+   "source": "worker",
+   "timestamp": 1793330540429,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1480,
+   "source": "worker",
+   "timestamp": 1793330540429,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1481,
+   "source": "worker",
+   "timestamp": 1793330540429,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1482,
+   "source": "worker",
+   "timestamp": 1793330540430,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1483,
+   "source": "worker",
+   "timestamp": 1793330540430,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000049)",
+   "module": "worker",
+   "seq": 1484,
+   "source": "worker",
+   "timestamp": 1793330540430,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000049), skipping",
+   "module": "worker",
+   "seq": 1485,
+   "source": "worker",
+   "timestamp": 1793330540430,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1486,
+   "source": "worker",
+   "timestamp": 1793330540430,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1487,
+   "source": "worker",
+   "timestamp": 1793330540430,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1488,
+   "source": "worker",
+   "timestamp": 1793330540431,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1489,
+   "source": "worker",
+   "timestamp": 1793330540431,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1490,
+   "source": "worker",
+   "timestamp": 1793330540431,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1491,
+   "source": "worker",
+   "timestamp": 1793330540431,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1492,
+   "source": "worker",
+   "timestamp": 1793330540432,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1493,
+   "source": "worker",
+   "timestamp": 1793330540432,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1494,
+   "source": "worker",
+   "timestamp": 1793330540432,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1495,
+   "source": "worker",
+   "timestamp": 1793330540432,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1496,
+   "source": "worker",
+   "timestamp": 1793330540432,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1497,
+   "source": "worker",
+   "timestamp": 1793330540432,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1498,
+   "source": "worker",
+   "timestamp": 1793330540433,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1499,
+   "source": "worker",
+   "timestamp": 1793330540433,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Processing notification for /audit/blocking_rewrite_test_dont_reuse_1.jpg (type=3, mask=0x00000009)",
+   "module": "worker",
+   "seq": 1500,
+   "source": "worker",
+   "timestamp": 1793330540433,
+   "type": "log"
+  },
+  {
+   "level": "info",
+   "message": "Variant already processed for /audit/blocking_rewrite_test_dont_reuse_1.jpg (mask=0x00000009), skipping",
+   "module": "worker",
+   "seq": 1501,
+   "source": "worker",
+   "timestamp": 1793330540433,
+   "type": "log"
+  }
+ ],
+ "gap": false,
+ "more": false,
+ "newest_seq": 1501,
+ "next_since": 1501,
+ "oldest_seq": 1,
+ "shed_total": 0,
+ "stream_id": "df99417717a89987"
+}

@@ -13,6 +13,13 @@
 # Usage:
 #   scripts/refresh-stat-fixture.sh                    # public demo server
 #   scripts/refresh-stat-fixture.sh http://host:8080/pagespeed_admin
+#   scripts/refresh-stat-fixture.sh --rig              # also the leaf fixtures
+#
+# --rig additionally runs the controlled workload on the local verification
+# rig (tools/console-audit/rig.sh, which must be up) and captures the real JSON
+# of every console leaf into test-fixtures/rig/, together with the client-side
+# expected values. The page-model tests in src/lib/utils/rig-fixtures.test.ts
+# read them. The statistics-name fixture is not touched.
 #
 # The argument is the admin console's base URL; "/statistics?format=json" is
 # appended to it. Note that one server only exposes the counters its own
@@ -22,6 +29,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT="$SCRIPT_DIR/../test-fixtures/stat-names.fixture.json"
+
+if [ "${1:-}" = "--rig" ]; then
+  RIG="$SCRIPT_DIR/../../../../tools/console-audit/rig.sh"
+  "$RIG" workload "${RIG_WORKLOAD_ROUNDS:-3}"
+  "$RIG" capture "$SCRIPT_DIR/../test-fixtures/rig"
+  # The statistics-name fixture is left alone: one rig only registers the
+  # counters its own configuration enables.
+  exit 0
+fi
 
 BASE="${1:-https://demo-httpd-1.1.modpagespeed.com/pagespeed_global_admin}"
 URL="$BASE/statistics?format=json"

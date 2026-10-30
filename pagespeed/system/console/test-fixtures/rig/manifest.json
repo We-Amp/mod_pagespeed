@@ -1,0 +1,112 @@
+{
+ "cache.vhost-a": {
+  "file": "cache.vhost-a.json",
+  "path": "/pagespeed_admin/cache",
+  "status": 200
+ },
+ "config.global": {
+  "file": "config.global.json",
+  "path": "/pagespeed_global_admin/config",
+  "status": 200
+ },
+ "config.vhost-a": {
+  "file": "config.vhost-a.json",
+  "path": "/pagespeed_admin/config",
+  "status": 200
+ },
+ "console.global": {
+  "file": "console.global.json",
+  "path": "/pagespeed_global_admin/console?json=1",
+  "status": 200
+ },
+ "daemon_cache_urls.global": {
+  "file": "daemon_cache_urls.global.json",
+  "path": "/pagespeed_global_admin/v1/daemon/cache/urls?limit=50",
+  "status": 200
+ },
+ "daemon_cooldowns.global": {
+  "file": "daemon_cooldowns.global.json",
+  "path": "/pagespeed_global_admin/v1/daemon/cooldowns",
+  "status": 200
+ },
+ "daemon_health.global": {
+  "file": "daemon_health.global.json",
+  "path": "/pagespeed_global_admin/v1/daemon/health",
+  "status": 200
+ },
+ "daemon_logs.global": {
+  "file": "daemon_logs.global.json",
+  "path": "/pagespeed_global_admin/v1/daemon/logs?limit=100",
+  "status": 200
+ },
+ "daemon_stats.global": {
+  "file": "daemon_stats.global.json",
+  "path": "/pagespeed_global_admin/v1/daemon/stats",
+  "status": 200
+ },
+ "daemon_stats.vhost-a": {
+  "file": "daemon_stats.vhost-a.json",
+  "path": "/pagespeed_admin/v1/daemon/stats",
+  "status": 200
+ },
+ "daemon_stats.vhost-b": {
+  "file": "daemon_stats.vhost-b.json",
+  "path": "/pagespeed_admin/v1/daemon/stats",
+  "status": 200
+ },
+ "graphs.global": {
+  "file": "graphs.global.json",
+  "path": "/pagespeed_global_admin/graphs?json=1",
+  "status": 200
+ },
+ "histograms.vhost-a": {
+  "file": "histograms.vhost-a.json",
+  "path": "/pagespeed_admin/histograms",
+  "status": 200
+ },
+ "message_history.grouped.global": {
+  "file": "message_history.grouped.global.json",
+  "path": "/pagespeed_global_admin/message_history?grouped=1&window_s=3600",
+  "status": 200
+ },
+ "message_history.vhost-a": {
+  "file": "message_history.vhost-a.json",
+  "path": "/pagespeed_admin/message_history",
+  "status": 200
+ },
+ "message_history.vhost-b": {
+  "file": "message_history.vhost-b.json",
+  "path": "/pagespeed_admin/message_history",
+  "status": 200
+ },
+ "physical_caches.vhost-a": {
+  "file": "physical_caches.vhost-a.json",
+  "path": "/pagespeed_admin/cache?physical_caches",
+  "status": 200
+ },
+ "rule_packs.global": {
+  "file": "rule_packs.global.json",
+  "path": "/pagespeed_global_admin/rule_packs?json=1&limit=1000",
+  "status": 200
+ },
+ "rule_packs.vhost-a": {
+  "file": "rule_packs.vhost-a.json",
+  "path": "/pagespeed_admin/rule_packs?json=1&limit=1000",
+  "status": 200
+ },
+ "stats_json.global": {
+  "file": "stats_json.global.json",
+  "path": "/pagespeed_global_admin/stats_json",
+  "status": 200
+ },
+ "stats_json.vhost-a": {
+  "file": "stats_json.vhost-a.json",
+  "path": "/pagespeed_admin/stats_json",
+  "status": 200
+ },
+ "stats_json.vhost-b": {
+  "file": "stats_json.vhost-b.json",
+  "path": "/pagespeed_admin/stats_json",
+  "status": 200
+ }
+}

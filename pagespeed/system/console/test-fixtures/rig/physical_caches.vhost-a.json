@@ -1,0 +1,22 @@
+{
+ "backend_stats": "\nCyclone cache '/var/cache/mod_pagespeed//cyclone.dat' statistics:\nCurrent entries: 74\nCurrent size bytes: 12615432\nRAM cache bytes: 0\nRAM cache hits: 0\nRAM cache misses: 0\nDisk cache hits: 1\nDisk cache misses: 0\nEvictions: 0\nWrite buffer wraps: 0\nWraps deferred by lease: 0\nWrites dropped by lease: 0\nWraps forced past lease: 0\nTag collision evictions: 0\nBucket full evictions: 0\nResets under degraded gate: 0\nResets gate verified: 0\n",
+ "caches": [
+  {
+   "name": "HTTP Cache",
+   "summary": "HTTPCache(Stats(prefix=file_cache,cache=CycloneCache))"
+  },
+  {
+   "name": "Metadata Cache",
+   "summary": "Compressed(WriteThroughCache(l1=Stats(prefix=shm_cache,cache=SharedMemCache<64>),l2=Stats(prefix=file_cache_small,cache=CycloneCache(small_tier))))"
+  },
+  {
+   "name": "Property Cache",
+   "summary": "beacon_cohort:Stats(prefix=pcache-cohorts-beacon_cohort,cache=Compressed(WriteThroughCache(l1=Stats(prefix=shm_cache,cache=SharedMemCache<64>),l2=Stats(prefix=file_cache_small,cache=CycloneCache(small_tier)))))\ndependencies_cohort:Stats(prefix=pcache-cohorts-dependencies_cohort,cache=Compressed(WriteThroughCache(l1=Stats(prefix=shm_cache,cache=SharedMemCache<64>),l2=Stats(prefix=file_cache_small,cache=CycloneCache(small_tier)))))\ndom:Stats(prefix=pcache-cohorts-dom,cache=Compressed(WriteThroughCache(l1=Stats(prefix=shm_cache,cache=SharedMemCache<64>),l2=Stats(prefix=file_cache_small,cache=CycloneCache(small_tier)))))"
+  },
+  {
+   "name": "FileSystem Metadata Cache",
+   "summary": "none"
+  }
+ ],
+ "purge_enabled": false
+}

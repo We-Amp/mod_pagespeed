@@ -1,0 +1,107 @@
+{
+ "groups": [
+  {
+   "count": 1,
+   "last_ms": 1793330347000,
+   "level": "warning",
+   "recent": 1,
+   "template": "mod_pagespeed: admin handler 'pagespeed_admin' received request from N.N.N.N; intended for loopback. Restrict access at the web-server layer (Apache: <Location> Require local; nginx: allow N.N.N.N; deny all; IIS: InfoUrlsLocalOnly). See URL"
+  },
+  {
+   "count": 96,
+   "last_ms": 1793330343000,
+   "level": "info",
+   "recent": 96,
+   "template": "No permission to rewrite 'URL'"
+  },
+  {
+   "count": 16,
+   "last_ms": 1793330343000,
+   "level": "info",
+   "recent": 16,
+   "template": "Retaining contents of script tag; probably data for external script."
+  },
+  {
+   "count": 6,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 6,
+   "template": "URL Shrinking image `URL' (N bytes) to `URL' (N bytes)"
+  },
+  {
+   "count": 2,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 2,
+   "template": "HTTPCache key=URL fragment=localhost: remembering recent failure for N seconds."
+  },
+  {
+   "count": 2,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 2,
+   "template": "Reusing shared memory for path: /var/cache/mod_pagespeed/ flush ."
+  },
+  {
+   "count": 2,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 2,
+   "template": "URL Resized image `URL' from NxN to NxN"
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 1,
+   "template": "Initializing shared memory for path: /var/cache/mod_pagespeed/ flush ."
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 1,
+   "template": "SharedMemCache: pagespeed_default_shm/metadata_cache, sectors = N, entries/sector = N,  N-byte blocks/sector = N, total footprint: N"
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 1,
+   "template": "URL is being re-fetched asynchronously (lock NLDIxvxNQovNOUjdQqH.lock held elsewhere)"
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 1,
+   "template": "URL is being re-fetched asynchronously (lock NpMqGBrUMN-N-ivvXfi.lock held elsewhere)"
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 1,
+   "template": "URL is being re-fetched asynchronously (lock TNoxNiKtkNnNiZONvhNf.lock held elsewhere)"
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330336000,
+   "level": "info",
+   "recent": 1,
+   "template": "URL is being re-fetched asynchronously (lock sUJlSLgdfNNzrNCQPWNB.lock held elsewhere)"
+  },
+  {
+   "count": 1,
+   "last_ms": 1793330335000,
+   "level": "info",
+   "recent": 1,
+   "template": "CycloneCache enabled at /var/cache/mod_pagespeed//cyclone.dat"
+  }
+ ],
+ "next": 133,
+ "now_ms": 1793330552597,
+ "scope": "process",
+ "truncated": false,
+ "window_s": 3600
+}

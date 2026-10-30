@@ -1,0 +1,307 @@
+{
+ "timestamps": [
+  1793330336123
+ ],
+ "variables": {
+  "cache_backend_hits": [
+   0
+  ],
+  "cache_backend_misses": [
+   0
+  ],
+  "cache_batcher_dropped_gets": [
+   0
+  ],
+  "cache_deletes": [
+   0
+  ],
+  "cache_expirations": [
+   0
+  ],
+  "cache_extensions": [
+   0
+  ],
+  "cache_fallbacks": [
+   0
+  ],
+  "cache_flush_count": [
+   0
+  ],
+  "cache_flush_timestamp_ms": [
+   0
+  ],
+  "cache_hits": [
+   0
+  ],
+  "cache_inserts": [
+   0
+  ],
+  "cache_misses": [
+   0
+  ],
+  "cache_time_us": [
+   0
+  ],
+  "curl_fetch_active_count": [
+   0
+  ],
+  "curl_fetch_bytes_count": [
+   0
+  ],
+  "curl_fetch_cancel_count": [
+   0
+  ],
+  "curl_fetch_cert_errors": [
+   0
+  ],
+  "curl_fetch_failure_count": [
+   0
+  ],
+  "curl_fetch_request_count": [
+   0
+  ],
+  "curl_fetch_time_duration_ms": [
+   0
+  ],
+  "curl_fetch_timeout_count": [
+   0
+  ],
+  "file_cache_bytes_freed_in_cleanup": [
+   null
+  ],
+  "file_cache_cleanups": [
+   null
+  ],
+  "file_cache_deletes": [
+   0
+  ],
+  "file_cache_disk_checks": [
+   null
+  ],
+  "file_cache_evictions": [
+   null
+  ],
+  "file_cache_hits": [
+   0
+  ],
+  "file_cache_inserts": [
+   0
+  ],
+  "file_cache_misses": [
+   0
+  ],
+  "file_cache_write_errors": [
+   null
+  ],
+  "http_approx_header_bytes_fetched": [
+   0
+  ],
+  "http_bytes_fetched": [
+   0
+  ],
+  "http_fetches": [
+   0
+  ],
+  "image_rewrite_latency_total_ms": [
+   0
+  ],
+  "image_rewrite_total_bytes_saved": [
+   0
+  ],
+  "image_rewrite_total_original_bytes": [
+   0
+  ],
+  "image_rewrite_uses": [
+   0
+  ],
+  "image_rewrites_dropped_decode_failure": [
+   0
+  ],
+  "image_rewrites_dropped_intentionally": [
+   0
+  ],
+  "image_rewrites_dropped_mime_type_unknown": [
+   0
+  ],
+  "image_rewrites_dropped_nosaving_noresize": [
+   0
+  ],
+  "image_rewrites_dropped_nosaving_resize": [
+   0
+  ],
+  "image_rewrites_dropped_server_write_fail": [
+   0
+  ],
+  "ipro_daemon_fallback_notified": [
+   0
+  ],
+  "ipro_daemon_fallback_notify_failed": [
+   0
+  ],
+  "ipro_daemon_fallthrough": [
+   0
+  ],
+  "ipro_daemon_fallthrough_css": [
+   0
+  ],
+  "ipro_daemon_fallthrough_image": [
+   0
+  ],
+  "ipro_daemon_fallthrough_js": [
+   0
+  ],
+  "ipro_daemon_served": [
+   0
+  ],
+  "ipro_daemon_served_css": [
+   0
+  ],
+  "ipro_daemon_served_image": [
+   0
+  ],
+  "ipro_daemon_served_js": [
+   0
+  ],
+  "ipro_daemon_served_original": [
+   0
+  ],
+  "ipro_daemon_served_other": [
+   0
+  ],
+  "ipro_not_in_cache": [
+   0
+  ],
+  "ipro_not_rewritable": [
+   0
+  ],
+  "ipro_recorder_dropped_due_to_load": [
+   0
+  ],
+  "ipro_recorder_dropped_due_to_size": [
+   0
+  ],
+  "ipro_recorder_failed": [
+   0
+  ],
+  "ipro_recorder_inserted_into_cache": [
+   0
+  ],
+  "ipro_recorder_not_cacheable": [
+   0
+  ],
+  "ipro_recorder_resources": [
+   0
+  ],
+  "ipro_served": [
+   0
+  ],
+  "memcached_async_deletes": [
+   0
+  ],
+  "memcached_async_hits": [
+   0
+  ],
+  "memcached_async_inserts": [
+   0
+  ],
+  "memcached_async_misses": [
+   0
+  ],
+  "memcached_blocking_deletes": [
+   0
+  ],
+  "memcached_blocking_hits": [
+   0
+  ],
+  "memcached_blocking_inserts": [
+   0
+  ],
+  "memcached_blocking_misses": [
+   0
+  ],
+  "pcache-cohorts-beacon_cohort_deletes": [
+   0
+  ],
+  "pcache-cohorts-beacon_cohort_hits": [
+   0
+  ],
+  "pcache-cohorts-beacon_cohort_inserts": [
+   0
+  ],
+  "pcache-cohorts-beacon_cohort_misses": [
+   0
+  ],
+  "pcache-cohorts-dom_deletes": [
+   0
+  ],
+  "pcache-cohorts-dom_hits": [
+   0
+  ],
+  "pcache-cohorts-dom_inserts": [
+   0
+  ],
+  "pcache-cohorts-dom_misses": [
+   0
+  ],
+  "redis_async_deletes": [
+   0
+  ],
+  "redis_async_hits": [
+   0
+  ],
+  "redis_async_inserts": [
+   0
+  ],
+  "redis_async_misses": [
+   0
+  ],
+  "redis_blocking_deletes": [
+   0
+  ],
+  "redis_blocking_hits": [
+   0
+  ],
+  "redis_blocking_inserts": [
+   0
+  ],
+  "redis_blocking_misses": [
+   0
+  ],
+  "rewrite_cached_output_hits": [
+   0
+  ],
+  "rewrite_cached_output_missed_deadline": [
+   0
+  ],
+  "rewrite_cached_output_misses": [
+   0
+  ],
+  "shm_cache_deletes": [
+   0
+  ],
+  "shm_cache_hits": [
+   0
+  ],
+  "shm_cache_inserts": [
+   0
+  ],
+  "shm_cache_misses": [
+   0
+  ],
+  "url_input_resource_hit": [
+   0
+  ],
+  "url_input_resource_miss": [
+   0
+  ],
+  "url_input_resource_recent_fetch_failure": [
+   0
+  ],
+  "url_input_resource_recent_uncacheable_failure": [
+   0
+  ],
+  "url_input_resource_recent_uncacheable_miss": [
+   0
+  ]
+ }
+}
