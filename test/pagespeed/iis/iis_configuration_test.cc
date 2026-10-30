@@ -923,4 +923,47 @@ TEST_F(IisConfigurationTest, BareDirectiveLinesParse) {
   EXPECT_TRUE(rwo.Enabled(RewriteOptions::kCombineCss));
 }
 
+// A UTF-8 byte order mark (EF BB BF) at the start of the text must not change
+// the parsed options: the first directive applies exactly as without it, and
+// one notice is logged.
+TEST_F(IisConfigurationTest, Utf8ByteOrderMarkIsSkipped) {
+  const std::string body =
+      "pagespeed EnableFilters combine_css\n"
+      "pagespeed DaemonSocketPath C:\\daemon\\notify.sock\n";
+  const std::string bom = "\xEF\xBB\xBF";
+
+  IisRewriteOptions plain(nullptr);
+  ParseAndGetConfig(body, "", &plain);
+
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf =
+      CreateTestConfigFile(bom + body, &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions with_bom(nullptr);
+  TestConfigFileGetConfig(cf, input, with_bom);
+  TestConfigFileRelease(cf);
+
+  EXPECT_TRUE(plain.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_TRUE(with_bom.Enabled(RewriteOptions::kCombineCss));
+  EXPECT_EQ("C:\\daemon\\notify.sock", plain.daemon_socket_path());
+  EXPECT_EQ(plain.daemon_socket_path(), with_bom.daemon_socket_path());
+  EXPECT_EQ(1, recorder.CountContaining("byte order mark"));
+}
+
+// Text without a mark logs no notice, and a mark-only text parses to nothing.
+TEST_F(IisConfigurationTest, Utf8ByteOrderMarkNoticeOnlyWhenPresent) {
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed EnableFilters combine_css\n", &recorder, global_config_,
+      nullptr);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(0, recorder.CountContaining("byte order mark"));
+
+  cf = CreateTestConfigFile("\xEF\xBB\xBF", &recorder, global_config_,
+                            nullptr);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(1, recorder.CountContaining("byte order mark"));
+}
+
 }  // namespace

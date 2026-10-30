@@ -107,6 +107,18 @@ class ConfigurationFile:public ReferenceCounter
 		tempbuf[length] = 0;
 
 		char *ptr=tempbuf;
+		// Windows tools (PowerShell 5.1 Set-Content -Encoding UTF8, several
+		// editors) put a UTF-8 byte order mark (EF BB BF) in front of the text.
+		// Skip it, or the first directive no longer matches its name and is
+		// dropped without a message. Runs once per parse of one file.
+		if (length >= 3
+		    && static_cast<unsigned char>(ptr[0]) == 0xEF
+		    && static_cast<unsigned char>(ptr[1]) == 0xBB
+		    && static_cast<unsigned char>(ptr[2]) == 0xBF)
+		{
+			ptr += 3;
+			mh->Message(kInfo, "Ignoring the UTF-8 byte order mark at the start of the configuration file.");
+		}
 		while(*ptr)
 		{
 			char *startline=ptr;
