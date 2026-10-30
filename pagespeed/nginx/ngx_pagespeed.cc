@@ -3471,12 +3471,18 @@ void ps_send_to_pagespeed(ngx_http_request_t* r, ps_request_ctx_t* ctx,
                           ps_srv_conf_t* cfg_s, ngx_chain_t* in) {
   ngx_chain_t* cur;
   int last_buf = 0;
+#if (NGX_DEBUG)
+  // Consumed only by the ngx_log_debug3 below, which compiles away in
+  // nginx builds without --with-debug.
   size_t total_bytes = 0;
   int buffer_count = 0;
+#endif
   for (cur = in; cur != nullptr; cur = cur->next) {
     last_buf = cur->buf->last_buf;
+#if (NGX_DEBUG)
     total_bytes += (cur->buf->last - cur->buf->pos);
     buffer_count++;
+#endif
     // Buffers are not really the last buffer until they've been through
     // pagespeed.
     cur->buf->last_buf = 0;
@@ -4521,7 +4527,8 @@ bool ps_request_body_to_string_piece(ngx_http_request_t* r, StringPiece* out) {
     }
 
     ngx_log_debug(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "ngx_pagespeed beacon: %d buffers totalling %d", len);
+                  "ngx_pagespeed beacon: %d buffers totalling %d", buffers,
+                  len);
 
     // Allocate a string to store the combined result.
     u_char* s = static_cast<u_char*>(ngx_palloc(r->pool, len));
