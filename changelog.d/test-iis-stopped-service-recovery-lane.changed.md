@@ -1,0 +1,1 @@
+- The IIS system tests now run the stopped-service recovery test against the optimizer worker the standard lane starts, and assert the event-log text written for an unusable optimizer service, including `(not set)` for an empty socket or volume path. Refs #250
