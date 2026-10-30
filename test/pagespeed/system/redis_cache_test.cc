@@ -1057,10 +1057,13 @@ TEST_F(RedisCacheTest, RejectedAuthIsNotFoundBacksOffAndDoesNotLogPassword) {
 
   CheckNotFound(kSomeKey);
   EXPECT_EQ(1, connections.load());
-  // Within the reconnection delay no further attempt is made.
+  // Within the reconnection delay no further attempt is made: the server
+  // is gone after one connection, so an attempt would log a connect error.
+  const int messages_before = handler_.TotalMessages();
   CheckNotFound(kSomeKey);
   CheckNotFound(kSomeKey);
   EXPECT_EQ(1, connections.load());
+  EXPECT_EQ(messages_before, handler_.TotalMessages());
   // After the delay exactly one more attempt happens (the scripted server
   // serves a single connection, so start a fresh one).
   WaitForCustomServerShutdown();
