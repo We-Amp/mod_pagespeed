@@ -1509,6 +1509,28 @@ jobs:
           start "$R" redis:7-alpine || exit 1
           start "$M" memcached:1.6-alpine || exit 1
           for a in $(seq 1 30); do docker exec "$R" redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::redis never became ready"; docker logs "$R" 2>&1 | tail; exit 1; }; done
+          # Authenticated Redis and a socket-served Redis/memcached for the
+          # credential and unix-socket cache cases (they skip without these).
+          # The auth server shares the plain server's network namespace so
+          # REDIS_HOST serves both; throwaway passwords are masked.
+          SOCK="ci-sock-${SUF}"; RA="ci-redis-auth-${SUF}"; MS="ci-memcached-sock-${SUF}"
+          AUTHPW=$(openssl rand -hex 16); USERPW=$(openssl rand -hex 16)
+          echo "::add-mask::${AUTHPW}"; echo "::add-mask::${USERPW}"
+          {
+            echo "TSVC_SOCK=${SOCK}"; echo "TSVC_REDIS_AUTH=${RA}"; echo "TSVC_MEMCACHED_SOCK=${MS}"
+            echo "TSVC_AUTHPW=${AUTHPW}"; echo "TSVC_USERPW=${USERPW}"
+          } >> "$GITHUB_ENV"
+          docker volume create "$SOCK" >/dev/null
+          docker run --rm -v "$SOCK:/sock" redis:7-alpine chmod 777 /sock
+          docker rm -f "$RA" "$MS" 2>/dev/null || true
+          docker run -d --init --name "$RA" --network "container:${R}" -v "$SOCK:/sock" redis:7-alpine \
+            redis-server --port 6380 --save '' --requirepass "$AUTHPW" \
+            --user cacheuser on ">${USERPW}" '~*' '+@all' \
+            --unixsocket /sock/redis.sock --unixsocketperm 777 || exit 1
+          docker run -d --init --name "$MS" -v "$SOCK:/sock" memcached:1.6-alpine \
+            memcached -s /sock/memcached.sock -a 0777 || exit 1
+          for a in $(seq 1 30); do docker exec "$RA" redis-cli -p 6380 -a "$AUTHPW" --no-auth-warning ping 2>/dev/null | grep -q PONG && break; sleep 1; [ "$a" = 30 ] && { echo "::error::authenticated redis never became ready"; docker logs "$RA" 2>&1 | tail; exit 1; }; done
+          for a in $(seq 1 15); do docker exec "$MS" test -S /sock/memcached.sock 2>/dev/null && break; sleep 1; [ "$a" = 15 ] && echo "::warning::memcached socket not seen after 15s (continuing; the socket case will skip or fail visibly)"; done
           for a in $(seq 1 15); do echo version | docker exec -i "$M" sh -c 'cat | nc -w1 127.0.0.1 11211' 2>/dev/null | grep -q VERSION && break; sleep 1; [ "$a" = 15 ] && echo "::warning::memcached readiness probe unconfirmed after 15s (container is running; continuing)"; done
 
       - name: Run unit tests
@@ -1537,6 +1559,8 @@ jobs:
             -e BAZEL_CONFIG="${BAZEL_CONFIG}${SLOT_CPUS:+ --jobs=${SLOT_CPUS}}" \
             -e REDIS_HOST="${TEST_REDIS}" -e MEMCACHED_HOST="${TEST_MEMCACHED}" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${TSVC_SOCK}:/sock" \
+            -e REDIS_AUTH_PASSWORD="${TSVC_AUTHPW}" -e REDIS_AUTH_USER_PASSWORD="${TSVC_USERPW}" \
             -v "${BAZEL_CACHE_DIR}:/cache" \
             -w /workspace \
             "${DOCKER_IMAGE}" \
@@ -1553,6 +1577,12 @@ jobs:
                 --test_env=REDIS_PORT=6379 \
                 --test_env=MEMCACHED_HOST="${MEMCACHED_HOST}" \
                 --test_env=MEMCACHED_PORT=11211 \
+                --test_env=REDIS_AUTH_PORT=6380 \
+                --test_env=REDIS_AUTH_PASSWORD="${REDIS_AUTH_PASSWORD}" \
+                --test_env=REDIS_AUTH_USER=cacheuser \
+                --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
+                --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
+                --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
@@ -1586,6 +1616,8 @@ jobs:
         if: always()
         run: |
           docker rm -f "${TEST_REDIS:-none}" "${TEST_MEMCACHED:-none}" 2>/dev/null || true
+          docker rm -f "${TSVC_REDIS_AUTH:-none}" "${TSVC_MEMCACHED_SOCK:-none}" 2>/dev/null || true
+          docker volume rm "${TSVC_SOCK:-none}" 2>/dev/null || true
           docker network rm "${TEST_NET:-none}" 2>/dev/null || true
 
 
