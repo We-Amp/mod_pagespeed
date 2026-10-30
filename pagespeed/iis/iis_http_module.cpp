@@ -63,6 +63,7 @@
 #include "pagespeed/iis/iis_module_misc.h"
 #include "pagespeed/iis/iis_request_context.h"
 #include "pagespeed/iis/iis_ip_string.h"
+#include "pagespeed/iis/iis_admin_path_match.h"
 
 namespace net_instaweb
 {
@@ -259,13 +260,11 @@ namespace net_instaweb
 		else if (
 			// The admin handlers get everything under a path (/path/*) while all the
 			// other handlers only get exact matches (/path).  So match all paths
-			// starting with the handler path.
-			!global_options->admin_path().empty() &&
-			StringCaseStartsWith(path, global_options->admin_path())) {
+			// at or below the handler path (at a '/' boundary).
+			IisAdminPathMatches(path, global_options->admin_path())) {
 			return RequestRouting::kAdmin;
 		}
-		else if (!global_options->global_admin_path().empty() &&
-			StringCaseStartsWith(path, global_options->global_admin_path())) {
+		else if (IisAdminPathMatches(path, global_options->global_admin_path())) {
 			return RequestRouting::kGlobalAdmin;
 		}
 		else if (global_options->enable_cache_purge() &&
