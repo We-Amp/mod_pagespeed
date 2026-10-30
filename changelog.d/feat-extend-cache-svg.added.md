@@ -1,0 +1,1 @@
+- `extend_cache_images` now also covers SVG images: they get a content-hashed URL and a long cache lifetime, with the bytes and the `image/svg+xml` content type unchanged. SVG referenced from stylesheets is covered too. SVG is still never inlined, resized or recompressed. Originally reported at https://github.com/apache/incubator-pagespeed-mod/issues/1221.

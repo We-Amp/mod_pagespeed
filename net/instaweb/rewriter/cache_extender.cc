@@ -48,6 +48,7 @@
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
@@ -348,7 +349,7 @@ void CacheExtender::Context::Render() {
         } else if (type->type() == ContentType::kJavascript) {
           filter_id =
               RewriteOptions::FilterId(RewriteOptions::kExtendCacheScripts);
-        } else if (type->IsImage()) {
+        } else if (type->IsImage() || type->IsSvg()) {  // SVG: rename only
           filter_id =
               RewriteOptions::FilterId(RewriteOptions::kExtendCacheImages);
         }
@@ -409,6 +410,7 @@ RewriteResult CacheExtender::RewriteLoadedResource(
     // if we want to cache extend them.
     const ContentType* input_type = input_resource->type();
     if (input_type->IsImage() ||  // images get sniffed only to other images
+        input_type->IsSvg() ||    // renamed only: type and bytes stay unchanged
         (input_type->type() == ContentType::kPdf &&
          driver()->MayCacheExtendPdfs()) ||  // Don't accept PDFs by default.
         input_type->type() == ContentType::kCss ||  // CSS + JS left as-is.
@@ -454,6 +456,15 @@ RewriteResult CacheExtender::RewriteLoadedResource(
 
   server_context()->MergeNonCachingResponseHeaders(input_resource,
                                                    output_resource);
+  if (output_type->IsSvg()) {
+    // SVG can carry script. The origin's own policy (copied by the merge
+    // above) is kept and sandbox is added: browsers enforce every
+    // Content-Security-Policy header, so adding one only tightens. A hashed
+    // SVG resource cannot run script in the serving origin if it is opened
+    // as a document.
+    output_resource->response_headers()->Add(
+        HttpAttributes::kContentSecurityPolicy, "sandbox");
+  }
   if (driver()->Write(ResourceVector(1, input_resource), contents, output_type,
                       input_resource->charset(), output_resource.get())) {
     return kRewriteOk;

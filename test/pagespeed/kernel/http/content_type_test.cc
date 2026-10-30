@@ -67,6 +67,15 @@ TEST_F(ContentTypeTest, TestExtensions) {
   EXPECT_EQ(ContentType::kAudio, ExtToType(".wav"));
 }
 
+TEST_F(ContentTypeTest, SvgIsXmlButIdentifiable) {
+  const ContentType* svg = MimeTypeToContentType("image/svg+xml");
+  ASSERT_TRUE(svg != nullptr);
+  EXPECT_TRUE(svg->IsSvg());
+  EXPECT_FALSE(svg->IsImage());  // image filters must keep skipping SVG
+  EXPECT_FALSE(kContentTypePng.IsSvg());
+  EXPECT_FALSE(kContentTypeXml.IsSvg());
+}
+
 TEST_F(ContentTypeTest, TestMimeType) {
   EXPECT_EQ(ContentType::kHtml, MimeToType("text/html"));
   EXPECT_EQ(ContentType::kHtml, MimeToType("text/html; charset=UTF-8"));

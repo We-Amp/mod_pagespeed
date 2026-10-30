@@ -22,6 +22,7 @@
 #include "net/instaweb/rewriter/public/cache_extender.h"
 
 #include <cstdint>
+#include <vector>
 
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/logging_proto.h"
@@ -40,6 +41,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -47,7 +49,6 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
-#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -314,8 +315,7 @@ TEST_F(CacheExtenderTest, DoNotExtendOversizedGzip) {
 
   // Inflates one byte past the largest handled response; compresses to a
   // tiny body that is comfortably cacheable at its compressed size.
-  GoogleString js(RewriteOptions::kDefaultMaxCacheableResponseContentLength +
-                      1,
+  GoogleString js(RewriteOptions::kDefaultMaxCacheableResponseContentLength + 1,
                   'a');
   GoogleString compressed;
   {
@@ -331,9 +331,8 @@ TEST_F(CacheExtenderTest, DoNotExtendOversizedGzip) {
   SetFetchResponse(AbsolutifyUrl("c.js"), response_headers, compressed);
   rewrite_driver()->AddFilters();
 
-  ValidateNoChanges(
-      "no_extend_oversized_gzip",
-      "<script type='text/javascript' src='c.js'></script>\n");
+  ValidateNoChanges("no_extend_oversized_gzip",
+                    "<script type='text/javascript' src='c.js'></script>\n");
   EXPECT_EQ(0, num_cache_extended_->Get());
 }
 
@@ -493,6 +492,95 @@ TEST_F(CacheExtenderTest, DoExtendForImagesOnly) {
         << "Number of cache extended resources is wrong";
     EXPECT_STREQ("ei", AppliedRewriterStringFromLog());
   }
+}
+
+// SVG is XML, not an image, so the image filters leave it alone, but cache
+// extension covers it: a hashed URL with a long lifetime and the same bytes
+// under its stored image/svg+xml content type, served with a
+// Content-Security-Policy: sandbox header.
+class CacheExtenderSvgTest : public CacheExtenderTest {
+ protected:
+  static constexpr char kSvgData[] =
+      "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>";
+
+  void InitSvg() {
+    InitTest(kShortTtlSec);
+    const ContentType* svg = MimeTypeToContentType("image/svg+xml");
+    ASSERT_TRUE(svg != nullptr);
+    InitResource("d.svg", *svg, kSvgData, kShortTtlSec);
+  }
+};
+
+TEST_F(CacheExtenderSvgTest, ExtendSvgImage) {
+  InitSvg();
+  GoogleString svg_ext = Encode("", kFilterId, "0", "d.svg", "svg");
+  for (int i = 0; i < 2; i++) {
+    ValidateExpected("extend_svg", "<img src='d.svg'/>",
+                     StrCat("<img src='", svg_ext, "'/>"));
+  }
+  EXPECT_STREQ("ei", AppliedRewriterStringFromLog());
+
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "d.svg", "svg", &content,
+                            &headers));
+  EXPECT_EQ(GoogleString(kSvgData), content);
+  EXPECT_STREQ("image/svg+xml", headers.Lookup1(HttpAttributes::kContentType));
+  EXPECT_GE(headers.cache_ttl_ms(), Timer::kMonthMs);
+  EXPECT_TRUE(headers.IsProxyCacheable());
+  EXPECT_STREQ("sandbox",
+               headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
+
+  // Other image types do not get the sandbox header.
+  GoogleString jpg_content;
+  ResponseHeaders jpg_headers;
+  ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "b.jpg", "jpg",
+                            &jpg_content, &jpg_headers));
+  EXPECT_EQ(nullptr,
+            jpg_headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
+}
+
+TEST_F(CacheExtenderSvgTest, SvgKeepsOriginContentSecurityPolicy) {
+  InitTest(kShortTtlSec);
+  ResponseHeaders origin_headers;
+  DefaultResponseHeaders(*MimeTypeToContentType("image/svg+xml"), kShortTtlSec,
+                         &origin_headers);
+  origin_headers.Add(HttpAttributes::kContentSecurityPolicy,
+                     "default-src 'none'");
+  SetFetchResponse(AbsolutifyUrl("d.svg"), origin_headers, kSvgData);
+  ValidateExpected(
+      "svg_keeps_csp", "<img src='d.svg'/>",
+      StrCat("<img src='", Encode("", kFilterId, "0", "d.svg", "svg"), "'/>"));
+
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "d.svg", "svg", &content,
+                            &headers));
+  ConstStringStarVector values;
+  ASSERT_TRUE(headers.Lookup(HttpAttributes::kContentSecurityPolicy, &values));
+  ASSERT_EQ(2, values.size());
+  EXPECT_THAT(std::vector<GoogleString>({*values[0], *values[1]}),
+              ::testing::UnorderedElementsAre("default-src 'none'", "sandbox"));
+}
+
+TEST_F(CacheExtenderSvgTest, SvgNotInlinedOrRewrittenByImageFilters) {
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->set_image_inline_max_bytes(10000);
+  InitSvg();
+  ValidateExpected(
+      "svg_not_inlined", "<img src='d.svg' width='1' height='1'/>",
+      StrCat("<img src='", Encode("", kFilterId, "0", "d.svg", "svg"),
+             "' width='1' height='1'/>"));
+}
+
+TEST_F(CacheExtenderSvgTest, SvgNotExtendedWhenImageExtensionDisabled) {
+  AddFilter(RewriteOptions::kExtendCacheCss);
+  const ContentType* svg = MimeTypeToContentType("image/svg+xml");
+  ASSERT_TRUE(svg != nullptr);
+  SetResponseWithDefaultHeaders("d.svg", *svg, kSvgData, kShortTtlSec);
+  ValidateNoChanges("svg_css_only", "<img src='d.svg'/>");
 }
 
 TEST_F(CacheExtenderTest, Handle404) {
@@ -750,10 +838,10 @@ TEST_F(CacheExtenderTest, ModuleScriptExtendedOnSameHost) {
   // imports keep resolving and the rewrite is safe.
   InitTest(kShortTtlSec);
   const char kModuleScript[] = "<script type=\"module\" src=\"c.js\"></script>";
-  ValidateExpected("module_extended_same_host", kModuleScript,
-                   StrCat("<script type=\"module\" src=\"",
-                          Encode("", kFilterId, "0", "c.js", "js"),
-                          "\"></script>"));
+  ValidateExpected(
+      "module_extended_same_host", kModuleScript,
+      StrCat("<script type=\"module\" src=\"",
+             Encode("", kFilterId, "0", "c.js", "js"), "\"></script>"));
   EXPECT_EQ(1, num_cache_extended_->Get())
       << "Number of cache extended resources is wrong";
 }
@@ -788,10 +876,10 @@ TEST_F(CacheExtenderTest, IntegrityScriptExtendedOnSameHost) {
   InitTest(kShortTtlSec);
   const char kIntegrityScript[] =
       "<script src=\"c.js\" integrity=\"sha384-x\"></script>";
-  ValidateExpected("integrity_extended_same_host", kIntegrityScript,
-                   StrCat("<script src=\"",
-                          Encode("", kFilterId, "0", "c.js", "js"),
-                          "\" integrity=\"sha384-x\"></script>"));
+  ValidateExpected(
+      "integrity_extended_same_host", kIntegrityScript,
+      StrCat("<script src=\"", Encode("", kFilterId, "0", "c.js", "js"),
+             "\" integrity=\"sha384-x\"></script>"));
   EXPECT_EQ(1, num_cache_extended_->Get())
       << "Number of cache extended resources is wrong";
 }
