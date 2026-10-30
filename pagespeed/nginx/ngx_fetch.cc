@@ -304,6 +304,7 @@ NgxFetch::NgxFetch(const GoogleString& url, AsyncFetch* async_fetch,
       done_(false),
       content_length_(-1),
       content_length_known_(false),
+      addr_len_(0),
       resolver_ctx_(nullptr) {
   ngx_memzero(&url_, sizeof(url_));
   log_ = log;
@@ -418,14 +419,42 @@ bool NgxFetch::Init() {
 
   GoogleString s_ipaddress(reinterpret_cast<char*>(tmp_url->host.data),
                            tmp_url->host.len);
-  ngx_memzero(&sin_, sizeof(sin_));
-  sin_.sin_family = AF_INET;
-  sin_.sin_port = htons(tmp_url->port);
-  sin_.sin_addr.s_addr = inet_addr(s_ipaddress.c_str());
+  ngx_memzero(&addr_, sizeof(addr_));
+  addr_len_ = 0;
+  bool have_literal_address = false;
+  {
+    // A literal IPv6 host may arrive with or without its square brackets.
+    GoogleString v6_host = s_ipaddress;
+    if (v6_host.size() >= 2 && v6_host[0] == '[' &&
+        v6_host[v6_host.size() - 1] == ']') {
+      v6_host = v6_host.substr(1, v6_host.size() - 2);
+    }
+    struct sockaddr_in* sin = reinterpret_cast<struct sockaddr_in*>(&addr_);
+    sin->sin_family = AF_INET;
+    sin->sin_port = htons(tmp_url->port);
+    sin->sin_addr.s_addr = inet_addr(s_ipaddress.c_str());
+    if (sin->sin_addr.s_addr != INADDR_NONE) {
+      addr_len_ = sizeof(struct sockaddr_in);
+      have_literal_address = true;
+    }
+#if (NGX_HAVE_INET6)
+    else if (v6_host.find(':') != GoogleString::npos) {
+      struct sockaddr_in6* sin6 =
+          reinterpret_cast<struct sockaddr_in6*>(&addr_);
+      ngx_memzero(&addr_, sizeof(addr_));
+      if (ngx_inet6_addr(reinterpret_cast<u_char*>(&v6_host[0]), v6_host.size(),
+                         sin6->sin6_addr.s6_addr) == NGX_OK) {
+        sin6->sin6_family = AF_INET6;
+        sin6->sin6_port = htons(tmp_url->port);
+        addr_len_ = sizeof(struct sockaddr_in6);
+        have_literal_address = true;
+      }
+    }
+#endif
+  }
 
-  if (sin_.sin_addr.s_addr == INADDR_NONE) {
-    // inet_addr returned INADDR_NONE, which means the hostname
-    // isn't a valid IP address.  Check DNS.
+  if (!have_literal_address) {
+    // The host isn't a valid IP address.  Check DNS.
     ngx_resolver_ctx_t temp;
     temp.name.data = tmp_url->host.data;
     temp.name.len = tmp_url->host.len;
@@ -576,24 +605,38 @@ void NgxFetch::ResolveDoneHandler(ngx_resolver_ctx_t* resolver_ctx) {
     return;
   }
 
-  ngx_uint_t i;
-  // Find the first ipv4 address. We don't support ipv6 yet.
-  for (i = 0; i < resolver_ctx->naddrs; i++) {
-    // Old versions of nginx and tengine have a different definition of addrs,
-    // work around to make sure we are using the right type (ngx_addr_t*).
-    ngx_addr_t* ngx_addrs = reinterpret_cast<ngx_addr_t*>(resolver_ctx->addrs);
-    if (typeid(*ngx_addrs) == typeid(*resolver_ctx->addrs)) {
-      if (reinterpret_cast<struct sockaddr_in*>(ngx_addrs[i].sockaddr)
-              ->sin_family == AF_INET) {
-        break;
-      }
-    } else {
-      // We're using an old version that uses in_addr_t* for addrs.
+  // Pick an address: prefer the first IPv4 address, and fall back to the first
+  // IPv6 address when the host has none. nginx already filters the list by the
+  // `resolver ... ipv6=on|off` setting. nginx's resolver cache rotates the list
+  // across both families, so taking the first entry would make a dual-stack
+  // host go over IPv6 on some lookups only.
+  ngx_uint_t i = resolver_ctx->naddrs;
+#if (nginx_version < 1005008)
+  // Old versions of nginx have a different definition of addrs (in_addr_t*,
+  // IPv4 only).
+  if (resolver_ctx->naddrs > 0) {
+    i = 0;
+  }
+#else
+  for (ngx_uint_t j = 0; j < resolver_ctx->naddrs; j++) {
+    if (resolver_ctx->addrs[j].sockaddr->sa_family == AF_INET) {
+      i = j;
       break;
     }
   }
+#if (NGX_HAVE_INET6)
+  if (i == resolver_ctx->naddrs) {
+    for (ngx_uint_t j = 0; j < resolver_ctx->naddrs; j++) {
+      if (resolver_ctx->addrs[j].sockaddr->sa_family == AF_INET6) {
+        i = j;
+        break;
+      }
+    }
+  }
+#endif
+#endif
 
-  // If no suitable ipv4 address was found, we fail.
+  // If no suitable address was found, we fail.
   if (i == resolver_ctx->naddrs) {
     if (fetch->timeout_event() != nullptr &&
         fetch->timeout_event()->timer_set) {
@@ -612,32 +655,51 @@ void NgxFetch::ResolveDoneHandler(ngx_resolver_ctx_t* resolver_ctx) {
     return;
   }
 
-  ngx_memzero(&fetch->sin_, sizeof(fetch->sin_));
-
-#if (nginx_version < 1005008)
-  fetch->sin_.sin_addr.s_addr = resolver_ctx->addrs[i];
-#else
-  struct sockaddr_in* sin;
-
-  sin = reinterpret_cast<struct sockaddr_in*>(resolver_ctx->addrs[i].sockaddr);
-
-  fetch->sin_.sin_family = sin->sin_family;
-  fetch->sin_.sin_addr.s_addr = sin->sin_addr.s_addr;
-#endif
-
-  fetch->sin_.sin_family = AF_INET;
-  fetch->sin_.sin_port = htons(fetch->url_.port);
+  ngx_memzero(&fetch->addr_, sizeof(fetch->addr_));
 
   // Maybe we have Proxy
-  if (0 != fetcher->proxy_.url.len) {
-    fetch->sin_.sin_port = htons(fetcher->proxy_.port);
-  }
+  const in_port_t port = (0 != fetcher->proxy_.url.len)
+                             ? htons(fetcher->proxy_.port)
+                             : htons(fetch->url_.port);
 
-  char* ip_address = inet_ntoa(fetch->sin_.sin_addr);
+#if (nginx_version < 1005008)
+  struct sockaddr_in* sin =
+      reinterpret_cast<struct sockaddr_in*>(&fetch->addr_);
+  sin->sin_addr.s_addr = resolver_ctx->addrs[i];
+  sin->sin_family = AF_INET;
+  sin->sin_port = port;
+  fetch->addr_len_ = sizeof(struct sockaddr_in);
+#else
+  struct sockaddr* resolved = resolver_ctx->addrs[i].sockaddr;
+  if (resolved->sa_family == AF_INET) {
+    struct sockaddr_in* sin =
+        reinterpret_cast<struct sockaddr_in*>(&fetch->addr_);
+    *sin = *reinterpret_cast<struct sockaddr_in*>(resolved);
+    sin->sin_family = AF_INET;
+    sin->sin_port = port;
+    fetch->addr_len_ = sizeof(struct sockaddr_in);
+  }
+#if (NGX_HAVE_INET6)
+  else {
+    struct sockaddr_in6* sin6 =
+        reinterpret_cast<struct sockaddr_in6*>(&fetch->addr_);
+    *sin6 = *reinterpret_cast<struct sockaddr_in6*>(resolved);
+    sin6->sin6_family = AF_INET6;
+    sin6->sin6_port = port;
+    fetch->addr_len_ = sizeof(struct sockaddr_in6);
+  }
+#endif
+#endif
+
+  u_char ip_text[NGX_SOCKADDR_STRLEN + 1];
+  size_t ip_len =
+      ngx_sock_ntop(reinterpret_cast<struct sockaddr*>(&fetch->addr_),
+                    fetch->addr_len_, ip_text, NGX_SOCKADDR_STRLEN, 0);
+  ip_text[ip_len] = '\0';
 
   ngx_log_error(NGX_LOG_DEBUG, fetch->log_, 0,
                 "NgxFetch %p: Resolved host [%V] to [%s]", fetch,
-                &resolver_ctx->name, ip_address);
+                &resolver_ctx->name, ip_text);
 
   fetch->release_resolver();
 
@@ -868,8 +930,8 @@ bool NgxFetch::VerifyTlsPeer(ngx_connection_t* c) {
 int NgxFetch::Connect() {
   ngx_peer_connection_t pc;
   ngx_memzero(&pc, sizeof(pc));
-  pc.sockaddr = (struct sockaddr*)&sin_;
-  pc.socklen = sizeof(struct sockaddr_in);
+  pc.sockaddr = reinterpret_cast<struct sockaddr*>(&addr_);
+  pc.socklen = addr_len_;
   pc.name = &url_.host;
 
   // get callback is dummy function, it just returns NGX_OK

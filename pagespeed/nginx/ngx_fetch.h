@@ -221,7 +221,9 @@ class NgxFetch : public PoolElement<NgxFetch> {
   int64 content_length_;
   bool content_length_known_;
 
-  struct sockaddr_in sin_;
+  // Address to connect to: IPv4 or IPv6, with its real length.
+  struct sockaddr_storage addr_;
+  socklen_t addr_len_;
   ngx_log_t* log_;
   ngx_buf_t* out_;
   ngx_buf_t* in_;
