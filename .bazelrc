@@ -383,16 +383,21 @@ build:asan-fuzzer --test_env=UBSAN_OPTIONS=print_stacktrace=1
 # of an OSS-Fuzz build come from its environment and go in on the command
 # line; this config carries what the tree needs on top of them there: the
 # builder's own libc++ behind its clang, linked statically because the runner
-# image has no libc++.so, and static binaries. It does not use --config=clang,
-# which pins CC/CXX to plain clang, while the AFL++ and honggfuzz builds set
-# them to their compiler wrappers.
+# image has no libc++.so; the tree's own libraries linked in, not as shared
+# objects; no debug-info splitting (a .dwo never reaches the output); and no
+# _FORTIFY_SOURCE, which -c opt would turn on and which conflicts with the
+# sanitizer interceptors. It does not use --config=clang, which pins CC/CXX
+# to plain clang, while the AFL++ and honggfuzz builds set them to their
+# compiler wrappers.
 build:oss-fuzz --action_env=BAZEL_COMPILER=clang
 build:oss-fuzz --action_env=BAZEL_CXXOPTS=-stdlib=libc++
 build:oss-fuzz --action_env=BAZEL_LINKLIBS=-l%:libc++.a:-l%:libc++abi.a
 build:oss-fuzz --action_env=BAZEL_LINKOPTS=-lm:-pthread
 build:oss-fuzz --copt=-Wno-unknown-warning-option
+build:oss-fuzz --copt=-U_FORTIFY_SOURCE
 build:oss-fuzz --linkopt=-fuse-ld=lld
 build:oss-fuzz --dynamic_mode=off
+build:oss-fuzz --fission=no
 build:oss-fuzz --strip=never
 
 # Compile database generation config

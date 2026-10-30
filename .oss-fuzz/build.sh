@@ -42,20 +42,18 @@ readonly HARNESSES=(
 bin_of() { local l="${1#//}"; echo "bazel-bin/${l/:/\/}"; }
 
 # The flags every build here shares. OSS-Fuzz's compiler flags go to C and
-# C++ compiles as they are; the sanitizer and coverage flags go on the link
-# line too, so the driver links their runtimes. -stdlib=libc++ stays off the
-# link line: the oss-fuzz config links OSS-Fuzz's libc++ statically.
+# C++ compiles as they are, and on the link line too, so the driver links the
+# sanitizer and coverage runtimes. Bazel links through the C driver, which
+# adds no C++ library of its own and, for the parts of the sanitizer runtimes
+# written for C++, needs to be told. -stdlib=libc++ stays on the link line
+# with -static-libstdc++: the engine's main() is C++ and makes the driver add
+# a standard library, and this keeps that OSS-Fuzz's libc++, static, instead
+# of the system libstdc++ (two C++ runtimes in one binary and a catch no
+# longer matches what was thrown).
 flags=(--config=oss-fuzz -c opt "--action_env=CC=${CC}" "--action_env=CXX=${CXX}")
 for f in ${CFLAGS}; do flags+=("--conlyopt=${f}"); done
-for f in ${CXXFLAGS}; do flags+=("--cxxopt=${f}"); done
-for f in ${CXXFLAGS}; do
-  case "${f}" in -stdlib=*) ;; *) flags+=("--linkopt=${f}") ;; esac
-done
-if [ "${SANITIZER:-}" = undefined ]; then
-  # Bazel links with the C driver, which leaves out the C++ half of the UBSan
-  # runtime (bazelbuild/bazel#8777); the vptr checks need it.
-  flags+=("--linkopt=$("${CXX}" -print-file-name=libclang_rt.ubsan_standalone_cxx.a)")
-fi
+for f in ${CXXFLAGS}; do flags+=("--cxxopt=${f}" "--linkopt=${f}"); done
+flags+=(--linkopt=-static-libstdc++ --linkopt=-fsanitize-link-c++-runtime)
 
 # 1. Replay binaries of the harnesses whose seed corpus is dumped from them.
 replay=()
@@ -68,17 +66,20 @@ for h in "${HARNESSES[@]}"; do
   IFS='|' read -r label name _ _ seeds <<<"${h}"
   [ "${seeds}" = dump ] || continue
   dir="$(mktemp -d)"
-  if "$(bin_of "${label}")" "--dump_corpus=${dir}" && [ -n "$(ls -A "${dir}")" ]; then
-    zip -j -q "${OUT}/${name}_seed_corpus.zip" "${dir}"/*
-  else
-    echo "WARNING: no seed corpus for ${name}: the replay binary did not dump one" >&2
-  fi
+  # A sanitizer-built binary: no leak check at exit, and the coverage build's
+  # profile goes nowhere.
+  ASAN_OPTIONS=detect_leaks=0 LLVM_PROFILE_FILE=/dev/null \
+    "$(bin_of "${label}")" "--dump_corpus=${dir}"
+  [ -n "$(ls -A "${dir}")" ] || { echo "no seed corpus dumped for ${name}" >&2; exit 1; }
+  rm -f "${OUT}/${name}_seed_corpus.zip"
+  zip -j -q "${OUT}/${name}_seed_corpus.zip" "${dir}"/*
   rm -rf "${dir}"
 done
 
 # 2. The fuzzers: every harness in one build, each source given its define,
 #    all linked against the engine.
-fuzz=("${flags[@]}" "--linkopt=${LIB_FUZZING_ENGINE}")
+fuzz=("${flags[@]}")
+for f in ${LIB_FUZZING_ENGINE}; do fuzz+=("--linkopt=${f}"); done
 targets=()
 for h in "${HARNESSES[@]}"; do
   IFS='|' read -r label _ src define _ <<<"${h}"
@@ -92,7 +93,9 @@ for h in "${HARNESSES[@]}"; do
   IFS='|' read -r label name _ _ seeds <<<"${h}"
   cp -f "$(bin_of "${label}")" "${OUT}/${name}"
   case "${seeds}" in
-    dir:*) zip -j -q "${OUT}/${name}_seed_corpus.zip" "${seeds#dir:}"/* ;;
+    dir:*)
+      rm -f "${OUT}/${name}_seed_corpus.zip"
+      zip -j -q "${OUT}/${name}_seed_corpus.zip" "${seeds#dir:}"/* ;;
   esac
   if [ -f ".oss-fuzz/dicts/${name}.dict" ]; then
     cp -f ".oss-fuzz/dicts/${name}.dict" "${OUT}/${name}.dict"
@@ -104,7 +107,7 @@ done
 #    report resolves them against $OUT/proc/self/cwd.
 if [ "${SANITIZER:-}" = coverage ]; then
   mkdir -p "${OUT}/proc/self/cwd"
-  rsync -aLk \
+  rsync -aLkm \
     --include '*.h' --include '*.hh' --include '*.hpp' --include '*.inc' \
     --include '*.c' --include '*.cc' --include '*.cpp' --include '*/' \
     --exclude '*' \
