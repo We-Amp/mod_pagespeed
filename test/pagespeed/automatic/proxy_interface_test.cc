@@ -30,7 +30,6 @@
 #include "net/instaweb/http/public/request_timing_info.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
-#include "net/instaweb/rewriter/public/html_vary_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -295,25 +294,25 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
                      ->has_value());
   }
 
-  // The Vary headers a served document carries, derived from the same token
-  // rule HtmlVaryFilter applies in production, so the expectations below
-  // track the rule instead of restating its current output.
-  GoogleString ExpectedHtmlVaryLines() {
-    StringVector tokens;
-    HtmlVaryFilter::HtmlVaryTokens(*server_context()->global_options(),
-                                   &tokens);
-    GoogleString vary_lines;
-    for (const GoogleString& token : tokens) {
-      StrAppend(&vary_lines, "Vary: ", token, "\r\n");
-    }
-    return vary_lines;
-  }
+  // The fixture's default rewrite level, pinned here so the expected Vary
+  // lines below have a visible basis: kCoreFilters enables the image and
+  // user-agent dependent filters, so served documents carry the HTML Vary
+  // tokens (see HtmlVaryFilter::HtmlVaryTokens). The expectations spell the
+  // lines out literally on purpose: a derived expectation would also pass if
+  // the token rule itself regressed.
+  static const RewriteOptions::RewriteLevel kVaryBearingLevel =
+      RewriteOptions::kCoreFilters;
 
   void TestQueryParameters(StringPiece original_domain,
                            StringPiece redirect_domain,
                            bool add_params_to_redirect,
                            bool add_params_to_location) {
     // Test to check if we re-add our query params when we get a redirect.
+    // The global options are frozen by now, so pin the level on a clone.
+    std::unique_ptr<RewriteOptions> vary_level_options(
+        server_context()->global_options()->Clone());
+    vary_level_options->SetRewriteLevel(kVaryBearingLevel);
+    SetRewriteOptions(vary_level_options.get());
     const char kParams[] = "PageSpeedCssInlineMaxBytes=99";
     GoogleString original_url = StrCat(original_domain, "a/?x=y");
     GoogleString redirect_url =
@@ -345,8 +344,10 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
                         "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Cache-Control: max-age=0, private\r\n"
-                        "X-Page-Speed: \r\n",
-                        ExpectedHtmlVaryLines(),
+                        "X-Page-Speed: \r\n"
+                        "Vary: Accept\r\n"
+                        "Vary: Save-Data\r\n"
+                        "Vary: User-Agent\r\n"
                         "HeadersComplete: 1\r\n\r\n"),
                  get_headers.ToString());
   }
@@ -514,7 +515,12 @@ TEST_F(ProxyInterfaceTest, SkipPropertyCacheLookupIfUrlBlacklisted) {
 }
 
 TEST_F(ProxyInterfaceTest, HeadRequest) {
-  // Test to check if we are handling Head requests correctly.
+  // Test to check if we are handling Head requests correctly. The global
+  // options are frozen by now, so pin the level on a clone.
+  std::unique_ptr<RewriteOptions> vary_level_options(
+      server_context()->global_options()->Clone());
+  vary_level_options->SetRewriteLevel(kVaryBearingLevel);
+  SetRewriteOptions(vary_level_options.get());
   GoogleString url = "http://www.example.com/";
   GoogleString set_text, get_text;
   RequestHeaders request_headers;
@@ -530,15 +536,17 @@ TEST_F(ProxyInterfaceTest, HeadRequest) {
 
   // Headers and body are correct for a Get request.
   EXPECT_EQ(
-      StrCat("HTTP/1.0 200 OK\r\n"
-             "Content-Type: text/html\r\n"
-             "X-Background-Fetch: 0\r\n"
-             "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
-             "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
-             "Cache-Control: max-age=0, private\r\n"
-             "X-Page-Speed: \r\n",
-             ExpectedHtmlVaryLines(),
-             "HeadersComplete: 1\r\n\r\n"),
+      "HTTP/1.0 200 OK\r\n"
+      "Content-Type: text/html\r\n"
+      "X-Background-Fetch: 0\r\n"
+      "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
+      "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
+      "Cache-Control: max-age=0, private\r\n"
+      "X-Page-Speed: \r\n"
+      "Vary: Accept\r\n"
+      "Vary: Save-Data\r\n"
+      "Vary: User-Agent\r\n"
+      "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
   EXPECT_EQ(set_text, get_text);
 
@@ -580,6 +588,7 @@ TEST_F(ProxyInterfaceTest, RedirectRequestWhenDomainRewriterEnabled) {
   set_headers.SetStatusAndReason(HttpStatus::kFound);
   std::unique_ptr<RewriteOptions> custom_options(
       server_context()->global_options()->Clone());
+  custom_options->SetRewriteLevel(kVaryBearingLevel);
   custom_options->EnableFilter(RewriteOptions::kRewriteDomains);
   custom_options->WriteableDomainLawyer()->AddTwoProtocolRewriteDomainMapping(
       "www.example.com", "m.example.com", &handler);
@@ -590,16 +599,18 @@ TEST_F(ProxyInterfaceTest, RedirectRequestWhenDomainRewriterEnabled) {
 
   // Headers and body are correct for a Get request.
   EXPECT_STREQ(
-      StrCat("HTTP/1.0 302 Found\r\n"
-             "Content-Type: text/html\r\n"
-             "Location: http://m.example.com\r\n"
-             "X-Background-Fetch: 0\r\n"
-             "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
-             "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
-             "Cache-Control: max-age=0, private\r\n"
-             "X-Page-Speed: \r\n",
-             ExpectedHtmlVaryLines(),
-             "HeadersComplete: 1\r\n\r\n"),
+      "HTTP/1.0 302 Found\r\n"
+      "Content-Type: text/html\r\n"
+      "Location: http://m.example.com\r\n"
+      "X-Background-Fetch: 0\r\n"
+      "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
+      "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
+      "Cache-Control: max-age=0, private\r\n"
+      "X-Page-Speed: \r\n"
+      "Vary: Accept\r\n"
+      "Vary: Save-Data\r\n"
+      "Vary: User-Agent\r\n"
+      "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
 }
 
@@ -2982,9 +2993,8 @@ TEST_F(ProxyInterfaceTest, MixedCaseNoCacheDirectives) {
                RewriteHtmlCacheHeader("mc-plain", "max-age=300"));
   EXPECT_STREQ("max-age=0, no-cache",
                RewriteHtmlCacheHeader("mc-no-cache", "No-Cache"));
-  EXPECT_STREQ(
-      "max-age=0, no-cache",
-      RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
 }
 
 // Rewritten HTML must never invite shared caches via s-maxage: the HTML
@@ -3002,9 +3012,8 @@ TEST_F(ProxyInterfaceTest, NoSMaxAgeOnRewrittenHtml) {
   EXPECT_STREQ("max-age=0, no-cache",
                RewriteHtmlCacheHeader("smaxage-only", "s-maxage=10"));
   // Directives that must survive still do.
-  EXPECT_STREQ(
-      "max-age=0, no-cache, no-store",
-      RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
+  EXPECT_STREQ("max-age=0, no-cache, no-store",
+               RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
 }
 
 // Rewritten HTML names the headers its image URLs depend on in Vary, and the
@@ -3624,7 +3633,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
    private:
     RewriteDriver* driver_;
     PerOriginPageReaderFilter(const PerOriginPageReaderFilter&) = delete;
-    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) = delete;
+    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) =
+        delete;
   };
 
   class PerOriginPageReaderFilterCreator
@@ -3638,8 +3648,10 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
     }
 
    private:
-    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) = delete;
-    PerOriginPageReaderFilterCreator& operator=(const PerOriginPageReaderFilterCreator&) = delete;
+    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) =
+        delete;
+    PerOriginPageReaderFilterCreator& operator=(
+        const PerOriginPageReaderFilterCreator&) = delete;
   };
 
   void SetUp() override {
