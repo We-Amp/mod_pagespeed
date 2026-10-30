@@ -306,6 +306,25 @@ TEST_F(JsInlineFilterTest, DeferScriptDebugMessage) {
                    "or event attribute-->");
 }
 
+// Inlining would drop integrity= enforcement (browsers ignore it on an inline
+// script), so the check the author asked for would stop happening. The match
+// is ASCII-case-insensitive.
+TEST_F(JsInlineFilterTest, DoNotInlineIntegrityScript) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  EnableDebug();
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  ValidateExpected("integrity_debug",
+                   "<script src=\"script.js\" Integrity=\"sha384-x\"></script>",
+                   "<script src=\"script.js\" Integrity=\"sha384-x\"></script>"
+                   "<!--JS not inlined because of the integrity "
+                   "attribute-->");
+  EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
+}
+
 TEST_F(JsInlineFilterTest, DoNotInlineModuleScript) {
   SetHtmlMimetype();
   AddFilter(RewriteOptions::kInlineJavascript);

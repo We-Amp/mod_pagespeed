@@ -115,6 +115,25 @@ TEST_F(DomainRewriteFilterTest, DontTouch) {
   ExpectNoChange("data:image/gif;base64,AAAA", "data:image/gif;base64,AAAA");
 }
 
+// A script or stylesheet carrying integrity= stays on its origin host: a
+// cross-host no-cors fetch yields an opaque response and the browser blocks a
+// subresource whose integrity cannot be enforced. The match is
+// ASCII-case-insensitive; the same resources without integrity still move.
+TEST_F(DomainRewriteFilterTest, IntegrityResourcesStayOnOriginHost) {
+  const GoogleString from_css = StrCat(kFrom1Domain, "a.css");
+  const GoogleString to_css = StrCat(kTo1Domain, "a.css");
+  const GoogleString from_js = StrCat(kFrom1Domain, "a.js");
+  ValidateNoChanges("sri_css", StrCat("<link rel=stylesheet href=", from_css,
+                                      " integrity=\"sha384-x\">"));
+  ValidateNoChanges("sri_css_upper",
+                    StrCat("<link rel=stylesheet href=", from_css,
+                           " INTEGRITY=\"sha384-x\">"));
+  ValidateNoChanges("sri_js", StrCat("<script src=", from_js,
+                                     " integrity=\"sha384-x\"></script>"));
+  EXPECT_EQ(0, DeltaRewrites());
+  ExpectChange("no_sri", from_css, to_css);
+}
+
 TEST_F(DomainRewriteFilterTest, RelativeUpReferenceRewrite) {
   ExpectNoChange("subdir/relative", "under_subdir.css");
   ExpectNoChange("subdir/relative", "../under_top.css");

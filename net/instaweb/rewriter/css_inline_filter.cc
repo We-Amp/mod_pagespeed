@@ -28,6 +28,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -129,6 +130,15 @@ void CssInlineFilter::EndElementImpl(HtmlElement* element) {
       // coordinating everything into that.
       driver()->InsertDebugComment(
           "CSS inlining not supported by PageSpeed for AMP documents", element);
+      return;
+    }
+
+    // Inlining copies integrity= onto a <style> element, where browsers
+    // ignore it, so the check the author asked for would silently stop
+    // happening. Leave the link alone.
+    if (ScriptTagScanner::HasIntegrityAttribute(element)) {
+      driver()->InsertDebugComment(
+          "CSS not inlined because of the integrity attribute", element);
       return;
     }
 

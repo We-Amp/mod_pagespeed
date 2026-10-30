@@ -53,6 +53,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "net/instaweb/rewriter/public/usage_data_reporter.h"
@@ -1008,6 +1009,16 @@ void CssFilter::EndElementImpl(HtmlElement* element) {
                                       &attributes);
     for (resource_tag_scanner::UrlCategoryPair uc : attributes) {
       if (uc.category == semantic_type::kStylesheet) {
+        // A stylesheet carrying integrity= pins its bytes: any rewrite
+        // (minify, URL rewriting, import handling) breaks the browser's
+        // subresource-integrity check and the stylesheet is not applied.
+        if (ScriptTagScanner::HasIntegrityAttribute(element)) {
+          driver()->InsertDebugComment(
+              "CSS not rewritten: integrity attribute pins the stylesheet "
+              "bytes",
+              element);
+          continue;
+        }
         StartExternalRewrite(element, uc.url);
       }
     }

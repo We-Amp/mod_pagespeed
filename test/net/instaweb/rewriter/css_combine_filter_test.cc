@@ -852,6 +852,31 @@ TEST_F(CssCombineFilterWithDebugTest, BogusLinkBarrier) {
              true);
 }
 
+// Combining would delete the original <link> together with its integrity=
+// attribute, so a link carrying one is a combining barrier and is emitted
+// unchanged. The attribute name match is ASCII-case-insensitive.
+TEST_F(CssCombineFilterTest, IntegrityLinkBarrier) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='d.css' "
+      "INTEGRITY='sha384-x'>\n";
+  UseMd5Hasher();
+  CombineCss("integrity_link_barrier", kBarrier, "", true);
+  EXPECT_HAS_SUBSTR(kBarrier, output_buffer_);
+}
+
+TEST_F(CssCombineFilterWithDebugTest, IntegrityLinkBarrier) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='d.css' "
+      "integrity='sha384-x'>\n";
+  UseMd5Hasher();
+  CombineCss("integrity_link_barrier", kBarrier,
+             "<!--combine_css: Could not combine over barrier: "
+             "integrity attribute-->",
+             true);
+}
+
 TEST_F(CssCombineFilterTest, AlternateStylesheetBarrier) {
   SetHtmlMimetype();
   static const char kBarrier[] =

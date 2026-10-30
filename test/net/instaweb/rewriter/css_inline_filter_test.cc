@@ -166,6 +166,17 @@ TEST_F(CssInlineFilterTest, InlineCssSimple) {
                 "http://www.example.com/styles.css", "", css, true, css);
 }
 
+// Inlining would copy integrity= onto a <style> element, where browsers
+// ignore it, so the integrity check the author asked for would stop
+// happening. The link is left alone.
+TEST_F(CssInlineFilterTest, DoNotInlineIntegrityLink) {
+  const GoogleString css = "BODY { color: red; }\n";
+  TestNoInlineCss("http://www.example.com/index.html",
+                  "http://www.example.com/styles.css",
+                  "integrity=\"sha384-x\"", css, css,
+                  "CSS not inlined because of the integrity attribute");
+}
+
 class CssInlineFilterTestCustomOptions : public CssInlineFilterTest {
  protected:
   // Derived classes should add their options and then call

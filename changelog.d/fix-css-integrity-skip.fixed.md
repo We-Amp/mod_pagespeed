@@ -1,0 +1,1 @@
+- Stylesheets, scripts and styles that carry an `integrity` attribute are left unmodified: `rewrite_css`, `combine_css`, `inline_css`, `inline_javascript`, `outline_css` and `rewrite_domains` no longer change them, so the browser no longer blocks them.
