@@ -117,6 +117,14 @@ class CssHierarchy {
   }
 
   const GoogleString& minified_contents() const { return minified_contents_; }
+
+  // Licence comments ("/*! ... */", "@license", "@preserve") found in this
+  // CSS and, once rolled up, in the imports flattened into it. The parser
+  // discards comments, so these are kept aside and hoisted to the top of the
+  // serialized output by the caller (see css_util::InsertLicenseComments).
+  // Valid after RollUpStylesheets() (and RollUpContents(), which already
+  // inserts them into minified_contents()).
+  const StringVector& license_comments() const { return license_comments_; }
   void set_minified_contents(const StringPiece minified_contents);
 
   const GoogleString& charset() const { return charset_; }
@@ -317,6 +325,10 @@ class CssHierarchy {
 
   // The text form of the output (flattened) CSS.
   GoogleString minified_contents_;
+
+  // Licence comments from this CSS (and flattened children); see
+  // license_comments().
+  StringVector license_comments_;
 
   // The parsed form of the CSS, in various states of transformation. Created
   // from the input text form by Parse, mutated by RollUpContents and

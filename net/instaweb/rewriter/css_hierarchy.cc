@@ -426,6 +426,11 @@ void CssHierarchy::RollUpContents() {
   }
   CHECK(stylesheet_.get() != nullptr);
 
+  // The parser drops comments, so note the licence comments to keep. Only our
+  // own: children's minified_contents() already carries theirs.
+  license_comments_.clear();
+  css_util::ExtractLicenseComments(input_contents_, &license_comments_);
+
   const int n = children_.size();
 
   // Check if flattening has worked so far for us and all our children.
@@ -461,7 +466,9 @@ void CssHierarchy::RollUpContents() {
     // our stylesheet without any import flattening. children are irrelevant.
     STLDeleteElements(&children_);
     StringWriter writer(&minified_contents_);
-    if (!CssMinify::Stylesheet(*stylesheet_.get(), &writer, message_handler_)) {
+    if (CssMinify::Stylesheet(*stylesheet_.get(), &writer, message_handler_)) {
+      css_util::InsertLicenseComments(license_comments_, &minified_contents_);
+    } else {
       // If we can't minify just use our contents, albeit not minified.
       input_contents_.CopyToString(&minified_contents_);
     }
@@ -470,6 +477,7 @@ void CssHierarchy::RollUpContents() {
     for (int i = 0; i < n; ++i) {
       StrAppend(&minified_contents_, children_[i]->minified_contents());
     }
+    const size_t children_size = minified_contents_.size();
 
     // @charset and @import rules are discarded by flattening, but save them
     // until we know that the regeneration and limit check both went ok so we
@@ -491,6 +499,14 @@ void CssHierarchy::RollUpContents() {
     StringWriter writer(&minified_contents_);
     bool minified_ok =
         CssMinify::Stylesheet(*stylesheet_.get(), &writer, message_handler_);
+    if (minified_ok && !license_comments_.empty()) {
+      // Our own licence comments go after the flattened children's content
+      // and before our own rules (after our @charset, if we kept it).
+      GoogleString own = minified_contents_.substr(children_size);
+      css_util::InsertLicenseComments(license_comments_, &own);
+      minified_contents_.resize(children_size);
+      minified_contents_ += own;
+    }
     if (!minified_ok) {
       if (filter_ != nullptr) {
         filter_->num_flatten_imports_minify_failed_->Add(1);
@@ -527,6 +543,8 @@ void CssHierarchy::RollUpContents() {
                                                  message_handler_)) {
         // If we can't minify just use our contents, albeit not minified.
         input_contents_.CopyToString(&minified_contents_);
+      } else {
+        css_util::InsertLicenseComments(license_comments_, &minified_contents_);
       }
     }
     STLDeleteElements(&saved_imports);  // no-op if empty (was swapped back).
@@ -558,6 +576,10 @@ bool CssHierarchy::RollUpStylesheets() {
     }
   }
   CHECK(stylesheet_.get() != nullptr);
+
+  // The parser drops comments, so note the licence comments to keep.
+  license_comments_.clear();
+  css_util::ExtractLicenseComments(input_contents_, &license_comments_);
 
   const int n = children_.size();
 
@@ -600,6 +622,15 @@ bool CssHierarchy::RollUpStylesheets() {
     if (n > 0) {
       stylesheet_->mutable_charsets().clear();
     }
+    // Flattened children's licence comments come first, as their content does.
+    StringVector all_comments;
+    for (int i = 0; i < n; ++i) {
+      const StringVector& child = children_[i]->license_comments_;
+      all_comments.insert(all_comments.end(), child.begin(), child.end());
+    }
+    all_comments.insert(all_comments.end(), license_comments_.begin(),
+                        license_comments_.end());
+    license_comments_.swap(all_comments);
     STLDeleteElements(&stylesheet_->mutable_imports());
     Css::Rulesets& target = stylesheet_->mutable_rulesets();
     Css::FontFaces& fonts_target = stylesheet_->mutable_font_faces();

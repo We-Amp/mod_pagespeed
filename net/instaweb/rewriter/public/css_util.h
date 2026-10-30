@@ -67,6 +67,23 @@ enum DimensionState {
 // http://www.w3.org/TR/CSS2/syndata.html#value-def-length
 DimensionState GetDimensions(Css::Declarations* decls, int* width, int* height);
 
+// Returns true for a complete CSS comment ("/* ... */") that must survive
+// minification because it carries a licence or attribution notice: one that
+// starts with "/*!" or contains "@license" or "@preserve".
+bool IsLicenseComment(const StringPiece& comment);
+
+// Appends to 'comments' every licence comment (see IsLicenseComment) found in
+// 'css', verbatim and in order. Comments inside string literals and unquoted
+// url() values are not comments and are ignored.
+void ExtractLicenseComments(const StringPiece& css, StringVector* comments);
+
+// Inserts the given licence comments, each followed by a newline, at the top
+// of the serialized stylesheet 'css': after a UTF-8 BOM and a leading
+// @charset rule if present, since @charset must stay first. A comment that
+// already appears verbatim in 'css' (or earlier in 'comments') is not added
+// again. The comments are inserted in order.
+void InsertLicenseComments(const StringVector& comments, GoogleString* css);
+
 class StyleExtractor {
  public:
   explicit StyleExtractor(HtmlElement* element);

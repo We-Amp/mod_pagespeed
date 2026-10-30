@@ -337,6 +337,7 @@ class CssFilter::Context : public SingleRewriteContext {
                     const GoogleUrl& css_base_gurl,
                     const GoogleUrl& css_trim_gurl, bool previously_optimized,
                     bool stylesheet_is_declarations, bool add_utf8_bom,
+                    const StringVector& license_comments,
                     GoogleString* out_text, MessageHandler* handler);
 
   // Used by the asynchronous rewrite callbacks (RewriteSingle + Harvest) to

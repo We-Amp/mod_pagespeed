@@ -404,6 +404,20 @@ TEST_F(CssFlattenImportsTest, FlattenInlineCss) {
   EXPECT_EQ(expected_savings, total_bytes_saved_->Get());
 }
 
+TEST_F(CssFlattenImportsTest, FlattenKeepsLicenseComments) {
+  SetResponseWithDefaultHeaders(
+      kSimpleCssFile, kContentTypeCss,
+      "/*! imported licence */ /* ordinary */ .a { color: red; }", 100);
+
+  ValidateRewriteInlineCss(
+      "flatten_license",
+      "@import url(http://test.com/simple.css);"
+      " /* @license top */ .b { color: red; }",
+      "/*! imported licence */\n/* @license top */\n"
+      ".a{color:red}.b{color:red}",
+      kExpectSuccess);
+}
+
 TEST_F(CssFlattenImportsTest, DontFlattenAttributeCss) {
   options()->ClearSignatureForTesting();
   options()->EnableFilter(RewriteOptions::kRewriteStyleAttributes);
