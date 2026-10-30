@@ -36,8 +36,8 @@ const char DeferIframeFilter::kDeferIframeInit[] =
     "pagespeed.deferIframeInit();";
 // Runs in its own script, so it first checks that the support script ran.
 const char DeferIframeFilter::kDeferIframeIframeJs[] =
-    "\nif(window.pagespeed&&pagespeed.deferIframe){"
-    "pagespeed.deferIframe.convertToIframe();}";
+    "\nif(window.pagespeed){if(pagespeed.deferIframe){"
+    "pagespeed.deferIframe.convertToIframe();}}";
 
 DeferIframeFilter::DeferIframeFilter(RewriteDriver* driver)
     : CommonFilter(driver),

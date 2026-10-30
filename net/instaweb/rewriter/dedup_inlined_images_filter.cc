@@ -37,7 +37,7 @@
 
 namespace net_instaweb {
 
-const unsigned int DedupInlinedImagesFilter::kMinimumImageCutoff = 237;
+const unsigned int DedupInlinedImagesFilter::kMinimumImageCutoff = 241;
 
 const char DedupInlinedImagesFilter::kDiiInitializer[] =
     "pagespeed.dedupInlinedImagesInit();";
@@ -130,13 +130,13 @@ void DedupInlinedImagesFilter::EndElementImpl(HtmlElement* element) {
       GoogleString script_id =
           StrCat("pagespeed_script_", IntegerToString(++snippet_id_));
       // NOTE: If you change this you need to update kMinimumImageCutoff,
-      // which is currently set to 237, slightly less than this snippet:
+      // which is currently set to 241, slightly less than this snippet:
       //   <script type="text/javascript" id="pagespeed_script_1"
       //    data-pagespeed-no-defer>
-      //   if(window.pagespeed&&pagespeed.dedupInlinedImages){
+      //   if(window.pagespeed){if(pagespeed.dedupInlinedImages){
       //   pagespeed.dedupInlinedImages.inlineImg("pagespeed_img_12345678",
       //                                          "pagespeed_img_87654321",
-      //                                          "pagespeed_script_1");}
+      //                                          "pagespeed_script_1");}}
       //   </script>
       // The id attributes are author-controlled (and may originate from
       // untrusted/UGC markup), so they must be escaped before being spliced
@@ -154,10 +154,10 @@ void DedupInlinedImagesFilter::EndElementImpl(HtmlElement* element) {
       EscapeToJsStringLiteral(script_id, false /* add_quotes */,
                               &escaped_script_id);
       GoogleString snippet(
-          "if(window.pagespeed&&pagespeed.dedupInlinedImages){"
+          "if(window.pagespeed){if(pagespeed.dedupInlinedImages){"
           "pagespeed.dedupInlinedImages.");
       StrAppend(&snippet, "inlineImg('", escaped_from_img_id, "','",
-                escaped_element_id, "','", escaped_script_id, "');}");
+                escaped_element_id, "','", escaped_script_id, "');}}");
       HtmlElement* script = driver()->NewElement(element, HtmlName::kScript);
       driver()->InsertElementAfterElement(element, script);
       AddJsToElement(snippet, script);

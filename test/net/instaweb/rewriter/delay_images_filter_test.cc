@@ -110,11 +110,11 @@ class DelayImagesFilterTest : public RewriteTestBase {
                                        const GoogleString& image_data) {
     return absl::StrFormat(
         kScriptTemplate,
-        StrCat("\nif(window.pagespeed&&pagespeed.delayImagesInline){"
+        StrCat("\nif(window.pagespeed){if(pagespeed.delayImagesInline){"
                "pagespeed.delayImagesInline.addLowResImages(\'",
                url, "\', \'", image_data,
                "\');\n"
-               "pagespeed.delayImagesInline.replaceWithLowRes();}\n")
+               "pagespeed.delayImagesInline.replaceWithLowRes();}}\n")
             .c_str());
   }
 
@@ -138,15 +138,15 @@ class DelayImagesFilterTest : public RewriteTestBase {
 
   GoogleString GetHighResScript() {
     return absl::StrFormat(kScriptTemplate,
-                           "\nif(window.pagespeed&&pagespeed.delayImages){"
-                           "pagespeed.delayImages.replaceWithHighRes();}\n");
+                           "\nif(window.pagespeed){if(pagespeed.delayImages){"
+                           "pagespeed.delayImages.replaceWithHighRes();}}\n");
   }
 
   GoogleString GetLazyHighResScript() {
     return absl::StrFormat(
         kScriptTemplate,
-        "\nif(window.pagespeed&&pagespeed.delayImages){"
-        "pagespeed.delayImages.registerLazyLoadHighRes();}\n");
+        "\nif(window.pagespeed){if(pagespeed.delayImages){"
+        "pagespeed.delayImages.registerLazyLoadHighRes();}}\n");
   }
 
   GoogleString GetDelayImagesInlineCode() {

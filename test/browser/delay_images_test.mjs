@@ -78,12 +78,12 @@ function deferredPage(endScript) {
          width="10" height="10">
     <script data-pagespeed-no-defer>${assetScript}<\/script>
     <script data-pagespeed-no-defer>
-if(window.pagespeed&&pagespeed.delayImagesInline){pagespeed.delayImagesInline.addLowResImages('${HI_A}', '${LOW_A}');
-pagespeed.delayImagesInline.replaceWithLowRes();}
+if(window.pagespeed){if(pagespeed.delayImagesInline){pagespeed.delayImagesInline.addLowResImages('${HI_A}', '${LOW_A}');
+pagespeed.delayImagesInline.replaceWithLowRes();}}
 <\/script>
     <script data-pagespeed-no-defer>
-if(window.pagespeed&&pagespeed.delayImagesInline){pagespeed.delayImagesInline.addLowResImages('${HI_B}', '${LOW_B}');
-pagespeed.delayImagesInline.replaceWithLowRes();}
+if(window.pagespeed){if(pagespeed.delayImagesInline){pagespeed.delayImagesInline.addLowResImages('${HI_B}', '${LOW_B}');
+pagespeed.delayImagesInline.replaceWithLowRes();}}
 <\/script>
     <script>
       window.__lowRes = ['a', 'b', 'c', 'd', 's'].map(
@@ -120,8 +120,8 @@ const srcs = (page) => page.evaluate(() => ['a', 'b', 'c', 'd', 's'].map(
 // --- 1-2. Low-res then high-res ------------------------------------------
 {
   const page = await openPage(deferredPage(
-      'if(window.pagespeed&&pagespeed.delayImages){' +
-      'pagespeed.delayImages.replaceWithHighRes();}'));
+      'if(window.pagespeed){if(pagespeed.delayImages){' +
+      'pagespeed.delayImages.replaceWithHighRes();}}'));
   const low = await page.evaluate(() => window.__lowRes);
   check(low[0] === LOW_A, 'replaceWithLowRes: <img> gets its low-res data URL');
   check(low[1] === LOW_B,
@@ -146,8 +146,8 @@ const srcs = (page) => page.evaluate(() => ['a', 'b', 'c', 'd', 's'].map(
 // --- 3. registerLazyLoadHighRes ------------------------------------------
 {
   const page = await openPage(deferredPage(
-      'if(window.pagespeed&&pagespeed.delayImages){' +
-      'pagespeed.delayImages.registerLazyLoadHighRes();}'));
+      'if(window.pagespeed){if(pagespeed.delayImages){' +
+      'pagespeed.delayImages.registerLazyLoadHighRes();}}'));
   const low = await page.evaluate(() => window.__lowRes);
   check(low[0] === LOW_A, 'lazy high-res: low-res shown before onload');
   const hi = await srcs(page);

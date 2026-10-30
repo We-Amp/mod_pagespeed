@@ -136,33 +136,33 @@ for (const [name, h] of Object.entries(HANDLERS)) {
 // tests pin the same text.
 const INLINE = {
   deferIframe: {
-    code: 'if(window.pagespeed&&pagespeed.deferIframe){' +
-          'pagespeed.deferIframe.convertToIframe();}',
+    code: 'if(window.pagespeed){if(pagespeed.deferIframe){' +
+          'pagespeed.deferIframe.convertToIframe();}}',
     ns: 'deferIframe', method: 'convertToIframe' },
   lazyLoadAll: {
-    code: 'if(window.pagespeed&&pagespeed.lazyLoadImages){' +
-          'pagespeed.lazyLoadImages.loadAllImages();}',
+    code: 'if(window.pagespeed){if(pagespeed.lazyLoadImages){' +
+          'pagespeed.lazyLoadImages.loadAllImages();}}',
     ns: 'lazyLoadImages', method: 'loadAllImages' },
   lazyOverride: {
-    code: 'if(window.pagespeed&&pagespeed.lazyLoadImages){' +
-          'pagespeed.lazyLoadImages.overrideAttributeFunctions();}',
+    code: 'if(window.pagespeed){if(pagespeed.lazyLoadImages){' +
+          'pagespeed.lazyLoadImages.overrideAttributeFunctions();}}',
     ns: 'lazyLoadImages', method: 'overrideAttributeFunctions' },
   dedup: {
-    code: 'if(window.pagespeed&&pagespeed.dedupInlinedImages){' +
-          "pagespeed.dedupInlinedImages.inlineImg('a','b','c');}",
+    code: 'if(window.pagespeed){if(pagespeed.dedupInlinedImages){' +
+          "pagespeed.dedupInlinedImages.inlineImg('a','b','c');}}",
     ns: 'dedupInlinedImages', method: 'inlineImg' },
   delayLowRes: {
-    code: 'if(window.pagespeed&&pagespeed.delayImagesInline){' +
+    code: 'if(window.pagespeed){if(pagespeed.delayImagesInline){' +
           "pagespeed.delayImagesInline.addLowResImages('a','b');\n" +
-          'pagespeed.delayImagesInline.replaceWithLowRes();}',
+          'pagespeed.delayImagesInline.replaceWithLowRes();}}',
     ns: 'delayImagesInline', method: 'replaceWithLowRes' },
   delayHighRes: {
-    code: 'if(window.pagespeed&&pagespeed.delayImages){' +
-          'pagespeed.delayImages.replaceWithHighRes();}',
+    code: 'if(window.pagespeed){if(pagespeed.delayImages){' +
+          'pagespeed.delayImages.replaceWithHighRes();}}',
     ns: 'delayImages', method: 'replaceWithHighRes' },
   delayLazyHighRes: {
-    code: 'if(window.pagespeed&&pagespeed.delayImages){' +
-          'pagespeed.delayImages.registerLazyLoadHighRes();}',
+    code: 'if(window.pagespeed){if(pagespeed.delayImages){' +
+          'pagespeed.delayImages.registerLazyLoadHighRes();}}',
     ns: 'delayImages', method: 'registerLazyLoadHighRes' },
 };
 

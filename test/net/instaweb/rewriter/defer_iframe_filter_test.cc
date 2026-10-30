@@ -49,8 +49,8 @@ class DeferIframeFilterTest : public RewriteTestBase {
     return StrCat("<pagespeed_iframe src=\"", src,
                   "\">"
                   "<script type=\"text/javascript\">"
-                  "\nif(window.pagespeed&&pagespeed.deferIframe){"
-                  "pagespeed.deferIframe.convertToIframe();}"
+                  "\nif(window.pagespeed){if(pagespeed.deferIframe){"
+                  "pagespeed.deferIframe.convertToIframe();}}"
                   "</script></pagespeed_iframe>");
   }
 };
@@ -156,16 +156,16 @@ TEST(InlineScriptGuardTest, SeparateScriptsAreGuarded) {
   } kScripts[] = {
       {"DeferIframeFilter::kDeferIframeIframeJs",
        DeferIframeFilter::kDeferIframeIframeJs,
-       "\nif(window.pagespeed&&pagespeed.deferIframe){"
-       "pagespeed.deferIframe.convertToIframe();}"},
+       "\nif(window.pagespeed){if(pagespeed.deferIframe){"
+       "pagespeed.deferIframe.convertToIframe();}}"},
       {"LazyloadImagesFilter::kLoadAllImages",
        LazyloadImagesFilter::kLoadAllImages,
-       "if(window.pagespeed&&pagespeed.lazyLoadImages){"
-       "pagespeed.lazyLoadImages.loadAllImages();}"},
+       "if(window.pagespeed){if(pagespeed.lazyLoadImages){"
+       "pagespeed.lazyLoadImages.loadAllImages();}}"},
       {"LazyloadImagesFilter::kOverrideAttributeFunctions",
        LazyloadImagesFilter::kOverrideAttributeFunctions,
-       "if(window.pagespeed&&pagespeed.lazyLoadImages){"
-       "pagespeed.lazyLoadImages.overrideAttributeFunctions();}"},
+       "if(window.pagespeed){if(pagespeed.lazyLoadImages){"
+       "pagespeed.lazyLoadImages.overrideAttributeFunctions();}}"},
   };
   for (const auto& script : kScripts) {
     SCOPED_TRACE(script.name);
@@ -173,8 +173,10 @@ TEST(InlineScriptGuardTest, SeparateScriptsAreGuarded) {
     GoogleString code(script.code);
     // The first statement is the check; the call is inside it.
     size_t start = code.find_first_not_of('\n');
-    EXPECT_EQ(start, code.find("if(window.pagespeed&&")) << code;
-    EXPECT_EQ(GoogleString::npos, code.find_first_of("<>\"'")) << code;
+    EXPECT_EQ(start, code.find("if(window.pagespeed){if(pagespeed.")) << code;
+    // Emitted as raw script text (no CDATA), so it must stay XML-safe for
+    // pages served as XHTML.
+    EXPECT_EQ(GoogleString::npos, code.find_first_of("<>\"'&")) << code;
   }
 }
 

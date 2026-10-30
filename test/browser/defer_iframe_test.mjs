@@ -34,8 +34,8 @@ const variants = [
 
 // Mirrors DeferIframeFilter::kDeferIframeIframeJs.
 const convert = '<script type="text/javascript">\n' +
-    'if(window.pagespeed&&pagespeed.deferIframe){' +
-    'pagespeed.deferIframe.convertToIframe();}<\/script>';
+    'if(window.pagespeed){if(pagespeed.deferIframe){' +
+    'pagespeed.deferIframe.convertToIframe();}}<\/script>';
 
 const testPage = (js) => `<!DOCTYPE html><html><body>
   <script>${js}pagespeed.deferIframeInit();<\/script>
