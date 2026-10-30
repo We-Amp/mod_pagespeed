@@ -2573,7 +2573,8 @@ class RewriteOptions {
     if (x_header_value_.was_set()) {
       return x_header_value_.value();
     }
-    if (expose_version_in_headers_.value() && !x_header_value_.value().empty()) {
+    if (expose_version_in_headers_.value() &&
+        !x_header_value_.value().empty()) {
       return x_header_value_.value();
     }
     return kGenericXHeaderValue;

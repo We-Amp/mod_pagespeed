@@ -2132,8 +2132,8 @@ TEST_F(RewriteOptionsTest, DeprecatedFilterWarningsFireOncePerProcess) {
   EXPECT_EQ(0U, second_parse.messages().size());
   RewriteOptions fresh_options(thread_system());
   TestMessageHandler fresh_parse;
-  EXPECT_TRUE(fresh_options.EnableFiltersByCommaSeparatedList(
-      "mobilize", &fresh_parse));
+  EXPECT_TRUE(fresh_options.EnableFiltersByCommaSeparatedList("mobilize",
+                                                              &fresh_parse));
   EXPECT_EQ(0U, fresh_parse.messages().size());
 
   // A different deprecated filter name still warns.

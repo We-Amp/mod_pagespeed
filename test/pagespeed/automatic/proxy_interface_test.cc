@@ -2964,9 +2964,8 @@ TEST_F(ProxyInterfaceTest, MixedCaseNoCacheDirectives) {
                RewriteHtmlCacheHeader("mc-plain", "max-age=300"));
   EXPECT_STREQ("max-age=0, no-cache",
                RewriteHtmlCacheHeader("mc-no-cache", "No-Cache"));
-  EXPECT_STREQ(
-      "max-age=0, no-cache",
-      RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
 }
 
 // Rewritten HTML must never invite shared caches via s-maxage: the HTML
@@ -2984,9 +2983,8 @@ TEST_F(ProxyInterfaceTest, NoSMaxAgeOnRewrittenHtml) {
   EXPECT_STREQ("max-age=0, no-cache",
                RewriteHtmlCacheHeader("smaxage-only", "s-maxage=10"));
   // Directives that must survive still do.
-  EXPECT_STREQ(
-      "max-age=0, no-cache, no-store",
-      RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
+  EXPECT_STREQ("max-age=0, no-cache, no-store",
+               RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
 }
 
 // Rewritten HTML names the headers its image URLs depend on in Vary, and the
@@ -3606,7 +3604,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
    private:
     RewriteDriver* driver_;
     PerOriginPageReaderFilter(const PerOriginPageReaderFilter&) = delete;
-    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) = delete;
+    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) =
+        delete;
   };
 
   class PerOriginPageReaderFilterCreator
@@ -3620,8 +3619,10 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
     }
 
    private:
-    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) = delete;
-    PerOriginPageReaderFilterCreator& operator=(const PerOriginPageReaderFilterCreator&) = delete;
+    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) =
+        delete;
+    PerOriginPageReaderFilterCreator& operator=(
+        const PerOriginPageReaderFilterCreator&) = delete;
   };
 
   void SetUp() override {
