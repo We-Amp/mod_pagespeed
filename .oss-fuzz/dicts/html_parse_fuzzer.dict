@@ -1,6 +1,9 @@
-# From AFL's dictionaries/html_tags.dict (https://github.com/google/AFL, Apache-2.0),
-# by Michal Zalewski and contributors; unchanged below this header.
-# Served to the fuzzer as $OUT/html_parse_fuzzer.dict by .oss-fuzz/build.sh.
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2013 Google LLC All rights reserved.
+#
+# From AFL's dictionaries/html_tags.dict (https://github.com/google/AFL), by Michal
+# Zalewski and contributors; unchanged below this header. Served to the fuzzer
+# as $OUT/html_parse_fuzzer.dict by .oss-fuzz/build.sh.
 
 #
 # AFL dictionary for HTML parsers (tags only)
