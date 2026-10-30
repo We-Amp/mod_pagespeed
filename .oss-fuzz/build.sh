@@ -29,10 +29,10 @@ cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
 USE_BAZEL_VERSION="$(cat .bazelversion)"
 export USE_BAZEL_VERSION
 
-# label | name in $OUT | source path (a --per_file_copt regex) | define | seeds
+# label | name in $OUT | source path (a --per_file_copt regex) | defines | seeds
 readonly HARNESSES=(
   "//pagespeed/kernel/html:html_fuzz|html_parse_fuzzer|pagespeed/kernel/html/html_fuzz[.]cc|HTML_PARSE_LIBFUZZER|dir:tools/html-parse-corpus/seeds"
-  "//pagespeed/kernel/js:js_minify_fuzz|js_minify_fuzzer|pagespeed/kernel/js/js_minify_fuzz[.]cc|JS_MINIFY_LIBFUZZER|dump"
+  "//pagespeed/kernel/js:js_minify_fuzz|js_minify_fuzzer|pagespeed/kernel/js/js_minify_fuzz[.]cc|JS_MINIFY_LIBFUZZER JS_MINIFY_FUZZ_SANITIZER_ONLY|dump"
   "//pagespeed/kernel/packs:pack_loader_fuzz|pack_loader_fuzzer|pagespeed/kernel/packs/pack_loader_fuzz[.]cc|PACK_LOADER_LIBFUZZER|dir:tools/pack-loader-corpus/seeds"
   "//pagespeed/kernel/packs:rule_pack_filter_fuzz|rule_pack_filter_fuzzer|pagespeed/kernel/packs/rule_pack_filter_fuzz[.]cc|RULE_PACK_FILTER_LIBFUZZER|dir:tools/rule-pack-filter-corpus/seeds"
   "//third_party/css_parser:parser_fuzz|css_parser_fuzzer|third_party/css_parser/src/webutil/css/parser_fuzz[.]cc|CSS_PARSER_LIBFUZZER|dump"
@@ -76,14 +76,18 @@ for h in "${HARNESSES[@]}"; do
   rm -rf "${dir}"
 done
 
-# 2. The fuzzers: every harness in one build, each source given its define,
-#    all linked against the engine.
+# 2. The fuzzers: every harness in one build, each source given its defines
+#    (space-separated in the table), all linked against the engine. The JS
+#    harness also gets its sanitizer-only mode: its oracles stop on invalid
+#    input that the nightly fuzz lane classifies as known (see its header).
 fuzz=("${flags[@]}")
 for f in ${LIB_FUZZING_ENGINE}; do fuzz+=("--linkopt=${f}"); done
 targets=()
 for h in "${HARNESSES[@]}"; do
-  IFS='|' read -r label _ src define _ <<<"${h}"
-  fuzz+=("--per_file_copt=${src}@-D${define}")
+  IFS='|' read -r label _ src defines _ <<<"${h}"
+  copts=""
+  for d in ${defines}; do copts+="${copts:+,}-D${d}"; done
+  fuzz+=("--per_file_copt=${src}@${copts}")
   targets+=("${label}")
 done
 bazel build "${fuzz[@]}" -- "${targets[@]}"

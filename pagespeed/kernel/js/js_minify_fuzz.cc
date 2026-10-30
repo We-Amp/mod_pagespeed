@@ -25,6 +25,18 @@
 //                              with -fsanitize=fuzzer; trips abort like
 //                              any other oracle failure.
 //
+// -DJS_MINIFY_FUZZ_SANITIZER_ONLY, in either mode, keeps both minify
+// passes but drops both oracles: the sanitizers are the only check.  The
+// OSS-Fuzz build (.oss-fuzz/build.sh) sets it for its fuzzer binary.  The
+// oracles trip within seconds on invalid input that the nightly fuzz
+// lane's classifier (tools/ci/classify-js-fuzz-artifacts.sh) files as
+// known classes: an unterminated string literal that the tokenizer closes
+// on an escaped quote, with a raw U+2028 the minifier turns into a
+// linebreak, trips the token-channel oracle and, once that is exempted,
+// the idempotence oracle.  An engine without that classifier would stop on
+// such input every session; the nightly lane keeps the oracles and the
+// classifier.
+//
 // Oracle 1 — strict idempotence, modeled on the full DECLINE contract
 // (js_minify.h: "the output string will still be fully populated from the
 // input; the portion of the input up to the parse error will be minified,
@@ -374,11 +386,17 @@ JsTokenizerPatterns& Patterns() {
   return *patterns;
 }
 
+#ifdef JS_MINIFY_FUZZ_SANITIZER_ONLY
+constexpr bool kRunOracles = false;
+#else
+constexpr bool kRunOracles = true;
+#endif
+
 // Seed-battery path: any trip aborts.
 void MinifyOne(std::string_view input) {
   GoogleString once;
   const bool ok1 = pagespeed::js::MinifyUtf8Js(&Patterns(), input, &once);
-  if (!ChannelsEquivalent(&Patterns(), input, once)) {
+  if (kRunOracles && !ChannelsEquivalent(&Patterns(), input, once)) {
     std::fprintf(stderr, "token-channel violation: [%.*s] -> [%.*s]\n",
                  static_cast<int>(input.size()), input.data(),
                  static_cast<int>(once.size()), once.data());
@@ -386,7 +404,7 @@ void MinifyOne(std::string_view input) {
   }
   GoogleString twice;
   const bool ok2 = pagespeed::js::MinifyUtf8Js(&Patterns(), once, &twice);
-  if (ok1 != ok2 || once != twice) {
+  if (kRunOracles && (ok1 != ok2 || once != twice)) {
     std::fprintf(stderr, "idempotence violation: [%.*s] -> [%.*s] -> [%.*s]\n",
                  static_cast<int>(input.size()), input.data(),
                  static_cast<int>(once.size()), once.data(),
@@ -399,12 +417,12 @@ void MinifyOne(std::string_view input) {
 OracleTrip MinifyOneCounted(std::string_view input) {
   GoogleString once;
   const bool ok1 = pagespeed::js::MinifyUtf8Js(&Patterns(), input, &once);
-  if (!ChannelsEquivalent(&Patterns(), input, once)) {
+  if (kRunOracles && !ChannelsEquivalent(&Patterns(), input, once)) {
     return OracleTrip::kTokenChannel;
   }
   GoogleString twice;
   const bool ok2 = pagespeed::js::MinifyUtf8Js(&Patterns(), once, &twice);
-  if (ok1 != ok2 || once != twice) {
+  if (kRunOracles && (ok1 != ok2 || once != twice)) {
     return OracleTrip::kIdempotence;
   }
   return OracleTrip::kNone;
@@ -504,9 +522,10 @@ int main(int argc, char** argv) {
   }
   std::fprintf(stderr,
                "js minify fuzz harness: %zu seeds clean; %zu files replayed, "
-               "%zu idempotence trips, %zu token-channel trips\n",
+               "%zu idempotence trips, %zu token-channel trips%s\n",
                sizeof(kValidJsSeeds) / sizeof(kValidJsSeeds[0]), files,
-               idem_trips, chan_trips);
+               idem_trips, chan_trips,
+               kRunOracles ? "" : " (oracles off: sanitizer-only build)");
   return (idem_trips + chan_trips) == 0 ? 0 : 1;
 }
 #endif
