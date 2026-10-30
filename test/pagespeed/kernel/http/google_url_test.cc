@@ -538,7 +538,7 @@ TEST_F(GoogleUrlTest, RelativeUrls) {
     StringPiece in_url = non_reproducible_url[0];
     UrlRelativity url_relativity = GoogleUrl::FindRelativity(in_url);
 
-    for (int j = 0; j < std::size(base_urls); ++j) {
+    for (size_t j = 0; j < std::size(base_urls); ++j) {
       GoogleUrl base(base_urls[j]);
       GoogleUrl url(base, in_url);
 

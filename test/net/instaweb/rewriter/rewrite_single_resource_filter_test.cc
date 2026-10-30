@@ -186,7 +186,7 @@ class TestRewriter : public RewriteFilter {
 
     void Encode(const StringVector& urls, const ResourceContext* data,
                 GoogleString* rewritten_url) const override {
-      CHECK_EQ(1, urls.size());
+      CHECK_EQ(1u, urls.size());
       *rewritten_url = kTestEncoderUrlExtra;
       UrlEscaper::EncodeToUrlSegment(urls[0], rewritten_url);
     }

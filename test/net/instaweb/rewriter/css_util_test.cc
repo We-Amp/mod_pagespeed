@@ -304,7 +304,7 @@ TEST_F(CssUtilTest, JsDetectableSelector) {
   EXPECT_EQ(Css::Parser::kNoError, parser.errors_seen_mask());
   CHECK(selectors.get() != nullptr);
   EXPECT_EQ(std::size(kExpected), selectors->size());
-  for (int i = 0; i < selectors->size(); ++i) {
+  for (size_t i = 0; i < selectors->size(); ++i) {
     EXPECT_EQ(kExpected[i], JsDetectableSelector(*(*selectors)[i]));
   }
 }
