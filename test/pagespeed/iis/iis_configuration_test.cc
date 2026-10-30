@@ -1025,6 +1025,21 @@ TEST_F(IisConfigurationTest, EmptyDirectiveIsReportedNotFatal) {
   EXPECT_NE(nullptr, error);
 }
 
+TEST_F(IisConfigurationTest, TreatProxiedRequestsAsLocalDefaultsOff) {
+  IisRewriteOptions rwo(nullptr);
+  EXPECT_FALSE(rwo.treat_proxied_requests_as_local());
+}
+
+TEST_F(IisConfigurationTest, TreatProxiedRequestsAsLocalParses) {
+  IisRewriteOptions on(nullptr);
+  ParseAndGetConfig("pagespeed TreatProxiedRequestsAsLocal on\n", "", &on);
+  EXPECT_TRUE(on.treat_proxied_requests_as_local());
+
+  IisRewriteOptions off(nullptr);
+  ParseAndGetConfig("pagespeed TreatProxiedRequestsAsLocal off\n", "", &off);
+  EXPECT_FALSE(off.treat_proxied_requests_as_local());
+}
+
 TEST_F(IisConfigurationTest, BareDirectiveLinesParse) {
   IisRewriteOptions rwo(nullptr);
   ParseAndGetConfig(

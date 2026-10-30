@@ -94,9 +94,9 @@ function Resolve-ModuleConfigPath {
 }
 
 function Get-PsHeaders {
-    param([string]$u)
+    param([string]$u, [hashtable]$extraHeaders = @{})
     try {
-        $r = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 5
+        $r = Invoke-WebRequest -Uri $u -UseBasicParsing -TimeoutSec 5 -Headers $extraHeaders
         return $r.Headers
     } catch {
         return $null
@@ -267,6 +267,25 @@ try {
         throw "Regression: expected X-Pagespeed-Init-Status='$ExpectedStatus' within ${PollSeconds}s; observed '$obs'."
     }
     Write-Host "PASS: header emitted with value '$diag'."
+
+    # The page follows the same local-request rule as the admin pages: a
+    # request relayed by a reverse proxy on this server (it carries
+    # forwarding headers) is not local unless TreatProxiedRequestsAsLocal is
+    # on, so it must not get the diagnostic header.
+    Write-Host "=== Asserting the diagnostic header is withheld from a proxied request ==="
+    foreach ($fwd in @(
+            @{ 'X-Forwarded-For' = '203.0.113.9' },
+            @{ 'X-ARR-ClientIP' = '203.0.113.9' },
+            @{ 'Forwarded' = 'for=203.0.113.9' })) {
+        $ph = Get-PsHeaders -u $Url -extraHeaders $fwd
+        if (-not $ph) {
+            throw "Regression: no response to a proxied request ($($fwd.Keys -join ','))."
+        }
+        if ($ph["X-Pagespeed-Init-Status"]) {
+            throw "Regression: X-Pagespeed-Init-Status='$($ph['X-Pagespeed-Init-Status'])' was sent to a proxied request ($($fwd.Keys -join ','))."
+        }
+    }
+    Write-Host "PASS: proxied requests get no diagnostic header."
 
     Restore-Config
 

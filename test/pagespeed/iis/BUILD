@@ -387,6 +387,16 @@ pagespeed_cc_test(
     ],
 )
 
+# Local-request decision unit tests.
+pagespeed_cc_test(
+    name = "iis_local_request_test",
+    srcs = ["iis_local_request_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_local_request",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # GetIPString(SOCKADDR*) unit tests. Windows-only (winsock2 types); the helper
 # was split out of iis_http_module.cpp into //pagespeed/iis:iis_ip_string
 # precisely so it could be linked and tested here in isolation (the previous

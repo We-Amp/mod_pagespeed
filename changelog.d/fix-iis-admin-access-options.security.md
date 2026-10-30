@@ -1,0 +1,1 @@
+- **IIS: access options for the admin, statistics and diagnostic pages.** A request relayed by a reverse proxy on the same server is no longer treated as local, and `AdminDomains` and `StatisticsDomains` now apply on IIS. The new site option `TreatProxiedRequestsAsLocal` restores the previous behaviour. Update recommended for IIS sites that run behind a reverse proxy.

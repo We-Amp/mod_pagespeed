@@ -96,6 +96,13 @@ class IisRewriteOptions : public SystemRewriteOptions {
   bool daemon_serve_honor_request_freshness() const {
 	  return daemon_serve_honor_request_freshness_.value();
   }
+  // Whether a request relayed by a reverse proxy on the same server (it
+  // carries forwarding headers) still counts as local for the admin,
+  // statistics, console, message and diagnostic pages
+  // (TreatProxiedRequestsAsLocal).  Off by default; per site.
+  bool treat_proxied_requests_as_local() const {
+	  return treat_proxied_requests_as_local_.value();
+  }
 
  private:
   OptionSettingResult ParseAndSetOptions0(
@@ -134,6 +141,7 @@ class IisRewriteOptions : public SystemRewriteOptions {
   Option<GoogleString> daemon_socket_path_;
   Option<GoogleString> daemon_volume_path_;
   Option<bool> daemon_serve_honor_request_freshness_;
+  Option<bool> treat_proxied_requests_as_local_;
 
   bool IsDirective(StringPiece config_directive, StringPiece compare_directive);
 

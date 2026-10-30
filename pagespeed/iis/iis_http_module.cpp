@@ -64,6 +64,8 @@
 #include "pagespeed/iis/iis_request_context.h"
 #include "pagespeed/iis/iis_ip_string.h"
 #include "pagespeed/iis/iis_admin_path_match.h"
+#include "pagespeed/iis/iis_local_request.h"
+#include <atomic>
 
 namespace net_instaweb
 {
@@ -126,12 +128,22 @@ namespace net_instaweb
 			ws2s(pHttpContext->GetApplication()->GetApplicationPhysicalPath()));
 	}
 
-	bool IisHttpModule::IsLocalRequest(IN IHttpContext* pHttpContext)
+	bool IisHttpModule::IsLocalRequest(IN IHttpContext* pHttpContext, const IisRewriteOptions* options, bool assume_proxied_opt_in)
 	{
-		GoogleString remote_ip_address = GetIPString(pHttpContext->GetRequest()->GetRemoteAddress());
-		GoogleString local_ip_address = GetIPString(pHttpContext->GetRequest()->GetLocalAddress());
+		IHttpRequest* request = pHttpContext->GetRequest();
+		GoogleString remote_ip_address = GetIPString(request->GetRemoteAddress());
+		GoogleString local_ip_address = GetIPString(request->GetLocalAddress());
+		bool has_forwarding_headers = IisHasForwardingHeaders(
+			[request](const char* name) { return request->GetHeader(name) != nullptr; });
+		// Without options (the site failed to start) the secure default applies
+		// unless the caller passes the failed site's own options.
+		bool treat_proxied_as_local =
+			assume_proxied_opt_in ||
+			(options != nullptr && options->treat_proxied_requests_as_local());
 
-		return IsLoopbackClientIp(remote_ip_address) || remote_ip_address == local_ip_address;
+		return IisIsLocalRequest(IsLoopbackClientIp(remote_ip_address),
+			remote_ip_address, local_ip_address, has_forwarding_headers,
+			treat_proxied_as_local);
 	}
 
 	// A site whose configured optimizer service is not usable keeps
@@ -148,7 +160,7 @@ namespace net_instaweb
 	void IisHttpModule::SetDaemonInitStatusHeaderIfLocal(
 		IN IHttpContext* pHttpContext, IisInnerRequestContext* innerContext)
 	{
-		if (!IsLocalRequest(pHttpContext)) {
+		if (!IsLocalRequest(pHttpContext, innerContext->server_context()->config())) {
 			return;
 		}
 		const char* daemon_init_status = DaemonInitStatusToken(
@@ -336,6 +348,39 @@ namespace net_instaweb
 		((char*)pvRequestBody)[pos] = 0;
 
 		return (const char*)pvRequestBody;
+	}
+
+	// Whether the admin-style page for `response_category` may be served to this
+	// request: local requests, plus hosts on the matching *Domains allowlist.
+	static bool AdminPageAccessAllowed(bool is_local,
+		RequestRouting::Response response_category, const GoogleUrl& url,
+		const IisRewriteOptions* options)
+	{
+		const FastWildcardGroup* domains = &options->admin_domains();
+		switch (response_category) {
+		case RequestRouting::kStatistics:
+			domains = &options->statistics_domains();
+			break;
+		case RequestRouting::kGlobalStatistics:
+			domains = &options->global_statistics_domains();
+			break;
+		case RequestRouting::kConsole:
+			domains = &options->console_domains();
+			break;
+		case RequestRouting::kMessages:
+			domains = &options->messages_domains();
+			break;
+		case RequestRouting::kGlobalAdmin:
+			domains = &options->global_admin_domains();
+			break;
+		default:
+			break;
+		}
+		bool allowlist_configured = !domains->empty();
+		bool host_on_allowlist = allowlist_configured &&
+			domains->Match(url.Host().as_string(), false /* default deny */);
+		return IisAdminAccessAllowed(INFO_URLS_LOCAL_ONLY, is_local,
+			allowlist_configured, host_on_allowlist);
 	}
 
 	// Maps a RequestRouting category that is served as an admin/statistics
@@ -791,7 +836,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		IisProcessContext* failed_pc = nullptr;
 		IisModuleRequestContext* ctx = CreateRequestContext(pHttpContext, checkpath, url, url_len, gurl, &failed_pc);
 		if (ctx == nullptr) {
-			if (!IsLocalRequest(pHttpContext)) {
+			if (!IsLocalRequest(pHttpContext,
+				failed_pc != nullptr ? failed_pc->root_options() : nullptr)) {
 				log(pHttpContext, "OnBeginRequest: Failed to create a request context, bail");
 				FreeUnstoredRequestState(ctx, gurl);
 				return RQ_NOTIFICATION_CONTINUE;
@@ -1066,13 +1112,26 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			options = custom_options.get();
 		}
 
-		if (is_an_admin_handler && !IsLocalRequest(pHttpContext) && INFO_URLS_LOCAL_ONLY) {
-			log(pHttpContext, "Declining serving of an admin page: not a local request");
+		bool admin_page_is_local = is_an_admin_handler &&
+			IsLocalRequest(pHttpContext, server_context->config());
+		if (is_an_admin_handler && !AdminPageAccessAllowed(admin_page_is_local, response_category, *innerContext->gurl(), server_context->config())) {
+			log(pHttpContext, "Declining serving of an admin page: access not allowed");
+			// A direct-looking client that carries forwarding headers is
+			// the shape of a same-server proxy: say once how to serve it.
+			static std::atomic<bool> proxied_decline_warned(false);
+			if (IsLocalRequest(pHttpContext, server_context->config(), true) &&
+				!proxied_decline_warned.exchange(true)) {
+				server_context->message_handler()->Message(kWarning,
+					"A request relayed by a reverse proxy on this server was refused "
+					"an admin, statistics, console or message page. To serve such "
+					"requests, allow the host with AdminDomains or StatisticsDomains, "
+					"or set TreatProxiedRequestsAsLocal on.");
+			}
 			is_an_admin_handler = false;
 		} 
 		else if (is_an_admin_handler) {
 			log(pHttpContext, "Serving admin page");
-			if (!IsLocalRequest(pHttpContext)) {
+			if (!admin_page_is_local) {
 				// Defense-in-depth: log one warning per handler family per
 				// process lifetime if a non-loopback client reaches an
 				// admin/statistics endpoint. IIS site bindings/IP restrictions

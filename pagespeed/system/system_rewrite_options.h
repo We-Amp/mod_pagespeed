@@ -310,6 +310,23 @@ class SystemRewriteOptions : public RewriteOptions {
                    const FastWildcardGroup& wildcard_group,
                    bool client_is_loopback) const;
 
+  // The configured *Domains allowlists, for ports that need to tell "no
+  // allowlist configured" (empty) from "host not on the allowlist".
+  const FastWildcardGroup& statistics_domains() const {
+    return *statistics_domains_;
+  }
+  const FastWildcardGroup& global_statistics_domains() const {
+    return *global_statistics_domains_;
+  }
+  const FastWildcardGroup& messages_domains() const {
+    return *messages_domains_;
+  }
+  const FastWildcardGroup& console_domains() const { return *console_domains_; }
+  const FastWildcardGroup& admin_domains() const { return *admin_domains_; }
+  const FastWildcardGroup& global_admin_domains() const {
+    return *global_admin_domains_;
+  }
+
   // For each of these AccessAllowed() methods, the url needs to have been
   // checked to make sure it is_valid().
   bool StatisticsAccessAllowed(const GoogleUrl& url) const {
