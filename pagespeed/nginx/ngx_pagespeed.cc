@@ -106,8 +106,9 @@ extern ngx_module_t ngx_pagespeed;
 #define NGX_HTTP_PAGESPEED_BUFFERED 0x08
 #define ADMIN_MAX_POST_SIZE 8192
 
-// Needed for SystemRewriteDriverFactory to use shared memory.
-#define PAGESPEED_SUPPORT_POSIX_SHARED_MEM
+// PAGESPEED_SUPPORT_POSIX_SHARED_MEM is defined per platform via -D in
+// pagespeed.bazelrc (1 on Linux/macOS, 0 on Windows); SystemRewriteDriverFactory
+// reads it there.
 #define NGINX_1_13_4 1013004
 
 net_instaweb::NgxRewriteDriverFactory* active_driver_factory = nullptr;
