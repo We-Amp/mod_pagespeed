@@ -82,8 +82,12 @@ void PrioritizeCriticalImagesFilter::DetermineEnabled(
       driver()->options()->SupportSaveData()) {
     ResponseHeaders* headers = driver()->mutable_response_headers();
     if (headers != nullptr &&
-        !headers->HasValue(HttpAttributes::kVary, HttpAttributes::kSaveData)) {
+        !headers->HasValueCaseInsensitive(HttpAttributes::kVary,
+                                          HttpAttributes::kSaveData)) {
       headers->Add(HttpAttributes::kVary, HttpAttributes::kSaveData);
+      // Keep the caching fields clean: the headers may already be computed,
+      // and no later filter is guaranteed to recompute for this addition.
+      headers->ComputeCaching();
       // Recorded like HtmlVaryFilter's own additions: this runs before that
       // filter's StartDocument, which then finds the token present.
       driver()->AddHtmlVaryTokenAdded(HttpAttributes::kSaveData);

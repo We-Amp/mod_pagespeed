@@ -99,10 +99,21 @@ void AgentOptimizeVaryFilter::StartDocumentImpl() {
     return;
   }
 
-  // Idempotent: never duplicate an existing Vary: Accept (e.g. one already added
-  // for image/WebP negotiation).
-  if (!headers->HasValue(HttpAttributes::kVary, HttpAttributes::kAccept)) {
+  // Idempotent: never duplicate an existing Vary: Accept (e.g. one already
+  // added for image/WebP negotiation). Vary values are RFC 9110 tokens, so
+  // the comparison is case-insensitive: an origin spelling it "accept" is
+  // the same token and must not earn a second one.
+  if (!headers->HasValueCaseInsensitive(HttpAttributes::kVary,
+                                        HttpAttributes::kAccept)) {
     headers->Add(HttpAttributes::kVary, HttpAttributes::kAccept);
+    // Add() marks the precomputed caching fields dirty, and the document's
+    // headers were already computed before the parse began (e.g. by
+    // ProxyFetch::AddPagespeedHeader). Restore the invariant that mutator
+    // establishes, so later readers of the caching fields (IsBrowserCacheable
+    // and friends) see valid data rather than tripping their DCHECKs.
+    // Accept is a named token and never '*', which is the only Vary input
+    // ComputeCaching() consults, so this recompute changes no cached value.
+    headers->ComputeCaching();
   }
 }
 

@@ -356,6 +356,34 @@ TEST_F(HtmlVaryFilterTest, EachTokenAppearsOnceAndAddedSetIsRecorded) {
   EXPECT_EQ("Accept,Save-Data,User-Agent", Added());
 }
 
+TEST_F(HtmlVaryFilterTest, CachingFieldsAreCleanAfterStampingVary) {
+  // Regression test for the cache_fields_dirty_ invariant (#385): the served
+  // headers enter the parse already computed (SetMimetype computes them
+  // here; ProxyFetch::AddPagespeedHeader does the same one step earlier in
+  // the real flow), and HtmlVaryFilter then Adds Vary tokens to them. Add()
+  // routes through UpdateHook() and marks the precomputed caching fields
+  // dirty, so the filter must recompute them: without the recompute every
+  // later reader of those fields DCHECK-aborts in debug builds
+  // (ProxyInterfaceTest.PropCacheNoWritesIfHtmlEndsWithTxt hit this first),
+  // and the public cache_fields_dirty() flag observes the dirty state in
+  // release builds too. The named tokens never change the computed values
+  // ('*' is the only Vary input ComputeCaching() consults), so the values
+  // must come back unchanged as well.
+  EnableCore();
+  ClearRewriteDriver();
+  response_headers_.Clear();
+  SetHtmlMimetype();
+  const bool browser_cacheable = response_headers_.IsBrowserCacheable();
+  SetCurrentUserAgent(UserAgentMatcherTestBase::kChrome18UserAgent);
+  AddRequestAttribute(HttpAttributes::kAccept, "image/webp");
+  ParseUrl(StrCat(kTestDomain, "index.html"), kHtml);
+  EXPECT_EQ("Accept,Save-Data,User-Agent", VaryValues());
+  // Observable in every build mode, including NDEBUG.
+  EXPECT_FALSE(response_headers_.cache_fields_dirty());
+  // The read that crashes a debug build while the fields are dirty.
+  EXPECT_EQ(browser_cacheable, response_headers_.IsBrowserCacheable());
+}
+
 TEST_F(HtmlVaryFilterTest, OriginVaryIsMergedWithoutDuplicates) {
   EnableCore();
   ClearRewriteDriver();

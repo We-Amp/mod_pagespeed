@@ -120,6 +120,35 @@ TEST_F(AgentOptimizeVaryFilterTest, ExistingVaryAcceptIsNotDuplicated) {
   EXPECT_TRUE(VariesOnAccept());
 }
 
+TEST_F(AgentOptimizeVaryFilterTest, LowercaseOriginVaryAcceptIsNotDuplicated) {
+  // Vary values are RFC 9110 tokens: an origin's lowercase "accept" names
+  // the same field our "Accept" does and must not be duplicated.
+  EnableAgentOptimize();
+  response_headers_.Add(HttpAttributes::kVary, "accept");
+  ParseWithAccept("text/markdown");
+  ConstStringStarVector values;
+  ASSERT_TRUE(response_headers_.Lookup(HttpAttributes::kVary, &values));
+  ASSERT_EQ(1, values.size());
+  EXPECT_STREQ("accept", values[0]->c_str());
+}
+
+TEST_F(AgentOptimizeVaryFilterTest, CachingFieldsAreCleanAfterStampingVary) {
+  // Regression test for the cache_fields_dirty_ invariant (#385): this
+  // filter has the same Add-without-recompute shape HtmlVaryFilter had. The
+  // served headers are already computed when the parse starts (SetMimetype
+  // here, ProxyFetch::AddPagespeedHeader on the serving path), so stamping
+  // Vary: Accept must recompute the caching fields: without the recompute,
+  // readers DCHECK-abort in debug builds and the public cache_fields_dirty()
+  // flag observes the dirty state in release builds too.
+  EnableAgentOptimize();
+  SetHtmlMimetype();  // wires and computes the served headers, pre-parse.
+  const bool browser_cacheable = response_headers_.IsBrowserCacheable();
+  ParseWithAccept("text/markdown");
+  EXPECT_TRUE(VariesOnAccept());
+  EXPECT_FALSE(response_headers_.cache_fields_dirty());
+  EXPECT_EQ(browser_cacheable, response_headers_.IsBrowserCacheable());
+}
+
 TEST_F(AgentOptimizeVaryFilterTest, WithHtmlVaryFilterAcceptAppearsOnce) {
   // Image rewriting makes HtmlVaryFilter name Accept in every response; a
   // markdown-negotiating request must not add a second one.
