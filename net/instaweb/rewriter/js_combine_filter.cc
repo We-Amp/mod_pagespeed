@@ -108,6 +108,16 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
       *failure_reason = "Combining strict mode files unsupported";
       return false;
     }
+    // Top-level const/let/class declarations made inside the eval() that the
+    // combination uses to run each file are scoped to that eval call, so
+    // later scripts would no longer see them.
+    if (HasTopLevelLexicalDeclaration(
+            filter_->server_context()->js_tokenizer_patterns(),
+            resource->ExtractUncompressedContents())) {
+      *failure_reason =
+          "Combining files with top-level const, let or class unsupported";
+      return false;
+    }
     const RewriteOptions* options = rewrite_driver_->options();
     if (options->avoid_renaming_introspective_javascript() &&
         JavascriptCodeBlock::UnsafeToRename(
@@ -552,6 +562,57 @@ bool JsCombineFilter::IsLikelyStrictMode(
         break;
       default:
         return false;
+    }
+  }
+}
+
+bool JsCombineFilter::HasTopLevelLexicalDeclaration(
+    const pagespeed::js::JsTokenizerPatterns* jstp, StringPiece input) {
+  pagespeed::js::JsTokenizer tokenizer(jstp, input);
+
+  // Count nesting of (), [] and {} (template interpolations are inside the
+  // template literal tokens and need no counting). Anything declared at depth
+  // zero is a top-level declaration. This errs towards saying yes: a class
+  // expression such as "var C = class {}" is reported too, which only costs a
+  // missed combination.
+  int depth = 0;
+  bool after_member_dot = false;
+  while (true) {
+    StringPiece token_text;
+    JsKeywords::Type token_type = tokenizer.NextToken(&token_text);
+    switch (token_type) {
+      case JsKeywords::kComment:
+      case JsKeywords::kWhitespace:
+      case JsKeywords::kLineSeparator:
+      case JsKeywords::kSemiInsert:
+        break;
+      case JsKeywords::kEndOfInput:
+        return false;
+      case JsKeywords::kError:
+        // Can't tell what the file does; be conservative.
+        return true;
+      case JsKeywords::kOperator:
+        if (token_text == "(" || token_text == "[" || token_text == "{") {
+          ++depth;
+        } else if (token_text == ")" || token_text == "]" ||
+                   token_text == "}") {
+          if (depth > 0) {
+            --depth;
+          }
+        }
+        after_member_dot = (token_text == "." || token_text == "?.");
+        break;
+      case JsKeywords::kConst:
+      case JsKeywords::kLet:
+      case JsKeywords::kClass:
+        if (depth == 0 && !after_member_dot) {
+          return true;
+        }
+        after_member_dot = false;
+        break;
+      default:
+        after_member_dot = false;
+        break;
     }
   }
 }

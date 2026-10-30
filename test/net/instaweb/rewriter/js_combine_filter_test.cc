@@ -64,6 +64,11 @@ const char kStrictUrl1[] = "strict1.js";
 const char kStrictUrl2[] = "strict2.js";
 const char kPseudoStrictUrl1[] = "pseudo_strict1.js";
 const char kPseudoStrictUrl2[] = "pseudo_strict2.js";
+const char kLexicalConstUrl[] = "lexical_const.js";
+const char kLexicalLetUrl[] = "lexical_let.js";
+const char kLexicalClassUrl[] = "lexical_class.js";
+const char kNestedLexicalUrl[] = "nested_lexical.js";
+const char kUsesLexicalUrl[] = "uses_lexical.js";
 const char kIntrospectiveUrl1[] = "introspective1.js";
 const char kIntrospectiveUrl2[] = "introspective2.js";
 const char kJsText1[] = "// script1\nvar a=\"hello\\nsecond line\"";
@@ -76,6 +81,15 @@ const char kStrictText1[] = "'use strict'; var x = 32;";
 const char kStrictText2[] = "\"use strict\"; var x = 42;";
 const char kPseudoStrictText1[] = "function(){'use strict'; var x = 32;}";
 const char kPseudoStrictText2[] = "function(){\"use strict\"; var x = 42;}";
+const char kLexicalConstText[] = "const checkForm = function() { return 1; };";
+const char kLexicalLetText[] = "// leading comment\nlet counter = 0;";
+const char kLexicalClassText[] = "class Widget { run() { return 1; } }";
+// Lexical declarations that are not top-level: they stay scoped as before.
+const char kNestedLexicalText[] =
+    "function f() { const a = 1; let b = 2; class C {} return a + b; }\n"
+    "for (let i = 0; i < 2; i++) { const j = i; }\n"
+    "var t = `${ {a: 1}.a }`; var o = {}; o.class = 1;";
+const char kUsesLexicalText[] = "var r = checkForm();";
 const char kIntrospectiveText1[] = "var x = 7; $('script') ; var y = 42;";
 const char kIntrospectiveText2[] = "document.getElementsByTagName('script');";
 const char kEscapedJs1[] =
@@ -162,6 +176,11 @@ class JsCombineFilterTest : public RewriteTestBase {
     SimulateJsResource(kStrictUrl2, kStrictText2);
     SimulateJsResource(kPseudoStrictUrl1, kPseudoStrictText1);
     SimulateJsResource(kPseudoStrictUrl2, kPseudoStrictText2);
+    SimulateJsResource(kLexicalConstUrl, kLexicalConstText);
+    SimulateJsResource(kLexicalLetUrl, kLexicalLetText);
+    SimulateJsResource(kLexicalClassUrl, kLexicalClassText);
+    SimulateJsResource(kNestedLexicalUrl, kNestedLexicalText);
+    SimulateJsResource(kUsesLexicalUrl, kUsesLexicalText);
     SimulateJsResource(kIntrospectiveUrl1, kIntrospectiveText1);
     SimulateJsResource(kIntrospectiveUrl2, kIntrospectiveText2);
 
@@ -1341,6 +1360,64 @@ TEST_F(JsCombineFilterTest, IsLikelyStrictMode) {
   // Shouldn't permit just random operators.
   EXPECT_FALSE(JsCombineFilter::IsLikelyStrictMode(
       server_context()->js_tokenizer_patterns(), "+ * ! 'use strict';"));
+}
+
+TEST_F(JsCombineFilterTest, HasTopLevelLexicalDeclaration) {
+  const pagespeed::js::JsTokenizerPatterns* jstp =
+      server_context()->js_tokenizer_patterns();
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, kLexicalConstText));
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, kLexicalLetText));
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, kLexicalClassText));
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "var a = 1;\nfunction g() {}\nconst b = 2;"));
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "if (x) { y(); }\nlet z;"));
+
+  EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, kNestedLexicalText));
+  EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "var const_ = 1; var letter = 'const x'; // let y\n/* class */"));
+  EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "(function() { const a = 1; })();"));
+  EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "var x = 1;"));
+  EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(jstp, ""));
+}
+
+// A script that declares a top-level const/let/class used by a later script
+// must stay a separate, uncombined script (issue 1887 of the archived
+// upstream repository).
+TEST_F(JsCombineFilterTest, TopLevelLexicalDeclarationsNotCombined) {
+  ValidateNoChanges("const", StrCat("<script src=", kLexicalConstUrl,
+                                    "></script><script src=", kUsesLexicalUrl,
+                                    "></script>"));
+  ValidateNoChanges("let", StrCat("<script src=", kLexicalLetUrl,
+                                  "></script><script src=", kUsesLexicalUrl,
+                                  "></script>"));
+  ValidateNoChanges("class", StrCat("<script src=", kLexicalClassUrl,
+                                    "></script><script src=", kUsesLexicalUrl,
+                                    "></script>"));
+  // Also when the declaring script is the second one.
+  ValidateNoChanges("const_second",
+                    StrCat("<script src=", kUsesLexicalUrl,
+                           "></script><script src=", kLexicalConstUrl,
+                           "></script>"));
+}
+
+// Scripts whose lexical declarations are nested still combine.
+TEST_F(JsCombineFilterTest, NestedLexicalDeclarationsStillCombined) {
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain, StrCat("<script src=", kNestedLexicalUrl,
+                               "></script><script src=", kJsUrl1,
+                               "></script>"));
+  ASSERT_EQ(3, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kNestedLexicalUrl, kJsUrl1));
+  VerifyUse(scripts[1], kNestedLexicalUrl);
+  VerifyUse(scripts[2], kJsUrl1);
 }
 
 TEST_F(JsCombineFilterTest, MapRewriteDomainAccrossDirs) {

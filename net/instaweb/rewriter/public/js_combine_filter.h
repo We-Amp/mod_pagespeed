@@ -91,6 +91,13 @@ class JsCombineFilter : public RewriteFilter {
   static bool IsLikelyStrictMode(const pagespeed::js::JsTokenizerPatterns* jstp,
                                  StringPiece input);
 
+  // Returns true if the given JavaScript has a top-level const, let or class
+  // declaration (or cannot be tokenized). Such declarations are scoped to the
+  // eval() the combination runs each file in, so the file must not be
+  // combined. Errs towards saying yes.
+  static bool HasTopLevelLexicalDeclaration(
+      const pagespeed::js::JsTokenizerPatterns* jstp, StringPiece input);
+
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
  protected:
