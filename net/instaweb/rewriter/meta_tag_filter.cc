@@ -93,6 +93,8 @@ bool MetaTagFilter::ExtractAndUpdateMetaTagDetails(
         // a charset that's not supposed to take any effect.
         if (type != nullptr && type->type() == ContentType::kHtml) {
           if (response_headers->MergeContentType(content)) {
+            // Caching fields depend on the content type (HTML vs. not).
+            response_headers->ComputeCaching();
             return true;
           }
         }
@@ -101,6 +103,8 @@ bool MetaTagFilter::ExtractAndUpdateMetaTagDetails(
       // No content => it has a charset attribute (and no mime_type).
       GoogleString type = StrCat("; charset=", charset);
       if (response_headers->MergeContentType(type)) {
+        // Keep the caching fields current after the Content-Type change.
+        response_headers->ComputeCaching();
         return true;
       }
     }
