@@ -24,6 +24,7 @@ The first request may return the original resource, while subsequent
 requests return the optimized version once it's ready.
 """
 
+import json
 import random
 import re
 
@@ -403,12 +404,9 @@ class TestNginxIproMessageHistory:
         """N in-place requests add at most one line to the message history,
         while the ipro_served statistic still counts every request."""
         requests = 20
-        url = f"{test_root}/ipro/cc200/example.css?r={random.randint(1, 100000)}"
+        token = f"r={random.randint(1, 10**9)}"
+        url = f"{test_root}/ipro/cc200/example.css?{token}"
         history_url = f"{server_config.admin_path}/message_history"
-
-        def in_place_lines() -> int:
-            body = client.get(history_url).text
-            return len(re.findall(r"resource in-place", body))
 
         # Warm: wait until the optimized copy is served, so the loop below
         # is all in-place hits.
@@ -416,18 +414,23 @@ class TestNginxIproMessageHistory:
             url, condition=lambda r: len(r.body) < 43, timeout=60.0
         )
 
-        lines_before = in_place_lines()
+        # The buffer may already be full, so count only what was written
+        # after this point, and only lines naming this test's URL.
+        next_before = json.loads(client.get(history_url).text)["next"]
         stats_before = stats_snapshot()
 
         for _ in range(requests):
             assert_http_status(client.get(url), 200)
 
-        lines_after = in_place_lines()
         stats_after = stats_snapshot()
+        history = json.loads(
+            client.get(f"{history_url}?since={next_before}").text
+        )
+        ours = [m for m in history["messages"] if token in m["message"]]
 
-        assert lines_after - lines_before <= 1, (
-            f"{requests} in-place requests added "
-            f"{lines_after - lines_before} message-history lines"
+        assert len(ours) <= 1, (
+            f"{requests} in-place requests added {len(ours)} "
+            f"message-history lines: {ours[:3]}"
         )
         served = stats_after.get("ipro_served", 0) - stats_before.get(
             "ipro_served", 0
