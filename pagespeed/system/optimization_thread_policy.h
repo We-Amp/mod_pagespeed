@@ -70,10 +70,10 @@
 // package ran 1 + 1, because its MPM is a DSO and the static carrying the
 // answer does not survive httpd's configuration-pool clear.
 //
-// The shapes this policy *will* raise are the single-process ones -- one nginx
-// worker, or one IIS application-pool worker, on a many-core host.  It raises
-// none of them yet: neither port reports a divisor, so both take the
-// unknown-divisor floor.  Wiring those divisors is #608.
+// The shapes this policy raises are the single-process ones -- one nginx
+// worker, or one IIS application-pool worker, on a many-core host.  nginx
+// reports worker_processes as its divisor (ForkedWorkerProcessCount()).  IIS
+// does not report one yet and keeps its own built-in pool size.
 //
 // This header is split out from SystemRewriteDriverFactory so the arithmetic,
 // the cgroup parsing and the cgroup *path resolution* are unit-testable
@@ -270,6 +270,22 @@ struct OptimizationThreadCounts {
 // a port that cannot determine its divisor never guesses higher.
 OptimizationThreadCounts ComputeOptimizationThreadCounts(
     int effective_cores, int concurrent_processes);
+
+// The divisor for a server that forks a fixed number of identical worker
+// processes from one master, each building its own worker pools: nginx's
+// worker_processes.  A server running without a master process
+// (multi_process false, nginx's `master_process off`) serves from a single
+// process whatever the configured count says.  A configured count of zero or
+// less is not an answer and yields kUnknownProcessConcurrency, so the policy
+// takes its floor rather than guess.
+//
+// workers_pinned is true when the server pins each worker to its own CPUs
+// after the fork (nginx's worker_cpu_affinity).  The budget is read before
+// that, in the master, so dividing it by the worker count would size each
+// pinned worker for the whole machine; such a server also yields
+// kUnknownProcessConcurrency and keeps the floor.
+int ForkedWorkerProcessCount(int configured_workers, bool multi_process,
+                             bool workers_pinned);
 
 // --------------------------------------------------------------------------
 // Live query.

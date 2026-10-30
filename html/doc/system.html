@@ -971,17 +971,27 @@ gzip_http_version 1.0;
       threads deal with very short-lived bookkeeping tasks that are generally
       latency-sensitive, while <em>expensive rewrite</em> threads deal with more
       computationally expensive tasks that are not in latency-sensitive
-      paths. By default, if you use a single-threaded MPM (such
-      as <code>prefork</code>) one thread of each kind will be used per an
-      Apache process. With a threaded MPM (such as <code>worker</code>,
-      and <code>event</code>) up to 4 threads of each kind will be used.  You
-      can, however, tune the thread count per process if necessary via
+      paths. By default (<code>auto</code>) each server process gets, in each
+      of the two pools, half the CPU cores the process may use (the smallest of
+      the online CPUs, the CPU affinity mask and a container's CPU limit),
+      divided by the number of server processes, and at least one thread. On
+      Apache the number of processes is the child-process ceiling the MPM
+      reports; on nginx it is <code>worker_processes</code> (one with
+      <code>master_process off</code>); with <code>worker_cpu_affinity</code>
+      each nginx worker keeps one thread per pool. Envoy does not report its
+      process count and uses one thread per pool. On IIS each site's pools have a
+      built-in size of half the CPUs and at least 4, in each worker process.
+      You can set the counts per process yourself with
       the <code>NumRewriteThreads</code>
-      and <code>NumExpensiveRewriteThreads</code> options.
+      and <code>NumExpensiveRewriteThreads</code> options, which replace the
+      computed values; <code>auto</code> or <code>0</code> asks for the
+      computed value. The counts in use are logged at startup in a line
+      starting with "PageSpeed optimization threads:".
     </p>
     <p>
       Note that this is a global setting, and cannot be done in a per virtual
-      host manner.
+      host manner, except on IIS, where a site's own
+      <code>pagespeed.config</code> can set it for that site.
     </p>
 
     <h2 id="image_rewrite_max">Limiting the number of concurrent image

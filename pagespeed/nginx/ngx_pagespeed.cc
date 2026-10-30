@@ -92,6 +92,7 @@
 #include "pagespeed/system/in_place_resource_recorder.h"  // the gate returns it
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/ipro_recorder.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/system/serve_host_names.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_request_context.h"
@@ -5068,6 +5069,28 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
                   "restarted");
     return NGX_OK;
   }
+
+  // Size the optimization pools from the core budget.  Every worker process
+  // inherits this factory and builds its own pools, so worker_processes is
+  // the divisor; it is final here, after the core module's defaults were
+  // applied, and the NumRewriteThreads / NumExpensiveRewriteThreads read from
+  // the http block are already known, so an explicit count still wins.
+  ngx_core_conf_t* ccf = reinterpret_cast<ngx_core_conf_t*>(
+      ngx_get_conf(cycle->conf_ctx, ngx_core_module));
+  // worker_cpu_affinity pins each worker to its own CPUs after the fork, but
+  // the budget is read here, in the master, from the master's mask: it would
+  // size each pinned worker for the whole machine.  Such a configuration takes
+  // the floor; NumRewriteThreads / NumExpensiveRewriteThreads still set the
+  // counts.
+  const bool workers_pinned = ccf->cpu_affinity_auto || ccf->cpu_affinity_n > 0;
+  cfg_m->driver_factory->set_worker_process_count(
+      ForkedWorkerProcessCount(static_cast<int>(ccf->worker_processes),
+                               ccf->master != 0, workers_pinned));
+  cfg_m->driver_factory->FinalizeThreadCounts();
+  cfg_m->driver_factory->caches()->set_thread_limit(
+      cfg_m->driver_factory->LookupThreadLimit() +
+      cfg_m->driver_factory->num_rewrite_threads() +
+      cfg_m->driver_factory->num_expensive_rewrite_threads());
 
   ngx_http_core_main_conf_t* cmcf = static_cast<ngx_http_core_main_conf_t*>(
       ngx_http_cycle_get_module_main_conf(cycle, ngx_http_core_module));

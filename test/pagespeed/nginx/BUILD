@@ -298,3 +298,18 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# Source pins for the optimization thread counts: the factory defers
+# resolution and reports worker_processes, and ps_init_module resolves (the
+# port cannot be linked into a test; see above).
+pagespeed_cc_test(
+    name = "ngx_thread_counts_pin_test",
+    srcs = ["ngx_thread_counts_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:nginx_sources",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
