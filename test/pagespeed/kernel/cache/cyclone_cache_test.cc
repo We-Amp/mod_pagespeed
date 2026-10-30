@@ -72,6 +72,10 @@
 #define CYCLONE_CACHE_TEST_NO_ALLOC_HOOK 1
 #endif
 
+// The thread locals exist only with the hook: sanitizer builds compile out
+// every use (the hook and the tests that arm it), which would leave the
+// definitions unused.
+#ifndef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
 namespace {
 thread_local bool t_fail_next_allocation = false;
 // When >= 0: let this many allocations on the thread succeed, then fail the
@@ -80,7 +84,6 @@ thread_local int t_allocations_before_failure = -1;
 thread_local int t_failed_allocations = 0;
 }  // namespace
 
-#ifndef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
 void* operator new(size_t size) {
   if (t_fail_next_allocation) {
     t_fail_next_allocation = false;
