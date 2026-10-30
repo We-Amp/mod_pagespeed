@@ -35,6 +35,7 @@ DaemonServeNotify::DaemonServeNotify(
       fallback_hit_(decision.fallback_hit),
       stale_variant_expired_by_age_(decision.stale_variant_expired_by_age),
       lost_optimized_copy_(decision.lost_optimized_copy),
+      renotify_original_only_(decision.renotify_original_only),
       vary_accept_origin_declared_(decision.vary_accept_origin_declared),
       ps_content_type_(decision.ps_content_type),
       client_mask_(decision.client_mask),
@@ -69,6 +70,7 @@ void DaemonServeNotify::Run() {
   decision.fallback_hit = fallback_hit_;
   decision.stale_variant_expired_by_age = stale_variant_expired_by_age_;
   decision.lost_optimized_copy = lost_optimized_copy_;
+  decision.renotify_original_only = renotify_original_only_;
   decision.vary_accept_origin_declared = vary_accept_origin_declared_;
   decision.ps_content_type = ps_content_type_;
   decision.client_mask = client_mask_;

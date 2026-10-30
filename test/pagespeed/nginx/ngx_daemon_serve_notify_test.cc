@@ -209,6 +209,19 @@ TEST_F(NgxDaemonServeNotifyTest, ALostCopyNotifyRunsAndSendsOnce) {
   }
 }
 
+TEST_F(NgxDaemonServeNotifyTest, AnOriginalOnlyReNotificationCrossesTheThread) {
+  // The closure carries the original-only flag as well as the lost-copy one,
+  // so the shared send function accepts the reconstituted decision.
+  DaemonServeDecision decision = MakeLostCopyDecision();
+  decision.lost_optimized_copy = false;
+  decision.renotify_original_only = true;
+  DaemonServeNotify* notify =
+      MakeNotify(DaemonServeNotifyKind::kLostCopy, decision);
+  notify->CallRun();
+  EXPECT_EQ(1, CountSubstring(StubLog(), "notify socket="));
+  EXPECT_EQ(1, notified_->Get());
+}
+
 TEST_F(NgxDaemonServeNotifyTest, NothingIsSentForADecisionThatDoesNotAskForIt) {
   // The closure carries the decision's own flag across the thread boundary:
   // a lost-copy closure built from a decision without it sends nothing, and

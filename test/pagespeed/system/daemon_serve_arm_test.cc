@@ -3694,6 +3694,25 @@ TEST_F(DaemonServeArmTest, ALostCopyKeepsItsOwnAskAndIsNotAnEmptyFamily) {
   EXPECT_FALSE(decision.renotify_original_only);
 }
 
+TEST_F(DaemonServeArmTest, AnAlreadyMinimalStylesheetIsNotOriginalOnly) {
+  // Gzip copies of the original only, no identity copy: the worker has
+  // finished with the URL.  Nothing is flagged and the ask limiter is never
+  // entered, so a hot minimal stylesheet costs the worker nothing.
+  UseStylesheetWithoutAnIdentityCopy("4307", "4307");
+  DaemonHealNotifyLimiter limiter(1);
+  const int before = NotifyCount();
+  for (int64 now = 1100; now < 1100 + 5 * DaemonHealNotifyLimiter::kIntervalSeconds;
+       now += DaemonHealNotifyLimiter::kIntervalSeconds) {
+    const DaemonServeDecision decision =
+        ServeWithLimiter(CssRequest("identity"), &limiter, now);
+    ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+    EXPECT_FALSE(decision.original_only_family);
+    EXPECT_FALSE(decision.renotify_original_only);
+    EXPECT_FALSE(decision.lost_optimized_copy);
+  }
+  EXPECT_EQ(before, NotifyCount());
+}
+
 TEST_F(DaemonServeArmTest, AStylesheetOriginalOnlyFamilyIsReNotifiedToo) {
   setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // css
   setenv("PS_STUB_ORIGIN_CT", "text/css", 1);

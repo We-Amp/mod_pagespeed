@@ -1200,9 +1200,15 @@ class DaemonServeReader {
   // is untouched.  The read is a real one: it counts as a hit on the gzip
   // copy and pays its checksum, normally once per URL per window per process
   // (DaemonHealNotifyLimiter::ShouldLookKey).  See DaemonServeDecision.
+  //
+  // `no_worker_copy_seen`, when given, is set true only when the gzip look
+  // RAN and found no optimizer-written copy: the evidence that a stylesheet
+  // or script really is original-only.  A look the limiter skipped, a read
+  // error, or a worker-written copy (a lost copy, or already-minimal
+  // content) leaves it false.
   bool LostOptimizedCopy(const DaemonServeRequest& request,
-                         const DaemonServeDecision& decision,
-                         int64 now_seconds) const;
+                         const DaemonServeDecision& decision, int64 now_seconds,
+                         bool* no_worker_copy_seen = nullptr) const;
 
   const DaemonAbi* abi_;
   void* cache_;

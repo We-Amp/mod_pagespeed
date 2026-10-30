@@ -2914,9 +2914,9 @@ ngx_int_t PsServeFromDaemonSubstrate(ngx_http_request_t* r,
   // fallback re-notify above and for the same reason placed ahead of the
   // send: a 304 or a HEAD answered from the stored original asks too.  The
   // arm's limiter has already held it to about once per URL per window, and
-  // its detection never fires for content the optimizer left unoptimized
-  // on purpose.  The response is not changed by this.
-  if (decision.lost_optimized_copy) {
+  // the same single ask answers an original recorded while the worker was
+  // down (renotify_original_only).  The response is not changed by this.
+  if (decision.lost_optimized_copy || decision.renotify_original_only) {
     DaemonAdapter* adapter = server_context->daemon_adapter();
     const SystemRewriteOptions* options =
         SystemRewriteOptions::DynamicCast(server_context->global_options());

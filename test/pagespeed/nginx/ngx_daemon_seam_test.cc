@@ -1382,7 +1382,8 @@ TEST_F(NgxDaemonSeamTest, TheLostCopyPostFollowsTheServeAndPrecedesTheSend) {
   EXPECT_LT(opt_in, serve);
   const size_t counted = body.find("RecordDaemonServeCounters(");
   ASSERT_NE(GoogleString::npos, counted);
-  const size_t gate = body.find("if(decision.lost_optimized_copy){");
+  const size_t gate = body.find(
+      "if(decision.lost_optimized_copy||decision.renotify_original_only){");
   ASSERT_NE(GoogleString::npos, gate)
       << "the lost-copy gate is gone; the notification can never be posted";
   const size_t post = body.find("DaemonServeNotifyKind::kLostCopy");

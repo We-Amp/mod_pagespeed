@@ -160,18 +160,17 @@ class RewriteStats {
     return ipro_daemon_refresh_notify_failed_;
   }
 
-  // Notifications sent after serving a stored original whose optimized copy
-  // has gone missing (asks, not heals), and sends that FAILED.  NOT
-  // partition members either: every such serve is already counted in
-  // ipro_daemon_served_original.  Only send
-  // outcomes move these two -- see the comment beside their names in
-  // rewrite_stats.cc.
   // Durable-original serves where no variant of any kind exists for the URL.
   // Not a partition member: each is already in ipro_daemon_served_original.
   Variable* ipro_daemon_served_original_only() {
     return ipro_daemon_served_original_only_;
   }
 
+  // Notifications sent after serving a stored original whose optimized copy
+  // has gone missing, or that has no variant at all (asks, not heals), and
+  // sends that FAILED.  NOT partition members either: every such serve is
+  // already counted in ipro_daemon_served_original.  Only send outcomes move
+  // these two -- see the comment beside their names in rewrite_stats.cc.
   Variable* ipro_daemon_heal_notified() { return ipro_daemon_heal_notified_; }
   Variable* ipro_daemon_heal_notify_failed() {
     return ipro_daemon_heal_notify_failed_;
