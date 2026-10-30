@@ -174,11 +174,9 @@ TEST_F(HtmlVaryTokensTest, DedupInlinedImagesAloneIsUserAgent) {
   EXPECT_EQ("User-Agent", Tokens(options_));
 }
 
-TEST_F(HtmlVaryTokensTest, LocalStorageCacheAloneIsUserAgent) {
+TEST_F(HtmlVaryTokensTest, RetiredLocalStorageCacheAddsNoToken) {
   options_.EnableFilter(RewriteOptions::kLocalStorageCache);
-  EXPECT_EQ("User-Agent", Tokens(options_));
-  options_.set_image_preserve_urls(true);
-  EXPECT_EQ("User-Agent", Tokens(options_));
+  EXPECT_EQ("", Tokens(options_));
 }
 
 TEST_F(HtmlVaryTokensTest, PreservedImageUrlsDropImageTokens) {

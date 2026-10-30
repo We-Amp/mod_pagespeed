@@ -62,8 +62,7 @@ class HtmlVaryFilter : public CommonFilter {
   //               is on (AVIF alone is Accept-only) or small-screen qualities
   //               differ from the base; or, whatever the image chain,
   //               inline_images, delay_images, dedup_inlined_images,
-  //               local_storage_cache, lazyload_images,
-  //               resize_to_rendered_image_dimensions or
+  //               lazyload_images, resize_to_rendered_image_dimensions or
   //               prioritize_critical_images is on (they read the browser or
   //               instrument the critical-image beacon per browser).
   //

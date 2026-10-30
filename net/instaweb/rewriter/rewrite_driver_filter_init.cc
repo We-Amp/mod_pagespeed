@@ -69,7 +69,6 @@
 #include "net/instaweb/rewriter/public/js_inline_filter.h"
 #include "net/instaweb/rewriter/public/js_outline_filter.h"
 #include "net/instaweb/rewriter/public/lazyload_images_filter.h"
-#include "net/instaweb/rewriter/public/local_storage_cache_filter.h"
 #include "net/instaweb/rewriter/public/make_show_ads_async_filter.h"
 #include "net/instaweb/rewriter/public/meta_tag_filter.h"
 #include "net/instaweb/rewriter/public/pedantic_filter.h"
@@ -154,7 +153,6 @@ void RewriteDriver::InitStats(Statistics* statistics) {
   JsCombineFilter::InitStats(statistics);
   JsInlineFilter::InitStats(statistics);
   LazyloadImagesFilter::InitStats(statistics);
-  LocalStorageCacheFilter::InitStats(statistics);
   MakeShowAdsAsyncFilter::InitStats(statistics);
   MetaTagFilter::InitStats(statistics);
   PrioritizeCriticalImagesFilter::InitStats(statistics);
@@ -194,7 +192,6 @@ void RewriteDriver::RegisterBuiltinRewriteFilters() {
   RegisterRewriteFilter(image_rewriter);
   RegisterRewriteFilter(cache_extender);
   RegisterRewriteFilter(image_combiner);
-  RegisterRewriteFilter(new LocalStorageCacheFilter(this));
   RegisterRewriteFilter(new JavascriptSourceMapFilter(this));
 
   // These filters are needed to rewrite and trim urls in modified CSS files.
@@ -442,9 +439,6 @@ void RewriteDriver::AddPreRenderFilters() {
   }
   if (rewrite_options->Enabled(RewriteOptions::kSpriteImages)) {
     EnableRewriteFilter(RewriteOptions::kImageCombineId);
-  }
-  if (rewrite_options->Enabled(RewriteOptions::kLocalStorageCache)) {
-    EnableRewriteFilter(RewriteOptions::kLocalStorageCacheId);
   }
 
   if (options()->NeedsDependenciesCohort()) {

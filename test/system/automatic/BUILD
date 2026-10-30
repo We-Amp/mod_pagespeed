@@ -67,7 +67,6 @@ pagespeed_py_test_suite(
         "test_js_blacklist.py",
         "test_keep_data_urls.py",
         "test_lazyload.py",
-        "test_local_storage_cache.py",
         "test_make_show_ads_async.py",
         "test_move_css.py",
         "test_no_cache.py",

@@ -24,7 +24,6 @@
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/inline_rewrite_context.h"
-#include "net/instaweb/rewriter/public/local_storage_cache_filter.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
@@ -64,16 +63,6 @@ class CssInlineFilter::Context : public InlineRewriteContext {
 
   bool PolicyPermitsRendering() const override {
     return Driver()->content_security_policy().PermitsInlineStyle();
-  }
-
-  void Render() override {
-    if (num_output_partitions() < 1 ||
-        !output_partition(0)->has_inlined_data()) {
-      // Remove any LSC attributes as they're pointless if we don't inline.
-      LocalStorageCacheFilter::RemoveLscAttributes(get_element(),
-                                                   filter_->driver());
-    }
-    InlineRewriteContext::Render();
   }
 
   void RenderInline(const ResourcePtr& resource, const StringPiece& text,
@@ -164,27 +153,10 @@ void CssInlineFilter::EndElementImpl(HtmlElement* element) {
       return;
     }
 
-    // Ask the LSC filter to work out how to handle this element. A return
-    // value of true means we don't have to rewrite it so can skip that.
-    // The state is carried forward to after we initiate rewriting since
-    // we might still have to modify the element.
-    LocalStorageCacheFilter::InlineState state;
-    if (!LocalStorageCacheFilter::AddStorableResource(
-            href->DecodedValueOrNull(), driver(), false /* check cookie */,
-            element, &state)) {
-      // StartInlining() transfers possession of ctx to RewriteDriver or
-      // deletes it on failure.
-      Context* ctx = new Context(this, base_url(), element, href);
-      bool initiated = ctx->StartInlining();
-
-      // If we're rewriting we need the LSC filter to add the URL as an
-      // attribute so that it knows to insert the LSC specific javascript.
-      if (initiated) {
-        LocalStorageCacheFilter::AddStorableResource(
-            href->DecodedValueOrNull(), driver(), true /* ignore cookie */,
-            element, &state);
-      }
-    }
+    // StartInlining() transfers possession of ctx to RewriteDriver or
+    // deletes it on failure.
+    Context* ctx = new Context(this, base_url(), element, href);
+    ctx->StartInlining();
   }
 }
 
@@ -255,7 +227,7 @@ bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
 }
 
 void CssInlineFilter::RenderInline(const ResourcePtr& resource,
-                                   const CachedResult& cached,
+                                   const CachedResult& /* cached */,
                                    const GoogleUrl& base_url,
                                    const StringPiece& contents,
                                    HtmlElement* element) {
@@ -287,8 +259,6 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
   }
 
   if (!resolved_ok) {
-    // Remove any LSC attributes as they're now pointless.
-    LocalStorageCacheFilter::RemoveLscAttributes(element, driver());
     return;
   }
 
@@ -304,8 +274,6 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
 
   // Copy over most attributes from the original link, discarding those that
   // we convert (href, rel), and dropping those that are irrelevant (type).
-  bool has_pagespeed_lsc_url = false;
-  bool has_pagespeed_lsc_hash = false;
   const HtmlElement::AttributeList& attrs = element->attributes();
   for (const auto& attr : attrs) {
     switch (attr.keyword()) {
@@ -313,14 +281,6 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
       case HtmlName::kRel:
       case HtmlName::kType:
         break;
-      case HtmlName::kDataPagespeedLscHash:
-        // If we have a hash, we /must/ have an url as well, so the fallthrough
-        // will be a no-op (so, the hash case must come before the url case).
-        has_pagespeed_lsc_hash = true;
-        FALLTHROUGH_INTENDED;
-      case HtmlName::kDataPagespeedLscUrl:
-        has_pagespeed_lsc_url = true;
-        FALLTHROUGH_INTENDED;
       default:
         style_element->AddAttribute(attr);
         break;
@@ -338,14 +298,6 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
     // css in the map.
     driver()->AddAttribute(style_element, HtmlName::kDataPagespeedHref,
                            resource_url.Spec());
-  }
-  // If we don't already have a data-pagespeed-lsc-url then EndElementImpl must
-  // not have called AddStorableResource or LSC is disabled; in either case
-  // there is no point in trying to add the LSC attributes. OTOH, if have an url
-  // and a hash then we've already got all the attributes we need.
-  if (has_pagespeed_lsc_url && !has_pagespeed_lsc_hash) {
-    LocalStorageCacheFilter::AddLscAttributes(resource_url.Spec(), cached,
-                                              driver(), style_element);
   }
   num_css_inlined_->Add(1);
 }
