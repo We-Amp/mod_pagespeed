@@ -2966,20 +2966,19 @@ TEST_F(ParserTest, GroupNonPreservationInnerErrorKeepsMask) {
   ASSERT_EQ(Ruleset::RULESET, body.ruleset(0).type());
 }
 
-TEST_F(ParserTest, TopLevelStraySemicolonRecovered) {
-  // A stray ';' between top-level statements is skipped, browser-style. Left
-  // alone it made selector recovery scan to EOF and fail the whole sheet.
+TEST_F(ParserTest, TopLevelTrailingStraySemicolonRecovered) {
+  // A stray ';' after the last statement of a sheet is skipped. Left alone it
+  // made selector recovery scan to EOF and fail the whole sheet.
   struct Case {
     const char* css;
     int rulesets;
   };
   const Case kCases[] = {
-      {"a{b:c};", 1},             // at EOF
-      {"a{b:c}; d{e:f}", 2},      // mid-sheet
-      {";a{b:c}", 1},             // before the first rule
-      {";;a{b:c};;d{e:f};;", 2},  // repeated
-      {"a{b:c} ; \n d{e:f}", 2},  // with whitespace around
-      {";", 0},                   // nothing else
+      {"a{b:c};", 1},
+      {"a{b:c};;", 1},
+      {"a{b:c} ; \n ", 1},
+      {"a{b:c}; /*x*/ ", 1},
+      {";", 0},
   };
   for (bool preserve : {false, true}) {
     for (const Case& c : kCases) {
@@ -2998,15 +2997,48 @@ TEST_F(ParserTest, TopLevelStraySemicolonRecovered) {
   }
 }
 
+TEST_F(ParserTest, TopLevelLeadingOrMidStraySemicolonUnchanged) {
+  // A ';' that is followed by another statement is NOT skipped: browsers make
+  // it part of the next statement's selector and drop that statement, and the
+  // parser keeps matching them. Preservation mode keeps the bytes as an
+  // unparsed section (non-zero mask); the other mode drops the following rule.
+  const char* kCases[] = {
+      "a{b:c}; d{e:f}",
+      ";a{b:c}",
+      ";;a{b:c}",
+      "a{b:c};;d{e:f}",
+  };
+  for (const char* css : kCases) {
+    SCOPED_TRACE(css);
+    {
+      Parser p(css);
+      p.set_preservation_mode(true);
+      std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+      EXPECT_NE(Parser::kNoError, p.unparseable_sections_seen_mask());
+      EXPECT_TRUE(p.Done());
+    }
+    {
+      Parser p(css);
+      std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+      EXPECT_TRUE(p.Done());
+      for (int i = 0; i < t->rulesets().size(); ++i) {
+        EXPECT_NE(Ruleset::UNPARSED_REGION, t->ruleset(i).type());
+      }
+      // Only the rule before the ';' (if any) survives.
+      EXPECT_EQ(css[0] == 'a' ? 1 : 0, t->rulesets().size());
+    }
+  }
+}
+
 TEST_F(ParserTest, TopLevelStraySemicolonKeepsRuleErrors) {
-  // An error inside a rule is reported exactly as before; the skipped ';'
-  // neither hides it nor adds one.
+  // An error inside a rule is reported exactly as before; the skipped
+  // trailing ';' neither hides it nor adds one.
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "plain");
-    Parser with_semi("a{padding-top:1.em}; d{e:f}");
+    Parser with_semi("d{e:f} a{padding-top:1.em};");
     with_semi.set_preservation_mode(preserve);
     std::unique_ptr<Stylesheet> t1(with_semi.ParseStylesheet());
-    Parser without_semi("a{padding-top:1.em} d{e:f}");
+    Parser without_semi("d{e:f} a{padding-top:1.em}");
     without_semi.set_preservation_mode(preserve);
     std::unique_ptr<Stylesheet> t2(without_semi.ParseStylesheet());
     EXPECT_NE(Parser::kNoError, with_semi.errors_seen_mask() |
@@ -3016,6 +3048,32 @@ TEST_F(ParserTest, TopLevelStraySemicolonKeepsRuleErrors) {
               with_semi.unparseable_sections_seen_mask());
     EXPECT_EQ(t2->rulesets().size(), t1->rulesets().size());
     EXPECT_TRUE(with_semi.Done());
+  }
+}
+
+TEST_F(ParserTest, TopLevelAtRuleSemicolonUnaffected) {
+  // The ';' that ends an at-rule is part of the at-rule, not a stray one:
+  // output is the same with and without a trailing ';' after the last rule.
+  const char* kSheets[] = {
+      "@import url(x);a{b:c}",
+      "@charset \"utf-8\";a{b:c}",
+      "@layer a,b;a{b:c}",
+  };
+  for (bool preserve : {false, true}) {
+    for (const char* css : kSheets) {
+      SCOPED_TRACE(std::string(preserve ? "preservation " : "plain ") + css);
+      Parser p1(css);
+      p1.set_preservation_mode(preserve);
+      std::unique_ptr<Stylesheet> t1(p1.ParseStylesheet());
+      std::string with_semi_css = std::string(css) + ";";
+      Parser p2(with_semi_css);
+      p2.set_preservation_mode(preserve);
+      std::unique_ptr<Stylesheet> t2(p2.ParseStylesheet());
+      EXPECT_EQ(p1.errors_seen_mask(), p2.errors_seen_mask());
+      EXPECT_EQ(p1.unparseable_sections_seen_mask(),
+                p2.unparseable_sections_seen_mask());
+      EXPECT_EQ(t1->ToString(), t2->ToString());
+    }
   }
 }
 

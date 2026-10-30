@@ -1,1 +1,1 @@
-- CSS parser: recover from a stray semicolon between top-level rules. A sheet such as `a{b:c};` previously failed to parse as a whole and was served unoptimized; the stray semicolon is now skipped, as it already was inside `@media` and other group rules. Output that previously kept the stray semicolon verbatim now omits it.
+- CSS parser: recover from a stray semicolon after the last rule of a sheet. A sheet such as `a{b:c};` previously failed to parse as a whole and was served unoptimized.
