@@ -31,11 +31,14 @@ StdMutex::StdMutex() {}
 
 StdMutex::~StdMutex() {}
 
-bool StdMutex::TryLock() { return mutex_.try_lock(); }
+// The header annotations promise the caller the StdMutex's own capability,
+// while these bodies delegate to the wrapped std::mutex — a different
+// capability to the analyzer — so the delegation is not analyzed.
+bool StdMutex::TryLock() NO_THREAD_SAFETY_ANALYSIS { return mutex_.try_lock(); }
 
-void StdMutex::Lock() { mutex_.lock(); }
+void StdMutex::Lock() NO_THREAD_SAFETY_ANALYSIS { mutex_.lock(); }
 
-void StdMutex::Unlock() { mutex_.unlock(); }
+void StdMutex::Unlock() NO_THREAD_SAFETY_ANALYSIS { mutex_.unlock(); }
 
 ThreadSystem::Condvar* StdMutex::NewCondvar() { return new StdCondvar(this); }
 

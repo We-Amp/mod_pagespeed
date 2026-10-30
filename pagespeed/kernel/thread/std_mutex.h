@@ -36,12 +36,9 @@ class StdMutex : public ThreadSystem::CondvarCapableMutex {
  public:
   StdMutex();
   ~StdMutex() override;
-  bool TryLock() override;
-  // Lock/Unlock transfer ownership of the wrapped std::mutex capability to
-  // and from the caller; the annotations express that transfer so the
-  // thread-safety analysis does not flag the wrapper itself.
-  void Lock() override EXCLUSIVE_LOCK_FUNCTION(mutex_);
-  void Unlock() override UNLOCK_FUNCTION(mutex_);
+  bool TryLock() EXCLUSIVE_TRYLOCK_FUNCTION(true) override;
+  void Lock() EXCLUSIVE_LOCK_FUNCTION() override;
+  void Unlock() UNLOCK_FUNCTION() override;
   ThreadSystem::Condvar* NewCondvar() override;
 
  private:
