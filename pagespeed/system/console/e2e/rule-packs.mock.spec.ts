@@ -98,6 +98,43 @@ test.describe("the packs", () => {
   });
 });
 
+test.describe("the whole-server page and the virtual hosts", () => {
+  test("a pack configured only on a virtual host is listed, with its decisions", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", replies(R.GLOBAL_VHOST_ONLY, F.CONFIG_GLOBAL));
+    await openConsole(page, "pagespeed_global_admin", "#/rule-packs");
+    await ready(page);
+    // Not the contradictory "No rule pack is configured" while a host has one.
+    await expect(page.getByTestId("rp-none-configured")).toHaveCount(0);
+    await expect(page.getByTestId("rp-per-vhost-only")).toContainText("one virtual host configures its own");
+    const headings = await page.locator("main h2").allTextContents();
+    expect(headings).toEqual(["Configuration", "Packs", "Virtual hosts", "Counters", "Decisions"]);
+    const vhost = page.getByTestId("rp-vhost");
+    await expect(vhost).toHaveCount(1);
+    await expect(vhost).toContainText("demo.example.test:80");
+    const pack = page.getByTestId("rp-vhost-pack");
+    await expect(pack).toContainText("edge-seo");
+    await expect(pack).toContainText("/etc/packs/edge.json");
+    await expect(pack.locator(".state-badge")).toHaveText("loaded");
+    await expect(page.getByTestId("rp-decision")).toHaveCount(3);
+  });
+
+  test("nothing configured anywhere still says so", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", replies(R.GLOBAL_NONE, F.CONFIG_GLOBAL));
+    await openConsole(page, "pagespeed_global_admin", "#/rule-packs");
+    await ready(page);
+    await expect(page.getByTestId("rp-none-configured")).toContainText("No rule pack is configured");
+    await expect(page.getByTestId("rp-vhosts")).toHaveCount(0);
+  });
+
+  test("a virtual host's pack opens its decision log", async ({ page }) => {
+    await mockAdmin(page, "pagespeed_global_admin", replies(R.GLOBAL_VHOST_ONLY, F.CONFIG_GLOBAL));
+    await openConsole(page, "pagespeed_global_admin", "#/rule-packs");
+    await ready(page);
+    await page.getByTestId("rp-vhost-log").click();
+    await expect(page).toHaveURL(/#\/rule-packs\?pack=edge-seo/);
+  });
+});
+
 test.describe("the decisions", () => {
   test("filters by pack, action, reason and rule, and clears them", async ({ page }) => {
     await mockAdmin(page, "pagespeed_admin", replies(R.TWO_BY_PACK));

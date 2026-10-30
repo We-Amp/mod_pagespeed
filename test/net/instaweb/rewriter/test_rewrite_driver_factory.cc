@@ -179,22 +179,27 @@ Timer* TestRewriteDriverFactory::DefaultTimer() {
 void TestRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
   // TODO(jmarantz): Make the cache-ownership semantics consistent between
   // DelayCache and ThreadsafeCache.
-  DCHECK(lru_cache_ == nullptr);
-  lru_cache_ = std::make_unique<LRUCache>(kCacheSize);
-  threadsafe_cache_ = std::make_unique<ThreadsafeCache>(
-      lru_cache_.get(), thread_system()->NewMutex());
-  mock_time_cache_ =
-      std::make_unique<MockTimeCache>(scheduler(), threadsafe_cache_.get());
-  delay_cache_ = new DelayCache(mock_time_cache_.get(), thread_system());
+  // A later server context of the same factory (a virtual host) shares the
+  // caches of the first one.
+  const bool first_context = (lru_cache_ == nullptr);
+  if (first_context) {
+    lru_cache_ = std::make_unique<LRUCache>(kCacheSize);
+    threadsafe_cache_ = std::make_unique<ThreadsafeCache>(
+        lru_cache_.get(), thread_system()->NewMutex());
+    mock_time_cache_ =
+        std::make_unique<MockTimeCache>(scheduler(), threadsafe_cache_.get());
+    delay_cache_ = new DelayCache(mock_time_cache_.get(), thread_system());
+  }
   HTTPCache* http_cache =
       new HTTPCache(delay_cache_, timer(), hasher(), statistics());
   server_context->set_http_cache(http_cache);
   server_context->set_metadata_cache(delay_cache_);
-  cache_property_store_ = new CachePropertyStore("test/", delay_cache_, timer(),
-                                                 statistics(), thread_system());
-  server_context->set_cache_property_store(cache_property_store_);
-  server_context->MakePagePropertyCache(cache_property_store_);
-  TakeOwnership(delay_cache_);
+  CachePropertyStore* property_store = new CachePropertyStore(
+      "test/", delay_cache_, timer(), statistics(), thread_system());
+  if (first_context) cache_property_store_ = property_store;
+  server_context->set_cache_property_store(property_store);
+  server_context->MakePagePropertyCache(property_store);
+  if (first_context) TakeOwnership(delay_cache_);
 }
 
 Hasher* TestRewriteDriverFactory::NewHasher() {

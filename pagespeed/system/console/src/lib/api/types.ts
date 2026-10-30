@@ -436,6 +436,15 @@ export interface RulePackDecisionRow {
   claimed_by?: string;
 }
 
+/** The rule-pack configuration of one virtual host (whole-server answer only). */
+export interface RulePackVhost {
+  host?: string;
+  filter_enabled?: boolean;
+  rule_pack_mode?: string;
+  rule_pack_require_signed?: boolean;
+  packs?: RulePackEntry[];
+}
+
 export interface RulePacksResponse {
   schema?: number;
   generated_at?: string;
@@ -448,6 +457,8 @@ export interface RulePacksResponse {
     rule_pack_require_signed?: boolean;
   };
   packs?: RulePackEntry[];
+  /** Whole-server answer: every virtual host that configures rule packs. */
+  vhosts?: RulePackVhost[];
   overlap_warnings?: string[];
   counters?: Record<string, number> | null;
   decisions?: {

@@ -9,7 +9,7 @@
  * shown as text, never as markup or links.
  */
 
-import type { RulePackDecisionRow, RulePackEntry, RulePackLicense, RulePacksResponse } from "$lib/api/types";
+import type { RulePackDecisionRow, RulePackEntry, RulePackLicense, RulePackVhost, RulePacksResponse } from "$lib/api/types";
 
 /** The only JSON schema this page reads. */
 export const RULE_PACKS_SCHEMA = 1;
@@ -59,6 +59,8 @@ export interface RulePacksView {
   mode: string;
   requireSigned: boolean;
   packs: PackView[];
+  /** Whole-server page: the virtual hosts that configure rule packs (empty on a per-host page). */
+  vhosts: VhostView[];
   overlapWarnings: string[];
   counters: Array<{ name: string; value: number }> | null;
   log: {
@@ -73,6 +75,15 @@ export interface RulePacksView {
   notLoadedYet: boolean;
   /** No pack file is configured at all. */
   noneConfigured: boolean;
+}
+
+export interface VhostView {
+  host: string;
+  filterEnabled: boolean;
+  mode: string;
+  requireSigned: boolean;
+  files: string[];
+  packs: PackView[];
 }
 
 export interface PackView {
@@ -118,6 +129,18 @@ function packView(p: RulePackEntry, index: number): PackView {
   };
 }
 
+function vhostView(v: RulePackVhost): VhostView {
+  const packs = (Array.isArray(v.packs) ? v.packs : []).map(packView);
+  return {
+    host: str(v.host) ?? "",
+    filterEnabled: v.filter_enabled === true,
+    mode: str(v.rule_pack_mode) ?? "",
+    requireSigned: v.rule_pack_require_signed === true,
+    files: packs.map((p) => p.file),
+    packs,
+  };
+}
+
 /** The status as the page shows it; throws on a schema this page does not know. */
 export function rulePacksView(raw: RulePacksResponse): RulePacksView {
   if (raw.schema !== RULE_PACKS_SCHEMA) {
@@ -126,6 +149,7 @@ export function rulePacksView(raw: RulePacksResponse): RulePacksView {
   const cfg = raw.configuration ?? {};
   const files = strings(cfg.rule_pack_files);
   const packs = (Array.isArray(raw.packs) ? raw.packs : []).map(packView);
+  const vhosts = (Array.isArray(raw.vhosts) ? raw.vhosts : []).map(vhostView);
   const counters =
     raw.counters !== null && typeof raw.counters === "object"
       ? Object.entries(raw.counters)
@@ -143,6 +167,7 @@ export function rulePacksView(raw: RulePacksResponse): RulePacksView {
     mode: str(cfg.rule_pack_mode) ?? "",
     requireSigned: cfg.rule_pack_require_signed === true,
     packs,
+    vhosts,
     overlapWarnings: strings(raw.overlap_warnings),
     counters,
     log: {
@@ -154,14 +179,14 @@ export function rulePacksView(raw: RulePacksResponse): RulePacksView {
       rows: Array.isArray(d.rows) ? d.rows : [],
     },
     notLoadedYet: files.length > 0 && packs.length > 0 && packs.every((p) => p.rawState === "none" && p.id === null),
-    noneConfigured: files.length === 0,
+    noneConfigured: files.length === 0 && vhosts.length === 0,
   };
 }
 
-/** The pack ids the tail can be read from, once each, in load order. */
-export function tailPackOptions(packs: readonly PackView[]): string[] {
+/** The pack ids the tail can be read from, once each, in load order (the server's packs, then each virtual host's). */
+export function tailPackOptions(packs: readonly PackView[], vhosts: readonly VhostView[] = []): string[] {
   const out: string[] = [];
-  for (const p of packs) if (p.id !== null && !out.includes(p.id)) out.push(p.id);
+  for (const p of [...packs, ...vhosts.flatMap((v) => v.packs)]) if (p.id !== null && !out.includes(p.id)) out.push(p.id);
   return out;
 }
 

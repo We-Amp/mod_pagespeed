@@ -215,6 +215,65 @@ void AppendPackTable(const Page& page, std::string* out) {
   }
 }
 
+Json::Value PackJson(const PackEntry& entry, Json::UInt position) {
+  Json::Value p(Json::objectValue);
+  p["position"] = position;
+  p["file"] = entry.file;
+  p["state"] = entry.state;
+  p["id"] = entry.pack.present ? Json::Value(entry.pack.id) : Json::Value();
+  p["version"] =
+      entry.pack.present ? Json::Value(entry.pack.version) : Json::Value();
+  p["publisher"] =
+      entry.pack.present ? Json::Value(entry.pack.publisher) : Json::Value();
+  p["key_id"] = StringOrNull(entry.pack.key_id);
+  p["sha256"] = StringOrNull(entry.pack.sha256);
+  p["last_event_at"] = entry.last_event_ms >= 0
+                           ? Json::Value(FormatIso(entry.last_event_ms))
+                           : Json::Value();
+  p["last_error"] = StringOrNull(entry.last_error);
+  Json::Value warnings(Json::arrayValue);
+  for (const std::string& w : entry.pack.warnings) warnings.append(w);
+  p["warnings"] = warnings;
+  if (entry.pack.license.present) {
+    Json::Value license(Json::objectValue);
+    license["label"] = entry.pack.license.label;
+    license["expires"] = StringOrNull(entry.pack.license.expires);
+    license["terms"] = StringOrNull(entry.pack.license.terms);
+    p["license"] = license;
+  } else {
+    p["license"] = Json::Value();
+  }
+  return p;
+}
+
+void AppendVhostTable(const Page& page, std::string* out) {
+  std::string& o = *out;
+  o.append(
+      "<h2>Virtual hosts</h2>\n<table>\n<tr><th>host</th><th>filter</th>"
+      "<th>mode</th><th>id</th><th>version</th><th>file</th><th>state</th>"
+      "<th>decisions</th></tr>\n");
+  for (const VhostEntry& vhost : page.vhosts) {
+    for (const PackEntry& entry : vhost.packs) {
+      o.append("<tr>");
+      Cell(&o, vhost.host);
+      Cell(&o, vhost.filter_enabled ? "enabled" : "off");
+      Cell(&o, vhost.mode);
+      Cell(&o, entry.pack.present ? entry.pack.id : "");
+      Cell(&o, entry.pack.version);
+      Cell(&o, entry.file, "m");
+      Cell(&o, entry.state);
+      o.append("<td>");
+      if (entry.pack.present) {
+        o.append("<a href=\"?pack=");
+        o.append(HtmlEscape(UrlEncode(entry.pack.id)));
+        o.append("\">log</a>");
+      }
+      o.append("</td></tr>\n");
+    }
+  }
+  o.append("</table>\n");
+}
+
 }  // namespace
 
 std::string HtmlEscape(std::string_view s) {
@@ -405,36 +464,29 @@ std::string RenderJson(const Page& page) {
   Json::Value packs(Json::arrayValue);
   Json::UInt position = 0;
   for (const PackEntry& entry : page.packs) {
-    Json::Value p(Json::objectValue);
-    p["position"] = position++;
-    p["file"] = entry.file;
-    p["state"] = entry.state;
-    p["id"] = entry.pack.present ? Json::Value(entry.pack.id) : Json::Value();
-    p["version"] =
-        entry.pack.present ? Json::Value(entry.pack.version) : Json::Value();
-    p["publisher"] =
-        entry.pack.present ? Json::Value(entry.pack.publisher) : Json::Value();
-    p["key_id"] = StringOrNull(entry.pack.key_id);
-    p["sha256"] = StringOrNull(entry.pack.sha256);
-    p["last_event_at"] = entry.last_event_ms >= 0
-                             ? Json::Value(FormatIso(entry.last_event_ms))
-                             : Json::Value();
-    p["last_error"] = StringOrNull(entry.last_error);
-    Json::Value warnings(Json::arrayValue);
-    for (const std::string& w : entry.pack.warnings) warnings.append(w);
-    p["warnings"] = warnings;
-    if (entry.pack.license.present) {
-      Json::Value license(Json::objectValue);
-      license["label"] = entry.pack.license.label;
-      license["expires"] = StringOrNull(entry.pack.license.expires);
-      license["terms"] = StringOrNull(entry.pack.license.terms);
-      p["license"] = license;
-    } else {
-      p["license"] = Json::Value();
-    }
+    Json::Value p = PackJson(entry, position++);
     packs.append(p);
   }
   root["packs"] = packs;
+
+  if (page.scope == "global") {
+    Json::Value vhosts(Json::arrayValue);
+    for (const VhostEntry& vhost : page.vhosts) {
+      Json::Value v(Json::objectValue);
+      v["host"] = vhost.host;
+      v["filter_enabled"] = vhost.filter_enabled;
+      v["rule_pack_mode"] = vhost.mode;
+      v["rule_pack_require_signed"] = vhost.require_signed;
+      Json::Value vpacks(Json::arrayValue);
+      Json::UInt vposition = 0;
+      for (const PackEntry& entry : vhost.packs) {
+        vpacks.append(PackJson(entry, vposition++));
+      }
+      v["packs"] = vpacks;
+      vhosts.append(v);
+    }
+    root["vhosts"] = vhosts;
+  }
 
   Json::Value overlaps(Json::arrayValue);
   for (const std::string& w : page.overlap_warnings) overlaps.append(w);
@@ -555,6 +607,7 @@ std::string RenderHtml(const Page& page) {
   } else {
     AppendLoadedPack(page, &o);
   }
+  if (!page.vhosts.empty()) AppendVhostTable(page, &o);
   // One static anchor: the server makes no request and sends nothing.
   o.append(
       "<p class=\"note\">A pack is a set of rules this server "

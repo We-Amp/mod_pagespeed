@@ -1,0 +1,1 @@
+- The whole-server console's Rule packs page now lists the packs each virtual host configures, with their state, and shows those hosts' decision logs, instead of reporting that no rule pack is configured.

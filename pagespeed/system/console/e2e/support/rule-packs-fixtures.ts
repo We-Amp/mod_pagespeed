@@ -91,6 +91,7 @@ interface Over {
   counters?: Record<string, number> | null;
   scope?: "vhost" | "global";
   enabled?: boolean;
+  vhosts?: unknown[];
 }
 
 export function status(o: Over = {}): Record<string, unknown> {
@@ -118,6 +119,7 @@ export function status(o: Over = {}): Record<string, unknown> {
     packs,
     schema: 1,
     scope: o.scope ?? "vhost",
+    ...(o.scope === "global" ? { vhosts: o.vhosts ?? [] } : {}),
   };
 }
 
@@ -178,4 +180,23 @@ export const TWO_BY_PACK: Responder = (_call, request) => {
 /** The whole-server console: rows of several hosts. */
 export const GLOBAL_TWO: Responder = ok(
   status({ scope: "global", packs: MANY_PACKS.slice(0, 2), pack: "edge-seo", rows: ROWS_EDGE }),
+);
+
+/** One virtual host's configuration, as the whole-server answer lists it. */
+export const VHOST_DEMO = {
+  filter_enabled: true,
+  host: "demo.example.test:80",
+  packs: [PACK_EDGE],
+  rule_pack_mode: "report",
+  rule_pack_require_signed: false,
+};
+
+/** The whole-server console where only a virtual host configures a pack: its packs and its decisions are listed. */
+export const GLOBAL_VHOST_ONLY: Responder = ok(
+  status({ scope: "global", files: [], packs: [], pack: "edge-seo", rows: ROWS_EDGE, vhosts: [VHOST_DEMO] }),
+);
+
+/** The whole-server console where nothing configures a pack anywhere. */
+export const GLOBAL_NONE: Responder = ok(
+  status({ scope: "global", files: [], packs: [], status: "no_pack_file", enabled: false, counters: null, vhosts: [] }),
 );
