@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <new>
 #include <thread>
@@ -227,6 +228,31 @@ TEST_F(CycloneCacheTest, IsHealthy) {
     GTEST_SKIP() << "CycloneCache failed to initialize - "
                  << "Cyclone library may not be available";
   }
+}
+
+// The Caches page prints this text as its Backend Stats block.  The served
+// read count covers both tiers, and the library never counts misses, so the
+// text must not claim a disk split or print an always-zero misses row.
+TEST_F(CycloneCacheTest, PrintStatsLabelsWhatIsMeasured) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache failed to initialize";
+  }
+  CheckPut("k", "v");
+  CheckGet("k", "v");
+  GoogleString out;
+  cache_->PrintStats(&out);
+  size_t pos = out.find("Reads served (RAM + disk): ");
+  ASSERT_NE(GoogleString::npos, pos);
+  EXPECT_GE(atoi(out.c_str() + pos + strlen("Reads served (RAM + disk): ")), 1);
+  EXPECT_NE(GoogleString::npos, out.find("Reads served (RAM + disk): "));
+  EXPECT_NE(GoogleString::npos,
+            out.find("Scope: hit, read and eviction counts are for this "
+                     "server process"));
+  EXPECT_LT(out.find("Scope: "), out.find("Current entries: "));
+  EXPECT_NE(GoogleString::npos, out.find("RAM cache hits: "));
+  EXPECT_NE(GoogleString::npos, out.find("RAM cache misses: "));
+  EXPECT_EQ(GoogleString::npos, out.find("Disk cache hits"));
+  EXPECT_EQ(GoogleString::npos, out.find("Disk cache misses"));
 }
 
 // Test basic put/get operations
