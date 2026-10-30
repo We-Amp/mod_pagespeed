@@ -4447,7 +4447,8 @@ TEST_F(RewriteOptionsTest, RenderOnlyDirectivesRejectedOn11) {
     EXPECT_EQ(RewriteOptions::kOptionValueInvalid,
               options_.ParseAndSetOptionFromName1(name, "x", &msg, &handler))
         << name;
-    EXPECT_NE(GoogleString::npos, msg.find("2.0")) << name << ": " << msg;
+    EXPECT_NE(GoogleString::npos, msg.find("optimizer worker"))
+        << name << ": " << msg;
   }
   // The real toggle is NOT mistaken for a render-only directive.
   GoogleString ok_msg;
