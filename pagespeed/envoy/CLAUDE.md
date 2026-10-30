@@ -42,7 +42,10 @@ virtual host overrides, circuit breaker, and admin authentication.
 The filter builds against Envoy 1.40, which `MODULE.bazel` declares as a
 module (`envoy` and `envoy_api`, both an `archive_override` of the v1.40.1
 commit; Envoy's registry follows the BCR in `.bazelrc`). Build with
-`--config=envoy-filter` (clang + libstdc++). Every target here and in
+`--config=envoy-filter` (clang + libstdc++; Linux dev container) or
+`--config=envoy-filter-macos` (Apple clang + libc++, composes
+`build:macos` — the Linux config's GCC-13 libstdc++ paths do not exist
+on a Mac). Every target here and in
 `test/pagespeed/envoy` is tagged manual, so `//...` leaves the filter out
 (building it compiles all of Envoy); name the targets:
 
@@ -50,6 +53,7 @@ commit; Envoy's registry follows the BCR in `.bazelrc`). Build with
 bazel build --config=envoy-filter //pagespeed/envoy:envoy_pagespeed      # standalone binary
 bazel build --config=envoy-filter //pagespeed/envoy:pagespeed_filter.so  # shared library
 bazel test --config=envoy-filter //test/pagespeed/envoy:http_filter_test # unit tests (tagged manual, so named)
+# on macOS, substitute --config=envoy-filter-macos in any of the above
 ```
 
 The extension list Envoy compiles in is `bazel/envoy/extensions_build_config.bzl`,
