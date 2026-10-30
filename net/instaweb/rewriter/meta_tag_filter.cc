@@ -103,6 +103,7 @@ bool MetaTagFilter::ExtractAndUpdateMetaTagDetails(
       // No content => it has a charset attribute (and no mime_type).
       GoogleString type = StrCat("; charset=", charset);
       if (response_headers->MergeContentType(type)) {
+        // Keep the caching fields current after the Content-Type change.
         response_headers->ComputeCaching();
         return true;
       }

@@ -1,1 +1,0 @@
-- Pages whose `<meta>` charset or content type differs from the response header now get their caching information recomputed after the Content-Type is updated.

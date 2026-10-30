@@ -162,12 +162,20 @@ TEST_F(MetaTagFilterTest, TestCharsetNoUpstream) {
 
 TEST_F(MetaTagFilterTest, CachingFieldsRecomputedAfterCharset) {
   headers()->SetStatusAndReason(HttpStatus::kOK);
+  headers()->SetDate(timer()->NowMs());
+  headers()->Add(HttpAttributes::kCacheControl, "max-age=300");
   headers()->ComputeCaching();
   ASSERT_FALSE(headers()->cache_fields_dirty());
+  ASSERT_TRUE(headers()->IsBrowserCacheable());
+  const int64 ttl_ms = headers()->cache_ttl_ms();
   ValidateNoChanges("caching_charset", kMetaTagCharsetOnly);
   EXPECT_STREQ("text/html; charset=UTF-8",
                headers()->Lookup1(HttpAttributes::kContentType));
   EXPECT_FALSE(headers()->cache_fields_dirty());
+  // A charset does not change the content type's class, so the derived
+  // values must not change.
+  EXPECT_TRUE(headers()->IsBrowserCacheable());
+  EXPECT_EQ(ttl_ms, headers()->cache_ttl_ms());
 }
 
 TEST_F(MetaTagFilterTest, CachingFieldsReflectNewContentType) {
