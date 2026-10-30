@@ -42,7 +42,6 @@ class CanonicalAttributes : public EmptyHtmlFilter {
   int num_errors() const { return num_errors_; }
 
  private:
-  HtmlParse* html_parse_;
   int num_changes_;
   int num_errors_;
 

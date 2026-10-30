@@ -71,7 +71,6 @@ class JpegReader {
  private:
   std::unique_ptr<jpeg_decompress_struct> jpeg_decompress_;
   std::unique_ptr<jpeg_error_mgr> decompress_error_;
-  MessageHandler* message_handler_;
 
   JpegReader(const JpegReader&) = delete;
   JpegReader& operator=(const JpegReader&) = delete;

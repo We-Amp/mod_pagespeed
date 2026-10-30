@@ -23,6 +23,7 @@
 #include <mutex>
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
 namespace net_instaweb {
@@ -35,9 +36,9 @@ class StdMutex : public ThreadSystem::CondvarCapableMutex {
  public:
   StdMutex();
   ~StdMutex() override;
-  bool TryLock() override;
-  void Lock() override;
-  void Unlock() override;
+  bool TryLock() EXCLUSIVE_TRYLOCK_FUNCTION(true) override;
+  void Lock() EXCLUSIVE_LOCK_FUNCTION() override;
+  void Unlock() UNLOCK_FUNCTION() override;
   ThreadSystem::Condvar* NewCondvar() override;
 
  private:

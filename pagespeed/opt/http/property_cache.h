@@ -274,7 +274,6 @@ class PropertyCache {
  private:
   PropertyStore* property_store_;
   Timer* timer_;
-  Statistics* stats_;
   ThreadSystem* thread_system_;
 
   int mutations_per_1000_writes_threshold_;

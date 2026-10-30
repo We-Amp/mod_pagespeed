@@ -120,8 +120,7 @@ struct JpegEnv {
 
 JpegReader::JpegReader(MessageHandler* handler)
     : jpeg_decompress_(std::make_unique<jpeg_decompress_struct>()),
-      decompress_error_(std::make_unique<jpeg_error_mgr>()),
-      message_handler_(handler) {
+      decompress_error_(std::make_unique<jpeg_error_mgr>()) {
   jpeg_decompress_->err = jpeg_std_error(decompress_error_.get());
   decompress_error_->error_exit = &ErrorExit;
   decompress_error_->output_message = &OutputMessage;

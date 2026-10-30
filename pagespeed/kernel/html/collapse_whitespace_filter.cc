@@ -49,8 +49,7 @@ bool IsSensitiveKeyword(HtmlName::Keyword keyword) {
 
 }  // namespace
 
-CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse)
-    : html_parse_(html_parse) {
+CollapseWhitespaceFilter::CollapseWhitespaceFilter(HtmlParse* html_parse) {
   for (size_t i = 1; i < std::size(kSensitiveTags); ++i) {
     DCHECK(kSensitiveTags[i - 1] < kSensitiveTags[i]);
   }

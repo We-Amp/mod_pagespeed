@@ -53,7 +53,7 @@ void AppendUrlFragment(GoogleString* str, const GoogleUrl& google_url,
 }  // namespace
 
 InsertAmpLinkFilter::InsertAmpLinkFilter(RewriteDriver* rewrite_driver)
-    : CommonFilter(rewrite_driver), enabled_(false), amp_link_found_(false) {}
+    : CommonFilter(rewrite_driver), amp_link_found_(false) {}
 
 InsertAmpLinkFilter::~InsertAmpLinkFilter() {}
 
