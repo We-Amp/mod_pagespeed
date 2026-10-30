@@ -107,6 +107,30 @@ class ConfigurationFile:public ReferenceCounter
 		tempbuf[length] = 0;
 
 		char *ptr=tempbuf;
+		// A UTF-16 file (PowerShell 5.1 Out-File and ">" write UTF-16LE) cannot
+		// be parsed as bytes of text: refuse it with a clear warning.
+		if (length >= 2
+		    && ((static_cast<unsigned char>(ptr[0]) == 0xFF
+		         && static_cast<unsigned char>(ptr[1]) == 0xFE)
+		        || (static_cast<unsigned char>(ptr[0]) == 0xFE
+		            && static_cast<unsigned char>(ptr[1]) == 0xFF)))
+		{
+			mh->Message(kWarning, "The configuration file is saved as UTF-16 and is ignored; save it as UTF-8 or ASCII.");
+			delete [] tempbuf;
+			return;
+		}
+		// Windows tools (PowerShell 5.1 Set-Content -Encoding UTF8, several
+		// editors) put a UTF-8 byte order mark (EF BB BF) in front of the text.
+		// Skip it, or the first directive no longer matches its name and is
+		// dropped without a message. Runs once per parse of one file.
+		if (length >= 3
+		    && static_cast<unsigned char>(ptr[0]) == 0xEF
+		    && static_cast<unsigned char>(ptr[1]) == 0xBB
+		    && static_cast<unsigned char>(ptr[2]) == 0xBF)
+		{
+			ptr += 3;
+			mh->Message(kInfo, "Ignoring the UTF-8 byte order mark at the start of %s.", path.empty() ? "the configuration text" : path.c_str());
+		}
 		while(*ptr)
 		{
 			char *startline=ptr;
