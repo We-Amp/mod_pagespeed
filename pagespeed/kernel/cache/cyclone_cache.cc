@@ -428,10 +428,15 @@ void CycloneCache::PrintStats(GoogleString* out) const {
   StrAppend(out, "RAM cache misses: ",
             Integer64ToString(static_cast<int64>(stats.ram_cache_misses)),
             "\n");
-  StrAppend(out, "Disk cache hits: ",
+  // The library's read counter advances for every read it serves, whether
+  // the RAM tier or the disk answered, so it is labelled as reads served,
+  // not as disk hits.  The library never counts misses at the version we
+  // ship (disk_cache_misses stays 0), so no misses row is printed.
+  StrAppend(out, "Reads served (RAM + disk): ",
             Integer64ToString(static_cast<int64>(stats.disk_cache_hits)), "\n");
-  StrAppend(out, "Disk cache misses: ",
-            Integer64ToString(static_cast<int64>(stats.disk_cache_misses)),
+  StrAppend(out, "Scope: ",
+            "this server process since it started; the Statistics page "
+            "shows totals for all processes",
             "\n");
   StrAppend(out, "Evictions: ",
             Integer64ToString(static_cast<int64>(stats.evictions)), "\n");

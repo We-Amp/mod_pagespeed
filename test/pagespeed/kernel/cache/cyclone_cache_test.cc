@@ -226,6 +226,24 @@ TEST_F(CycloneCacheTest, IsHealthy) {
   }
 }
 
+// The Caches page prints this text as its Backend Stats block.  The served
+// read count covers both tiers, and the library never counts misses, so the
+// text must not claim a disk split or print an always-zero misses row.
+TEST_F(CycloneCacheTest, PrintStatsLabelsWhatIsMeasured) {
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache failed to initialize";
+  }
+  GoogleString out;
+  cache_->PrintStats(&out);
+  EXPECT_NE(GoogleString::npos, out.find("Reads served (RAM + disk): "));
+  EXPECT_NE(GoogleString::npos,
+            out.find("Scope: this server process since it started"));
+  EXPECT_NE(GoogleString::npos, out.find("RAM cache hits: "));
+  EXPECT_NE(GoogleString::npos, out.find("RAM cache misses: "));
+  EXPECT_EQ(GoogleString::npos, out.find("Disk cache hits"));
+  EXPECT_EQ(GoogleString::npos, out.find("Disk cache misses"));
+}
+
 // Test basic put/get operations
 TEST_F(CycloneCacheTest, PutGet) {
   if (!IsHealthyTest()) {

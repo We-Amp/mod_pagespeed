@@ -1,5 +1,5 @@
 {
- "backend_stats": "\nCyclone cache '/var/cache/mod_pagespeed//cyclone.dat' statistics:\nCurrent entries: 74\nCurrent size bytes: 12615432\nRAM cache bytes: 0\nRAM cache hits: 0\nRAM cache misses: 0\nDisk cache hits: 1\nDisk cache misses: 0\nEvictions: 0\nWrite buffer wraps: 0\nWraps deferred by lease: 0\nWrites dropped by lease: 0\nWraps forced past lease: 0\nTag collision evictions: 0\nBucket full evictions: 0\nResets under degraded gate: 0\nResets gate verified: 0\n",
+ "backend_stats": "\nCyclone cache '/var/cache/mod_pagespeed//cyclone.dat' statistics:\nCurrent entries: 74\nCurrent size bytes: 12615432\nRAM cache bytes: 0\nRAM cache hits: 0\nRAM cache misses: 0\nReads served (RAM + disk): 1\nScope: this server process since it started; the Statistics page shows totals for all processes\nEvictions: 0\nWrite buffer wraps: 0\nWraps deferred by lease: 0\nWrites dropped by lease: 0\nWraps forced past lease: 0\nTag collision evictions: 0\nBucket full evictions: 0\nResets under degraded gate: 0\nResets gate verified: 0\n",
  "caches": [
   {
    "name": "HTTP Cache",
