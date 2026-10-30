@@ -563,7 +563,13 @@ APRUTIL_SHA = "804b8b276b346a69ca91bc704198de9ff4956a9a60a2f1212f350c230ee3dd03"
 # it open, as on POSIX.  A full purge of the optimizer's cache relies on
 # that to replace the volume without waiting for the module to let go.  The
 # other commit changes a fuzz harness only.  POSIX builds are unaffected.
-CYCLONE_COMMIT = "b081e22a4b8e5accf541e856ae908424901a2df1"
+# Bumped again to cyclone 03c5e8a (4 commits past b081e22).  On Windows,
+# cache volume files are now opened with wide-character paths and cache
+# paths are converted as UTF-8 end to end, so a cache directory whose path
+# holds non-ASCII characters works.  The rest is tests and CI only.  One new
+# header (src/io/win_path.hpp) is picked up by the existing globs; no new
+# source file, define or link flag.  POSIX builds are unaffected.
+CYCLONE_COMMIT = "03c5e8af8bec3f6b4c7088516829294f52864103"
 
 # Libevent - cross-platform event notification library
 # Used by LibeventDispatcher for standalone event loop (Apache deployments)

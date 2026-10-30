@@ -499,7 +499,7 @@
     {
       "SPDXID": "SPDXRef-Package-cyclone",
       "name": "cyclone",
-      "versionInfo": "b081e22a4b8e5accf541e856ae908424901a2df1",
+      "versionInfo": "03c5e8af8bec3f6b4c7088516829294f52864103",
       "supplier": "Organization: We-Amp B.V.",
       "downloadLocation": "https://github.com/We-Amp/cyclone-cache",
       "filesAnalyzed": false,
@@ -510,7 +510,7 @@
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:github/We-Amp/cyclone-cache@b081e22a4b8e5accf541e856ae908424901a2df1"
+          "referenceLocator": "pkg:github/We-Amp/cyclone-cache@03c5e8af8bec3f6b4c7088516829294f52864103"
         }
       ]
     },
