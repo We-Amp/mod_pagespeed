@@ -2992,6 +2992,13 @@ Stylesheet* Parser::ParseRawStylesheet() {
           ReportParsingError(kHtmlCommentError, "- without following ->");
         }
         break;
+      // mod_pagespeed local change: browser-style recovery for a stray ';'
+      // between top-level statements (e.g. "a{b:c};"), identical to the
+      // group-rule and @media body loops above. Left to ParseSelectors'
+      // recovery it scans to EOF hunting for a '{' and fails the whole sheet.
+      case ';':
+        in_++;
+        break;
       default:
         ParseStatement(nullptr, stylesheet);
         break;

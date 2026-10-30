@@ -2966,6 +2966,59 @@ TEST_F(ParserTest, GroupNonPreservationInnerErrorKeepsMask) {
   ASSERT_EQ(Ruleset::RULESET, body.ruleset(0).type());
 }
 
+TEST_F(ParserTest, TopLevelStraySemicolonRecovered) {
+  // A stray ';' between top-level statements is skipped, browser-style. Left
+  // alone it made selector recovery scan to EOF and fail the whole sheet.
+  struct Case {
+    const char* css;
+    int rulesets;
+  };
+  const Case kCases[] = {
+      {"a{b:c};", 1},             // at EOF
+      {"a{b:c}; d{e:f}", 2},      // mid-sheet
+      {";a{b:c}", 1},             // before the first rule
+      {";;a{b:c};;d{e:f};;", 2},  // repeated
+      {"a{b:c} ; \n d{e:f}", 2},  // with whitespace around
+      {";", 0},                   // nothing else
+  };
+  for (bool preserve : {false, true}) {
+    for (const Case& c : kCases) {
+      SCOPED_TRACE(std::string(preserve ? "preservation " : "plain ") + c.css);
+      Parser p(c.css);
+      p.set_preservation_mode(preserve);
+      std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
+      EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+      EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
+      EXPECT_TRUE(p.Done());
+      ASSERT_EQ(c.rulesets, t->rulesets().size());
+      for (int i = 0; i < c.rulesets; ++i) {
+        EXPECT_EQ(Ruleset::RULESET, t->ruleset(i).type());
+      }
+    }
+  }
+}
+
+TEST_F(ParserTest, TopLevelStraySemicolonKeepsRuleErrors) {
+  // An error inside a rule is reported exactly as before; the skipped ';'
+  // neither hides it nor adds one.
+  for (bool preserve : {false, true}) {
+    SCOPED_TRACE(preserve ? "preservation" : "plain");
+    Parser with_semi("a{padding-top:1.em}; d{e:f}");
+    with_semi.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t1(with_semi.ParseStylesheet());
+    Parser without_semi("a{padding-top:1.em} d{e:f}");
+    without_semi.set_preservation_mode(preserve);
+    std::unique_ptr<Stylesheet> t2(without_semi.ParseStylesheet());
+    EXPECT_NE(Parser::kNoError, with_semi.errors_seen_mask() |
+                                    with_semi.unparseable_sections_seen_mask());
+    EXPECT_EQ(without_semi.errors_seen_mask(), with_semi.errors_seen_mask());
+    EXPECT_EQ(without_semi.unparseable_sections_seen_mask(),
+              with_semi.unparseable_sections_seen_mask());
+    EXPECT_EQ(t2->rulesets().size(), t1->rulesets().size());
+    EXPECT_TRUE(with_semi.Done());
+  }
+}
+
 TEST_F(ParserTest, GroupBodyStraySemicolonRecovered) {
   // A stray ';' at statement position inside a group body (a common
   // hand-authoring artifact) is skipped, browser-style, keeping the sheet
