@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
+name: mod_pagespeed CodeQL configuration
+
+# Same query suite as the repository's former default setup.
+# (No "queries:" entry: the default suite applies.)
+
+# admin_console.html is the minified build output of the sources under
+# pagespeed/system/console/src/, which are analysed directly. Analysing the
+# bundle as well only re-raises the same findings on every rebuild.
+paths-ignore:
+  - pagespeed/system/console/admin_console.html
