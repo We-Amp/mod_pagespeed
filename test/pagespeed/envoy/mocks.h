@@ -36,6 +36,7 @@
 
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -78,13 +79,13 @@ class MockStreamDecoderFilterCallbacks
   ~MockStreamDecoderFilterCallbacks() override = default;
 
   // Additional mock methods commonly used in PageSpeed filter tests.
-  MOCK_METHOD(void, sendLocalReply,
-              (Envoy::Http::Code code, absl::string_view body,
-               std::function<void(Envoy::Http::ResponseHeaderMap& headers)>
-                   modify_headers,
-               const absl::optional<Envoy::Grpc::Status::GrpcStatus>
-                   grpc_status,
-               absl::string_view details));
+  MOCK_METHOD(
+      void, sendLocalReply,
+      (Envoy::Http::Code code, absl::string_view body,
+       std::function<void(Envoy::Http::ResponseHeaderMap& headers)>
+           modify_headers,
+       const absl::optional<Envoy::Grpc::Status::GrpcStatus> grpc_status,
+       absl::string_view details));
 
   // Returns the captured response from sendLocalReply.
   Envoy::Http::Code last_reply_code() const { return last_reply_code_; }
@@ -146,9 +147,7 @@ class FakeTimer : public Envoy::Event::Timer {
   FakeTimer() : enabled_(false), callback_(nullptr) {}
   ~FakeTimer() override = default;
 
-  void disableTimer() override {
-    enabled_ = false;
-  }
+  void disableTimer() override { enabled_ = false; }
 
   void enableTimer(std::chrono::milliseconds timeout,
                    const Envoy::ScopeTrackedObject* /* scope */) override {
@@ -159,7 +158,8 @@ class FakeTimer : public Envoy::Event::Timer {
   void enableHRTimer(std::chrono::microseconds timeout,
                      const Envoy::ScopeTrackedObject* /* scope */) override {
     enabled_ = true;
-    timeout_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(timeout);
+    timeout_ms_ =
+        std::chrono::duration_cast<std::chrono::milliseconds>(timeout);
   }
 
   bool enabled() override { return enabled_; }
@@ -192,17 +192,19 @@ class FakeDispatcher : public Envoy::Event::MockDispatcher {
     // Override post() to collect callbacks.
     ON_CALL(*this, post(::testing::_))
         .WillByDefault([this](Envoy::Event::PostCb callback) {
+          std::lock_guard<std::mutex> lock(mutex_);
           pending_callbacks_.push_back(std::move(callback));
         });
 
     // Override createTimer() to return FakeTimers.
     ON_CALL(*this, createTimer_(::testing::_))
-        .WillByDefault([this](Envoy::Event::TimerCb cb) -> Envoy::Event::Timer* {
-          auto timer = new FakeTimer();
-          timer->setCallback(std::move(cb));
-          created_timers_.push_back(timer);
-          return timer;
-        });
+        .WillByDefault(
+            [this](Envoy::Event::TimerCb cb) -> Envoy::Event::Timer* {
+              auto timer = new FakeTimer();
+              timer->setCallback(std::move(cb));
+              created_timers_.push_back(timer);
+              return timer;
+            });
   }
 
   ~FakeDispatcher() override = default;
@@ -210,7 +212,10 @@ class FakeDispatcher : public Envoy::Event::MockDispatcher {
   // Run all pending callbacks (single iteration).
   void runPendingCallbacks() {
     std::vector<Envoy::Event::PostCb> callbacks;
-    callbacks.swap(pending_callbacks_);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      callbacks.swap(pending_callbacks_);
+    }
     for (auto& cb : callbacks) {
       cb();
     }
@@ -218,13 +223,16 @@ class FakeDispatcher : public Envoy::Event::MockDispatcher {
 
   // Run all pending callbacks recursively until none remain.
   void runAllPendingCallbacks() {
-    while (!pending_callbacks_.empty()) {
+    while (pendingCallbackCount() > 0) {
       runPendingCallbacks();
     }
   }
 
   // Get the number of pending callbacks.
-  size_t pendingCallbackCount() const { return pending_callbacks_.size(); }
+  size_t pendingCallbackCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pending_callbacks_.size();
+  }
 
   // Get created timers for test inspection.
   const std::vector<FakeTimer*>& created_timers() const {
@@ -241,6 +249,7 @@ class FakeDispatcher : public Envoy::Event::MockDispatcher {
   }
 
  private:
+  mutable std::mutex mutex_;
   std::vector<Envoy::Event::PostCb> pending_callbacks_;
   std::vector<FakeTimer*> created_timers_;
 };
@@ -267,8 +276,7 @@ class MockUrlAsyncFetcher : public UrlAsyncFetcher {
 
   // Helper to set up a successful response for a URL.
   void SetResponse(const GoogleString& url, int status_code,
-                   const GoogleString& content_type,
-                   const GoogleString& body) {
+                   const GoogleString& content_type, const GoogleString& body) {
     responses_[url] = {status_code, content_type, body, true};
   }
 
@@ -321,9 +329,9 @@ class MockAsyncFetch : public AsyncFetch {
       : AsyncFetch(request_context) {}
   ~MockAsyncFetch() override = default;
 
-  MOCK_METHOD(bool, HandleWrite, (const StringPiece& sp, MessageHandler* handler),
-              (override));
-  MOCK_METHOD(bool, HandleFlush, (MessageHandler* handler), (override));
+  MOCK_METHOD(bool, HandleWrite,
+              (const StringPiece& sp, MessageHandler* handler), (override));
+  MOCK_METHOD(bool, HandleFlush, (MessageHandler * handler), (override));
   MOCK_METHOD(void, HandleHeadersComplete, (), (override));
   MOCK_METHOD(void, HandleDone, (bool success), (override));
 
@@ -371,8 +379,7 @@ inline Envoy::Http::TestRequestHeaderMapImpl CreateTestRequestHeaders(
 inline Envoy::Http::TestResponseHeaderMapImpl CreateTestResponseHeaders(
     int status_code, const std::string& content_type) {
   return Envoy::Http::TestResponseHeaderMapImpl{
-      {":status", std::to_string(status_code)},
-      {"content-type", content_type}};
+      {":status", std::to_string(status_code)}, {"content-type", content_type}};
 }
 
 // Helper to create a buffer with test data.

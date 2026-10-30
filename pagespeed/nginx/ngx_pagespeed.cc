@@ -940,6 +940,8 @@ void copy_request_headers_from_ngx(const ngx_http_request_t* r,
   // TODO(chaizhenhua): only allow RewriteDriver::kPassThroughRequestAttributes?
   headers->set_major_version(r->http_version / 1000);
   headers->set_minor_version(r->http_version % 1000);
+  headers->set_method(
+      RequestHeaders::MethodFromString(str_to_string_piece(r->method_name)));
   copy_headers_from_table(r->headers_in.headers, headers);
 }
 
@@ -3221,7 +3223,10 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
     GoogleString mapped_url;
     GoogleString host_header;
 
-    if (options->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
+    // Only GET and HEAD are answered through the proxy branch (and so from
+    // the cache); any other method is left to nginx.
+    if ((r->method == NGX_HTTP_GET || r->method == NGX_HTTP_HEAD) &&
+        options->domain_lawyer()->MapOriginUrl(url, &mapped_url, &host_header,
                                                &is_proxy) &&
         is_proxy) {
       ps_create_base_fetch(url.Spec(), ctx, request_context,
@@ -3249,6 +3254,12 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
   }
 
   if (html_rewrite && options->IsAllowed(url.Spec())) {
+    // The HTML pipeline runs a HEAD like the GET it answers (the same
+    // response headers, Vary included); nginx drops the body of a HEAD
+    // response itself.
+    if (request_headers->method() == RequestHeaders::kHead) {
+      request_headers->set_method(RequestHeaders::kGet);
+    }
     ps_create_base_fetch(url.Spec(), ctx, request_context,
                          request_headers.release(), kHtmlTransform, options);
     // Do not store driver in request_context, it's not safe.

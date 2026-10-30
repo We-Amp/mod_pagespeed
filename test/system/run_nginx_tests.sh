@@ -596,6 +596,15 @@ EOF
             proxy_pass http://127.0.0.1:$NGINX_ECHO_PORT;
         }
 
+        # Proxy-mapped method probe: URLs here are mapped to the echo origin
+        # as a proxied domain, and the location also proxies to it. Only GET
+        # and HEAD are answered through the module's proxy mapping; any other
+        # method goes to the origin as sent, with nothing looked up or stored.
+        location ^~ /mod_pagespeed_test/method_proxy/ {
+            pagespeed MapProxyDomain "http://localhost:$NGINX_PORT/mod_pagespeed_test/method_proxy" "http://127.0.0.1:$NGINX_ECHO_PORT/mod_pagespeed_test/method_proxy";
+            proxy_pass http://127.0.0.1:$NGINX_ECHO_PORT;
+        }
+
         # Filter-order probes. With the module in its proper chain position:
         # rewritten HTML keeps the module's own caching headers under an
         # expires directive, a .pagespeed. resource under the same location

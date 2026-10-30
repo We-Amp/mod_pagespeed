@@ -270,3 +270,17 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# Source pins: the nginx request headers carry the request method, and the
+# proxy branch serves GET and HEAD only.
+pagespeed_cc_test(
+    name = "ngx_cache_method_pin_test",
+    srcs = ["ngx_cache_method_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)

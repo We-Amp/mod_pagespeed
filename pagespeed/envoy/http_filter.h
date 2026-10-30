@@ -254,6 +254,9 @@ class HttpPageSpeedDecoderFilter : public StreamFilter {
   const net_instaweb::RewriteOptions* options_{nullptr};
   net_instaweb::RewriteDriver* rewrite_driver_{nullptr};
   net_instaweb::InPlaceResourceRecorder* recorder_{nullptr};
+  // The method of the client's request (the base fetch runs HEAD as GET).
+  net_instaweb::RequestHeaders::Method client_method_{
+      net_instaweb::RequestHeaders::kGet};
   net_instaweb::GoogleMessageHandler message_handler_;
   std::unique_ptr<net_instaweb::ResponseHeaders> response_headers_;
   std::unique_ptr<net_instaweb::GoogleUrl> pristine_url_;

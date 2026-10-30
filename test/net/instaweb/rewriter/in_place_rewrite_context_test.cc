@@ -1312,6 +1312,50 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlRewritingSucceeds) {
                         timer()->NowMs());
 }
 
+// A HEAD request for a cached, not yet rewritten original gets no body and
+// does not start a rewrite of an empty input: later GETs get the original and
+// then the full optimized body.
+TEST_F(InPlaceRewriteContextTest, HeadRequestDoesNotRewriteEmptyInput) {
+  Init();
+  // The original is in the cache, not yet rewritten.
+  AddResponse(cache_css_url_, kContentTypeCss, cache_body_, start_time_ms(),
+              ttl_ms_, "", StringPiece(""), kWriteToCache, kTransform);
+  ResetHeadersAndStats();
+
+  {
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    NotifyingFetch head_fetch(request_context, options(), cache_css_url_, &sync,
+                              &response_headers_);
+    head_fetch.request_headers()->set_method(RequestHeaders::kHead);
+    rewrite_driver()->FetchResource(cache_css_url_, &head_fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    EXPECT_TRUE(head_fetch.done());
+    EXPECT_EQ("", head_fetch.content());
+  }
+  EXPECT_EQ(0, css_filter_->num_rewrites());
+
+  // GETs afterwards: the first serves the original bytes and rewrites in the
+  // background, the next serves the full optimized body.
+  for (const char* expected : {cache_body_.c_str(), "good:cf"}) {
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    NotifyingFetch get_fetch(request_context, options(), cache_css_url_, &sync,
+                             &response_headers_);
+    rewrite_driver()->FetchResource(cache_css_url_, &get_fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    EXPECT_TRUE(get_fetch.done());
+    EXPECT_EQ(expected, get_fetch.content());
+  }
+  EXPECT_EQ(1, css_filter_->num_rewrites());
+}
+
 TEST_F(InPlaceRewriteContextTest, NonCacheableUrlNoRewriting) {
   Init();
   FetchAndCheckResponse(nocache_html_url_, nocache_body_, true, 0, nullptr,
