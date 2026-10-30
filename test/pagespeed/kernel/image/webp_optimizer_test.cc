@@ -510,7 +510,7 @@ TEST_F(AnimatedWebpTest, RejectExtraScanlines) {
 
   uint8_t scanline[300];
   memset(scanline, 0x80, GetBytesPerPixel(RGB_888) * frame_spec.width);
-  for (int j = 0; j < frame_spec.height; ++j) {
+  for (size_px j = 0; j < frame_spec.height; ++j) {
     EXPECT_TRUE(writer_->WriteNextScanline(scanline, &status));
   }
 #ifndef NDEBUG

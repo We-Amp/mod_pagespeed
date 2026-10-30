@@ -273,6 +273,45 @@ build:macos --host_linkopt=-Wl,-no_warn_duplicate_libraries
 build:macos --per_file_copt=external/.*@-w
 build:macos --host_per_file_copt=external/.*@-w
 
+# =============================================================================
+# EXPERIMENTAL — compiler-hygiene campaign: -Wextra / -Werror dry-run (macOS)
+# =============================================================================
+# Branch warnings/werror-dryrun ONLY: measurement lane for "what would
+# tightening first-party warnings from -Wall (already clean) to -Wextra cost
+# on macOS / Apple clang?". NOT for merging as-is. -Werror here is a census
+# probe: bazel only prints the diagnostics of FAILED actions, so upgrading
+# the -Wextra findings to errors (with --keep_going) is what makes every
+# affected TU print its findings in one build. The census is recorded in
+# ~/.weamp/compiler-warnings/reports/werror-dryrun.md.
+#
+# Flag placement, per the -Wno-dangling-reference rule above:
+# - -Wextra: plain --copt. Valid for BOTH C and C++ in clang, and bazel
+#   passes --copt to C and C++ compiles alike (verified with aquery: the
+#   external C TU src/psl.c and C++ TUs both carry it), so no --conlyopt or
+#   --cxxopt duplicate is needed.
+# - -Werror: --per_file_copt scoped to the first-party source roots (the six
+#   top-level dirs that own cc rules), mirroring the build:win-asan idiom.
+#   External repos need no -Werror exclusion of their own: build:macos
+#   already appends -w via --per_file_copt=external/.*@-w after every other
+#   warning flag, and clang's -w suppresses a warning before -Werror could
+#   upgrade it (verified with aquery: external TUs end "... -Wextra -w" and
+#   carry no -Werror; first-party TUs carry -Wall -Wextra -Werror, no -w).
+# - rules_foreign_cc: the cmake() deps inherit --copt values inside
+#   CMAKE_{C,CXX}_FLAGS_INIT (verified in aom's build_script.sh: both init
+#   flag strings end in -Wextra), where no -w boundary exists. Benign here:
+#   per_file_copt does NOT reach cmake, so -Werror stays out, and the cmake
+#   actions redirect all output into their CMake.log — their warnings never
+#   reach the bazel log the census parses.
+# - Host/exec configuration is untouched: --copt/per_file_copt here are not
+#   --host_* variants, and bazel does not flow them into host compiles, so
+#   host tools keep the clean -Wall baseline.
+# - -ferror-limit=0 rides along on the same per-file scope: clang's default
+#   per-TU error cap (20) truncated the census (488 TUs hit the cap in the
+#   first round), and unbounded diagnostics are needed to count every site.
+#   Scoped per-file so external/cache-stable action keys are untouched.
+build:werror-extra --copt=-Wextra
+build:werror-extra --per_file_copt=//pagespeed/.*,//net/.*,//test/.*,//base/.*,//third_party/.*,//tools/.*@-Werror,-ferror-limit=0
+
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan
 # Workaround, see https://github.com/bazelbuild/bazel/issues/6932

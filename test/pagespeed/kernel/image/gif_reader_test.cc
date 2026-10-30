@@ -1296,14 +1296,14 @@ class GifAnimationTest : public testing::Test {
       static const int kRgbBytes = 3;
 
       if (read_all_scanlines_) {
-        for (int row = 0; row < frame_spec.height; ++row) {
+        for (size_px row = 0; row < frame_spec.height; ++row) {
           EXPECT_TRUE(reader_->HasMoreScanlines());
           const uint8_t* scanline;
           ScanlineStatus status = reader_->ReadNextScanline(
               reinterpret_cast<const void**>(&scanline));
           EXPECT_TRUE(status.Success());
 
-          for (int col = 0; col < frame_spec.width; ++col) {
+          for (size_px col = 0; col < frame_spec.width; ++col) {
             // Since we're comparing pixel by pixel, correlated errors
             // would generate huge output if we use EXPECT rather than
             // ASSERT below.
@@ -1863,7 +1863,7 @@ TEST_F(GifAnimationTest, ReadMultipleFrameTransparencyLoopThrice) {
 }
 
 void CheckImageForOutOfBoundsPixel(const char* filename,
-                                   int first_invalid_frame) {
+                                   size_px first_invalid_frame) {
   const PixelRgbaChannels kTransparentPixel = {0, 0, 0, kAlphaTransparent};
 
   MockMessageHandler message_handler(new NullMutex);

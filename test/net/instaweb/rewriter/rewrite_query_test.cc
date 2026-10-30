@@ -70,7 +70,7 @@ class RewriteQueryTest : public RewriteTestBase {
     for (auto component : components) {
       StringPieceVector attr_value;
       SplitStringPieceToVector(component, ":", &attr_value, false);
-      CHECK_EQ(2, attr_value.size());
+      CHECK_EQ(2u, attr_value.size());
       request_headers.Add(attr_value[0], attr_value[1]);
     }
     return ParseAndScan(request_url, in_query, StringPiece(), &request_headers,

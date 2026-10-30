@@ -611,7 +611,7 @@ TEST_F(RewriteDomainTransformerTest, StreamingCharByChar) {
   CssTagScanner scanner(&transformer, message_handler());
   GoogleString result;
 
-  for (int i = 0; i < STATIC_STRLEN(input); ++i) {
+  for (size_t i = 0; i < STATIC_STRLEN(input); ++i) {
     char character = input[i];
     bool last_piece = (i == (STATIC_STRLEN(input) - 1));
 
