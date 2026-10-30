@@ -49,8 +49,9 @@ const char CriticalImagesBeaconFilter::kCriticalImagesBeaconAddedCount[] =
 // Onload code for img elements to detect whether they are critical or not.
 // The handler is guarded so that a page whose support script did not run
 // (blocked, deferred or stripped by another tool) degrades silently instead
-// of throwing a ReferenceError. Nested ifs instead of && keep the attribute
-// value free of characters that are escaped when the HTML is serialized.
+// of throwing a ReferenceError. Nested ifs are used instead of && so that the
+// serialized attribute value stays byte-identical to this constant (an
+// escaped &amp;&amp; would also execute, but would differ from it).
 const char* CriticalImagesBeaconFilter::kImageOnloadCode =
     "if(window.pagespeed){if(pagespeed.CriticalImages){"
     "pagespeed.CriticalImages.checkImageForCriticality(this);}}";

@@ -599,18 +599,27 @@ TEST(InjectedImageOnloadHandlerTest, HandlersAreGuarded) {
     const char* name;
     const char* code;
     const char* needed;
+    const char* expected;
   } kHandlers[] = {
       {"CriticalImagesBeaconFilter",
        CriticalImagesBeaconFilter::kImageOnloadCode,
-       "if(pagespeed.CriticalImages){"},
+       "if(pagespeed.CriticalImages){",
+       "if(window.pagespeed){if(pagespeed.CriticalImages){"
+       "pagespeed.CriticalImages.checkImageForCriticality(this);}}"},
       {"DelayImagesFilter", DelayImagesFilter::kImageOnloadCode,
-       "if(pagespeed.switchToHighResAndMaybeBeacon){"},
+       "if(pagespeed.switchToHighResAndMaybeBeacon){",
+       "if(window.pagespeed){if(pagespeed.switchToHighResAndMaybeBeacon){"
+       "pagespeed.switchToHighResAndMaybeBeacon(this);}}"},
       {"LazyloadImagesFilter", LazyloadImagesFilter::kImageOnloadCode,
-       "if(pagespeed.lazyLoadImages){"},
+       "if(pagespeed.lazyLoadImages){",
+       "if(window.pagespeed){if(pagespeed.lazyLoadImages){"
+       "pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);}}"},
   };
   for (const auto& handler : kHandlers) {
     GoogleString code(handler.code);
     SCOPED_TRACE(handler.name);
+    // The browser test keeps a copy of this literal.
+    EXPECT_STREQ(handler.expected, handler.code);
     // The first thing the handler does is check that the support script ran.
     EXPECT_EQ(0u, code.find("if(window.pagespeed){")) << code;
     // The object it calls is checked before the call.

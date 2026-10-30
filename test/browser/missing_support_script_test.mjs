@@ -4,10 +4,10 @@
 // Browser test: the inline onload/onerror handlers that the image filters
 // inject must not throw when the support script is missing.
 //
-// The handler strings are read from the filter sources (kImageOnloadCode in
+// The handler strings mirror kImageOnloadCode in
 // critical_images_beacon_filter.cc, delay_images_filter.cc and
-// lazyload_images_filter.cc), so the test cannot drift from the shipped
-// code. Each page carries <img> elements with those handlers while the
+// lazyload_images_filter.cc; the C++ test HandlersAreGuarded pins each
+// constant to the same literal so the copies cannot drift. Each page carries <img> elements with those handlers while the
 // external support script request is aborted (as a blocker, a CDN outage or
 // a script-deferring tool would), so `pagespeed` is never defined.
 //
@@ -20,29 +20,19 @@
 // Run via run_browser_tests.sh (installs playwright + chromium on demand).
 
 import { chromium } from 'playwright';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-// Pull the kImageOnloadCode string literal(s) out of a filter source file.
-function onloadCode(file) {
-  const src = readFileSync(
-      join(repoRoot, 'net', 'instaweb', 'rewriter', file), 'utf8');
-  const m = src.match(/kImageOnloadCode(?:\[\])?\s*=((?:\s*"(?:[^"\\]|\\.)*")+);/);
-  if (!m) throw new Error(`kImageOnloadCode not found in ${file}`);
-  return m[1].match(/"(?:[^"\\]|\\.)*"/g)
-      .map((l) => l.slice(1, -1)).join('');
-}
-
 const HANDLERS = {
-  critical: { code: onloadCode('critical_images_beacon_filter.cc'),
-              global: 'CriticalImages', method: 'checkImageForCriticality' },
-  delay: { code: onloadCode('delay_images_filter.cc'),
-           global: null, method: 'switchToHighResAndMaybeBeacon' },
-  lazy: { code: onloadCode('lazyload_images_filter.cc'),
-          global: 'lazyLoadImages', method: 'loadIfVisibleAndMaybeBeacon' },
+  critical: {
+    code: 'if(window.pagespeed){if(pagespeed.CriticalImages){' +
+          'pagespeed.CriticalImages.checkImageForCriticality(this);}}',
+    global: 'CriticalImages', method: 'checkImageForCriticality' },
+  delay: {
+    code: 'if(window.pagespeed){if(pagespeed.switchToHighResAndMaybeBeacon){' +
+          'pagespeed.switchToHighResAndMaybeBeacon(this);}}',
+    global: null, method: 'switchToHighResAndMaybeBeacon' },
+  lazy: {
+    code: 'if(window.pagespeed){if(pagespeed.lazyLoadImages){' +
+          'pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);}}',
+    global: 'lazyLoadImages', method: 'loadIfVisibleAndMaybeBeacon' },
 };
 
 // 1x1 transparent GIF.
