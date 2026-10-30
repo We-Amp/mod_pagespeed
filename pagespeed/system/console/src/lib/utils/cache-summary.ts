@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
+import { formatBytes } from "./format";
+
 /**
  * The cache leaf describes each cache as an expression such as
  * "Compressed(WriteThroughCache(l1=Stats(prefix=shm_cache,cache=SharedMemCache<64>),…))".
@@ -219,10 +221,16 @@ export function parseBackendStats(raw: string): Array<{ key: string; value: stri
   return raw
     .split("\n")
     .filter((l) => l.trim())
+    // A configured directory with a trailing slash is joined with another
+    // slash by the module: print the path once.
+    .map((line) => line.replace(/([^:/])\/{2,}/g, "$1/"))
     .map((line) => {
       const eqIdx = line.indexOf(":");
       if (eqIdx >= 0) {
-        return { key: line.substring(0, eqIdx).trim(), value: line.substring(eqIdx + 1).trim() };
+        const key = line.substring(0, eqIdx).trim();
+        const value = line.substring(eqIdx + 1).trim();
+        // "Current size bytes: 158002320" reads as bytes elsewhere on the page.
+        return { key, value: /bytes$/i.test(key) && /^\d+$/.test(value) ? formatBytes(Number(value)) : value };
       }
       const spIdx = line.indexOf(" ");
       if (spIdx >= 0) {

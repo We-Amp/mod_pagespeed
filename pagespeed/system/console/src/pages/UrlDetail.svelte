@@ -313,7 +313,7 @@
               <td class="num" data-label="Size">{row.size === null ? "—" : formatBytes(row.size)}</td>
               <td class="num" data-label="Quality">
                 {#if row.quality !== null}
-                  <QualityBadge score={row.quality} />
+                  <QualityBadge score={row.quality} showLabel={false} />
                 {:else}
                   —
                 {/if}
@@ -468,6 +468,9 @@
   }
 
   .table-wrapper {
+    /* Twelve columns: a tighter step between them keeps the table inside its
+       frame on a desktop, with wider glyphs too. */
+    --ps-cell-pad-x: var(--ps-space-sm);
     overflow-x: auto;
     border: 1px solid var(--ps-border);
     border-radius: var(--ps-border-radius);
@@ -487,14 +490,15 @@
 
   th {
     text-align: left;
-    padding: var(--ps-space-sm) var(--ps-space-md);
+    padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
     font-weight: 600;
     border-bottom: 2px solid var(--ps-border);
-    white-space: nowrap;
+    /* A plain header may wrap, to keep a twelve-column table in its frame. */
+    white-space: normal;
   }
 
   td {
-    padding: var(--ps-space-sm) var(--ps-space-md);
+    padding: var(--ps-space-sm) var(--ps-cell-pad-x, var(--ps-space-md));
     border-bottom: 1px solid var(--ps-border-light);
   }
 

@@ -58,8 +58,14 @@ describe("cache summaries", () => {
   it("backend statistics: key and value per line", () => {
     expect(parseBackendStats("Current entries: 51329\nCurrent size bytes: 83039256")).toEqual([
       { key: "Current entries", value: "51329" },
-      { key: "Current size bytes", value: "83039256" },
+      { key: "Current size bytes", value: "79.2 MB" },
     ]);
+  });
+
+  it("backend statistics print a configured path once, with a single slash", () => {
+    const rows = parseBackendStats("Cyclone cache '/var/cache/mod_pagespeed//cyclone.dat' statistics:\nEvictions: 0");
+    expect(rows[0].key).toBe("Cyclone cache '/var/cache/mod_pagespeed/cyclone.dat' statistics");
+    expect(parseBackendStats("Origin: https://example.test//a")[0].value).toBe("https://example.test/a");
   });
 
   it("'none' and empty summaries have no layers", () => {

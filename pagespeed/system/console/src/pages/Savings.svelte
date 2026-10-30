@@ -630,6 +630,13 @@
     text-align: left;
     border-bottom: 1px solid var(--ps-border-light);
   }
+  /* Figures keep their unit on one line ("33.8 MB"); only host names break. */
+  .breakdown td {
+    white-space: nowrap;
+  }
+  .breakdown td.host-cell {
+    white-space: normal;
+  }
   .breakdown th {
     color: var(--ps-text-secondary);
     font-weight: 600;

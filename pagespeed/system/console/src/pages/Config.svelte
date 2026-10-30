@@ -95,9 +95,10 @@
       role="tabpanel"
       id="config-panel"
       aria-labelledby={hasEffectiveConfig ? `config-tab-${view}` : undefined}
-      tabindex="0"
     >
-      <div class="config-wrapper">
+      <!-- A box that may scroll is a named region that takes keyboard focus (WCAG 2.1.1). -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div class="config-wrapper" role="region" aria-label={hasEffectiveConfig && view === "effective" ? "Effective configuration" : "Server configuration"} tabindex="0">
         <pre class="config-block">{configText}</pre>
       </div>
     </div>
