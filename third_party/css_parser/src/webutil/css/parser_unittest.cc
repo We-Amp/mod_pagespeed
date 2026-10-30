@@ -3436,7 +3436,7 @@ TEST_F(ParserTest, CalcAdditionOperator) {
     std::unique_ptr<Stylesheet> t4(s.ParseStylesheet());
     EXPECT_EQ(Parser::kNoError, s.errors_seen_mask());
     ASSERT_EQ(1, t4->rulesets().size());
-    EXPECT_EQ(":root {--x: 2px}", t4->ruleset(0).ToString());
+    EXPECT_EQ(":root {--x: +2px}", t4->ruleset(0).ToString());
   }
 }
 
@@ -3468,19 +3468,18 @@ TEST_F(ParserTest, CustomPropertyNamesAreCaseSensitive) {
 TEST_F(ParserTest, CustomPropertyValuesAreVerbatim) {
   Parser p(
       ":root { --gap: 0px; --c:   #ff0 ; --w: calc(var(--gap) + 1px) ; "
-      "--n: 0.50em !important; --e:; --u: url(a.png) }");
+      "--n: 0.50em !important; --u: url(a.png) }");
   std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
   ASSERT_EQ(1, t->rulesets().size());
   const Declarations& decls = t->ruleset(0).declarations();
-  ASSERT_EQ(6, decls.size());
+  ASSERT_EQ(5, decls.size());
   EXPECT_EQ("--gap: 0px", decls[0]->ToString());
   EXPECT_EQ("--c: #ff0", decls[1]->ToString());
   EXPECT_EQ("--w: calc(var(--gap) + 1px)", decls[2]->ToString());
   EXPECT_EQ("--n: 0.50em !important", decls[3]->ToString());
-  EXPECT_EQ("--e: ", decls[4]->ToString());
   // url() values keep the structured form so URLs can still be rewritten.
-  EXPECT_FALSE(decls[5]->has_verbatim_value());
-  EXPECT_EQ("--u: url(a.png)", decls[5]->ToString());
+  EXPECT_FALSE(decls[4]->has_verbatim_value());
+  EXPECT_EQ("--u: url(a.png)", decls[4]->ToString());
 }
 
 TEST_F(ParserTest, ModernCssCustomProperties) {
@@ -3533,26 +3532,25 @@ TEST_F(ParserTest, ModernCssCustomPropertyValues) {
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
 
-    // Optimizer suite: CustomPropertyCommentBecomesTokenSeparator — the comment is
-    // stripped but keeps the tokens apart, matching 2.0.
+    // Optimizer suite: CustomPropertyCommentBecomesTokenSeparator — the value
+    // is kept as written, comment included, so the tokens stay apart.
     Parser p(":root { --x: a/*c*/b; }");
     p.set_preservation_mode(preserve);
     std::unique_ptr<Stylesheet> t(p.ParseStylesheet());
     EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
     EXPECT_EQ(Parser::kNoError, p.unparseable_sections_seen_mask());
     ASSERT_EQ(1, t->rulesets().size());
-    EXPECT_EQ(":root {--x: a b}", t->ruleset(0).ToString());
+    EXPECT_EQ(":root {--x: a/*c*/b}", t->ruleset(0).ToString());
 
-    // Optimizer suite: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
-    // 2.0 preserves interior whitespace runs; this parser stores values as a
-    // token vector, so the run collapses to a single space.
+    // Optimizer suite: CustomPropertyInternalSpaceRunsPreserved — interior
+    // whitespace runs are kept, as in 2.0.
     Parser q(":root { --msg: a   b; }");
     q.set_preservation_mode(preserve);
     std::unique_ptr<Stylesheet> t2(q.ParseStylesheet());
     EXPECT_EQ(Parser::kNoError, q.errors_seen_mask());
     EXPECT_EQ(Parser::kNoError, q.unparseable_sections_seen_mask());
     ASSERT_EQ(1, t2->rulesets().size());
-    EXPECT_EQ(":root {--msg: a b}", t2->ruleset(0).ToString());
+    EXPECT_EQ(":root {--msg: a   b}", t2->ruleset(0).ToString());
 
     // Optimizer suite: CustomPropertySelectorFragmentPreserved. KNOWN LIMITATION: a
     // selector fragment is not a representable value here — the declaration

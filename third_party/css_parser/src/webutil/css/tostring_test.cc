@@ -147,30 +147,29 @@ TEST_F(ToStringTest, CalcAdditionOperator) {
 // css_minify_test.cc, adapted to this parser's serialization semantics — the
 // two CSS implementations share test material, not code.
 TEST_F(ToStringTest, ModernCssCustomProperties) {
-  // Optimizer suite: CssCustomProperties. Colors are canonicalized even inside
-  // custom-property values.
+  // Optimizer suite: CssCustomProperties. Custom-property values are kept as
+  // written, so colors are not canonicalized.
   {
     Css::Parser parser("--my-color: #ff0");
     std::unique_ptr<Css::Declarations> decls(parser.ParseDeclarations());
-    EXPECT_EQ("--my-color: #ffff00", decls->ToString());
+    EXPECT_EQ("--my-color: #ff0", decls->ToString());
   }
-  // Optimizer suite: CustomPropertyInternalSpaceRunsPreserved. DOCUMENTED DIFFERENCE:
-  // interior whitespace runs collapse to a single space here (values are
-  // stored as a token vector, not as raw text).
+  // Optimizer suite: CustomPropertyInternalSpaceRunsPreserved. Interior
+  // whitespace runs are kept.
   {
     Css::Parser parser("--msg: a   b");
     std::unique_ptr<Css::Declarations> decls(parser.ParseDeclarations());
-    EXPECT_EQ("--msg: a b", decls->ToString());
+    EXPECT_EQ("--msg: a   b", decls->ToString());
   }
   // Optimizer suite: CustomPropertyCommentBecomesTokenSeparator.
   {
     Css::Parser parser("--x: a/*c*/b");
     std::unique_ptr<Css::Declarations> decls(parser.ParseDeclarations());
-    EXPECT_EQ("--x: a b", decls->ToString());
+    EXPECT_EQ("--x: a/*c*/b", decls->ToString());
   }
 
   // Identity round-trips.
-  TESTDECLARATIONS("--my-color: #ffff00");
+  TESTDECLARATIONS("--my-color: #ff0");
   TESTDECLARATIONS("color: var(--my-color)");
   TESTDECLARATIONS("width: calc(100% - 20px)");
 }
