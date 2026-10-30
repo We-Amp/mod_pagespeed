@@ -877,6 +877,30 @@ TEST_F(CssCombineFilterWithDebugTest, IntegrityLinkBarrier) {
              true);
 }
 
+// An integrity link splits the combine group; links on each side still combine
+// among themselves and the integrity link is emitted unchanged.
+TEST_F(CssCombineFilterTest, IntegrityLinkSplitsCombination) {
+  SetHtmlMimetype();
+  UseMd5Hasher();
+  SetupCssResources("a.css", "b.css");
+  ResponseHeaders css_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &css_headers);
+  SetFetchResponse(StrCat(kDomain, "e.css"), css_headers, kCCssBody);
+  static const char kIntegrity[] =
+      "<link rel=\"stylesheet\" type=\"text/css\" href=\"d.css\" "
+      "integrity=\"sha384-x\">";
+  ParseUrl(StrCat(kDomain, "split.html"),
+           StrCat(Link("a.css"), Link("b.css"), kIntegrity, Link("c.css"),
+                  Link("e.css")));
+  StringVector css_urls;
+  CollectCssLinks("split", output_buffer_, &css_urls);
+  ASSERT_EQ(3, css_urls.size());  // a+b, d.css, c+e
+  EXPECT_NE(StringPiece::npos, css_urls[0].find("a.css+b.css"));
+  EXPECT_EQ("d.css", css_urls[1]);
+  EXPECT_NE(StringPiece::npos, css_urls[2].find("c.css+e.css"));
+  EXPECT_HAS_SUBSTR(kIntegrity, output_buffer_);
+}
+
 TEST_F(CssCombineFilterTest, AlternateStylesheetBarrier) {
   SetHtmlMimetype();
   static const char kBarrier[] =

@@ -172,8 +172,8 @@ TEST_F(CssInlineFilterTest, InlineCssSimple) {
 TEST_F(CssInlineFilterTest, DoNotInlineIntegrityLink) {
   const GoogleString css = "BODY { color: red; }\n";
   TestNoInlineCss("http://www.example.com/index.html",
-                  "http://www.example.com/styles.css",
-                  "integrity=\"sha384-x\"", css, css,
+                  "http://www.example.com/styles.css", "integrity=\"sha384-x\"",
+                  css, css,
                   "CSS not inlined because of the integrity attribute");
 }
 

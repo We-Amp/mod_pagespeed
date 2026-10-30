@@ -130,6 +130,10 @@ TEST_F(DomainRewriteFilterTest, IntegrityResourcesStayOnOriginHost) {
                            " INTEGRITY=\"sha384-x\">"));
   ValidateNoChanges("sri_js", StrCat("<script src=", from_js,
                                      " integrity=\"sha384-x\"></script>"));
+  // The sharded mapping (kFrom2Domain -> kTo2Domain) is left alone too.
+  ValidateNoChanges("sri_js_sharded",
+                    StrCat("<script src=", kFrom2Domain,
+                           "b.js integrity=\"sha384-x\"></script>"));
   EXPECT_EQ(0, DeltaRewrites());
   ExpectChange("no_sri", from_css, to_css);
 }
