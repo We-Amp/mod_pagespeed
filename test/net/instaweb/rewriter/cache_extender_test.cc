@@ -22,6 +22,7 @@
 #include "net/instaweb/rewriter/public/cache_extender.h"
 
 #include <cstdint>
+#include <vector>
 
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/logging_proto.h"
