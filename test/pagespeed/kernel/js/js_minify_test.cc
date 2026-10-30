@@ -880,6 +880,43 @@ TEST_F(JsMinifyTest, LeaveIEConditionalCompilationComments) {
       "@*/");
 }
 
+TEST_F(JsMinifyTest, KeepsBangLicenseComment) {
+  CheckNewMinification("/*! (c) Acme, MIT */\nvar a = 1;",
+                       "/*! (c) Acme, MIT */var a=1;");
+}
+
+TEST_F(JsMinifyTest, KeepsLicenseTagComment) {
+  CheckNewMinification("/**\n * @license Acme v1\n * MIT\n */\nvar a = 1;",
+                       "/**\n * @license Acme v1\n * MIT\n */var a=1;");
+}
+
+TEST_F(JsMinifyTest, KeepsPreserveTagComment) {
+  CheckNewMinification("/* @preserve Acme v1 */\nvar a = 1;",
+                       "/* @preserve Acme v1 */var a=1;");
+}
+
+TEST_F(JsMinifyTest, KeepsLicenseCommentMidScript) {
+  CheckNewMinification("var a = 1;  /*! keep */  var b = 2;",
+                       "var a=1;/*! keep */var b=2;");
+  // Other comments around it are still dropped.
+  CheckNewMinification("/* drop */ var a = 1; /*! keep */ // drop\nvar b = 2;",
+                       "var a=1;/*! keep */var b=2;");
+}
+
+TEST_F(JsMinifyTest, DropsPlainComments) {
+  CheckNewMinification("/* plain */ var a = 1; // plain", "var a=1;");
+  CheckNewMinification("/** doc comment */ var a = 1;", "var a=1;");
+  // Line comments are never kept, even if they look like licence comments.
+  CheckNewMinification("//! not kept\n// @license not kept\nvar a = 1;",
+                       "var a=1;");
+}
+
+TEST_F(JsMinifyTest, RetainedLicenseCommentNoSlashGlue) {
+  // As for conditional-compilation comments, the comment must not weld onto a
+  // preceding division slash.
+  CheckNewMinification("x = a / /*! c */ b;", "x=a/ /*! c */b;");
+}
+
 TEST_F(JsMinifyTest, RetainedCommentNoRegexGlue) {
   // Without a separator, the "/" and the retained comment's "/*" fuse into
   // "//" -- a line comment that swallows the rest of the line and silently

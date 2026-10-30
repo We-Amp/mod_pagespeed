@@ -47,9 +47,9 @@
 //     match kind+text one-for-one, and an error token (decline-path
 //     remainder passthrough) must match byte-for-byte.  Comments are
 //     dropped by the minifier EXCEPT IE conditional-compilation comments
-//     (/*@...@*/) and the leading #! hashbang, which it must retain — so
-//     those two are semantic-channel members (a dropped CC comment or
-//     hashbang flags).
+//     (/*@...@*/), licence comments (/*! */, @license, @preserve) and the
+//     leading #! hashbang, which it must retain — so those are
+//     semantic-channel members (a dropped retained comment flags).
 //   * ASI channel: whitespace and comments are the sanctioned-different
 //     channel, but a linebreak the minifier keeps for automatic semicolon
 //     insertion is semantic.  For every restricted-production keyword
@@ -140,6 +140,7 @@
 namespace {
 
 using pagespeed::JsKeywords;
+using pagespeed::js::IsRetainedBlockComment;
 using pagespeed::js::JsTokenizerPatterns;
 
 // Valid-JS-biased seed set: ASI restricted productions, comment/newline
@@ -197,11 +198,11 @@ enum class OracleTrip { kNone, kIdempotence, kTokenChannel };
 // Whitespace-class tokens: the sanctioned-different channel (spaces,
 // linebreaks, semicolon-insertion markers, and comments).  Comments are
 // dropped by the minifier EXCEPT IE conditional-compilation comments
-// (/*@...@*/) and the leading #! hashbang, which it must retain, so
+// (/*@...@*/), licence comments and the leading #! hashbang, which it must retain, so
 // those two are NOT skipped here — they belong to the semantic channel.
 bool IsRetainedComment(std::string_view t) {
-  return t.substr(0, 2) == "#!" || (t.size() >= 6 && t.substr(0, 3) == "/*@" &&
-                                    t.substr(t.size() - 3) == "@*/");
+  return t.substr(0, 2) == "#!" ||
+         IsRetainedBlockComment(StringPiece(t.data(), t.size()));
 }
 
 bool IsWsClass(JsKeywords::Type t, std::string_view text) {

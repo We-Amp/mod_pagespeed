@@ -196,7 +196,8 @@ JsKeywords::Type JsMinifyingTokenizer::NextTokenHelper(
       return type;
     } else if (type == JsKeywords::kComment) {
       // Emit comments that look like they might be IE conditional compilation
-      // comments; treat all other comments as whitespace.  A leading
+      // comments, and licence comments (/*! ... */, @license, @preserve);
+      // treat all other comments as whitespace.  A leading
       // `#!...` hashbang line is likewise emitted verbatim (including its
       // terminating linebreak, so node-executable scripts stay directly
       // executable).
@@ -210,9 +211,9 @@ JsKeywords::Type JsMinifyingTokenizer::NextTokenHelper(
         *token_out = token;
         *position_out = first_position;  // Beginning of whitespace/comments.
         return type;
-      } else if (token.size() >= 6 && strings::StartsWith(token, "/*@") &&
-                 strings::EndsWith(token, "@*/")) {
-        // A retained IE conditional-compilation comment is emitted as a real
+      } else if (IsRetainedBlockComment(token)) {
+        // A retained IE conditional-compilation comment, or a licence comment
+        // (/*! ... */, @license, @preserve), is emitted as a real
         // token, so it must pass through the same whitespace machinery as any
         // other emitted token.  Two glue hazards otherwise slip through: the
         // leading "/*@" can weld onto a preceding "/" (a regex or division
