@@ -99,6 +99,10 @@ common --experimental_allow_tags_propagation
 # Linux hosts and build images ship both tools, so use the preinstalled ones.
 build:linux --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
 build:linux --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
+# Same for macOS: the BCR m4's generated gnulib spawn.h redeclares
+# posix_spawn_file_actions_addchdir, which the macOS SDK also declares,
+# so it fails to compile there. macOS ships m4, so use the preinstalled one.
+build:macos --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_m4_toolchain
 
 # Enable position independent code (this is the default on macOS and Windows)
 # (Workaround for https://github.com/bazelbuild/rules_foreign_cc/issues/421)
@@ -232,6 +236,14 @@ build:clang-asan --linkopt -fuse-ld=lld
 
 # macOS
 build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
+# Apple clang's libc++ warns "The selected platform is no longer supported
+# by libc++" in every TU that touches it when the deployment target is below
+# its supported floor (the cc_configure default was 10.11; 171 such warnings
+# in one full local build). 11.0 is the arm64 floor. macOS is a dev-only
+# platform for this repo (shipped artifacts are Linux/Windows), so no
+# shipped-artifact compatibility is affected.
+build:macos --macos_minimum_os=11.0
+build:macos --host_macos_minimum_os=11.0
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --define tcmalloc=disabled
@@ -241,6 +253,25 @@ build:macos --cxxopt=-faligned-allocation --host_cxxopt=-faligned-allocation
 # Suppress 'register' keyword errors from gperf-generated code (deprecated in
 # C++17). -Wregister is C++/ObjC++-only, hence --cxxopt.
 build:macos --cxxopt=-Wno-register --host_cxxopt=-Wno-register
+# Bazel deliberately repeats cc_library linkopts once per contributing
+# library, and protobuf's macOS LINK_OPTS ("-lpthread -lm -framework
+# CoreFoundation", external/protobuf+/build_defs/cpp_opts.bzl) lands on
+# every protobuf library in a closure, on top of the toolchain's own
+# default link libs ("-ldl -lc++ -lm") and our daemon_adapter's -ldl.
+# ld64 dedupes them itself and warns about every duplicate; the flag
+# needs the Xcode 15 linker or newer (classic ld64 rejects it) and GNU
+# ld errors on it, hence macOS-only - the Linux link line is untouched.
+build:macos --linkopt=-Wl,-no_warn_duplicate_libraries
+build:macos --host_linkopt=-Wl,-no_warn_duplicate_libraries
+# Third-party code is not ours to fix (e.g. re2's deprecated MutexLock,
+# cyclone's thread-safety annotations, spdlog's deprecated fmt
+# conversion); keep first-party warnings visible by disabling ALL
+# warnings for translation units under external/ only. The regex
+# matches the external exec paths; main-repo files never start with
+# external/, so first-party diagnostics are unchanged. Linux builds
+# will need the same boundary once warnings are enforced there.
+build:macos --per_file_copt=external/.*@-w
+build:macos --host_per_file_copt=external/.*@-w
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan

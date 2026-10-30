@@ -54,6 +54,9 @@ cc_library(
         "apr_thread_compatible_pool.h",
     ],
     copts = select({
+        # mac/x64 gen headers on Apple Silicon too, matching @apr's own
+        # select in bazel/apr.bzl.
+        "@platforms//os:macos": ["-Ithird_party/apr/gen/arch/mac/x64/include/"],
         "//bazel:linux_arm64": ["-Ithird_party/apr/gen/arch/linux/arm64/include/"],
         "//conditions:default": ["-Ithird_party/apr/gen/arch/linux/x64/include/"],
     }),
@@ -83,8 +86,11 @@ cc_library(
 # Core Apache library without mod_instaweb.cc.
 # Use this for tests to avoid the static ApacheProcessContext in mod_instaweb.cc
 # which conflicts with test infrastructure's RewriteTestBaseProcessContext.
+# Linux-only: needs the host's Apache httpd headers (-I/usr/include/apache2),
+# like every target in this package that includes httpd.h.
 cc_library(
     name = "apache_core",
+    target_compatible_with = ["@platforms//os:linux"],
     srcs = [
         "apache_config.cc",
         "apache_fetch.cc",
@@ -171,8 +177,10 @@ cc_library(
 # Full Apache library including mod_instaweb.cc (Apache module entry point).
 # This includes a static ApacheProcessContext that initializes the module.
 # For tests, use :apache_core instead to avoid ProcessContext conflicts.
+# Linux-only, like apache_core: needs the host's Apache httpd headers.
 cc_library(
     name = "apache",
+    target_compatible_with = ["@platforms//os:linux"],
     srcs = [
         "mod_instaweb.cc",
     ],

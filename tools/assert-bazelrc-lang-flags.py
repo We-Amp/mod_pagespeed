@@ -122,6 +122,7 @@ AGNOSTIC_FLAGS = {
     "-fno-sanitize-blacklist", "-fsanitize-memory-track-origins=2",
     # warnings that both frontends accept
     "-Wall", "-Wextra",
+    "-w",
     "-Wno-deprecated-declarations",
     "-Wno-unknown-warning-option",
     # debug-info level: valid for C and C++ alike (sanitizer configs use it

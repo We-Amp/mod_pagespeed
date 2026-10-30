@@ -196,6 +196,12 @@ cmake(
     name = "libmemcached",
     lib_source = "@libmemcached_src//:all_srcs",
     build_args = cmake_build_args(),
+    # Linux-only, matching its sole consumer //pagespeed/system:memcached_cache
+    # (same reason: the macOS build cannot compile libmemcached — Envoy's
+    # -UDEBUG copt strips the -DDEBUG=0 that libmemcached's own CMake adds).
+    # Without this, `bazel build //...` fails on macOS on this leaf target
+    # even though nothing off Linux depends on it.
+    target_compatible_with = ["@platforms//os:linux"],
     out_static_libs = select({
         "@platforms//os:windows": [
             "libmemcached.lib",
