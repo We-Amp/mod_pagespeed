@@ -21,6 +21,7 @@
 
 #include "ap_mpm.h"
 #include "apr_errno.h"
+#include "http_core.h"
 #include "pagespeed/system/optimization_thread_policy.h"
 
 namespace net_instaweb {
@@ -82,6 +83,14 @@ int ProcessConcurrencyFromMpmInfo(const MpmProcessInfo& info) {
     return kUnknownProcessConcurrency;
   }
   return info.max_daemons;
+}
+
+bool IsConfigTestRunMode(int run_mode) {
+  return run_mode == AP_SQ_RM_CONFIG_TEST;
+}
+
+bool IsConfigTestRun() {
+  return IsConfigTestRunMode(ap_state_query(AP_SQ_RUN_MODE));
 }
 
 }  // namespace net_instaweb

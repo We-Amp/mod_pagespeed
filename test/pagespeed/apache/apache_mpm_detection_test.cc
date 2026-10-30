@@ -32,6 +32,7 @@
 #include <type_traits>
 
 #include "ap_mpm.h"
+#include "http_core.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
@@ -222,6 +223,26 @@ TEST(ApachePostConfigWiringTest, PostConfigFinalizesThreadCounts) {
   EXPECT_HAS_SUBSTR("caches()->set_thread_limit(", source)
       << "pagespeed_post_config() must update the cache thread limit once the "
          "thread counts are resolved; Init() ran before they were known.";
+}
+
+// A configuration test must not open the cache volumes (RootInit).
+TEST(ApacheMpmDetectionTest, ConfigTestRunModeIsRecognized) {
+  EXPECT_TRUE(IsConfigTestRunMode(AP_SQ_RM_CONFIG_TEST));
+  EXPECT_FALSE(IsConfigTestRunMode(AP_SQ_RM_NORMAL));
+  EXPECT_FALSE(IsConfigTestRunMode(AP_SQ_RM_UNKNOWN));
+}
+
+TEST(ApacheMpmDetectionTest, PostConfigSkipsRootInitInConfigTest) {
+  StdioFileSystem file_system;
+  GoogleMessageHandler handler;
+  GoogleString source;
+  const GoogleString path =
+      StrCat(GTestSrcDir(), "/pagespeed/apache/mod_instaweb.cc");
+  ASSERT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
+  EXPECT_HAS_SUBSTR(
+      "if (!IsConfigTestRun()) {\n    factory->RootInit();\n  }", source)
+      << "pagespeed_post_config() must not call RootInit() during a "
+         "configuration test: it creates and syncs the cache volumes.";
 }
 
 }  // namespace

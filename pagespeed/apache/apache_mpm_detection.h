@@ -93,6 +93,14 @@ MpmProcessInfo QueryMpmProcessInfo();
 // exposed for testing.
 int ProcessConcurrencyFromMpmInfo(const MpmProcessInfo& info);
 
+// True iff run_mode, as reported by ap_state_query(AP_SQ_RUN_MODE), is the
+// configuration-test run (httpd -t).  Pure; exposed for testing.
+bool IsConfigTestRunMode(int run_mode);
+
+// True iff httpd is only validating the configuration (httpd -t), in which
+// case nothing may create cache volumes or other on-disk state.
+bool IsConfigTestRun();
+
 }  // namespace net_instaweb
 
 #endif  // PAGESPEED_APACHE_APACHE_MPM_DETECTION_H_

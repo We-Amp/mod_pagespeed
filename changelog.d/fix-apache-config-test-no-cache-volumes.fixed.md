@@ -1,0 +1,1 @@
+- Apache: a configuration test (`httpd -t` / `apachectl -t`) no longer creates or opens the cache volumes, so it finishes quickly even on a slow disk.

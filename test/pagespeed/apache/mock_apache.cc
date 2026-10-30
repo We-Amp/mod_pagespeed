@@ -30,6 +30,7 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "apr_buckets.h"  // NOLINT - for the ap_pass_brigade mock
 #include "apr_strings.h"  // NOLINT - for apr_pstrdup
+#include "http_core.h"  // NOLINT - for ap_state_query declarations
 #include "http_log.h"     // NOLINT - for ap_log_*_ declarations
 #include "http_protocol.h"  // NOLINT - for AP_DECLARE_HOOK types
 #include "http_request.h"   // NOLINT - for AP_DECLARE_HOOK types
@@ -318,6 +319,11 @@ apr_status_t ap_mpm_query(int query_code, int* result) {
     *result = 1;
   }
   return APR_SUCCESS;
+}
+
+int ap_state_query(int query_code) {
+  // Normal run; tests that need another mode test the pure helper instead.
+  return query_code == AP_SQ_RUN_MODE ? AP_SQ_RM_NORMAL : AP_SQ_NOT_SUPPORTED;
 }
 
 int ap_directory_walk(request_rec* r) {

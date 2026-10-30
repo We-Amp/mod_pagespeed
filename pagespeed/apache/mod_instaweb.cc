@@ -39,6 +39,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/apache/apache_config.h"
+#include "pagespeed/apache/apache_mpm_detection.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/apr_timer.h"
@@ -1145,7 +1146,13 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
     ApacheRewriteDriverFactory::InitStats(factory->statistics());
   }
 
-  factory->RootInit();
+  // A configuration test (httpd -t) validates the configuration and must not
+  // create cache volumes: RootInit registers every cache path and opens
+  // (creating and syncing, on a fresh directory) its volumes, which takes over
+  // a minute on a slow disk.  Nothing above depends on it.
+  if (!IsConfigTestRun()) {
+    factory->RootInit();
+  }
 
   return APACHE_OK;
 }
