@@ -6,7 +6,7 @@ import { LIVE_BASE } from "./support/live";
 
 // Use the Vite dev server (which proxies API calls to the real backend)
 // so that we test the latest source. The dev server must be running.
-// Override with ADMIN_BASE_URL env var if needed.
+// Override with the CONSOLE_LIVE_URL env var if needed.
 const BASE = LIVE_BASE;
 
 // Helper: navigate to a hash route and wait for content to load.

@@ -8,7 +8,6 @@ const BASE = LIVE_BASE;
 
 async function navigateTo(page, hash: string) {
   await page.goto(`${BASE}${hash}`);
-  await page.waitForTimeout(500);
 }
 
 test.describe("Graphs page", () => {
@@ -38,7 +37,7 @@ test.describe("Graphs page", () => {
     if ((await glance.count()) > 0) {
       // Every drawn chart is a labelled image with a title and a latest
       // value; charts without data yet are listed in the hidden notice.
-      const cards = page.locator('[data-testid^="curated-"]:not([data-testid="curated-latest"]):not([data-testid="curated-hidden"])');
+      const cards = page.locator("section.curated section.card");
       const drawn = await cards.count();
       const hidden = await page.getByTestId("curated-hidden").count();
       expect(drawn + hidden).toBeGreaterThan(0);

@@ -756,7 +756,7 @@ jobs:
           curl -fsS -o /dev/null "${CONSOLE_LIVE_URL}/pagespeed_admin/"
           cd /workspace/pagespeed/system/console
           corepack pnpm install --frozen-lockfile
-          sudo env "PATH=${PATH}" "HOME=${HOME}" corepack pnpm exec playwright install-deps chromium
+          sudo ./node_modules/.bin/playwright install-deps chromium
           corepack pnpm exec playwright install chromium
           corepack pnpm exec playwright test --project=live --workers=1 --reporter=list,html
           EOS
