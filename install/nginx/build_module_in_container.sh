@@ -776,6 +776,8 @@ BAZEL_FLAGS=(
   "--config=vendored" "-c" "opt"
   "--cxxopt=-std=c++20" "--host_cxxopt=-std=c++20"
   "--define=go_build=disabled"
+  # Same hardening as the other shipped artifacts (.bazelrc build:hardening).
+  "--config=hardening"
 )
 # NOTE: we deliberately do NOT add --disk_cache here, even when BAZEL_DISK_CACHE
 # is set (the GA-blocking materialization fix). The merged PSOL archive is
@@ -1252,6 +1254,9 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
     --with-threads
     --with-cc-opt="${CC_OPT}"
   )
+  # Full RELRO on the module link (the Bazel hardening config does not reach
+  # nginx's own `make modules` link).
+  RELRO_LDOPT="-Wl,-z,relro -Wl,-z,now"
   if [ "${DISTRO}" = "focal" ]; then
     # Link the module with gcc-13 (matches the bazel objects' libstdc++-13 ABI;
     # focal's default cc=gcc-9 would pull libstdc++-9 and mis-resolve the C++23
@@ -1259,7 +1264,7 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
     # libstdc++.so.6 / libgcc_s.so.1 NEEDED — it then loads on hosts with an older
     # libstdc++ (Debian 11 etc.). The glibc floor is set by focal's glibc 2.31.
     export CC=gcc-13
-    CONFIGURE_ARGS+=( --with-ld-opt="-static-libstdc++ -static-libgcc" )
+    CONFIGURE_ARGS+=( --with-ld-opt="-static-libstdc++ -static-libgcc ${RELRO_LDOPT}" )
   elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
     # Distro-stock targets. We do NOT override CC here: nginx's
     # configure pollutes the global CFLAGS with the module config's `-std=c++17`
@@ -1272,7 +1277,9 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
     # C++ runtime + clang++ link compiler are injected ONLY on the module .so link
     # rule via the post-configure sed below (NOT via --with-ld-opt, whose configure
     # probe links a C test and would reject the C++-only -static-libstdc++).
-    :
+    CONFIGURE_ARGS+=( --with-ld-opt="${RELRO_LDOPT}" )
+  else
+    CONFIGURE_ARGS+=( --with-ld-opt="${RELRO_LDOPT}" )
   fi
   ./configure "${CONFIGURE_ARGS[@]}"
   if [ "${DISTRO}" = "focal" ]; then
@@ -1338,6 +1345,10 @@ BUILT_SO="${NGX_SRC}/objs/ngx_pagespeed.so"
 
 mkdir -p "$(dirname "${OUT_SO}")"
 install -m 644 "${BUILT_SO}" "${OUT_SO}"
+
+# Fail the build if the module is not fully hardened (RELRO, BIND_NOW, canary,
+# FORTIFY, non-executable stack).
+bash "${SRCDIR}/tools/assert-binary-hardening.sh" "${OUT_SO}"
 
 # ---------------------------------------------------------------------------
 # 7. Sanity: embedded module->version must match the target nginx; D4 hygiene.

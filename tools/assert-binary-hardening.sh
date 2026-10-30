@@ -8,11 +8,12 @@
 # on each built .so, BEFORE stripping/packaging, so a shipped artifact can never
 # silently regress to un-hardened. Needs only readelf (binutils).
 #
-# Asserts the four properties verified to land on the linked output:
+# Asserts the properties verified to land on the linked output:
 #   1. Full RELRO   — a GNU_RELRO segment is present, and
 #   2. BIND_NOW     — DT_FLAGS BIND_NOW / DT_FLAGS_1 NOW (GOT resolved + RO at load)
 #   3. Stack canary — __stack_chk_fail is referenced (-fstack-protector-strong)
 #   4. FORTIFY      — fortified *_chk symbols are referenced (_FORTIFY_SOURCE=2)
+#   5. NX stack     — a GNU_STACK segment exists and is not executable
 #
 # NOT asserted: CET/BTI GNU-property notes. Branch-protection (-fcf-protection /
 # -mbranch-protection) instruments our code but the binary-level enforcement note
@@ -23,6 +24,7 @@
 set -euo pipefail
 
 BIN="${1:?usage: assert-binary-hardening.sh <binary>}"
+command -v readelf >/dev/null || { echo "FAIL: readelf not found" >&2; exit 1; }
 [ -f "${BIN}" ] || { echo "FAIL: ${BIN} not found" >&2; exit 1; }
 
 echo "=== binary-hardening assertion: ${BIN} ==="
@@ -69,6 +71,18 @@ if [ "${NCHK:-0}" -gt 0 ]; then
 else
   echo "FAIL: no fortified *_chk symbols — _FORTIFY_SOURCE=2 not in effect." >&2
   RC=1
+fi
+
+# 5. Non-executable stack: GNU_STACK present with flags RW (no E).
+STACK_LINE=$(grep -m1 GNU_STACK <<<"${RELF_L}" || true)
+if [ -z "${STACK_LINE}" ]; then
+  echo "FAIL: no GNU_STACK segment — loader may assume an executable stack." >&2
+  RC=1
+elif [[ "${STACK_LINE}" == *RWE* ]]; then
+  echo "FAIL: GNU_STACK is executable (RWE)." >&2
+  RC=1
+else
+  echo "OK: GNU_STACK present and non-executable."
 fi
 
 if [ "${RC}" -ne 0 ]; then
