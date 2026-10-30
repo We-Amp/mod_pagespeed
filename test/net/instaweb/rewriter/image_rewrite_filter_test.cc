@@ -2065,10 +2065,10 @@ TEST_F(ImageRewriteTest, TestLoggingWithOptimize) {
           IMAGE_UNKNOWN /* low res image type */, _ /* low_res_data_size */)));
   // Without resize, it's not optimizable.
   // With resize, the image shrinks quite a bit, and we can inline it
-  // given the 10K threshold explicitly set above.  This also strips the
-  // size information, which is now embedded in the image itself anyway.
+  // given the 10K threshold explicitly set above.  The size
+  // attributes are kept so the browser can reserve layout space.
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypePng,
-                    kResizedDims, "", true, true);
+                    kResizedDims, kResizedDims, true, true);
 }
 
 TEST_F(ImageRewriteTest, InlineTestWithoutOptimize) {
@@ -2117,10 +2117,10 @@ TEST_F(ImageRewriteTest, InlineTestWithResizeWithOptimize) {
   const char kResizedDims[] = " width=48 height=64";
   // Without resize, it's not optimizable.
   // With resize, the image shrinks quite a bit, and we can inline it
-  // given the 10K threshold explicitly set above.  This also strips the
-  // size information, which is now embedded in the image itself anyway.
+  // given the 10K threshold explicitly set above.  The size
+  // attributes are kept so the browser can reserve layout space.
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypePng,
-                    kResizedDims, "", true, true);
+                    kResizedDims, kResizedDims, true, true);
 
   // After optimization, the GIF image is converted to a PNG image.
   rewrite_driver()->Clear();
@@ -2183,12 +2183,12 @@ TEST_F(ImageRewriteTest, InlineTestWithResizeWithOptimizeAndUrlLogging) {
   const char kResizedDims[] = " width=48 height=64";
   // Without resize, it's not optimizable.
   // With resize, the image shrinks quite a bit, and we can inline it
-  // given the 10K threshold explicitly set above.  This also strips the
-  // size information, which is now embedded in the image itself anyway.
+  // given the 10K threshold explicitly set above.  The size
+  // attributes are kept so the browser can reserve layout space.
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypePng,
-                    kResizedDims, "", true, true);
+                    kResizedDims, kResizedDims, true, true);
   TestSingleRewriteWithoutAbs(kChefGifFile, kChefGifFile, kContentTypeGif,
-                              kContentTypePng, kResizedDims, "", true, true);
+                              kContentTypePng, kResizedDims, kResizedDims, true, true);
 }
 
 TEST_F(ImageRewriteTest, DimensionStripAfterInline) {
@@ -2197,13 +2197,13 @@ TEST_F(ImageRewriteTest, DimensionStripAfterInline) {
   rewrite_driver()->AddFilters();
   const char kChefWidth[] = " width=192";
   const char kChefHeight[] = " height=256";
-  // With all specified dimensions matching, dims are stripped after inlining.
+  // With all specified dimensions matching, dims are kept after inlining.
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypeGif, kChefDims,
-                    "", false, true);
+                    kChefDims, false, true);
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypeGif, kChefWidth,
-                    "", false, true);
+                    kChefWidth, false, true);
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypeGif, kChefHeight,
-                    "", false, true);
+                    kChefHeight, false, true);
   // If we stretch the image in either dimension, we keep the dimensions.
   const char kChefWider[] = " width=384 height=256";
   const char kChefTaller[] = " width=192 height=512";
@@ -2258,10 +2258,9 @@ TEST_F(ImageRewriteTest, InlineNoRewrite) {
   options()->set_image_inline_max_bytes(30000);
   options()->EnableFilter(RewriteOptions::kInlineImages);
   rewrite_driver()->AddFilters();
-  // This image is just small enough to inline, which also erases
-  // dimension information.
+  // This image is just small enough to inline; dimension attributes are kept.
   TestSingleRewrite(kChefGifFile, kContentTypeGif, kContentTypeGif, kChefDims,
-                    "", false, true);
+                    kChefDims, false, true);
   // This image is too big to inline, and we don't insert missing
   // dimension information because that is not explicitly enabled.
   TestSingleRewrite(kPuzzleJpgFile, kContentTypeJpeg, kContentTypeJpeg, "", "",
@@ -2277,9 +2276,9 @@ TEST_F(ImageRewriteTest, InlineNoResize) {
   rewrite_driver()->AddFilters();
   const char kOrigDims[] = " width=24 height=24";
   const char kResizedDims[] = " width=20 height=12";
-  // At natural size, we should inline and erase dimensions.
+  // At natural size, we should inline and keep dimensions.
   TestSingleRewrite(kChromium24, kContentTypeWebp, kContentTypeWebp, kOrigDims,
-                    "", false, true);
+                    kOrigDims, false, true);
   // Image is inlined but not resized, so preserve dimensions.
   TestSingleRewrite(kChromium24, kContentTypeWebp, kContentTypeWebp,
                     kResizedDims, kResizedDims, false, true);
@@ -2294,9 +2293,9 @@ TEST_F(ImageRewriteTest, InlineLargerResize) {
   rewrite_driver()->AddFilters();
   const char kOrigDims[] = " width=65 height=70";
   const char kResizedDims[] = " width=64 height=69";
-  // At natural size, we should inline and erase dimensions.
+  // At natural size, we should inline and keep dimensions.
   TestSingleRewrite(kCuppaOPngFile, kContentTypePng, kContentTypePng, kOrigDims,
-                    "", false, true);
+                    kOrigDims, false, true);
   // Image is inlined but not resized, so preserve dimensions.
   TestSingleRewrite(kCuppaOPngFile, kContentTypePng, kContentTypePng,
                     kResizedDims, kResizedDims, false, true);
@@ -2345,7 +2344,7 @@ TEST_F(ImageRewriteTest, ResizeTransparentImage) {
   const char kResizedDims[] = " width=26 height=28";
   // Image is resized and inlined.
   TestSingleRewrite(kCuppaTPngFile, kContentTypePng, kContentTypePng,
-                    kResizedDims, "", true, true);
+                    kResizedDims, kResizedDims, true, true);
 }
 
 TEST_F(ImageRewriteTest, InlineEnlargedImage) {

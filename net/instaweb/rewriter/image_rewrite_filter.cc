@@ -1874,46 +1874,6 @@ void SetHeightFromAttribute(const HtmlElement* element, ImageDim* page_dim) {
   }
 }
 
-void DeleteMatchingImageDimsAfterInline(const CachedResult* cached,
-                                        HtmlElement* element) {
-  // Never strip width= or height= attributes from non-img elements.
-  if (element->keyword() != HtmlName::kImg) {
-    return;
-  }
-  // We used to take the absence of desired_image_dims here as license to delete
-  // dimensions.  That was incorrect, as sometimes there were dimensions in the
-  // page but the image was being enlarged on page and we can't strip the
-  // enlargement out safely.  Now we also strip desired_image_dims when the
-  // image is 1x1 or less.  As a result, we go back to the html to determine
-  // whether it's safe to strip the width and height attributes, doing so only
-  // if all dimensions that are present match the actual post-optimization image
-  // dimensions.
-  if (cached->has_image_file_dims()) {
-    int attribute_width = -1, attribute_height = -1;
-    if (GetDimensionAttribute(element, HtmlName::kWidth, &attribute_width)) {
-      if (cached->image_file_dims().width() == attribute_width) {
-        // Width matches, height must either be absent or match.
-        if (!element->FindAttribute(HtmlName::kHeight)) {
-          // No height, just delete width.
-          element->DeleteAttribute(HtmlName::kWidth);
-        } else if (GetDimensionAttribute(element, HtmlName::kHeight,
-                                         &attribute_height) &&
-                   cached->image_file_dims().height() == attribute_height) {
-          // Both dimensions match, delete both.
-          element->DeleteAttribute(HtmlName::kWidth);
-          element->DeleteAttribute(HtmlName::kHeight);
-        }
-      }
-    } else if (!element->FindAttribute(HtmlName::kWidth) &&
-               GetDimensionAttribute(element, HtmlName::kHeight,
-                                     &attribute_height) &&
-               cached->image_file_dims().height() == attribute_height) {
-      // No width, matching height
-      element->DeleteAttribute(HtmlName::kHeight);
-    }
-  }
-}
-
 }  // namespace
 
 bool ImageRewriteFilter::FinishRewriteImageUrl(
@@ -1962,7 +1922,6 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
           << "Modifying a URL slot despite "
           << "image_inlining_identify_and_cache_without_rewriting set.";
       src->SetValue(data_url);
-      DeleteMatchingImageDimsAfterInline(cached, element);
       image_inline_count_->Add(1);
       rewrote_url = true;
       image_inlined = true;
