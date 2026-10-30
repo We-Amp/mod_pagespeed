@@ -36,6 +36,7 @@
 #include "pagespeed/kernel/base/abstract_shared_mem.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/split_statistics.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -822,6 +823,11 @@ void SystemCaches::InitStats(Statistics* statistics) {
   CompressedCache::InitStats(statistics);
   PurgeContext::InitStats(statistics);
   RedisCache::InitStats(statistics);
+}
+
+void SystemCaches::MarkSharedStats(SplitStatistics* split) {
+  split->AddGlobalReadVariablePrefix("cyclone_cache_");
+  split->AddGlobalReadVariablePrefix(StrCat(SystemCachePath::kFileCache, "_"));
 }
 
 void SystemCaches::PrintCacheStats(StatFlags flags, GoogleString* out) {

@@ -186,6 +186,13 @@ SplitVariable* SplitStatistics::NewVariable(StringPiece name) {
   Variable* global_var = global_->FindVariable(name);
   CHECK(global_var != nullptr);
 
+  for (const GoogleString& prefix : global_read_prefixes_) {
+    if (StringPiece(name).starts_with(prefix)) {
+      // Shared resource: only the global object is written, so read it.
+      return new SplitVariable(global_var /* read/write */,
+                               local_var /* write only */);
+    }
+  }
   return new SplitVariable(local_var /* read/write */,
                            global_var /* write only */);
 }

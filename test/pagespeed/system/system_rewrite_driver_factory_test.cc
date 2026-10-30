@@ -49,7 +49,15 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/split_statistics.h"
+#include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/cache/cyclone_cache.h"
+#include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/simple_stats.h"
 #include "pagespeed/system/optimization_thread_policy.h"
+#include "pagespeed/system/system_cache_path.h"
+#include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_thread_system.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -466,6 +474,34 @@ TEST_F(SystemThreadCountTest, MessageBufferSizeInRangeIsAccepted) {
 
   SetDirective("MessageBufferSize", "10000");
   EXPECT_EQ(10000, factory_->message_buffer_size());
+}
+
+// With per-virtual-host statistics the statistics page reads a split view.
+// The disk cache is shared by every virtual host and increments the global
+// object only, so the split view has to read those counters from there.
+TEST(SystemCachesSharedStats, DiskCacheCountersVisibleInPerHostView) {
+  std::unique_ptr<ThreadSystem> threads(Platform::CreateThreadSystem());
+  SimpleStats global(threads.get());
+  SimpleStats* local = new SimpleStats(threads.get());  // owned by split
+  SystemCaches::InitStats(&global);
+  SystemCaches::InitStats(local);
+  SplitStatistics split(threads.get(), local, &global);
+  SystemCaches::MarkSharedStats(&split);
+  SystemCaches::InitStats(&split);
+
+  const GoogleString file_hits =
+      StrCat(SystemCachePath::kFileCache, "_hits");
+  const GoogleString small_hits =
+      StrCat(SystemCachePath::kFileCacheSmall, "_hits");
+  global.GetVariable(CycloneCache::kHits)->Add(7);
+  global.GetVariable(CycloneCache::kBytesRead)->Add(4096);
+  global.GetVariable(file_hits)->Add(5);
+  global.GetVariable(small_hits)->Add(2);
+
+  EXPECT_EQ(7, split.GetVariable(CycloneCache::kHits)->Get());
+  EXPECT_EQ(4096, split.GetVariable(CycloneCache::kBytesRead)->Get());
+  EXPECT_EQ(5, split.GetVariable(file_hits)->Get());
+  EXPECT_EQ(2, split.GetVariable(small_hits)->Get());
 }
 
 }  // namespace

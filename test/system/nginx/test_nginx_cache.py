@@ -60,7 +60,6 @@ class TestCacheHitTracking:
 
     @pytest.mark.nginx_only
     @pytest.mark.requires_stats
-    @pytest.mark.skip(reason="nginx cache hit stats not incrementing - needs investigation")
     def test_cache_hit_tracking(
         self,
         client: PageSpeedClient,
@@ -73,11 +72,11 @@ class TestCacheHitTracking:
         This test:
         1. Gets initial statistics
         2. Fetches a resource multiple times to prime and hit cache
-        3. Verifies cache_hits stat increased
+        3. Verifies the disk-cache hit counters increased
 
-        Note: Currently skipped because nginx PageSpeed doesn't increment the
-        expected cache hit statistics. This may be due to how the cache backend
-        is configured or a missing statistics hook in nginx integration.
+        The nginx statistics page is a per-virtual-host view; the disk cache
+        is shared by every virtual host, so its counters must show up there
+        too (they used to read 0).
         """
         # Get initial statistics
         initial_stats = stats_snapshot()
@@ -106,12 +105,10 @@ class TestCacheHitTracking:
         # Get new statistics
         new_stats = stats_snapshot()
 
-        # Check for various cache hit statistics
-        # nginx may use different stat names, so check for common ones
+        # The disk-cache backend counters.
         cache_hit_stats = [
-            "cache_hits",
+            "cyclone_cache_hits",
             "file_cache_hits",
-            "http_cache_hits",
         ]
 
         total_increase = 0

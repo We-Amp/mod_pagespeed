@@ -28,11 +28,13 @@
 #define PAGESPEED_KERNEL_BASE_SPLIT_STATISTICS_H_
 
 #include <memory>
+#include <vector>
 
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"  // for StringPiece
 #include "pagespeed/kernel/base/writer.h"
 
@@ -166,6 +168,17 @@ class SplitStatistics
 
   ~SplitStatistics() override;
 
+  // Declares that counters whose name starts with 'prefix' describe a resource
+  // shared by every split (for example the disk cache, which all virtual
+  // hosts use) and which therefore only the global object ever increments.
+  // Variables added afterwards under such a name read from the global object,
+  // so the per-split view reports the shared value instead of a permanent 0.
+  // Must be called before the matching AddVariable calls; histograms and
+  // other variable kinds are unaffected.
+  void AddGlobalReadVariablePrefix(StringPiece prefix) {
+    global_read_prefixes_.push_back(GoogleString(prefix));
+  }
+
   StatisticsLogger* console_logger() override {
     // console_logger() is only used for read access, so just provide the
     // local version.
@@ -194,6 +207,7 @@ class SplitStatistics
   ThreadSystem* thread_system_;
   std::unique_ptr<Statistics> local_;
   Statistics* global_;
+  std::vector<GoogleString> global_read_prefixes_;
   SplitStatistics(const SplitStatistics&) = delete;
   SplitStatistics& operator=(const SplitStatistics&) = delete;
 };
