@@ -395,7 +395,7 @@ class JsCombineFilter::Context : public RewriteContext {
   GoogleString CacheKeySuffix() const override {
     // Updated to make sure certain bugfixes actually deploy, and we don't
     // end up using old broken cached version.
-    return "v4";
+    return "v5";
   }
 
  private:
@@ -606,6 +606,15 @@ bool JsCombineFilter::HasTopLevelLexicalDeclaration(
       case JsKeywords::kLet:
       case JsKeywords::kClass:
         if (depth == 0 && !after_member_dot) {
+          return true;
+        }
+        after_member_dot = false;
+        break;
+      case JsKeywords::kIdentifier:
+        // The tokenizer reports "let" as a keyword only in some positions
+        // (e.g. not right after "}" on the same line, nor before a non-ASCII
+        // name), so also look at the identifier's text.
+        if (depth == 0 && !after_member_dot && token_text == "let") {
           return true;
         }
         after_member_dot = false;

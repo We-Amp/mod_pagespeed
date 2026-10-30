@@ -1385,6 +1385,13 @@ TEST_F(JsCombineFilterTest, HasTopLevelLexicalDeclaration) {
   EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(
       jstp, "var x = 1;"));
   EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(jstp, ""));
+  // "let" the tokenizer reports as a plain identifier.
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "async function f(){}let x=1;"));
+  EXPECT_TRUE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "let \xCF\x80 = 3.14;"));
+  EXPECT_FALSE(JsCombineFilter::HasTopLevelLexicalDeclaration(
+      jstp, "o.let = 1; var p = {let: 2};"));
 }
 
 // A script that declares a top-level const/let/class used by a later script
