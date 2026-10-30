@@ -60,14 +60,12 @@ class CacheSpammer : public ThreadSystem::Thread {
  private:
   CacheSpammer(ThreadSystem* runtime, ThreadSystem::ThreadFlags flags,
                CacheInterface* cache, bool expecting_evictions, bool do_deletes,
-               const char* value_prefix, int index, int num_iters,
-               int num_inserts);
+               const char* value_prefix, int num_iters, int num_inserts);
 
   CacheInterface* cache_;
   bool expecting_evictions_;
   bool do_deletes_;
   const char* value_prefix_;
-  int index_;
   int num_iters_;
   int num_inserts_;
   std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;

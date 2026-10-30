@@ -80,15 +80,14 @@ class LockManagerSpammer : public ThreadSystem::Thread {
   LockManagerSpammer(Scheduler* scheduler, ThreadSystem::ThreadFlags flags,
                      const StringVector& lock_names,
                      ThreadSafeLockManager* lock_manager,
-                     bool expecting_denials, bool delay_unlocks, int index,
-                     int num_iters, int num_names, CountDown* pending_threads);
+                     bool expecting_denials, bool delay_unlocks, int num_iters,
+                     int num_names, CountDown* pending_threads);
 
   Scheduler* scheduler_;
   const StringVector& lock_names_;
   ThreadSafeLockManager* lock_manager_;
   bool expecting_denials_;
   bool delay_unlocks_;
-  int index_;
   int num_iters_;
   int num_names_;
   std::unique_ptr<ThreadSystem::CondvarCapableMutex> mutex_;
