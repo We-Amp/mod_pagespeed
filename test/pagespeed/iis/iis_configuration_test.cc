@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <string>
@@ -1005,10 +1006,11 @@ TEST_F(IisConfigurationTest, PoolThreadSettingsComeFromBothFilesEveryTime) {
   RemoveDirectoryA(dir.c_str());
 }
 
-// The machine-wide settings are read from the machine-wide file for every site
-// context of a process, not only for the first one that parses it, and a
-// context rebuilt after a file was edited still sees them.
-TEST_F(IisConfigurationTest, MachineWideSettingsReachEverySiteContext) {
+// The settings of a new site context come from the machine-wide file and,
+// for the pool sizes, the site's own file, for every context of a process: not
+// only for the first one that parses the file, whatever the process-wide
+// cache holds, and after either file was edited.
+TEST_F(IisConfigurationTest, SiteContextSettingsDoNotDependOnTheCache) {
   char temp[MAX_PATH];
   ASSERT_GT(GetTempPathA(MAX_PATH, temp), 0u);
   const std::string dir = std::string(temp) + "pagespeed-machine-wide-" +
@@ -1025,50 +1027,84 @@ TEST_F(IisConfigurationTest, MachineWideSettingsReachEverySiteContext) {
     return path;
   };
   const std::string machine = write("machine.config",
-      "pagespeed MessageBufferSize 4096\n"
-      "pagespeed UseNativeFetcher on\n"
-      "pagespeed UsePerVHostStatistics off\n"
-      "pagespeed CreateSharedMemoryMetadataCache /cache 2048\n");
-  const std::string site = write("site.config", "pagespeed EnableFilters combine_css\n");
+                                    "pagespeed MessageBufferSize 4096\n"
+                                    "pagespeed UseNativeFetcher on\n"
+                                    "pagespeed NumRewriteThreads 2\n");
+  const std::string site =
+      write("site.config", "pagespeed NumRewriteThreads 3\n");
 
   net_instaweb::NullMessageHandler quiet;
-  auto expect_machine_values = [](const net_instaweb::global_settings& g) {
-    EXPECT_EQ(4096, g.message_buffer_size);
+  const net_instaweb::global_settings defaults;
+  std::map<std::string, std::string> input;
+  input["path"] = "/";
+  input["fullpath"] = "/";
+  input["config"] = "base";
+
+  // The process-wide cache, as the module factory uses it: it fills the
+  // settings only when it parses a file.
+  ConfigFactory shared;
+  auto read_through_cache = [&](net_instaweb::global_settings* g) {
+    net_instaweb::IisRewriteOptions options(nullptr);
+    std::list<std::string> paths(1, machine);
+    shared.GetConfig(paths, input, options, &quiet, g);
+  };
+  net_instaweb::global_settings first, second;
+  read_through_cache(&first);
+  read_through_cache(&second);
+  EXPECT_EQ(4096, first.message_buffer_size);
+  // This is the behaviour the module works around: the second read finds the
+  // file cached and gets nothing.
+  EXPECT_EQ(defaults.message_buffer_size, second.message_buffer_size);
+  EXPECT_FALSE(second.use_native_fetcher);
+
+  auto expect_values = [](const net_instaweb::global_settings& g,
+                          int buffer_size, int rewrite_threads) {
+    EXPECT_EQ(buffer_size, g.message_buffer_size);
     EXPECT_TRUE(g.use_native_fetcher);
-    EXPECT_FALSE(g.use_per_vhost_statistics);
-    EXPECT_EQ(2048, g.shm_cache_size_kb);
+    EXPECT_EQ(rewrite_threads, g.num_rewrite_threads);
   };
 
-  // Three site contexts created in one process, one after the other.
+  // Three site contexts created in one process, in the order the factory
+  // uses: the cached read, then the settings read. The site's pool size wins
+  // over the machine-wide one, and the machine-wide values are all there.
   for (int i = 0; i < 3; ++i) {
     net_instaweb::global_settings g;
-    ReadMachineWideSettings(machine, &quiet, &g);
-    expect_machine_values(g);
+    read_through_cache(&g);
+    ReadSiteContextSettings(machine, site, &quiet, &g);
+    expect_values(g, 4096, 3);
   }
 
-  // A context rebuilt after the site's file was edited still sees them.
-  write("site.config", "pagespeed EnableFilters combine_css,extend_cache\n");
-  net_instaweb::global_settings after_site_edit;
-  ReadMachineWideSettings(machine, &quiet, &after_site_edit);
-  expect_machine_values(after_site_edit);
+  // A context rebuilt after the site's file was edited.
+  write("site.config", "pagespeed NumRewriteThreads 5\n");
+  {
+    net_instaweb::global_settings g;
+    read_through_cache(&g);
+    ReadSiteContextSettings(machine, site, &quiet, &g);
+    expect_values(g, 4096, 5);
+  }
 
-  // A context rebuilt after the machine-wide file was edited sees the new value.
+  // A context rebuilt after the machine-wide file was edited, once the
+  // cache's one-second window has passed and the modification time decides.
+  Sleep(1100);
   write("machine.config",
-      "pagespeed MessageBufferSize 8192\n"
-      "pagespeed UseNativeFetcher on\n"
-      "pagespeed UsePerVHostStatistics off\n"
-      "pagespeed CreateSharedMemoryMetadataCache /cache 2048\n");
-  net_instaweb::global_settings after_machine_edit;
-  ReadMachineWideSettings(machine, &quiet, &after_machine_edit);
-  EXPECT_EQ(8192, after_machine_edit.message_buffer_size);
-  EXPECT_TRUE(after_machine_edit.use_native_fetcher);
+        "pagespeed MessageBufferSize 8192\n"
+        "pagespeed UseNativeFetcher on\n"
+        "pagespeed NumRewriteThreads 2\n");
+  {
+    net_instaweb::global_settings g;
+    read_through_cache(&g);
+    ReadSiteContextSettings(machine, site, &quiet, &g);
+    expect_values(g, 8192, 5);
+  }
 
-  // No machine-wide file: the built-in defaults.
-  net_instaweb::global_settings defaults;
-  ReadMachineWideSettings("", &quiet, &defaults);
-  EXPECT_EQ(net_instaweb::global_settings().message_buffer_size,
-            defaults.message_buffer_size);
-  EXPECT_FALSE(defaults.use_native_fetcher);
+  // A machine-wide file that does not exist: the built-in defaults.
+  {
+    net_instaweb::global_settings g;
+    ReadSiteContextSettings(dir + "\\absent.config", "", &quiet, &g);
+    EXPECT_EQ(defaults.message_buffer_size, g.message_buffer_size);
+    EXPECT_FALSE(g.use_native_fetcher);
+    EXPECT_EQ(0, g.num_rewrite_threads);
+  }
 
   for (const std::string& f : {machine, site}) {
     DeleteFileA(f.c_str());

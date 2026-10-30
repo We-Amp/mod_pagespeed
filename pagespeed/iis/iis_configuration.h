@@ -95,4 +95,12 @@ void ReadPoolThreadSettings(const std::string& machine_path,
                             const std::string& site_path,
                             net_instaweb::MessageHandler* quiet,
                             net_instaweb::global_settings* out);
-#endif 
+// Fills *out for a new site context: the machine-wide settings from the
+// machine-wide file, then the pool sizes from both files (the site's wins).
+// Both are read afresh, never from the process-wide cache.
+void ReadSiteContextSettings(const std::string& machine_path,
+                             const std::string& site_path,
+                             net_instaweb::MessageHandler* quiet,
+                             net_instaweb::global_settings* out);
+
+#endif

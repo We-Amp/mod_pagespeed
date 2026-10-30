@@ -665,3 +665,11 @@ void ReadPoolThreadSettings(const std::string& machine_path,
 	out->num_expensive_rewrite_threads = site_settings.num_expensive_rewrite_threads > 0
 		? site_settings.num_expensive_rewrite_threads : machine_settings.num_expensive_rewrite_threads;
 }
+
+void ReadSiteContextSettings(const std::string& machine_path,
+                             const std::string& site_path,
+                             net_instaweb::MessageHandler* quiet,
+                             net_instaweb::global_settings* out) {
+	ReadMachineWideSettings(machine_path, quiet, out);
+	ReadPoolThreadSettings(machine_path, site_path, quiet, out);
+}
