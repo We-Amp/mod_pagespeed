@@ -336,6 +336,13 @@ TEST_F(ApacheFetchTest, ExistingNosniffIsNotDuplicated) {
   InitFetchUnbuffered(kExampleUrl, HttpStatus::kOK);
   apache_fetch_->response_headers()->Add("X-Content-Type-Options", "nosniff");
   EXPECT_TRUE(apache_fetch_->Write("hello", message_handler()));
+  EXPECT_STREQ(
+      "ap_set_content_type(text/plain) "
+      "ap_remove_output_filter(MOD_EXPIRES) "
+      "ap_remove_output_filter(FIXUP_HEADERS_OUT) "
+      "ap_set_content_type(text/plain) "
+      "ap_rwrite(hello)",
+      MockApache::ActionsSinceLastCall());
   GoogleString headers = HeadersOutToString(&request_);
   const size_t first = headers.find("X-Content-Type-Options");
   ASSERT_NE(GoogleString::npos, first) << headers;
