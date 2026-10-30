@@ -81,11 +81,13 @@ class GoogleFontCssInlineFilterTestBase : public RewriteTestBase {
     // Now upload some UA-specific CSS where UaSensitiveFetcher will find it,
     // for two fake UAs: Chromezilla and Safieri, used since they are short,
     // unlike real UA strings.
-    SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla"), "font_chromezilla");
-    SetFontCssResponse(StrCat(kRoboto, "&UA=Safieri"), "font_safieri");
+    SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=Chromezilla"),
+                       "font_chromezilla");
+    SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=Safieri"),
+                       "font_safieri");
 
     // If other filters will try to fetch this, they won't have a UA.
-    SetFontCssResponse(StrCat(kRoboto, "&UA=unknown"), "font_huh");
+    SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=unknown"), "font_huh");
     SetCurrentUserAgent(user_agent);
   }
 };
@@ -109,13 +111,43 @@ TEST_F(GoogleFontCssInlineFilterTest, BasicOperation) {
                    StrCat(kPreconnectHttp, "<style>font_safieri</style>"));
 }
 
+TEST_F(GoogleFontCssInlineFilterTest, DisplaySwapRequestedAndInlined) {
+  // The page's loader URL has no display=, so the filter asks the Font Service
+  // for display=swap (the only URL with a mock response) and the inlined
+  // @font-face rules carry font-display: swap.
+  ResetUserAgent("Chromezilla");
+  const char kSwapCss[] =
+      "@font-face{font-family:'Roboto';font-display:swap;"
+      "src:url(http://fonts.gstatic.com/s/roboto/r.woff2)}";
+  SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=Chromezilla"), kSwapCss);
+  ValidateExpected("display_swap", CssLinkHref(kRoboto),
+                   StrCat(kPreconnectHttp, "<style>", kSwapCss, "</style>"));
+}
+
+TEST_F(GoogleFontCssInlineFilterTest, ExplicitDisplayKept) {
+  // An explicit display= is fetched exactly as written; it is not replaced by
+  // swap (display=swap is not mocked for this family, so a rewritten request
+  // would fail to fetch and leave the link alone).
+  ResetUserAgent("Chromezilla");
+  const char kOptionalUrl[] =
+      "http://fonts.googleapis.com/css?family=Lato&display=optional";
+  const char kOptionalCss[] =
+      "@font-face{font-family:'Lato';font-display:optional;"
+      "src:url(http://fonts.gstatic.com/s/lato/l.woff2)}";
+  SetFontCssResponse(StrCat(kOptionalUrl, "&UA=Chromezilla"), kOptionalCss);
+  ValidateExpected(
+      "display_optional", CssLinkHref(kOptionalUrl),
+      StrCat(kPreconnectHttp, "<style>", kOptionalCss, "</style>"));
+}
+
 TEST_F(GoogleFontCssInlineFilterTest, LargeCssNowInlines) {
   // Real Font Service CSS responses typically run well past the old 3K
   // default; make sure a response of realistic size inlines under the
   // default configuration.
   ResetUserAgent("Chromezilla");
   GoogleString large_css(20 * 1024, 'a');
-  SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla"), large_css);
+  SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=Chromezilla"),
+                     large_css);
   ValidateExpected(
       "large_css", CssLinkHref(kRoboto),
       StrCat(kPreconnectHttp, "<style>", large_css, "</style>"));
@@ -126,7 +158,8 @@ TEST_F(GoogleFontCssInlineFilterTest, OverDefaultLimitDoesNotInline) {
   // external under default configuration, but still gets the hint.
   ResetUserAgent("Chromezilla");
   GoogleString oversize_css(48 * 1024 + 1, 'a');
-  SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla"), oversize_css);
+  SetFontCssResponse(StrCat(kRoboto, "&display=swap&UA=Chromezilla"),
+                     oversize_css);
   ValidateExpected(
       "oversize_css", CssLinkHref(kRoboto),
       StrCat(kPreconnectHttp, CssLinkHref(kRoboto),
@@ -137,7 +170,7 @@ TEST_F(GoogleFontCssInlineFilterTest, PreconnectFollowsLinkScheme) {
   // The loader CSS references fonts.gstatic.com over the scheme it was
   // fetched with, so an https font link must produce an https hint.
   ResetUserAgent("Chromezilla");
-  SetFontCssResponse(StrCat(kRobotoSsl, "&UA=Chromezilla"),
+  SetFontCssResponse(StrCat(kRobotoSsl, "&display=swap&UA=Chromezilla"),
                      "sfont_chromezilla");
   ValidateExpected(
       "https_link", CssLinkHref(kRobotoSsl),
@@ -148,7 +181,8 @@ TEST_F(GoogleFontCssInlineFilterTest, PreconnectInsertedOnce) {
   // Two links to different font families: the hint is once-per-document,
   // not once-per-URL.
   ResetUserAgent("Chromezilla");
-  SetFontCssResponse(StrCat(kLato, "&UA=Chromezilla"), "lato_chromezilla");
+  SetFontCssResponse(StrCat(kLato, "&display=swap&UA=Chromezilla"),
+                     "lato_chromezilla");
   ValidateExpected("two_font_links",
                    StrCat(CssLinkHref(kRoboto), CssLinkHref(kLato)),
                    StrCat(kPreconnectHttp, "<style>font_chromezilla</style>",
@@ -394,8 +428,9 @@ TEST_F(GoogleFontCssInlineFilterDnsPrefetchTest, SingleHintWithDnsPrefetch) {
   // UserAgentSensitiveTestFetcher to key on. The fetcher escapes the UA when
   // appending it as a query param.
   ResetUserAgent("Chromezilla Chrome/42");
-  SetFontCssResponse(StrCat(kRoboto, "&UA=Chromezilla+Chrome%2f42"),
-                     "font_chrome");
+  SetFontCssResponse(
+      StrCat(kRoboto, "&display=swap&UA=Chromezilla+Chrome%2f42"),
+      "font_chrome");
 
   // A body resource on a third-party domain gives insert_dns_prefetch a
   // domain to act on once its stored domain list stabilizes.

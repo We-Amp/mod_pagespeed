@@ -44,6 +44,15 @@ const char kRoboto[] = "http://fonts.googleapis.com/css?family=Roboto";
 const char kRobotoSsl[] = "https://fonts.googleapis.com/css?family=Roboto";
 const char kNonCss[] = "http://fonts.googleapis.com/some.txt";
 
+// The URLs actually requested: the filter adds display=swap when the loader URL
+// has no display parameter.
+const char kRobotoSwap[] =
+    "http://fonts.googleapis.com/css?family=Roboto&display=swap";
+const char kRobotoSslSwap[] =
+    "https://fonts.googleapis.com/css?family=Roboto&display=swap";
+const char kRobotoOptional[] =
+    "http://fonts.googleapis.com/css?family=Roboto&display=optional";
+
 class GoogleFontServiceInputResourceTest : public RewriteTestBase {
  protected:
   void SetUp() override {
@@ -57,21 +66,21 @@ class GoogleFontServiceInputResourceTest : public RewriteTestBase {
                                        86400 * Timer::kSecondMs, ", private");
 
     // Set them up in spots where UaSensitiveFetcher would direct them.
-    SetFetchResponse(StrCat(kRoboto, "&UA=Chromezilla"), response_headers,
+    SetFetchResponse(StrCat(kRobotoSwap, "&UA=Chromezilla"), response_headers,
                      "font_chromezilla");
 
-    SetFetchResponse(StrCat(kRoboto, "&UA=Safieri"), response_headers,
+    SetFetchResponse(StrCat(kRobotoSwap, "&UA=Safieri"), response_headers,
                      "font_safieri");
 
-    SetFetchResponse(StrCat(kRobotoSsl, "&UA=Chromezilla"), response_headers,
-                     "sfont_chromezilla");
+    SetFetchResponse(StrCat(kRobotoSslSwap, "&UA=Chromezilla"),
+                     response_headers, "sfont_chromezilla");
 
-    SetFetchResponse(StrCat(kRobotoSsl, "&UA=Safieri"), response_headers,
+    SetFetchResponse(StrCat(kRobotoSslSwap, "&UA=Safieri"), response_headers,
                      "sfont_safieri");
 
     ResponseHeaders non_css;
     SetDefaultLongCacheHeaders(&kContentTypeText, &non_css);
-    SetFetchResponse(StrCat(kNonCss, "?UA=Chromezilla"), non_css,
+    SetFetchResponse(StrCat(kNonCss, "?display=swap&UA=Chromezilla"), non_css,
                      "something weird");
   }
 
@@ -100,17 +109,103 @@ TEST_F(GoogleFontServiceInputResourceTest, Creation) {
   GoogleUrl url3(kRoboto);
   resource.reset(GoogleFontServiceInputResource::Make(url3, rewrite_driver()));
   ASSERT_TRUE(resource.get() != nullptr);
-  EXPECT_EQ(kRoboto, resource->url());
-  EXPECT_EQ("gfnt://fonts.googleapis.com/css?family=Roboto&X-PS-UA=Chromezilla",
-            resource->cache_key());
+  EXPECT_EQ(kRobotoSwap, resource->url());
+  EXPECT_EQ(
+      "gfnt://fonts.googleapis.com/css?family=Roboto&display=swap"
+      "&X-PS-UA=Chromezilla",
+      resource->cache_key());
 
   GoogleUrl url4(kRobotoSsl);
   resource.reset(GoogleFontServiceInputResource::Make(url4, rewrite_driver()));
   ASSERT_TRUE(resource.get() != nullptr);
-  EXPECT_EQ(kRobotoSsl, resource->url());
+  EXPECT_EQ(kRobotoSslSwap, resource->url());
   EXPECT_EQ(
-      "gfnts://fonts.googleapis.com/css?family=Roboto&X-PS-UA=Chromezilla",
+      "gfnts://fonts.googleapis.com/css?family=Roboto&display=swap"
+      "&X-PS-UA=Chromezilla",
       resource->cache_key());
+}
+
+TEST_F(GoogleFontServiceInputResourceTest, DisplaySwapAddedWhenMissing) {
+  ResetUserAgent("Chromezilla");
+  std::unique_ptr<GoogleFontServiceInputResource> resource;
+
+  // No query at all.
+  GoogleUrl no_query("http://fonts.googleapis.com/css");
+  resource.reset(
+      GoogleFontServiceInputResource::Make(no_query, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ("http://fonts.googleapis.com/css?display=swap", resource->url());
+
+  // A multi-family query keeps its text exactly as written.
+  GoogleUrl families(
+      "https://fonts.googleapis.com/css?family=Open+Sans:400,700|Lato");
+  resource.reset(
+      GoogleFontServiceInputResource::Make(families, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ(
+      "https://fonts.googleapis.com/css?family=Open+Sans:400,700|Lato"
+      "&display=swap",
+      resource->url());
+
+  // A parameter that merely starts with "display" is not display=.
+  GoogleUrl lookalike(
+      "http://fonts.googleapis.com/css?family=Roboto&displayx=1");
+  resource.reset(
+      GoogleFontServiceInputResource::Make(lookalike, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ(
+      "http://fonts.googleapis.com/css?family=Roboto&displayx=1&display=swap",
+      resource->url());
+}
+
+TEST_F(GoogleFontServiceInputResourceTest, ExplicitDisplayKept) {
+  ResetUserAgent("Chromezilla");
+  std::unique_ptr<GoogleFontServiceInputResource> resource;
+
+  GoogleUrl optional(kRobotoOptional);
+  resource.reset(
+      GoogleFontServiceInputResource::Make(optional, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ(kRobotoOptional, resource->url());
+  EXPECT_EQ(
+      "gfnt://fonts.googleapis.com/css?family=Roboto&display=optional"
+      "&X-PS-UA=Chromezilla",
+      resource->cache_key());
+
+  // display first in the query, and an empty value, are still the author's.
+  GoogleUrl first(
+      "http://fonts.googleapis.com/css?display=block&family=Roboto");
+  resource.reset(GoogleFontServiceInputResource::Make(first, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ("http://fonts.googleapis.com/css?display=block&family=Roboto",
+            resource->url());
+
+  GoogleUrl empty("http://fonts.googleapis.com/css?family=Roboto&display=");
+  resource.reset(GoogleFontServiceInputResource::Make(empty, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ("http://fonts.googleapis.com/css?family=Roboto&display=",
+            resource->url());
+}
+
+TEST_F(GoogleFontServiceInputResourceTest, FetchesExplicitDisplayUnchanged) {
+  ResponseHeaders response_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &response_headers);
+  response_headers.SetDateAndCaching(timer()->NowMs(), 86400 * Timer::kSecondMs,
+                                     ", private");
+  SetFetchResponse(StrCat(kRobotoOptional, "&UA=Chromezilla"), response_headers,
+                   "font_optional");
+  ResetUserAgent("Chromezilla");
+
+  GoogleUrl url(kRobotoOptional);
+  ResourcePtr resource(
+      GoogleFontServiceInputResource::Make(url, rewrite_driver()));
+  ASSERT_TRUE(resource.get() != nullptr);
+  MockResourceCallback callback(resource, server_context()->thread_system());
+  resource->LoadAsync(Resource::kReportFailureIfNotCacheable,
+                      rewrite_driver()->request_context(), &callback);
+  EXPECT_TRUE(callback.done());
+  EXPECT_TRUE(callback.success());
+  EXPECT_EQ("font_optional", resource->ExtractUncompressedContents());
 }
 
 TEST_F(GoogleFontServiceInputResourceTest, Load) {
@@ -159,7 +254,7 @@ TEST_F(GoogleFontServiceInputResourceTest, UANormalization) {
       "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Trident/4.0; "
       ".NET CLR 2.0.50727; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729)";
 
-  GoogleUrl url(kRoboto);
+  GoogleUrl url(kRobotoSwap);
   std::unique_ptr<GoogleUrl> url_plus_ua(url.CopyAndAddQueryParam("UA", kIE7a));
   ResponseHeaders response_headers;
   SetDefaultLongCacheHeaders(&kContentTypeCss, &response_headers);

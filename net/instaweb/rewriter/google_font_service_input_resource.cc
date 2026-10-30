@@ -26,6 +26,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -38,6 +39,20 @@ namespace net_instaweb {
 namespace {
 
 const char kFontApiHost[] = "fonts.googleapis.com";
+
+// Returns true if the query string carries a display parameter, with any
+// value (including an empty one): the page author's choice always wins.
+bool HasDisplayParam(StringPiece query) {
+  StringPieceVector params;
+  SplitStringPieceToVector(query, "&", &params, true /* skip empty */);
+  for (StringPiece param : params) {
+    StringPiece name = param.substr(0, param.find('='));
+    if (name == "display") {
+      return true;
+    }
+  }
+  return false;
+}
 
 }  // namespace
 
@@ -56,10 +71,23 @@ bool GoogleFontServiceInputResource::IsFontServiceUrl(const GoogleUrl& url) {
 }
 
 GoogleFontServiceInputResource* GoogleFontServiceInputResource::Make(
-    const GoogleUrl& parsed_url, RewriteDriver* rewrite_driver) {
-  if (!IsFontServiceUrl(parsed_url)) {
+    const GoogleUrl& original_url, RewriteDriver* rewrite_driver) {
+  if (!IsFontServiceUrl(original_url)) {
     return nullptr;
   }
+
+  // A loader URL without display= makes the Font Service emit @font-face rules
+  // without font-display, which keeps text invisible while the font loads.
+  // Ask for swap instead; an explicit display= is left as the author wrote it.
+  // The query is extended textually; the rest of the URL stays as written.
+  GoogleUrl swap_url;
+  if (!HasDisplayParam(original_url.Query())) {
+    StringPiece query = original_url.Query();
+    swap_url.Reset(StrCat(original_url.AllExceptQuery(), "?",
+                          query.empty() ? "" : StrCat(query, "&"),
+                          "display=swap", original_url.AllAfterQuery()));
+  }
+  const GoogleUrl& parsed_url = swap_url.IsWebValid() ? swap_url : original_url;
 
   // Compute cache key, incorporating the UA string --- but normalize it first,
   // to cut down on irrelevant noise.
