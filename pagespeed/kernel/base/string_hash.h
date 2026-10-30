@@ -22,6 +22,7 @@
 
 #include <cstddef>
 
+#include "absl/hash/hash.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -72,15 +73,23 @@ struct CaseFold {
 };
 
 // Functors for constructing case-insensitive and case-sensitive hash-tables.
+//
+// absl's Swiss tables use the top 7 bits of a custom hasher's result as the
+// probe tag without mixing it further, and HashString leaves those bits zero
+// for keys of 8 characters or fewer, so unmixed short keys would all share
+// one tag. These functors therefore pass the HashString result through
+// absl::HashOf, which mixes the full word; the result is still a pure function
+// of the (case-folded) key, so it agrees with the matching equality functors.
 struct CasePreserveStringHash {
   size_t operator()(const GoogleString& str) const {
-    return HashString<CasePreserve, size_t>(str.data(), str.size());
+    return absl::HashOf(
+        HashString<CasePreserve, size_t>(str.data(), str.size()));
   }
 };
 
 struct CaseFoldStringHash {
   size_t operator()(const GoogleString& str) const {
-    return HashString<CaseFold, size_t>(str.data(), str.size());
+    return absl::HashOf(HashString<CaseFold, size_t>(str.data(), str.size()));
   }
 };
 
@@ -92,13 +101,14 @@ struct CaseFoldStringEqual {
 
 struct CasePreserveStringPieceHash {
   size_t operator()(StringPiece str) const {
-    return HashString<CasePreserve, size_t>(str.data(), str.size());
+    return absl::HashOf(
+        HashString<CasePreserve, size_t>(str.data(), str.size()));
   }
 };
 
 struct CaseFoldStringPieceHash {
   size_t operator()(StringPiece str) const {
-    return HashString<CaseFold, size_t>(str.data(), str.size());
+    return absl::HashOf(HashString<CaseFold, size_t>(str.data(), str.size()));
   }
 };
 struct CaseFoldStringPieceEqual {
