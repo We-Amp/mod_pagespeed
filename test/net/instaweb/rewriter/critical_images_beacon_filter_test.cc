@@ -303,9 +303,9 @@ TEST_F(CriticalImagesBeaconFilterTest, ScriptInjection) {
   VerifyInjection(1);
 
   // Verify that image onload criticality check has been added.
-  int img_begin = output_buffer_.find("IronChef2");
+  GoogleString::size_type img_begin = output_buffer_.find("IronChef2");
   EXPECT_TRUE(img_begin != GoogleString::npos);
-  int img_end = output_buffer_.substr(img_begin).find(">");
+  GoogleString::size_type img_end = output_buffer_.substr(img_begin).find(">");
   EXPECT_TRUE(img_end != GoogleString::npos);
   EXPECT_TRUE(output_buffer_.substr(img_begin, img_end)
                   .find("onload=\"if(window.pagespeed){"

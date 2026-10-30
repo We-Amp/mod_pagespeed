@@ -834,7 +834,7 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       "@-webkit-keyframes \"foo\" { 0 { transform: scale (.85) } }",
   };
 
-  for (int i = 0; i < std::size(good_examples); ++i) {
+  for (size_t i = 0; i < std::size(good_examples); ++i) {
     GoogleString id = absl::StrFormat("distilled_css_good%d", i);
     ValidateRewrite(id, good_examples[i], good_examples[i], kExpectSuccess);
   }
@@ -950,7 +950,7 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
   };
 
   DebugWithMessage("<!--CSS rewrite failed: Parse error in %url%-->");
-  for (int i = 0; i < std::size(fail_examples); ++i) {
+  for (size_t i = 0; i < std::size(fail_examples); ++i) {
     GoogleString id = absl::StrFormat("distilled_css_fail%d", i);
     ValidateFailParse(id, fail_examples[i]);
   }
@@ -984,7 +984,7 @@ TEST_F(CssFilterTest, ToOptimize) {
       },
   };
 
-  for (int i = 0; i < std::size(examples); ++i) {
+  for (size_t i = 0; i < std::size(examples); ++i) {
     GoogleString id = absl::StrFormat("to_optimize_%d", i);
     ValidateRewrite(id, examples[i][0], examples[i][1], kExpectSuccess);
   }
@@ -1808,7 +1808,7 @@ TEST_F(CssFilterTest, ComplexCssTest) {
        "@media screen{.foo{color:red}}"},
   };
 
-  for (int i = 0; i < std::size(examples); ++i) {
+  for (size_t i = 0; i < std::size(examples); ++i) {
     GoogleString id = absl::StrFormat("complex_css%d", i);
     ValidateRewrite(id, examples[i][0], examples[i][1], kExpectSuccess);
   }
@@ -1845,7 +1845,7 @@ TEST_F(CssFilterTest, ComplexCssTest) {
   };
 
   DebugWithMessage("<!--CSS rewrite failed: Parse error in %url%-->");
-  for (int i = 0; i < std::size(parse_fail_examples); ++i) {
+  for (size_t i = 0; i < std::size(parse_fail_examples); ++i) {
     GoogleString id = absl::StrFormat("complex_css_parse_fail%d", i);
     ValidateFailParse(id, parse_fail_examples[i]);
   }

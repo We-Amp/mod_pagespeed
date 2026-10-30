@@ -319,7 +319,7 @@ bool JsReplacer::HandleCandidate(const GoogleString& object,
                                  GoogleString* out) {
   // Note that the token still has the quotes; we strip them before invoking
   // the callback and then restore them when serializing.
-  CHECK_GE(value.length(), 2) << value;
+  CHECK_GE(value.length(), 2u) << value;
   char quote = value[0];
   CHECK(quote == '\'' || quote == '"');
   CHECK_EQ(quote, value[value.length() - 1]);

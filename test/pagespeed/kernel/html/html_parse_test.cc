@@ -1453,7 +1453,7 @@ class Bool {
  public:
   Bool() : value_(false) {}
   Bool(bool value) : value_(value) {}  // Copy constructor // NOLINT
-  const bool Test() const { return value_; }
+  bool Test() const { return value_; }
 
  private:
   bool value_;

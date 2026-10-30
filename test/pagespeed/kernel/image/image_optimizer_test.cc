@@ -295,7 +295,7 @@ class ImageOptimizerTest : public testing::Test {
   }
 
   void RewriteAndVerifyImages(const char* dir, const TestingImageInfo* images,
-                              int num_images, bool is_animated,
+                              size_t num_images, bool is_animated,
                               const ImageOptions& options,
                               const ImageDimensions& requested_dimension,
                               const ImageFormat original_format,
