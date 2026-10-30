@@ -127,7 +127,8 @@ TEST_F(CachePropertyStoreTest, TestNoResultAvailable) {
 
 TEST_F(CachePropertyStoreTest, TestResultAvailable) {
   PropertyCacheValues values;
-  // kParsableContent always parses; failures surface via ExecuteGet.
+  // kParsableContent is text format, so this wire-format parse fails and
+  // leaves `values` empty; the test only needs a message to Put.
   (void)values.ParseFromString(kParsableContent);
   cache_property_store_.Put(kUrl, kOptionsSignatureHash, kCacheKeySuffix,
                             cohort_, &values, nullptr);
@@ -157,7 +158,8 @@ TEST_F(CachePropertyStoreTest, TestMultipleCohorts) {
                         kOptionsSignatureHash, kCacheKeySuffix);
   property_cache_.Read(&page);
   PropertyCacheValues values;
-  // kParsableContent always parses; failures surface via ExecuteGet.
+  // kParsableContent is text format, so this wire-format parse fails and
+  // leaves `values` empty; the test only needs a message to Put.
   (void)values.ParseFromString(kParsableContent);
   cohort_list_.push_back(cohort2);
   lru_cache_.ClearStats();
@@ -202,7 +204,8 @@ TEST_F(CachePropertyStoreTest, TestMultipleCacheBackends) {
                         kOptionsSignatureHash, kCacheKeySuffix);
   property_cache_.Read(&page);
   PropertyCacheValues values;
-  // kParsableContent always parses; failures surface via ExecuteGet.
+  // kParsableContent is text format, so this wire-format parse fails and
+  // leaves `values` empty; the test only needs a message to Put.
   (void)values.ParseFromString(kParsableContent);
   lru_cache_.ClearStats();
   second_cache.ClearStats();
@@ -240,7 +243,8 @@ TEST_F(CachePropertyStoreTest, TestPropertyCacheKeyMethod) {
 
 TEST_F(CachePropertyStoreTest, TestPutHandlesNonNullCallback) {
   PropertyCacheValues values;
-  // kParsableContent always parses; failures surface via ExecuteGet.
+  // kParsableContent is text format, so this wire-format parse fails and
+  // leaves `values` empty; the test only needs a message to Put.
   (void)values.ParseFromString(kParsableContent);
   cache_property_store_.Put(
       kUrl, kOptionsSignatureHash, kCacheKeySuffix, cohort_, &values,
