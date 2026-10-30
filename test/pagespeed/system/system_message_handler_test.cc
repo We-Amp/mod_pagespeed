@@ -113,6 +113,122 @@ TEST_F(SystemMessageHandlerTest, AddsFileLineInfoWrapLongLines) {
       buffer_);
 }
 
+// An identical info line is kept once per window; the repeats are counted
+// and reported with the next line kept.
+TEST_F(SystemMessageHandlerTest, RepeatedInfoLinesAreKeptOncePerWindow) {
+  AddMessage(kInfo, "No permission to rewrite 'http://example.com/a.js'");
+  const GoogleString first = buffer_;
+  EXPECT_NE(GoogleString::npos, first.find("No permission to rewrite"));
+  for (int i = 0; i < 50; ++i) {
+    timer_.AdvanceMs(100);
+    AddMessage(kInfo, "No permission to rewrite 'http://example.com/a.js'");
+  }
+  // Fifty repeats inside the window left no trace.
+  EXPECT_EQ(first, buffer_);
+  timer_.AdvanceMs(kRepeatedInfoWindowMs);
+  AddMessage(kInfo, "No permission to rewrite 'http://example.com/a.js'");
+  EXPECT_NE(GoogleString::npos,
+            buffer_.find("a.js' (repeated 50 times)\n", first.size()));
+  // The count starts over: the next line in the new window is not annotated
+  // and is itself suppressed.
+  const GoogleString second = buffer_;
+  timer_.AdvanceMs(1000);
+  AddMessage(kInfo, "No permission to rewrite 'http://example.com/a.js'");
+  EXPECT_EQ(second, buffer_);
+  timer_.AdvanceMs(kRepeatedInfoWindowMs);
+  AddMessage(kInfo, "No permission to rewrite 'http://example.com/a.js'");
+  EXPECT_NE(GoogleString::npos,
+            buffer_.find("a.js' (repeated 1 time)\n", second.size()));
+}
+
+// A handler whose hash puts every line in the same bucket.
+class CollidingHashHandler : public SystemMessageHandler {
+ public:
+  using SystemMessageHandler::AddMessageToBuffer;
+  CollidingHashHandler(Timer* timer, AbstractMutex* mutex)
+      : SystemMessageHandler(timer, mutex) {}
+
+ protected:
+  size_t HashRepeatedInfoKey(StringPiece key) const override { return 7; }
+};
+
+TEST_F(SystemMessageHandlerTest, LinesWithEqualHashesAreNotMerged) {
+  GoogleString buffer;
+  StringWriter writer(&buffer);
+  CollidingHashHandler handler(&timer_, thread_system_->NewMutex());
+  handler.set_buffer(&writer);
+  handler.AddMessageToBuffer(kInfo, "f.cc", 1, "first distinct line");
+  handler.AddMessageToBuffer(kInfo, "f.cc", 1, "second distinct line");
+  EXPECT_EQ(1, CountSubstring(buffer, "first distinct line"));
+  EXPECT_EQ(1, CountSubstring(buffer, "second distinct line"));
+  // An identical line is still suppressed.
+  handler.AddMessageToBuffer(kInfo, "f.cc", 1, "second distinct line");
+  EXPECT_EQ(1, CountSubstring(buffer, "second distinct line"));
+}
+
+TEST_F(SystemMessageHandlerTest, LinesBeforeTheBufferExistDoNotSuppressLater) {
+  GoogleString buffer;
+  StringWriter writer(&buffer);
+  CollidingHashHandler handler(&timer_, thread_system_->NewMutex());
+  // Logged before set_buffer: goes nowhere, and must not count as seen.
+  handler.AddMessageToBuffer(kInfo, "early line");
+  handler.set_buffer(&writer);
+  handler.AddMessageToBuffer(kInfo, "early line");
+  EXPECT_EQ(1, CountSubstring(buffer, "early line"));
+}
+
+TEST_F(SystemMessageHandlerTest, DifferentInfoLinesAreNotMerged) {
+  AddMessage(kInfo, "first line");
+  AddMessage(kInfo, "second line");
+  AddMessage(kInfo, "test_file.cc", 1, "first line");
+  AddMessage(kInfo, "test_file.cc", 2, "first line");
+  EXPECT_EQ(4, CountSubstring(buffer_, "[Info]"));
+}
+
+TEST_F(SystemMessageHandlerTest,
+       RepeatedLinesInterleavedWithOthersAreStillCounted) {
+  AddMessage(kInfo, "noisy");
+  for (int i = 0; i < 10; ++i) {
+    timer_.AdvanceMs(10);
+    AddMessage(kInfo, StrCat("other ", IntegerToString(i)));
+    AddMessage(kInfo, "noisy");
+  }
+  EXPECT_EQ(1, CountSubstring(buffer_, "noisy"));
+  EXPECT_EQ(10, CountSubstring(buffer_, "other"));
+}
+
+TEST_F(SystemMessageHandlerTest, WarningsAndErrorsAreNeverDeduplicated) {
+  for (int i = 0; i < 5; ++i) {
+    AddMessage(kWarning, "same warning");
+    AddMessage(kError, "same error");
+  }
+  EXPECT_EQ(5, CountSubstring(buffer_, "same warning"));
+  EXPECT_EQ(5, CountSubstring(buffer_, "same error"));
+}
+
+TEST_F(SystemMessageHandlerTest, TheNumberOfTrackedInfoLinesIsBounded) {
+  // Far more distinct lines than are tracked: all are kept, none is lost.
+  for (int i = 0; i < 200; ++i) {
+    AddMessage(kInfo, StrCat("distinct ", IntegerToString(i)));
+  }
+  EXPECT_EQ(200, CountSubstring(buffer_, "distinct"));
+  // The oldest were forgotten, so a repeat of the first is kept again.
+  AddMessage(kInfo, "distinct 0");
+  EXPECT_EQ(2, CountSubstring(buffer_, "distinct 0\n"));
+}
+
+TEST_F(SystemMessageHandlerTest,
+       ARepeatedMultiLineMessageCarriesTheCountOnItsFirstLine) {
+  AddMessage(kInfo, "head\nsecond line");
+  timer_.AdvanceMs(1);
+  AddMessage(kInfo, "head\nsecond line");
+  timer_.AdvanceMs(kRepeatedInfoWindowMs);
+  const size_t before = buffer_.size();
+  AddMessage(kInfo, "head\nsecond line");
+  EXPECT_NE(GoogleString::npos,
+            buffer_.find("head (repeated 1 time)\nIsecond line\n", before));
+}
+
 // The message-history endpoint over a real, wrapped SharedCircularBuffer:
 // a `since` older than the retained window returns everything retained, and
 // the partial line the wrap leaves at the start of the dump is never

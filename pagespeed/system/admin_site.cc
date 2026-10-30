@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -28,8 +29,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -195,6 +198,71 @@ void WriteJsonBusy(AsyncFetch* fetch, MessageHandler* handler) {
   fetch->Done(true);
 }
 
+// Frees the slot of a cache lookup when the lookup's response is complete.
+// The lookup may finish after the handler that started it has returned, so
+// the slot is held until the fetch is done rather than until the call ends.
+class SlotReleasingFetch : public SharedAsyncFetch {
+ public:
+  SlotReleasingFetch(AsyncFetch* base_fetch, AdminSite* site,
+                     ExpensiveLeaf leaf)
+      : SharedAsyncFetch(base_fetch), site_(site), leaf_(leaf) {}
+
+ protected:
+  void HandleDone(bool success) override {
+    SharedAsyncFetch::HandleDone(success);
+    site_->ReleaseExpensiveSlot(leaf_);
+    delete this;
+  }
+
+ private:
+  ~SlotReleasingFetch() override {}
+
+  AdminSite* site_;
+  ExpensiveLeaf leaf_;
+};
+
+// If `body` ends with the annotation the message history adds to an info line
+// it kept after skipping identical ones (" (repeated N times)", or " (repeated
+// 1 time)"), removes it and returns the number of lines it stands for besides
+// the one it annotates; otherwise returns 0 and leaves `body` alone.
+int64 TakeRepeatedSuffix(StringPiece* body) {
+  StringPiece text = *body;
+  while (!text.empty() && (text.back() == ' ' || text.back() == '\t' ||
+                           text.back() == '\r' || text.back() == '\n')) {
+    text.remove_suffix(1);
+  }
+  static const char kOpen[] = " (repeated ";
+  StringPiece rest;
+  if (StringPiece(" times)") ==
+      text.substr(text.size() >= 7 ? text.size() - 7 : text.size())) {
+    rest = text.substr(0, text.size() - 7);
+  } else if (StringPiece(" time)") ==
+             text.substr(text.size() >= 6 ? text.size() - 6 : text.size())) {
+    rest = text.substr(0, text.size() - 6);
+  } else {
+    return 0;
+  }
+  size_t digits = 0;
+  while (digits < rest.size() &&
+         IsDecimalDigit(rest[rest.size() - 1 - digits])) {
+    ++digits;
+  }
+  const size_t open_len = sizeof(kOpen) - 1;
+  // At most 12 digits, so the count cannot overflow.
+  if (digits == 0 || digits > 12 || rest.size() < digits + open_len ||
+      rest.substr(rest.size() - digits - open_len, open_len) !=
+          StringPiece(kOpen, open_len)) {
+    return 0;
+  }
+  int64 repeated = 0;
+  if (!StringToInt64(rest.substr(rest.size() - digits), &repeated) ||
+      repeated <= 0) {
+    return 0;
+  }
+  *body = rest.substr(0, rest.size() - digits - open_len);
+  return repeated;
+}
+
 struct MessageGroup {
   const char* level = "info";
   GoogleString template_text;
@@ -218,18 +286,24 @@ GoogleString GroupedMessagesJson(MessageHandler* handler,
     if (messages[i].empty()) continue;
     const char* level = MessageLevelName(handler->GetMessageType(messages[i]));
     const StringPiece line = handler->ReformatMessage(messages[i]);
-    const StringPiece body = MessageLineBody(line);
+    StringPiece body = MessageLineBody(line);
     if (body.size() < line.size()) current_ms = MessageLineTimeMs(line);
+    // A line kept after skipped repeats counts for all of them, and is
+    // grouped with the unannotated lines of the same text.
+    // Only info lines are ever annotated; the text of any other level is its
+    // own.
+    const int64 weight =
+        1 + (strcmp(level, "info") == 0 ? TakeRepeatedSuffix(&body) : 0);
     GoogleString text = MessageTemplate(body);
     MessageGroup& group = by_key[std::make_pair(GoogleString(level), text)];
     if (group.count == 0) {
       group.level = level;
       group.template_text = std::move(text);
     }
-    ++group.count;
+    group.count += weight;
     if (current_ms > group.last_ms) group.last_ms = current_ms;
     if (window_s > 0 && current_ms >= 0 && current_ms >= window_start_ms) {
-      ++group.recent;
+      group.recent += weight;
     }
   }
   std::vector<const MessageGroup*> rows;
@@ -314,6 +388,51 @@ class PurgeFetchCallbackGasket {
 };
 
 }  // namespace
+
+GraphQuery ParseGraphQuery(const QueryParams& params, int64 now_ms) {
+  GraphQuery query;
+  query.start_time = 0;
+  query.end_time = now_ms;
+  query.granularity_ms = 3000;
+  for (int i = 0; i < params.size(); ++i) {
+    GoogleString value;
+    if (!params.UnescapedValue(i, &value)) continue;
+    StringPiece name = params.name(i);
+    if (name == "start_time") {
+      StringToInt64(value, &query.start_time);
+    } else if (name == "end_time") {
+      StringToInt64(value, &query.end_time);
+    } else if (name == "var_titles") {
+      // Fetch specified data if users populate var_titles.
+      query.dump_for_graphs = false;
+      std::vector<StringPiece> variable_names;
+      SplitStringPieceToVector(value, ",", &variable_names, true);
+      for (auto variable_name : variable_names) {
+        if (query.var_titles.size() >= kMaxGraphVarTitles) break;
+        query.var_titles.insert(variable_name.as_string());
+      }
+    } else if (name == "granularity") {
+      StringToInt64(value, &query.granularity_ms);
+    }
+  }
+  query.granularity_ms =
+      std::min(std::max(query.granularity_ms, kMinGraphGranularityMs),
+               kMaxGraphGranularityMs);
+  const int64 latest_ms = now_ms + 86400000;
+  query.start_time = std::min(std::max<int64>(query.start_time, 0), latest_ms);
+  query.end_time = std::min(std::max<int64>(query.end_time, 0), latest_ms);
+  return query;
+}
+
+bool AdminSite::AcquireExpensiveSlot(ExpensiveLeaf leaf, int wait_ms) {
+  constexpr int kPollMs = 5;
+  std::atomic<bool>& slot = expensive_in_flight_[static_cast<size_t>(leaf)];
+  for (int waited_ms = 0;; waited_ms += kPollMs) {
+    if (!slot.exchange(true, std::memory_order_acq_rel)) return true;
+    if (waited_ms >= wait_ms) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(kPollMs));
+  }
+}
 
 AdminSite::AdminSite(Timer* timer, MessageHandler* message_handler,
                      DaemonReader* daemon_reader)
@@ -401,6 +520,11 @@ void AdminSite::GraphsHandler(const RewriteOptions& options, AdminSource source,
 
 void AdminSite::ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
                                    Statistics* statistics) {
+  ExpensiveSlot slot(this, ExpensiveLeaf::kGraphs);
+  if (!slot.held()) {
+    WriteJsonBusy(fetch, message_handler_);
+    return;
+  }
   StatisticsLogger* console_logger = statistics->console_logger();
   if (console_logger == nullptr) {
     WriteJsonError(fetch, HttpStatus::kNotFound,
@@ -416,41 +540,10 @@ void AdminSite::ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch,
   headers->Add(HttpAttributes::kCacheControl, "no-store, private");
   headers->Add("X-Content-Type-Options", "nosniff");
 
-  std::set<GoogleString> var_titles;
-  // Default is to fetch data used on graphs page.
-  bool dump_for_graphs = true;
-
-  // Default values for start_time, end_time, and granularity_ms in case the
-  // query does not include these parameters.
-  int64 start_time = 0;
-  int64 end_time = timer_->NowMs();
-  // Granularity is the difference in ms between data points. If it is not
-  // specified by the query, the default value is 3000 ms, the same as the
-  // default logging granularity.
-  int64 granularity_ms = 3000;
-  for (int i = 0; i < params.size(); ++i) {
-    GoogleString value;
-    if (params.UnescapedValue(i, &value)) {
-      StringPiece name = params.name(i);
-      if (name == "start_time") {
-        StringToInt64(value, &start_time);
-      } else if (name == "end_time") {
-        StringToInt64(value, &end_time);
-      } else if (name == "var_titles") {
-        // Fetch specified data if users populate var_titles.
-        dump_for_graphs = false;
-        std::vector<StringPiece> variable_names;
-        SplitStringPieceToVector(value, ",", &variable_names, true);
-        for (auto variable_name : variable_names) {
-          var_titles.insert(variable_name.as_string());
-        }
-      } else if (name == "granularity") {
-        StringToInt64(value, &granularity_ms);
-      }
-    }
-  }
-  console_logger->DumpJSON(dump_for_graphs, var_titles, start_time, end_time,
-                           granularity_ms, fetch, message_handler_);
+  const GraphQuery query = ParseGraphQuery(params, timer_->NowMs());
+  console_logger->DumpJSON(query.dump_for_graphs, query.var_titles,
+                           query.start_time, query.end_time,
+                           query.granularity_ms, fetch, message_handler_);
   fetch->Done(true);
 }
 
@@ -537,9 +630,21 @@ void AdminSite::PrintCaches(
     // Always use JSON format now.
     GoogleString ua;
     query_params.Lookup1Unescaped("user_agent", &ua);
-    server_context->ShowCacheHandler(ServerContext::kFormatAsJson, url, ua,
-                                     query_params.Has("Delete"), fetch,
-                                     options->Clone());
+    // Each lookup builds a rewrite driver: one at a time, until the answer
+    // has been written (it can complete after this call returns).  The slot
+    // is taken without waiting: a wait would block this thread, which can be
+    // the server's event loop, and the slot may be held by a lookup that is
+    // waiting for that same thread.
+    ExpensiveSlot slot(this, ExpensiveLeaf::kCacheLookup, 0 /* no wait */);
+    if (!slot.held()) {
+      WriteJsonBusy(fetch, message_handler_);
+      return;
+    }
+    slot.Detach();
+    server_context->ShowCacheHandler(
+        ServerContext::kFormatAsJson, url, ua, query_params.Has("Delete"),
+        new SlotReleasingFetch(fetch, this, ExpensiveLeaf::kCacheLookup),
+        options->Clone());
   } else if ((source == kPageSpeedAdmin) &&
              query_params.Lookup1Unescaped("new_set", &url)) {
     GoogleString purge_set = options->PurgeSetString();
@@ -611,7 +716,16 @@ void AdminSite::PrintCaches(
       }
     }
   } else {
-    // Return JSON with cache structure info.
+    // Return JSON with cache structure info.  The whole-server listing asks
+    // each memcached/redis server for its status, so it runs one at a time.
+    std::optional<ExpensiveSlot> status_slot;
+    if (is_global) {
+      status_slot.emplace(this, ExpensiveLeaf::kCacheStatus);
+      if (!status_slot->held()) {
+        WriteJsonBusy(fetch, message_handler_);
+        return;
+      }
+    }
     GoogleString json = "{\"caches\":[";
     const char* separator = "";
 
@@ -671,6 +785,11 @@ void AdminSite::PrintConfig(AdminSource source, AsyncFetch* fetch,
                             const RewriteOptions& server_config,
                             const RewriteOptions& effective_options,
                             bool is_global, StringPiece host) {
+  ExpensiveSlot slot(this, ExpensiveLeaf::kConfig);
+  if (!slot.held()) {
+    WriteJsonBusy(fetch, message_handler_);
+    return;
+  }
   GoogleString json =
       StrCat("{\"config\":\"", JsonEscape(server_config.OptionsToString()),
              "\",\"effective_config\":\"",
@@ -909,6 +1028,15 @@ void AdminSite::MessageHistoryHandler(const RewriteOptions& options,
       return;
     }
     if (grouped_in_flight_.exchange(true, std::memory_order_acq_rel)) {
+      WriteJsonBusy(fetch, message_handler_);
+      return;
+    }
+  }
+  // The plain answer walks the whole retained buffer too.
+  std::optional<ExpensiveSlot> plain_slot;
+  if (!grouped) {
+    plain_slot.emplace(this, ExpensiveLeaf::kMessages);
+    if (!plain_slot->held()) {
       WriteJsonBusy(fetch, message_handler_);
       return;
     }

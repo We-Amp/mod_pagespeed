@@ -22,12 +22,14 @@
 #include "pagespeed/system/admin_site.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,6 +44,8 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/cache/delay_cache.h"
+#include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/query_params.h"
@@ -61,6 +65,7 @@
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
+#include "test/pagespeed/kernel/thread/mock_scheduler.h"
 
 namespace net_instaweb {
 
@@ -906,6 +911,33 @@ TEST_F(AdminSiteGroupedMessagesTest, GroupedIgnoresAnInvalidWindow) {
               ::testing::HasSubstr("\"window_s\":86400,"));
 }
 
+TEST_F(AdminSiteGroupedMessagesTest,
+       GroupedCountsRepeatedAnnotationsInTheirGroup) {
+  message_handler()->Message(kInfo, "Ignore the first line.");
+  message_handler()->Message(kInfo, "X");
+  message_handler()->Message(kInfo, "X (repeated 5 times)");
+  message_handler()->Message(kInfo, "Y (repeated 1 time)");
+  const Answer a = Ask("grouped=1&window_s=900");
+  EXPECT_THAT(a.body,
+              ::testing::HasSubstr("{\"level\":\"info\",\"template\":\"X\","
+                                   "\"count\":7,\"last_ms\":1388534400000,"
+                                   "\"recent\":7}"));
+  EXPECT_THAT(a.body, ::testing::HasSubstr("\"template\":\"Y\",\"count\":2,"));
+  // Only the one group of X.
+  EXPECT_EQ(a.body.find("\"template\":\"X\""),
+            a.body.rfind("\"template\":\"X\""));
+}
+
+TEST_F(AdminSiteGroupedMessagesTest, GroupedKeepsTheSuffixOfNonInfoLevels) {
+  message_handler()->Message(kInfo, "Ignore the first line.");
+  message_handler()->Message(kWarning, "W (repeated 5 times)");
+  const Answer a = Ask("grouped=1&window_s=900");
+  EXPECT_THAT(a.body, ::testing::HasSubstr(
+                          "{\"level\":\"warning\",\"template\":\"W (repeated "
+                          "N times)\",\"count\":1,\"last_ms\":1388534400000,"
+                          "\"recent\":1}"));
+}
+
 TEST_F(AdminSiteGroupedMessagesTest, GroupedHonorsTheSinceCursor) {
   message_handler()->Message(kInfo, "Ignore the first line.");
   message_handler()->Message(kWarning, "old 1");
@@ -985,6 +1017,341 @@ TEST_F(AdminSiteGroupedMessagesTest, GroupedStaysUnderTheResponseCap) {
   EXPECT_THAT(a.body, ::testing::HasSubstr("\"truncated\":true,"));
   ASSERT_GE(a.body.size(), 3u);
   EXPECT_EQ("}]}", a.body.substr(a.body.size() - 3));
+}
+
+// =============================================================================
+// Expensive reads: one at a time per leaf, with a short wait, then 429; and
+// bounds on the statistics-log query of the graphs/console JSON leaves.
+// =============================================================================
+
+class AdminSiteExpensiveReadsTest : public AdminSiteTest {
+ protected:
+  struct Answer {
+    int status = 0;
+    GoogleString body;
+  };
+
+  static constexpr const char* kBusyBody =
+      "{\"success\":false,\"error\":\"busy\"}";
+
+  Answer Config() {
+    Answer answer;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &answer.body);
+    admin_site_->PrintConfig(AdminSite::kPageSpeedAdmin, &fetch,
+                             *(rewrite_driver()->options()),
+                             *(rewrite_driver()->options()), true, "host");
+    answer.status = fetch.response_headers()->status_code();
+    return answer;
+  }
+
+  Answer History() {
+    Answer answer;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &answer.body);
+    QueryParams none;
+    admin_site_->MessageHistoryHandler(*(rewrite_driver()->options()),
+                                       AdminSite::kPageSpeedAdmin, none,
+                                       &fetch);
+    answer.status = fetch.response_headers()->status_code();
+    return answer;
+  }
+
+  Answer Graphs() {
+    Answer answer;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &answer.body);
+    QueryParams none;
+    admin_site_->ConsoleJsonHandler(none, &fetch, factory()->statistics());
+    answer.status = fetch.response_headers()->status_code();
+    return answer;
+  }
+
+  // The cache page: `query` is the part after '?'.
+  Answer Caches(StringPiece query, bool is_global) {
+    Answer answer;
+    StringAsyncFetch fetch(rewrite_driver()->request_context(), &answer.body);
+    GoogleUrl gurl("http://example.com/pagespeed_global_admin/cache");
+    GoogleUrl with_query(StrCat(gurl.Spec(), "?", query));
+    QueryParams params;
+    params.ParseFromUrl(with_query);
+    admin_site_->PrintCaches(
+        is_global, AdminSite::kPageSpeedAdmin, gurl, params,
+        rewrite_driver()->options(), nullptr /* cache_path */, &fetch,
+        nullptr /* system_caches */, nullptr /* filesystem_metadata_cache */,
+        http_cache(), lru_cache(), page_property_cache(),
+        server_context_.get());
+    answer.status = fetch.response_headers()->status_code();
+    return answer;
+  }
+
+  // Starts a cache lookup (is_global, on the real server context) into a
+  // fetch the caller owns, which can complete after this returns.
+  void LookupInto(StringPiece query, AsyncFetch* fetch) {
+    GoogleUrl gurl("http://example.com/pagespeed_global_admin/cache");
+    GoogleUrl with_query(StrCat(gurl.Spec(), "?", query));
+    QueryParams params;
+    params.ParseFromUrl(with_query);
+    admin_site_->PrintCaches(
+        true, AdminSite::kPageSpeedAdmin, gurl, params,
+        rewrite_driver()->options(), nullptr /* cache_path */, fetch,
+        nullptr /* system_caches */, nullptr /* filesystem_metadata_cache */,
+        http_cache(), lru_cache(), page_property_cache(), server_context());
+  }
+
+  void ExpectBusy(const Answer& answer) {
+    EXPECT_EQ(429, answer.status);
+    EXPECT_EQ(kBusyBody, answer.body);
+  }
+};
+
+TEST_F(AdminSiteExpensiveReadsTest, ConfigAdmitsOneReadAtATime) {
+  EXPECT_EQ(HttpStatus::kOK, Config().status);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, true);
+  ExpectBusy(Config());
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, false);
+  // A finished read frees the slot for the next one.
+  EXPECT_EQ(HttpStatus::kOK, Config().status);
+  EXPECT_EQ(HttpStatus::kOK, Config().status);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, PlainMessageHistoryAdmitsOneReadAtATime) {
+  message_handler()->Message(kInfo, "Ignore the first line.");
+  message_handler()->Message(kWarning, "something");
+  EXPECT_EQ(HttpStatus::kOK, History().status);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kMessages, true);
+  ExpectBusy(History());
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kMessages, false);
+  EXPECT_EQ(HttpStatus::kOK, History().status);
+  EXPECT_EQ(HttpStatus::kOK, History().status);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, GraphsJsonAdmitsOneReadAtATime) {
+  // The test statistics have no console logger: the answer is the 404 of a
+  // disabled logger, which is not a refusal for load.
+  EXPECT_EQ(HttpStatus::kNotFound, Graphs().status);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kGraphs, true);
+  ExpectBusy(Graphs());
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kGraphs, false);
+  EXPECT_EQ(HttpStatus::kNotFound, Graphs().status);
+  EXPECT_EQ(HttpStatus::kNotFound, Graphs().status);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, CacheLookupAdmitsOneReadAtATime) {
+  // An unusable URL is answered at once; the answer completes the fetch,
+  // which frees the slot.
+  const Answer first = Caches("url=not-a-url", true);
+  EXPECT_NE(429, first.status);
+  EXPECT_THAT(first.body, ::testing::HasSubstr("Invalid URL"));
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kCacheLookup,
+                                              true);
+  ExpectBusy(Caches("url=not-a-url", true));
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kCacheLookup,
+                                              false);
+  EXPECT_NE(429, Caches("url=not-a-url", true).status);
+  EXPECT_NE(429, Caches("url=not-a-url", true).status);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, ABusyCacheLookupIsRefusedWithoutWaiting) {
+  // The lookup runs on the server's event loop in some servers: it must not
+  // sleep waiting for a slot that only that loop can free.
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kCacheLookup,
+                                              true);
+  const auto begin = std::chrono::steady_clock::now();
+  ExpectBusy(Caches("url=not-a-url", true));
+  const auto waited_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - begin)
+                             .count();
+  EXPECT_LT(waited_ms, kExpensiveSlotWaitMs / 2);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kCacheLookup,
+                                              false);
+}
+
+// A cache lookup of a well-formed URL goes through the metadata cache; its
+// answer completes the fetch, possibly after the call has returned.
+TEST_F(AdminSiteExpensiveReadsTest, ACompletedCacheLookupFreesItsSlot) {
+  const GoogleString query = "url=http%3A%2F%2Fexample.com%2Fa.css";
+  GoogleString body;
+  StringAsyncFetch first(rewrite_driver()->request_context(), &body);
+  LookupInto(query, &first);
+  mock_scheduler()->AwaitQuiescence();
+  EXPECT_TRUE(first.done());
+  EXPECT_THAT(body, ::testing::HasSubstr("Metadata cache key:"));
+  // Finished, so the next lookup is not refused.
+  GoogleString body2;
+  StringAsyncFetch second(rewrite_driver()->request_context(), &body2);
+  LookupInto(query, &second);
+  mock_scheduler()->AwaitQuiescence();
+  EXPECT_TRUE(second.done());
+  EXPECT_NE(429, second.response_headers()->status_code());
+  EXPECT_THAT(body2, ::testing::HasSubstr("Metadata cache key:"));
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, APendingCacheLookupHoldsItsSlot) {
+  const GoogleString query = "url=http%3A%2F%2Fexample.com%2Fa.css";
+  // Learn the metadata cache key from one lookup, then delay the cache's
+  // answer for that key.
+  GoogleString probe;
+  StringAsyncFetch probe_fetch(rewrite_driver()->request_context(), &probe);
+  LookupInto(query, &probe_fetch);
+  mock_scheduler()->AwaitQuiescence();
+  const GoogleString marker = "Metadata cache key:";
+  const size_t begin = probe.find(marker);
+  ASSERT_NE(GoogleString::npos, begin) << probe;
+  size_t end = probe.find("\\u000a", begin);
+  ASSERT_NE(GoogleString::npos, end) << probe;
+  GoogleString key =
+      probe.substr(begin + marker.size(), end - begin - marker.size());
+  GoogleString unescaped;
+  for (size_t i = 0; i < key.size(); ++i) {
+    if (key[i] == '\\' && i + 1 < key.size() && key[i + 1] == '/') continue;
+    unescaped.push_back(key[i]);
+  }
+  delay_cache()->DelayKey(unescaped);
+
+  GoogleString body1;
+  StringAsyncFetch pending(rewrite_driver()->request_context(), &body1);
+  LookupInto(query, &pending);
+  mock_scheduler()->AwaitQuiescence();
+  EXPECT_FALSE(pending.done());
+  // While the first lookup waits for the cache, a second one is refused,
+  // immediately.
+  GoogleString body2;
+  StringAsyncFetch refused(rewrite_driver()->request_context(), &body2);
+  LookupInto(query, &refused);
+  EXPECT_EQ(429, refused.response_headers()->status_code());
+  EXPECT_EQ(kBusyBody, body2);
+  EXPECT_FALSE(pending.done());
+  // The cache answers: the first lookup completes and frees the slot.
+  delay_cache()->ReleaseKey(unescaped);
+  mock_scheduler()->AwaitQuiescence();
+  EXPECT_TRUE(pending.done());
+  EXPECT_THAT(body1, ::testing::HasSubstr("Metadata cache key:"));
+  GoogleString body3;
+  StringAsyncFetch after(rewrite_driver()->request_context(), &body3);
+  LookupInto(query, &after);
+  mock_scheduler()->AwaitQuiescence();
+  EXPECT_NE(429, after.response_headers()->status_code());
+  EXPECT_THAT(body3, ::testing::HasSubstr("Metadata cache key:"));
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, CacheStatusAdmitsOneReadAtATime) {
+  EXPECT_EQ(HttpStatus::kOK, Caches("", true).status);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kCacheStatus,
+                                              true);
+  ExpectBusy(Caches("", true));
+  // The per-vhost listing never asks the external servers: not limited.
+  EXPECT_EQ(HttpStatus::kOK, Caches("", false).status);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kCacheStatus,
+                                              false);
+  EXPECT_EQ(HttpStatus::kOK, Caches("", true).status);
+  EXPECT_EQ(HttpStatus::kOK, Caches("", true).status);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, LeavesDoNotBlockEachOther) {
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, true);
+  EXPECT_EQ(HttpStatus::kOK, History().status);
+  EXPECT_NE(429, Graphs().status);
+  EXPECT_EQ(HttpStatus::kOK, Caches("", true).status);
+  ExpectBusy(Config());
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, false);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, ABusySlotIsWaitedForBriefly) {
+  // Freed within the wait: the read goes through.
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, true);
+  std::thread releaser([this]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, false);
+  });
+  const Answer waited = Config();
+  releaser.join();
+  EXPECT_EQ(HttpStatus::kOK, waited.status);
+  // Not freed: refused only after waiting for about kExpensiveSlotWaitMs.
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, true);
+  const auto begin = std::chrono::steady_clock::now();
+  ExpectBusy(Config());
+  const auto waited_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - begin)
+                             .count();
+  EXPECT_GE(waited_ms, kExpensiveSlotWaitMs - 10);
+  EXPECT_LT(waited_ms, 20 * kExpensiveSlotWaitMs);
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kConfig, false);
+}
+
+TEST_F(AdminSiteExpensiveReadsTest, TheGroupedHistorySlotIsItsOwn) {
+  message_handler()->Message(kInfo, "Ignore the first line.");
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kMessages, true);
+  QueryParams grouped;
+  grouped.AddEscaped("grouped", "1");
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  admin_site_->MessageHistoryHandler(*(rewrite_driver()->options()),
+                                     AdminSite::kPageSpeedAdmin, grouped,
+                                     &fetch);
+  EXPECT_EQ(HttpStatus::kOK, fetch.response_headers()->status_code());
+  admin_site_->SetExpensiveSlotBusyForTesting(ExpensiveLeaf::kMessages, false);
+}
+
+class GraphQueryTest : public ::testing::Test {
+ protected:
+  static constexpr int64 kNowMs = 1700000000000;
+
+  GraphQuery Parse(StringPiece query) {
+    GoogleUrl gurl(
+        StrCat("http://example.com/pagespeed_admin/console?", query));
+    QueryParams params;
+    params.ParseFromUrl(gurl);
+    return ParseGraphQuery(params, kNowMs);
+  }
+};
+
+TEST_F(GraphQueryTest, DefaultsAskForTheGraphsOverTheWholeLog) {
+  const GraphQuery q = Parse("json=1");
+  EXPECT_EQ(0, q.start_time);
+  EXPECT_EQ(kNowMs, q.end_time);
+  EXPECT_EQ(3000, q.granularity_ms);
+  EXPECT_TRUE(q.dump_for_graphs);
+  EXPECT_TRUE(q.var_titles.empty());
+}
+
+TEST_F(GraphQueryTest, GranularityIsHeldToTheBounds) {
+  EXPECT_EQ(kMinGraphGranularityMs, Parse("granularity=0").granularity_ms);
+  EXPECT_EQ(kMinGraphGranularityMs, Parse("granularity=1").granularity_ms);
+  EXPECT_EQ(kMinGraphGranularityMs, Parse("granularity=-5").granularity_ms);
+  EXPECT_EQ(kMinGraphGranularityMs, Parse("granularity=999").granularity_ms);
+  EXPECT_EQ(1000, Parse("granularity=1000").granularity_ms);
+  EXPECT_EQ(60000, Parse("granularity=60000").granularity_ms);
+  EXPECT_EQ(kMaxGraphGranularityMs,
+            Parse("granularity=999999999999999").granularity_ms);
+  // Not a number reads as 0, which is held to the lower bound.
+  EXPECT_EQ(kMinGraphGranularityMs, Parse("granularity=abc").granularity_ms);
+}
+
+TEST_F(GraphQueryTest, TimesAreNonNegativeAndNotFarInTheFuture) {
+  EXPECT_EQ(0, Parse("start_time=-100").start_time);
+  EXPECT_EQ(0, Parse("end_time=-100").end_time);
+  EXPECT_EQ(12345, Parse("start_time=12345").start_time);
+  EXPECT_EQ(kNowMs + 86400000, Parse("end_time=99999999999999999").end_time);
+  EXPECT_EQ(kNowMs + 86400000,
+            Parse("start_time=99999999999999999").start_time);
+  EXPECT_EQ(kNowMs - 1000, Parse("end_time=1699999999000").end_time);
+}
+
+TEST_F(GraphQueryTest, VariableNamesAreListedAndBounded) {
+  const GraphQuery named = Parse("var_titles=a,b,,c");
+  EXPECT_FALSE(named.dump_for_graphs);
+  EXPECT_EQ(3u, named.var_titles.size());
+  GoogleString many = "var_titles=";
+  for (size_t i = 0; i < 3 * kMaxGraphVarTitles; ++i) {
+    StrAppend(&many, i == 0 ? "" : ",", "v", IntegerToString(i));
+  }
+  const GraphQuery capped = Parse(many);
+  EXPECT_FALSE(capped.dump_for_graphs);
+  EXPECT_EQ(kMaxGraphVarTitles, capped.var_titles.size());
+  // Several var_titles parameters share the same bound.
+  GoogleString repeated;
+  for (size_t i = 0; i < 3 * kMaxGraphVarTitles; ++i) {
+    StrAppend(&repeated, i == 0 ? "" : "&", "var_titles=w", IntegerToString(i));
+  }
+  EXPECT_EQ(kMaxGraphVarTitles, Parse(repeated).var_titles.size());
 }
 
 // =============================================================================
@@ -1091,6 +1458,26 @@ TEST_F(AdminExposureWarningTest, IdempotentPerFamily) {
   WarnIfNonLoopbackAdminAccess("8.8.8.8", AdminHandlerFamily::kAdmin,
                                "pagespeed_admin", handler_.get());
   EXPECT_EQ(1, WarningCount());
+}
+
+TEST_F(AdminExposureWarningTest,
+       ARepeatingClientLogsOncePerFamilyForTheProcess) {
+  // Many requests from many non-loopback clients, over every family: one
+  // line per family and no more, however many hits arrive.  The latch is
+  // per process, so a server that starts several processes logs the line once
+  // in each of them.
+  const AdminHandlerFamily families[] = {
+      AdminHandlerFamily::kAdmin,      AdminHandlerFamily::kGlobalAdmin,
+      AdminHandlerFamily::kStatistics, AdminHandlerFamily::kGlobalStatistics,
+      AdminHandlerFamily::kConsole,    AdminHandlerFamily::kMessages};
+  for (int hit = 0; hit < 200; ++hit) {
+    for (AdminHandlerFamily family : families) {
+      WarnIfNonLoopbackAdminAccess(StrCat("10.0.0.", IntegerToString(hit)),
+                                   family, "pagespeed_admin", handler_.get());
+    }
+  }
+  EXPECT_EQ(static_cast<int>(sizeof(families) / sizeof(families[0])),
+            WarningCount());
 }
 
 TEST_F(AdminExposureWarningTest, IndependentAcrossFamilies) {

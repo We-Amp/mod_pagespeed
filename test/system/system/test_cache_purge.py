@@ -156,6 +156,32 @@ class TestCachePurgeWithPurgeMethod:
         _run_purge_cycle(vhost_client(PURGE_VHOST), doc_root, _purge)
 
 
+@pytest.mark.requires_secondary
+@pytest.mark.requires_fixture("secondary_vhosts")
+class TestPurgeMethodIsTheOnlyGate:
+    """The configured PurgeMethod verb purges on its own, and only that verb.
+
+    The module answers the verb ahead of the admin access options, so the
+    verb is what must be restricted at the web server (see
+    docs/recommended-configuration.md). Any other method at the same URL is
+    not a purge.
+    """
+
+    # A URL no other test in this file uses, so purging it leaves the cache
+    # entries the purge-cycle tests look for alone.
+    GATE_URL = "/styles/purge_gate_probe.css"
+
+    def test_the_configured_verb_is_answered_as_a_purge(self, vhost_client):
+        response = vhost_client(PURGE_VHOST).purge(self.GATE_URL)
+        require_status_ok(response, "PURGE of a single URL")
+        assert "Purge successful" in response.text
+
+    @pytest.mark.parametrize("method", ["GET", "HEAD", "purge", "PURGEX"])
+    def test_other_methods_are_not_purges(self, vhost_client, method):
+        response = vhost_client(PURGE_VHOST)._request(method, self.GATE_URL)
+        assert "Purge successful" not in (response.text or "")
+
+
 @pytest.mark.requires_stats
 @pytest.mark.requires_secondary
 @pytest.mark.requires_fixture("secondary_vhosts", "doc_root_scratch")
