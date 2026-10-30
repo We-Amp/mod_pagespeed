@@ -379,20 +379,21 @@ build:asan-fuzzer --copt=-fno-omit-frame-pointer
 # Remove UBSAN halt_on_error to avoid crashing on protobuf errors.
 build:asan-fuzzer --test_env=UBSAN_OPTIONS=print_stacktrace=1
 
-build:oss-fuzz --config=fuzzing
-build:oss-fuzz --define=FUZZING_ENGINE=oss-fuzz
-build:oss-fuzz --@rules_fuzzing//fuzzing:cc_engine_instrumentation=oss-fuzz
-build:oss-fuzz --@rules_fuzzing//fuzzing:cc_engine_sanitizer=none
+# OSS-Fuzz (.oss-fuzz/build.sh). The compiler, sanitizer and engine flags
+# of an OSS-Fuzz build come from its environment and go in on the command
+# line; this config carries what the tree needs on top of them there: the
+# builder's own libc++ behind its clang, linked statically because the runner
+# image has no libc++.so, and static binaries. It does not use --config=clang,
+# which pins CC/CXX to plain clang, while the AFL++ and honggfuzz builds set
+# them to their compiler wrappers.
+build:oss-fuzz --action_env=BAZEL_COMPILER=clang
+build:oss-fuzz --action_env=BAZEL_CXXOPTS=-stdlib=libc++
+build:oss-fuzz --action_env=BAZEL_LINKLIBS=-l%:libc++.a:-l%:libc++abi.a
+build:oss-fuzz --action_env=BAZEL_LINKOPTS=-lm:-pthread
+build:oss-fuzz --copt=-Wno-unknown-warning-option
+build:oss-fuzz --linkopt=-fuse-ld=lld
 build:oss-fuzz --dynamic_mode=off
 build:oss-fuzz --strip=never
-build:oss-fuzz --copt=-fno-sanitize=vptr
-build:oss-fuzz --linkopt=-fno-sanitize=vptr
-build:oss-fuzz --define=tcmalloc=disabled
-build:oss-fuzz --define=signal_trace=disabled
-build:oss-fuzz --copt=-D_LIBCPP_DISABLE_DEPRECATION_WARNINGS
-build:oss-fuzz --define=force_libcpp=enabled
-build:oss-fuzz --linkopt=-lc++
-build:oss-fuzz --linkopt=-pthread
 
 # Compile database generation config
 build:compdb --build_tag_filters=-nocompdb
