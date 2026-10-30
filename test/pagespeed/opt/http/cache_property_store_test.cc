@@ -127,7 +127,8 @@ TEST_F(CachePropertyStoreTest, TestNoResultAvailable) {
 
 TEST_F(CachePropertyStoreTest, TestResultAvailable) {
   PropertyCacheValues values;
-  values.ParseFromString(kParsableContent);
+  // kParsableContent always parses; failures surface via ExecuteGet.
+  (void)values.ParseFromString(kParsableContent);
   cache_property_store_.Put(kUrl, kOptionsSignatureHash, kCacheKeySuffix,
                             cohort_, &values, nullptr);
   EXPECT_TRUE(ExecuteGet(page_.get()));
@@ -156,7 +157,8 @@ TEST_F(CachePropertyStoreTest, TestMultipleCohorts) {
                         kOptionsSignatureHash, kCacheKeySuffix);
   property_cache_.Read(&page);
   PropertyCacheValues values;
-  values.ParseFromString(kParsableContent);
+  // kParsableContent always parses; failures surface via ExecuteGet.
+  (void)values.ParseFromString(kParsableContent);
   cohort_list_.push_back(cohort2);
   lru_cache_.ClearStats();
   EXPECT_FALSE(ExecuteGet(&page));
@@ -200,7 +202,8 @@ TEST_F(CachePropertyStoreTest, TestMultipleCacheBackends) {
                         kOptionsSignatureHash, kCacheKeySuffix);
   property_cache_.Read(&page);
   PropertyCacheValues values;
-  values.ParseFromString(kParsableContent);
+  // kParsableContent always parses; failures surface via ExecuteGet.
+  (void)values.ParseFromString(kParsableContent);
   lru_cache_.ClearStats();
   second_cache.ClearStats();
   // Insert the value for cohort1.
@@ -237,7 +240,8 @@ TEST_F(CachePropertyStoreTest, TestPropertyCacheKeyMethod) {
 
 TEST_F(CachePropertyStoreTest, TestPutHandlesNonNullCallback) {
   PropertyCacheValues values;
-  values.ParseFromString(kParsableContent);
+  // kParsableContent always parses; failures surface via ExecuteGet.
+  (void)values.ParseFromString(kParsableContent);
   cache_property_store_.Put(
       kUrl, kOptionsSignatureHash, kCacheKeySuffix, cohort_, &values,
       NewCallback(this, &CachePropertyStoreTest::ResultCallback));
