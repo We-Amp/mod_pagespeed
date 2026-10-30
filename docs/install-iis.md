@@ -55,6 +55,55 @@ cache extension) to all responses. The admin UI is available at
 Filters are enabled and disabled in `pagespeed.config` (for example `pagespeed EnableFilters collapse_whitespace`). See [iis-limitations.md](iis-limitations.md#architecture) for how the configuration file is resolved, and [Running PageSpeed for IIS with the optimizer](daemon-adapter-iis.md) for the optimizer directives.
 
 
+### Admin pages and reverse proxies
+
+The admin, statistics, console and message pages (and the start-up diagnostic
+page) are served to local requests only, which is the default
+(`pagespeed InfoUrlsLocalOnly on`). A request is local when it comes from the
+server itself over a loopback address and was not relayed by a reverse proxy.
+
+A request that carries forwarding headers (`X-Forwarded-For`, `Forwarded`,
+`X-ARR-ClientIP`, `X-Real-IP` and similar) was relayed by a proxy, so it is not
+local, even if the proxy runs on the same server: the pages answer such a
+request like any other unknown path. The module only checks that such a header
+is present, never what it says. A proxy or tunnel that adds none of these
+headers cannot be told from a direct request. Restrict the page paths at the
+proxy, or make the proxy add a forwarding header, which the module then
+detects (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`,
+HAProxy: `option forwardfor`).
+
+Two directives change who is served:
+
+```
+# Serve the admin pages to this host name, whoever asks (also behind a proxy).
+pagespeed AdminDomains allow admin.example.com
+pagespeed StatisticsDomains allow stats.example.com
+
+# Count requests relayed by a proxy on this server as local (default off).
+pagespeed TreatProxiedRequestsAsLocal on
+```
+
+- `AdminDomains` covers the admin and cache purge paths, `GlobalAdminDomains`
+  the global admin path, and `StatisticsDomains`, `GlobalStatisticsDomains`,
+  `ConsoleDomains` and `MessagesDomains` the other pages. A request whose
+  `Host` header matches the list is served; other requests follow the local
+  rule above. The match is on the `Host` header the site receives, so with
+  Application Request Routing turn on "Preserve client host header"; without
+  it every relayed request carries the back-end host name, and listing that
+  name would serve the pages to every visitor. The `Host` header is set by the
+  client: the `*Domains` lists limit access by host name and are not
+  authentication, so give the host name only to people who may see the pages.
+- `TreatProxiedRequestsAsLocal on` is for a site where every visitor comes
+  through a proxy on the server and the pages are protected there. With it off
+  (the default), the start-up diagnostic page and the
+  `X-Pagespeed-Init-Status` response header are also withheld from relayed
+  requests. Do not turn it on together with a module that rewrites the client
+  address from a forwarding header: a visitor could then present a loopback
+  address.
+- `pagespeed InfoUrlsLocalOnly off` serves the pages to everyone unless a
+  `*Domains` list is set for that page; protect the paths with IIS IP and
+  Domain Restrictions or an authenticated proxy if you use it.
+
 ### HTML caching
 
 Rewritten HTML is served as not cacheable by shared caches by default, and it

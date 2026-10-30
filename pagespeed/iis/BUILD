@@ -170,6 +170,7 @@ cc_library(
         ":iis_global_constants",
         ":iis_admin_path_match",
         ":iis_ip_string",
+        ":iis_local_request",
         ":iis_proxy_fetch_completion",
         ":iis_unclaimed_ref",
         ":iis_zerocopy_serve",
@@ -294,6 +295,19 @@ cc_library(
     name = "iis_admin_path_match",
     srcs = ["iis_admin_path_match.cc"],
     hdrs = ["iis_admin_path_match.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The "is this request local" decision for the admin-style pages (forwarding
+# headers, TreatProxiedRequestsAsLocal, *Domains), split out of
+# iis_http_module.cpp so it can be unit-tested without the IIS headers.
+cc_library(
+    name = "iis_local_request",
+    srcs = ["iis_local_request.cc"],
+    hdrs = ["iis_local_request.h"],
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",

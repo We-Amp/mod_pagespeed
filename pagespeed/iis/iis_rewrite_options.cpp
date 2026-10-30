@@ -46,6 +46,7 @@ const char kAutoCreateCachePath[] = "AutoCreateCachePath";
 const char kAutoCreateLogDir[] = "AutoCreateLogDir";
 const char kDaemonSocketPath[] = "DaemonSocketPath";
 const char kDaemonVolumePath[] = "DaemonVolumePath";
+const char kTreatProxiedRequestsAsLocal[] = "TreatProxiedRequestsAsLocal";
 const char kDaemonServeHonorRequestFreshness[] =
     "DaemonServeHonorRequestFreshness";
 
@@ -197,6 +198,21 @@ void IisRewriteOptions::AddProperties() {
 		true);
 	// Like the Apache and nginx switches, it decides which stored bytes are
 	// sent, not what the optimizer produces.
+	iis_properties_->property(iis_properties_->size() - 1)
+		->set_do_not_use_for_signature_computation(true);
+	// Access control for the admin-style pages.  Default off: a request that
+	// carries reverse-proxy forwarding headers is not local, however close
+	// the proxy is.  Like the switch above, it decides who is served, not
+	// what the optimizer produces.
+	add_iis_option(
+		false, &IisRewriteOptions::treat_proxied_requests_as_local_, "tprl",
+		kTreatProxiedRequestsAsLocal, kServerScope,
+		"Count a request relayed by a reverse proxy or tunnel on this server "
+		"(one that carries forwarding headers such as X-Forwarded-For) as local "
+		"for the admin, statistics, console and message pages and the "
+		"diagnostic page. Default off: only direct local requests are local. "
+		"Use AdminDomains and StatisticsDomains to allow named hosts instead.",
+		true);
 	iis_properties_->property(iis_properties_->size() - 1)
 		->set_do_not_use_for_signature_computation(true);
 

@@ -171,6 +171,8 @@ pagespeed GlobalStatisticsPath /pagespeed_global_statistics
 pagespeed ConsolePath /pagespeed_console
 pagespeed MessagesPath /pagespeed_message
 pagespeed GlobalAdminPath /pagespeed_global_admin
+pagespeed AdminDomains allow admin.example.com
+pagespeed StatisticsDomains allow stats.example.com
 "@
 
 # Site-level config

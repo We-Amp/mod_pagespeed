@@ -40,7 +40,11 @@ public:
 
 	
 	
-	bool IsLocalRequest(IN IHttpContext* pHttpContext);
+	// True when the request counts as local for the admin-style pages: a
+	// loopback or same-address client that was not relayed by a reverse proxy
+	// (unless `options` opts in).  `options` may be null (secure default).
+	bool IsLocalRequest(IN IHttpContext* pHttpContext, const IisRewriteOptions* options, bool assume_proxied_opt_in = false);
+
 
 	// Sets the local-only X-Pagespeed-Init-Status value for an unusable
 	// optimizer service (DaemonInitStatusToken: every kUnavailable
