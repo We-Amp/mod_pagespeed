@@ -18,9 +18,12 @@
 #include "gtest/gtest.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/iis/iis_configuration.h"
+#include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
+#include "pagespeed/kernel/base/null_message_handler.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 // Forward declarations of test helpers (defined in iis_configuration.cpp).
@@ -899,6 +902,117 @@ TEST_F(IisConfigurationTest,
   EXPECT_FALSE(any_crash.load())
       << "GetConfiguration threw under concurrent load";
   EXPECT_GT(total_files.load(), 0);
+}
+
+// NumRewriteThreads and NumExpensiveRewriteThreads are read into the
+// process-wide settings the driver factory sizes its pools from.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesAreRead) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(
+      "pagespeed NumRewriteThreads 6\n"
+      "pagespeed NumExpensiveRewriteThreads 3\n",
+      "", &rwo);
+  EXPECT_EQ(6, global_config_.num_rewrite_threads);
+  EXPECT_EQ(3, global_config_.num_expensive_rewrite_threads);
+}
+
+// Unset, "auto" and 0 all leave the built-in size in place; "auto" after a
+// count puts it back.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesAutoAndDefault) {
+  IisRewriteOptions unset(nullptr);
+  ParseAndGetConfig("pagespeed EnableFilters combine_css\n", "", &unset);
+  EXPECT_EQ(0, global_config_.num_rewrite_threads);
+  EXPECT_EQ(0, global_config_.num_expensive_rewrite_threads);
+
+  IisRewriteOptions autos(nullptr);
+  ParseAndGetConfig(
+      "pagespeed NumRewriteThreads 6\n"
+      "pagespeed NumRewriteThreads auto\n"
+      "pagespeed NumExpensiveRewriteThreads 4\n"
+      "pagespeed NumExpensiveRewriteThreads 0\n",
+      "", &autos);
+  EXPECT_EQ(0, global_config_.num_rewrite_threads);
+  EXPECT_EQ(0, global_config_.num_expensive_rewrite_threads);
+}
+
+// A negative or non-numeric count is refused with a warning and changes
+// nothing.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesRejectBadValues) {
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed NumRewriteThreads -2\n"
+      "pagespeed NumExpensiveRewriteThreads many\n",
+      &recorder, global_config_, nullptr);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(0, global_config_.num_rewrite_threads);
+  EXPECT_EQ(0, global_config_.num_expensive_rewrite_threads);
+  EXPECT_EQ(2, recorder.CountContaining("must be 'auto' or a whole number"));
+}
+
+// A mistyped digit must not create thousands of threads: the count is reduced
+// to the shared cap, with a warning.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesAreClamped) {
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed NumRewriteThreads 100000\n", &recorder, global_config_, nullptr);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(net_instaweb::kMaxOptimizationThreadsPerPool,
+            global_config_.num_rewrite_threads);
+  EXPECT_EQ(1, recorder.CountContaining("using 1024 instead"));
+}
+
+// The counts are read from the machine-wide file for every site of the
+// process, not only for the first one that parses it, and a site's own file
+// wins for that site.
+TEST_F(IisConfigurationTest, PoolThreadSettingsComeFromBothFilesEveryTime) {
+  char temp[MAX_PATH];
+  ASSERT_GT(GetTempPathA(MAX_PATH, temp), 0u);
+  const std::string dir = std::string(temp) + "pagespeed-pool-threads-" +
+                          std::to_string(GetCurrentProcessId());
+  CreateDirectoryA(dir.c_str(), nullptr);
+  auto write = [&](const std::string& name, const std::string& text) {
+    const std::string path = dir + "\\" + name;
+    FILE* f = fopen(path.c_str(), "wb");
+    EXPECT_NE(nullptr, f);
+    if (f != nullptr) {
+      fwrite(text.data(), 1, text.size(), f);
+      fclose(f);
+    }
+    return path;
+  };
+  const std::string machine = write("machine.config",
+      "pagespeed NumRewriteThreads 5\npagespeed NumExpensiveRewriteThreads 3\n");
+  const std::string site_b = write("site-b.config", "pagespeed NumRewriteThreads 9\n");
+  const std::string site_c = write("site-c.config", "pagespeed EnableFilters combine_css\n");
+
+  net_instaweb::NullMessageHandler quiet;
+  // A first site, then a second and third in the same process.
+  net_instaweb::global_settings first, second, third;
+  ReadPoolThreadSettings(machine, "", &quiet, &first);
+  ReadPoolThreadSettings(machine, site_b, &quiet, &second);
+  ReadPoolThreadSettings(machine, site_c, &quiet, &third);
+
+  EXPECT_EQ(5, first.num_rewrite_threads);
+  EXPECT_EQ(3, first.num_expensive_rewrite_threads);
+  EXPECT_EQ(9, second.num_rewrite_threads);   // the site's own file wins
+  EXPECT_EQ(3, second.num_expensive_rewrite_threads);
+  EXPECT_EQ(5, third.num_rewrite_threads);    // a site without a value
+  EXPECT_EQ(3, third.num_expensive_rewrite_threads);
+
+  for (const std::string& f : {machine, site_b, site_c}) {
+    DeleteFileA(f.c_str());
+  }
+  RemoveDirectoryA(dir.c_str());
+}
+
+// A configured count always wins; otherwise half the CPUs, at least 4.
+TEST(IisPoolThreadCountTest, ConfiguredCountWinsOverBuiltInSize) {
+  using net_instaweb::IisRewriteDriverFactory;
+  EXPECT_EQ(1, IisRewriteDriverFactory::PoolThreadCount(1, 64));
+  EXPECT_EQ(12, IisRewriteDriverFactory::PoolThreadCount(12, 2));
+  EXPECT_EQ(4, IisRewriteDriverFactory::PoolThreadCount(0, 2));
+  EXPECT_EQ(4, IisRewriteDriverFactory::PoolThreadCount(0, 8));
+  EXPECT_EQ(16, IisRewriteDriverFactory::PoolThreadCount(0, 32));
 }
 
 // A directive line with no option name (a bare "pagespeed", or one followed

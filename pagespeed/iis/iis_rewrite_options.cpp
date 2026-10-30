@@ -15,6 +15,7 @@
 #include "pagespeed/iis/iis_message_handler.h"
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/iis/iis_rewrite_driver_factory.h"
+#include "pagespeed/system/optimization_thread_policy.h"
 
 namespace {
 // Local helper: joins a vector of strings with a separator character.
@@ -368,6 +369,34 @@ IisRewriteOptions::ParseAndSetOptions(
       } else {
 		msg = "Failed to set MessageBufferSize value";
         result = RewriteOptions::kOptionValueInvalid;
+      }
+    } else if (IsDirective(directive, "NumRewriteThreads") ||
+               IsDirective(directive, "NumExpensiveRewriteThreads")) {
+      // "auto" (and its alias 0) keeps the built-in size; a positive count
+      // sets the pool size of the site, in each worker process.
+      int count = 0;
+      if (IsDirective(arg, "auto")) {
+        result = RewriteOptions::kOptionOk;
+      } else if (StringToInt(arg.as_string(), &count) && count >= 0) {
+        result = RewriteOptions::kOptionOk;
+        if (count > kMaxOptimizationThreadsPerPool) {
+          // As on the other ports: a mistyped digit must not create
+          // thousands of threads.
+          handler->Message(kWarning,
+              "'%s' was set to %d, which is far more threads than a site can use; using %d instead.",
+              directive.as_string().c_str(), count, kMaxOptimizationThreadsPerPool);
+          count = kMaxOptimizationThreadsPerPool;
+        }
+      } else {
+        msg = directive.as_string() + " must be 'auto' or a whole number of 0 or more";
+        result = RewriteOptions::kOptionValueInvalid;
+      }
+      if (result == RewriteOptions::kOptionOk) {
+        if (IsDirective(directive, "NumRewriteThreads")) {
+          global_config.num_rewrite_threads = count;
+        } else {
+          global_config.num_expensive_rewrite_threads = count;
+        }
       }
     } else if (IsDirective(directive, "UseNativeFetcher")) {
 		if (!SetBoolFlag(&global_config.use_native_fetcher,arg)) {

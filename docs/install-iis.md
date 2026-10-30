@@ -69,6 +69,23 @@ enable IIS output caching for rewritten pages, use the user-mode `policy` with
 `kernelCachePolicy` off for them: kernel-mode caching cannot vary by request
 header.
 
+### Optimization threads
+
+`NumRewriteThreads` and `NumExpensiveRewriteThreads` set the sizes of the two
+pools that do optimization work (short bookkeeping tasks, and the more
+expensive rewrites). Set them in the machine-wide `pagespeed.config`, which
+applies to every site, or in a site's own `pagespeed.config`, which wins for
+that site. The counts apply per site, in each worker process: an application
+pool that hosts several sites runs about that many threads for each of them.
+
+Unset, or `auto` (or `0`), keeps the built-in size: half the CPUs, and at
+least 4. A site's `auto` does not cancel a machine-wide count. Values above
+1024 are reduced to 1024 with a warning. The pool for HTML processing is not
+affected. A new value takes effect when the site's configuration is reloaded
+or the application pool recycles. The startup message "PageSpeed optimization
+threads: ..." (in the message history and, with `UseEventLog on`, the event
+log) shows the sizes in use.
+
 ## Verification
 
 ```powershell

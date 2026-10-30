@@ -609,3 +609,37 @@ ConfigurationFile *ConfigFactory::GetConfiguration(string path,MessageHandler *m
 
 
 
+
+// Reads the two pool-size directives from the machine-wide file and the
+// site's own file through a ConfigFactory of its own. The process-wide
+// factory keeps each parsed file and fills global_settings only when it
+// parses, so a second site context in the same process, or a context rebuilt
+// after one file changed, would see no value from the file it found cached.
+void ReadPoolThreadSettings(const std::string& machine_path,
+                            const std::string& site_path,
+                            net_instaweb::MessageHandler* quiet,
+                            net_instaweb::global_settings* out) {
+	ConfigFactory factory;
+	std::map<std::string, std::string> input;
+	input["path"] = "/";
+	input["fullpath"] = "/";
+	input["config"] = "base";
+
+	net_instaweb::global_settings machine_settings;
+	net_instaweb::global_settings site_settings;
+	if (!machine_path.empty()) {
+		net_instaweb::IisRewriteOptions scratch(nullptr);
+		std::list<std::string> paths(1, machine_path);
+		factory.GetConfig(paths, input, scratch, quiet, &machine_settings);
+	}
+	if (!site_path.empty() && site_path != machine_path) {
+		net_instaweb::IisRewriteOptions scratch(nullptr);
+		std::list<std::string> paths(1, site_path);
+		factory.GetConfig(paths, input, scratch, quiet, &site_settings);
+	}
+	// The site's own file wins for its site.
+	out->num_rewrite_threads = site_settings.num_rewrite_threads > 0
+		? site_settings.num_rewrite_threads : machine_settings.num_rewrite_threads;
+	out->num_expensive_rewrite_threads = site_settings.num_expensive_rewrite_threads > 0
+		? site_settings.num_expensive_rewrite_threads : machine_settings.num_expensive_rewrite_threads;
+}
