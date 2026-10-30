@@ -3345,8 +3345,7 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
       ps_apply_webbotauth_verdict(r, cfg_s, driver);
       ctx->driver = driver;
 
-      VLOG(1) << "Trying to serve rewritten resource in-place: "
-              << url_string;
+      VLOG(1) << "Trying to serve rewritten resource in-place: " << url_string;
 
       ctx->in_place = true;
       ctx->driver->FetchInPlaceResource(url, false /* proxy_mode */,

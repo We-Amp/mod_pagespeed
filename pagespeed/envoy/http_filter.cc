@@ -790,8 +790,7 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
     // Copy request headers to the driver (required by FetchInPlaceResource).
     ipro_driver_->SetRequestHeaders(*base_fetch_->request_headers());
 
-    ENVOY_LOG_MISC(debug, "Trying IPRO lookup for {}",
-                   fetch_url.spec_c_str());
+    ENVOY_LOG_MISC(debug, "Trying IPRO lookup for {}", fetch_url.spec_c_str());
 
     // FetchInPlaceResource will:
     // 1. Check HTTPCache for an optimized version
