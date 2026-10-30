@@ -248,8 +248,15 @@ scrollbar-arrow-color, Property::SCROLLBAR_ARROW_COLOR
 Property::Property(UnicodeText s)
   : prop_(PropFromText(s.utf8_data(), s.utf8_length()))
 {
-    if (prop_ == OTHER)
-      other_ = LowercaseAscii(s);
+    if (prop_ == OTHER) {
+      // mod_pagespeed local change: custom property names (--*) are
+      // case-sensitive, so keep them as written. Other names are lowercased.
+      if (s.utf8_length() >= 2 && s.utf8_data()[0] == '-' &&
+          s.utf8_data()[1] == '-')
+        other_ = s;
+      else
+        other_ = LowercaseAscii(s);
+    }
 }
 
 //

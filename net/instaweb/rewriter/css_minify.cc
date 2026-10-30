@@ -421,6 +421,15 @@ void CssMinify::Minify(const Css::Declaration& declaration) {
   } else {
     Write(Css::EscapeIdentifier(declaration.prop_text()));
     Write(":");
+    if (declaration.has_verbatim_value()) {
+      // Custom property (--*): the value is an opaque token stream that
+      // scripts and var() consumers see as written, so it is not minified.
+      Write(declaration.verbatim_value());
+      if (declaration.IsImportant()) {
+        Write("!important");
+      }
+      return;
+    }
     switch (declaration.prop()) {
       case Css::Property::FONT_FAMILY:
         JoinMinify(*declaration.values(), ",");
