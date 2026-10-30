@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+#
+# CSS tokens for the css_parser_fuzzer harness: at-rules, selector
+# punctuation, functions, units and the escapes and comment forms that the
+# tokenizer special-cases. Served to the fuzzer as $OUT/css_parser_fuzzer.dict
+# by .oss-fuzz/build.sh.
+
+# at-rules
+"@charset "
+"@import "
+"@media "
+"@font-face"
+"@page "
+"@namespace "
+"@keyframes "
+"@supports "
+"@layer "
+"@container "
+
+# selectors and combinators
+"*"
+">"
+"+"
+"~"
+"||"
+","
+"#"
+"."
+"["
+"]"
+"="
+"~="
+"|="
+"^="
+"$="
+"*="
+":not("
+":nth-child("
+":hover"
+"::before"
+"::after"
+"::first-line"
+
+# declarations
+"{"
+"}"
+":"
+";"
+"!important"
+"! important"
+"inherit"
+"initial"
+"unset"
+
+# functions and values
+"url("
+"url(\"\")"
+"url('')"
+"rgb("
+"rgba("
+"hsl("
+"calc("
+"var("
+"attr("
+"format("
+"local("
+"counter("
+"#fff"
+"#ffffff"
+"transparent"
+
+# units
+"px"
+"em"
+"rem"
+"%"
+"pt"
+"vw"
+"vh"
+"deg"
+"ms"
+"s"
+"1e3"
+".5"
+"-0"
+
+# strings, escapes and comments
+"\""
+"'"
+"\\"
+"\\\""
+"\\27"
+"\\000020"
+"\\\x0a"
+"/*"
+"*/"
+"<!--"
+"-->"
+"\\0"
