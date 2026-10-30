@@ -137,6 +137,12 @@ const char kIproDaemonRefreshNotifyFailed[] =
 // process -- for a URL whose copy the optimizer does not write back, for
 // instance because its content type was switched off after the compressed
 // copies were stored.
+// Durable-original serves where the cache holds no variant of any kind for
+// the URL.  Every one is already inside `ipro_daemon_served_original`.  A
+// count that keeps climbing while the optimizer worker is healthy means the
+// worker is not producing variants for those URLs.
+const char kIproDaemonServedOriginalOnly[] = "ipro_daemon_served_original_only";
+
 const char kIproDaemonHealNotified[] = "ipro_daemon_heal_notified";
 
 // The failure half, on the same terms as the two pairs above: only SEND
@@ -262,6 +268,7 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproDaemonFallbackNotifyFailed);
   statistics->AddVariable(kIproDaemonRefreshNotified);
   statistics->AddVariable(kIproDaemonRefreshNotifyFailed);
+  statistics->AddVariable(kIproDaemonServedOriginalOnly);
   statistics->AddVariable(kIproDaemonHealNotified);
   statistics->AddVariable(kIproDaemonHealNotifyFailed);
   statistics->AddVariable(kDownstreamCachePurgeAttempts);
@@ -339,6 +346,8 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
           stats->GetVariable(kIproDaemonRefreshNotified)),
       ipro_daemon_refresh_notify_failed_(
           stats->GetVariable(kIproDaemonRefreshNotifyFailed)),
+      ipro_daemon_served_original_only_(
+          stats->GetVariable(kIproDaemonServedOriginalOnly)),
       ipro_daemon_heal_notified_(stats->GetVariable(kIproDaemonHealNotified)),
       ipro_daemon_heal_notify_failed_(
           stats->GetVariable(kIproDaemonHealNotifyFailed)),

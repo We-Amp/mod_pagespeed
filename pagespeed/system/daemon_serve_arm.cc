@@ -1013,7 +1013,16 @@ void DaemonServeReader::Compose(const DaemonServeRequest& request,
       negotiated && content_type == kPsContentImage;
   // The same selection read every header of kPsImageSelectionVary; see the
   // field.
-  decision->vary_image_selection = decision->vary_accept_negotiated;
+  //
+  // THE IMAGE-SELECTION `Vary` FOLLOWS THE URL, NOT THE BYTES SENT.  Every
+  // image URL is negotiable: a variant for another client may appear at any
+  // time, and a shared cache that stored the original under a key that
+  // ignores these headers would keep handing it out after the variants
+  // exist.  So an image answered with its durable original -- no variant
+  // exists yet, or none is selectable for this request -- states the same
+  // set as one answered with a variant.
+  decision->vary_image_selection =
+      decision->vary_accept_negotiated || content_type == kPsContentImage;
   // OFF THE DURABLE ORIGINAL'S BYTE, NOT THE SERVED ENTRY'S.  This is the
   // origin's statement about the URL, and it lives only on the entry the
   // writer stamped: an optimizer-produced variant carries a clear flags byte
@@ -1240,6 +1249,12 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
   // been re-recorded between the two reads, and the bytes sent are the second
   // read's.  Rule 6 is therefore asked again of the re-read entry.
   uint8_t served_original_flags = original_flags;
+  // No variant of any kind was found for this key: the selection and the
+  // by-id retries refused nothing (a refusal sets its own reason).  This is
+  // an original-only family, as opposed to one whose variants exist but are
+  // not selectable for this request.
+  const bool family_has_no_variants =
+      !decision.selected && decision.reason == daemon_serve_reason::kNoEntry;
   if (original_status == kPsOk) {
     original_status = ReadById(request, kPsSentinelOriginal);
     if (original_status == kPsOk) {
@@ -1281,6 +1296,19 @@ DaemonServeDecision DaemonServeReader::Serve(const DaemonServeRequest& request,
     // the field.  A reader with no limiter never looks.
     decision.lost_optimized_copy =
         LostOptimizedCopy(request, decision, now_seconds);
+    if (family_has_no_variants && !decision.lost_optimized_copy) {
+      decision.original_only_family = true;
+      // The record-time notification is lost when the worker is down, and
+      // an exact hit on the original never re-notifies.  Ask again, at most
+      // once per URL per window.  A flagged lost copy is a different state
+      // with its own ask and is excluded above.
+      decision.renotify_original_only =
+          heal_limiter_ != nullptr && !decision.vary_accept_origin_declared &&
+          heal_limiter_->AdmitAskKey(
+              heal_limiter_->UrlKey(request.scheme, request.hostname,
+                                    request.url),
+              now_seconds);
+    }
   }
   return decision;
 }
@@ -1753,7 +1781,7 @@ bool DaemonServeLostCopyNotify(const DaemonAbi& abi, StringPiece socket_path,
   // Flagged durable-original serves only.  Every other outcome either
   // served an optimized copy or has its own path to converge on.
   if (decision.verdict != DaemonServeVerdict::kServeOriginal ||
-      !decision.lost_optimized_copy) {
+      !(decision.lost_optimized_copy || decision.renotify_original_only)) {
     return false;
   }
   // The same gate the detection applied, restated where the send is: a URL
@@ -1831,6 +1859,9 @@ void RecordDaemonServeCounters(RewriteStats* stats,
     RecordDaemonServedClass(stats, decision.ps_content_type);
   } else if (decision.verdict == DaemonServeVerdict::kServeOriginal) {
     stats->ipro_daemon_served_original()->Add(1);
+    if (decision.original_only_family) {
+      stats->ipro_daemon_served_original_only()->Add(1);
+    }
   }
 }
 

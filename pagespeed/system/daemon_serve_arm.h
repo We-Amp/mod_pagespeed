@@ -322,6 +322,26 @@ struct DaemonServeDecision {
   // notification; see DaemonServeLostCopyNotify.
   bool lost_optimized_copy = false;
 
+  // ORIGINAL-ONLY FAMILY: the durable original was served and the cache holds
+  // no variant of any kind for the URL (as opposed to variants that exist
+  // but are not selectable for this request).  Only ever set on a
+  // kServeOriginal verdict.  Counted by RecordDaemonServeCounters so an
+  // operator can see how many serves are answered from an original-only
+  // entry; a count that stays high while the worker is healthy means the
+  // worker is not producing variants for those URLs.
+  bool original_only_family = false;
+
+  // The same serve, when the reader's limiter admitted a new ask for the URL
+  // in this window: the seam sends ONE ordinary notification
+  // (DaemonServeLostCopyNotify).  This is the recovery for an original that
+  // was recorded while the worker was down -- the record-time notification
+  // was lost and an exact hit on the original never re-notifies.  A reader
+  // with no limiter never sets it, and neither does a decision whose lost
+  // copy flag already carries the ask.  Rate limited per URL, so a hot URL
+  // costs the worker one message per window; a worker that has already
+  // processed the URL answers its own dedup.
+  bool renotify_original_only = false;
+
   // THE TWO DISJOINT REASONS `Vary: Accept` CAN BE OWED, kept apart rather
   // than folded into the boolean below.  They are different facts about the
   // response and only one of them is about anything this module did, so a
@@ -341,8 +361,10 @@ struct DaemonServeDecision {
   // viewport and density from `User-Agent`, density from `Sec-CH-DPR` when
   // sent, and Save-Data from `Save-Data` -- kPsImageSelectionVary.  Set on
   // the same negotiated image serves as `vary_accept_negotiated`, the 304
-  // included, and on nothing else: a stylesheet or script variant is stored
-  // at one device class, and a durable-original serve selected nothing.
+  // included, and on an image answered with its durable original: the
+  // statement follows the URL, which stays negotiable, not the bytes sent.
+  // Never on a stylesheet or script: a variant is stored at one device
+  // class.
   //
   // WHY THE HEADERS AND NOT A NORMALIZED DEVICE-CLASS KEY.  `User-Agent` is
   // a wide key for a shared cache, but the class is computed here, after

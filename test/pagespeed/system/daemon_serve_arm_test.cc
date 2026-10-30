@@ -991,6 +991,12 @@ TEST_F(DaemonServeArmTest, AReservedViewportNeverNamesTheOriginalAsAVariant) {
   EXPECT_STREQ(daemon_serve_reason::kDurableOriginal, decision.reason);
   EXPECT_EQ(kPsServeClassOriginalPending, decision.serve_class);
   EXPECT_FALSE(decision.vary_accept_negotiated);
+  // Variants exist but none is selectable for this request: the original is
+  // still an answer to a negotiable URL and carries the image-selection Vary.
+  EXPECT_TRUE(decision.vary_image_selection);
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            ServeVaryFieldValue(decision, false));
+  EXPECT_FALSE(decision.original_only_family);
   // The selection really did hand back the SVG variant (score 1400) and the
   // refusal branch really did run -- the retry is on the path taken.
   const GoogleString log = CallLog();
@@ -1277,20 +1283,52 @@ TEST_F(DaemonServeArmTest, ANegotiatedImageServeOwesTheDeviceAxes) {
   EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
             ServeVaryFieldValue(fallback, false));
 
-  // Not owed where nothing was selected by device: the durable original,
-  // even when the origin itself negotiates on Accept, and a stylesheet
-  // variant, which is stored at one device class.
+  // Owed on an image answered with its durable original too, even when the
+  // origin itself negotiates on Accept: the statement follows the URL.  Not
+  // owed on a stylesheet variant, which is stored at one device class.
   SetAlternates("0c:04:0");
   const DaemonServeDecision original = Serve(Request("image/webp"));
   ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
-  EXPECT_FALSE(original.vary_image_selection);
-  EXPECT_EQ("Accept", ServeVaryFieldValue(original, false));
+  EXPECT_TRUE(original.vary_image_selection);
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            ServeVaryFieldValue(original, false));
 
   setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // css
   SetAlternates("08:00:1,0c:00:0");
   const DaemonServeDecision css = Serve(Request("text/css,*/*"));
   ASSERT_EQ(DaemonServeVerdict::kServeOptimized, css.verdict);
   EXPECT_FALSE(css.vary_image_selection);
+}
+
+TEST_F(DaemonServeArmTest, AnImageOriginalWithAnEmptyFamilyCarriesTheImageVary) {
+  // Nothing but the durable original: no variant exists yet.  An AVIF-
+  // advertising request answered with the original states the same Vary as
+  // one answered with a variant, so a shared cache cannot pin the original.
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(Request("image/avif"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  EXPECT_TRUE(original.vary_image_selection);
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            ServeVaryFieldValue(original, false));
+  EXPECT_EQ("Accept, Save-Data, User-Agent, Sec-CH-DPR",
+            ServeVaryFieldValueOnBothLegs(original, false));
+
+  // The set is the one a variant carries.
+  SetAlternates("09:00:1,0c:00:0");
+  const DaemonServeDecision variant = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, variant.verdict);
+  EXPECT_EQ(ServeVaryFieldValue(variant, false),
+            ServeVaryFieldValue(original, false));
+}
+
+TEST_F(DaemonServeArmTest, AStylesheetOriginalStillCarriesNoImageVary) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // css
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision original = Serve(CssRequest("identity"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, original.verdict);
+  EXPECT_FALSE(original.vary_image_selection);
+  EXPECT_FALSE(original.emit_vary_accept);
+  EXPECT_EQ("", ServeVaryFieldValue(original, false));
 }
 
 TEST_F(DaemonServeArmTest, TheSelectionTakesTheDensityHint) {
@@ -3517,6 +3555,174 @@ TEST_F(DaemonServeArmTest, NothingIsAskedForWithoutTheFlagOrTheContext) {
                                          lost, default_context_, "", nullptr,
                                          nullptr));
   EXPECT_EQ(before, NotifyCount());
+}
+
+// ---------------------------------------------------------------------------
+// An original recorded while the worker was down: asked for again.
+// ---------------------------------------------------------------------------
+
+TEST_F(DaemonServeArmTest, AnOriginalOnlyFamilyIsReNotifiedOncePerWindow) {
+  SetAlternates("0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = Request("image/webp");
+
+  const DaemonServeDecision first = ServeWithLimiter(request, &limiter, 1100);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, first.verdict);
+  EXPECT_TRUE(first.original_only_family);
+  EXPECT_TRUE(first.renotify_original_only);
+  EXPECT_FALSE(first.lost_optimized_copy);
+
+  // A hot URL: the state is still reported, the ask is not repeated.
+  const DaemonServeDecision hot = ServeWithLimiter(request, &limiter, 1101);
+  EXPECT_TRUE(hot.original_only_family);
+  EXPECT_FALSE(hot.renotify_original_only);
+
+  // The next window asks again.
+  const DaemonServeDecision later = ServeWithLimiter(
+      request, &limiter, 1100 + DaemonHealNotifyLimiter::kIntervalSeconds);
+  EXPECT_TRUE(later.renotify_original_only);
+}
+
+TEST_F(DaemonServeArmTest, TheReNotificationIsSentAndCounted) {
+  SetAlternates("0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = Request("image/webp");
+  const DaemonServeDecision decision = ServeWithLimiter(request, &limiter);
+  ASSERT_TRUE(decision.renotify_original_only);
+
+  SimpleStats stats(thread_system_.get());
+  Variable* notified = stats.AddVariable("ipro_daemon_heal_notified");
+  Variable* failed = stats.AddVariable("ipro_daemon_heal_notify_failed");
+  const int before = NotifyCount();
+  EXPECT_TRUE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                        decision, default_context_,
+                                        default_signature_, notified, failed));
+  EXPECT_EQ(before + 1, NotifyCount());
+  EXPECT_NE(GoogleString::npos,
+            CallLog().find(StrCat("url=", kUrl, " host=", kHost,
+                                  " scheme=", kScheme, " content_type=3 mask=",
+                                  static_cast<uint64>(decision.client_mask),
+                                  " ")));
+  EXPECT_EQ(1, notified->Get());
+  EXPECT_EQ(0, failed->Get());
+
+  // A failed send moves the failure counter only.
+  setenv("PS_STUB_NOTIFY_FAIL", "1", 1);
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         decision, default_context_,
+                                         default_signature_, notified, failed));
+  EXPECT_EQ(1, notified->Get());
+  EXPECT_EQ(1, failed->Get());
+}
+
+TEST_F(DaemonServeArmTest, ASuppressedReNotificationSendsNothing) {
+  SetAlternates("0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeRequest request = Request("image/webp");
+  ServeWithLimiter(request, &limiter, 1100);
+  const DaemonServeDecision hot = ServeWithLimiter(request, &limiter, 1101);
+  ASSERT_FALSE(hot.renotify_original_only);
+  const int before = NotifyCount();
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         hot, default_context_,
+                                         default_signature_, nullptr, nullptr));
+  EXPECT_EQ(before, NotifyCount());
+}
+
+TEST_F(DaemonServeArmTest, ReNotificationNeedsALimiterAndTheOptionContext) {
+  SetAlternates("0c:00:0");
+  const DaemonServeRequest request = Request("image/webp");
+  // A reader with no limiter reports the state and never asks.
+  const DaemonServeDecision unlimited = Serve(request);
+  EXPECT_TRUE(unlimited.original_only_family);
+  EXPECT_FALSE(unlimited.renotify_original_only);
+
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision = ServeWithLimiter(request, &limiter);
+  ASSERT_TRUE(decision.renotify_original_only);
+  const int before = NotifyCount();
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         decision, "", default_signature_,
+                                         nullptr, nullptr));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         decision, default_context_, "",
+                                         nullptr, nullptr));
+  EXPECT_EQ(before, NotifyCount());
+}
+
+TEST_F(DaemonServeArmTest, AnOriginOfferingAcceptIsNeverReNotified) {
+  SetAlternates("0c:04:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(Request("image/webp"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_TRUE(decision.original_only_family);
+  EXPECT_FALSE(decision.renotify_original_only);
+}
+
+TEST_F(DaemonServeArmTest, VariantsThatAreNotSelectableAreNotAnEmptyFamily) {
+  // The vectorised family: a variant exists but is refused for this request,
+  // so the request is answered with the original.  The family is not empty,
+  // and nobody is asked for work that has been done.
+  setenv("PS_STUB_CLASSIFY_VIEWPORT", "3", 1);
+  SetAlternates("0b:00:1,0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(Request("image/webp"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_FALSE(decision.original_only_family);
+  EXPECT_FALSE(decision.renotify_original_only);
+}
+
+TEST_F(DaemonServeArmTest, AVariantServeIsNeverAnOriginalOnlyFamily) {
+  SetAlternates("09:00:1,0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(Request("image/webp"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_FALSE(decision.original_only_family);
+  EXPECT_FALSE(decision.renotify_original_only);
+}
+
+TEST_F(DaemonServeArmTest, ALostCopyKeepsItsOwnAskAndIsNotAnEmptyFamily) {
+  UseStylesheetWithoutAnIdentityCopy("4307", "3899");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_TRUE(decision.lost_optimized_copy);
+  EXPECT_FALSE(decision.original_only_family);
+  EXPECT_FALSE(decision.renotify_original_only);
+}
+
+TEST_F(DaemonServeArmTest, AStylesheetOriginalOnlyFamilyIsReNotifiedToo) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // css
+  setenv("PS_STUB_ORIGIN_CT", "text/css", 1);
+  SetAlternates("0c:00:0");
+  DaemonHealNotifyLimiter limiter(1);
+  const DaemonServeDecision decision =
+      ServeWithLimiter(CssRequest("identity"), &limiter);
+  ASSERT_EQ(DaemonServeVerdict::kServeOriginal, decision.verdict);
+  EXPECT_TRUE(decision.original_only_family);
+  EXPECT_TRUE(decision.renotify_original_only);
+}
+
+TEST_F(DaemonServeArmTest, TheOriginalOnlyStateIsCounted) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), nullptr);
+
+  SetAlternates("0c:00:0");
+  const DaemonServeDecision only = Serve(Request("image/webp"));
+  ASSERT_TRUE(only.original_only_family);
+  RecordDaemonServeCounters(&rewrite_stats, only);
+  RecordDaemonServeCounters(&rewrite_stats, only);
+  EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_original")->Get());
+  EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_original_only")->Get());
+
+  // A variant serve moves neither.
+  SetAlternates("09:00:1,0c:00:0");
+  RecordDaemonServeCounters(&rewrite_stats, Serve(Request("image/webp")));
+  EXPECT_EQ(2, stats.GetVariable("ipro_daemon_served_original_only")->Get());
 }
 
 // ---------------------------------------------------------------------------
