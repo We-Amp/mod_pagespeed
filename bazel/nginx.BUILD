@@ -73,6 +73,13 @@ cc_library(
         "@platforms//os:freebsd": glob(["src/os/unix/*.h"]),
         "@platforms//os:windows": glob(["src/os/win32/*.h"]),
         "//conditions:default": glob(["src/os/unix/*.h"]),
+    }) + select({
+        # The PCRE headers nginx was configured against (Homebrew prefix,
+        # symlinked in by bazel/nginx.bzl; empty on Linux, where pcre2.h is
+        # in /usr/include). Declared as hdrs so they reach the sandbox; the
+        # matching include path is in the includes select below.
+        "@platforms//os:macos": glob(["pcre/*.h"]),
+        "//conditions:default": [],
     }),
     includes = [
         "src/core",
@@ -90,6 +97,12 @@ cc_library(
         "@platforms//os:freebsd": ["src/os/unix"],
         "@platforms//os:windows": ["src/os/win32"],
         "//conditions:default": ["src/os/unix"],
+    }) + select({
+        # Homebrew's PCRE headers, symlinked in by bazel/nginx.bzl: Linux has
+        # pcre2.h in /usr/include (default search path), Homebrew's prefix is
+        # not on Apple clang's default search path.
+        "@platforms//os:macos": ["pcre"],
+        "//conditions:default": [],
     }),
     # NGINX headers require certain defines
     copts = select({
