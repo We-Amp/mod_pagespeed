@@ -645,11 +645,12 @@ void Headers<Proto>::UpdateFrom(const Headers<Proto>& other) {
 template <class Proto>
 bool Headers<Proto>::WriteAsBinary(Writer* writer, MessageHandler* handler) {
   GoogleString buf;
+  bool serialized;
   {
     StringOutputStream sstream(&buf);
-    proto_->SerializeToZeroCopyStream(&sstream);
+    serialized = proto_->SerializeToZeroCopyStream(&sstream);
   }
-  return writer->Write(buf, handler);
+  return serialized && writer->Write(buf, handler);
 }
 
 template <class Proto>

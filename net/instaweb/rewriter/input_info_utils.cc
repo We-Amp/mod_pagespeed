@@ -89,7 +89,8 @@ bool IsFilesystemMetadataCacheCurrent(CacheInterface* fsmdc,
 
 // Update the filesystem metadata cache with the timestamp and contents hash
 // of the given input's file (which is read from disk to compute the hash).
-// Returns false if the file cannot be read.
+// Returns false if the file cannot be read or the metadata cannot be
+// serialized.
 bool UpdateFilesystemMetadataCache(ServerContext* server_context,
                                    const GoogleString& file_key,
                                    const InputInfo& input_info, int64 mtime_ms,
@@ -111,7 +112,9 @@ bool UpdateFilesystemMetadataCache(ServerContext* server_context,
   {
     // MUST be in a block so that sstream is destructed to finalize buf.
     StringOutputStream sstream(&buf);
-    fsmdc_info->SerializeToZeroCopyStream(&sstream);
+    if (!fsmdc_info->SerializeToZeroCopyStream(&sstream)) {
+      return false;
+    }
   }
   fsmdc->PutSwappingString(file_key, &buf);
   return true;
