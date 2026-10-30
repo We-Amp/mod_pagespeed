@@ -350,7 +350,8 @@ du -s -h --apparent-size /path/to/pagespeed_cache/rname
      >pagespeed MemcachedServers "host1:port1,host2:port2,host3:port3";</pre>
 </dl>
     <p>
-      A memcached listening on a Unix domain socket is named as
+      With Apache and nginx, a memcached listening on a Unix domain socket
+      (not available on Windows) is named as
       <code>unix:/absolute/path</code>, for example
       <code>MemcachedServers "unix:/var/run/memcached.sock"</code>.
       Socket paths cannot contain commas.
@@ -499,7 +500,8 @@ total_items:           4166384
      >pagespeed RedisServer "host:port";</pre>
 </dl>
     <p>
-      A redis server listening on a Unix domain socket is named as
+      With Apache and nginx, a redis server listening on a Unix domain socket
+      (not available on Windows) is named as
       <code>unix:/absolute/path</code>, for example
       <code>RedisServer "unix:/var/run/redis/redis.sock"</code>.
     </p>
@@ -546,12 +548,16 @@ total_items:           4166384
     >pagespeed RedisTTLSec ttl_in_seconds;</pre>
 </dl>
     <p>
-      If the redis server requires authentication, set
-      <code>RedisPassword</code>.  PageSpeed sends it with <code>AUTH</code>
+      With Apache and nginx, if the redis server requires authentication, set
+      <code>RedisPassword</code> (default: unset, no <code>AUTH</code> is
+      sent).  PageSpeed sends it with <code>AUTH</code>
       right after every connection it makes to the server (and, for a cluster,
       to every node), including after a reconnect.  With redis 6 or later
       access control lists, also set <code>RedisUser</code> to authenticate as
-      that user; without it the password is used for the default user.
+      that user (default: unset, so the password is used for the default user).
+      <code>RedisUser</code> is ignored without <code>RedisPassword</code>.
+      If the server has no password configured, <code>AUTH</code> is refused
+      and the connection is not used.
       <code>RedisPassword</code> is never written to the logs, and the
       configuration pages and admin console show it as <code>***</code>.
     </p>
@@ -563,6 +569,12 @@ ModPagespeedRedisUser "user"</pre>
     >pagespeed RedisPassword "password";
 pagespeed RedisUser "user";</pre>
 </dl>
+    <p>
+      An ACL user needs only these commands: <code>GET SET SETEX DEL SELECT
+      INFO CLUSTER ASKING</code>, for example
+      <code>ACL SETUSER pagespeed on &gt;password ~* -@all +get +set +setex
+      +del +select +info +cluster +asking</code>.
+    </p>
     <p>
       Keep the configuration file readable only by the account that runs the
       server, and use a connection you trust: AUTH does not encrypt traffic, so

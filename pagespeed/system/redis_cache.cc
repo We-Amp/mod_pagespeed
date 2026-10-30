@@ -346,6 +346,8 @@ ExternalServerSpec RedisCache::ParseRedirectionError(StringPiece error) {
     LOG(ERROR) << "Invalid redirection error: '" << error << "'";
     return ExternalServerSpec();
   }
+  // Redirect targets come from the server: never parse them with
+  // ExternalServerSpec::SetFromString, which would accept a unix: path.
   GoogleString host_port = error_tokens[2].as_string();
 
   StringPieceVector host_port_vec;
@@ -766,11 +768,11 @@ bool RedisCache::Connection::Authenticate(redisContext* context) {
     LogRedisContextError(context, "Error while authenticating to redis");
     return false;
   }
-  if (reply->type == REDIS_REPLY_ERROR) {
+  if (reply->type != REDIS_REPLY_STATUS) {
     // The server's error text never contains the password.
-    redis_cache_->message_handler_->Message(kError,
-                                            "Redis AUTH rejected by %s: %s",
-                                            ToString().c_str(), reply->str);
+    redis_cache_->message_handler_->Message(
+        kError, "Redis AUTH rejected by %s: %s", ToString().c_str(),
+        reply->type == REDIS_REPLY_ERROR ? reply->str : "unexpected reply");
     return false;
   }
   return true;

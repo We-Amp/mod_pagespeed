@@ -21,6 +21,7 @@
 
 #include "pagespeed/system/redis_cache.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -210,12 +211,19 @@ class RedisCacheTest : public CacheTestBase {
     }
     auto get = [](const char* name, GoogleString* out) {
       const char* v = getenv(name);
-      CHECK(v != nullptr) << name << " must be set with REDIS_AUTH_PORT";
+      if (v == nullptr) {
+        LOG(ERROR) << "Redis authentication tests are skipped because $"
+                   << name << " is not set.";
+        return false;
+      }
       *out = v;
+      return true;
     };
-    get("REDIS_AUTH_PASSWORD", &env->password);
-    get("REDIS_AUTH_USER", &env->user);
-    get("REDIS_AUTH_USER_PASSWORD", &env->user_password);
+    if (!get("REDIS_AUTH_PASSWORD", &env->password) ||
+        !get("REDIS_AUTH_USER", &env->user) ||
+        !get("REDIS_AUTH_USER_PASSWORD", &env->user_password)) {
+      return false;
+    }
     const char* socket = getenv("REDIS_AUTH_SOCKET");
     if (socket != nullptr) {
       env->socket = socket;
@@ -1004,6 +1012,74 @@ class RedisAuthRecordingServerThread : public TcpServerThreadForTesting {
   std::mutex* seen_mutex_;
 };
 
+// Rejects every AUTH with -WRONGPASS and counts the connections it accepts.
+class RedisAuthRejectingServerThread : public TcpServerThreadForTesting {
+ public:
+  RedisAuthRejectingServerThread(apr_port_t listen_port,
+                                 ThreadSystem* thread_system,
+                                 std::atomic<int>* connections)
+      : TcpServerThreadForTesting(listen_port, "redis_auth_rejecting_server",
+                                  thread_system),
+        connections_(connections) {}
+
+  ~RedisAuthRejectingServerThread() override { ShutDown(); }
+
+ private:
+  void HandleClientConnection(apr_socket_t* sock) override {
+    static const char kAnswer[] =
+        "-WRONGPASS invalid username-password pair or user is disabled.\r\n";
+    char buf[4096];
+    apr_size_t size = sizeof(buf);
+    if (apr_socket_recv(sock, buf, &size) == APR_SUCCESS) {
+      ++*connections_;
+      apr_size_t answer_size = STATIC_STRLEN(kAnswer);
+      apr_socket_send(sock, kAnswer, &answer_size);
+    }
+    apr_socket_close(sock);
+  }
+
+  std::atomic<int>* connections_;
+};
+
+TEST_F(RedisCacheTest, RejectedAuthIsNotFoundBacksOffAndDoesNotLogPassword) {
+  const GoogleString password = "pw-rejected-3d9e";
+  std::atomic<int> connections{0};
+  cache_.emplace_back(new RedisCache(
+      "localhost", custom_server_port_, thread_system_.get(), &handler_,
+      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
+      kTTLSec));
+  cache_[0]->SetCredentials("alice", password);
+  custom_server_ = std::make_unique<RedisAuthRejectingServerThread>(
+      custom_server_port_, thread_system_.get(), &connections);
+  ASSERT_TRUE(custom_server_->Start());
+  ASSERT_EQ(custom_server_port_, custom_server_->GetListeningPort());
+  cache_[0]->StartUp();
+
+  CheckNotFound(kSomeKey);
+  EXPECT_EQ(1, connections.load());
+  // Within the reconnection delay no further attempt is made.
+  CheckNotFound(kSomeKey);
+  CheckNotFound(kSomeKey);
+  EXPECT_EQ(1, connections.load());
+  // After the delay exactly one more attempt happens (the scripted server
+  // serves a single connection, so start a fresh one).
+  WaitForCustomServerShutdown();
+  custom_server_ = std::make_unique<RedisAuthRejectingServerThread>(
+      custom_server_port_, thread_system_.get(), &connections);
+  ASSERT_TRUE(custom_server_->Start());
+  ASSERT_EQ(custom_server_port_, custom_server_->GetListeningPort());
+  timer_.AdvanceMs(kReconnectionDelayMs + 1);
+  CheckNotFound(kSomeKey);
+  EXPECT_EQ(2, connections.load());
+
+  GoogleString log;
+  StringWriter writer(&log);
+  handler_.Dump(&writer);
+  EXPECT_THAT(log, HasSubstr("AUTH rejected"));
+  EXPECT_THAT(log, ::testing::Not(HasSubstr(password)));
+  WaitForCustomServerShutdown();
+}
+
 TEST_F(RedisCacheTest, AuthWithPassword) {
   AuthEnv env;
   if (!PrepareAuthOrSkip(&env)) {
@@ -1061,7 +1137,10 @@ TEST_F(RedisCacheTest, AuthOverUnixSocket) {
   if (!PrepareAuthOrSkip(&env)) {
     return;
   }
-  ASSERT_FALSE(env.socket.empty()) << "REDIS_AUTH_SOCKET must be set";
+  if (env.socket.empty()) {
+    LOG(ERROR) << "Skipped: $REDIS_AUTH_SOCKET is not set.";
+    return;
+  }
   InitRedisWithCredentials(env.socket, ExternalServerSpec::kUnixSocketPort,
                            env.user, env.user_password);
   EXPECT_EQ(StrCat("unix:", env.socket), cache_[0]->ServerDescription());

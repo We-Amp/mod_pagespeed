@@ -116,6 +116,10 @@ TEST_F(ExternalServerSpecTestInvalid, UnixSocketWithoutPath) {
   TestInvalidSpec("unix:");
 }
 
+TEST_F(ExternalServerSpecTestInvalid, UnixSocketWithPort) {
+  TestInvalidSpec("unix:/run/redis.sock:6379");
+}
+
 TEST_F(ExternalServerSpecTestInvalid, UnixSocketWithRelativePath) {
   TestInvalidSpec("unix:redis.sock");
 }

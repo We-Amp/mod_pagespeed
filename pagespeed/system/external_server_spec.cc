@@ -32,6 +32,13 @@ bool ExternalServerSpec::SetFromString(StringPiece value_string,
       *error_detail = "Unix socket server must be in format unix:/<path>";
       return false;
     }
+    int ignored_port;
+    size_t colon = socket_path.rfind(':');
+    if (colon != StringPiece::npos &&
+        StringToInt(socket_path.substr(colon + 1), &ignored_port)) {
+      *error_detail = "Unix socket servers take no port";
+      return false;
+    }
     host = socket_path.as_string();
     port = kUnixSocketPort;
     return true;

@@ -295,13 +295,17 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
   // Some unique signature to distinguish server configurations.
   GoogleString spec_signature;
   if (use_redis) {
-    spec_signature =
-        StrCat("r;", config->redis_server().ToString(), ";",
-               IntegerToString(config->redis_database_index()), ";",
-               IntegerToString(config->redis_reconnection_delay_ms()), ";",
-               IntegerToString(config->redis_timeout_us()), ";",
-               IntegerToString(config->redis_ttl_sec()), ";",
-               config->redis_user(), ";", config->redis_password());
+    spec_signature = StrCat(
+        "r;", config->redis_server().ToString(), ";",
+        IntegerToString(config->redis_database_index()), ";",
+        IntegerToString(config->redis_reconnection_delay_ms()), ";",
+        IntegerToString(config->redis_timeout_us()), ";",
+        IntegerToString(config->redis_ttl_sec()), ";",
+        // Credentials are length-prefixed (so no value can mimic another
+        // pair) and the password enters only as a hash.  This key must
+        // never be logged or printed.
+        IntegerToString(config->redis_user().size()), ":", config->redis_user(),
+        ";", cache_hasher_.Hash(config->redis_password()));
 #if PAGESPEED_ENABLE_MEMCACHED
   } else if (use_memcached) {
     spec_signature = StrCat("m;", config->memcached_servers().ToString(), ";",
