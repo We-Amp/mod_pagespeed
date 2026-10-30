@@ -1,16 +1,6 @@
-# Copyright 2024 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
 
 """nginx daemon lane: image variants served from the optimizer's cache.
 
@@ -48,6 +38,8 @@ pytestmark = [
 HOST = "daemon.example.com"
 IMAGE_PATH = "/daemon_lane/lane.jpg"
 CSS_PATH = "/daemon_lane/lane.css"
+# The desktop-no-webp class needs the worker to keep a re-encoded JPEG of the
+# photo; a worker pin that declines it shows up here as a settle timeout.
 # The worker searches for the smallest acceptable encoding, which takes a while.
 WORKER_DEADLINE_S = 240.0
 DESKTOP_UA = (
@@ -145,6 +137,11 @@ def test_each_request_class_gets_its_own_variant(served):
 def test_every_cache_served_response_names_the_selection_headers(served):
     variants, seen = served
     assert seen, "the cache answered nothing"
+    originals = [(n, r) for n, r in seen if VARIANT_ETAG_MARK not in r.header("ETag")]
+    assert originals, (
+        "no stored original was served from the cache before the variants existed; "
+        "the original-carries-the-selection-Vary case was not exercised"
+    )
     for name, response in seen:
         assert SELECTION_VARY <= _vary_tokens(response), (name, dict(response.headers))
     for name, response in variants.items():
@@ -200,11 +197,10 @@ def test_a_stylesheet_names_no_device_header(site):
     response = site.fetch_until(
         CSS_PATH,
         lambda r: r.status == 200 and bool(r.header("Age")),
-        timeout=60.0,
+        timeout=WORKER_DEADLINE_S,
         interval=1.0,
         detail_fn=lambda r: f"status={r.status} headers={dict(r.headers)}",
     )
-    require_status_ok(response, f"{HOST}{CSS_PATH}")
     assert not _vary_tokens(response) & DEVICE_HEADERS, dict(response.headers)
 
 

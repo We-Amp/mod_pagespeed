@@ -1244,6 +1244,7 @@ stop_daemon_worker() {
                 [ -d "/proc/$pid" ] || break
                 sleep 0.1
             done
+            [ -d "/proc/$pid" ] && kill -KILL "$pid" 2>/dev/null || true
         fi
         rm -f "$DAEMON_PID"
     fi
@@ -1353,7 +1354,9 @@ setup_nginx() {
     setup_directories
     setup_test_content
     generate_tls_certs || return 1
-    start_daemon_worker
+    if [ "$NO_MODULE" = false ]; then
+        start_daemon_worker
+    fi
     if [ -n "$DAEMON_READY" ]; then
         write_daemon_content
     fi
