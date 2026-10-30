@@ -734,7 +734,7 @@ TEST_F(CycloneCacheTest, ConcurrentWritersOfOneKey) {
   const int kIterations = 500;
   std::atomic<int> unexpected(0);
   std::atomic<bool> stop(false);
-  auto writer = [&cache, kIterations](const GoogleString& value) {
+  auto writer = [&cache](const GoogleString& value) {
     SharedString shared(value);
     for (int i = 0; i < kIterations; ++i) {
       cache.Put("contended", shared);
