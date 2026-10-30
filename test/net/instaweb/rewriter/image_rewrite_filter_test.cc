@@ -3511,6 +3511,27 @@ TEST_F(ImageRewriteTest, ServeAvifFromColdCache) {
 // both-capable request via the production SetLibWebpLevel/SetAvifLevel, never
 // hand-assembled.
 
+TEST_F(ImageRewriteTest, AvifRecompressAloneDoesNotSelectAnimatedKey) {
+  // Recompression without animated conversion must key at the lossless+alpha
+  // level: the animated level would produce identical output under a second
+  // key.
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kRecompressAvif);
+  ResetForAvif();
+  ResourceContext context = MintingResourceContext();
+  EXPECT_EQ(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA, context.avif_level());
+  EXPECT_EQ("vAg", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+}
+
+TEST_F(ImageRewriteTest, AvifAnimatedConversionSelectsAnimatedKey) {
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kRecompressAvif);
+  options()->EnableFilter(RewriteOptions::kConvertToAvifAnimated);
+  ResetForAvif();
+  EXPECT_EQ(ResourceContext::AVIF_ANIMATED,
+            MintingResourceContext().avif_level());
+}
+
 TEST_F(ImageRewriteTest, AvifCommittedUrlReconcileReproducesMintingKey) {
   // Canonical config: lossless-tier conversion filters for both formats.
   options()->EnableFilter(RewriteOptions::kRecompressJpeg);
