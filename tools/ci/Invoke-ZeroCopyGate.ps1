@@ -28,6 +28,12 @@
     state is always disabled in the finally block, even on failure -- leftover
     IFEO settings would silently affect every later w3wp.exe launch on the
     machine.
+
+    A skipped gate test is a failure. The test skips itself when the rig
+    rewrote no image or the aliased serve never engaged, and pytest exits 0 for
+    a skip, so the pytest output is captured and checked by
+    Test-ZeroCopyGateResult.ps1: exactly one passed and nothing skipped,
+    failed or errored. The skip reason is printed.
 #>
 [CmdletBinding()]
 param(
@@ -63,6 +69,10 @@ function Disable-Verifier {
 $since = Get-Date
 $testRc = 1
 $failFastRc = 1
+$verdictRc = 1
+$pytestLog = Join-Path $EvidenceDir 'zerocopy-gate-pytest.log'
+$verdict = Join-Path $RepoDir 'tools\ci\Test-ZeroCopyGateResult.ps1'
+if (-not (Test-Path $verdict)) { throw "result checker not found: $verdict" }
 try {
     Disable-Verifier
     if (Test-Path 'C:\pagespeed_cache') { Remove-Item 'C:\pagespeed_cache' -Recurse -Force -ErrorAction SilentlyContinue }
@@ -73,6 +83,8 @@ try {
     $env:PAGESPEED_ZEROCOPY_GATE = '1'
     $env:PAGESPEED_TEST_TIMEOUT_MULTIPLIER = "$TimeoutMultiplier"
     $env:PAGESPEED_EVIDENCE_DIR = $EvidenceDir
+    # -rs prints each skip reason in the pytest summary.
+    $env:PYTEST_ADDOPTS = '-rs'
 
     # run_iis_tests.ps1 -UseFullIIS spawns the worker AFTER arming IFEO (its
     # setup recycles the app pool), so the worker that serves the gate is the
@@ -81,9 +93,14 @@ try {
         Push-Location $RepoDir
         & powershell -NoProfile -ExecutionPolicy Bypass `
             -File "$RepoDir\test\system\run_iis_tests.ps1" `
-            -SkipBuild -UseFullIIS -TestFilter zerocopy_gate -Verbose
+            -SkipBuild -UseFullIIS -TestFilter zerocopy_gate -Verbose |
+            Tee-Object -FilePath $pytestLog | Out-Host
         Pop-Location }
     $testRc = $LASTEXITCODE
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $verdict `
+        -LogPath $pytestLog -PytestRc $testRc
+    $verdictRc = $LASTEXITCODE
 
     & powershell -NoProfile -ExecutionPolicy Bypass -File $detector `
         -Since $since -ReportPath (Join-Path $EvidenceDir 'worker-failfast.txt')
@@ -96,10 +113,11 @@ try {
 Write-Host ''
 Write-Host '=== zero-copy M1 gate summary ==='
 Write-Host "  pytest rc      : $testRc"
+Write-Host "  gate ran+passed: $($verdictRc -eq 0)"
 Write-Host "  worker failfast: $($failFastRc -ne 0)"
 Write-Host "  evidence       : $EvidenceDir"
 
-if (($testRc -ne 0) -or ($failFastRc -ne 0)) {
+if (($testRc -ne 0) -or ($verdictRc -ne 0) -or ($failFastRc -ne 0)) {
     Write-Host 'FAIL: zero-copy M1 gate regressed.'
     exit 1
 }
