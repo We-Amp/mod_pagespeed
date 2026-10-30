@@ -25,6 +25,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/logging.h"
@@ -587,28 +588,39 @@ const RewriteOptions* ProxyFetch::Options() const { return options_; }
 
 namespace {
 
-// True if the query parameter name 'theirs' denotes the same PageSpeed
-// parameter as 'ours'. This mirrors how RewriteQuery reads request parameters:
-// the ModPagespeed/PageSpeed prefix and the exact names PageSpeed,
-// ModPagespeed, PageSpeedFilters and ModPagespeedFilters are case-sensitive,
-// the option name after the prefix and X-PSA-Client-Options are not.
+// The setting a query parameter name selects when RewriteQuery reads it, or
+// "" if it is not one of ours. ModPagespeed and PageSpeed are the same
+// prefix; the prefix and the exact names PageSpeed, ModPagespeed,
+// PageSpeedFilters and ModPagespeedFilters are case-sensitive; the option
+// name after the prefix, X-PSA-Client-Options and Cache-Control are not.
+GoogleString PageSpeedParamKey(StringPiece name) {
+  for (const char* header :
+       {HttpAttributes::kXPsaClientOptions, HttpAttributes::kCacheControl}) {
+    if (StringCaseEqual(name, header)) {
+      return StrCat("h:", header);
+    }
+  }
+  for (const char* prefix :
+       {RewriteQuery::kModPagespeed, RewriteQuery::kPageSpeed}) {
+    if (name.starts_with(prefix)) {
+      name.remove_prefix(strlen(prefix));
+      if (name.empty() || name == "Filters") {
+        return StrCat("e:", name);
+      }
+      GoogleString key = StrCat("o:", name);
+      LowerString(&key);
+      return key;
+    }
+  }
+  return GoogleString();
+}
+
 bool SamePageSpeedParamName(StringPiece ours, StringPiece theirs) {
   if (ours == theirs) {
     return true;
   }
-  if (StringCaseEqual(ours, HttpAttributes::kXPsaClientOptions)) {
-    return StringCaseEqual(theirs, HttpAttributes::kXPsaClientOptions);
-  }
-  for (const char* prefix :
-       {RewriteQuery::kPageSpeed, RewriteQuery::kModPagespeed}) {
-    if (ours.starts_with(prefix) && theirs.starts_with(prefix)) {
-      ours.remove_prefix(strlen(prefix));
-      theirs.remove_prefix(strlen(prefix));
-      return ours != "Filters" && theirs != "Filters" &&
-             StringCaseEqual(ours, theirs);
-    }
-  }
-  return false;
+  GoogleString key = PageSpeedParamKey(ours);
+  return !key.empty() && key == PageSpeedParamKey(theirs);
 }
 
 bool IsOneOfOurParams(const QueryParams& ours, StringPiece name) {
@@ -620,12 +632,12 @@ bool IsOneOfOurParams(const QueryParams& ours, StringPiece name) {
   return false;
 }
 
-// The query of 'url' as a sorted list of unescaped "name=value" entries,
+// The query of 'url' as a sorted list of unescaped (name, value) pairs,
 // leaving out our PageSpeed parameters. 'a' and 'a=' are the same, '+' and
 // '%20' are the same, and the order of the parameters does not matter.
-std::vector<GoogleString> NormalizedQueryWithoutOurs(const GoogleUrl& url,
-                                                     const QueryParams& ours) {
-  std::vector<GoogleString> result;
+std::vector<std::pair<GoogleString, GoogleString>> NormalizedQueryWithoutOurs(
+    const GoogleUrl& url, const QueryParams& ours) {
+  std::vector<std::pair<GoogleString, GoogleString>> result;
   if (url.IsWebValid() && url.has_query()) {
     QueryParams params;
     params.ParseFromUrl(url);
@@ -635,8 +647,7 @@ std::vector<GoogleString> NormalizedQueryWithoutOurs(const GoogleUrl& url,
       }
       GoogleString value;
       params.UnescapedValue(i, &value);
-      result.push_back(
-          StrCat(GoogleUrl::UnescapeQueryParam(params.name(i)), "=", value));
+      result.emplace_back(GoogleUrl::UnescapeQueryParam(params.name(i)), value);
     }
     std::sort(result.begin(), result.end());
   }

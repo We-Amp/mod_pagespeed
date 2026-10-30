@@ -758,10 +758,12 @@ TEST_F(ProxyInterfaceTest, RedirectWithEquivalentQueryFormsStaysAsWritten) {
                              "http://www.example.com/a?q=a%20b"));
 }
 
-TEST_F(ProxyInterfaceTest, RedirectDifferingOnlyByPagespeedParamsStaysAsWritten) {
-  EXPECT_EQ("http://www.example.com/a?x=1&PageSpeed=noscript",
-            RedirectLocation("http://www.example.com/a?x=1",
-                             "http://www.example.com/a?x=1&PageSpeed=noscript"));
+TEST_F(ProxyInterfaceTest,
+       RedirectDifferingOnlyByPagespeedParamsStaysAsWritten) {
+  EXPECT_EQ(
+      "http://www.example.com/a?x=1&PageSpeed=noscript",
+      RedirectLocation("http://www.example.com/a?x=1",
+                       "http://www.example.com/a?x=1&PageSpeed=noscript"));
 }
 
 TEST_F(ProxyInterfaceTest, RedirectWithDifferentOtherQueryStillGetsParams) {
@@ -773,33 +775,67 @@ TEST_F(ProxyInterfaceTest, RedirectWithDifferentOtherQueryStillGetsParams) {
 TEST_F(ProxyInterfaceTest, RedirectOptionNameCaseIsIgnoredWhenReAdding) {
   // The option name after the PageSpeed prefix is case-insensitive in
   // requests, so a Location that spells it differently already carries it.
-  EXPECT_EQ("http://www.example.com/b?PageSpeedCSSINLINEMAXBYTES=5",
-            RedirectLocation("http://www.example.com/a",
-                             "http://www.example.com/b?PageSpeedCSSINLINEMAXBYTES=5",
-                             "PageSpeedCssInlineMaxBytes=99"));
+  EXPECT_EQ(
+      "http://www.example.com/b?PageSpeedCSSINLINEMAXBYTES=5",
+      RedirectLocation("http://www.example.com/a",
+                       "http://www.example.com/b?PageSpeedCSSINLINEMAXBYTES=5",
+                       "PageSpeedCssInlineMaxBytes=99"));
 }
 
 TEST_F(ProxyInterfaceTest, RedirectPrefixCaseIsStillSignificantWhenReAdding) {
   // A differently cased PageSpeed prefix is not recognised in requests, so
   // that parameter is not ours and ours is still added.
-  EXPECT_EQ("http://www.example.com/b?pagespeedcssinlinemaxbytes=5"
-            "&PageSpeedCssInlineMaxBytes=99",
-            RedirectLocation("http://www.example.com/a",
-                             "http://www.example.com/b?pagespeedcssinlinemaxbytes=5",
-                             "PageSpeedCssInlineMaxBytes=99"));
+  EXPECT_EQ(
+      "http://www.example.com/b?pagespeedcssinlinemaxbytes=5"
+      "&PageSpeedCssInlineMaxBytes=99",
+      RedirectLocation("http://www.example.com/a",
+                       "http://www.example.com/b?pagespeedcssinlinemaxbytes=5",
+                       "PageSpeedCssInlineMaxBytes=99"));
 }
 
 TEST_F(ProxyInterfaceTest, RedirectKeepsDifferentValueOfCarriedParam) {
-  EXPECT_EQ("http://www.example.com/b?PageSpeedCssInlineMaxBytes=5",
-            RedirectLocation("http://www.example.com/a",
-                             "http://www.example.com/b?PageSpeedCssInlineMaxBytes=5",
-                             "PageSpeedCssInlineMaxBytes=99"));
+  EXPECT_EQ(
+      "http://www.example.com/b?PageSpeedCssInlineMaxBytes=5",
+      RedirectLocation("http://www.example.com/a",
+                       "http://www.example.com/b?PageSpeedCssInlineMaxBytes=5",
+                       "PageSpeedCssInlineMaxBytes=99"));
 }
 
-TEST_F(ProxyInterfaceTest, RedirectWithOtherParamsAndFragmentGetsParamsBeforeFragment) {
+TEST_F(ProxyInterfaceTest,
+       RedirectWithOtherParamsAndFragmentGetsParamsBeforeFragment) {
   EXPECT_EQ("http://www.example.com/b?x=1&PageSpeed=noscript#top",
             RedirectLocation("http://www.example.com/a",
                              "http://www.example.com/b?x=1#top"));
+}
+
+TEST_F(ProxyInterfaceTest, RedirectPrefixesModPagespeedAndPageSpeedAreTheSame) {
+  EXPECT_EQ(
+      "http://www.example.com/b?PageSpeedCssInlineMaxBytes=5",
+      RedirectLocation("http://www.example.com/a",
+                       "http://www.example.com/b?PageSpeedCssInlineMaxBytes=5",
+                       "ModPagespeedCssInlineMaxBytes=99"));
+  EXPECT_EQ("http://www.example.com/b?PageSpeed=off",
+            RedirectLocation("http://www.example.com/a",
+                             "http://www.example.com/b?PageSpeed=off",
+                             "ModPagespeed=noscript"));
+}
+
+TEST_F(ProxyInterfaceTest, RedirectEscapedEqualsSignIsNotAnEquivalentQuery) {
+  EXPECT_EQ("http://www.example.com/a?a=b%3Dc&PageSpeed=noscript",
+            RedirectLocation("http://www.example.com/a?a%3Db=c",
+                             "http://www.example.com/a?a=b%3Dc"));
+}
+
+TEST_F(ProxyInterfaceTest, RedirectEmptyQueryIsEquivalentToNoQuery) {
+  EXPECT_EQ("http://www.example.com/a?",
+            RedirectLocation("http://www.example.com/a",
+                             "http://www.example.com/a?"));
+}
+
+TEST_F(ProxyInterfaceTest, RedirectEscapedAmpersandIsNotAnEquivalentQuery) {
+  EXPECT_EQ("http://www.example.com/a?q=a&b&PageSpeed=noscript",
+            RedirectLocation("http://www.example.com/a?q=a%26b",
+                             "http://www.example.com/a?q=a&b"));
 }
 
 TEST_F(ProxyInterfaceTest, HeadResourceRequest) {
