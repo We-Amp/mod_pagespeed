@@ -32,7 +32,7 @@ set -u
 WORKSPACE="${WORKSPACE:-/workspace}"
 MODULE="${MODULE:-$WORKSPACE/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
 NGINX_BIN="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
-D="${D:-/tmp/native-ipv6-smoke}"
+D="${D:-$(mktemp -d /tmp/native-ipv6-smoke.XXXXXX)}"
 BASE_PORT="${BASE_PORT:-8456}"
 DNS_PORT="${DNS_PORT:-$((BASE_PORT + 20))}"
 ORIGIN_PORT=$((BASE_PORT + 10))
@@ -43,20 +43,24 @@ fail() { echo "FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 if ! python3 -c 'import socket; s=socket.socket(socket.AF_INET6); s.bind(("::1",0))' \
     2>/dev/null; then
   echo "SKIP: no IPv6 loopback (::1) available"
-  exit 0
+  [ "${NATIVE_IPV6_SMOKE_ALLOW_SKIP:-0}" = "1" ] && exit 0
+  exit 1
 fi
 
 # The fetcher parses each URL with the C library resolver before the nginx
 # resolver runs, so the two test names must also resolve through /etc/hosts.
 # Add them when we may (root, or a container started with --add-host).
+ADDED_HOSTS=0
 if ! getent hosts v6only.test >/dev/null 2>&1; then
   if ! { echo "::1 v6only.test" >> /etc/hosts && \
          echo "127.0.0.1 dual.test" >> /etc/hosts; } 2>/dev/null; then
     echo "SKIP: v6only.test / dual.test do not resolve and /etc/hosts is not"
     echo "      writable; start the container with --add-host v6only.test:::1"
     echo "      --add-host dual.test:127.0.0.1"
-    exit 0
+    [ "${NATIVE_IPV6_SMOKE_ALLOW_SKIP:-0}" = "1" ] && exit 0
+    exit 1
   fi
+  ADDED_HOSTS=1
 fi
 
 DNS_PID=""
@@ -66,6 +70,13 @@ stop_all() {
     kill "$(cat "$NGINX_PID_FILE")" 2>/dev/null
   fi
   if [ -n "$DNS_PID" ]; then kill "$DNS_PID" 2>/dev/null; fi
+  if [ "$ADDED_HOSTS" = "1" ]; then
+    # Remove the two lines we added (rewrite in place: /etc/hosts may be a
+    # bind mount that cannot be replaced).
+    grep -v -e '^::1 v6only.test$' -e '^127.0.0.1 dual.test$' /etc/hosts \
+      > "$D.hosts" 2>/dev/null && cat "$D.hosts" > /etc/hosts 2>/dev/null
+    rm -f "$D.hosts"
+  fi
 }
 trap stop_all EXIT
 

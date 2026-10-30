@@ -605,32 +605,36 @@ void NgxFetch::ResolveDoneHandler(ngx_resolver_ctx_t* resolver_ctx) {
     return;
   }
 
-  // Take the first usable address, in the order the resolver returned them
-  // (nginx already filters by the `resolver ... ipv6=on|off` setting).
-  ngx_uint_t i;
-  for (i = 0; i < resolver_ctx->naddrs; i++) {
+  // Pick an address: prefer the first IPv4 address, and fall back to the first
+  // IPv6 address when the host has none. nginx already filters the list by the
+  // `resolver ... ipv6=on|off` setting. nginx's resolver cache rotates the list
+  // across both families, so taking the first entry would make a dual-stack
+  // host go over IPv6 on some lookups only.
+  ngx_uint_t i = resolver_ctx->naddrs;
 #if (nginx_version < 1005008)
-    // Old versions of nginx and tengine have a different definition of addrs
-    // (in_addr_t*, IPv4 only).
-    break;
-#else
-    // Tengine and some old versions use a different addrs type; make sure we
-    // are using the right one (ngx_addr_t*).
-    ngx_addr_t* ngx_addrs = reinterpret_cast<ngx_addr_t*>(resolver_ctx->addrs);
-    if (typeid(*ngx_addrs) != typeid(*resolver_ctx->addrs)) {
-      break;
-    }
-    int family = ngx_addrs[i].sockaddr->sa_family;
-    if (family == AF_INET) {
-      break;
-    }
-#if (NGX_HAVE_INET6)
-    if (family == AF_INET6) {
-      break;
-    }
-#endif
-#endif
+  // Old versions of nginx have a different definition of addrs (in_addr_t*,
+  // IPv4 only).
+  if (resolver_ctx->naddrs > 0) {
+    i = 0;
   }
+#else
+  for (ngx_uint_t j = 0; j < resolver_ctx->naddrs; j++) {
+    if (resolver_ctx->addrs[j].sockaddr->sa_family == AF_INET) {
+      i = j;
+      break;
+    }
+  }
+#if (NGX_HAVE_INET6)
+  if (i == resolver_ctx->naddrs) {
+    for (ngx_uint_t j = 0; j < resolver_ctx->naddrs; j++) {
+      if (resolver_ctx->addrs[j].sockaddr->sa_family == AF_INET6) {
+        i = j;
+        break;
+      }
+    }
+  }
+#endif
+#endif
 
   // If no suitable address was found, we fail.
   if (i == resolver_ctx->naddrs) {
