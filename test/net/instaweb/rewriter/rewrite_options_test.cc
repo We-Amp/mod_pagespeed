@@ -4515,6 +4515,15 @@ TEST_F(RewriteOptionsTest, EffectiveXHeaderValuePrecedence) {
   }
 }
 
+// Only a response header depends on it, so it stays out of the signature.
+TEST_F(RewriteOptionsTest, ExposeVersionInHeadersIsNotInTheSignature) {
+  std::unique_ptr<RewriteOptions> with(options_.Clone());
+  with->set_expose_version_in_headers(true);
+  options_.ComputeSignature();
+  with->ComputeSignature();
+  EXPECT_EQ(options_.signature(), with->signature());
+}
+
 // Server-wide only: the vhost/location scope must reject it.
 TEST_F(RewriteOptionsTest, ExposeVersionInHeadersIsProcessScope) {
   const RewriteOptions::PropertyBase* property =

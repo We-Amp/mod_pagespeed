@@ -370,55 +370,46 @@ reading the XML.
 
 <h2 id="XHeaderValue">Specifying the value for the PageSpeed header</h2>
 <p>
-  PageSpeed adds a header to the responses it handles, <code>X-Mod-Pagespeed</code>
-  in Apache, <code>X-Page-Speed</code> in Nginx, IIS and Envoy.  By default its
-  value is the generic <code>on</code>; it does not include the product version.
-  Tools that detect PageSpeed by the presence of the header keep working.
+  By default, PageSpeed adds an header, <code>X-Mod-Pagespeed</code> in
+  Apache, <code>X-Page-Speed</code> in Nginx, with the version of PageSpeed
+  being used.  The format of this header is:
 </p>
 
-<pre>X-Mod-Pagespeed: on</pre>
+<pre>[Major].[Minor].[Branch].[Point]-[Commit]</pre>
 
 <p>
-  The value is chosen in this order:
+  For example:
 </p>
-<ol>
-  <li>A value set with the <code>XHeaderValue</code> directive, if any.</li>
-  <li>The product version, if <code>ExposeVersionInHeaders</code> is on.</li>
-  <li>Otherwise <code>on</code>.</li>
-</ol>
 
-<h3 id="ExposeVersionInHeaders">Reporting the product version</h3>
+<pre>1.9.32.3-4448</pre>
+
 <p>
-  <code>ExposeVersionInHeaders</code> (default <code>off</code>) makes the
-  header carry the product version, for example <code>2.7.0</code>, instead of
-  <code>on</code>.  It is a server-wide option: set it once in the main
-  server configuration, not inside a virtual host, server block, location or
-  <code>.htaccess</code> file.  A use inside a <code>&lt;VirtualHost&gt;</code>
-  (Apache) or a <code>server</code> block (Nginx) makes the configuration test
-  fail with an error that names the directive.  On IIS, it is server-wide:
-  put it in the server-wide <code>pagespeed.config</code>; a per-site entry is
-  not rejected.
+  We update these following this schedule:
 </p>
+
 <dl>
-  <dt>Apache:<dd><pre class="prettyprint"
-     >ModPagespeedExposeVersionInHeaders on</pre>
-  <dt>Nginx:<dd><pre class="prettyprint"
-     >pagespeed ExposeVersionInHeaders on;</pre>
-  <dt>IIS:<dd><pre class="prettyprint"
-     >pagespeed ExposeVersionInHeaders on</pre>
-</dl>
-<p class="note">
-  <b>Upgrading:</b> earlier releases reported the version by default.  If
-  scripts, monitoring or deploy checks read the version from this header, set
-  <code>ExposeVersionInHeaders on</code> in the server-wide configuration, in
-  the same step as the upgrade.  A server older than this option rejects the
-  directive as unknown, so do not add it before the upgrade.
-</p>
+  <dt>Major Version</dt>
+  <dd>Incremented when we make very large changes.</dd>
 
-<h3>Custom value</h3>
+  <dt>Minor Version</dt>
+  <dd>Incremented for each release since the last major version</dd>
+
+  <dt>Branch Number</dt>
+  <dd>Incremented for every release.  Always increasing.</dd>
+
+  <dt>Point Number</dt>
+  <dd>Incremented each time we build a new release candidate or patch release,
+      resets on each minor release.</dd>
+
+  <dt>Commit Number</dt>
+  <dd>Incremented each time we accept a commit to the PSOL trunk.  Always
+      increasing.</dd>
+</dl>
+
 <p>
-  To report something else entirely, use the <code>XHeaderValue</code>
-  directive.  It wins over <code>ExposeVersionInHeaders</code>:
+  All servers running a given release will have the same value for this header
+  by default.  If you would like to change the value reported, you can use
+  the <code>XHeaderValue</code> directive to specify what to use instead:
 </p>
 <dl>
   <dt>Apache:<dd><pre class="prettyprint"
@@ -426,12 +417,6 @@ reading the XML.
   <dt>Nginx:<dd><pre class="prettyprint"
      >pagespeed XHeaderValue "Powered By ngx_pagespeed";</pre>
 </dl>
-<p>
-  On IIS, an explicitly empty <code>XHeaderValue ""</code> leaves the header
-  out of responses served from the optimizer cache and sends it with an empty
-  value on the in-process path; leave <code>XHeaderValue</code> unset to get
-  <code>on</code>.
-</p>
 <p class="note">
   <b>Note:</b> You cannot suppress the injection of this header. This is because
   it is used to prevent infinite loops and unnecessary rewrites when PageSpeed

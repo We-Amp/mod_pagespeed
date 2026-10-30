@@ -102,6 +102,9 @@ def test_vhost_use_fails_the_configuration_test(server_config):
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert "ExposeVersionInHeaders" in output, output
+    # The scope error, not an unknown-directive error.
+    expected = "applies globally" if server_config.server_type == "apache" else "cannot be set at this scope"
+    assert expected in output, output
 
 
 if __name__ == "__main__":

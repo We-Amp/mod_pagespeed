@@ -528,11 +528,6 @@
   X("", x_header_value_, "xhv", \
     kXModPagespeedHeaderValue, kDirectoryScope, \
     "Set the value for the X-Mod-Pagespeed HTTP header", true) \
-  X(false, expose_version_in_headers_, "eveh", \
-    kExposeVersionInHeaders, kProcessScopeStrict, \
-    "OPT-IN, default off. Server-wide: report the product version in the " \
-    "X-Mod-Pagespeed / X-Page-Speed response header instead of the generic " \
-    "value \"on\". An explicit XHeaderValue still wins.", true) \
   X(true, avoid_renaming_introspective_javascript_, "aris", \
     kAvoidRenamingIntrospectiveJavascript, kDirectoryScope, \
     "Don't combine, inline, cache extend, or otherwise modify " \
