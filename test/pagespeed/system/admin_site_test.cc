@@ -691,6 +691,54 @@ TEST_F(RulePacksSeveralTest, TheRawFormOfOnePackIsTheLoggedLinesOnly) {
   EXPECT_EQ(raw, Get({a}, "raw=1&json=1", nullptr));
 }
 
+// The whole-server page lists the packs of every virtual host and reads their
+// decision logs, though the server-wide scope configures no pack itself.
+TEST_F(RulePacksSeveralTest, TheWholeServerPageListsThePacksOfEveryVhost) {
+  const std::string a =
+      WriteFile("a.json", TestPackJson("edge-seo", "enforce", ""));
+  Load(a);
+  WriteLog("edge-seo", "/from-vhost");
+
+  auto vhost_options = std::make_unique<SystemRewriteOptions>(
+      "vhost", thread_system_.get());
+  vhost_options->set_log_dir(log_dir_.string());
+  GoogleString msg;
+  ASSERT_TRUE(vhost_options->AddRulePackFile(a, &msg)) << msg;
+  std::unique_ptr<SystemServerContext> vhost(
+      new SystemServerContextNoProxyHtml(factory()));
+  vhost->reset_global_options(vhost_options.release());
+  vhost->set_statistics(factory()->statistics());
+  factory()->InitServerContext(vhost.get());
+
+  // The server-wide scope: no pack file of its own, the log directory unset.
+  SystemRewriteOptions global_options("global", thread_system_.get());
+  GoogleUrl gurl("http://example.com/pagespeed_global_admin/rule_packs?json=1");
+  QueryParams query_params;
+  query_params.ParseFromUrl(gurl);
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  fetch.request_headers()->set_method(RequestHeaders::kGet);
+  ssc_->AdminPage(true /* global */, gurl, query_params, &global_options,
+                  &fetch, "");
+  factory()->TerminateServerContext(vhost.get());
+
+  Json::Value root;
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  std::istringstream in(body);
+  ASSERT_TRUE(Json::parseFromStream(builder, in, &root, &errors)) << errors;
+  EXPECT_EQ("global", root["scope"].asString());
+  EXPECT_EQ(0u, root["packs"].size());
+  ASSERT_EQ(1u, root["vhosts"].size());
+  EXPECT_EQ("fake_hostname:80", root["vhosts"][0]["host"].asString());
+  ASSERT_EQ(1u, root["vhosts"][0]["packs"].size());
+  EXPECT_EQ("loaded", root["vhosts"][0]["packs"][0]["state"].asString());
+  EXPECT_EQ("edge-seo", root["vhosts"][0]["packs"][0]["id"].asString());
+  EXPECT_EQ("ok", root["decisions"]["status"].asString());
+  ASSERT_EQ(1u, root["decisions"]["rows"].size());
+  EXPECT_EQ("/from-vhost", root["decisions"]["rows"][0]["path"].asString());
+}
+
 // =============================================================================
 // Message templates.  The admin console implements the same rules in
 // TypeScript; both test suites read testdata/message_templates.tsv.

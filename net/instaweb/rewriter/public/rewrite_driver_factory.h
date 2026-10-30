@@ -21,6 +21,7 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_REWRITE_DRIVER_FACTORY_H_
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <set>
 #include <vector>
@@ -374,6 +375,11 @@ class RewriteDriverFactory {
   // The per-process source of rule packs for the rule_packs filter, or null
   // when this kind of server has none (the filter is then never built).
   virtual RulePackProvider* rule_pack_provider() { return nullptr; }
+
+  // Calls `visit` once for every live server context (the global one and each
+  // virtual host), under the factory's server-context lock: `visit` must be
+  // quick and must not create or terminate a server context.
+  void ForEachServerContext(const std::function<void(ServerContext*)>& visit);
 
   // Creates an ExperimentMatcher, which is used to match clients or sessions to
   // a specific experiment.

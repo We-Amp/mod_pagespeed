@@ -91,6 +91,16 @@ struct PackEntry {
   PackInfo pack;
 };
 
+// The rule-pack configuration of one virtual host, as the whole-server page
+// lists it next to the server-wide packs.
+struct VhostEntry {
+  std::string host;  // the host identifier of the virtual host's context
+  bool filter_enabled = false;
+  std::string mode;  // enforce or report
+  bool require_signed = false;
+  std::vector<PackEntry> packs;  // every RulePackFile, in load order
+};
+
 struct Page {
   std::string scope;  // "vhost" or "global"
   std::string host;   // the host identifier of the server context
@@ -110,6 +120,9 @@ struct Page {
   // Warnings about kinds that a later pack carries in another mode than the
   // earlier pack that owns them.
   std::vector<std::string> overlap_warnings;
+  // The virtual hosts of the server that configure rule packs; filled on the
+  // whole-server page only (a virtual host's own packs are in `packs`).
+  std::vector<VhostEntry> vhosts;
   // The pack whose decision log is shown (?pack=, else the first loaded
   // pack); empty when the logs of the known packs are merged.
   std::string tail_pack;

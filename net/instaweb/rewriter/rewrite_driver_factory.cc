@@ -646,6 +646,12 @@ void RewriteDriverFactory::StopCacheActivity() {
   }
 }
 
+void RewriteDriverFactory::ForEachServerContext(
+    const std::function<void(ServerContext*)>& visit) {
+  ScopedMutex lock(server_context_mutex_.get());
+  for (ServerContext* server_context : server_contexts_) visit(server_context);
+}
+
 bool RewriteDriverFactory::TerminateServerContext(ServerContext* sc) {
   ScopedMutex lock(server_context_mutex_.get());
   server_contexts_.erase(sc);

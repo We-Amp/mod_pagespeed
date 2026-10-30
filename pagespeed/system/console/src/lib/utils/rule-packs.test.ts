@@ -26,6 +26,41 @@ const base: RulePacksResponse = {
   decisions: { date: "2026-10-11", pack: null, limit: 100, status: "ok", error: null, rows: [] },
 };
 
+describe("virtual hosts on the whole-server page", () => {
+  const vhost = {
+    host: "demo.test:80",
+    filter_enabled: true,
+    rule_pack_mode: "enforce",
+    rule_pack_require_signed: true,
+    packs: [{ position: 0, file: "/p/demo.json", state: "loaded", id: "demo-pack", version: "1.0.0" }],
+  };
+  const global: RulePacksResponse = {
+    ...base,
+    scope: "global",
+    configuration: { filter_enabled: false, rule_pack_files: [], rule_pack_mode: "report", rule_pack_require_signed: false },
+    vhosts: [vhost],
+  };
+
+  it("a host's pack means packs are configured, even with none server-wide", () => {
+    const v = rulePacksView(global);
+    expect(v.noneConfigured).toBe(false);
+    expect(v.vhosts).toHaveLength(1);
+    expect(v.vhosts[0]).toMatchObject({ host: "demo.test:80", filterEnabled: true, mode: "enforce", requireSigned: true, files: ["/p/demo.json"] });
+    expect(v.vhosts[0].packs[0].state.label).toBe("loaded");
+  });
+
+  it("is none configured only when neither the server nor a host has a pack", () => {
+    expect(rulePacksView({ ...global, vhosts: [] }).noneConfigured).toBe(true);
+    expect(rulePacksView({ ...global, vhosts: undefined }).vhosts).toEqual([]);
+  });
+
+  it("the decision log can be read from a host's pack", () => {
+    const v = rulePacksView({ ...global, packs: [{ position: 0, file: "/p/a.json", state: "loaded", id: "edge" }] });
+    expect(tailPackOptions(v.packs, v.vhosts)).toEqual(["edge", "demo-pack"]);
+    expect(tailPackOptions(v.packs)).toEqual(["edge"]);
+  });
+});
+
 describe("rulePacksView", () => {
   it("refuses a schema it does not know", () => {
     expect(() => rulePacksView({ ...base, schema: 2 })).toThrow(/schema/);

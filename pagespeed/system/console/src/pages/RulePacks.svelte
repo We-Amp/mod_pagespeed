@@ -74,7 +74,7 @@
   let packChoices = $derived(distinctValues(tailRows, "pack_id"));
   let actionChoices = $derived(distinctValues(tailRows, "action"));
   let reasonChoices = $derived(distinctValues(tailRows, "reason"));
-  let tailPacks = $derived(view ? tailPackOptions(view.packs) : []);
+  let tailPacks = $derived(view ? tailPackOptions(view.packs, view.vhosts) : []);
   let tailNote = $derived(view ? tailStatusText(view.log.status, view.log.error) : null);
   let filtering = $derived(packFilter !== "" || actionFilter !== "" || reasonFilter !== "" || ruleFilter.trim() !== "" || lensHost !== null);
 
@@ -164,7 +164,11 @@
 
     <section class="block" aria-labelledby="rp-packs-heading" data-testid="rp-packs">
       <h2 id="rp-packs-heading">Packs</h2>
-      {#if view.noneConfigured}
+      {#if view.vhosts.length > 0 && view.packs.length === 0}
+        <p class="source-note" data-testid="rp-per-vhost-only">
+          No rule pack is configured for the server as a whole; {view.vhosts.length === 1 ? "one virtual host configures its own" : `${view.vhosts.length} virtual hosts configure their own`}, listed below.
+        </p>
+      {:else if view.noneConfigured}
         <EmptyState
           testid="rp-none-configured"
           title="No rule pack is configured"
@@ -230,6 +234,38 @@
         </ol>
       {/if}
     </section>
+
+    {#if view.vhosts.length > 0}
+      <section class="block" aria-labelledby="rp-vhosts-heading" data-testid="rp-vhosts">
+        <h2 id="rp-vhosts-heading">Virtual hosts</h2>
+        <ul class="vhost-list">
+          {#each view.vhosts as vhost, v (v)}
+            <li class="pack-card" data-testid="rp-vhost" data-host={vhost.host}>
+              <div class="pack-head">
+                <span class="pack-id mono">{vhost.host}</span>
+                <span class="pack-version mono">{vhost.mode || "—"}</span>
+                <span class="state-badge tone-{vhost.filterEnabled ? 'success' : 'neutral'}">filter {vhost.filterEnabled ? "on" : "off"}</span>
+                {#if vhost.requireSigned}<span class="state-badge tone-neutral">signed packs only</span>{/if}
+              </div>
+              <ul class="vhost-packs">
+                {#each vhost.packs as pack, i (i)}
+                  <li data-testid="rp-vhost-pack" data-state={pack.rawState} data-pack-id={pack.id ?? ""}>
+                    <span class="pack-id mono">{pack.id ?? "(no pack read)"}</span>
+                    {#if pack.version}<span class="pack-version mono">{pack.version}</span>{/if}
+                    <span class="state-badge tone-{pack.state.tone}" title={pack.state.explain}>{pack.state.label}</span>
+                    <span class="mono pack-file">{pack.file}</span>
+                    {#if pack.id !== null}
+                      <button type="button" class="btn btn-secondary" onclick={() => selectTailPack(pack.id ?? "")} data-testid="rp-vhost-log">Show decisions</button>
+                    {/if}
+                    {#if pack.lastError}<p class="pack-error">Last error: {pack.lastError}</p>{/if}
+                  </li>
+                {/each}
+              </ul>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
 
     <section class="block" aria-labelledby="rp-counters-heading" data-testid="rp-counters">
       <h2 id="rp-counters-heading">Counters</h2>
@@ -603,5 +639,25 @@
 
   .wrap {
     overflow-wrap: anywhere;
+  }
+
+  .vhost-list,
+  .vhost-packs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .vhost-list {
+    display: grid;
+    gap: var(--ps-space-md);
+  }
+
+  .vhost-packs li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ps-space-sm);
+    padding: var(--ps-space-xs) 0;
   }
 </style>
