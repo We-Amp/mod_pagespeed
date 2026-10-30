@@ -150,7 +150,8 @@ const srcOf = (page, id) =>
 {
   const { page } = await openPage(testPage({
     tail: `<script data-pagespeed-no-defer>
-             pagespeed.lazyLoadImages.overrideAttributeFunctions();
+             if(window.pagespeed){if(pagespeed.lazyLoadImages){
+             pagespeed.lazyLoadImages.overrideAttributeFunctions();}}
            <\/script>`,
   }));
   await page.waitForTimeout(300);
