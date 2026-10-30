@@ -380,6 +380,30 @@ TEST_F(JsMinifyTest, ExportDefaultFunctionAsi) {
                        "export default function(){}\n(0);");
 }
 
+TEST_F(JsMinifyTest, ForLetDestructuring) {
+  // A module as emitted by common bundlers: a named import with no spaces,
+  // template literals, and a for-of that destructures with `let`.
+  CheckNewMinification(
+      "import{C as e,S as t}from\"./psi.js\";\n"
+      "async function f(a){for(let{chip:e,ok:t}of a){if(!t)continue;"
+      "g(`lead_${e.id}`)}}\n"
+      "export{f as default};",
+      "import{C as e,S as t}from\"./psi.js\";"
+      "async function f(a){for(let{chip:e,ok:t}of a){if(!t)continue;"
+      "g(`lead_${e.id}`)}}\n"
+      "export{f as default};");
+  CheckNewMinification("for (let { a, b } of xs) { f(a, b); }",
+                       "for(let{a,b}of xs){f(a,b);}");
+  CheckNewMinification("for (let [k, v] of m) { f(k, v); }",
+                       "for(let[k,v]of m){f(k,v);}");
+  CheckNewMinification("for (let { a } = o; a < 3; a++) { f(a); }",
+                       "for(let{a}=o;a<3;a++){f(a);}");
+  CheckNewMinification("for (let x of xs) { f(x); }", "for(let x of xs){f(x);}");
+  // `let` as an identifier outside a for header is unchanged.
+  CheckNewMinification("if (let [0]) { f(); }", "if(let[0]){f();}");
+  CheckError("for (let { a of xs) {");
+}
+
 TEST_F(JsMinifyTest, Es2015ModulePositiveControl) {
   // A realistic module: two imports, an export const, and an IIFE after an
   // import line; every statement boundary survives minification.

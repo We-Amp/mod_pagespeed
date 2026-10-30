@@ -1471,9 +1471,16 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     // the kOtherKeyword itself (see ConsumeOperator).
     case JsKeywords::kLet: {
       const ParseState let_state = parse_stack_.back();
-      const bool stmt_position =
-          let_state == kStartOfInput || let_state == kOpenBrace ||
-          let_state == kBlockHeader || let_state == kModuleDecl;
+      // The open paren of a `for` header is a declaration position too, but
+      // only for a `{`/`[` binding pattern (checked below): a plain
+      // identifier after `let` already tokenizes correctly there, and `if
+      // (let [0])` style identifier uses stay untouched.
+      const bool for_header_paren = let_state == kOpenParen &&
+                                    parse_stack_.size() - 1 == for_paren_index_;
+      const bool stmt_position = let_state == kStartOfInput ||
+                                 let_state == kOpenBrace ||
+                                 let_state == kBlockHeader ||
+                                 let_state == kModuleDecl || for_header_paren;
       bool is_declaration = false;
       if (stmt_position) {
         const int size = input_.size();
@@ -1501,6 +1508,9 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
                // except over the module marker, where the pinned
                // `export let {a} = b` residual is preserved instead.
                (let_state != kModuleDecl && (c == '{' || c == '[')));
+          if (for_header_paren) {
+            is_declaration = (c == '{' || c == '[');
+          }
         }
       }
       if (is_declaration) {
@@ -1534,6 +1544,10 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     case JsKeywords::kWhile:
     case JsKeywords::kWith:
       parse_stack_.push_back(kBlockKeyword);
+      // Remember where a `for` header's open paren will sit, so a `let`
+      // directly inside it can be read as a declaration (see kLet).
+      for_paren_index_ =
+          (type == JsKeywords::kFor) ? parse_stack_.size() : kNoForParen;
       break;
     // These keywords mark the start of a block.  A slash after one of these is
     // the start of a regex literal (rather than division); an open brace after
