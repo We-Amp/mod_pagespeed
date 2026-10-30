@@ -171,10 +171,11 @@ TEST_F(ResourceFetchTest, ResourceHeaderReplacesOriginHeader) {
   callback->Release();
 }
 
-// The module's own nosniff on a rewritten resource is a single header even
-// when a configured header names it too.
+// The origin's nosniff reaches the rewritten resource; a configured nosniff
+// replaces it, so origin plus configured gives one header.
 TEST_F(ResourceFetchTest, NosniffAppearsOnce) {
   SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kCssContent, 100);
+  AddToResponse(AbsolutifyUrl("a.css"), "X-Content-Type-Options", "nosniff");
 
   GoogleString buffer;
   StringWriter writer(&buffer);
