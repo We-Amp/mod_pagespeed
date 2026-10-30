@@ -36,7 +36,7 @@ class IntElement : public PoolElement<IntElement> {
  public:
   IntElement() {}
 
-  const int num() const { return num_; }
+  int num() const { return num_; }
   void set_num(int num) { num_ = num; }
 
  private:
@@ -52,7 +52,7 @@ using PoolPosition = PoolElement<IntElement>::Position;
 class PoolTest : public testing::Test {
  protected:
   PoolTest() {
-    for (int i = 0; i < std::size(elements_); ++i) {
+    for (size_t i = 0; i < std::size(elements_); ++i) {
       elements_[i].set_num(i);
     }
   }
