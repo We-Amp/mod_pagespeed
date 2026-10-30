@@ -253,6 +253,16 @@ build:macos --cxxopt=-faligned-allocation --host_cxxopt=-faligned-allocation
 # Suppress 'register' keyword errors from gperf-generated code (deprecated in
 # C++17). -Wregister is C++/ObjC++-only, hence --cxxopt.
 build:macos --cxxopt=-Wno-register --host_cxxopt=-Wno-register
+# Bazel deliberately repeats cc_library linkopts once per contributing
+# library, and protobuf's macOS LINK_OPTS ("-lpthread -lm -framework
+# CoreFoundation", external/protobuf+/build_defs/cpp_opts.bzl) lands on
+# every protobuf library in a closure, on top of the toolchain's own
+# default link libs ("-ldl -lc++ -lm") and our daemon_adapter's -ldl.
+# ld64 dedupes them itself and warns about every duplicate; the flag is
+# ld64-only (GNU ld errors on it), hence macOS-only — the Linux link
+# line is untouched.
+build:macos --linkopt=-Wl,-no_warn_duplicate_libraries
+build:macos --host_linkopt=-Wl,-no_warn_duplicate_libraries
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan
