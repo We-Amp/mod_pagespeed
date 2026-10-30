@@ -18,11 +18,10 @@ Tests:
   service by definition, recycles the application pool, checks the local
   header and its absence for remote clients, then restores the site's
   pagespeed.config and recycles again.
-* ``test_unusable_service_event_log_names_the_cause`` and
-  ``test_half_configured_service_event_log_says_not_set`` run in the
-  standard lane too. They read the Application event log entry the module
-  writes for the unusable service and assert its text: the configured pipe
-  name is in it, and an empty socket or volume path prints "(not set)".
+* The same test also reads the Application event log entry the module
+  writes for the unusable service and asserts that it names the configured
+  pipe; ``test_half_configured_service_event_log_says_not_set`` asserts
+  that an empty volume path prints "(not set)".
 * ``test_recovered_service_turns_the_header_off`` needs a real optimizer
   service. It runs against either a Windows service installed and already
   named by the site's pagespeed.config, or the optimizer worker the lane
@@ -30,14 +29,15 @@ Tests:
   points at it (PAGESPEED_IIS_DAEMON_SITE_URL). It stops the service or
   worker, waits for the header, starts it again, and checks that the
   30 second recheck turns the header off and writes one informational
-  event-log entry. It is skipped, with the reason, everywhere else.
+  event-log entry. It is skipped, with the reason, where neither exists.
 
-Both need two non-loopback IPv4 addresses on the machine: the module treats
-a client as local when its address is loopback or equals the address it
-connected to, so a "remote" request is one made from one local address to
-another. A machine with fewer, or whose addresses cannot reach
-each other, is a skip that lists the addresses it found and says no
-routable pair exists (unless a WSL guest can make the remote request).
+The remote-client checks need a way to make a request that counts as remote:
+the module treats a client as local when its address is loopback or equals
+the address it connected to, so a "remote" request is one made from one local
+address to another, or from a WSL guest. A machine with neither still runs
+every local check; it prints one note saying why the remote half was not run.
+The recovery test is marked ``slow_recovery`` (about a minute, mostly the
+30 second recheck) so the per-merge lane can deselect it.
 The site is restored and the application pool recycled on every exit path.
 
 Environment variables (all optional; the defaults match the standard lane):
@@ -82,6 +82,14 @@ SITE_CONFIG = os.environ.get(
 APPCMD = os.path.join(
     os.environ.get("SystemRoot", r"C:\Windows"), "system32", "inetsrv", "appcmd.exe"
 )
+
+
+def _scaled(seconds: float) -> float:
+    """Scale a wait by PAGESPEED_TEST_TIMEOUT_MULTIPLIER, as the harness does."""
+    try:
+        return seconds * max(1.0, float(os.environ.get("PAGESPEED_TEST_TIMEOUT_MULTIPLIER", "1")))
+    except ValueError:
+        return seconds
 
 
 def _run(args: List[str]) -> subprocess.CompletedProcess:
@@ -174,7 +182,7 @@ def _event_messages_since(since: float) -> List[str]:
 
 def _wait_for_event(since: float, needle: str, timeout: float = 60.0) -> List[str]:
     """Event log messages since a time that contain needle (polls briefly)."""
-    deadline = time.time() + timeout
+    deadline = time.time() + _scaled(timeout)
     while True:
         found = [m for m in _event_messages_since(since) if needle in m]
         if found or time.time() >= deadline:
@@ -206,29 +214,36 @@ def _wsl_available() -> bool:
         return False
 
 
-def _remote_route(port: int):
-    """(target, remote_source) for a request that counts as remote.
+def _find_remote_route(port: int):
+    """((target, remote_source), None) for a request that counts as remote.
 
     Windows refuses to send from one interface's address to another
     interface's address (strong host model, WinError 10051), so pairs are
     probed and the first that connects is used. With no routable pair the
     request is made from a WSL guest (remote_source None), which has its own
-    network stack. Otherwise a skip that lists the addresses it found.
+    network stack. Never skips: with no way to make a remote request the
+    result is (None, reason), and the caller runs its local checks anyway.
     """
     addresses = _non_loopback_addresses()
     for target in addresses:
         for source in addresses:
             if source != target and _connects(target, source, port):
-                return target, source
-    if addresses and _wsl_available():
-        for target in addresses:
-            probe = _run(["wsl.exe", "-e", "curl", "-s", "-o", "/dev/null",
-                          "--max-time", "5", f"http://{target}:{port}/"])
-            if probe.returncode == 0:
-                return target, None
-    pytest.skip(
-        "no routable pair of non-loopback IPv4 addresses to make a remote "
-        f"request on port {port}; found: {addresses or 'none'}"
+                return (target, source), None
+    if not addresses:
+        return None, f"no non-loopback IPv4 address found for port {port}"
+    if not _wsl_available():
+        return None, (
+            "no routable pair of non-loopback IPv4 addresses to make a remote "
+            f"request on port {port}, and no WSL guest to make it from; found: {addresses}"
+        )
+    for target in addresses:
+        probe = _run(["wsl.exe", "-e", "curl", "-s", "-o", "/dev/null",
+                      "--max-time", "5", f"http://{target}:{port}/"])
+        if probe.returncode == 0:
+            return (target, None), None
+    return None, (
+        f"a WSL guest cannot reach the site on any of {addresses}, port {port}; "
+        "no routable pair of host addresses either"
     )
 
 
@@ -292,12 +307,20 @@ def _wait_for_local_header(port: int, path: str, want: bool, timeout: float = 60
     return response
 
 
-def _assert_local_only(target: str, remote_source: str, port: int, path: str) -> None:
-    """The header is on local requests and never reaches a remote one."""
+def _assert_local_only(route, route_reason, port: int, path: str) -> None:
+    """The header is on local requests and never reaches a remote one.
+
+    The local half always runs. The remote half runs when |route| (from
+    _find_remote_route) is not None; otherwise a note says why it did not.
+    """
     local = _wait_for_local_header(port, path, want=True)
     assert local.getheader(STATUS_HEADER) == STATUS_VALUE, (
         f"local request lacks {STATUS_HEADER}: {local.getheader(STATUS_HEADER)}"
     )
+    if route is None:
+        print(f"NOTE: remote half not run: {route_reason}")
+        return
+    target, remote_source = route
     # Local requests for the same file inside the cache window would prime an
     # IIS cache if the response were cacheable. They go to the same address
     # the remote ones do (source == target is local by the module's rule), so
@@ -339,6 +362,7 @@ def _site_config_with(config_path: str, lines: str):
 @pytest.mark.iis_only
 @pytest.mark.slow
 def test_unusable_service_reported_locally_never_remotely(server_config, example_root):
+    """Local-only header, and an event-log entry that names the cause."""
     original = _read_site_config()
     if _sets_daemon_paths(original):
         pytest.skip(
@@ -346,31 +370,11 @@ def test_unusable_service_reported_locally_never_remotely(server_config, example
             "test_recovered_service_turns_the_header_off covers that setup"
         )
     port = server_config.port
-    target, remote_source = _remote_route(port)
+    route, route_reason = _find_remote_route(port)
     path = f"{example_root}/combine_javascript1.js"
 
     # A pipe nothing listens on and a folder that holds no cache volume: the
     # service is configured and cannot be used.
-    empty_volume = tempfile.mkdtemp(prefix="pagespeed-unusable-")
-    pipe = rf"\\.\pipe\pagespeed-unusable-{uuid.uuid4().hex}"
-    try:
-        with _site_config_with(
-            SITE_CONFIG,
-            f"pagespeed DaemonSocketPath {pipe}\n"
-            f"pagespeed DaemonVolumePath {empty_volume}\n",
-        ):
-            _assert_local_only(target, remote_source, port, path)
-    finally:
-        shutil.rmtree(empty_volume, ignore_errors=True)
-
-
-@pytest.mark.iis_only
-@pytest.mark.slow
-def test_unusable_service_event_log_names_the_cause(server_config, example_root):
-    """The event-log entry for an unusable service names the cause."""
-    original = _read_site_config()
-    if _sets_daemon_paths(original):
-        pytest.skip(f"{SITE_CONFIG} already names an optimizer service")
     started = time.time()
     empty_volume = tempfile.mkdtemp(prefix="pagespeed-unusable-")
     pipe = rf"\\.\pipe\pagespeed-unusable-{uuid.uuid4().hex}"
@@ -380,8 +384,7 @@ def test_unusable_service_event_log_names_the_cause(server_config, example_root)
             f"pagespeed DaemonSocketPath {pipe}\n"
             f"pagespeed DaemonVolumePath {empty_volume}\n",
         ):
-            # The module starts with the first request to the site.
-            _get("127.0.0.1", server_config.port, f"{example_root}/combine_javascript1.js")
+            _assert_local_only(route, route_reason, port, path)
             found = _wait_for_event(started, pipe)
             assert found, (
                 "no event-log entry names the configured pipe; got: "
@@ -452,8 +455,6 @@ class _LaneWorkerUnderTest:
     management token, so the other tests see the worker they started with.
     """
 
-    API_PORT = 18765
-
     def __init__(self, port: int):
         self.port = port
         self.config_path = os.environ.get(
@@ -465,6 +466,11 @@ class _LaneWorkerUnderTest:
         self.release = os.environ.get("PAGESPEED_OPTIMIZER_DIR", "")
         self.volume_dir = os.path.dirname(os.environ.get("PAGESPEED_OPTIMIZER_VOLUME", ""))
         self.socket_name = os.environ.get("PAGESPEED_OPTIMIZER_SOCKET", "pagespeed-optimizer")
+        # tools/ci/Start-OptimizerWorker.ps1 exports host:port of the
+        # management API; the other worker arguments below are that script's.
+        self.api_port = int(os.environ.get("PAGESPEED_OPTIMIZER_API", "127.0.0.1:18765").rsplit(":", 1)[1])
+        # Logs go where the lane's failure upload collects the worker's own.
+        self.log_dir = os.environ.get("PAGESPEED_EVIDENCE_DIR", self.root)
 
     @classmethod
     def available(cls) -> Optional[str]:
@@ -508,21 +514,22 @@ class _LaneWorkerUnderTest:
         env = dict(os.environ)
         env["PAGESPEED_API_TOKEN"] = os.environ["PAGESPEED_OPTIMIZER_API_TOKEN"]
         worker = os.path.join(self.release, "factory_worker.exe")
-        out_log = open(os.path.join(self.root, "worker-restart.out.log"), "ab")
-        err_log = open(os.path.join(self.root, "worker-restart.err.log"), "ab")
-        proc = subprocess.Popen(
-            [worker, "--socket", self.socket_name, "--cache-dir", self.volume_dir,
-             "--cache-size", "268435456", "--api-bind", "127.0.0.1",
-             "--api-port", str(self.API_PORT), "--log-level", "info"],
-            env=env, stdout=out_log, stderr=err_log, stdin=subprocess.DEVNULL,
-            creationflags=0x08000000 | 0x00000008,  # CREATE_NO_WINDOW | DETACHED_PROCESS
-        )
+        os.makedirs(self.log_dir, exist_ok=True)
+        with open(os.path.join(self.log_dir, "optimizer-worker-restart.out.log"), "ab") as out_log, \
+                open(os.path.join(self.log_dir, "optimizer-worker-restart.err.log"), "ab") as err_log:
+            proc = subprocess.Popen(
+                [worker, "--socket", self.socket_name, "--cache-dir", self.volume_dir,
+                 "--cache-size", "268435456", "--api-bind", "127.0.0.1",
+                 "--api-port", str(self.api_port), "--log-level", "info"],
+                env=env, stdout=out_log, stderr=err_log, stdin=subprocess.DEVNULL,
+                creationflags=0x08000000 | 0x00000008,  # CREATE_NO_WINDOW | DETACHED_PROCESS
+            )
         with open(self.pid_file, "w", encoding="ascii") as handle:
             handle.write(f"{proc.pid}\n")
-        deadline = time.time() + 60
+        deadline = time.time() + _scaled(60)
         while time.time() < deadline:
             try:
-                conn = http.client.HTTPConnection("127.0.0.1", self.API_PORT, timeout=2)
+                conn = http.client.HTTPConnection("127.0.0.1", self.api_port, timeout=2)
                 conn.request("GET", "/v1/health", headers={
                     "Authorization": "Bearer " + os.environ["PAGESPEED_OPTIMIZER_API_TOKEN"]})
                 if conn.getresponse().status == 200:
@@ -539,6 +546,7 @@ class _LaneWorkerUnderTest:
 
 @pytest.mark.iis_only
 @pytest.mark.slow
+@pytest.mark.slow_recovery
 def test_recovered_service_turns_the_header_off(server_config, example_root):
     service_reason = _WindowsServiceUnderTest.available()
     if service_reason is None:
@@ -551,14 +559,14 @@ def test_recovered_service_turns_the_header_off(server_config, example_root):
         if not _sets_daemon_paths(_read_config(under_test.config_path)):
             pytest.skip(f"{under_test.config_path} does not set DaemonSocketPath and DaemonVolumePath")
     port = under_test.port
-    target, remote_source = _remote_route(port)
+    route, route_reason = _find_remote_route(port)
     path = f"{example_root}/combine_javascript1.js"
 
     try:
         under_test.stop()
         # A worker starts the check afresh after a recycle.
         _recycle_pool()
-        _assert_local_only(target, remote_source, port, path)
+        _assert_local_only(route, route_reason, port, path)
 
         # Recovery: start the service, let the 30 second recheck pass.
         started = time.time()

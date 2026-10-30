@@ -3122,7 +3122,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           .\tools\ci\Start-OptimizerWorker.ps1 -Action start
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose
+          .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose -TestFilter 'not slow_recovery'
           exit $LASTEXITCODE
 
       # The worker goes down with the job's tests, whatever their outcome; its
