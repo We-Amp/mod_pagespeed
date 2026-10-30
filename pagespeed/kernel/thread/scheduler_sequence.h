@@ -65,6 +65,13 @@ class Scheduler::Sequence : public net_instaweb::Sequence {
   void ForwardToSequence(net_instaweb::Sequence* forwarding_sequence)
       EXCLUSIVE_LOCKS_REQUIRED(scheduler_->mutex());
 
+  // Thread-safety analysis aid, no runtime effect. RunTasksUntil and
+  // ForwardToSequence require the scheduler mutex in this class's rooted
+  // form (scheduler_->mutex()); a caller holding the same mutex through
+  // its own Scheduler* cannot be seen to hold that form and asserts it
+  // here.
+  void AssertSchedulerMutexHeld() ASSERT_EXCLUSIVE_LOCK(scheduler_->mutex()) {}
+
  private:
   VectorDeque<Function*> work_queue_ GUARDED_BY(scheduler_->mutex());
   Scheduler* scheduler_;

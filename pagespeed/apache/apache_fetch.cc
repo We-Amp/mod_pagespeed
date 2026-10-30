@@ -420,6 +420,12 @@ void ApacheFetch::Wait() {
         std::max(options_->blocking_fetch_timeout_ms(),
                  static_cast<int64>(options_->in_place_rewrite_deadline_ms()));
     Scheduler::Sequence* scheduler_sequence = driver_->scheduler_sequence();
+    // RunTasksUntil and SwitchToQueuedWorkerPool each require the scheduler
+    // mutex in their own rooted form; this lock is the same mutex through
+    // ApacheFetch's scheduler_, which the analysis cannot see. Assert it
+    // in each callee's form.
+    scheduler_sequence->AssertSchedulerMutexHeld();
+    driver_->AssertRewriteMutexHeld();
     while (!scheduler_sequence->RunTasksUntil(fetch_timeout_ms, &done_)) {
       int64 elapsed_ms = timer->NowMs() - start_ms;
       message_handler_->Message(kWarning,

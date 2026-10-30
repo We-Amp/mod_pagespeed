@@ -89,8 +89,7 @@ ApacheWriter::ApacheWriter(request_rec* r, ThreadSystem* thread_system)
       headers_out_(false),
       disable_downstream_header_filters_(false),
       strip_cookies_(false),
-      content_length_(AsyncFetch::kContentLengthUnknown),
-      thread_system_(thread_system) {
+      content_length_(AsyncFetch::kContentLengthUnknown) {
   apache_request_thread_.reset(thread_system->GetThreadId());
 }
 

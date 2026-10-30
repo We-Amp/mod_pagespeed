@@ -970,6 +970,12 @@ class RewriteDriver : public HtmlParse {
   // no longer continue on the request thread.
   void SwitchToQueuedWorkerPool() EXCLUSIVE_LOCKS_REQUIRED(rewrite_mutex());
 
+  // Thread-safety analysis aid, no runtime effect: asserts the rewrite
+  // mutex in the driver-rooted form SwitchToQueuedWorkerPool annotates,
+  // for callers that hold the same mutex through their own scheduler
+  // pointer.
+  void AssertRewriteMutexHeld() ASSERT_EXCLUSIVE_LOCK(rewrite_mutex()) {}
+
   Scheduler* scheduler() { return scheduler_; }
 
   // Used by CacheExtender, CssCombineFilter, etc. for rewriting domains

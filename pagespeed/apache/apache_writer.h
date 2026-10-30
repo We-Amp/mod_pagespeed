@@ -125,7 +125,6 @@ class ApacheWriter : public Writer {
   bool disable_downstream_header_filters_;
   bool strip_cookies_;
   int64 content_length_;
-  ThreadSystem* thread_system_;
   std::unique_ptr<ThreadSystem::ThreadId> apache_request_thread_;
 
   ApacheWriter(const ApacheWriter&) = delete;
