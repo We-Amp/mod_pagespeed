@@ -78,6 +78,15 @@ public:
 	
 };
 
+// Sets every field of *out (MessageBufferSize, UseNativeFetcher,
+// UsePerVHostStatistics, the shared-memory size and the pool sizes) from the
+// machine-wide file alone. Reads the file afresh, never from a cache, so every
+// site context of a process, and a context rebuilt after a file edit, gets the
+// same values. |machine_path| may be empty, which leaves the defaults.
+void ReadMachineWideSettings(const std::string& machine_path,
+                             net_instaweb::MessageHandler* quiet,
+                             net_instaweb::global_settings* out);
+
 // Sets out->num_rewrite_threads and out->num_expensive_rewrite_threads from
 // the machine-wide file and the site's own file (either path may be empty; the
 // site's value wins). Reads the files afresh, never from a cache, and logs

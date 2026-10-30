@@ -1005,6 +1005,77 @@ TEST_F(IisConfigurationTest, PoolThreadSettingsComeFromBothFilesEveryTime) {
   RemoveDirectoryA(dir.c_str());
 }
 
+// The machine-wide settings are read from the machine-wide file for every site
+// context of a process, not only for the first one that parses it, and a
+// context rebuilt after a file was edited still sees them.
+TEST_F(IisConfigurationTest, MachineWideSettingsReachEverySiteContext) {
+  char temp[MAX_PATH];
+  ASSERT_GT(GetTempPathA(MAX_PATH, temp), 0u);
+  const std::string dir = std::string(temp) + "pagespeed-machine-wide-" +
+                          std::to_string(GetCurrentProcessId());
+  CreateDirectoryA(dir.c_str(), nullptr);
+  auto write = [&](const std::string& name, const std::string& text) {
+    const std::string path = dir + "\\" + name;
+    FILE* f = fopen(path.c_str(), "wb");
+    EXPECT_NE(nullptr, f);
+    if (f != nullptr) {
+      fwrite(text.data(), 1, text.size(), f);
+      fclose(f);
+    }
+    return path;
+  };
+  const std::string machine = write("machine.config",
+      "pagespeed MessageBufferSize 4096\n"
+      "pagespeed UseNativeFetcher on\n"
+      "pagespeed UsePerVHostStatistics off\n"
+      "pagespeed CreateSharedMemoryMetadataCache /cache 2048\n");
+  const std::string site = write("site.config", "pagespeed EnableFilters combine_css\n");
+
+  net_instaweb::NullMessageHandler quiet;
+  auto expect_machine_values = [](const net_instaweb::global_settings& g) {
+    EXPECT_EQ(4096, g.message_buffer_size);
+    EXPECT_TRUE(g.use_native_fetcher);
+    EXPECT_FALSE(g.use_per_vhost_statistics);
+    EXPECT_EQ(2048, g.shm_cache_size_kb);
+  };
+
+  // Three site contexts created in one process, one after the other.
+  for (int i = 0; i < 3; ++i) {
+    net_instaweb::global_settings g;
+    ReadMachineWideSettings(machine, &quiet, &g);
+    expect_machine_values(g);
+  }
+
+  // A context rebuilt after the site's file was edited still sees them.
+  write("site.config", "pagespeed EnableFilters combine_css,extend_cache\n");
+  net_instaweb::global_settings after_site_edit;
+  ReadMachineWideSettings(machine, &quiet, &after_site_edit);
+  expect_machine_values(after_site_edit);
+
+  // A context rebuilt after the machine-wide file was edited sees the new value.
+  write("machine.config",
+      "pagespeed MessageBufferSize 8192\n"
+      "pagespeed UseNativeFetcher on\n"
+      "pagespeed UsePerVHostStatistics off\n"
+      "pagespeed CreateSharedMemoryMetadataCache /cache 2048\n");
+  net_instaweb::global_settings after_machine_edit;
+  ReadMachineWideSettings(machine, &quiet, &after_machine_edit);
+  EXPECT_EQ(8192, after_machine_edit.message_buffer_size);
+  EXPECT_TRUE(after_machine_edit.use_native_fetcher);
+
+  // No machine-wide file: the built-in defaults.
+  net_instaweb::global_settings defaults;
+  ReadMachineWideSettings("", &quiet, &defaults);
+  EXPECT_EQ(net_instaweb::global_settings().message_buffer_size,
+            defaults.message_buffer_size);
+  EXPECT_FALSE(defaults.use_native_fetcher);
+
+  for (const std::string& f : {machine, site}) {
+    DeleteFileA(f.c_str());
+  }
+  RemoveDirectoryA(dir.c_str());
+}
+
 // A configured count always wins; otherwise half the CPUs, at least 4.
 TEST(IisPoolThreadCountTest, ConfiguredCountWinsOverBuiltInSize) {
   using net_instaweb::IisRewriteDriverFactory;

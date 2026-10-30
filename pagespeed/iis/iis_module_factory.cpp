@@ -142,6 +142,14 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 
 		if (cf->GetConfig(paths, input, *options, message_handler_, &global_config))
 		{
+			// The machine-wide settings come from the machine-wide file, read
+			// afresh for every context: the cache above fills global_config only
+			// when a file is parsed, which a second site of this process, or a
+			// rebuilt context, would miss.
+			{
+				NullMessageHandler quiet_machine;
+				ReadMachineWideSettings(config_path, &quiet_machine, &global_config);
+			}
 			// The pool sizes (NumRewriteThreads, NumExpensiveRewriteThreads)
 			// come from the machine-wide file, or from the site's own file,
 			// which wins for this site. They are read afresh: the cache above
