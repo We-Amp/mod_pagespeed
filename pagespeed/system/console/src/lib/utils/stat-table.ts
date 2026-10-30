@@ -104,6 +104,9 @@ export function groupStatRows(rows: StatRow[]): StatGroup[] {
     const key = statGroupKey(row.name);
     const label = groupLabel(key);
     const group = byLabel.get(label) ?? { key, rows: [] };
+    // One fixed key per family, whatever order the rows arrive in (a sort by
+    // value changes it on every poll), so a reader's open/closed choice stays.
+    if (key < group.key) group.key = key;
     group.rows.push(row);
     byLabel.set(label, group);
   }

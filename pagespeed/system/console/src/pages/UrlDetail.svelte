@@ -313,7 +313,7 @@
               <td class="num" data-label="Size">{row.size === null ? "—" : formatBytes(row.size)}</td>
               <td class="num" data-label="Quality">
                 {#if row.quality !== null}
-                  <QualityBadge score={row.quality} />
+                  <QualityBadge score={row.quality} showLabel={false} />
                 {:else}
                   —
                 {/if}

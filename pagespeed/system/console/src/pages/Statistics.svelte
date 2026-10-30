@@ -79,6 +79,8 @@
   const COLLAPSE_ABOVE = 60;
   const KEY_GROUP = "num";
   let groupToggled = $state<Record<string, boolean>>({});
+  // A new search starts from what it matches: an earlier manual close does
+  // not hide a group the search found.
   function groupOpen(group: { key: string }): boolean {
     if (group.key in groupToggled) return groupToggled[group.key];
     if (search.trim() !== "" || entries.length <= COLLAPSE_ABOVE) return true;
@@ -128,6 +130,7 @@
         placeholder="Search name or description..."
         aria-label="Search statistics"
         bind:value={search}
+        oninput={() => (groupToggled = {})}
       />
       <span class="count field-text">{entries.length} of {totalCount} variables</span>
       </div>

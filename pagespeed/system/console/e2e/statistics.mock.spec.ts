@@ -119,3 +119,15 @@ test("a long counter list starts collapsed except the key counters; a search ope
   await page.getByRole("searchbox", { name: "Search statistics" }).fill("javascript");
   await expect(page.locator(".stat-group", { hasText: "JavaScript" })).toHaveJSProperty("open", true);
 });
+
+test("a new search opens a group the reader had closed", async ({ page }) => {
+  const variables: Record<string, number> = { num_flushes: 3, javascript_blocks: 1 };
+  for (let i = 0; i < 70; i++) variables[`css_counter_${i}`] = i;
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), stats_json: F.ok({ variables, maxlength: 60 }) });
+  await openConsole(page, "pagespeed_admin", "#/statistics");
+  const counts = page.locator(".stat-group", { hasText: "Counts" });
+  await counts.locator("summary").click();
+  await expect(counts).toHaveJSProperty("open", false);
+  await page.getByRole("searchbox", { name: "Search statistics" }).fill("flushes");
+  await expect(counts).toHaveJSProperty("open", true);
+});

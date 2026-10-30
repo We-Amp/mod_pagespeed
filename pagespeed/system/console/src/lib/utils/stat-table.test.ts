@@ -246,6 +246,12 @@ describe("groupStatRows", () => {
     expect(STAT_GROUP_LABELS["ipro"]).toBe("In-place optimization");
   });
 
+  it("a merged group keeps one key whatever the row order", () => {
+    const rows = [row("js_a"), row("javascript_b")];
+    expect(groupStatRows(rows)[0].key).toBe("javascript");
+    expect(groupStatRows([...rows].reverse())[0].key).toBe("javascript");
+  });
+
   it("prefixes that share a label are one group, so a label names one family", () => {
     const groups = groupStatRows([row("js_a"), row("javascript_b"), row("memcache_x"), row("memcached_y")]);
     expect(groups.map((g) => [g.label, g.rows.length])).toEqual([["JavaScript", 2], ["Memcached", 2]]);

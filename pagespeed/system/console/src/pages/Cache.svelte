@@ -303,7 +303,7 @@
                 <h2 class="cache-name">Backend Stats</h2>
               </div>
               <div class="cache-body">
-                <p class="stats-scope" data-testid="backend-stats-scope">Counters of the web-server process that answered this request.</p>
+                <p class="stats-scope" data-testid="backend-stats-scope">Some of these counters are kept by each web-server process (here, the one that answered), so they can differ from Statistics.</p>
                 {#if stats.length > 0}
                   <div class="stats-grid">
                     {#each stats as stat}
