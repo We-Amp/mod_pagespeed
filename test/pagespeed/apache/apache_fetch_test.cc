@@ -330,6 +330,21 @@ TEST_F(ApacheFetchTest, IsProxySuppressesNosniffUnbuffered) {
   apache_fetch_->Done(true);
 }
 
+// A response that already carries nosniff (the admin and daemon JSON
+// leaves) gets no second copy from ApacheFetch.
+TEST_F(ApacheFetchTest, ExistingNosniffIsNotDuplicated) {
+  InitFetchUnbuffered(kExampleUrl, HttpStatus::kOK);
+  apache_fetch_->response_headers()->Add("X-Content-Type-Options", "nosniff");
+  EXPECT_TRUE(apache_fetch_->Write("hello", message_handler()));
+  GoogleString headers = HeadersOutToString(&request_);
+  const size_t first = headers.find("X-Content-Type-Options");
+  ASSERT_NE(GoogleString::npos, first) << headers;
+  EXPECT_EQ(GoogleString::npos,
+            headers.find("X-Content-Type-Options", first + 1))
+      << headers;
+  apache_fetch_->Done(true);
+}
+
 TEST_F(ApacheFetchTest, SuccessBuffered) {
   InitFetchBuffered(kExampleUrl, HttpStatus::kOK);
   EXPECT_TRUE(apache_fetch_->Write("hello ", &message_handler_));

@@ -173,6 +173,13 @@ void ResourceFetch::HandleHeadersComplete() {
   response_headers()->RemoveAll(HttpAttributes::kSetCookie);
   response_headers()->RemoveAll(HttpAttributes::kSetCookie2);
 
+  // An AddResourceHeader name replaces whatever the origin already sent
+  // under that name (e.g. Access-Control-Allow-Origin), rather than being
+  // appended as a second value.  Several directives for one name still all
+  // apply: clear the origin's copy first, then add each directive.
+  for (int i = 0; i < driver_->options()->num_resource_headers(); ++i) {
+    response_headers()->RemoveAll(driver_->options()->resource_header(i)->name);
+  }
   for (int i = 0; i < driver_->options()->num_resource_headers(); ++i) {
     const RewriteOptions::NameValue* nv =
         driver_->options()->resource_header(i);

@@ -145,9 +145,10 @@ static_assert(sizeof(kDaemonEndpoints) / sizeof(kDaemonEndpoints[0]) ==
 // same-origin only: a cross-origin page can neither load it nor learn
 // from a load's success or failure whether the data exists.
 void AddNoStoreHeaders(ResponseHeaders* headers) {
-  headers->Add(HttpAttributes::kCacheControl, "no-store, private");
-  headers->Add("X-Content-Type-Options", "nosniff");
-  headers->Add("Cross-Origin-Resource-Policy", "same-origin");
+  headers->Replace(HttpAttributes::kCacheControl, "no-store, private");
+  headers->Replace(HttpAttributes::kXContentTypeOptions,
+                   HttpAttributes::kNosniff);
+  headers->Replace("Cross-Origin-Resource-Policy", "same-origin");
 }
 
 // A client-supplied parameter name, made safe to echo in an error

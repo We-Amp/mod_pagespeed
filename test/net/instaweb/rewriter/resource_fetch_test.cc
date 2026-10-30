@@ -143,6 +143,60 @@ TEST_F(ResourceFetchTest, BlockingFetch) {
   EXPECT_EQ(kMinimizedCssContent, buffer);
 }
 
+// An AddResourceHeader name replaces the origin's header of that name
+// instead of adding a second value next to it.
+TEST_F(ResourceFetchTest, ResourceHeaderReplacesOriginHeader) {
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kCssContent, 100);
+  AddToResponse(AbsolutifyUrl("a.css"), "Access-Control-Allow-Origin", "*");
+
+  GoogleString buffer;
+  StringWriter writer(&buffer);
+  SyncFetcherAdapterCallback* callback = new SyncFetcherAdapterCallback(
+      server_context()->thread_system(), &writer, CreateRequestContext());
+  RewriteOptions* custom_options = server_context()->global_options()->Clone();
+  GoogleString err;
+  EXPECT_TRUE(custom_options->ValidateAndAddResourceHeader(
+      "Access-Control-Allow-Origin", "https://example.com", &err));
+  RewriteDriver* custom_driver = server_context()->NewCustomRewriteDriver(
+      custom_options, CreateRequestContext());
+
+  GoogleUrl url(Encode(kTestDomain, "cf", "0", "a.css", "css"));
+  EXPECT_TRUE(ResourceFetch::BlockingFetch(url, server_context(), custom_driver,
+                                           callback));
+  ConstStringStarVector values;
+  ASSERT_TRUE(callback->response_headers()->Lookup(
+      "Access-Control-Allow-Origin", &values));
+  ASSERT_EQ(1, values.size());
+  EXPECT_STREQ("https://example.com", *values[0]);
+  callback->Release();
+}
+
+// The module's own nosniff on a rewritten resource is a single header even
+// when a configured header names it too.
+TEST_F(ResourceFetchTest, NosniffAppearsOnce) {
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kCssContent, 100);
+
+  GoogleString buffer;
+  StringWriter writer(&buffer);
+  SyncFetcherAdapterCallback* callback = new SyncFetcherAdapterCallback(
+      server_context()->thread_system(), &writer, CreateRequestContext());
+  RewriteOptions* custom_options = server_context()->global_options()->Clone();
+  GoogleString err;
+  EXPECT_TRUE(custom_options->ValidateAndAddResourceHeader(
+      "X-Content-Type-Options", "nosniff", &err));
+  RewriteDriver* custom_driver = server_context()->NewCustomRewriteDriver(
+      custom_options, CreateRequestContext());
+
+  GoogleUrl url(Encode(kTestDomain, "cf", "0", "a.css", "css"));
+  EXPECT_TRUE(ResourceFetch::BlockingFetch(url, server_context(), custom_driver,
+                                           callback));
+  ConstStringStarVector values;
+  ASSERT_TRUE(
+      callback->response_headers()->Lookup("X-Content-Type-Options", &values));
+  EXPECT_EQ(1, values.size());
+  callback->Release();
+}
+
 TEST_F(ResourceFetchTest, BlockingFetchOfInvalidUrl) {
   // Fetch stuff.
   GoogleString buffer;
