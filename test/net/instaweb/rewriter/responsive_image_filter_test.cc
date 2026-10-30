@@ -20,6 +20,7 @@
 #include "net/instaweb/rewriter/public/responsive_image_filter.h"
 
 #include "net/instaweb/rewriter/public/delay_images_filter.h"
+#include "net/instaweb/rewriter/public/lazyload_images_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
@@ -791,8 +792,8 @@ TEST_F(ResponsiveImageFilterTest, InlinePreview) {
       " 3x,"
       "a.jpg 10.23x\" src=\"",
       kLowResSource,
-      "\" onload=\"pagespeed.switchToHighResAndMaybeBeacon(this);\" onerror=\""
-      "this.onerror=null;pagespeed.switchToHighResAndMaybeBeacon(this);\">");
+      "\" onload=\"", DelayImagesFilter::kImageOnloadCode, "\" onerror=\"",
+      "this.onerror=null;", DelayImagesFilter::kImageOnloadCode, "\">");
   ValidateExpected("inline_preview", input_html, output_html);
 }
 
@@ -821,9 +822,9 @@ TEST_F(ResponsiveImageFilterTest, Lazyload) {
       EncodeImage(300, 300, "a.jpg", "0", "jpg"),
       " 3x,"
       "a.jpg 10.23x\" src=\"/psajs/1.0.gif\" "
-      "onload=\"pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);\" "
-      "onerror=\"this.onerror=null;pagespeed.lazyLoadImages."
-      "loadIfVisibleAndMaybeBeacon(this);\">");
+      "onload=\"", LazyloadImagesFilter::kImageOnloadCode, "\" ",
+      "onerror=\"this.onerror=null;", LazyloadImagesFilter::kImageOnloadCode,
+      "\">");
   ValidateExpected("lazyload", input_html, output_html);
 }
 

@@ -51,8 +51,11 @@ const char DelayImagesFilter::kDelayImagesSuffix[] =
 const char DelayImagesFilter::kDelayImagesInlineSuffix[] =
     "\npagespeed.delayImagesInlineInit();";
 
+// Guarded so that a missing support script does not throw; see
+// CriticalImagesBeaconFilter::kImageOnloadCode.
 const char DelayImagesFilter::kImageOnloadCode[] =
-    "pagespeed.switchToHighResAndMaybeBeacon(this);";
+    "if(window.pagespeed){if(pagespeed.switchToHighResAndMaybeBeacon){"
+    "pagespeed.switchToHighResAndMaybeBeacon(this);}}";
 
 // Js snippet with the code for image elements to load the high resolution
 // image once onload triggers (for the low resolution data url). This code

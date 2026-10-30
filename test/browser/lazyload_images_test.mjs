@@ -38,7 +38,8 @@ const lazyJs = loadCompiledAsset(
          'lazyload_images_opt.cc'));
 
 const BLANK = 'http://test/static/blank.gif';
-const ONLOAD = 'pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);';
+const ONLOAD = 'if(window.pagespeed){if(pagespeed.lazyLoadImages){' +
+    'pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);}}';
 
 // 1x1 transparent GIF.
 const GIF = Buffer.from(
