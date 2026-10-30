@@ -527,6 +527,10 @@ ngx_int_t NgxBaseFetch::CopyBufferToNginx(ngx_chain_t** link_ptr) {
                 : nullptr;
         ring->copied_out_stat = copied_stat;
         ring->renew_fail_stat = renew_fail_stat;
+        ring->stall_stat =
+            stats != nullptr
+                ? stats->FindVariable("zerocopy_serve_stall_timeouts")
+                : nullptr;
         cln->handler = ps_bounded_ring_free;
         cln->data = ring;
         rctx->bounded_ring = ring;

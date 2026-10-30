@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
-"""Minimal HTTP/2 client for the zero-copy stall smoke.
+"""Minimal HTTP/2 client for the zero-copy stall smoke (TLS, or cleartext
+with --plaintext).
 
 Standard library only (the system test framework has no third-party
 dependencies).  It opens one stream with a deliberately tiny flow-control
@@ -30,6 +31,8 @@ import ssl
 import struct
 import sys
 import time
+
+SCHEME_HTTP = False  # set by --plaintext
 
 PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
@@ -60,7 +63,7 @@ def literal(name, value):
 
 def request_block(host, path):
     block = b"\x82"                              # :method GET (static idx 2)
-    block += b"\x87"                             # :scheme https (idx 7)
+    block += (b"\x86" if SCHEME_HTTP else b"\x87")  # :scheme http/https (idx 6/7)
     block += b"\x04" + hpack_string(path)  # :path, name idx 4
     block += b"\x01" + hpack_string(host)  # :authority, name idx 1
     block += literal(b"accept-encoding", b"identity")
@@ -94,15 +97,22 @@ class Reader:
 
 
 def run(args):
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    ctx.set_alpn_protocols(["h2"])
+    global SCHEME_HTTP
     raw = socket.create_connection((args.host, args.port), timeout=10)
-    sock = ctx.wrap_socket(raw, server_hostname=args.host)
-    if sock.selected_alpn_protocol() != "h2":
-        print("ERROR: server did not negotiate h2", file=sys.stderr)
-        return 2
+    if args.plaintext:
+        # HTTP/2 over cleartext TCP with prior knowledge (h2c).
+        SCHEME_HTTP = True
+        sock = raw
+    else:
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ctx.set_alpn_protocols(["h2"])
+        sock = ctx.wrap_socket(raw, server_hostname=args.host)
+        if sock.selected_alpn_protocol() != "h2":
+            print("ERROR: server did not negotiate h2", file=sys.stderr)
+            return 2
     sock.settimeout(0.1)
     reader = Reader(sock)
 
@@ -110,7 +120,7 @@ def run(args):
                            args.initial_window)
     sock.sendall(PREFACE + frame(SETTINGS, 0, 0, settings))
     sock.sendall(frame(HEADERS, 0x4 | END_STREAM, 1,
-                       request_block(args.host.encode(),
+                       request_block(("%s:%d" % (args.host, args.port)).encode(),
                                      args.path.encode())))
 
     start = time.monotonic()
@@ -182,6 +192,8 @@ def main():
     p.add_argument("--initial-window", type=int, default=1024)
     p.add_argument("--grant-bytes", type=int, default=32768)
     p.add_argument("--grant-interval", type=float, default=0.5)
+    p.add_argument("--plaintext", action="store_true",
+                   help="speak h2c (no TLS, prior knowledge)")
     p.add_argument("--max-wait", type=float, required=True,
                    help="give up (outcome=alive) after this many seconds")
     args = p.parse_args()

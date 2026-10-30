@@ -107,6 +107,15 @@ struct PsBoundedCopyRing {
   Variable* refills_stat;     // nullable
   Variable* copied_out_stat;  // nullable
   Variable* renew_fail_stat;  // nullable
+  Variable* stall_stat;       // nullable
+  // Stall tracking.  progress_mark is the number of body bytes the
+  // downstream has accepted (emitted minus still-in-flight) at the last
+  // refill tick that observed progress; stall_since is when that tick ran.
+  // A client that stops reading leaves the mark unchanged, and the stream
+  // is closed once that lasts send_timeout (see ps_bounded_ring_stalled).
+  size_t progress_mark;
+  ngx_msec_t stall_since;
+  bool progress_seen;
 };
 
 // Allocate chain links and buffers from the supplied pool, and copy over the
@@ -232,6 +241,10 @@ ngx_int_t ps_bounded_ring_emit_next(ngx_http_request_t* r,
 
 // Refill-clock timer handler (PsBoundedCopyRing::refill_ev).
 void ps_bounded_ring_refill_event(ngx_event_t* ev);
+
+// True once the ring has made no progress for send_timeout (and
+// send_timeout is enabled).  Updates the ring's progress bookkeeping.
+bool ps_bounded_ring_stalled(ngx_http_request_t* r, PsBoundedCopyRing* ring);
 
 }  // namespace ps_base_fetch
 

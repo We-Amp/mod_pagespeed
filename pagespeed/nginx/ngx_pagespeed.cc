@@ -478,6 +478,91 @@ ngx_int_t ps_bounded_ring_emit_next(ngx_http_request_t* r,
   return NGX_OK;
 }
 
+// Bounded-copy ring refill: appends one window per drained slot to *in.
+// Driven from the top body filter (ngx_http_writer re-enters it with
+// in == NULL when the stream becomes writable again) and from the refill
+// timer.  A slot whose buf reads pos == last is fully accepted by the
+// socket (verified against nginx 1.30.3: h2 advances the ORIGINAL buf's pos
+// only on DATA-frame send completion, via the shadow back-pointer, and only
+// then recycles the shadow chunks; QUIC copies at consumption), so no
+// downstream reference to the previous window's bytes can remain and the
+// slot is reusable.  Slots drain in emission order, so scan from the oldest
+// and stop at the first undrained one.
+ngx_int_t ps_bounded_ring_refill(ngx_http_request_t* r, PsBoundedCopyRing* ring,
+                                 ngx_chain_t** in) {
+  ngx_chain_t* refills = nullptr;
+  ngx_chain_t** refill_tail = &refills;
+  while (!ring->done) {
+    ngx_buf_t* slot = ring->slot[ring->next_refill];
+    if (slot->pos < slot->last) {
+      break;  // oldest window still in flight downstream.
+    }
+    ngx_chain_t* cl = nullptr;
+    if (ps_bounded_ring_emit_next(r, ring, &cl) != NGX_OK) {
+      ps_set_buffered(r, false);
+      return NGX_ERROR;  // torn window mid-stream: reset fail-closed.
+    }
+    *refill_tail = cl;
+    refill_tail = &cl->next;
+  }
+  if (refills != nullptr) {
+    // Refilled windows go after whatever is already being passed down.
+    if (*in == nullptr) {
+      *in = refills;
+    } else {
+      ngx_chain_t* tail = *in;
+      while (tail->next != nullptr) {
+        tail = tail->next;
+      }
+      tail->next = refills;
+    }
+  }
+  // Keep our buffered bit set while windows remain so ngx_http_writer
+  // stays armed (ngx_http_set_write_handler keys on r->buffered) across
+  // h2 window reopens; once the final window is handed down, r->out and
+  // the stream's own buffering own completion.  Reuses the same bit
+  // ps_base_fetch_handler holds while collecting: the ring only exists
+  // after the base fetch was released, so ownership never overlaps.
+  ps_set_buffered(r, !ring->done);
+  // Re-arm the refill clock: fast cadence while windows are turning over,
+  // backed off when the in-flight windows have not drained yet (a slow
+  // client's resume rides the exhausted-writer path; the timer is only
+  // its backstop).  Disarm on completion -- and on the error return
+  // above, request teardown runs the pool cleanup, which disarms.
+  if (!ring->done) {
+    ngx_add_timer(&ring->refill_ev, refills != nullptr ? 1 : 25);
+  } else if (ring->refill_ev.timer_set) {
+    ngx_del_timer(&ring->refill_ev);
+  }
+  return NGX_OK;
+}
+
+// Stall detection for the ring.  Every writer pass re-arms nginx's
+// send_timeout, and this module's own refill timer drives the writer, so
+// without a separate clock a client that stops reading would never time out.
+// Progress is the count of body bytes the downstream accepted: bytes emitted
+// minus bytes still in flight in the slots.  It only moves when the client
+// reads, so a slow client that keeps reading keeps resetting the clock.
+bool ps_bounded_ring_stalled(ngx_http_request_t* r, PsBoundedCopyRing* ring) {
+  size_t in_flight = 0;
+  for (ngx_buf_t* slot : ring->slot) {
+    in_flight += static_cast<size_t>(slot->last - slot->pos);
+  }
+  const size_t accepted = ring->cursor - in_flight;
+  if (!ring->progress_seen || accepted != ring->progress_mark) {
+    ring->progress_seen = true;
+    ring->progress_mark = accepted;
+    ring->stall_since = ngx_current_msec;
+    return false;
+  }
+  ngx_http_core_loc_conf_t* clcf = static_cast<ngx_http_core_loc_conf_t*>(
+      ngx_http_get_module_loc_conf(r, ngx_http_core_module));
+  if (clcf == nullptr || clcf->send_timeout == 0) {
+    return false;
+  }
+  return ngx_current_msec - ring->stall_since >= clcf->send_timeout;
+}
+
 // Refill timer handler: drive the request's write path exactly as a
 // write event would -- the writer flushes r->out, re-enters the body-filter
 // chain (our refill block) with NULL input, and finalizes the request when
@@ -486,6 +571,44 @@ ngx_int_t ps_bounded_ring_emit_next(ngx_http_request_t* r,
 void ps_bounded_ring_refill_event(ngx_event_t* ev) {
   ngx_http_request_t* r = static_cast<ngx_http_request_t*>(ev->data);
   ngx_connection_t* c = r->connection;
+  ps_request_ctx_t* ctx = ps_get_request_context(r);
+  PsBoundedCopyRing* ring = ctx != nullptr ? ctx->bounded_ring : nullptr;
+  if (ring != nullptr && !ring->done && ps_bounded_ring_stalled(r, ring)) {
+    // The client stopped reading: end the stream the way nginx's own writer
+    // does on send_timeout.  Finalizing runs the pool cleanup, which drops
+    // the cache read reservation; the slot buffers go with the request pool.
+    ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                  "pagespeed: client stopped reading a zero-copy response, "
+                  "closing the stream");
+    if (ring->stall_stat != nullptr) {
+      ring->stall_stat->Add(1);
+    }
+    ring->done = true;
+    if (ev->timer_set) {
+      ngx_del_timer(ev);
+    }
+    c->timedout = 1;
+    ngx_http_finalize_request(r, NGX_HTTP_REQUEST_TIME_OUT);
+    ngx_http_run_posted_requests(c);
+    return;
+  }
+  if (ring != nullptr && !ring->done) {
+    // nginx's postpone filter drops a NULL-input pass once nothing is queued
+    // on the connection, so a client that drained everything in flight would
+    // never reach the refill in the body filter.  Refill here and pass the
+    // new windows to the next body filter, where the module's own output
+    // enters the chain.
+    ngx_chain_t* refills = nullptr;
+    ngx_int_t rc = ps_bounded_ring_refill(r, ring, &refills);
+    if (rc == NGX_OK && refills != nullptr) {
+      rc = ngx_http_next_body_filter(r, refills);
+    }
+    if (rc == NGX_ERROR) {
+      ngx_http_finalize_request(r, NGX_ERROR);
+      ngx_http_run_posted_requests(c);
+      return;
+    }
+  }
   r->write_event_handler(r);
   ngx_http_run_posted_requests(c);
 }
@@ -505,64 +628,13 @@ ngx_int_t ps_base_fetch_filter(ngx_http_request_t* r, ngx_chain_t* in) {
       return NGX_ERROR;
     }
   }
-  // Bounded-copy ring refill.  This is the top body filter, so
-  // ngx_http_writer re-enters it (in == NULL) whenever the stream becomes
-  // writable again -- that re-entry is the ring's refill clock.  Like the
-  // barrier above it must run before the base_fetch-null early return: the
-  // ring outlives the NgxBaseFetch by design.  A slot whose buf reads
-  // pos == last is fully accepted by the socket (verified against nginx
-  // 1.30.3: h2 advances the ORIGINAL buf's pos only on DATA-frame send
-  // completion, via the shadow back-pointer, and only then recycles the
-  // shadow chunks; QUIC copies at consumption), so no downstream reference
-  // to the previous window's bytes can remain and the slot is reusable.
-  // Slots drain in emission order, so scan from the oldest and stop at the
-  // first undrained one.
+  // Bounded-copy ring refill (see ps_bounded_ring_refill).  Like the barrier
+  // above it must run before the base_fetch-null early return: the ring
+  // outlives the NgxBaseFetch by design.
   if (ctx != nullptr && ctx->bounded_ring != nullptr &&
       !ctx->bounded_ring->done) {
-    PsBoundedCopyRing* ring = ctx->bounded_ring;
-    ngx_chain_t* refills = nullptr;
-    ngx_chain_t** refill_tail = &refills;
-    while (!ring->done) {
-      ngx_buf_t* slot = ring->slot[ring->next_refill];
-      if (slot->pos < slot->last) {
-        break;  // oldest window still in flight downstream.
-      }
-      ngx_chain_t* cl = nullptr;
-      if (ps_bounded_ring_emit_next(r, ring, &cl) != NGX_OK) {
-        ps_set_buffered(r, false);
-        return NGX_ERROR;  // torn window mid-stream: reset fail-closed.
-      }
-      *refill_tail = cl;
-      refill_tail = &cl->next;
-    }
-    if (refills != nullptr) {
-      // Refilled windows go after whatever is already being passed down.
-      if (in == nullptr) {
-        in = refills;
-      } else {
-        ngx_chain_t* tail = in;
-        while (tail->next != nullptr) {
-          tail = tail->next;
-        }
-        tail->next = refills;
-      }
-    }
-    // Keep our buffered bit set while windows remain so ngx_http_writer
-    // stays armed (ngx_http_set_write_handler keys on r->buffered) across
-    // h2 window reopens; once the final window is handed down, r->out and
-    // the stream's own buffering own completion.  Reuses the same bit
-    // ps_base_fetch_handler holds while collecting: the ring only exists
-    // after the base fetch was released, so ownership never overlaps.
-    ps_set_buffered(r, !ring->done);
-    // Re-arm the refill clock: fast cadence while windows are turning over,
-    // backed off when the in-flight windows have not drained yet (a slow
-    // client's resume rides the exhausted-writer path; the timer is only
-    // its backstop).  Disarm on completion -- and on the error return
-    // above, request teardown runs the pool cleanup, which disarms.
-    if (!ring->done) {
-      ngx_add_timer(&ring->refill_ev, refills != nullptr ? 1 : 25);
-    } else if (ring->refill_ev.timer_set) {
-      ngx_del_timer(&ring->refill_ev);
+    if (ps_bounded_ring_refill(r, ctx->bounded_ring, &in) != NGX_OK) {
+      return NGX_ERROR;  // torn window mid-stream: reset fail-closed.
     }
   }
   if (ctx == nullptr || ctx->base_fetch == nullptr) {

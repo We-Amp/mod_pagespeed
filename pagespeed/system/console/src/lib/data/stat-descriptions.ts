@@ -124,6 +124,8 @@ export const STAT_DESCRIPTIONS: Readonly<Record<string, string>> = {
     "On IIS, serves abandoned for reasons other than an overwritten region, namely memory allocation or submission failures. Non-zero indicates resource pressure in the serving path. Always zero on other servers.",
   zerocopy_serve_ring_refills:
     "On nginx, body windows handed to the client while streaming a large cached response over HTTP/2 or HTTP/3, counted once per window rather than once per response. Normal activity. Always zero on other servers, and on a site with no HTTP/2 or HTTP/3 traffic.",
+  zerocopy_serve_stall_timeouts:
+    "On nginx, HTTP/2 streams ended because the client stopped reading a large cached response for longer than the send timeout. A few are normal; a steady rate means clients abandon transfers or the timeout is too short. Always zero on other servers.",
 
   // ---------------------------------------------------------------------
   // Serving stale content, and error responses
