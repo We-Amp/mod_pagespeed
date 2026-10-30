@@ -3028,6 +3028,24 @@ Stylesheet* Parser::ParseRawStylesheet() {
           ReportParsingError(kHtmlCommentError, "- without following ->");
         }
         break;
+      // mod_pagespeed local change: a stray ';' after the last rule of a sheet
+      // (e.g. "a{b:c};") is skipped. Left to ParseSelectors' recovery it scans
+      // to EOF hunting for a '{' and fails the whole sheet. Only the trailing
+      // case is skipped: browsers treat a ';' before another statement as the
+      // start of that statement's selector and drop the statement, so then we
+      // parse exactly as before and keep matching them.
+      case ';': {
+        const char* semi = in_;
+        while (in_ < end_ && *in_ == ';') {
+          in_++;
+          SkipSpace();
+        }
+        if (in_ < end_) {
+          in_ = semi;
+          ParseStatement(nullptr, stylesheet);
+        }
+        break;
+      }
       default:
         ParseStatement(nullptr, stylesheet);
         break;

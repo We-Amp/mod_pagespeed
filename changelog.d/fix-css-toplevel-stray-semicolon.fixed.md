@@ -1,0 +1,1 @@
+- CSS parser: recover from a stray semicolon after the last rule of a sheet. A sheet such as `a{b:c};` previously failed to parse as a whole and was served unoptimized.
