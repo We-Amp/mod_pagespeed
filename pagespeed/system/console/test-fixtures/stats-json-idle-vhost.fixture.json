@@ -1,6 +1,6 @@
 {
   "scope": "vhost",
-  "host": "we-amp.com:0",
+  "host": "example.test:0",
   "timestamp_ms": 1793330536122,
   "variables": {
     "ipro_daemon_served": 0,

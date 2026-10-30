@@ -301,6 +301,7 @@
                   </dd>
                 </div>
               </dl>
+              <p class="note">{SAVINGS_QUALIFIER}</p>
             {/if}
           </div>
         {/if}

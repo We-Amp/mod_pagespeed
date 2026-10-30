@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-// The honest-numbers set, against answers captured from running consoles
-// (test-fixtures/README-w2-2.md says where each came from).
+// The honest-numbers set, against fixtures rebuilt from measured times and totals from a live console
+// (test-fixtures/README-honest-numbers.md says where each came from).
 
 import { describe, expect, it } from "vitest";
 import { AlertTracker, healthSummary, type AlertSnapshot } from "$lib/alerts";
