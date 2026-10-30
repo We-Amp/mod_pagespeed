@@ -22,7 +22,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
@@ -35,6 +38,7 @@
 #include "net/instaweb/rewriter/public/experiment_util.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "net/instaweb/util/public/fallback_property_page.h"
@@ -45,6 +49,7 @@
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/request_trace.h"
 #include "pagespeed/kernel/base/stl_util.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -580,6 +585,66 @@ bool ProxyFetch::StartParse() {
 
 const RewriteOptions* ProxyFetch::Options() const { return options_; }
 
+namespace {
+
+// True if the query parameter name 'theirs' denotes the same PageSpeed
+// parameter as 'ours'. This mirrors how RewriteQuery reads request parameters:
+// the ModPagespeed/PageSpeed prefix and the exact names PageSpeed,
+// ModPagespeed, PageSpeedFilters and ModPagespeedFilters are case-sensitive,
+// the option name after the prefix and X-PSA-Client-Options are not.
+bool SamePageSpeedParamName(StringPiece ours, StringPiece theirs) {
+  if (ours == theirs) {
+    return true;
+  }
+  if (StringCaseEqual(ours, HttpAttributes::kXPsaClientOptions)) {
+    return StringCaseEqual(theirs, HttpAttributes::kXPsaClientOptions);
+  }
+  for (const char* prefix :
+       {RewriteQuery::kPageSpeed, RewriteQuery::kModPagespeed}) {
+    if (ours.starts_with(prefix) && theirs.starts_with(prefix)) {
+      ours.remove_prefix(strlen(prefix));
+      theirs.remove_prefix(strlen(prefix));
+      return ours != "Filters" && theirs != "Filters" &&
+             StringCaseEqual(ours, theirs);
+    }
+  }
+  return false;
+}
+
+bool IsOneOfOurParams(const QueryParams& ours, StringPiece name) {
+  for (int i = 0, n = ours.size(); i < n; ++i) {
+    if (SamePageSpeedParamName(ours.name(i), name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The query of 'url' as a sorted list of unescaped "name=value" entries,
+// leaving out our PageSpeed parameters. 'a' and 'a=' are the same, '+' and
+// '%20' are the same, and the order of the parameters does not matter.
+std::vector<GoogleString> NormalizedQueryWithoutOurs(const GoogleUrl& url,
+                                                     const QueryParams& ours) {
+  std::vector<GoogleString> result;
+  if (url.IsWebValid() && url.has_query()) {
+    QueryParams params;
+    params.ParseFromUrl(url);
+    for (int i = 0, n = params.size(); i < n; ++i) {
+      if (IsOneOfOurParams(ours, params.name(i))) {
+        continue;
+      }
+      GoogleString value;
+      params.UnescapedValue(i, &value);
+      result.push_back(
+          StrCat(GoogleUrl::UnescapeQueryParam(params.name(i)), "=", value));
+    }
+    std::sort(result.begin(), result.end());
+  }
+  return result;
+}
+
+}  // namespace
+
 void ProxyFetch::HandleHeadersComplete() {
   const RewriteOptions* options = Options();
   if ((response_headers() != nullptr) &&
@@ -614,22 +679,25 @@ void ProxyFetch::HandleHeadersComplete() {
       // Only add them back if we're being redirected back to the same domain.
       // A Location equal to the request URL without our parameters (fragment
       // ignored) is the origin deliberately stripping them: leave it alone.
+      // Queries that differ only in parameter order, in 'a' versus 'a=', in
+      // '+' versus '%20', or in our own parameters count as equal.
+      QueryParams ours;
+      ours.ParseFromUntrustedString(driver_->pagespeed_query_params());
       bool canonicalising =
           base_url.IsWebValid() && locn_url.IsWebValid() &&
           base_url.AllExceptQuery() == locn_url.AllExceptQuery() &&
-          base_url.has_query() == locn_url.has_query() &&
-          base_url.Query() == locn_url.Query();
+          NormalizedQueryWithoutOurs(base_url, ours) ==
+              NormalizedQueryWithoutOurs(locn_url, ours);
       if (base_url.Origin() == locn_url.Origin() && !canonicalising) {
         // Re-add only the PageSpeed parameters the Location does not already
         // carry, so a redirect chain never accumulates repeats of them.
-        QueryParams ours, theirs;
-        ours.ParseFromUntrustedString(driver_->pagespeed_query_params());
+        QueryParams theirs;
         if (locn_url.has_query()) {
           theirs.ParseFromUrl(locn_url);
         }
         GoogleString missing;
         for (int i = 0, n = ours.size(); i < n; ++i) {
-          if (theirs.Has(ours.name(i))) {
+          if (IsOneOfOurParams(theirs, ours.name(i))) {
             continue;
           }
           if (!missing.empty()) {
