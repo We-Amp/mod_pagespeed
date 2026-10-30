@@ -263,6 +263,15 @@ build:macos --cxxopt=-Wno-register --host_cxxopt=-Wno-register
 # ld errors on it, hence macOS-only - the Linux link line is untouched.
 build:macos --linkopt=-Wl,-no_warn_duplicate_libraries
 build:macos --host_linkopt=-Wl,-no_warn_duplicate_libraries
+# Third-party code is not ours to fix (e.g. re2's deprecated MutexLock,
+# cyclone's thread-safety annotations, spdlog's deprecated fmt
+# conversion); keep first-party warnings visible by disabling ALL
+# warnings for translation units under external/ only. The regex
+# matches the external exec paths; main-repo files never start with
+# external/, so first-party diagnostics are unchanged. Linux builds
+# will need the same boundary once warnings are enforced there.
+build:macos --per_file_copt=external/.*@-w
+build:macos --host_per_file_copt=external/.*@-w
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan
