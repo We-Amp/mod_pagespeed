@@ -1,0 +1,1 @@
+- **The error for render-only directives no longer names a retired product.** The message now points at the optimizer worker instead. Fixes #244.

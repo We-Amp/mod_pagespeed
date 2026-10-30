@@ -2586,8 +2586,8 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
     // so a shared/ported config fails at parse time instead of silently no-op.
     *msg = StrCat("Directive '", name,
                   "' requires markdown rendering, which is unavailable in "
-                  "mod_pagespeed (no headless browser). Use ModPageSpeed "
-                  "2.0.");
+                  "mod_pagespeed (no headless browser). Use the optimizer "
+                  "worker.");
     result = RewriteOptions::kOptionValueInvalid;
   } else {
     result = RewriteOptions::kOptionNameUnknown;
