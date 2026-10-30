@@ -25,6 +25,7 @@
 #include "net/instaweb/rewriter/critical_keys.pb.h"
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
+#include "net/instaweb/rewriter/public/delay_images_filter.h"
 #include "net/instaweb/rewriter/public/lazyload_images_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -307,8 +308,9 @@ TEST_F(CriticalImagesBeaconFilterTest, ScriptInjection) {
   int img_end = output_buffer_.substr(img_begin).find(">");
   EXPECT_TRUE(img_end != GoogleString::npos);
   EXPECT_TRUE(output_buffer_.substr(img_begin, img_end)
-                  .find("onload=\"pagespeed.CriticalImages."
-                        "checkImageForCriticality(this);\"") !=
+                  .find("onload=\"if(window.pagespeed){"
+                        "if(pagespeed.CriticalImages){pagespeed.CriticalImages."
+                        "checkImageForCriticality(this);}}\"") !=
               GoogleString::npos);
   VerifyWithNoImageRewrite();
 }
@@ -584,6 +586,40 @@ TEST_F(CriticalImagesBeaconFilterTest, BeaconUrlJsEscaped) {
   EXPECT_THAT(output_buffer_, HasSubstr("'http://example.com/beacon\\'x','"));
   // The raw, unescaped single-quote form must not appear.
   EXPECT_THAT(output_buffer_, Not(HasSubstr("beacon'x")));
+}
+
+// Class oracle: every inline onload/onerror handler that the image filters
+// inject calls into the support script, so it must check that the script ran
+// before using it. A page where the support script is blocked, deferred or
+// stripped by another tool must not log a ReferenceError. The handlers also
+// avoid characters that HTML serialization escapes, so the attribute value
+// stays readable and identical in the output.
+TEST(InjectedImageOnloadHandlerTest, HandlersAreGuarded) {
+  const struct {
+    const char* name;
+    const char* code;
+    const char* needed;
+  } kHandlers[] = {
+      {"CriticalImagesBeaconFilter",
+       CriticalImagesBeaconFilter::kImageOnloadCode,
+       "if(pagespeed.CriticalImages){"},
+      {"DelayImagesFilter", DelayImagesFilter::kImageOnloadCode,
+       "if(pagespeed.switchToHighResAndMaybeBeacon){"},
+      {"LazyloadImagesFilter", LazyloadImagesFilter::kImageOnloadCode,
+       "if(pagespeed.lazyLoadImages){"},
+  };
+  for (const auto& handler : kHandlers) {
+    GoogleString code(handler.code);
+    SCOPED_TRACE(handler.name);
+    // The first thing the handler does is check that the support script ran.
+    EXPECT_EQ(0u, code.find("if(window.pagespeed){")) << code;
+    // The object it calls is checked before the call.
+    size_t check = code.find(handler.needed);
+    ASSERT_NE(GoogleString::npos, check) << code;
+    EXPECT_GT(code.rfind("pagespeed."), check) << code;
+    // Characters that HTML serialization escapes would change the attribute.
+    EXPECT_EQ(GoogleString::npos, code.find_first_of("&<>\"'")) << code;
+  }
 }
 
 }  // namespace net_instaweb

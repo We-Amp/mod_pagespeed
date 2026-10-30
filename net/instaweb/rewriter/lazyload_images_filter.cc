@@ -55,8 +55,11 @@ const char kJquerySlider[] = "jquery.sexyslider";
 
 }  // namespace
 
+// Guarded so that a missing support script does not throw; see
+// CriticalImagesBeaconFilter::kImageOnloadCode.
 const char LazyloadImagesFilter::kImageOnloadCode[] =
-    "pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);";
+    "if(window.pagespeed){if(pagespeed.lazyLoadImages){"
+    "pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);}}";
 
 const char LazyloadImagesFilter::kLoadAllImages[] =
     "pagespeed.lazyLoadImages.loadAllImages();";

@@ -53,7 +53,8 @@ const onloadSnippet =
     'pagespeed.CriticalImages.checkImageForCriticality(elem);}' +
     '}, 0);' +
     '};';
-const onloadCode = 'pagespeed.switchToHighResAndMaybeBeacon(this);';
+const onloadCode = 'if(window.pagespeed){if(pagespeed.switchToHighResAndMaybeBeacon){' +
+    'pagespeed.switchToHighResAndMaybeBeacon(this);}}';
 
 const GIF_B64 =
     'R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';

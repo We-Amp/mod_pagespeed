@@ -35,6 +35,7 @@ node add_instrumentation_test.mjs
 node critical_images_beacon_test.mjs
 node critical_images_beacon_modes_test.mjs
 node lazyload_images_test.mjs
+node missing_support_script_test.mjs
 node responsive_js_test.mjs
 node delay_images_test.mjs
 node dedup_inlined_images_test.mjs
