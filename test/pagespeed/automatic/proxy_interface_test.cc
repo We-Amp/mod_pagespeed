@@ -655,6 +655,43 @@ TEST_F(ProxyInterfaceTest, RedirectToDiffDomainDiscardsPagespeedQueryParams) {
                       /* add_params_to_location= */ false);
 }
 
+TEST_F(ProxyInterfaceTest, RedirectDoesNotRepeatPagespeedQueryParams) {
+  // The Location already carries the PageSpeed parameter, so it must not be
+  // appended a second time.
+  const char kParams[] = "PageSpeedCssInlineMaxBytes=99";
+  GoogleString original_url = "http://www.example.com/a/?x=y";
+  GoogleString redirect_url =
+      StrCat("http://www.example.com/b/?x=y&", kParams);
+  GoogleString get_text;
+  RequestHeaders request_headers;
+  ResponseHeaders set_headers, get_headers;
+
+  set_headers.Add(HttpAttributes::kContentType, kContentTypeHtml.mime_type());
+  set_headers.Add(HttpAttributes::kLocation, redirect_url);
+  set_headers.SetStatusAndReason(HttpStatus::kFound);
+  mock_url_fetcher_.SetResponse(original_url, set_headers, "<html></html>");
+  FetchFromProxy(StrCat(original_url, "&", kParams), request_headers, true,
+                 &get_text, &get_headers);
+  EXPECT_STREQ(redirect_url, get_headers.Lookup1(HttpAttributes::kLocation));
+}
+
+TEST_F(ProxyInterfaceTest, RedirectKeepsPagespeedQueryParamsBeforeFragment) {
+  const char kParams[] = "PageSpeedCssInlineMaxBytes=99";
+  GoogleString original_url = "http://www.example.com/a/?x=y";
+  GoogleString get_text;
+  RequestHeaders request_headers;
+  ResponseHeaders set_headers, get_headers;
+
+  set_headers.Add(HttpAttributes::kContentType, kContentTypeHtml.mime_type());
+  set_headers.Add(HttpAttributes::kLocation, "http://www.example.com/b/#top");
+  set_headers.SetStatusAndReason(HttpStatus::kFound);
+  mock_url_fetcher_.SetResponse(original_url, set_headers, "<html></html>");
+  FetchFromProxy(StrCat(original_url, "&", kParams), request_headers, true,
+                 &get_text, &get_headers);
+  EXPECT_STREQ(StrCat("http://www.example.com/b/?", kParams, "#top"),
+               get_headers.Lookup1(HttpAttributes::kLocation));
+}
+
 TEST_F(ProxyInterfaceTest, HeadResourceRequest) {
   // Test to check if we are handling Head requests correctly in pagespeed
   // resource flow.

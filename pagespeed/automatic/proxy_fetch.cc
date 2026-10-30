@@ -50,6 +50,7 @@
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/query_params.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/thread/queued_alarm.h"
@@ -612,12 +613,41 @@ void ProxyFetch::HandleHeadersComplete() {
       GoogleUrl locn_url(base_url, loc);
       // Only add them back if we're being redirected back to the same domain.
       if (base_url.Origin() == locn_url.Origin()) {
-        // TODO(jmarantz): Add a method to GoogleUrl that makes this easy.
-        GoogleString new_loc(loc);
-        StrAppend(&new_loc, locn_url.has_query() ? "&" : "?",
-                  driver_->pagespeed_query_params());
-        response_headers()->Replace(HttpAttributes::kLocation, new_loc);
-        response_headers()->ComputeCaching();
+        // Re-add only the PageSpeed parameters the Location does not already
+        // carry, so a redirect chain never accumulates repeats of them.
+        QueryParams ours, theirs;
+        ours.ParseFromUntrustedString(driver_->pagespeed_query_params());
+        if (locn_url.has_query()) {
+          theirs.ParseFromUrl(locn_url);
+        }
+        GoogleString missing;
+        for (int i = 0, n = ours.size(); i < n; ++i) {
+          if (theirs.Has(ours.name(i))) {
+            continue;
+          }
+          if (!missing.empty()) {
+            missing += "&";
+          }
+          StrAppend(&missing, ours.name(i));
+          const GoogleString* value = ours.EscapedValue(i);
+          if (value != nullptr) {
+            StrAppend(&missing, "=", *value);
+          }
+        }
+        if (!missing.empty()) {
+          // Insert before any fragment; a query after '#' would be lost.
+          GoogleString new_loc(loc);
+          GoogleString fragment;
+          size_t hash = new_loc.find('#');
+          if (hash != GoogleString::npos) {
+            fragment = new_loc.substr(hash);
+            new_loc.erase(hash);
+          }
+          StrAppend(&new_loc, locn_url.has_query() ? "&" : "?", missing,
+                    fragment);
+          response_headers()->Replace(HttpAttributes::kLocation, new_loc);
+          response_headers()->ComputeCaching();
+        }
       }
     }
   }
