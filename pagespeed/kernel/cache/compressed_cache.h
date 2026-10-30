@@ -75,7 +75,8 @@ class CompressedCache : public CacheInterface {
  private:
   CacheInterface* cache_;
   int64 max_inflated_value_size_;
-  Histogram* compressed_cache_savings_;
+  // Only used when INCLUDE_HISTOGRAMS is enabled in compressed_cache.cc.
+  [[maybe_unused]] Histogram* compressed_cache_savings_;
   Variable* corrupt_payloads_;
   Variable* original_size_;
   Variable* compressed_size_;

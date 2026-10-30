@@ -152,7 +152,6 @@ ResourceFetch::ResourceFetch(const GoogleUrl& url, CleanupMode cleanup_mode,
       // Elapsed-time start for the fetch-latency stat; monotonic so a
       // wall-clock step can't make the delta negative.
       start_time_ms_(timer->NowMonotonicMs()),
-      redirect_count_(0),
       cleanup_mode_(cleanup_mode) {
   resource_url_.Reset(url);
   // Note: the driver may already carry request headers here.  Apache's

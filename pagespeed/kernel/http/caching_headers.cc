@@ -36,7 +36,6 @@ CachingHeaders::CachingHeaders(int status_code)
       parsed_cache_control_(false),
       public_(false),
       private_(false),
-      no_transform_(false),
       must_revalidate_(false),
       proxy_revalidate_(false),
       no_cache_(false),

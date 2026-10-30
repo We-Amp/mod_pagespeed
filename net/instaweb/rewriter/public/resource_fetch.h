@@ -113,7 +113,6 @@ class ResourceFetch : public SharedAsyncFetch {
   RewriteDriver* driver_;
   Timer* timer_;
   int64 start_time_ms_;
-  int redirect_count_;
   CleanupMode cleanup_mode_;
 
   ResourceFetch(const ResourceFetch&) = delete;

@@ -2464,7 +2464,7 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
                  StringCaseEqual(name, kContentExperimentVariantID) ||
                  StringCaseEqual(name, kIncreaseSpeedTracking)) {
         handler->Message(
-            kWarning,
+            kWarning, "%s",
             StrCat("'", name,
                    "' is deprecated and ignored: it only "
                    "configured the insert_ga filter, which no longer has any "

@@ -158,7 +158,6 @@ class CachingHeaders {
   // state until successfully parsed.
   bool public_;
   bool private_;
-  bool no_transform_;
   bool must_revalidate_;
   bool proxy_revalidate_;
   bool no_cache_;

@@ -52,7 +52,6 @@ class CollapseWhitespaceFilter : public EmptyHtmlFilter {
   const char* Name() const override { return "CollapseWhitespace"; }
 
  private:
-  HtmlParse* html_parse_;
   std::vector<HtmlName::Keyword> keyword_stack_;
 
   CollapseWhitespaceFilter(const CollapseWhitespaceFilter&) = delete;

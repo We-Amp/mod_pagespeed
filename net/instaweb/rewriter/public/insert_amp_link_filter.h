@@ -50,8 +50,6 @@ class InsertAmpLinkFilter : public CommonFilter {
  private:
   // Returns the AMP URL to insert into the link tag.
   GoogleString GetAmpUrl();
-  // True if the filter is enabled
-  bool enabled_;
   // True if an AMP link has already been found in the document.
   bool amp_link_found_;
 
