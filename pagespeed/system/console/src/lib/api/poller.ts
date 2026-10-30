@@ -9,6 +9,8 @@
  *   previous one settled (a setTimeout chain, never setInterval);
  * - a longer wait after each failed refresh: the interval, then doubling,
  *   capped at a minute;
+ * - a leaf the server has turned off (UnavailableError) is the page's state:
+ *   no back-off, no further polling;
  * - HTTP 429 ("busy": the daemon proxy serves one read per endpoint at a
  *   time, usually taken by another tab) keeps the last view and is not a
  *   failure;
@@ -19,7 +21,7 @@
  * unit-tested without a browser; polling.svelte.ts adapts it to runes.
  */
 
-import { ApiError } from "./client";
+import { ApiError, UnavailableError } from "./client";
 
 export interface PollerClock {
   setTimeout(fn: () => void, ms: number): unknown;
@@ -92,7 +94,7 @@ function documentVisibility(): VisibilitySource | null {
   };
 }
 
-type Outcome = "ok" | "busy" | "failed";
+type Outcome = "ok" | "busy" | "failed" | "off";
 
 export class Poller<T> {
   private state: PollerState<T>;
@@ -194,6 +196,13 @@ export class Poller<T> {
         this.lastOutcome = "busy";
         return;
       }
+      if (error instanceof UnavailableError) {
+        // Turned off on purpose: the error is the page's state, not a
+        // failure to back off from, and nothing asks again by itself.
+        this.lastOutcome = "off";
+        this.patch({ error, loading: false });
+        return;
+      }
       this.lastOutcome = "failed";
       this.patch({ error, failures: this.state.failures + 1, loading: false });
       return;
@@ -204,7 +213,7 @@ export class Poller<T> {
   }
 
   private scheduleNext(): void {
-    if (this.disposed || !this.state.autoRefresh || this.state.paused) {
+    if (this.disposed || !this.state.autoRefresh || this.state.paused || this.lastOutcome === "off") {
       if (this.state.nextAt !== null) this.patch({ nextAt: null });
       return;
     }

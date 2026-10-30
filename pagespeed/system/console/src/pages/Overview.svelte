@@ -18,7 +18,8 @@
   // module statistics and the daemon's health and statistics together.
   import { usePolling } from "$lib/api/polling.svelte";
   import { isConnectionFailure } from "$lib/api/connection";
-  import { ApiError } from "$lib/api/client";
+  import { ApiError, isUnavailable } from "$lib/api/client";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
   import type { StatsResponse } from "$lib/api/types";
   import { healthSummary, num, type ActiveAlert, type AlertSnapshot } from "$lib/alerts";
   import EmptyState from "$lib/EmptyState.svelte";
@@ -65,6 +66,8 @@
   // The last sample's message-log read failed (404, 5xx, junk): the summary
   // must then say the findings are unavailable, never "No findings".
   let logUnavailable = $state(false);
+  // ... because the server has turned the message log off (a state, not a fault).
+  let logOff = $state(false);
 
   // Per-sample bookkeeping runs inside the fetcher, not in an $effect: the
   // fetcher is called from the poll timer (or the Refresh button), outside any
@@ -89,6 +92,7 @@
         alerts = tracker.evaluate(snap, sample.at);
         acknowledged = tracker.acknowledged();
         logUnavailable = snap.messages === null;
+        logOff = sample.messages !== undefined && !sample.messages.ok && isUnavailable(sample.messages.error);
         if (!sample.module.ok) {
           const status = sample.module.error instanceof ApiError ? sample.module.error.status : null;
           if (isConnectionFailure("/stats_json", status)) throw sample.module.error;
@@ -149,7 +153,7 @@
   let optimizer = $derived(daemonView?.daemon === "ok" ? optimizerStateText(daemonView.health) : null);
   let availability = $derived(daemonView && daemonView.daemon !== "ok" ? availabilityText(daemonView.daemon) : null);
   let serveSavings = $derived(daemonServeSavings(daemonView?.daemonStats ?? null));
-  let health = $derived(healthSummary(alerts, lastModule !== null, acknowledged, logUnavailable));
+  let health = $derived(healthSummary(alerts, lastModule !== null, acknowledged, logUnavailable, logOff));
 </script>
 
 <div class="page">
@@ -168,6 +172,9 @@
     <p class="loading">Loading overview...</p>
   {:else}
     <p class="health health-{health.level}" data-testid="health-summary" role="status">{health.text}</p>
+    {#if logOff}
+      <UnavailableCard testid="overview-log-unavailable" />
+    {/if}
     {#if alerts.length === 0 && findingsStamp}
       <p class="findings-since" data-testid="findings-since">{findingsStamp}</p>
     {/if}

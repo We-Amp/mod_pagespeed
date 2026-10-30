@@ -34,7 +34,8 @@
   import { usePolling } from "$lib/api/polling.svelte";
   import { isBusyAnswer } from "$lib/api/poller";
   import { useConsole } from "$lib/api/context";
-  import { ApiError } from "$lib/api/client";
+  import { ApiError, isUnavailable } from "$lib/api/client";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
   import { router } from "$lib/router.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
   import EmptyState from "$lib/EmptyState.svelte";
@@ -153,7 +154,14 @@
       // The poller's rules apply to the page's primary source: a busy read
       // retries soon; a failure with nothing at all to show is the page's.
       if (isBusyAnswer(err)) throw err;
-      if (messages.items.length === 0 && optimizer.rows.length === 0) throw err;
+      // Turned off on purpose: the page's state, but only when the
+      // optimizer's log is no help either (the poller then stops for good);
+      // otherwise the optimizer's entries keep refreshing.
+      const optimizerGone =
+        opt.status === "rejected" && (isUnavailable(opt.reason) || errorCode(asError(opt.reason)) === "whole_server_console_only");
+      if (isUnavailable(err)) {
+        if (optimizerGone && messages.items.length === 0 && optimizer.rows.length === 0) throw err;
+      } else if (messages.items.length === 0 && optimizer.rows.length === 0) throw err;
     }
     updatedAt = Date.now();
     return updatedAt;
@@ -310,12 +318,18 @@
 
   {#if poll.loading}
     <p class="loading">Loading logs...</p>
+  {:else if isUnavailable(poll.error)}
+    <UnavailableCard testid="logs-unavailable" />
   {:else if poll.error && allEntries.length === 0}
     <LoadError message={poll.error.message} />
   {:else}
     <RefreshNotice error={poll.error} />
 
-    {#if moduleError && source !== "optimizer"}
+    {#if isUnavailable(moduleError) && source !== "optimizer"}
+      <p class="source-note" data-testid="logs-module-off">
+        The module's messages are turned off on this console.
+      </p>
+    {:else if moduleError && source !== "optimizer"}
       <p class="source-note" data-testid="logs-module-error">The module's messages could not be read: {moduleError.message}</p>
     {/if}
     {#if perVhost}
@@ -327,7 +341,11 @@
         {/if}
       </p>
     {:else if source !== "module" && optimizerError}
-      {#if optimizerError instanceof ApiError && optimizerError.status === 404}
+      {#if isUnavailable(optimizerError)}
+        <p class="source-note" data-testid="logs-optimizer-off">
+          The optimizer's log is turned off on this console.
+        </p>
+      {:else if optimizerError instanceof ApiError && optimizerError.status === 404}
         <p class="source-note" data-testid="logs-no-support">
           This module version cannot show the optimizer's log; the module's messages are below.
         </p>

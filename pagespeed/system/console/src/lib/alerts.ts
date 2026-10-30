@@ -683,6 +683,7 @@ export function healthSummary(
   moduleOk: boolean,
   acknowledged: readonly ActiveAlert[] = [],
   logUnavailable = false,
+  logOff = false,
 ): HealthSummary {
   const recent = [...alerts, ...acknowledged].find((a) => a.id === "recent-warnings");
   const n = recent?.count;
@@ -691,6 +692,7 @@ export function healthSummary(
   const acked = acknowledged.length > 0 ? ` · ${acknowledged.length} acknowledged` : "";
   if (alerts.length === 0) {
     if (!moduleOk) return { text: "Module statistics unavailable", level: "warning" };
+    if (logOff) return { text: "Findings from the message log are not available on this console", level: "info" };
     if (logUnavailable) return { text: "Findings unavailable — the message log could not be read", level: "info" };
     return { text: `No findings${warnings}${acked}`, level: "healthy" };
   }

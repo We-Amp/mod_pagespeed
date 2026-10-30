@@ -6,6 +6,8 @@
 <script lang="ts">
   import type { ConfigResponse } from "$lib/api/types";
   import LoadError from "$lib/LoadError.svelte";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
+  import { isUnavailable } from "$lib/api/client";
   import PageHeader from "$lib/PageHeader.svelte";
   import Tabs from "$lib/Tabs.svelte";
   import { displayHost, scopeLine } from "$lib/utils/config-scope";
@@ -16,6 +18,8 @@
   let data = $state<ConfigResponse | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
+  // The server has turned this view off: said once, not retried.
+  let off = $state(false);
   let updatedAt = $state<number | null>(null);
   // Which text the config-wrapper shows: the server-wide config, or the
   // options actually in effect for the request that hit this vhost.
@@ -33,7 +37,8 @@
       data = await api.getConfig();
       updatedAt = Date.now();
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      if (isUnavailable(err)) off = true;
+      else error = err instanceof Error ? err.message : String(err);
     } finally {
       loading = false;
     }
@@ -58,13 +63,17 @@
     updatedAt={updatedAt}
   >
     {#snippet toolbar()}
-      <button type="button" class="btn btn-secondary" onclick={fetchConfig} disabled={loading}>
-        {loading ? "Loading..." : "Refresh"}
-      </button>
+      {#if !off}
+        <button type="button" class="btn btn-secondary" onclick={fetchConfig} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      {/if}
     {/snippet}
   </PageHeader>
 
-  {#if loading && !data}
+  {#if off}
+    <UnavailableCard testid="config-unavailable" />
+  {:else if loading && !data}
     <p class="loading">Loading configuration...</p>
   {:else if error}
     <div class="error-box">

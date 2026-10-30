@@ -7,6 +7,7 @@
   import { onMount, tick, untrack, type Component } from "svelte";
   import { AdminApiClient } from "$lib/api/client";
   import { connection, type ConnectionView } from "$lib/api/connection";
+  import { unavailable } from "$lib/api/unavailable";
   import { provideConsole } from "$lib/api/context";
   import { pollers } from "$lib/api/poller";
   import ConnectionBanner from "$lib/ConnectionBanner.svelte";
@@ -94,6 +95,19 @@
   let sidebarOpen = $state(false);
   let loadedComponent = $state<Component | null>(null);
   let loadError = $state<string | null>(null);
+
+  // Leaves the server has refused: the sidebar marks the pages that read
+  // only those. A counter, so the template re-reads the registry.
+  let offRevision = $state(0);
+  onMount(() =>
+    unavailable.subscribe(() => {
+      offRevision++;
+    }),
+  );
+  function isOff(route: { leaves?: string[]; leavesPerVhost?: string[] }): boolean {
+    void offRevision;
+    return unavailable.allOff(!scope.isGlobal && route.leavesPerVhost ? route.leavesPerVhost : route.leaves);
+  }
 
   // What the top bar says about the server: answered or not (not a health check).
   let connectionView = $state<ConnectionView>(connection.view);
@@ -272,6 +286,7 @@
         {#each routes.filter((r) => r.group === group.id && r.hidden !== true && (r.globalOnly !== true || scope.isGlobal)) as route (route.path)}
           {@const hint = navKeyHint(route.path)}
           {@const active = isNavActive(route, router.path, routes)}
+          {@const off = isOff(route)}
           <li class="nav-row">
             <a
               class="nav-item"
@@ -279,10 +294,14 @@
               href={withLens(route.path, lensHost)}
               aria-current={active ? "page" : undefined}
               aria-keyshortcuts={hint ?? undefined}
+              aria-describedby={off ? `nav-off-${route.path.slice(2).replace(/\W+/g, "-")}` : undefined}
               onclick={() => (sidebarOpen = false)}
             >{route.label}</a>
             <!-- The hint sits beside the link, not in it: the link's name stays the page's name. -->
-            {#if hint}<span class="nav-key" aria-hidden="true">{hint}</span>{/if}
+            {#if off}
+              <span class="nav-off" aria-hidden="true">off</span>
+              <span class="sr-only" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}">Turned off on this console</span>
+            {:else if hint}<span class="nav-key" aria-hidden="true">{hint}</span>{/if}
           </li>
         {/each}
         <!-- Pages the server renders itself: plain same-tab anchors, no hash route. -->
@@ -534,6 +553,27 @@
     color: var(--ps-text-secondary);
     white-space: nowrap;
     pointer-events: none;
+  }
+
+  /* A page the server has turned off: still listed, quieter. */
+  .nav-off {
+    position: absolute;
+    top: 50%;
+    right: var(--ps-space-md);
+    transform: translateY(-50%);
+    font-size: var(--ps-font-size-xs);
+    color: var(--ps-text-secondary);
+    font-style: italic;
+    pointer-events: none;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .nav-item {

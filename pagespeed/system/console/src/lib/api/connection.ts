@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
+import { unavailable } from "./unavailable";
+
 /**
  * Whether the console can reach the server at all. Fed by AdminApiClient on
  * every request; read by the reconnect banner and the top bar. The daemon
@@ -90,6 +92,8 @@ export class ConnectionMonitor {
     } else {
       this.current = { status: "connected", failures: 0, lastAnsweredAt: now };
     }
+    // The server is back: what it refused before may have been fixed.
+    if (prev.status === "reconnecting" && this.current.status === "connected") unavailable.reset();
     if (this.current.status !== prev.status || this.current.failures !== prev.failures) {
       for (const fn of this.listeners) fn(this.current);
     }

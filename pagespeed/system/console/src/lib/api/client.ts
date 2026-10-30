@@ -26,6 +26,7 @@ import type {
 } from "./types";
 
 import { NetworkError, connection } from "./connection";
+import { UNAVAILABLE_STATUSES, leafKey, rememberable, unavailable } from "./unavailable";
 
 // Identical GETs in flight at the same time share one request, whichever
 // page or client instance asked: the daemon proxy serves one read per
@@ -46,6 +47,50 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A read of a leaf the server has turned off: refused with 401/403/410 (or
+ * 404 on a module leaf) by whoever fronts or configures the console. Not a
+ * network failure and not a server error: the view is off on purpose, the
+ * pages show an explanation, and nothing asks again. A subclass of ApiError,
+ * so code that looks at `status` keeps working.
+ */
+export class UnavailableError extends ApiError {
+  readonly leaf: string;
+  constructor(status: number, statusText: string, leaf: string) {
+    super(status, statusText);
+    this.leaf = leaf;
+    this.name = "UnavailableError";
+    Object.setPrototypeOf(this, UnavailableError.prototype);
+  }
+}
+
+/** Whether `error` is a read of a leaf the server has turned off. */
+export function isUnavailable(error: unknown): error is UnavailableError {
+  return error instanceof UnavailableError;
+}
+
+/**
+ * Whether a refusal of `path` with `status` and body `text` is "turned off".
+ * The module's own refusals carry a JSON reason code (whole_server_console_only,
+ * the daemon proxy's codes, "Unknown admin page"): those keep their specific
+ * explanations. A 404 on a daemon leaf stays a plain ApiError too: it already
+ * means "this module build lacks the leaf" and has its own explanation.
+ */
+function isTurnedOff(path: string, status: number, text: string): boolean {
+  if (!UNAVAILABLE_STATUSES.has(status)) return false;
+  if (status === 404 && path.startsWith("/v1/daemon/")) return false;
+  try {
+    const body = JSON.parse(text.replace(/^\)\]\}'?\s*\n/, "")) as { error?: unknown };
+    // The module's codes are strings; the optimizer's own answer (passed
+    // through by the daemon proxy) is an object.
+    if (typeof body.error === "string" && body.error) return false;
+    if (body.error !== null && typeof body.error === "object") return false;
+  } catch {
+    // Not JSON: a refusal from a proxy or the web server.
+  }
+  return true;
+}
+
 export class AdminApiClient {
   /** The admin path the console is served under, without a trailing slash. */
   readonly basePath: string;
@@ -56,6 +101,11 @@ export class AdminApiClient {
 
   private get<T>(path: string): Promise<T> {
     const url = `${this.basePath}${path}`;
+    const off = unavailable.statusOf(leafKey(path));
+    if (off !== undefined) {
+      // Refused before: do not ask again.
+      return Promise.reject(new UnavailableError(off, "turned off", leafKey(path)));
+    }
     const shared = inflight.get(url);
     if (shared !== undefined) return shared as Promise<T>;
     const request = this.send<T>(path, url).finally(() => {
@@ -94,6 +144,14 @@ export class AdminApiClient {
     clearTimeout(timer);
     connection.record(path, response.status, Date.now(), text);
     if (!response.ok) {
+      if (init === undefined && isTurnedOff(path, response.status, text)) {
+        const key = leafKey(path);
+        // A 404, or a refusal of a leaf that answers for one entry, may be
+        // about that entry alone; only a refusal of the leaf itself is
+        // remembered.
+        if (response.status !== 404 && rememberable(path)) unavailable.mark(key, response.status);
+        throw new UnavailableError(response.status, response.statusText, key);
+      }
       throw this.errorFromBody(response.status, response.statusText, text);
     }
     return this.parseResponse<T>(response.status, text);

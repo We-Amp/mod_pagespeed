@@ -27,6 +27,8 @@
   import { activeLensHost } from "$lib/host-lens.svelte";
   import EmptyState from "$lib/EmptyState.svelte";
   import LoadError from "$lib/LoadError.svelte";
+  import UnavailableCard from "$lib/UnavailableCard.svelte";
+  import { isUnavailable } from "$lib/api/client";
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import { formatCount } from "$lib/utils/format";
@@ -123,6 +125,8 @@
 
   {#if poll.loading}
     <p class="loading">Loading the rule packs...</p>
+  {:else if isUnavailable(poll.error)}
+    <UnavailableCard testid="rule-packs-unavailable" />
   {:else if poll.error && view === null}
     <LoadError message={poll.error.message} />
   {:else if view !== null}
