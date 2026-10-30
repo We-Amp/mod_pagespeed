@@ -231,14 +231,16 @@ void CachePropertyStore::Put(const GoogleString& url,
                              BoolCallback* done) {
   GoogleString value;
   StringOutputStream sstream(&value);
-  values->SerializeToZeroCopyStream(&sstream);
+  bool serialized = values->SerializeToZeroCopyStream(&sstream);
   CohortCacheMap::iterator cohort_itr = cohort_cache_map_.find(cohort->name());
   CHECK(cohort_itr != cohort_cache_map_.end());
   const GoogleString cache_key =
       CacheKey(url, options_signature_hash, cache_key_suffix, cohort);
-  cohort_itr->second->PutSwappingString(cache_key, &value);
+  if (serialized) {
+    cohort_itr->second->PutSwappingString(cache_key, &value);
+  }
   if (done != nullptr) {
-    done->Run(true);
+    done->Run(serialized);
   }
 }
 
