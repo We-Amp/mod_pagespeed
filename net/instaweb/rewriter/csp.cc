@@ -609,9 +609,8 @@ bool CspPolicy::CanModifyInlineScript() const {
     return true;
   }
   return !script_src->saw_hash() &&
-         (script_src->saw_nonce() ||
-          (script_src->saw_unsafe_inline() &&
-           !script_src->saw_strict_dynamic()));
+         (script_src->saw_nonce() || (script_src->saw_unsafe_inline() &&
+                                      !script_src->saw_strict_dynamic()));
 }
 
 bool CspPolicy::CanModifyInlineStyle() const {
@@ -622,8 +621,7 @@ bool CspPolicy::CanModifyInlineStyle() const {
   }
   return !style_src->saw_hash() &&
          (style_src->saw_nonce() ||
-          (style_src->saw_unsafe_inline() &&
-           !style_src->saw_strict_dynamic()));
+          (style_src->saw_unsafe_inline() && !style_src->saw_strict_dynamic()));
 }
 
 bool CspPolicy::PermitsInlineStyleAttribute() const {
