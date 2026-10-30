@@ -25,7 +25,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/hash/hash.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
@@ -200,26 +199,13 @@ class HtmlKeywords {
   // measured, and its lookups go through the mixed hashers below, so the
   // sparsehash dependency could be dropped.
   //
-  // absl's Swiss tables use the top 7 bits of the hash as the probe tag (a
-  // custom hasher's output gets no further mixing), and HashString leaves
-  // those bits zero for keys of 8 characters or fewer, which covers every
-  // entity name. absl::HashOf mixes the full word, and being a pure function
-  // of the inner hash it stays in agreement with the equality functors.
-  struct MixedCaseFoldHash {
-    size_t operator()(const GoogleString& str) const {
-      return absl::HashOf(CaseFoldStringHash()(str));
-    }
-  };
-  struct MixedCasePreserveHash {
-    size_t operator()(const GoogleString& str) const {
-      return absl::HashOf(CasePreserveStringHash()(str));
-    }
-  };
+  // The hashers mix their result through absl::HashOf (see string_hash.h), so
+  // short entity names do not all land on one Swiss-table probe tag.
   using StringStringHashMapInsensitive =
-      absl::flat_hash_map<GoogleString, const char*, MixedCaseFoldHash,
+      absl::flat_hash_map<GoogleString, const char*, CaseFoldStringHash,
                           CaseFoldStringEqual>;
   using StringStringHashMapSensitive =
-      absl::flat_hash_map<GoogleString, const char*, MixedCasePreserveHash>;
+      absl::flat_hash_map<GoogleString, const char*, CasePreserveStringHash>;
 
   StringStringHashMapInsensitive unescape_insensitive_map_;
   StringStringHashMapSensitive unescape_sensitive_map_;
