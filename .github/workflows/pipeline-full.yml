@@ -431,6 +431,7 @@ jobs:
                 //pagespeed/nginx:ngx_pagespeed_module.so \
                 //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
               # The modules carry their own crypto and are loaded into server
               # processes that have another one. Fail before the artifacts are
@@ -581,6 +582,7 @@ jobs:
                 --test_env=MEMCACHED_PORT=11211 \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
             '
 
@@ -707,6 +709,7 @@ jobs:
                 --test_env=MEMCACHED_PORT=11211 \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
             '
 
@@ -1732,6 +1735,7 @@ jobs:
                 //pagespeed/nginx:ngx_pagespeed_module.so \
                 //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
               bash tools/ci/assert_module_symbols.sh --self-test --require-fixtures
               bash tools/ci/assert_module_symbols.sh --profile apache \
@@ -1885,6 +1889,7 @@ jobs:
                 --test_env=MEMCACHED_PORT=11211 \
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
+                //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
             '
 
