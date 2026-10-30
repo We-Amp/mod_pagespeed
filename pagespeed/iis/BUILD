@@ -151,6 +151,7 @@ cc_library(
         "asyncwinhttp.h",
         "dechunker.h",
         "iis_misc.h",
+        "iis_experiment_assignment.h",
         "iis_config_util.h",
         "util.h",
         "FileCheck.h",
