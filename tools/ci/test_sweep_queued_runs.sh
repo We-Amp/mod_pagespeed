@@ -62,6 +62,10 @@ case "$1" in
     ;;
   run)
     if [ "$2" = "cancel" ]; then
+      if [ -n "${FAKE_CANCEL_FAIL_ID:-}" ] && [ "$3" = "${FAKE_CANCEL_FAIL_ID}" ]; then
+        echo "${FAKE_CANCEL_FAIL_MSG}" >&2
+        exit 1
+      fi
       echo "$3" >> "${FAKE_LOG}"
     else
       echo "fake gh: unexpected run call: $*" >&2; exit 1
@@ -74,7 +78,7 @@ chmod +x "${TMP}/bin/gh"
 
 run_sweep() { # <args...>; sets OUT and CANCELLED
   : > "${TMP}/log"
-  OUT="$(PATH="${TMP}/bin:${PATH}" FAKE_FIX="${TMP}/fix" FAKE_LOG="${TMP}/log" \
+  OUT="$(PATH="${TMP}/bin:${PATH}" FAKE_CANCEL_FAIL_ID="${FAKE_CANCEL_FAIL_ID:-}" FAKE_CANCEL_FAIL_MSG="${FAKE_CANCEL_FAIL_MSG:-}" FAKE_FIX="${TMP}/fix" FAKE_LOG="${TMP}/log" \
          GITHUB_REPOSITORY=example/repo SWEEP_NOW_EPOCH="${NOW}" \
          bash "${SWEEP}" "$@" 2>&1)" || { fail "sweep exited non-zero: ${OUT}"; return 1; }
   CANCELLED="$(tr '\n' ' ' < "${TMP}/log" | sed 's/ $//')"
@@ -121,6 +125,24 @@ SWEEP_MAX_AGE_MINUTES=90 run_sweep --max-age 30
 expect "--max-age overrides SWEEP_MAX_AGE_MINUTES" "${CANCELLED}" "101 106 107 201"
 SWEEP_MAX_AGE_MINUTES="" run_sweep
 expect "an empty SWEEP_MAX_AGE_MINUTES means 30" "${CANCELLED}" "101 106 107 201"
+
+# Race: run 106 completes between the listing and the cancel. The sweep skips
+# it, keeps going and still cancels the others.
+FAKE_CANCEL_FAIL_ID=106 FAKE_CANCEL_FAIL_MSG="Cannot cancel a workflow run that is completed" run_sweep
+expect "a run that completed before the cancel is skipped" "${CANCELLED}" "101 107 201"
+expect_out "log explains the completed run" "kept run 106 (CI, queued 60 min): already completed, skipped"
+expect_out "summary counts only real cancellations" "cancelled 3"
+
+# Any other cancel error stays fatal.
+: > "${TMP}/log"
+if PATH="${TMP}/bin:${PATH}" FAKE_FIX="${TMP}/fix" FAKE_LOG="${TMP}/log" \
+   FAKE_CANCEL_FAIL_ID=106 FAKE_CANCEL_FAIL_MSG="HTTP 403: forbidden" \
+   GITHUB_REPOSITORY=example/repo SWEEP_NOW_EPOCH="${NOW}" \
+   bash "${SWEEP}" >/dev/null 2>&1; then
+  fail "another cancel error was swallowed"
+else
+  pass "another cancel error is still fatal"
+fi
 
 # Bad arguments.
 if bash "${SWEEP}" --max-age abc >/dev/null 2>&1; then

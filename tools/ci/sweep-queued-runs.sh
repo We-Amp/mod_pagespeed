@@ -103,8 +103,18 @@ for status in queued waiting; do
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "would cancel run ${id} (${name}, ${status} ${age} min, no runner assigned)"
     else
-      gh run cancel "$id" --repo "$REPO" >/dev/null
-      echo "cancelled run ${id} (${name}, ${status} ${age} min, no runner assigned)"
+      # The run can finish between the listing and the cancel. GitHub then
+      # answers "Cannot cancel a workflow run that is completed"; that is not a
+      # failure of the sweep, so skip the run. Any other error stays fatal.
+      if cancel_out="$(gh run cancel "$id" --repo "$REPO" 2>&1)"; then
+        echo "cancelled run ${id} (${name}, ${status} ${age} min, no runner assigned)"
+      elif printf '%s' "$cancel_out" | grep -qi 'cannot cancel a workflow run that is completed'; then
+        echo "kept run ${id} (${name}, ${status} ${age} min): already completed, skipped"
+        continue
+      else
+        printf '%s\n' "$cancel_out" >&2
+        exit 1
+      fi
     fi
     cancelled=$((cancelled + 1))
   done <<EOT
