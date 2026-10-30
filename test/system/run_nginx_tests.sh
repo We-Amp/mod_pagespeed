@@ -99,6 +99,9 @@ Environment Variables:
   NGINX_PORT              Alias for PAGESPEED_PORT (default: 8080)
   BAZEL_CONFIG            Bazel config (default: --config=clang-libstdcxx13)
   BAZEL_JOBS              Parallel build jobs (default: auto)
+  PAGESPEED_DAEMON_LANE   0 (default) leaves the optimizer worker lane out;
+                          1 provides it when it can; require fails the run
+                          when it cannot be provided
 EOF
 }
 
@@ -191,6 +194,29 @@ NGINX_CONFIG_FILE="$NGINX_CONFIG_DIR/nginx.conf"
 # worker_processes value to assert against. Override with NGINX_WORKER_PROCESSES
 # (e.g. "auto") if a test run needs the historical autodetect behaviour.
 NGINX_WORKER_PROCESSES="${NGINX_WORKER_PROCESSES:-2}"
+
+# Lane fixture "daemon_arm": the optimizer worker running next to nginx, with
+# in-place daemon serving configured on the plain daemon.example.com server
+# and on rulepacks.example.com (the same two hosts the Apache lane arms). The
+# worker is the one the release pin names (install/debian/optimizer-pin.json),
+# built from its public source at that commit with the toolchain already in
+# the dev container, and kept in $DAEMON_ARTIFACT_DIR keyed by the pinned
+# commit.
+#
+# PAGESPEED_DAEMON_LANE: 0 (default) leaves the lane out, so the cases that
+# need it skip; 1 provides it when it can and skips otherwise; require
+# provides it or fails the run. The build is minutes long on a cold cache.
+DAEMON_LANE="${PAGESPEED_DAEMON_LANE:-0}"
+DAEMON_PIN_FILE="$PROJECT_ROOT/install/debian/optimizer-pin.json"
+DAEMON_STATE_DIR="$NGINX_CONFIG_DIR/daemon"
+DAEMON_SOCKET="$DAEMON_STATE_DIR/notify.sock"
+DAEMON_CACHE_ROOT="$DAEMON_STATE_DIR/cache"
+# The module's volume path is the worker's cache directory plus /cache.
+DAEMON_VOLUME="$DAEMON_CACHE_ROOT/cache"
+DAEMON_PID="$NGINX_CONFIG_DIR/daemon_worker.pid"
+DAEMON_LOG="$NGINX_CONFIG_DIR/daemon_worker.log"
+# Set once the worker answers on its socket; the config writer reads it.
+DAEMON_READY=""
 
 # TLS configuration
 TLS_CERT_DIR="$NGINX_CONFIG_DIR/certs"
@@ -808,6 +834,7 @@ EOF
         pagespeed EnableFilters rule_packs;
         pagespeed RulePackFile $DOC_ROOT/mod_pagespeed_test/rule_packs/pack.json;
         pagespeed RulePackMode $pack_mode;
+$(if [ "$pack_host" = rulepacks.example.com ]; then daemon_directives; fi)
 
         location ~ "^/pagespeed_admin" { }
         location /pagespeed_statistics { }
@@ -818,6 +845,31 @@ EOF
 
 EOF
         done
+
+        # Lane fixture daemon_arm: a plain server with in-place optimization
+        # handed to the optimizer worker (no rule packs), next to the
+        # rulepacks.example.com one above.
+        if [ -n "$DAEMON_READY" ]; then
+            cat >> "$NGINX_CONFIG_FILE" << EOF
+    server {
+        listen $NGINX_PORT;
+        server_name daemon.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed InPlaceResourceOptimization on;
+$(daemon_directives)
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+
+EOF
+        fi
 
         # Lane fixture rule_pack_signing: RulePackRequireSigned on with the
         # throwaway public key the signed pack was signed with (only the public
@@ -1122,6 +1174,176 @@ stop_nginx() {
     log_info "NGINX stopped"
 }
 
+# Lane fixture "daemon_arm": build (once per pinned commit) the optimizer
+# worker and its client library. Failing to provide it is not an error for the
+# rest of the suite: the cases that need it skip with the standard reason.
+build_daemon_worker() {
+    local commit
+    commit="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$DAEMON_PIN_FILE")" || return 1
+    if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+        log_warn "optimizer pin does not name a full commit hash"
+        return 1
+    fi
+    DAEMON_ARTIFACT_DIR="${PAGESPEED_DAEMON_ARTIFACT_DIR:-${HOME:-/tmp}/.cache/pagespeed-daemon-lane}/${commit:0:12}"
+    if [ -x "$DAEMON_ARTIFACT_DIR/factory_worker" ] && [ -f "$DAEMON_ARTIFACT_DIR/libpagespeed.so" ]; then
+        log_info "Optimizer worker for ${commit:0:12} already built"
+        return 0
+    fi
+    log_info "Building the optimizer worker at ${commit:0:12} (first run on this host)..."
+    local src="$DAEMON_ARTIFACT_DIR.src" cfg="--config=docker"
+    rm -rf "${src:?}"
+    mkdir -p "$src" "$DAEMON_ARTIFACT_DIR" "$NGINX_CONFIG_DIR"
+    git -C "$src" init -q \
+        && git -C "$src" fetch -q --depth 1 https://github.com/We-Amp/pagespeed-optimizer.git "$commit" \
+        && git -C "$src" checkout -q --detach FETCH_HEAD || { log_warn "cannot fetch the optimizer source"; return 1; }
+    # Share the CI build cache where the host provides one.
+    if getent hosts bazel-remote-cache > /dev/null 2>&1; then
+        cfg="$cfg --config=remote-cache"
+    fi
+    # The bundled image codec is configured by CMake, which some dev images
+    # do not carry; a hash-pinned user-level install keeps the image unchanged.
+    if ! command -v cmake > /dev/null 2>&1; then
+        pip3 install --user -q --require-hashes -r "$PROJECT_ROOT/tools/daemon-lane-requirements.txt" > /dev/null 2>&1 \
+            || { log_warn "cannot install cmake"; return 1; }
+    fi
+    (
+        cd "$src"
+        export PATH="$HOME/.local/bin:$PATH" CC=/usr/bin/clang-20 CXX=/usr/bin/clang++-20
+        # The sandbox does not pass HOME on, so say where the user-level cmake
+        # installed above lives.
+        bazel build $cfg --action_env=CC --action_env=CXX \
+            --action_env=PYTHONUSERBASE="$HOME/.local" \
+            //src/worker:factory_worker //lib/pagespeed:libpagespeed.so \
+            > "$NGINX_CONFIG_DIR/daemon_build.log" 2>&1
+    ) || { log_warn "optimizer worker build failed; see $NGINX_CONFIG_DIR/daemon_build.log"; tail -20 "$NGINX_CONFIG_DIR/daemon_build.log" || true; return 1; }
+    cp -L "$src/bazel-bin/src/worker/factory_worker" "$src/bazel-bin/lib/pagespeed/libpagespeed.so" "$DAEMON_ARTIFACT_DIR/" || return 1
+    # Stop the build's own bazel server before its directory goes away.
+    (cd "$src" && bazel shutdown > /dev/null 2>&1) || true
+    rm -rf "${src:?}"
+}
+
+# The lane could not be provided: an error in require mode, a skip otherwise.
+daemon_unavailable() {
+    if [ "$DAEMON_LANE" = "require" ]; then
+        log_error "$1 (PAGESPEED_DAEMON_LANE=require)"
+        exit 1
+    fi
+    log_warn "$1; daemon_arm lane not provided"
+}
+
+stop_daemon_worker() {
+    local pid=""
+    if [ -f "$DAEMON_PID" ]; then
+        pid="$(cat "$DAEMON_PID")"
+        # Only a process that is still this lane's worker (the number may have
+        # been reused since); never signal by pattern.
+        if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q "factory_worker"; then
+            kill -TERM "$pid" 2>/dev/null || true
+            local i
+            for i in $(seq 1 100); do
+                [ -d "/proc/$pid" ] || break
+                sleep 0.1
+            done
+            [ -d "/proc/$pid" ] && kill -KILL "$pid" 2>/dev/null || true
+        fi
+        rm -f "$DAEMON_PID"
+    fi
+    rm -rf "$DAEMON_STATE_DIR"
+}
+
+start_daemon_worker() {
+    case "$DAEMON_LANE" in
+        0)
+            log_info "daemon_arm lane disabled (PAGESPEED_DAEMON_LANE=0)"
+            return 0
+            ;;
+        1|require) ;;
+        *) log_error "PAGESPEED_DAEMON_LANE must be 0, 1 or require"; exit 1 ;;
+    esac
+    mkdir -p "$NGINX_CONFIG_DIR"
+    if ! build_daemon_worker; then
+        daemon_unavailable "cannot build the optimizer worker"
+        return 0
+    fi
+    stop_daemon_worker
+    mkdir -p "$DAEMON_CACHE_ROOT"
+    # The worker runs as the user that runs nginx, so the volume it authors is
+    # readable and writable by the nginx workers.
+    nohup "$DAEMON_ARTIFACT_DIR/factory_worker" \
+        --cache-dir "$DAEMON_CACHE_ROOT" --socket "$DAEMON_SOCKET" \
+        --cache-size 536870912 --log-level info \
+        > "$DAEMON_LOG" 2>&1 &
+    echo $! > "$DAEMON_PID"
+    local i
+    for i in $(seq 1 100); do
+        # The module reads the volume size the worker publishes while it
+        # starts, so wait for that as well as for the socket.
+        if [ -S "$DAEMON_SOCKET" ] && [ -n "$(find "$DAEMON_STATE_DIR" -name pagespeed-shared.conf 2>/dev/null)" ]; then
+            break
+        fi
+        sleep 0.2
+    done
+    if [ ! -S "$DAEMON_SOCKET" ]; then
+        tail -20 "$DAEMON_LOG" 2>/dev/null || true
+        stop_daemon_worker
+        daemon_unavailable "the optimizer worker did not open its socket"
+        return 0
+    fi
+    # The module binds the client library by its bare name, through the loader.
+    export LD_LIBRARY_PATH="$DAEMON_ARTIFACT_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    log_info "Optimizer worker is listening on $DAEMON_SOCKET"
+    DAEMON_READY=1
+}
+
+# Lane fixture "daemon_arm": the content the daemon cases fetch. It lives
+# outside /mod_pagespeed_test, whose responses carry an extra header the
+# daemon cannot reproduce on a stored copy.
+write_daemon_content() {
+    local dir="$NGINX_CONFIG_DIR/www/daemon_lane"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    printf 'body {\n  background: lightblue;\n}\n\n.lane { color: red; }\n' > "$dir/lane.css"
+    # Repetitive so the compressor has something to compress.
+    printf '%s\n' \
+        '/* Repetitive so the compressor has something to compress. */' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        '.deflate-lane { color: #13579b; padding: 0 1px 2px 3px; }' \
+        > "$dir/deflate.css"
+    # Shipped compressed by the origin itself; gzip -n keeps it byte-identical.
+    printf '.precompressed { color: #2468ac; padding: 1px 2px 3px; }\n' | gzip -n > "$dir/precompressed.css.gz"
+    printf '<!doctype html>\n<html><head><title>lane</title></head>\n<body>\n<!-- lane-comment -->\n<p>daemon lane page</p>\n</body></html>\n' > "$dir/lane.html"
+    # The photo the image cases fetch: wider than a phone, so the worker has a
+    # device class to size it for, and small enough to optimize quickly.
+    cp "$PROJECT_ROOT/install/mod_pagespeed_example/images/Puzzle.jpg" "$dir/lane.jpg"
+}
+
+# The daemon directives of a server block: nothing where the worker is not up.
+# The daemon serves a stored copy only while the origin's own freshness says it
+# is fresh, and a static file freshly written by the lane has none, so state it
+# for the stylesheets.
+daemon_directives() {
+    [ -n "$DAEMON_READY" ] || return 0
+    cat << EOF
+        pagespeed DaemonSocketPath $DAEMON_SOCKET;
+        pagespeed DaemonVolumePath $DAEMON_VOLUME;
+        location ~ "\\.css(\\.gz)?\$" {
+            expires 1h;
+        }
+        location = /daemon_lane/precompressed.css.gz {
+            default_type text/css;
+            gzip off;
+            add_header Content-Encoding gzip;
+            expires 1h;
+        }
+EOF
+}
+
 # Setup NGINX
 setup_nginx() {
     log_step "Setting up NGINX with PageSpeed..."
@@ -1132,6 +1354,12 @@ setup_nginx() {
     setup_directories
     setup_test_content
     generate_tls_certs || return 1
+    if [ "$NO_MODULE" = false ]; then
+        start_daemon_worker
+    fi
+    if [ -n "$DAEMON_READY" ]; then
+        write_daemon_content
+    fi
     generate_nginx_config
     start_nginx || return 1
 
@@ -1165,6 +1393,8 @@ run_tests() {
     # fixture rule_pack_log).
     export PAGESPEED_RULE_PACKS_PORT="$NGINX_PORT"
     export PAGESPEED_RULE_PACK_LOG_DIR="$NGINX_LOG_DIR"
+    # The optimizer worker's notification socket (lane fixture daemon_arm).
+    export PAGESPEED_DAEMON_SOCKET="$DAEMON_SOCKET"
 
     # Lane fixtures this lane provides (test/system/conftest.py
     # KNOWN_LANE_FIXTURES): cache_flush -- PAGESPEED_CACHE_DIR above is the
@@ -1174,10 +1404,16 @@ run_tests() {
     # rule_packs, rule_pack_log, rule_pack_signing and rule_pack_multi -- the
     # rulepacks*.example.com servers (generate_nginx_config).
     export PAGESPEED_STATS_LOG="${PAGESPEED_STATS_LOG:-$NGINX_LOG_DIR/stats_log_dummy_hostname:-3}"
+    # daemon_arm -- the optimizer worker and the daemon.example.com server,
+    # only where the worker is up (start_daemon_worker).
     if [ "$NO_MODULE" = true ]; then
         export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-}"
     else
-        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi}"
+        local daemon_fixture=""
+        if [ -n "$DAEMON_READY" ]; then
+            daemon_fixture=",daemon_arm"
+        fi
+        export PAGESPEED_LANE_FIXTURES="${PAGESPEED_LANE_FIXTURES:-cache_flush,stats_log,option_response_headers,rule_packs,rule_pack_log,rule_pack_signing,rule_pack_multi${daemon_fixture}}"
     fi
 
     # HTTPS configuration for TLS tests
@@ -1245,6 +1481,7 @@ run_tests() {
 cleanup() {
     if [ "$KEEP_RUNNING" = false ]; then
         stop_nginx
+        stop_daemon_worker
     else
         log_info "NGINX left running (--keep-running specified)"
         log_info "Stop it manually with: nginx -s stop -c $NGINX_CONFIG_FILE"
