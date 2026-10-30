@@ -9,7 +9,10 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
 import * as R from "./support/rule-packs-fixtures";
+import { noHorizontalScroll } from "./support/layout";
 import { NETWORK_ERROR, mockAdmin, openConsole } from "./support/mock-admin";
+
+const ok = F.ok;
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -337,5 +340,63 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(page.getByTestId("rp-decisions")).toBeVisible();
       await expectNoViolations(page);
     });
+  });
+}
+
+// A box that scrolls must be a named, focusable region (axe's
+// scrollable-region-focusable fires only when the content really overflows,
+// so these fixtures are long). Wider glyphs and a phone width must neither
+// push the page sideways nor hide a column.
+const LONG_CONFIG = Array.from(
+  { length: 120 },
+  (_, i) => `ModPagespeedDomain https://static-${i}.a-rather-long-host-name.example.test/with/a/long/path/segment/${i}`,
+).join("\n");
+
+const MANY_HISTOGRAMS = ok({
+  histograms: Array.from({ length: 40 }, (_, i) => ({
+    name: `Rewrite Latency Histogram Number ${i} ms`,
+    count: 1000 + i, avg: 12.5, stddev: 3.2, min: 1, median: 11, max: 90, p90: 20, p95: 30, p99: 60,
+    buckets: Array.from({ length: 30 }, (_, b) => ({ start: b * 5, limit: b * 5 + 5, count: 10 + b })),
+  })),
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  test.describe(`Accessibility, Configuration and Histograms that scroll (${scheme})`, () => {
+    test.use({ colorScheme: scheme });
+
+    for (const size of [
+      { width: 1280, height: 720 },
+      { width: 375, height: 812 },
+    ]) {
+      test(`#/configuration with long text at ${size.width} px`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await mockAdmin(page, "pagespeed_admin", {
+          ...F.allReplies(),
+          config: ok({ config: LONG_CONFIG, effective_config: LONG_CONFIG, scope: "vhost", host: "www.example.test:80" }),
+        });
+        await openConsole(page, "pagespeed_admin", "#/configuration");
+        await ready(page);
+        await page.addStyleTag({ content: "body { letter-spacing: 0.05em; }" });
+        const region = page.getByRole("region", { name: "Server configuration" });
+        expect(await region.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+        await expect(region).toHaveAttribute("tabindex", "0");
+        expect(await noHorizontalScroll(page)).toBe(true);
+        await expectNoViolations(page);
+      });
+
+      test(`#/histograms with many wide rows at ${size.width} px`, async ({ page }) => {
+        await page.setViewportSize(size);
+        await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), histograms: MANY_HISTOGRAMS });
+        await openConsole(page, "pagespeed_admin", "#/histograms");
+        await ready(page);
+        await page.addStyleTag({ content: "body { letter-spacing: 0.05em; }" });
+        await expect(page.getByRole("region", { name: "Histogram summary" })).toHaveAttribute("tabindex", "0");
+        const detail = page.getByRole("region", { name: /^Buckets of / });
+        expect(await detail.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+        // The table scrolls inside its box: the page itself does not scroll sideways.
+        expect(await noHorizontalScroll(page)).toBe(true);
+        await expectNoViolations(page);
+      });
+    }
   });
 }

@@ -637,6 +637,9 @@
 
   .content {
     grid-area: content;
+    /* A grid item may not be narrower than its content by default; without
+       this a wide table widens the whole page instead of scrolling. */
+    min-width: 0;
     padding: var(--ps-gutter);
   }
 

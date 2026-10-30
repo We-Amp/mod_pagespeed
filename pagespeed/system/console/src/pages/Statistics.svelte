@@ -72,6 +72,19 @@
     stats.data?.variables ? Object.keys(stats.data.variables).length : 0,
   );
 
+  // A real server reports hundreds of counters: past this many, a family
+  // starts collapsed (except the key counters) so the page is not tens of
+  // thousands of pixels tall. A search opens every family that matches, and
+  // a family the reader opened or closed stays as they left it.
+  const COLLAPSE_ABOVE = 60;
+  const KEY_GROUP = "num";
+  let groupToggled = $state<Record<string, boolean>>({});
+  function groupOpen(group: { key: string }): boolean {
+    if (group.key in groupToggled) return groupToggled[group.key];
+    if (search.trim() !== "" || entries.length <= COLLAPSE_ABOVE) return true;
+    return group.key === KEY_GROUP;
+  }
+
   function toggleSort(key: SortKey) {
     sort = nextSortState(sort, key);
   }
@@ -150,8 +163,13 @@
          shown each column needs more room to stay readable. -->
     <div class="stat-groups" class:stat-groups--described={showDescriptions}>
     {#each groups as group (group.key)}
-      <details class="stat-group" open>
-        <summary>{group.label} <span class="stat-group-count">{group.rows.length}</span></summary>
+      <details class="stat-group" open={groupOpen(group)}>
+        <summary
+          onclick={(e) => {
+            e.preventDefault();
+            groupToggled[group.key] = !groupOpen(group);
+          }}
+        >{group.label} <span class="stat-group-count">{group.rows.length}</span></summary>
         <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="table-wrapper" role="region" aria-label="{group.label} statistics" tabindex="0">

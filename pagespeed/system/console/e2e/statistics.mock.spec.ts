@@ -98,3 +98,24 @@ test("the old Console page lands on Statistics with the Δ column on", async ({ 
   await expect(page.getByRole("checkbox", { name: "Δ since open" })).toBeChecked();
   await expect(page.getByRole("button", { name: "Δ since open" }).first()).toBeVisible();
 });
+
+test("a long counter list starts collapsed except the key counters; a search opens the matches", async ({ page }) => {
+  const variables: Record<string, number> = { num_flushes: 3 };
+  for (let i = 0; i < 70; i++) variables[`css_counter_${i}`] = i;
+  variables.javascript_blocks = 1;
+  await mockAdmin(page, "pagespeed_admin", {
+    ...F.allReplies(),
+    stats_json: F.ok({ variables, maxlength: 60 }),
+  });
+  await openConsole(page, "pagespeed_admin", "#/statistics");
+  const css = page.locator(".stat-group", { hasText: "CSS" });
+  const counts = page.locator(".stat-group", { hasText: "Counts" });
+  await expect(counts).toHaveJSProperty("open", true);
+  await expect(css).toHaveJSProperty("open", false);
+  await css.locator("summary").click();
+  await expect(css).toHaveJSProperty("open", true);
+  await css.locator("summary").click();
+  await expect(css).toHaveJSProperty("open", false);
+  await page.getByRole("searchbox", { name: "Search statistics" }).fill("javascript");
+  await expect(page.locator(".stat-group", { hasText: "JavaScript" })).toHaveJSProperty("open", true);
+});

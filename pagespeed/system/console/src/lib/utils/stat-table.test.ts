@@ -245,6 +245,11 @@ describe("groupStatRows", () => {
     expect(STAT_GROUP_LABELS["javascript"]).toBe(STAT_GROUP_LABELS["js"]);
     expect(STAT_GROUP_LABELS["ipro"]).toBe("In-place optimization");
   });
+
+  it("prefixes that share a label are one group, so a label names one family", () => {
+    const groups = groupStatRows([row("js_a"), row("javascript_b"), row("memcache_x"), row("memcached_y")]);
+    expect(groups.map((g) => [g.label, g.rows.length])).toEqual([["JavaScript", 2], ["Memcached", 2]]);
+  });
 });
 
 describe("buildRows with deltas", () => {

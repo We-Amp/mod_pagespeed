@@ -99,7 +99,9 @@
     {#if filteredIndices.length === 0}
       <p class="empty">No histograms match your filter.</p>
     {:else}
-      <div class="histogram-wrapper">
+      <!-- A table that may scroll sideways is a named region that takes keyboard focus (WCAG 2.1.1). -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div class="histogram-wrapper" role="region" aria-label="Histogram summary" tabindex="0">
         <table class="histogram-table">
           <thead>
             <tr>
@@ -152,7 +154,8 @@
       </div>
 
       {#if selected?.buckets.length}
-        <div class="detail-wrapper">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="detail-wrapper" role="region" aria-label="Buckets of {selected.name}" tabindex="0">
           <h2 class="detail-title">{selected.name}</h2>
           <table class="detail-table">
             <thead>

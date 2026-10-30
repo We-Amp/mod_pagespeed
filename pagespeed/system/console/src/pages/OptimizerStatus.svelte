@@ -139,7 +139,7 @@
         <div class="info-grid">
           <div class="info-item">
             <span class="info-label metric-label">Version</span>
-            <span class="info-value metric-value mono-value">{view.health.version ?? "—"}</span>
+            <span class="info-value metric-value mono-value">{view.health.version ? (view.health.version.startsWith("v") ? view.health.version : `v${view.health.version}`) : "—"}</span>
           </div>
           <div class="info-item">
             <span class="info-label metric-label">Commit</span>
@@ -540,6 +540,13 @@
 
   th.num {
     text-align: right;
+  }
+
+  /* A row header sits in the row like a cell: the same border, not the
+     column header's heavier one. */
+  tbody th {
+    font-weight: normal;
+    border-bottom: 1px solid var(--ps-border-light);
   }
 
   td {

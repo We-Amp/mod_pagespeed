@@ -303,6 +303,7 @@
                 <h2 class="cache-name">Backend Stats</h2>
               </div>
               <div class="cache-body">
+                <p class="stats-scope" data-testid="backend-stats-scope">Counters of the web-server process that answered this request.</p>
                 {#if stats.length > 0}
                   <div class="stats-grid">
                     {#each stats as stat}
@@ -759,11 +760,20 @@
     gap: 0;
   }
 
+  .stats-scope {
+    margin: 0 0 var(--ps-space-xs);
+    font-size: var(--ps-font-size-xs);
+    color: var(--ps-text-secondary);
+  }
+
   .stat-row {
     display: contents;
   }
 
   .stat-key {
+    /* A path or a long label breaks instead of widening the page. */
+    overflow-wrap: anywhere;
+    min-width: 0;
     font-size: var(--ps-font-size-sm);
     font-weight: 500;
     color: var(--ps-text-secondary);
@@ -778,6 +788,8 @@
     padding: var(--ps-space-xs) var(--ps-space-sm);
     border-bottom: 1px solid var(--ps-border-light);
     text-align: right;
+    overflow-wrap: anywhere;
+    min-width: 0;
   }
 
   /* ---- Existing styles ---- */

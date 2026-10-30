@@ -96,12 +96,18 @@ export interface StatGroup {
  * (by label). A group with no rows cannot occur — the caller passes the
  * rows it wants shown (already search-filtered). */
 export function groupStatRows(rows: StatRow[]): StatGroup[] {
-  const byKey = new Map<string, StatRow[]>();
+  // Prefixes that share a label (js and javascript, memcache and memcached)
+  // are one family: two groups with one name would also be two landmarks
+  // with one name.
+  const byLabel = new Map<string, { key: string; rows: StatRow[] }>();
   for (const row of rows) {
     const key = statGroupKey(row.name);
-    byKey.set(key, [...(byKey.get(key) ?? []), row]);
+    const label = groupLabel(key);
+    const group = byLabel.get(label) ?? { key, rows: [] };
+    group.rows.push(row);
+    byLabel.set(label, group);
   }
-  const groups = [...byKey.entries()].map(([key, grouped]) => ({ key, label: groupLabel(key), rows: grouped }));
+  const groups = [...byLabel.entries()].map(([label, g]) => ({ key: g.key, label, rows: g.rows }));
   return groups.sort((a, b) => {
     const aKnown = a.key in STAT_GROUP_LABELS ? 0 : 1;
     const bKnown = b.key in STAT_GROUP_LABELS ? 0 : 1;
