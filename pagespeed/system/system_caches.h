@@ -54,6 +54,7 @@ class NamedLockManager;
 class QueuedWorkerPool;
 class RewriteDriverFactory;
 class ServerContext;
+class SplitStatistics;
 class Statistics;
 class SystemCachePath;
 
@@ -90,6 +91,12 @@ class SystemCaches {
 
   // Registers all statistics the cache backends may use.
   static void InitStats(Statistics* statistics);
+
+  // Tells a per-virtual-host statistics view that the disk-cache counters
+  // (Cyclone backend and file_cache*) are process-wide: they are incremented
+  // on the global statistics object only, so the view must read them there.
+  // Call before InitStats on the split object.
+  static void MarkSharedStats(SplitStatistics* split);
 
   // Inflated-size cap for the CompressedCache wrappers around the metadata
   // and property caches. Metadata entries are not HTTP responses, so the

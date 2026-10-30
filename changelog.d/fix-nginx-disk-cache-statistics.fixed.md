@@ -1,0 +1,1 @@
+- The per-server statistics page now reports the disk-cache counters (`cyclone_cache_*` and `file_cache_*`) instead of 0 whenever per-virtual-host statistics are on, which is the nginx default. The disk cache is shared by every server, so these counters show server-wide totals.

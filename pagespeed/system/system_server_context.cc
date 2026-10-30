@@ -320,8 +320,12 @@ void SystemServerContext::CreateLocalStatistics(
   local_statistics_ = factory->AllocateAndInitSharedMemStatistics(
       true /* local */, hostname_identifier(),
       *global_system_rewrite_options());
-  split_statistics_ = std::make_unique<SplitStatistics>(
+  auto split_statistics = std::make_unique<SplitStatistics>(
       factory->thread_system(), local_statistics_, global_statistics);
+  // The disk cache is one resource shared by every virtual host and its
+  // counters are kept on the global object only; let this view read them.
+  SystemCaches::MarkSharedStats(split_statistics.get());
+  split_statistics_ = std::move(split_statistics);
   // local_statistics_ was ::InitStat'd by AllocateAndInitSharedMemStatistics,
   // but we need to take care of split_statistics_.
   factory->NonStaticInitStats(split_statistics_.get());

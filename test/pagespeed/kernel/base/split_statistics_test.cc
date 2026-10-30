@@ -28,6 +28,7 @@
 #include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_statistics.h"
 #include "pagespeed/kernel/util/platform.h"
+#include "pagespeed/kernel/util/simple_stats.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mem_file_system.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
@@ -414,6 +415,35 @@ TEST_F(SplitStatisticsTest, ConsoleLogTickWithoutSplitTicksOnlyTheOwnLogger) {
   // split_a_) tolerates the tick.
   split_a_->UpdateConsoleLogIfRequired();
   SUCCEED();
+}
+
+// A counter whose name matches a global-read prefix describes a resource shared
+// by every split: only the global object is written, and each split's view
+// must report that value. Other counters keep their per-split reading.
+TEST(SplitStatisticsGlobalRead, PrefixedVariablesReadTheGlobalObject) {
+  std::unique_ptr<ThreadSystem> threads(Platform::CreateThreadSystem());
+  SimpleStats global(threads.get());
+  SimpleStats* local = new SimpleStats(threads.get());  // owned by split
+  for (Statistics* s :
+       {static_cast<Statistics*>(&global), static_cast<Statistics*>(local)}) {
+    s->AddVariable("shared_hits");
+    s->AddVariable("own_hits");
+  }
+  SplitStatistics split(threads.get(), local, &global);
+  split.AddGlobalReadVariablePrefix("shared_");
+  split.AddVariable("shared_hits");
+  split.AddVariable("own_hits");
+
+  // The shared resource increments the global object directly.
+  global.GetVariable("shared_hits")->Add(3);
+  EXPECT_EQ(3, split.GetVariable("shared_hits")->Get());
+
+  // Ordinary counters written through the split stay split.
+  split.GetVariable("own_hits")->Add(2);
+  EXPECT_EQ(2, split.GetVariable("own_hits")->Get());
+  EXPECT_EQ(2, global.GetVariable("own_hits")->Get());
+  global.GetVariable("own_hits")->Add(5);
+  EXPECT_EQ(2, split.GetVariable("own_hits")->Get());
 }
 
 }  // namespace

@@ -60,7 +60,6 @@ class TestCacheHitTracking:
 
     @pytest.mark.nginx_only
     @pytest.mark.requires_stats
-    @pytest.mark.skip(reason="nginx cache hit stats not incrementing - needs investigation")
     def test_cache_hit_tracking(
         self,
         client: PageSpeedClient,
@@ -73,60 +72,42 @@ class TestCacheHitTracking:
         This test:
         1. Gets initial statistics
         2. Fetches a resource multiple times to prime and hit cache
-        3. Verifies cache_hits stat increased
+        3. Verifies the disk-cache hit counters increased
 
-        Note: Currently skipped because nginx PageSpeed doesn't increment the
-        expected cache hit statistics. This may be due to how the cache backend
-        is configured or a missing statistics hook in nginx integration.
+        The nginx statistics page is a per-virtual-host view; the disk cache
+        is shared by every virtual host, so its counters must show up there
+        too (they used to read 0).
         """
-        # Get initial statistics
-        initial_stats = stats_snapshot()
-
         # Use a unique timestamp to ensure fresh resource
         timestamp = int(time.time() * 1000)
 
-        # Fetch a resource to prime the cache
+        # Prime: the page links to a rewritten (.pagespeed.) image.
         test_url = f"{example_root}/extend_cache.html?PageSpeedFilters=extend_cache_images&ts={timestamp}"
         response1 = client.fetch_until_contains(
             test_url, pattern=r"\.pagespeed\.", timeout=30.0
         )
         assert_http_status(response1, 200)
+        match = require_match(
+            r'src="([^"]+\.pagespeed\.[^"]+)"', response1, "rewritten image URL"
+        )
+        resource_path = f"{example_root}/{match.group(1)}"
+        assert_http_status(client.get(resource_path), 200)  # make sure it is cached
 
-        # Wait for cache to be populated
-        time.sleep(1.0)
-
-        # Fetch the same resource multiple times to generate cache hits
+        # Serving the rewritten resource reads it from the disk cache.
+        initial_stats = stats_snapshot()
         for _ in range(3):
-            response = client.get(test_url)
-            assert_http_status(response, 200)
-
-        # Wait for stats to update
-        time.sleep(0.5)
-
-        # Get new statistics
+            assert_http_status(client.get(resource_path), 200)
         new_stats = stats_snapshot()
 
-        # Check for various cache hit statistics
-        # nginx may use different stat names, so check for common ones
-        cache_hit_stats = [
-            "cache_hits",
+        for stat_name in (
+            "cyclone_cache_hits",
             "file_cache_hits",
-            "http_cache_hits",
-        ]
-
-        total_increase = 0
-        for stat_name in cache_hit_stats:
-            old_val = initial_stats.get(stat_name, 0)
-            new_val = new_stats.get(stat_name, 0)
-            if new_val > old_val:
-                total_increase += new_val - old_val
-
-        assert total_increase > 0, (
-            f"Expected at least one cache hit stat to increase. "
-            f"Stats checked: {cache_hit_stats}. "
-            f"Initial: {[(s, initial_stats.get(s, 0)) for s in cache_hit_stats]}, "
-            f"New: {[(s, new_stats.get(s, 0)) for s in cache_hit_stats]}"
-        )
+            "cyclone_cache_bytes_read",
+        ):
+            assert new_stats.get(stat_name, 0) > initial_stats.get(stat_name, 0), (
+                f"{stat_name} did not move on the per-server statistics page: "
+                f"{initial_stats.get(stat_name, 0)} -> {new_stats.get(stat_name, 0)}"
+            )
 
     @pytest.mark.nginx_only
     @pytest.mark.requires_stats
