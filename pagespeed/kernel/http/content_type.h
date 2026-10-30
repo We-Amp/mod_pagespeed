@@ -87,6 +87,12 @@ struct ContentType {
   // Return true iff this content type is Image.
   bool IsImage() const;
 
+  // True for image/svg+xml. SVG is classed as XML rather than as an image
+  // because it can carry script, so IsImage() is false for it and the image
+  // filters never touch it. Callers that only rename and re-serve resources
+  // unchanged (cache extension) can opt in with this.
+  bool IsSvg() const;
+
   // Return true iff this content type is Video.
   bool IsVideo() const;
 

@@ -348,7 +348,7 @@ void CacheExtender::Context::Render() {
         } else if (type->type() == ContentType::kJavascript) {
           filter_id =
               RewriteOptions::FilterId(RewriteOptions::kExtendCacheScripts);
-        } else if (type->IsImage()) {
+        } else if (type->IsImage() || type->IsSvg()) {  // SVG: rename only
           filter_id =
               RewriteOptions::FilterId(RewriteOptions::kExtendCacheImages);
         }
@@ -409,6 +409,7 @@ RewriteResult CacheExtender::RewriteLoadedResource(
     // if we want to cache extend them.
     const ContentType* input_type = input_resource->type();
     if (input_type->IsImage() ||  // images get sniffed only to other images
+        input_type->IsSvg() ||  // renamed only: type and bytes stay unchanged
         (input_type->type() == ContentType::kPdf &&
          driver()->MayCacheExtendPdfs()) ||  // Don't accept PDFs by default.
         input_type->type() == ContentType::kCss ||  // CSS + JS left as-is.

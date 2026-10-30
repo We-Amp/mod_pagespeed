@@ -495,6 +495,62 @@ TEST_F(CacheExtenderTest, DoExtendForImagesOnly) {
   }
 }
 
+// SVG is XML, not an image, so the image filters leave it alone, but cache
+// extension covers it: a hashed URL with a long lifetime and the same bytes
+// under the same content type. (The server adapters add nosniff to every
+// served .pagespeed. resource, so it is not visible at this level.)
+class CacheExtenderSvgTest : public CacheExtenderTest {
+ protected:
+  static constexpr char kSvgData[] =
+      "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>";
+
+  void InitSvg() {
+    InitTest(kShortTtlSec);
+    const ContentType* svg = MimeTypeToContentType("image/svg+xml");
+    ASSERT_TRUE(svg != nullptr);
+    InitResource("d.svg", *svg, kSvgData, kShortTtlSec);
+  }
+};
+
+TEST_F(CacheExtenderSvgTest, ExtendSvgImage) {
+  InitSvg();
+  GoogleString svg_ext = Encode("", kFilterId, "0", "d.svg", "svg");
+  for (int i = 0; i < 2; i++) {
+    ValidateExpected("extend_svg", "<img src='d.svg'/>",
+                     StrCat("<img src='", svg_ext, "'/>"));
+  }
+  EXPECT_STREQ("ei", AppliedRewriterStringFromLog());
+
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "d.svg", "svg", &content,
+                            &headers));
+  EXPECT_EQ(GoogleString(kSvgData), content);
+  EXPECT_STREQ("image/svg+xml", headers.Lookup1(HttpAttributes::kContentType));
+  EXPECT_GE(headers.cache_ttl_ms(), Timer::kMonthMs);
+  EXPECT_TRUE(headers.IsProxyCacheable());
+}
+
+TEST_F(CacheExtenderSvgTest, SvgNotInlinedOrRewrittenByImageFilters) {
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->set_image_inline_max_bytes(10000);
+  InitSvg();
+  ValidateExpected("svg_not_inlined", "<img src='d.svg' width='1' height='1'/>",
+                   StrCat("<img src='", Encode("", kFilterId, "0", "d.svg",
+                                               "svg"),
+                          "' width='1' height='1'/>"));
+}
+
+TEST_F(CacheExtenderSvgTest, SvgNotExtendedWhenImageExtensionDisabled) {
+  AddFilter(RewriteOptions::kExtendCacheCss);
+  const ContentType* svg = MimeTypeToContentType("image/svg+xml");
+  ASSERT_TRUE(svg != nullptr);
+  SetResponseWithDefaultHeaders("d.svg", *svg, kSvgData, kShortTtlSec);
+  ValidateNoChanges("svg_css_only", "<img src='d.svg'/>");
+}
+
 TEST_F(CacheExtenderTest, Handle404) {
   // Test to make sure that a missing input is handled well.
   options()->EnableExtendCacheFilters();

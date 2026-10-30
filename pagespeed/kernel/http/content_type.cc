@@ -19,6 +19,7 @@
 
 #include "pagespeed/kernel/http/content_type.h"
 
+#include <cstring>
 #include <vector>
 
 #include "base/logging.h"
@@ -61,7 +62,8 @@ const ContentType kTypes[] = {
     // SVG is XML.  If at some point we start optimizing svg as images, we need
     // to
     // be very careful not to just lump them in with images for all purposes, to
-    // avoid creating security vulnerabilities.
+    // avoid creating security vulnerabilities.  Cache extension opts in
+    // explicitly through ContentType::IsSvg().
     {"image/svg+xml", ".svg", ContentType::kXml},
 
     // AVIF. Appended at the end of the canonical block (index 18) rather than
@@ -186,6 +188,10 @@ bool ContentType::IsFlash() const {
     default:
       return false;
   }
+}
+
+bool ContentType::IsSvg() const {
+  return type_ == kXml && strcmp(mime_type_, "image/svg+xml") == 0;
 }
 
 bool ContentType::IsImage() const {

@@ -81,6 +81,12 @@ best practice</a> to optimize caching, as applied to the browser.
 
 <h2 id="operation">Operation</h2>
 <p>
+SVG images (<code>image/svg+xml</code>) are cache-extended by
+<code>extend_cache_images</code> too. They are only renamed and given a long
+lifetime: the bytes and the content type stay as they were, and the image
+filters never recompress, resize or inline them.
+</p>
+<p>
 The 'Extend Cache' filter rewrites the URL references in the HTML
 page to include a hash of the resource content (if
 <a href="filter-css-rewrite"><code>rewrite_css</code></a> is enabled
