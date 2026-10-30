@@ -59,7 +59,7 @@ void* PngWrapMalloc(png_structp ptr, png_size_t size) {
   } else {
     png_size_t extra = 8 - (size & 7);
     png_size_t rounded = size + extra;
-    DCHECK_NE(rounded, 0);
+    DCHECK_NE(rounded, 0u);
     if (rounded == 0) {
       return nullptr;
     }
