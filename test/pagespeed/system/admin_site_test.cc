@@ -699,16 +699,16 @@ TEST_F(RulePacksSeveralTest, TheWholeServerPageListsThePacksOfEveryVhost) {
   Load(a);
   WriteLog("edge-seo", "/from-vhost");
 
-  auto vhost_options = std::make_unique<SystemRewriteOptions>(
-      "vhost", thread_system_.get());
+  auto vhost_options =
+      std::make_unique<SystemRewriteOptions>("vhost", thread_system_.get());
   vhost_options->set_log_dir(log_dir_.string());
   GoogleString msg;
   ASSERT_TRUE(vhost_options->AddRulePackFile(a, &msg)) << msg;
-  std::unique_ptr<SystemServerContext> vhost(
-      new SystemServerContextNoProxyHtml(factory()));
+  // The factory owns the context once registered and deletes it with itself.
+  SystemServerContext* vhost = new SystemServerContextNoProxyHtml(factory());
   vhost->reset_global_options(vhost_options.release());
   vhost->set_statistics(factory()->statistics());
-  factory()->InitServerContext(vhost.get());
+  factory()->InitServerContext(vhost);
 
   // The server-wide scope: no pack file of its own, the log directory unset.
   SystemRewriteOptions global_options("global", thread_system_.get());
@@ -720,7 +720,6 @@ TEST_F(RulePacksSeveralTest, TheWholeServerPageListsThePacksOfEveryVhost) {
   fetch.request_headers()->set_method(RequestHeaders::kGet);
   ssc_->AdminPage(true /* global */, gurl, query_params, &global_options,
                   &fetch, "");
-  factory()->TerminateServerContext(vhost.get());
 
   Json::Value root;
   Json::CharReaderBuilder builder;

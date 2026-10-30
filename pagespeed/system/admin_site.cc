@@ -916,32 +916,33 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
     log_dirs.push_back(system_options->log_dir());
   }
   if (is_global) {
-    server_context->factory()->ForEachServerContext(
-        [&](ServerContext* other) {
-          if (other == server_context) return;
-          auto* vhost = static_cast<SystemServerContext*>(other);
-          const SystemRewriteOptions* vopts =
-              vhost->global_system_rewrite_options();
-          if (vopts == nullptr || vopts->rule_pack_files().empty()) return;
-          rule_pack_view::VhostEntry entry;
-          entry.host = vhost->hostname_identifier();
-          entry.filter_enabled = vopts->Enabled(RewriteOptions::kRulePacks);
-          entry.mode =
-              vopts->rule_pack_mode() == RewriteOptions::kRulePackModeEnforce
-                  ? "enforce"
-                  : "report";
-          entry.require_signed = vopts->rule_pack_require_signed();
-          FillPackEntries(*vopts, provider, &entry.packs, nullptr, nullptr);
-          page.vhosts.push_back(std::move(entry));
-          if (!vopts->log_dir().empty() &&
-              std::find(log_dirs.begin(), log_dirs.end(), vopts->log_dir()) ==
-                  log_dirs.end()) {
-            log_dirs.push_back(vopts->log_dir());
-          }
-        });
-    std::sort(page.vhosts.begin(), page.vhosts.end(),
-              [](const rule_pack_view::VhostEntry& x,
-                 const rule_pack_view::VhostEntry& y) { return x.host < y.host; });
+    server_context->factory()->ForEachServerContext([&](ServerContext* other) {
+      if (other == server_context) return;
+      auto* vhost = dynamic_cast<SystemServerContext*>(other);
+      if (vhost == nullptr) return;
+      const SystemRewriteOptions* vopts =
+          vhost->global_system_rewrite_options();
+      if (vopts == nullptr || vopts->rule_pack_files().empty()) return;
+      rule_pack_view::VhostEntry entry;
+      entry.host = vhost->hostname_identifier();
+      entry.filter_enabled = vopts->Enabled(RewriteOptions::kRulePacks);
+      entry.mode =
+          vopts->rule_pack_mode() == RewriteOptions::kRulePackModeEnforce
+              ? "enforce"
+              : "report";
+      entry.require_signed = vopts->rule_pack_require_signed();
+      FillPackEntries(*vopts, provider, &entry.packs, nullptr, nullptr);
+      page.vhosts.push_back(std::move(entry));
+      if (!vopts->log_dir().empty() &&
+          std::find(log_dirs.begin(), log_dirs.end(), vopts->log_dir()) ==
+              log_dirs.end()) {
+        log_dirs.push_back(vopts->log_dir());
+      }
+    });
+    std::sort(
+        page.vhosts.begin(), page.vhosts.end(),
+        [](const rule_pack_view::VhostEntry& x,
+           const rule_pack_view::VhostEntry& y) { return x.host < y.host; });
   }
   for (const pagespeed::packs::PackOverlap& overlap :
        pagespeed::packs::FindOverlaps(
@@ -998,16 +999,14 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
       page.tail_pack = requested;
       ids.push_back(requested);
     } else {
-      if (page.pack.present) {
-        page.tail_pack = page.pack.id;
-        add_id(page.pack.id);
-      }
+      if (page.pack.present) add_id(page.pack.id);
       for (const rule_pack_view::VhostEntry& vhost : page.vhosts) {
         for (const rule_pack_view::PackEntry& entry : vhost.packs) {
           if (entry.pack.present && ids.size() < 8) add_id(entry.pack.id);
         }
       }
-      if (page.tail_pack.empty() && !ids.empty()) page.tail_pack = ids.front();
+      // One pack: its log; several: their logs are merged and tail_pack stays empty.
+      if (ids.size() == 1) page.tail_pack = ids.front();
     }
     if (ids.empty()) {
       std::error_code ec;
@@ -1035,6 +1034,9 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
     for (const std::string& id : ids) {
       if (!IsSafeLogComponent(id)) continue;
       for (const std::string& log_dir : log_dirs) {
+        // Bounded: at most 16 tails are read, however many packs and log
+        // directories the virtual hosts configure.
+        if (read_paths.size() >= 16) break;
         const std::string path =
             StrCat(log_dir, "/packs/", id, "/",
                    RulePackDecisionLog::FileName(page.log_date));
