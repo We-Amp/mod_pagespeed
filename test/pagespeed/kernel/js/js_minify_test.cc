@@ -398,7 +398,13 @@ TEST_F(JsMinifyTest, ForLetDestructuring) {
                        "for(let[k,v]of m){f(k,v);}");
   CheckNewMinification("for (let { a } = o; a < 3; a++) { f(a); }",
                        "for(let{a}=o;a<3;a++){f(a);}");
-  CheckNewMinification("for (let x of xs) { f(x); }", "for(let x of xs){f(x);}");
+  CheckNewMinification("for (let x of xs) { f(x); }",
+                       "for(let x of xs){f(x);}");
+  // A slash after the header, and after `of`, starts a regex, as for const.
+  CheckNewMinification("for (let [a] of b) /x/.test(a);",
+                       "for(let[a]of b)/x/.test(a);");
+  CheckNewMinification("for (let [m] of /x/g.exec(s)) f(m);",
+                       "for(let[m]of/x/g.exec(s))f(m);");
   // `let` as an identifier outside a for header is unchanged.
   CheckNewMinification("if (let [0]) { f(); }", "if(let[0]){f();}");
   CheckError("for (let { a of xs) {");

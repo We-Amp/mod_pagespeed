@@ -2655,6 +2655,20 @@ TEST_F(JsTokenizerTest, ForLetDestructuringOf) {
   ExpectEndOfInput();
 }
 
+TEST_F(JsTokenizerTest, LetIdentifierInCallAfterForStatement) {
+  // The for-header declaration reading must not outlive the header.
+  BeginTokenizing("for(;;);f(let[0]);");
+  ExpectToken(JsKeywords::kFor, "for", "Start BkKwd");
+  ExpectToken(JsKeywords::kOperator, "(", "Start BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ";");
+  ExpectToken(JsKeywords::kOperator, ";");
+  ExpectToken(JsKeywords::kOperator, ")");
+  ExpectToken(JsKeywords::kOperator, ";");
+  ExpectToken(JsKeywords::kIdentifier, "f");
+  ExpectToken(JsKeywords::kOperator, "(");
+  ExpectToken(JsKeywords::kIdentifier, "let");
+}
+
 TEST_F(JsTokenizerTest, ExportLetDestructuringResidual) {
   // Documented residual: over the module-declaration marker `let` is a
   // declaration only when an identifier-start character follows; before `{`

@@ -1441,11 +1441,14 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
     // such as `if (x)`.  (A kOpenBrace at the top of the stack here is
     // always a block: had it been an object literal, the property-name
     // branch above would already have consumed this word as an identifier.)
-    // The set deliberately excludes kOpenParen and kOperator, so `let` in a
-    // for-header stays an identifier; the residual `for (let {a} of xs)`
-    // therefore still errors out (byte-preserving) -- pinned in tests, do
-    // not "fix" by widening the set without revisiting the sloppy-mode
-    // traces.  kModuleDecl (directly after `export`) IS a statement
+    // kOpenParen is a statement position only for the open paren of a `for`
+    // header (for_paren_index_, directly over the `for` kBlockKeyword), and
+    // there only a `{`/`[` binding pattern makes `let` a declaration: ES2015+
+    // forbids a `let [` lookahead on the for-statement LHS, so `for (let [a]
+    // of xs)` / `for (let {a} of xs)` can only be declarations, while
+    // `for (let in o)` and `for (let.x of xs)` keep the identifier reading.
+    // Every other kOpenParen (e.g. `if (let [0])`, sloppy mode) and kOperator
+    // stays excluded.  kModuleDecl (directly after `export`) IS a statement
     // position, but with a narrower binding lookahead (below): only an
     // identifier-start character qualifies, so `export let {a} = b` keeps
     // its pinned error residual (the identifier path leaves the `{` to
@@ -1475,8 +1478,10 @@ bool JsTokenizer::TryConsumeIdentifierOrKeyword(JsKeywords::Type* type_out,
       // only for a `{`/`[` binding pattern (checked below): a plain
       // identifier after `let` already tokenizes correctly there, and `if
       // (let [0])` style identifier uses stay untouched.
-      const bool for_header_paren = let_state == kOpenParen &&
-                                    parse_stack_.size() - 1 == for_paren_index_;
+      const bool for_header_paren =
+          let_state == kOpenParen &&
+          parse_stack_.size() - 1 == for_paren_index_ &&
+          parse_stack_[for_paren_index_ - 1] == kBlockKeyword;
       const bool stmt_position = let_state == kStartOfInput ||
                                  let_state == kOpenBrace ||
                                  let_state == kBlockHeader ||
