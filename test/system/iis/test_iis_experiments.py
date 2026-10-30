@@ -20,7 +20,9 @@ Environment variables (optional; defaults match the test setup created by run_ii
         (C:\\inetpub\\pagespeed_test\\pagespeed.config)
 """
 
+import contextlib
 import os
+import re
 import subprocess
 import time
 
@@ -50,28 +52,39 @@ def _recycle_pool() -> None:
     time.sleep(3)
 
 
-@pytest.mark.iis_only
-@pytest.mark.slow
-def test_experiment_arm_applies_to_rewritten_html(client: PageSpeedClient, example_root: str):
+@contextlib.contextmanager
+def _site_config_prepended(lines: str):
+    """Prepend ``lines`` to the site's pagespeed.config and recycle the pool.
+
+    Prepended because the lane's config ends in "host:" match blocks, and
+    directives appended there would fall inside the last block. The original
+    config is restored, and the pool recycled, on every exit path.
+    """
     try:
         with open(SITE_CONFIG, "rb") as handle:
             raw_original = handle.read()
     except OSError:
         pytest.skip(f"site config {SITE_CONFIG} not readable")
     original = raw_original.decode("utf-8", errors="replace")
-
-    # Prepended: the lane's config ends in "host:" match blocks, and
-    # directives appended there would fall inside the last block.
-    injected = (
-        "pagespeed RunExperiment on\n"
-        "pagespeed ExperimentSpec id=1;percent=100;default;enable=remove_comments\n"
-        + original
-    )
     try:
         with open(SITE_CONFIG, "w", encoding="utf-8", newline="") as handle:
-            handle.write(injected)
+            handle.write(lines + original)
+        _recycle_pool()
+        yield
+    finally:
+        with open(SITE_CONFIG, "wb") as handle:
+            handle.write(raw_original)
         _recycle_pool()
 
+
+@pytest.mark.iis_only
+@pytest.mark.slow
+def test_experiment_arm_applies_to_rewritten_html(client: PageSpeedClient, example_root: str):
+    lines = (
+        "pagespeed RunExperiment on\n"
+        "pagespeed ExperimentSpec id=1;percent=100;default;enable=remove_comments\n"
+    )
+    with _site_config_prepended(lines):
         deadline = time.time() + 60
         response = client.get(f"{example_root}/{PAGE}")
         while COMMENT in response.text and time.time() < deadline:
@@ -85,10 +98,30 @@ def test_experiment_arm_applies_to_rewritten_html(client: PageSpeedClient, examp
         )
         cookies = [v for v in response.header_values("Set-Cookie") if v.startswith(COOKIE)]
         assert len(cookies) == 1, f"experiment cookie written {len(cookies)} times: {cookies}"
-    finally:
-        with open(SITE_CONFIG, "wb") as handle:
-            handle.write(raw_original)
-        _recycle_pool()
+
+
+@pytest.mark.iis_only
+@pytest.mark.slow
+def test_experiment_arm_survives_remote_configuration(client: PageSpeedClient, example_root: str):
+    # A remote configuration URL on a closed local port: the module still
+    # merges the remote options into each request's options, which is where
+    # the arm used to be dropped. The bare form of the directive is used: the
+    # "pagespeed" form of RemoteConfigurationUrl is not read on IIS.
+    lines = (
+        "RemoteConfigurationUrl http://127.0.0.1:9/remote.cfg\n"
+        "pagespeed RemoteConfigurationTimeoutMs 200\n"
+        "pagespeed RunExperiment on\n"
+        "pagespeed ExperimentSpec id=1;percent=100;default;enable=extend_cache\n"
+    )
+    with _site_config_prepended(lines):
+        marker = re.compile(r"\.pagespeed\.a\.ce\.")
+        deadline = time.time() + 60
+        response = client.get(f"{example_root}/extend_cache.html")
+        while not marker.search(response.text) and time.time() < deadline:
+            time.sleep(2)
+            response = client.get(f"{example_root}/extend_cache.html")
+        require_status_ok(response, "extend_cache.html")
+        assert marker.search(response.text), "the arm id is missing from rewritten resource URLs"
 
 
 if __name__ == "__main__":

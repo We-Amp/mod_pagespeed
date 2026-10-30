@@ -1096,9 +1096,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			if (custom_options.get() == nullptr) {
 				custom_options.reset(innerContext->server_context()->global_options()->Clone());
 			}
-			custom_options->Merge(*remote_options);
-			// The merge resets the experiment id: hand the request's arm back.
-			innerContext->experiment_assignment()->ApplyTo(custom_options.get());
+			MergeRemoteOptions(*remote_options, *innerContext->experiment_assignment(), custom_options.get());
 			delete remote_options;
 			remote_options = nullptr;
 		}
@@ -1698,9 +1696,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					if (custom_options.get() == nullptr) {
 						custom_options.reset(innerContext->server_context()->global_options()->Clone());
 					}
-					custom_options->Merge(*remote_options);
-					// The merge resets the experiment id: hand the request's arm back.
-					innerContext->experiment_assignment()->ApplyTo(custom_options.get());
+					MergeRemoteOptions(*remote_options, *innerContext->experiment_assignment(), custom_options.get());
 					delete remote_options;
 					remote_options = nullptr;
 				}
