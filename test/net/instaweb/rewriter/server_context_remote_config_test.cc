@@ -121,6 +121,24 @@ TEST_F(ServerContextRemoteConfigTest, SuccessResponseIsApplied) {
   EXPECT_EQ(1, FetchCount());
 }
 
+TEST_F(ServerContextRemoteConfigTest, Utf8ByteOrderMarkIsIgnored) {
+  SetConfigResponse(HttpStatus::kOK,
+                    StrCat("\xEF\xBB\xBF", kConfigBody));
+  EXPECT_TRUE(RemoteConfigApplied());
+}
+
+TEST_F(ServerContextRemoteConfigTest, Utf16ByteOrderMarkIsWarnedAndIgnored) {
+  // "EnableFilters ..." as little-endian UTF-16 text after the FF FE mark.
+  GoogleString body("\xFF\xFE", 2);
+  for (const char* p = kConfigBody; *p != '\0'; ++p) {
+    body.push_back(*p);
+    body.push_back('\0');
+  }
+  SetConfigResponse(HttpStatus::kOK, body);
+  EXPECT_FALSE(RemoteConfigApplied());
+  EXPECT_LT(0, message_handler()->MessagesOfType(kWarning));
+}
+
 TEST_F(ServerContextRemoteConfigTest, NotModifiedRevalidationIsApplied) {
   SetConditionalConfigResponse(kConfigBody);
   EXPECT_TRUE(RemoteConfigApplied());

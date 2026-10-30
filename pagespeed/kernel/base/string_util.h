@@ -542,6 +542,14 @@ inline GoogleString JsonEscape(StringPiece s) {
   return out;
 }
 
+// True if `text` starts with a UTF-16 byte order mark (FF FE or FE FF). Such
+// text cannot be read as bytes of ASCII/UTF-8 configuration text.
+bool HasUtf16ByteOrderMark(StringPiece text);
+
+// If `text` starts with a UTF-8 byte order mark (EF BB BF), removes it from
+// `text` and returns true; otherwise leaves `text` alone and returns false.
+bool StripUtf8ByteOrderMark(StringPiece* text);
+
 }  // namespace net_instaweb
 
 #endif  // PAGESPEED_KERNEL_BASE_STRING_UTIL_H_

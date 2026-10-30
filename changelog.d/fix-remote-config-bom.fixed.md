@@ -1,0 +1,1 @@
+- Remote configuration that starts with a UTF-8 byte order mark now applies as if the mark were absent, as in local configuration files. A remote file saved as UTF-16 is ignored with a warning that says so.

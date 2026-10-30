@@ -948,6 +948,33 @@ TEST(JsonEscapeTest, PassesThroughNearMissSequences) {
   EXPECT_EQ("\xE2\x80", JsonEscape("\xE2\x80"));
 }
 
+TEST(ByteOrderMarkTest, DetectsUtf16) {
+  EXPECT_TRUE(HasUtf16ByteOrderMark(StringPiece("\xFF\xFE" "a\0", 4)));
+  EXPECT_TRUE(HasUtf16ByteOrderMark(StringPiece("\xFE\xFF\0" "a", 4)));
+  EXPECT_FALSE(HasUtf16ByteOrderMark("\xEF\xBB\xBF" "text"));
+  EXPECT_FALSE(HasUtf16ByteOrderMark("text"));
+  EXPECT_FALSE(HasUtf16ByteOrderMark("\xFF"));
+  EXPECT_FALSE(HasUtf16ByteOrderMark(""));
+}
+
+TEST(ByteOrderMarkTest, StripsUtf8) {
+  StringPiece with_bom("\xEF\xBB\xBF" "EnableFilters x\n");
+  EXPECT_TRUE(StripUtf8ByteOrderMark(&with_bom));
+  EXPECT_EQ("EnableFilters x\n", with_bom);
+
+  StringPiece without_bom("EnableFilters x\n");
+  EXPECT_FALSE(StripUtf8ByteOrderMark(&without_bom));
+  EXPECT_EQ("EnableFilters x\n", without_bom);
+
+  StringPiece partial("\xEF\xBB");
+  EXPECT_FALSE(StripUtf8ByteOrderMark(&partial));
+  EXPECT_EQ(2u, partial.size());
+
+  StringPiece only_bom("\xEF\xBB\xBF");
+  EXPECT_TRUE(StripUtf8ByteOrderMark(&only_bom));
+  EXPECT_TRUE(only_bom.empty());
+}
+
 }  // namespace
 
 }  // namespace net_instaweb
