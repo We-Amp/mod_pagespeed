@@ -165,6 +165,19 @@ class TestAdminPages:
         assert len(response.text) > 100, f"{path}: the console shell is empty"
 
 
+class TestAdminHostName:
+    """The statistics JSON names its host without an unset port ("host:0")."""
+
+    def test_host_has_no_unset_port(self, client: PageSpeedClient, server_config):
+        path = f"{server_config.admin_path}/statistics"
+        response = client.get(path)
+        require_no_auth_gate(response, f"Admin page {path}")
+        require_status_ok(response, f"Admin page {path}")
+        host = json.loads(response.text).get("host")
+        assert isinstance(host, str), f"{path}: expected a string host, got {host!r}"
+        assert not host.endswith(":0"), f"{path}: host {host!r} carries the unset port"
+
+
 class TestAdminNotFoundQuoting:
     """pagespeed_admin quoting on not-found page.
 

@@ -88,6 +88,12 @@ class SystemServerContext : public ServerContext {
   SystemRewriteOptions* global_system_rewrite_options();
   GoogleString hostname_identifier() { return hostname_identifier_; }
 
+  // The name the admin JSON reports as "host": the server's host name, with
+  // ":port" only when the server was configured with an explicit port (an
+  // unset port is 0 and is not part of the name). hostname_identifier() stays
+  // the statistics/shared-memory segment name.
+  const GoogleString& display_host() const { return display_host_; }
+
   // Updates the PurgeSet with a new version.  This is called when the system
   // picks up (by polling or API) a new version of the cache.purge file.
   void UpdateCachePurgeSet(const CopyOnWrite<PurgeSet>& purge_set);
@@ -263,6 +269,7 @@ class SystemServerContext : public ServerContext {
   // used to distinguish the name of shared memory so that each vhost has its
   // own SharedCircularBuffer.
   GoogleString hostname_identifier_;
+  GoogleString display_host_;
 
   SystemCaches* system_caches_;
 

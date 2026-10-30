@@ -30,12 +30,14 @@
   import {
     formatRate,
     graphTitle,
+    lastSampleForDisplay,
     latestForDisplay,
     loadDeltaView,
     saveDeltaView,
     seriesForDisplay,
     type Sample,
   } from "$lib/utils/graph-series";
+  import { hasHistory, historyCadenceText, widerRange } from "$lib/utils/graph-range";
   import { mergeSeries, sliceSince } from "$lib/utils/merge-series";
   import {
     graphsView,
@@ -89,6 +91,8 @@
   let focusHost = $derived(lensHost ?? siteHost);
 
   let timeRange = $state("15");
+  /** False until the viewer picks a range: until then the range widens to one that has history. */
+  let rangeChosen = false;
   /** null: the viewer never chose — the default follows the reply's gauges field. */
   let deltaChoice = $state<boolean | null>(loadDeltaView());
   let search = $state("");
@@ -103,6 +107,7 @@
   let logRequested = true;
 
   let updatedAt = $state<number | null>(null);
+  let cadenceText = $derived(historyCadenceText(logView));
 
   const timeRangeOptions = [
     { label: "Last 5 minutes", value: "5" },
@@ -159,6 +164,16 @@
       logFetchedAt = Date.now();
       try {
         logView = graphsView(await api.getGraphs(buildParams()));
+        // A viewer who never chose a range gets the narrowest one with
+        // history: the log is sampled every few minutes, so a short range is
+        // usually empty. Stops at the first range with data, or the widest.
+        if (!rangeChosen && logView.kind !== "absent" && logView.kind !== "no-log" && !hasHistory(logView)) {
+          const wider = widerRange(parseInt(timeRange, 10));
+          if (wider !== null) {
+            timeRange = String(wider);
+            logRequested = true;
+          }
+        }
       } catch (e) {
         if (!(e instanceof Error) || !isGraphsAbsent(e)) throw e;
         logView = { kind: "absent", detail: "" };
@@ -171,6 +186,7 @@
   const vhostHref = perVhostConsoleHref(api.basePath);
 
   function changeRange(value: string) {
+    rangeChosen = true;
     timeRange = value;
     logRequested = true;
     graphs.invalidate();
@@ -382,6 +398,9 @@
     ]}
   />
   <RefreshNotice error={graphs.error} />
+  {#if cadenceText}
+    <p class="note" data-testid="graphs-cadence">{cadenceText}</p>
+  {/if}
 
   {#if logView !== null && logView.kind === "absent"}
     <p class="note" data-testid="graphs-absent">
@@ -434,7 +453,7 @@
             {#each curated.shown as chart (chart.id)}
               {@const title = curatedTitle(chart)}
               {@const format = curatedFormat(chart.unit)}
-              {@const latest = latestForDisplay(chart.series)}
+              {@const latest = chart.unit === "percent" ? lastSampleForDisplay(chart.series) : latestForDisplay(chart.series)}
               <section class="card" data-testid="curated-{chart.id}">
                 <h3 class="card-title">{title}</h3>
                 <TimeSeriesChart

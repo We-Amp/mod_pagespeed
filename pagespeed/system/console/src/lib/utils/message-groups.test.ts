@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { describe, expect, it } from "vitest";
-import { EMPTY_MESSAGE_TEXT, MESSAGE_WINDOW_MS, groupForDisplay, groupMessages, messageLevel, toMessageDigest } from "./message-groups";
+import { EMPTY_MESSAGE_TEXT, MESSAGE_WINDOW_MS, coveredWindowText, groupForDisplay, groupMessages, messageLevel, toMessageDigest } from "./message-groups";
 
 const NOW = Date.parse("Fri, 02 Oct 2026 10:25:51 GMT");
 const at = (time: string) => Date.parse(`Fri, 02 Oct 2026 ${time} GMT`);
@@ -78,6 +78,7 @@ describe("toMessageDigest", () => {
     expect(digest).toEqual({
       source: "module",
       truncated: true,
+      firstMs: null,
       groups: [
         { level: "warning", template: "slow N", count: 2, recent: 1, lastMs: 5 },
         { level: "error", template: "neg", count: 0, recent: 0, lastMs: 0 },
@@ -94,14 +95,36 @@ describe("toMessageDigest", () => {
     expect(digest).toEqual({
       source: "console",
       truncated: false,
+      firstMs: at("10:20:00"),
       groups: [{ level: "warning", template: "slow N", count: 1, recent: 1, lastMs: at("10:20:00") }],
     });
+  });
+
+  it("reads the module's first_ms, and ignores a missing or non-positive one", () => {
+    expect(toMessageDigest({ groups: [], first_ms: 1700000000000 }, NOW)?.firstMs).toBe(1700000000000);
+    expect(toMessageDigest({ groups: [] }, NOW)?.firstMs).toBeNull();
+    expect(toMessageDigest({ groups: [], first_ms: 0 }, NOW)?.firstMs).toBeNull();
   });
 
   it("is null for anything else", () => {
     for (const junk of [null, "x", 3, [], {}, { groups: "no", messages: "no" }]) {
       expect(toMessageDigest(junk, NOW), JSON.stringify(junk)).toBeNull();
     }
+  });
+});
+
+describe("coveredWindowText", () => {
+  const clock = (ms: number) => new Date(ms).toISOString().slice(11, 16);
+  const MIN = 60_000;
+  it("states the real window when the buffer is younger than the claim (a 4-minute buffer, a 15-minute claim)", () => {
+    const now = Date.UTC(2026, 9, 29, 16, 23, 37);
+    const first = Date.UTC(2026, 9, 29, 16, 19, 46);
+    expect(coveredWindowText(first, now, 15 * MIN, clock)).toBe("in the retained messages since 16:19");
+  });
+  it("keeps the claim when the buffer reaches back past the window or its start is unknown", () => {
+    const now = Date.UTC(2026, 9, 29, 16, 23, 37);
+    expect(coveredWindowText(now - 20 * MIN, now, 15 * MIN, clock)).toBe("in the last 15 min");
+    expect(coveredWindowText(null, now, 15 * MIN, clock)).toBe("in the last 15 min");
   });
 });
 

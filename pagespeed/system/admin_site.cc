@@ -282,12 +282,18 @@ GoogleString GroupedMessagesJson(MessageHandler* handler,
   std::map<std::pair<GoogleString, GoogleString>, MessageGroup> by_key;
   const int64 window_start_ms = now_ms - window_s * 1000;
   int64 current_ms = -1;
+  // The oldest line that carried a time: how far back the log reaches, which
+  // the console needs to say what window a count really covers.
+  int64 first_ms = -1;
   for (size_t i = first; i < messages.size(); ++i) {
     if (messages[i].empty()) continue;
     const char* level = MessageLevelName(handler->GetMessageType(messages[i]));
     const StringPiece line = handler->ReformatMessage(messages[i]);
     StringPiece body = MessageLineBody(line);
     if (body.size() < line.size()) current_ms = MessageLineTimeMs(line);
+    if (current_ms > 0 && (first_ms < 0 || current_ms < first_ms)) {
+      first_ms = current_ms;
+    }
     // A line kept after skipped repeats counts for all of them, and is
     // grouped with the unannotated lines of the same text.
     // Only info lines are ever annotated; the text of any other level is its
@@ -342,6 +348,9 @@ GoogleString GroupedMessagesJson(MessageHandler* handler,
   GoogleString json = StrCat(
       "{\"scope\":\"process\",\"next\":", Integer64ToString(lines_written),
       ",\"now_ms\":", Integer64ToString(now_ms));
+  if (first_ms > 0) {
+    StrAppend(&json, ",\"first_ms\":", Integer64ToString(first_ms));
+  }
   if (window_s > 0) {
     StrAppend(&json, ",\"window_s\":", Integer64ToString(window_s));
   }
@@ -821,8 +830,7 @@ void AdminSite::RulePacksPage(bool is_global, StringPiece request_host,
 
   rule_pack_view::Page page;
   page.scope = is_global ? "global" : "vhost";
-  page.host =
-      static_cast<SystemServerContext*>(server_context)->hostname_identifier();
+  page.host = static_cast<SystemServerContext*>(server_context)->display_host();
   page.filter_enabled = options.Enabled(RewriteOptions::kRulePacks);
   // The first pack file (the legacy single-pack fields describe it).
   page.pack_file = options.rule_pack_files().empty()
@@ -1218,21 +1226,21 @@ void AdminSite::AdminPage(
       if (query_params.Has("json")) {
         ConsoleJsonHandler(query_params, fetch, statistics);
       } else {
-        StatisticsHandler(*options, kPageSpeedAdmin, fetch, stats, is_global,
-                          static_cast<SystemServerContext*>(server_context)
-                              ->hostname_identifier());
+        StatisticsHandler(
+            *options, kPageSpeedAdmin, fetch, stats, is_global,
+            static_cast<SystemServerContext*>(server_context)->display_host());
       }
     } else if (leaf == "stats_json") {
-      StatisticsJsonHandler(fetch, stats, is_global,
-                            static_cast<SystemServerContext*>(server_context)
-                                ->hostname_identifier());
+      StatisticsJsonHandler(
+          fetch, stats, is_global,
+          static_cast<SystemServerContext*>(server_context)->display_host());
     } else if (leaf == "graphs") {
       GraphsHandler(*options, kPageSpeedAdmin, query_params, fetch, statistics);
     } else if (leaf == "config") {
-      PrintConfig(kPageSpeedAdmin, fetch, *global_system_rewrite_options,
-                  *options, is_global,
-                  static_cast<SystemServerContext*>(server_context)
-                      ->hostname_identifier());
+      PrintConfig(
+          kPageSpeedAdmin, fetch, *global_system_rewrite_options, *options,
+          is_global,
+          static_cast<SystemServerContext*>(server_context)->display_host());
     } else if (leaf == "rule_packs") {
       RulePacksPage(is_global, stripped_gurl.Host(), *options, query_params,
                     fetch, server_context, stats);
@@ -1266,10 +1274,9 @@ void AdminSite::StatisticsPage(
   if (query_params.Has("json")) {
     ConsoleJsonHandler(query_params, fetch, statistics);
   } else if (query_params.Has("config")) {
-    PrintConfig(kStatistics, fetch, *global_system_rewrite_options, *options,
-                is_global,
-                static_cast<SystemServerContext*>(server_context)
-                    ->hostname_identifier());
+    PrintConfig(
+        kStatistics, fetch, *global_system_rewrite_options, *options, is_global,
+        static_cast<SystemServerContext*>(server_context)->display_host());
   } else if (query_params.Has("histograms")) {
     PrintHistograms(kStatistics, fetch, stats);
   } else if (query_params.Has("graphs")) {
@@ -1281,9 +1288,9 @@ void AdminSite::StatisticsPage(
                 fetch, system_caches, filesystem_metadata_cache, http_cache,
                 metadata_cache, page_property_cache, server_context);
   } else {
-    StatisticsHandler(*options, kStatistics, fetch, stats, is_global,
-                      static_cast<SystemServerContext*>(server_context)
-                          ->hostname_identifier());
+    StatisticsHandler(
+        *options, kStatistics, fetch, stats, is_global,
+        static_cast<SystemServerContext*>(server_context)->display_host());
   }
 }
 

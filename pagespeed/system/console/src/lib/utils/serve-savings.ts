@@ -86,3 +86,6 @@ export function serveSavingsView(block: unknown): ServeSavingsView | null {
   const total = original > 0 ? { saved, original, percent: percentOf(saved, original) ?? 0 } : null;
   return { served, notServed, total };
 }
+
+/** The note every headline of served-response savings carries: the figure is not optimization alone. */
+export const SAVINGS_QUALIFIER = "Measured in transfer bytes, includes compression.";

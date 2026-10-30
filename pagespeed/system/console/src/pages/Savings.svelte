@@ -47,7 +47,7 @@
     savingsSplit,
     splitSummaryText,
   } from "$lib/utils/savings";
-  import { serveSavingsView } from "$lib/utils/serve-savings";
+  import { SAVINGS_QUALIFIER, serveSavingsView } from "$lib/utils/serve-savings";
   import { activeLensHost } from "$lib/host-lens.svelte";
   import { consoleHostName, hostRow, hostSavingsView, siteRow } from "$lib/utils/host-savings";
   import { sinceLabel } from "$lib/utils/since";
@@ -319,6 +319,7 @@
             <!-- The headline figures: side by side once the card is wide. -->
             <div class="headlines">
             <div class="headline">
+            <h3 class="window-heading" data-testid="window-heading-optimizer">Optimizer counters (since optimizer restart)</h3>
             <dl class="figures">
               <div class="figure">
                 <dt class="metric-label">Saved on served responses</dt>
@@ -332,6 +333,7 @@
                 </dd>
               </div>
             </dl>
+            <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
             <p class="since" data-testid="since-optimizer" title={optimizerSince?.iso ?? undefined}>
               {optimizerSince?.text ?? "since restart"} (optimizer restart)
               {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
@@ -340,6 +342,7 @@
             {#if hitRate && hitRate.percent !== null}
               <div class="headline">
               <!-- Computed from module counters, so it carries the module's time base. -->
+              <h3 class="window-heading" data-testid="window-heading-module">Module counters (since web server restart)</h3>
               <dl class="figures">
                 <div class="figure">
                   <dt
@@ -629,6 +632,12 @@
   .breakdown th {
     color: var(--ps-text-secondary);
     font-weight: 600;
+  }
+  .window-heading {
+    margin: 0 0 var(--ps-space-xs);
+    font-size: var(--ps-font-size-sm);
+    font-weight: 600;
+    color: var(--ps-text-secondary);
   }
   .note {
     font-size: var(--ps-font-size-sm);

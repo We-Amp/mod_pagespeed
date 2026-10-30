@@ -73,8 +73,9 @@ namespace {
 
 class SystemServerContextNoProxyHtml : public SystemServerContext {
  public:
-  explicit SystemServerContextNoProxyHtml(RewriteDriverFactory* factory)
-      : SystemServerContext(factory, "fake_hostname", 80 /* fake port */) {}
+  explicit SystemServerContextNoProxyHtml(RewriteDriverFactory* factory,
+                                          int port = 80 /* fake port */)
+      : SystemServerContext(factory, "fake_hostname", port) {}
 
   bool ProxiesHtml() const override { return false; }
 
@@ -868,7 +869,7 @@ TEST_F(AdminSiteGroupedMessagesTest, GroupsByLevelAndTemplate) {
   EXPECT_EQ("application/json", a.content_type);
   EXPECT_EQ(
       "{\"scope\":\"process\",\"next\":5,\"now_ms\":1388534460000,"
-      "\"truncated\":false,\"groups\":["
+      "\"first_ms\":1388534400000,\"truncated\":false,\"groups\":["
       "{\"level\":\"warning\",\"template\":\"Fetch of URL failed after N ms\","
       "\"count\":2,\"last_ms\":1388534400000},"
       "{\"level\":\"error\",\"template\":\"boom N\",\"count\":1,"
@@ -1601,6 +1602,17 @@ std::unique_ptr<SystemServerContext> ServingContextOn(
   sc->set_message_handler(handler);
   sc->PostInitHook();
   return sc;
+}
+
+// The admin JSON names the host without an unset port ("host:0"), while the
+// statistics segment name keeps the port.
+TEST_F(AdminSiteTest, DisplayHostOmitsAnUnsetPort) {
+  SystemServerContextNoProxyHtml unset(factory(), 0);
+  EXPECT_EQ("fake_hostname", unset.display_host());
+  EXPECT_EQ("fake_hostname:0", unset.hostname_identifier());
+  SystemServerContextNoProxyHtml explicit_port(factory(), 8080);
+  EXPECT_EQ("fake_hostname:8080", explicit_port.display_host());
+  EXPECT_EQ("fake_hostname:8080", explicit_port.hostname_identifier());
 }
 
 // A decoding stub context must skip AdminSite setup in PostInitHook(): it
