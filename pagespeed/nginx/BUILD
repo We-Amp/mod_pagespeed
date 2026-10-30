@@ -339,19 +339,41 @@ cc_binary(
         "ngx_pagespeed_module.cc",
     ],
     copts = NGINX_COPTS + [
-        # Hide all symbols by default; the version script controls exports
+        # Hide all symbols by default; the version script (Linux) /
+        # exported_symbol list (macOS) below controls exports
         "-fvisibility=hidden",
     ],
-    linkopts = [
+    linkopts = select({
+        # Apple ld has no --version-script. -exported_symbol is its
+        # equivalent here: only the listed symbols enter the dynamic symbol
+        # table, hiding BoringSSL/curl/internal symbols from nginx's own
+        # libssl, and the three exports are marked
+        # __attribute__((visibility("default"))) in ngx_pagespeed_module.cc.
+        # -z,start-stop-visibility is GNU-ld-only and has no ld64
+        # counterpart; ld64 does not export section-bound symbols.
+        "@platforms//os:macos": [
+            "-Wl,-exported_symbol,_ngx_modules",
+            "-Wl,-exported_symbol,_ngx_module_names",
+            "-Wl,-exported_symbol,_ngx_module_order",
+            # nginx is a headers-only library in this build graph: every
+            # ngx_* symbol resolves against the host nginx binary at
+            # load_module time. GNU ld leaves undefined symbols in a shared
+            # library alone; ld64 errors on them unless told to look them
+            # up dynamically.
+            "-Wl,-undefined,dynamic_lookup",
+        ],
         # Version script: export only ngx_modules/ngx_module_names/ngx_module_order.
         # Hides BoringSSL/curl/internal symbols to avoid conflicts with nginx's
         # own libssl (system OpenSSL) loaded in the same process.
-        "-Wl,--version-script,$(location :ngx_pagespeed.lds)",
+        #
         # The version script does not reach the __start_<section> /
         # __stop_<section> bounds the linker itself creates (protobuf's
         # pb_defaults section); without this they are exported.
-        "-Wl,-z,start-stop-visibility=hidden",
-    ],
+        "//conditions:default": [
+            "-Wl,--version-script,$(location :ngx_pagespeed.lds)",
+            "-Wl,-z,start-stop-visibility=hidden",
+        ],
+    }),
     linkshared = True,
     linkstatic = True,
     visibility = ["//visibility:public"],
@@ -456,10 +478,20 @@ cc_binary(
     copts = NGINX_COPTS + [
         "-fvisibility=hidden",
     ],
-    linkopts = [
-        "-Wl,--version-script,$(location :ngx_pagespeed.lds)",
-        "-Wl,-z,start-stop-visibility=hidden",
-    ],
+    linkopts = select({
+        # Apple ld equivalent of the version script; see
+        # ngx_pagespeed_module.so for the rationale.
+        "@platforms//os:macos": [
+            "-Wl,-exported_symbol,_ngx_modules",
+            "-Wl,-exported_symbol,_ngx_module_names",
+            "-Wl,-exported_symbol,_ngx_module_order",
+            "-Wl,-undefined,dynamic_lookup",
+        ],
+        "//conditions:default": [
+            "-Wl,--version-script,$(location :ngx_pagespeed.lds)",
+            "-Wl,-z,start-stop-visibility=hidden",
+        ],
+    }),
     linkshared = True,
     linkstatic = True,
     visibility = ["//visibility:public"],
