@@ -1915,6 +1915,60 @@ TEST_F(CssFilterTest, BrokenGroupRuleFallsBack) {
 TEST_F(CssFilterTest, RemoveComments) {
   ValidateRewrite("remove_comments", " /* This comment will be removed. */ ",
                   "", kExpectSuccess);
+  ValidateRewrite("remove_comments_in_rule",
+                  "a { /* gone */ color: red } /** doc comment */ b { }",
+                  "a{color:red}b{}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, KeepBangComment) {
+  ValidateRewrite("keep_bang_comment",
+                  "/*! Example 1.0 | (c) Someone | MIT */\n"
+                  "  a  {  color : red  }\n",
+                  "/*! Example 1.0 | (c) Someone | MIT */\na{color:red}",
+                  kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, KeepLicenseComment) {
+  ValidateRewrite("keep_license_comment",
+                  "/**\n * @license MIT\n * (c) Someone\n */\n"
+                  "  a  {  color : red  }\n",
+                  "/**\n * @license MIT\n * (c) Someone\n */\na{color:red}",
+                  kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, KeepPreserveComment) {
+  ValidateRewrite("keep_preserve_comment",
+                  "a { color : red }\n/* @preserve Attribution */\n",
+                  "/* @preserve Attribution */\na{color:red}", kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, KeepOnlyLicenseComments) {
+  // Qualifying comments are kept in order, ordinary ones are dropped, and a
+  // comment-like sequence inside a string or url() is not a comment.
+  ValidateRewrite(
+      "keep_only_license_comments",
+      "/* ordinary */ /*! first */ a { content: \"/*! not a comment */\"; "
+      "background: url(x/*! y */.png) } /* also ordinary */ "
+      "/* @license second */ b { color : blue }",
+      "/*! first */\n/* @license second */\n"
+      "a{content:\"/*! not a comment */\";background: url(x/*! y */.png) }"
+      "b{color:#00f}",
+      kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, KeepLicenseCommentAfterCharset) {
+  // @charset must remain the first thing in the stylesheet.
+  ValidateRewrite("keep_license_after_charset",
+                  "@charset \"utf-8\";\n/*! Keep me */\na { color : red }\n",
+                  "@charset \"utf-8\";/*! Keep me */\na{color:red}",
+                  kExpectSuccess);
+}
+
+TEST_F(CssFilterTest, KeepLicenseCommentInsideAtRule) {
+  // A licence comment inside a rule's prelude is kept too, hoisted to the top.
+  ValidateRewrite("keep_license_in_at_rule",
+                  "@media /*! m */ screen { a { color : red } }",
+                  "/*! m */\n@media screen{a{color:red}}", kExpectSuccess);
 }
 
 TEST_F(CssFilterTest, InlineCssOptimizedFromCache) {

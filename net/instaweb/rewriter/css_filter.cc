@@ -649,11 +649,11 @@ void CssFilter::Context::Harvest() {
           Driver(), Driver()->message_handler());
     }
 
-    ok = SerializeCss(in_text_size_, hierarchy_.mutable_stylesheet(),
-                      css_base_gurl_to_use, css_trim_gurl_to_use,
-                      previously_optimized || absolutified_urls,
-                      IsInlineAttribute() /* stylesheet_is_declarations */,
-                      has_utf8_bom_, &out_text, Driver()->message_handler());
+    ok = SerializeCss(
+        in_text_size_, hierarchy_.mutable_stylesheet(), css_base_gurl_to_use,
+        css_trim_gurl_to_use, previously_optimized || absolutified_urls,
+        IsInlineAttribute() /* stylesheet_is_declarations */, has_utf8_bom_,
+        hierarchy_.license_comments(), &out_text, Driver()->message_handler());
   }
 
   if (ok) {
@@ -699,7 +699,8 @@ bool CssFilter::Context::SerializeCss(
     int64 in_text_size, const Css::Stylesheet* stylesheet,
     const GoogleUrl& css_base_gurl, const GoogleUrl& css_trim_gurl,
     bool previously_optimized, bool stylesheet_is_declarations,
-    bool add_utf8_bom, GoogleString* out_text, MessageHandler* handler) {
+    bool add_utf8_bom, const StringVector& license_comments,
+    GoogleString* out_text, MessageHandler* handler) {
   bool ret = true;
 
   // Re-serialize stylesheet.
@@ -713,6 +714,8 @@ bool CssFilter::Context::SerializeCss(
                             handler);
   } else {
     CssMinify::Stylesheet(*stylesheet, &writer, handler);
+    // The parser drops comments; put licence comments back at the top.
+    css_util::InsertLicenseComments(license_comments, out_text);
   }
 
   // Get signed versions so that we can subtract them.

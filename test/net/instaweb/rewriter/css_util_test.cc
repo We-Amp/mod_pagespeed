@@ -347,6 +347,55 @@ TEST_F(CssUtilTest, EliminateElementsNotIn) {
   EXPECT_TRUE(input_vector == intersect_vector);
 }
 
+TEST(CssUtilLicenseCommentsTest, IsLicenseComment) {
+  EXPECT_TRUE(IsLicenseComment("/*! x */"));
+  EXPECT_TRUE(IsLicenseComment("/*!*/"));
+  EXPECT_TRUE(IsLicenseComment("/* @license MIT */"));
+  EXPECT_TRUE(IsLicenseComment("/* @preserve */"));
+  EXPECT_FALSE(IsLicenseComment("/* plain */"));
+  EXPECT_FALSE(IsLicenseComment("/** doc */"));
+  EXPECT_FALSE(IsLicenseComment("/* ! not bang */"));
+}
+
+TEST(CssUtilLicenseCommentsTest, Extract) {
+  StringVector comments;
+  ExtractLicenseComments(
+      "/*! a */ x { content: '/*! s */'; background: URL( q/*! u */.png ) }"
+      " /* plain */ /* @license b */ y { content: \"\\\"/*! t */\" }"
+      " /*! c */ /*! unterminated",
+      &comments);
+  ASSERT_EQ(3, comments.size());
+  EXPECT_EQ("/*! a */", comments[0]);
+  EXPECT_EQ("/* @license b */", comments[1]);
+  EXPECT_EQ("/*! c */", comments[2]);
+}
+
+TEST(CssUtilLicenseCommentsTest, Insert) {
+  StringVector comments;
+  comments.push_back("/*! a */");
+  comments.push_back("/*! b */");
+  comments.push_back("/*! a */");
+
+  GoogleString css("a{color:red}");
+  InsertLicenseComments(comments, &css);
+  EXPECT_EQ("/*! a */\n/*! b */\na{color:red}", css);
+
+  // After a BOM and @charset, which must stay first.
+  css = "\xEF\xBB\xBF@charset \"a;b\";a{color:red}";
+  InsertLicenseComments(comments, &css);
+  EXPECT_EQ("\xEF\xBB\xBF@charset \"a;b\";/*! a */\n/*! b */\na{color:red}",
+            css);
+
+  // Not added again if the output already holds it.
+  css = "@media /*! a */ x{}";
+  InsertLicenseComments(comments, &css);
+  EXPECT_EQ("/*! b */\n@media /*! a */ x{}", css);
+
+  css = "a{}";
+  InsertLicenseComments(StringVector(), &css);
+  EXPECT_EQ("a{}", css);
+}
+
 }  // namespace css_util
 
 }  // namespace net_instaweb

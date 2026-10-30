@@ -2006,6 +2006,26 @@ TEST_F(CssFilterWithCombineTest, FetchCombinedMinifiedWithoutGzip) {
   EXPECT_FALSE(WasGzipped(response_headers));
 }
 
+TEST_F(CssFilterWithCombineTest, CombinedOutputKeepsLicenseComments) {
+  SetHtmlMimetype();
+  SetResponseWithDefaultHeaders(
+      kCssA, kContentTypeCss,
+      "/*! (c) A, MIT */ /* plain A */ div {    } ", 300);
+  SetResponseWithDefaultHeaders(
+      kCssB, kContentTypeCss,
+      "/* plain B */ /* @license B, BSD */ div {    } /* @preserve B2 */", 300);
+
+  ValidateExpected("combine_license", StrCat(Link(kCssA), Link(kCssB)),
+                   Link(CssOut()));
+
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, CssOut()), &content));
+  EXPECT_EQ(
+      "/*! (c) A, MIT */\n/* @license B, BSD */\n/* @preserve B2 */\n"
+      "div{}div{}",
+      content);
+}
+
 class CssFilterWithCombineTestUrlNamer : public CssFilterWithCombineTest {
  public:
   CssFilterWithCombineTestUrlNamer() { SetUseTestUrlNamer(true); }

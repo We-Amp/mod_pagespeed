@@ -297,6 +297,96 @@ GoogleString JsDetectableSelector(const Css::Selector& selector) {
   return result;
 }
 
+bool IsLicenseComment(const StringPiece& comment) {
+  return comment.starts_with("/*!") ||
+         comment.find("@license") != StringPiece::npos ||
+         comment.find("@preserve") != StringPiece::npos;
+}
+
+void ExtractLicenseComments(const StringPiece& css, StringVector* comments) {
+  const size_t n = css.size();
+  size_t i = 0;
+  while (i < n) {
+    const char c = css[i];
+    if (c == '/' && i + 1 < n && css[i + 1] == '*') {
+      size_t end = css.find("*/", i + 2);
+      if (end == StringPiece::npos) {
+        return;  // Unterminated comment: not kept.
+      }
+      end += 2;
+      StringPiece comment = css.substr(i, end - i);
+      if (IsLicenseComment(comment)) {
+        comments->push_back(GoogleString(comment));
+      }
+      i = end;
+    } else if (c == '"' || c == '\'') {
+      // String literal: skip to the closing quote (an unescaped newline also
+      // ends it, as in the CSS tokenizer).
+      ++i;
+      while (i < n && css[i] != c && css[i] != '\n') {
+        i += (css[i] == '\\') ? 2 : 1;
+      }
+      ++i;
+    } else if ((c == 'u' || c == 'U') && i + 3 < n &&
+               StringCaseEqual(css.substr(i, 4), "url(")) {
+      i += 4;
+      while (i < n && (css[i] == ' ' || css[i] == '\t' || css[i] == '\n' ||
+                       css[i] == '\r' || css[i] == '\f')) {
+        ++i;
+      }
+      if (i < n && css[i] != '"' && css[i] != '\'') {
+        // Unquoted url(): no comments inside; skip to the closing paren.
+        while (i < n && css[i] != ')') {
+          i += (css[i] == '\\') ? 2 : 1;
+        }
+        ++i;
+      }
+    } else {
+      ++i;
+    }
+  }
+}
+
+void InsertLicenseComments(const StringVector& comments, GoogleString* css) {
+  if (comments.empty()) {
+    return;
+  }
+  size_t pos = 0;
+  if (StringPiece(*css).starts_with("\xEF\xBB\xBF")) {
+    pos = 3;
+  }
+  if (StringPiece(*css).substr(pos).starts_with("@charset ")) {
+    // Skip the rule: up to the first ';' that is outside the quoted name.
+    size_t i = pos + 9;
+    char quote = 0;
+    while (i < css->size()) {
+      const char c = (*css)[i];
+      if (quote != 0) {
+        if (c == '\\') {
+          ++i;
+        } else if (c == quote) {
+          quote = 0;
+        }
+      } else if (c == '"' || c == '\'') {
+        quote = c;
+      } else if (c == ';') {
+        break;
+      }
+      ++i;
+    }
+    pos = (i < css->size()) ? i + 1 : pos;
+  }
+  GoogleString insertion;
+  for (const GoogleString& comment : comments) {
+    if (css->find(comment) != GoogleString::npos ||
+        insertion.find(comment) != GoogleString::npos) {
+      continue;
+    }
+    StrAppend(&insertion, comment, "\n");
+  }
+  css->insert(pos, insertion);
+}
+
 }  // namespace css_util
 
 }  // namespace net_instaweb
