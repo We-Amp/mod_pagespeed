@@ -32,8 +32,8 @@
 // lane's classifier (tools/ci/classify-js-fuzz-artifacts.sh) files as
 // known classes: an unterminated string literal that the tokenizer closes
 // on an escaped quote, with a raw U+2028 the minifier turns into a
-// linebreak, trips the token-channel oracle (and, without it, the
-// idempotence oracle).  An engine without that classifier would stop on
+// linebreak, trips the token-channel oracle and, once that is exempted,
+// the idempotence oracle.  An engine without that classifier would stop on
 // such input every session; the nightly lane keeps the oracles and the
 // classifier.
 //
@@ -522,9 +522,10 @@ int main(int argc, char** argv) {
   }
   std::fprintf(stderr,
                "js minify fuzz harness: %zu seeds clean; %zu files replayed, "
-               "%zu idempotence trips, %zu token-channel trips\n",
+               "%zu idempotence trips, %zu token-channel trips%s\n",
                sizeof(kValidJsSeeds) / sizeof(kValidJsSeeds[0]), files,
-               idem_trips, chan_trips);
+               idem_trips, chan_trips,
+               kRunOracles ? "" : " (oracles off: sanitizer-only build)");
   return (idem_trips + chan_trips) == 0 ? 0 : 1;
 }
 #endif
