@@ -310,6 +310,11 @@ class JsTokenizer {
   // set by whitespace/comment tokens that carry a terminator.
   bool speculative_linebreak_ = false;
   bool error_;
+  // Parse-stack index the kOpenParen of the most recent `for` header will
+  // occupy (or kNoForParen).  Lets `let` right after that paren be read as a
+  // declaration, so `for (let {a} of xs)` / `for (let [a] of xs)` tokenize.
+  static constexpr size_t kNoForParen = static_cast<size_t>(-1);
+  size_t for_paren_index_ = kNoForParen;
   // One-shot flag armed when a block-bodied arrow completes: nothing can
   // continue it, so the next linebreak inserts a semicolon regardless of
   // the continuation set.  Cleared on the next non-whitespace/comment

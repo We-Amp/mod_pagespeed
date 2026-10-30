@@ -2634,18 +2634,39 @@ TEST_F(JsTokenizerTest, ForConstDestructuringOf) {
   ExpectEndOfInput();
 }
 
-TEST_F(JsTokenizerTest, ForLetDestructuringResidual) {
-  // Documented residual: the `let` statement-position set excludes the
-  // for-header kOpenParen, so `let` there stays an identifier and the
-  // binding pattern's brace errors out (byte-preserving).  Use
-  // `for (const {a} of xs)` instead; do not widen the statement-position set
-  // without revisiting the sloppy-mode traces.
+TEST_F(JsTokenizerTest, ForLetDestructuringOf) {
+  // `let` directly inside a `for` header followed by a binding pattern is a
+  // declaration, exactly like `const` (ForConstDestructuringOf).
   BeginTokenizing("for(let {a} of xs){}");
   ExpectToken(JsKeywords::kFor, "for", "Start BkKwd");
   ExpectToken(JsKeywords::kOperator, "(", "Start BkKwd (");
-  ExpectToken(JsKeywords::kIdentifier, "let", "Start BkKwd ( Expr");
+  ExpectToken(JsKeywords::kLet, "let", "Start BkKwd ( MVar");
   ExpectToken(JsKeywords::kWhitespace, " ");
-  ExpectError("{a} of xs){}");
+  ExpectToken(JsKeywords::kOperator, "{", "Start BkKwd ( MVar {");
+  ExpectToken(JsKeywords::kIdentifier, "a", "Start BkKwd ( MVar { Expr");
+  ExpectToken(JsKeywords::kOperator, "}", "Start BkKwd ( MVar Expr");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "of", "Start BkKwd ( MVar Expr Oper");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "xs", "Start BkKwd ( MVar Expr");
+  ExpectToken(JsKeywords::kOperator, ")", "Start BkHdr");
+  ExpectToken(JsKeywords::kOperator, "{", "Start BkHdr {");
+  ExpectToken(JsKeywords::kOperator, "}", "Start");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, LetIdentifierInCallAfterForStatement) {
+  // The for-header declaration reading must not outlive the header.
+  BeginTokenizing("for(;;);f(let[0]);");
+  ExpectToken(JsKeywords::kFor, "for", "Start BkKwd");
+  ExpectToken(JsKeywords::kOperator, "(", "Start BkKwd (");
+  ExpectToken(JsKeywords::kOperator, ";");
+  ExpectToken(JsKeywords::kOperator, ";");
+  ExpectToken(JsKeywords::kOperator, ")");
+  ExpectToken(JsKeywords::kOperator, ";");
+  ExpectToken(JsKeywords::kIdentifier, "f");
+  ExpectToken(JsKeywords::kOperator, "(");
+  ExpectToken(JsKeywords::kIdentifier, "let");
 }
 
 TEST_F(JsTokenizerTest, ExportLetDestructuringResidual) {

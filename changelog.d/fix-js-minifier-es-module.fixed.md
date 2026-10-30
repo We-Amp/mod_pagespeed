@@ -1,0 +1,1 @@
+- The JavaScript minifier now minifies scripts and ES modules that destructure in a `for (let {a} of xs)` or `for (let [a] of xs)` loop header. Before, such a file was reported as having a parse error and was served unminified.
