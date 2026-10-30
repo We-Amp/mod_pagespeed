@@ -108,7 +108,7 @@ how to report bugs and send pull requests.
 
 mod_pagespeed is enrolled in [Anthropic's OSS Scanner](https://github.com/anthropics/oss-scanner/blob/main/projects/mod_pagespeed/project.yaml). The [threat model](.oss-scanner/threat_model.md) is in this repository.
 
-[![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/mod_pagespeed.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:mod_pagespeed)
+[![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/mod_pagespeed.svg)](https://oss-fuzz-build-logs.storage.googleapis.com/index.html#mod_pagespeed)
 
 mod_pagespeed has been enrolled in [OSS-Fuzz](https://github.com/google/oss-fuzz/tree/master/projects/mod_pagespeed), Google's fuzzing service for open-source projects, since &lt;MONTH YEAR&gt;, and is fuzzed continuously. Report security issues to security@modpagespeed.com (see [SECURITY.md](SECURITY.md)).
 
