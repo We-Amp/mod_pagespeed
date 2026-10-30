@@ -8,7 +8,7 @@
 # top of a base commit. One static case pins the trigger expressions in the
 # real workflows.
 #
-# Env: optional DEFAULT_BRANCH (default master) for the static case.
+# Env: optional DEFAULT_BRANCH for the static case (default: origin/HEAD, else master).
 #
 # Run: tools/ci/test_full_tier_scope.sh
 
@@ -17,7 +17,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${HERE}/full_tier_scope.sh"
 ROOT="${HERE}/../.."
-BRANCH="${DEFAULT_BRANCH:-master}"
+# The default branch the static case pins: DEFAULT_BRANCH, else the clone's
+# origin/HEAD, else master.
+BRANCH="${DEFAULT_BRANCH:-$(git -C "${ROOT}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)}"
+BRANCH="${BRANCH:-master}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT

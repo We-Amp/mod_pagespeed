@@ -161,6 +161,10 @@ jobs:
         run: tools/ci/check-workflow-shape.sh
       - name: Workflow-shape gate fixtures
         run: tools/ci/test_check_workflow_shape.sh
+      - name: CI rot gate (self-test steps fail the job, compose project names)
+        run: python3 tools/ci/check_ci_rot.py
+      - name: CI rot gate fixtures
+        run: tools/ci/test_check_ci_rot.sh
       - name: Hygiene gate credential-rule fixtures
         run: tools/ci/test_check_public_hygiene.sh
 
