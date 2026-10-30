@@ -58,7 +58,7 @@ from pagespeed_test_framework.require import (
     require_no_auth_gate,
 )
 from pagespeed_test_framework.pytest_main import run_pytest
-from pagespeed_test_framework.client import VhostClient
+from pagespeed_test_framework.client import PageSpeedClient, VhostClient, WEBP_USER_AGENT
 from pagespeed_test_framework import flush_origin
 from pagespeed_test_framework.streaming import fetch_chunks
 
@@ -1228,6 +1228,22 @@ class TestVhostClient:
         assert request[0] == "GET http://ipro-for-browser.example.com/images/Puzzle.jpg HTTP/1.1"
         assert _header_lines(request, "User-Agent") == ["User-Agent: webp"]
 
+    def test_with_webp_sends_user_agent_and_accept(self, capture_server):
+        client = self._client(capture_server, "ipro-for-browser.example.com")
+        client.with_webp().get("/images/Puzzle.jpg")
+        request = capture_server.captured[0]
+        assert request[0] == "GET http://ipro-for-browser.example.com/images/Puzzle.jpg HTTP/1.1"
+        assert _header_lines(request, "Accept") == ["Accept: image/webp"]
+
+    def test_plain_client_sends_no_accept(self, capture_server):
+        self._client(capture_server).get("/x")
+        assert _header_lines(capture_server.captured[0], "Accept") == []
+
+    def test_per_call_accept_overrides_client_accept(self, capture_server):
+        self._client(capture_server).with_webp().get("/x", headers={"Accept": "text/html"})
+        assert _header_lines(capture_server.captured[0], "Accept") == ["Accept: text/html"]
+
+
     def test_base_url(self):
         assert VhostClient("cdn.pm.example.com", "localhost", 8081).base_url == (
             "http://cdn.pm.example.com"
@@ -1724,3 +1740,16 @@ if __name__ == "__main__":
     # so the default runs this file; the exit-status regression guard passes
     # a synthetic case file, driving this exact shipped entry point.
     run_pytest(sys.argv[1:] or [__file__, "-v"])
+
+
+class TestPageSpeedClientWebp:
+    def test_with_webp_sends_user_agent_and_accept(self, capture_server):
+        client = PageSpeedClient("127.0.0.1", capture_server.server_address[1])
+        client.with_webp().get("/x")
+        request = capture_server.captured[0]
+        assert _header_lines(request, "Accept") == ["Accept: image/webp"]
+        assert _header_lines(request, "User-Agent") == [f"User-Agent: {WEBP_USER_AGENT}"]
+
+    def test_plain_client_sends_no_accept(self, capture_server):
+        PageSpeedClient("127.0.0.1", capture_server.server_address[1]).get("/x")
+        assert _header_lines(capture_server.captured[0], "Accept") == []

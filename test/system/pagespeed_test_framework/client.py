@@ -217,6 +217,9 @@ WEBP_USER_AGENT = (
     "AppleWebKit/535.19 (KHTML, like Gecko) Chrome/80.0.1025.166 Safari/535.19"
 )
 
+# Accept value of a WebP-capable client: WebP capability is read from Accept.
+WEBP_ACCEPT = "image/webp"
+
 # WebP with animated WebP support User-Agent (matches bash test webp-animated)
 WEBP_ANIMATED_USER_AGENT = "webp-animated"
 
@@ -311,6 +314,7 @@ class PageSpeedClient:
         timeout: float = 30.0,
         user_agent: str = DEFAULT_USER_AGENT,
         use_https: bool = False,
+        accept: Optional[str] = None,
     ):
         """Initialize the client.
 
@@ -320,6 +324,8 @@ class PageSpeedClient:
             timeout: Connection timeout in seconds
             user_agent: User-Agent header value
             use_https: Use HTTPS instead of HTTP
+            accept: Accept header sent on every request (None sends none);
+                a per-call ``headers={"Accept": ...}`` overrides it
         """
         self.host = host
         self.port = port
@@ -330,6 +336,7 @@ class PageSpeedClient:
         self.timeout = timeout * _TIMEOUT_MULTIPLIER
         self.user_agent = user_agent
         self.use_https = use_https
+        self.accept = accept
 
     def _make_connection(self) -> Union[http.client.HTTPConnection, http.client.HTTPSConnection]:
         """Create a new HTTP(S) connection."""
@@ -478,6 +485,8 @@ class PageSpeedClient:
     ) -> Response:
         """Internal method to perform HTTP requests."""
         request_headers = {"User-Agent": self.user_agent}
+        if self.accept:
+            request_headers["Accept"] = self.accept
         if headers:
             request_headers.update(headers)
 
@@ -840,6 +849,7 @@ class PageSpeedClient:
             timeout=self._raw_timeout,
             user_agent=WEBP_USER_AGENT,
             use_https=self.use_https,
+            accept=WEBP_ACCEPT,
         )
 
 
@@ -888,6 +898,8 @@ class ProxiedPageSpeedClient(PageSpeedClient):
     ) -> Response:
         """Perform request through proxy."""
         request_headers = {"User-Agent": self.user_agent, "Host": f"{self.host}:{self.port}"}
+        if self.accept:
+            request_headers["Accept"] = self.accept
         if headers:
             request_headers.update(headers)
 
@@ -945,8 +957,9 @@ class VhostClient(PageSpeedClient):
         proxy_port: int,
         timeout: float = 30.0,
         user_agent: str = DEFAULT_USER_AGENT,
+        accept: Optional[str] = None,
     ):
-        super().__init__(vhost, 80, timeout, user_agent)
+        super().__init__(vhost, 80, timeout, user_agent, accept=accept)
         self.vhost = vhost
         self.proxy_host = proxy_host
         self.proxy_port = proxy_port
@@ -956,19 +969,25 @@ class VhostClient(PageSpeedClient):
         """http://<vhost> -- the bash suite's per-vhost URL prefix."""
         return f"http://{self.vhost}"
 
-    def with_user_agent(self, user_agent: str) -> "VhostClient":
-        """Return a client for the same vhost that sends another User-Agent."""
+    def with_user_agent(
+        self, user_agent: str, accept: Optional[str] = None
+    ) -> "VhostClient":
+        """Return a client for the same vhost that sends another User-Agent.
+
+        The Accept header is kept unless ``accept`` replaces it.
+        """
         return VhostClient(
             self.vhost,
             self.proxy_host,
             self.proxy_port,
             timeout=self._raw_timeout,
             user_agent=user_agent,
+            accept=accept if accept is not None else self.accept,
         )
 
     def with_webp(self) -> "VhostClient":
-        """Same vhost, WebP-capable User-Agent (see PageSpeedClient.with_webp)."""
-        return self.with_user_agent(WEBP_USER_AGENT)
+        """Same vhost, WebP-capable User-Agent and Accept: image/webp."""
+        return self.with_user_agent(WEBP_USER_AGENT, accept=WEBP_ACCEPT)
 
     def _make_connection(self) -> http.client.HTTPConnection:
         """Connect to the secondary server, never to the vhost name."""
@@ -988,6 +1007,8 @@ class VhostClient(PageSpeedClient):
         if not path.startswith("/"):
             raise ValueError(f"VhostClient paths start with '/', got {path!r}")
         request_headers = {"User-Agent": self.user_agent, "Host": self.vhost}
+        if self.accept:
+            request_headers["Accept"] = self.accept
         if headers:
             request_headers.update(headers)
         target = f"http://{self.vhost}{path}"
