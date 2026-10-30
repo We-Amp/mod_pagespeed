@@ -330,7 +330,7 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
                         "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Cache-Control: max-age=0, private\r\n"
-                        "X-Page-Speed: \r\n"
+                        "X-Page-Speed: on\r\n"
                         "HeadersComplete: 1\r\n\r\n"),
                  get_headers.ToString());
   }
@@ -520,7 +520,7 @@ TEST_F(ProxyInterfaceTest, HeadRequest) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Cache-Control: max-age=0, private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
   EXPECT_EQ(set_text, get_text);
@@ -542,7 +542,7 @@ TEST_F(ProxyInterfaceTest, HeadRequest) {
       "HTTP/1.0 200 OK\r\n"
       "Content-Type: text/html\r\n"
       "X-Background-Fetch: 0\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
   EXPECT_TRUE(get_text.empty());
@@ -580,7 +580,7 @@ TEST_F(ProxyInterfaceTest, RedirectRequestWhenDomainRewriterEnabled) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Cache-Control: max-age=0, private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
 }
@@ -672,7 +672,7 @@ TEST_F(ProxyInterfaceTest, HeadResourceRequest) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:56:26 GMT\r\n"
       "Cache-Control: max-age=300,private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n";
 
   // We're not going to image-compress so we don't need our mock image
@@ -715,7 +715,7 @@ TEST_F(ProxyInterfaceTest, HeadResourceRequest) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:56:26 GMT\r\n"
       "Cache-Control: max-age=300,private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n";
 
   EXPECT_EQ(expected_response_headers_string, response_headers.ToString());

@@ -477,6 +477,17 @@ EOF
 EOF
     fi
 
+    # Version-in-headers mode (opt-in): PAGESPEED_TEST_EXPOSE_VERSION=1 runs the
+    # suite with ExposeVersionInHeaders on, so the PageSpeed response header
+    # carries the product version instead of the generic "on".
+    if [ "$NO_MODULE" = false ] && [ "${PAGESPEED_TEST_EXPOSE_VERSION:-0}" = "1" ]; then
+        cat >> "$NGINX_CONFIG_FILE" << EOF
+    # Version in headers (PAGESPEED_TEST_EXPOSE_VERSION=1)
+    pagespeed ExposeVersionInHeaders on;
+
+EOF
+    fi
+
     # POST-echo origin for the in-place method tests: answers POST with a
     # different cacheable body than GET, so a POST recorded into the
     # in-place cache is observable from a later GET. No PageSpeed here --

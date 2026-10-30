@@ -184,7 +184,7 @@ void ResourceFetch::HandleHeadersComplete() {
   // response_headers()->Add(HttpAttributes::kVary, "Accept-Encoding");
 
   response_headers()->Add(kPageSpeedHeader,
-                          driver_->options()->x_header_value());
+                          driver_->options()->EffectiveXHeaderValue());
   SharedAsyncFetch::HandleHeadersComplete();
 }
 

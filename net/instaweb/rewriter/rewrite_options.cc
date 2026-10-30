@@ -304,6 +304,8 @@ const char RewriteOptions::kUseExperimentalJsMinifier[] =
 const char RewriteOptions::kUseFallbackPropertyCacheValues[] =
     "UseFallbackPropertyCacheValues";
 const char RewriteOptions::kUseImageScanlineApi[] = "UseImageScanlineApi";
+const char RewriteOptions::kExposeVersionInHeaders[] =
+    "ExposeVersionInHeaders";
 const char RewriteOptions::kXModPagespeedHeaderValue[] = "XHeaderValue";
 const char RewriteOptions::kXPsaBlockingRewrite[] = "BlockingRewriteKey";
 

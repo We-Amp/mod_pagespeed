@@ -463,7 +463,9 @@ $smokeScript = {
     # Hard-assert the version string.
     # kModPagespeedVersion shape: MAJOR.MINOR.BUILD[-PRERELEASE]
     # e.g. "1.1.0-beta.10" or "1.1.0" for a stable release.
-    if ($expectedVersion -and ($hdr -notmatch [regex]::Escape($expectedVersion))) {
+    # The header reports the generic value "on" unless ExposeVersionInHeaders is
+    # set, so "on" is accepted alongside the version string.
+    if ($expectedVersion -and ($hdr -ne 'on') -and ($hdr -notmatch [regex]::Escape($expectedVersion))) {
         throw "X-Page-Speed header '$hdr' does not contain expected version string '$expectedVersion'"
     }
 

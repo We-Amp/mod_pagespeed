@@ -803,6 +803,13 @@ pagespeed MessagesPath /pagespeed_message
 pagespeed GlobalAdminPath /pagespeed_global_admin
 "@
 
+        # Version-in-headers mode (opt-in): PAGESPEED_TEST_EXPOSE_VERSION=1
+        # writes ExposeVersionInHeaders on, so X-Page-Speed carries the product
+        # version instead of the generic "on". The default rig leaves it off.
+        if ($env:PAGESPEED_TEST_EXPOSE_VERSION -eq '1') {
+            $pagespeedConfig += "`r`npagespeed ExposeVersionInHeaders on`r`n"
+        }
+
         # ZeroCopy M1 merge-gate rig config (opt-in). The gate integration
         # test (iis/test_iis_zerocopy_gate.py) needs the aliased serve on and a
         # Cyclone volume small enough that flood writes wrap it mid-serve, so

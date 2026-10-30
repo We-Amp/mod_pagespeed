@@ -1105,6 +1105,13 @@ fi
 # silent-degrade scan only sees lines the upgraded module wrote.
 LOG_OFFSET="$(in_ctr "stat -c %s ${ERROR_LOG} 2>/dev/null || echo 0")"
 LOG_OFFSET="${LOG_OFFSET//[^0-9]/}"; LOG_OFFSET="${LOG_OFFSET:-0}"
+# The PageSpeed header reports the generic "on" unless the server-wide opt-in is
+# set; the version-header assertion below needs it. A separate drop-in keeps the
+# customized conffile byte-identical (checked below).
+in_ctr "printf '<IfModule pagespeed_module>\n    ModPagespeedExposeVersionInHeaders on\n</IfModule>\n' > ${DROPIN_DIR}/expose-version.conf"
+if [[ "$FAMILY" == deb ]]; then
+  in_ctr "a2enconf -q expose-version" >/dev/null
+fi
 if configtest; then
   pass "post-upgrade configtest: Syntax OK (1.15 conffile + daemon drop-in accepted by ${RC})"
 else

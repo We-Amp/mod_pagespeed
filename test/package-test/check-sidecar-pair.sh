@@ -91,6 +91,7 @@ http {
   pagespeed on;
   pagespeed FileCachePath "$R/cache";
   pagespeed RewriteLevel CoreFilters;
+  pagespeed ExposeVersionInHeaders on;
   server {
     listen 8099;
     root $R/www;

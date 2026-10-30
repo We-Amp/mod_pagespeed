@@ -21,6 +21,7 @@ Ported from: pagespeed/system/system_tests/check_headers.sh
 These tests verify correct HTTP header handling.
 """
 
+import os
 import random
 import re
 
@@ -61,10 +62,16 @@ class TestPageSpeedHeader:
         assert header_value, \
             "Expected X-Mod-Pagespeed or X-Page-Speed header"
 
-        # Header should contain version number (e.g., 1.1.0-beta.1 or 1.13.35.2-0)
-        version_pattern = r"\d+\.\d+\.\d+[\w.\-]*"
-        assert re.search(version_pattern, header_value), \
-            f"Header should contain version number, got: {header_value}"
+        if os.environ.get("PAGESPEED_TEST_EXPOSE_VERSION") == "1":
+            # ExposeVersionInHeaders on: the product version
+            # (e.g., 2.7.0 or 2.7.0-rc.1).
+            version_pattern = r"\d+\.\d+\.\d+[\w.\-]*"
+            assert re.search(version_pattern, header_value), \
+                f"Header should contain version number, got: {header_value}"
+        else:
+            # Default: the generic value, no version.
+            assert header_value == "on", \
+                f"Header should be the generic value 'on', got: {header_value}"
 
 
 class TestDefaultFiltering:

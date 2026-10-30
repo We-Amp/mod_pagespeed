@@ -1335,6 +1335,7 @@ TEST_F(RewriteOptionsTest, LookupOptionByNameTest) {
       RewriteOptions::kEnrollExperiment,
       RewriteOptions::kExperimentCookieDurationMs,
       RewriteOptions::kExperimentSlot,
+      RewriteOptions::kExposeVersionInHeaders,
       RewriteOptions::kFetcherTimeOutMs,
       RewriteOptions::kFinderPropertiesCacheExpirationTimeMs,
       RewriteOptions::kFinderPropertiesCacheRefreshTimeMs,
@@ -4454,6 +4455,73 @@ TEST_F(RewriteOptionsTest, RenderOnlyDirectivesRejectedOn11) {
   EXPECT_EQ(RewriteOptions::kOptionOk,
             options_.ParseAndSetOptionFromName1("AgentOptimize", "on", &ok_msg,
                                                 &handler));
+}
+
+namespace {
+
+// Reaches set_default_x_header_value (protected), which is how every port
+// supplies the product version as the default of XHeaderValue.
+class VersionDefaultOptions : public RewriteOptions {
+ public:
+  explicit VersionDefaultOptions(ThreadSystem* thread_system)
+      : RewriteOptions(thread_system) {}
+  using RewriteOptions::set_default_x_header_value;
+};
+
+}  // namespace
+
+// The PageSpeed response header value: an explicit XHeaderValue wins, then
+// the ExposeVersionInHeaders opt-in (the version the port supplied as the
+// default), then the generic "on".
+TEST_F(RewriteOptionsTest, EffectiveXHeaderValuePrecedence) {
+  VersionDefaultOptions probe(&thread_system_);
+  probe.set_default_x_header_value("9.8.7");
+  NullMessageHandler handler;
+  GoogleString msg;
+
+  {  // Default: generic, no version.
+    std::unique_ptr<RewriteOptions> o(new RewriteOptions(&thread_system_));
+    EXPECT_EQ("on", o->EffectiveXHeaderValue());
+  }
+  {  // Opt-in: the version.
+    std::unique_ptr<RewriteOptions> o(new RewriteOptions(&thread_system_));
+    EXPECT_EQ(RewriteOptions::kOptionOk,
+              o->ParseAndSetOptionFromName1("ExposeVersionInHeaders", "on",
+                                            &msg, &handler));
+    EXPECT_EQ("9.8.7", o->EffectiveXHeaderValue());
+  }
+  {  // Custom value beats the opt-in.
+    std::unique_ptr<RewriteOptions> o(new RewriteOptions(&thread_system_));
+    o->set_expose_version_in_headers(true);
+    o->set_x_header_value("custom");
+    EXPECT_EQ("custom", o->EffectiveXHeaderValue());
+  }
+  {  // Custom value beats the default too.
+    std::unique_ptr<RewriteOptions> o(new RewriteOptions(&thread_system_));
+    o->set_x_header_value("custom");
+    EXPECT_EQ("custom", o->EffectiveXHeaderValue());
+  }
+  {  // An explicit empty value is a custom value.
+    std::unique_ptr<RewriteOptions> o(new RewriteOptions(&thread_system_));
+    o->set_expose_version_in_headers(true);
+    o->set_x_header_value("");
+    EXPECT_EQ("", o->EffectiveXHeaderValue());
+  }
+  probe.set_default_x_header_value("");
+  {  // Opt-in with no version supplied by the port falls back to "on".
+    std::unique_ptr<RewriteOptions> o(new RewriteOptions(&thread_system_));
+    o->set_expose_version_in_headers(true);
+    EXPECT_EQ("on", o->EffectiveXHeaderValue());
+  }
+}
+
+// Server-wide only: the vhost/location scope must reject it.
+TEST_F(RewriteOptionsTest, ExposeVersionInHeadersIsProcessScope) {
+  const RewriteOptions::PropertyBase* property =
+      RewriteOptions::LookupOptionByName("ExposeVersionInHeaders");
+  ASSERT_NE(nullptr, property);
+  EXPECT_EQ(RewriteOptions::kProcessScopeStrict, property->scope());
+  EXPECT_FALSE(options_.expose_version_in_headers());
 }
 
 }  // namespace net_instaweb

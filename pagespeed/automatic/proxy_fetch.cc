@@ -673,7 +673,8 @@ void ProxyFetch::HandleHeadersComplete() {
 
 void ProxyFetch::AddPagespeedHeader() {
   if (Options()->enabled()) {
-    response_headers()->Add(kPageSpeedHeader, Options()->x_header_value());
+    response_headers()->Add(kPageSpeedHeader,
+                            Options()->EffectiveXHeaderValue());
     response_headers()->ComputeCaching();
   }
 }

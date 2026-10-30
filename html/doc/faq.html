@@ -129,7 +129,7 @@ You should get something like:
 Date: Fri, 30 Sep 2016 15:36:57 GMT
 Server: Apache/2.4.7 (Ubuntu)
 ...
-X-Mod-Pagespeed: 1.11.33.4-0
+X-Mod-Pagespeed: on
 ...
 </pre>
   <dt>Nginx:<dd>
@@ -137,9 +137,14 @@ X-Mod-Pagespeed: 1.11.33.4-0
 Date: Fri, 30 Sep 2016 15:37:24 GMT
 Server: nginx/1.11.4
 ...
-X-Page-Speed: 1.11.33.4-0
+X-Page-Speed: on
 </pre>
 </dl>
+<p>
+The value is <code>on</code>; the product version is reported only when
+<a href="configuration#ExposeVersionInHeaders">ExposeVersionInHeaders</a>
+is set.
+</p>
 <p>
 If you don't see an <code>X-Mod-Pagespeed</code> header (Apache)
 or <code>X-Page-Speed</code> header (Nginx), this means that your webserver
