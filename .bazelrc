@@ -236,6 +236,14 @@ build:clang-asan --linkopt -fuse-ld=lld
 
 # macOS
 build:macos --cxxopt=-std=c++20 --host_cxxopt=-std=c++20
+# Apple clang's libc++ warns "The selected platform is no longer supported
+# by libc++" in every TU that touches it when the deployment target is below
+# its supported floor (the cc_configure default was 10.11; 171 such warnings
+# in one full local build). 11.0 is the arm64 floor. macOS is a dev-only
+# platform for this repo (shipped artifacts are Linux/Windows), so no
+# shipped-artifact compatibility is affected.
+build:macos --macos_minimum_os=11.0
+build:macos --host_macos_minimum_os=11.0
 build:macos --action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --host_action_env=PATH=/opt/homebrew/bin:/opt/local/bin:/usr/local/bin:/usr/bin:/bin
 build:macos --define tcmalloc=disabled
