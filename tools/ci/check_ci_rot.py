@@ -101,8 +101,8 @@ def check_test_steps(path, lines, errs):
             name = m.group(1)
             head, tail = text[: m.start(1)], text[m.end():]
             where = "%s:%d (%s)" % (path, n, name)
-            if re.search(r"\|\|(?!\s*(exit|return)\b)", tail):
-                errs.append(where + ": exit status swallowed by ||")
+            if re.search(r"\|\|(?!\s*(?:exit|return)(?:\s+[1-9][0-9]*)?\s*(?:$|[;&|)]))", tail):
+                errs.append(where + ": exit status swallowed by || (only a bare or non-zero exit/return may follow)")
             if re.search(r"(?<![|&])\|(?!\|)", tail):
                 errs.append(where + ": output piped, exit status masked")
             if re.search(r"&\s*$", tail):
