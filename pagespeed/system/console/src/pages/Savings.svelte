@@ -230,7 +230,7 @@
               </div>
             </dl>
             <p class="since" data-testid="since-module" title={moduleSince?.iso ?? undefined}>
-              {moduleSince?.text ?? "since restart"} (web server restart)
+              {moduleSince?.text ?? "since restart"} (web server restart or reload)
               {#if moduleSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
             </p>
             {#if rows.some((row) => row.regressed)}
@@ -343,7 +343,7 @@
             {#if hitRate && hitRate.percent !== null}
               <div class="headline">
               <!-- Computed from module counters, so it carries the module's time base. -->
-              <h3 class="window-heading" data-testid="window-heading-module">Module counters (since web server restart)</h3>
+              <h3 class="window-heading" data-testid="window-heading-module">Module counters (since web server restart or reload)</h3>
               <dl class="figures">
                 <div class="figure">
                   <dt
@@ -365,7 +365,7 @@
                 </div>
               </dl>
               <p class="since" data-testid="since-hit-rate" title={moduleSince?.iso ?? undefined}>
-                {moduleSince?.text ?? "since restart"} (web server restart)
+                {moduleSince?.text ?? "since restart"} (web server restart or reload)
                 {#if moduleSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
               </p>
               </div>

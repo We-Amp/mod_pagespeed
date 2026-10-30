@@ -237,7 +237,7 @@
               </div>
             </dl>
             <p class="since" data-testid="since-module" title={moduleSince?.iso ?? undefined}>
-              {moduleSince?.text ?? "since restart"} (web server restart)
+              {moduleSince?.text ?? "since restart"} (web server restart or reload)
               {#if moduleSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
             </p>
           {:else}

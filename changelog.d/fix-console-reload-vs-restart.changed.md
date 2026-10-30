@@ -1,0 +1,1 @@
+- The admin console now labels the statistics time base "web server restart or reload", because a graceful configuration reload also starts the counters over and the console cannot tell the two apart.

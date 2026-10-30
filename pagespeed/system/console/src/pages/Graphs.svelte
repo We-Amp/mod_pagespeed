@@ -18,7 +18,7 @@
   // feeds into the same series: short ranges gain a dense live tail, wide
   // ranges get their last hour densified. Counters are drawn as rates per
   // second once the module names its gauges (or the viewer asks); gauges
-  // are always raw, and a counter reset (a restart) is a gap, not a spike.
+  // are always raw, and a counter reset (a restart or a configuration reload) is a gap, not a spike.
   import { usePolling } from "$lib/api/polling.svelte";
   import type { TimeRangeParams } from "$lib/api/types";
   import PageHeader from "$lib/PageHeader.svelte";
