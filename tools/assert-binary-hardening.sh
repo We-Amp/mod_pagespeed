@@ -24,6 +24,7 @@
 set -euo pipefail
 
 BIN="${1:?usage: assert-binary-hardening.sh <binary>}"
+command -v readelf >/dev/null || { echo "FAIL: readelf not found" >&2; exit 1; }
 [ -f "${BIN}" ] || { echo "FAIL: ${BIN} not found" >&2; exit 1; }
 
 echo "=== binary-hardening assertion: ${BIN} ==="
