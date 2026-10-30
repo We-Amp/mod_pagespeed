@@ -137,8 +137,11 @@ void ApacheFetch::SendOutHeaders() {
     // incorrect MIME types if the server sends the response header
     // "X-Content-Type-Options: nosniff". This is a security feature
     // that helps prevent attacks based on MIME-type confusion.
-    if (!is_proxy_) {
-      response_headers()->Add("X-Content-Type-Options", "nosniff");
+    // Only when absent: the admin and daemon leaves already carry their own.
+    if (!is_proxy_ &&
+        !response_headers()->Has(HttpAttributes::kXContentTypeOptions)) {
+      response_headers()->Add(HttpAttributes::kXContentTypeOptions,
+                              HttpAttributes::kNosniff);
     }
 
     // TODO(sligocki): Add X-Mod-Pagespeed header.
