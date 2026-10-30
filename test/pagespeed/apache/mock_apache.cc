@@ -82,7 +82,7 @@ void MockApache::PrepareRequest(request_rec* request) {
         apr_palloc(request->pool, sizeof(ap_filter_t)));
     (*filter)->frec = static_cast<ap_filter_rec_t*>(
         apr_palloc(request->pool, sizeof(ap_filter_rec_t)));
-    const char* filter_name;
+    const char* filter_name = nullptr;
     switch (i) {
       case 0:
         filter_name = "MOD_EXPIRES";

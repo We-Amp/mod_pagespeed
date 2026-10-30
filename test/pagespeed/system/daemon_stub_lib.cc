@@ -215,17 +215,17 @@ struct StubNotifyParams {
 };
 
 // The peer's published error codes, in its numbering.  Only the ones some
-// caller distinguishes by value or a test steers a read into are here;
-// corrupted and busy exist for exactly one purpose: ps_cache_read_alternate
-// being asked to fail the way the real volume does -- neither found nor
-// not-found.
+// caller distinguishes by value or a test steers a read into are here.
+// Corrupted (3) and busy (6) deliberately carry no constant: their only
+// role is ps_cache_read_alternate being asked to fail the way the real
+// volume does -- neither found nor not-found -- and the tests steer that
+// by literal value through PS_STUB_READ_ALT_STATUS, carrying their own
+// named copies (daemon_serve_arm_test.cc).
 constexpr int kOk = 0;
 constexpr int kErrNotFound = 1;
 constexpr int kErrIo = 2;
-constexpr int kErrCorrupted = 3;
 constexpr int kErrNoSpace = 4;
 constexpr int kErrInvalidArg = 5;
-constexpr int kErrBusy = 6;
 constexpr int kErrClosed = 7;
 
 constexpr uint8_t kSentinelOriginal = 0x0C;
