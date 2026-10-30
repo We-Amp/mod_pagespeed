@@ -122,10 +122,6 @@ const char* kValidOpaqueGifImages[] = {
 
 const char* kValidTransparentGifImages[] = {"tr-basi4a08", "tr-basn4a08"};
 
-const size_t kValidOpaqueGifImageCount = std::size(kValidOpaqueGifImages);
-const size_t kValidTransparentGifImageCount =
-    std::size(kValidTransparentGifImages);
-
 const char kAnimatedGif[] = "animated";
 const char kBadGif[] = "bad";
 const char kFrameSmallerThanScreen[] = "frame_smaller_than_screen";

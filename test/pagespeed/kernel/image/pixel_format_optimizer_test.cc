@@ -56,7 +56,6 @@ const char* kUnoptimizableImages[] = {
     "alpha_32x32.png",             // alpha, first few pixels are transparent
     "partially_opaque_32x20.png",  // alpha, only last pixel is transparent
 };
-const size_t kUnoptimizableImageCount = std::size(kUnoptimizableImages);
 
 // Message to ignore.
 const char kMessagePatternScanline[] = "*scanline*";

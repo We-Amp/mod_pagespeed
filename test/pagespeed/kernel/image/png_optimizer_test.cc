@@ -557,7 +557,6 @@ bool InitializeEntireReader(const GoogleString& image_string,
 
 const size_t kValidImageCount = std::size(kValidImages);
 const size_t kInvalidFileCount = std::size(kInvalidFiles);
-const size_t kOpaqueImagesWithAlphaCount = std::size(kOpaqueImagesWithAlpha);
 
 class PngOptimizerTest : public testing::Test {
  public:
