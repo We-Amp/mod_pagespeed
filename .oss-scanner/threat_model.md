@@ -83,9 +83,10 @@ Highest value, roughly in order of exposure:
 - The admin and statistics handlers (`pagespeed/system/admin_site.cc`,
   `pagespeed/system/admin_daemon_handler.cc`, console, messages, rule-pack
   views): request routing, escaping of anything reflected into HTML, and the
-  beacon handlers. The module does not block non-loopback clients itself; it
-  logs a warning. Access control is the web server's ACL on the handler
-  locations plus the `AdminDomains`/`StatisticsDomains` family of options.
+  beacon handlers. Access control for these handlers is delegated by design
+  to the web server's ACL on the handler locations plus the
+  `AdminDomains`/`StatisticsDomains` family of options; the module warns when
+  a handler is reachable from a non-loopback client.
   A finding is module behaviour that gets around a correctly configured ACL,
   for example an admin handler reachable through a URL the `<Location>` or
   `location` block does not cover; an unconfigured ACL is operator
@@ -96,8 +97,7 @@ Highest value, roughly in order of exposure:
 - The server glue in `pagespeed/apache`, `pagespeed/nginx` and
   `pagespeed/system`: request and response header handling, body streaming,
   flush and buffering limits, and process and thread lifecycle (the engine is
-  multi-threaded; data races on request-path objects have been real bugs
-  here).
+  multi-threaded, so thread safety on the request path is in scope).
 
 Lower priority or out of scope:
 
@@ -115,6 +115,9 @@ Lower priority or out of scope:
   finding to the component holding its root cause.
 
 ## How to exercise it
+
+This section describes the scanner's build image; outside it, see the
+repository's build documentation.
 
 The checkout is built at `/src`. `/src/user.bazelrc` carries the settings of
 this image (in-image output base, the project's clang toolchain config,
@@ -236,12 +239,9 @@ directly.
 ## Anything to leave alone
 
 - The `html/` documentation archive.
-- Known, deliberate behaviour: the Redis and Memcached tests skipping without
-  services.
-- Two nginx system tests that are not module bugs: the framework self-test
-  `TestLaneFixtureGate::test_known_names_are_pinned` (its pinned list lags
-  `conftest.py`) and `TestConsoleJsonHandler::test_json_handler_returns_the_logged_series`
-  when it fails only in the full run (it passes on its own; the comparison
-  is order-sensitive).
+- Two nginx system tests with known test-harness flakiness,
+  `TestLaneFixtureGate::test_known_names_are_pinned` and
+  `TestConsoleJsonHandler::test_json_handler_returns_the_logged_series`;
+  failures in them are not module findings.
 - Thread-safety findings confined to test fixtures or to the single-threaded
   command-line tools.
