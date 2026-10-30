@@ -457,10 +457,12 @@ RewriteResult CacheExtender::RewriteLoadedResource(
   server_context()->MergeNonCachingResponseHeaders(input_resource,
                                                    output_resource);
   if (output_type->IsSvg()) {
-    // SVG can carry script. Whatever the origin served, a hashed SVG
-    // resource is always delivered sandboxed, so it cannot run script in
-    // the serving origin if it is opened as a document.
-    output_resource->response_headers()->Replace(
+    // SVG can carry script. The origin's own policy (copied by the merge
+    // above) is kept and sandbox is added: browsers enforce every
+    // Content-Security-Policy header, so adding one only tightens. A hashed
+    // SVG resource cannot run script in the serving origin if it is opened
+    // as a document.
+    output_resource->response_headers()->Add(
         HttpAttributes::kContentSecurityPolicy, "sandbox");
   }
   if (driver()->Write(ResourceVector(1, input_resource), contents, output_type,

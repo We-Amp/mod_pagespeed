@@ -539,6 +539,29 @@ TEST_F(CacheExtenderSvgTest, ExtendSvgImage) {
             jpg_headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
 }
 
+TEST_F(CacheExtenderSvgTest, SvgKeepsOriginContentSecurityPolicy) {
+  InitTest(kShortTtlSec);
+  ResponseHeaders origin_headers;
+  DefaultResponseHeaders(*MimeTypeToContentType("image/svg+xml"), kShortTtlSec,
+                         &origin_headers);
+  origin_headers.Add(HttpAttributes::kContentSecurityPolicy,
+                     "default-src 'none'");
+  SetFetchResponse(AbsolutifyUrl("d.svg"), origin_headers, kSvgData);
+  ValidateExpected(
+      "svg_keeps_csp", "<img src='d.svg'/>",
+      StrCat("<img src='", Encode("", kFilterId, "0", "d.svg", "svg"), "'/>"));
+
+  GoogleString content;
+  ResponseHeaders headers;
+  ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "d.svg", "svg", &content,
+                            &headers));
+  ConstStringStarVector values;
+  ASSERT_TRUE(headers.Lookup(HttpAttributes::kContentSecurityPolicy, &values));
+  ASSERT_EQ(2, values.size());
+  EXPECT_THAT(std::vector<GoogleString>({*values[0], *values[1]}),
+              ::testing::UnorderedElementsAre("default-src 'none'", "sandbox"));
+}
+
 TEST_F(CacheExtenderSvgTest, SvgNotInlinedOrRewrittenByImageFilters) {
   options()->EnableFilter(RewriteOptions::kInlineImages);
   options()->EnableFilter(RewriteOptions::kRecompressPng);
