@@ -3520,7 +3520,8 @@ TEST_F(ImageRewriteTest, AvifRecompressAloneDoesNotSelectAnimatedKey) {
   ResetForAvif();
   ResourceContext context = MintingResourceContext();
   EXPECT_EQ(ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA, context.avif_level());
-  EXPECT_EQ("vAg", ImageUrlEncoder::CacheKeyFromResourceContext(context));
+  // No WebP filter is enabled, so the WebP token is the NONE token '.'.
+  EXPECT_EQ(".Ag", ImageUrlEncoder::CacheKeyFromResourceContext(context));
 }
 
 TEST_F(ImageRewriteTest, AvifAnimatedConversionSelectsAnimatedKey) {

@@ -93,12 +93,12 @@ class ImageUrlEncoder : public UrlSegmentEncoder {
 
   // Set AVIF level according to the request capabilities.  This is a pure
   // pre-decode request capability (from request_properties.SupportsAvif*() and
-  // the enabled AVIF filters), carrying NO image-byte input, structurally
-  // mirroring SetLibWebpLevel.  The two are no longer an exact mirror at the
-  // top tier: SetLibWebpLevel takes its animated level only under
-  // convert_to_webp_animated, whereas SetAvifLevel still admits recompress_avif
-  // into AVIF_ANIMATED.  avif_level and libwebp_level are independent: both may
-  // be non-NONE for a both-capable request, and both ride in the metadata cache
+  // the enabled AVIF filters), carrying NO image-byte input, and mirroring
+  // SetLibWebpLevel: the animated level is taken only under
+  // convert_to_avif_animated, and recompress_avif selects the lossless+alpha
+  // level for animated-capable clients.  avif_level and libwebp_level are
+  // independent: both may be
+  // non-NONE for a both-capable request, and both ride in the metadata cache
   // key (CacheKeyFromResourceContext).  The per-image format choice is made
   // downstream at encode time (Stream E), recorded in the CachedResult output
   // extension, never folded back into this level.
