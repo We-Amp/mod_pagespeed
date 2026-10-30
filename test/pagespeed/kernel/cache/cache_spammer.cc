@@ -37,14 +37,13 @@ namespace net_instaweb {
 CacheSpammer::CacheSpammer(ThreadSystem* runtime,
                            ThreadSystem::ThreadFlags flags,
                            CacheInterface* cache, bool expecting_evictions,
-                           bool do_deletes, const char* value_prefix, int index,
+                           bool do_deletes, const char* value_prefix,
                            int num_iters, int num_inserts)
     : Thread(runtime, "cache_spammer", flags),
       cache_(cache),
       expecting_evictions_(expecting_evictions),
       do_deletes_(do_deletes),
       value_prefix_(value_prefix),
-      index_(index),
       num_iters_(num_iters),
       num_inserts_(num_inserts),
       mutex_(runtime->NewMutex()),
@@ -101,11 +100,10 @@ void CacheSpammer::RunTests(int num_threads, int num_iters, int num_inserts,
 
   // First, create all the threads.
   for (int i = 0; i < num_threads; ++i) {
-    spammers[i] =
-        new CacheSpammer(thread_runtime, ThreadSystem::kJoinable,
-                         cache,  // lru_cache_.get() will make this fail.
-                         expecting_evictions, do_deletes, value_prefix, i,
-                         num_iters, num_inserts);
+    spammers[i] = new CacheSpammer(
+        thread_runtime, ThreadSystem::kJoinable,
+        cache,  // lru_cache_.get() will make this fail.
+        expecting_evictions, do_deletes, value_prefix, num_iters, num_inserts);
   }
 
   // Then, start them.

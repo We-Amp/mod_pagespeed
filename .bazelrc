@@ -253,6 +253,25 @@ build:macos --cxxopt=-faligned-allocation --host_cxxopt=-faligned-allocation
 # Suppress 'register' keyword errors from gperf-generated code (deprecated in
 # C++17). -Wregister is C++/ObjC++-only, hence --cxxopt.
 build:macos --cxxopt=-Wno-register --host_cxxopt=-Wno-register
+# Bazel deliberately repeats cc_library linkopts once per contributing
+# library, and protobuf's macOS LINK_OPTS ("-lpthread -lm -framework
+# CoreFoundation", external/protobuf+/build_defs/cpp_opts.bzl) lands on
+# every protobuf library in a closure, on top of the toolchain's own
+# default link libs ("-ldl -lc++ -lm") and our daemon_adapter's -ldl.
+# ld64 dedupes them itself and warns about every duplicate; the flag is
+# ld64-only (GNU ld errors on it), hence macOS-only — the Linux link
+# line is untouched.
+build:macos --linkopt=-Wl,-no_warn_duplicate_libraries
+build:macos --host_linkopt=-Wl,-no_warn_duplicate_libraries
+# Third-party code is not ours to fix (e.g. re2's deprecated MutexLock,
+# cyclone's thread-safety annotations, spdlog's deprecated fmt
+# conversion); keep first-party warnings visible by disabling ALL
+# warnings for translation units under external/ only. The regex
+# matches the external exec paths; main-repo files never start with
+# external/, so first-party diagnostics are unchanged. Linux legs need
+# the same boundary when compiler-warning enforcement lands in CI.
+build:macos --per_file_copt=external/.*@-w
+build:macos --host_per_file_copt=external/.*@-w
 
 # macOS ASAN/UBSAN
 build:macos-asan --config=asan

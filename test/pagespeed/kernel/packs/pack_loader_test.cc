@@ -569,9 +569,9 @@ TEST(PackLoaderErrorTest, PackIdMustMatchGrammar) {
 }
 
 TEST(PackLoaderTest, PackIdAcceptsGrammar) {
-  for (const std::string id : {std::string("edge-seo"),
-                               std::string("fixture-second"),
-                               std::string(64, 'a')}) {
+  for (const std::string& id :
+       {std::string("edge-seo"), std::string("fixture-second"),
+        std::string(64, 'a')}) {
     Json j = Base();
     j["pack"]["id"] = id;
     auto p = Load(j);

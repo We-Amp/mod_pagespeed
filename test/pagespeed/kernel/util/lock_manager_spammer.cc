@@ -51,15 +51,14 @@ namespace net_instaweb {
 LockManagerSpammer::LockManagerSpammer(
     Scheduler* scheduler, ThreadSystem::ThreadFlags flags,
     const StringVector& lock_names, ThreadSafeLockManager* lock_manager,
-    bool expecting_denials, bool delay_unlocks, int index, int num_iters,
-    int num_names, CountDown* pending_threads)
+    bool expecting_denials, bool delay_unlocks, int num_iters, int num_names,
+    CountDown* pending_threads)
     : Thread(scheduler->thread_system(), "lock_manager_spammer", flags),
       scheduler_(scheduler),
       lock_names_(lock_names),
       lock_manager_(lock_manager),
       expecting_denials_(expecting_denials),
       delay_unlocks_(delay_unlocks),
-      index_(index),
       num_iters_(num_iters),
       num_names_(num_names),
       mutex_(scheduler->thread_system()->NewMutex()),
@@ -110,7 +109,7 @@ void LockManagerSpammer::RunTests(int num_threads, int num_iters, int num_names,
     spammers[i] =
         new LockManagerSpammer(scheduler, ThreadSystem::kJoinable, lock_names,
                                lock_manager, expecting_denials, delay_unlocks,
-                               i, num_iters, num_names, &pending_threads);
+                               num_iters, num_names, &pending_threads);
   }
 
   // Then, start them.
