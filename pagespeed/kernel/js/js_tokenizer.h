@@ -347,6 +347,13 @@ class JsTokenizer {
 bool SpeculativeRegexCanReassembleComment(
     StringPiece input, const char** no_block_end_from = nullptr);
 
+// Returns true if the given comment token is a block comment the minifier
+// retains verbatim: an IE conditional compilation comment (/*@ ... @*/) or a
+// licence/preserved comment (/*! ... */, or any block comment containing
+// "@license" or "@preserve"), which many libraries' licences require to stay
+// in redistributed copies.  Line comments are never retained.
+bool IsRetainedBlockComment(StringPiece token);
+
 // Structure to store RE2 patterns that can be shared by instances of
 // JsTokenizer.  These patterns are slightly expensive to compile, so we'd
 // rather not create one for every JsTokenizer instance, but unfortunately C++

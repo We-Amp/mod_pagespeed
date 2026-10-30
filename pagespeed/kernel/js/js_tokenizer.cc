@@ -237,11 +237,11 @@ bool CommentHasLineTerminator(StringPiece token) {
           token.find("\xE2\x80\xA9") != StringPiece::npos);
 }
 
-// Returns true if the given comment token is shaped like an IE conditional
-// compilation comment (/*@...@*/), which the minifier retains verbatim.
+// Returns true if the given comment token is one the minifier retains
+// verbatim (an IE conditional compilation comment or a licence comment; see
+// IsRetainedBlockComment).
 bool IsConditionalCompilationComment(StringPiece token) {
-  return (token.size() >= 6 && strings::StartsWith(token, "/*@") &&
-          strings::EndsWith(token, "@*/"));
+  return IsRetainedBlockComment(token);
 }
 
 // Returns the index of the first byte at or after `start` that is neither
@@ -2774,6 +2774,19 @@ JsTokenizerPatterns::JsTokenizerPatterns()
 }
 
 JsTokenizerPatterns::~JsTokenizerPatterns() {}
+
+bool IsRetainedBlockComment(StringPiece token) {
+  if (token.size() >= 6 && strings::StartsWith(token, "/*@") &&
+      strings::EndsWith(token, "@*/")) {
+    return true;
+  }
+  if (token.size() < 4 || !strings::StartsWith(token, "/*") ||
+      !strings::EndsWith(token, "*/")) {
+    return false;
+  }
+  return token[2] == '!' || token.find("@license") != StringPiece::npos ||
+         token.find("@preserve") != StringPiece::npos;
+}
 
 }  // namespace js
 

@@ -932,6 +932,32 @@ TEST_F(JavascriptFilterTest, RewriteEs2020Script) {
   EXPECT_STREQ(kEs2020MinJs, content);
 }
 
+TEST_F(JavascriptFilterTest, KeepsLicenseComments) {
+  // Licence comments (/*! ... */, @license, @preserve) survive minification
+  // of the served resource; ordinary comments are still removed.
+  const char kLicensedJs[] =
+      "/*! Acme v1 (c) Acme, MIT */\n"
+      "/* removed */\n"
+      "var   a  =  1;\n"
+      "/** @license Acme MIT */\n"
+      "var   b  =  2;\n"
+      "/* @preserve keep */\n"
+      "var   c  =  3;\n";
+  const char kLicensedMinJs[] =
+      "/*! Acme v1 (c) Acme, MIT */var a=1;/** @license Acme MIT */"
+      "var b=2;/* @preserve keep */var c=3;";
+  InitFilters();
+  SetResponseWithDefaultHeaders("licensed.js", kContentTypeJavascript,
+                                kLicensedJs, 100);
+  const GoogleString expected_url =
+      Encode("", kFilterId, "0", "licensed.js", "js");
+  ValidateExpected("keeps_license_comments", GenerateHtml("licensed.js"),
+                   GenerateHtml(expected_url.c_str()));
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, expected_url), &content));
+  EXPECT_STREQ(kLicensedMinJs, content);
+}
+
 TEST_F(JavascriptFilterTest, PreserveEs2020ReservedError) {
   // `enum` is reserved in all modes; the minifier must fail on it, preserve
   // the original resource, and bump the failure stat.
