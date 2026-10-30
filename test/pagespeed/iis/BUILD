@@ -601,3 +601,15 @@ pagespeed_cc_test(
         "//pagespeed/system:daemon_serve_arm",
     ],
 )
+
+# The experiment arm a request is assigned to is handed to every later options
+# clone of the same request. Windows-only: depends on iis_module.
+pagespeed_cc_test(
+    name = "iis_experiment_assignment_test",
+    srcs = ["iis_experiment_assignment_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_module",
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)

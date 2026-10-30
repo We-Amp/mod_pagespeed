@@ -1,0 +1,1 @@
+- **A/B experiments on IIS now apply the visitor's arm to the HTML.** Visitors were given an experiment cookie, but the page was rewritten without that arm's filters, so experiment results on IIS were not meaningful. The arm's settings are now applied to the rewritten HTML, and the cookie is still written once. https://github.com/We-Amp/mod_pagespeed/issues/312

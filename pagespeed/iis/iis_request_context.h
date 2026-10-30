@@ -10,6 +10,7 @@
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/kernel/thread/win_mutex.h"
 #include "pagespeed/iis/iis_base_fetch.h"
+#include "pagespeed/iis/iis_experiment_assignment.h"
 #include "pagespeed/iis/iis_process_context.h"
 #include "pagespeed/iis/iis_server_context.h"
 #include "pagespeed/iis/iis_message_handler.h"
@@ -48,7 +49,6 @@ public:
 		, in_place_(false)
 		, driver_(nullptr)
 		, recorder_(nullptr)
-		, experiment_classified_(false)
 		, rewrite_html_(false)
 		, outer_context_(outer_context)
 	{
@@ -108,8 +108,7 @@ public:
 	void set_driver(RewriteDriver* x) { driver_ = x; }
 	void set_recorder(IproRecorder* x) { recorder_ = x; }
 	IproRecorder* recorder() { return recorder_; }
-	bool experiment_classified() { return experiment_classified_;}
-	void set_experiment_classified(bool x) { experiment_classified_ = x; }
+	IisExperimentAssignment* experiment_assignment() { return &experiment_assignment_; }
 	bool rewrite_html() { return rewrite_html_;}
 	void set_rewrite_html(bool x) { rewrite_html_ = x; }
 	IisModuleRequestContext* outer_context() { return outer_context_; }
@@ -142,7 +141,7 @@ private:
 	bool in_place_;
 	RewriteDriver* driver_;
 	IproRecorder* recorder_;
-	bool experiment_classified_;
+	IisExperimentAssignment experiment_assignment_;
 	bool rewrite_html_;
 
 	IisInnerRequestContext(const IisInnerRequestContext&) = delete;

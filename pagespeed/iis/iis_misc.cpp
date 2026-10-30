@@ -138,12 +138,14 @@ namespace net_instaweb
 		const StringPiece& host)
 	{
 		CHECK(options->running_experiment());
-		if (ctx->experiment_classified()) {
+		if (ctx->experiment_assignment()->ApplyTo(options)) {
+			// Assigned, and the cookie written, earlier in this request: this
+			// options clone is new, so give it the same arm.
 			return true;
 		}
-		ctx->set_experiment_classified(true);
 		
 		bool need_cookie = ctx->server_context()->experiment_matcher()->ClassifyIntoExperiment(*request_headers, *ctx->server_context()->user_agent_matcher(), options);
+		ctx->experiment_assignment()->Record(*options);
 
 		if (need_cookie && host.length() > 0) {
 			StdTimer posix_timer;
