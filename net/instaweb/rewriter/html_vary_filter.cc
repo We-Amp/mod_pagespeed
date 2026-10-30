@@ -88,11 +88,23 @@ void HtmlVaryFilter::StartDocumentImpl() {
   }
   StringVector tokens;
   HtmlVaryTokens(*driver()->options(), &tokens);
+  bool added_token = false;
   for (const GoogleString& token : tokens) {
     if (!headers->HasValueCaseInsensitive(HttpAttributes::kVary, token)) {
       headers->Add(HttpAttributes::kVary, token);
       driver()->AddHtmlVaryTokenAdded(token);
+      added_token = true;
     }
+  }
+  // Add() marks the precomputed caching fields dirty, and the document's
+  // headers were already computed before the parse began (e.g. by
+  // ProxyFetch::AddPagespeedHeader). Restore the invariant that mutator
+  // establishes, so later readers of the caching fields (IsBrowserCacheable
+  // and friends) see valid data rather than tripping their DCHECKs. The
+  // tokens are named values and never '*', which is the only Vary input
+  // ComputeCaching() consults, so this recompute changes no cached value.
+  if (added_token) {
+    headers->ComputeCaching();
   }
 }
 

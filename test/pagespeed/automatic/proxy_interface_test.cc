@@ -297,11 +297,25 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
   GoogleString RedirectLocation(const GoogleString& original_url,
                                 const GoogleString& redirect_url);
 
+  // The fixture's default rewrite level, pinned here so the expected Vary
+  // lines below have a visible basis: kCoreFilters enables the image and
+  // user-agent dependent filters, so served documents carry the HTML Vary
+  // tokens (see HtmlVaryFilter::HtmlVaryTokens). The expectations spell the
+  // lines out literally on purpose: a derived expectation would also pass if
+  // the token rule itself regressed.
+  static const RewriteOptions::RewriteLevel kVaryBearingLevel =
+      RewriteOptions::kCoreFilters;
+
   void TestQueryParameters(StringPiece original_domain,
                            StringPiece redirect_domain,
                            bool add_params_to_redirect,
                            bool add_params_to_location) {
     // Test to check if we re-add our query params when we get a redirect.
+    // The global options are frozen by now, so pin the level on a clone.
+    std::unique_ptr<RewriteOptions> vary_level_options(
+        server_context()->global_options()->Clone());
+    vary_level_options->SetRewriteLevel(kVaryBearingLevel);
+    SetRewriteOptions(vary_level_options.get());
     const char kParams[] = "PageSpeedCssInlineMaxBytes=99";
     GoogleString original_url = StrCat(original_domain, "a/?x=y");
     GoogleString redirect_url =
@@ -334,6 +348,9 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
                         "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Cache-Control: max-age=0, private\r\n"
                         "X-Page-Speed: on\r\n"
+                        "Vary: Accept\r\n"
+                        "Vary: Save-Data\r\n"
+                        "Vary: User-Agent\r\n"
                         "HeadersComplete: 1\r\n\r\n"),
                  get_headers.ToString());
   }
@@ -501,7 +518,12 @@ TEST_F(ProxyInterfaceTest, SkipPropertyCacheLookupIfUrlBlacklisted) {
 }
 
 TEST_F(ProxyInterfaceTest, HeadRequest) {
-  // Test to check if we are handling Head requests correctly.
+  // Test to check if we are handling Head requests correctly. The global
+  // options are frozen by now, so pin the level on a clone.
+  std::unique_ptr<RewriteOptions> vary_level_options(
+      server_context()->global_options()->Clone());
+  vary_level_options->SetRewriteLevel(kVaryBearingLevel);
+  SetRewriteOptions(vary_level_options.get());
   GoogleString url = "http://www.example.com/";
   GoogleString set_text, get_text;
   RequestHeaders request_headers;
@@ -524,6 +546,9 @@ TEST_F(ProxyInterfaceTest, HeadRequest) {
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Cache-Control: max-age=0, private\r\n"
       "X-Page-Speed: on\r\n"
+      "Vary: Accept\r\n"
+      "Vary: Save-Data\r\n"
+      "Vary: User-Agent\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
   EXPECT_EQ(set_text, get_text);
@@ -566,6 +591,7 @@ TEST_F(ProxyInterfaceTest, RedirectRequestWhenDomainRewriterEnabled) {
   set_headers.SetStatusAndReason(HttpStatus::kFound);
   std::unique_ptr<RewriteOptions> custom_options(
       server_context()->global_options()->Clone());
+  custom_options->SetRewriteLevel(kVaryBearingLevel);
   custom_options->EnableFilter(RewriteOptions::kRewriteDomains);
   custom_options->WriteableDomainLawyer()->AddTwoProtocolRewriteDomainMapping(
       "www.example.com", "m.example.com", &handler);
@@ -584,6 +610,9 @@ TEST_F(ProxyInterfaceTest, RedirectRequestWhenDomainRewriterEnabled) {
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Cache-Control: max-age=0, private\r\n"
       "X-Page-Speed: on\r\n"
+      "Vary: Accept\r\n"
+      "Vary: Save-Data\r\n"
+      "Vary: User-Agent\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
 }
