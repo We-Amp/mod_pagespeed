@@ -416,6 +416,14 @@ void CycloneCache::PrintStats(GoogleString* out) const {
   // read 0, not garbage.
   CycloneCacheStats stats = {};
   cyclone_cache_get_stats(cache_, &stats);
+  // Hit, read and eviction counters live in this process; entries, size
+  // and buffer wraps come from the cache file shared by all processes.
+  StrAppend(out, "Scope: ",
+            "hit, read and eviction counts are for this server process "
+            "since it started; entries, size and write buffer wraps are "
+            "for the whole cache file; the Statistics page shows totals "
+            "for all processes",
+            "\n");
   StrAppend(out, "Current entries: ",
             Integer64ToString(static_cast<int64>(stats.current_entries)), "\n");
   StrAppend(out, "Current size bytes: ",
@@ -434,10 +442,6 @@ void CycloneCache::PrintStats(GoogleString* out) const {
   // ship (disk_cache_misses stays 0), so no misses row is printed.
   StrAppend(out, "Reads served (RAM + disk): ",
             Integer64ToString(static_cast<int64>(stats.disk_cache_hits)), "\n");
-  StrAppend(out, "Scope: ",
-            "this server process since it started; the Statistics page "
-            "shows totals for all processes",
-            "\n");
   StrAppend(out, "Evictions: ",
             Integer64ToString(static_cast<int64>(stats.evictions)), "\n");
   StrAppend(out, "Write buffer wraps: ",

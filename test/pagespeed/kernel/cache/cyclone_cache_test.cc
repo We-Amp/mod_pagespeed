@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <new>
 #include <thread>
@@ -233,11 +234,18 @@ TEST_F(CycloneCacheTest, PrintStatsLabelsWhatIsMeasured) {
   if (!IsHealthyTest()) {
     GTEST_SKIP() << "CycloneCache failed to initialize";
   }
+  CheckPut("k", "v");
+  CheckGet("k", "v");
   GoogleString out;
   cache_->PrintStats(&out);
+  size_t pos = out.find("Reads served (RAM + disk): ");
+  ASSERT_NE(GoogleString::npos, pos);
+  EXPECT_GE(atoi(out.c_str() + pos + strlen("Reads served (RAM + disk): ")), 1);
   EXPECT_NE(GoogleString::npos, out.find("Reads served (RAM + disk): "));
   EXPECT_NE(GoogleString::npos,
-            out.find("Scope: this server process since it started"));
+            out.find("Scope: hit, read and eviction counts are for this "
+                     "server process"));
+  EXPECT_LT(out.find("Scope: "), out.find("Current entries: "));
   EXPECT_NE(GoogleString::npos, out.find("RAM cache hits: "));
   EXPECT_NE(GoogleString::npos, out.find("RAM cache misses: "));
   EXPECT_EQ(GoogleString::npos, out.find("Disk cache hits"));
