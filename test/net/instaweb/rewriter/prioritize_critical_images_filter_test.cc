@@ -434,6 +434,62 @@ TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataVariantsCarryVaryHeader) {
                                          HttpAttributes::kSaveData));
 }
 
+TEST_F(PrioritizeCriticalImagesFilterTest,
+       CachingFieldsAreCleanAfterVaryStamp) {
+  // Regression test for the cache_fields_dirty_ invariant (#385): this
+  // filter stamps Vary: Save-Data before HtmlVaryFilter runs, and when the
+  // origin already sends a Vary token HtmlVaryFilter adds nothing itself, so
+  // its recompute does not fire for this addition. The stamp must recompute:
+  // without it, later caching-field readers DCHECK-abort in debug builds and
+  // the public cache_fields_dirty() flag observes the dirty state in release
+  // builds too.
+  InitPrioritizeCriticalImagesFilter();
+  SetHtmlMimetype();  // wires and computes the served headers, pre-parse.
+  const bool browser_cacheable = response_headers_.IsBrowserCacheable();
+  // An origin Vary token keeps HtmlVaryFilter from adding one itself.
+  response_headers_.Add(HttpAttributes::kVary, HttpAttributes::kUserAgent);
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/critical.jpg");
+  SetCriticalImages(critical_images);
+  ValidateExpected("clean_after_stamp",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
+                   "</body>");
+  EXPECT_TRUE(response_headers_.HasValue(HttpAttributes::kVary,
+                                         HttpAttributes::kSaveData));
+  EXPECT_FALSE(response_headers_.cache_fields_dirty());
+  EXPECT_EQ(browser_cacheable, response_headers_.IsBrowserCacheable());
+}
+
+TEST_F(PrioritizeCriticalImagesFilterTest,
+       LowercaseOriginVarySaveDataIsNotDuplicated) {
+  // Vary values are RFC 9110 tokens: an origin's lowercase "save-data" names
+  // the same field our "Save-Data" does and must not be duplicated.
+  InitPrioritizeCriticalImagesFilter();
+  response_headers_.Add(HttpAttributes::kVary, "save-data");
+  StringSet* critical_images = new StringSet;
+  critical_images->insert("http://test.com/critical.jpg");
+  SetCriticalImages(critical_images);
+  ValidateExpected("lowercase_not_duplicated",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical.jpg\"/>"
+                   "</body>",
+                   "<head></head>"
+                   "<body>"
+                   "<img src=\"critical.jpg\" fetchpriority=\"high\"/>"
+                   "</body>");
+  ConstStringStarVector values;
+  ASSERT_TRUE(response_headers_.Lookup(HttpAttributes::kVary, &values));
+  ASSERT_EQ(1, values.size());
+  EXPECT_STREQ("save-data", values[0]->c_str());
+}
+
 TEST_F(PrioritizeCriticalImagesFilterTest, SaveDataUnsupportedEmitsNoVary) {
   // With Save-Data qualities equal to the normal ones SupportSaveData() is
   // false, so the Save-Data header no longer influences the filter: the
