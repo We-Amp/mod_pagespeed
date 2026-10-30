@@ -1,0 +1,51 @@
+{
+ "configuration": {
+  "filter_enabled": false,
+  "rule_pack_files": [],
+  "rule_pack_mode": "report",
+  "rule_pack_require_signed": false
+ },
+ "counters": {
+  "rule_pack_decision_log_dropped": 0,
+  "rule_pack_decision_log_lines": 0,
+  "rule_pack_decisions_applied": 0,
+  "rule_pack_decisions_claimed": 0,
+  "rule_pack_decisions_would_apply": 0,
+  "rule_pack_headers_flushed": 0,
+  "rule_pack_headers_set": 0,
+  "rule_pack_late_removed": 0,
+  "rule_pack_late_unremovable": 0,
+  "rule_pack_load_errors": 0,
+  "rule_pack_loads": 0,
+  "rule_pack_loads_signed": 0,
+  "rule_pack_pages_evaluated": 0,
+  "rule_pack_pages_modified": 0,
+  "rule_pack_pages_skipped_error": 0,
+  "rule_pack_pages_skipped_host_not_listed": 0,
+  "rule_pack_pages_skipped_malformed_head": 0,
+  "rule_pack_pages_skipped_no_head": 0,
+  "rule_pack_pages_skipped_not_rewritable": 0,
+  "rule_pack_pages_skipped_size_limit": 0,
+  "rule_pack_pages_would_modify": 0,
+  "rule_pack_refused_bad_signature": 0,
+  "rule_pack_refused_duplicate_id": 0,
+  "rule_pack_refused_publisher_mismatch": 0,
+  "rule_pack_refused_signature_unreadable": 0,
+  "rule_pack_refused_unknown_key": 0,
+  "rule_pack_refused_unsigned": 0
+ },
+ "decisions": {
+  "date": "2026-10-30",
+  "error": null,
+  "limit": 1000,
+  "pack": null,
+  "rows": [],
+  "status": "no_pack_file"
+ },
+ "generated_at": "2026-10-30T03:22:32Z",
+ "host": ":0",
+ "overlap_warnings": [],
+ "packs": [],
+ "schema": 1,
+ "scope": "global"
+}

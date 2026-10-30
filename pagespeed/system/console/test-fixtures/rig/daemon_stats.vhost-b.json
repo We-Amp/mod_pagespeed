@@ -1,0 +1,295 @@
+{
+ "agent_markdown": {
+  "preserved": 0,
+  "purged_on_change": 0,
+  "rebuild_forced": 0
+ },
+ "alternates": {
+  "write_failures": 0,
+  "writes": 132,
+  "writes_fenced": 0
+ },
+ "browser_sandbox": "disabled",
+ "by_format": {
+  "avif": 12,
+  "jpeg": 12,
+  "png": 4,
+  "webp": 18
+ },
+ "by_type": {
+  "css": {
+   "count": 12,
+   "time_us": 36218
+  },
+  "html": {
+   "count": 0,
+   "time_us": 0
+  },
+  "image": {
+   "count": 54,
+   "time_us": 32316070
+  },
+  "js": {
+   "count": 10,
+   "time_us": 20431
+  }
+ },
+ "cache": {
+  "entries": 56,
+  "size_bytes": 24531328
+ },
+ "cache_auto_heal_exhausted": 0,
+ "cache_auto_heals": 0,
+ "cache_read_deferred_retries": 0,
+ "cache_read_deferred_successes": 0,
+ "cache_read_failures": 0,
+ "cache_read_retries": 0,
+ "connections": {
+  "active": 1,
+  "max": 32
+ },
+ "content_analysis": {
+  "denoised": 0,
+  "illustration": 0,
+  "noisy": 14,
+  "photo": 4,
+  "screenshot": 2
+ },
+ "dedup": {
+  "content_hash_hits": 0,
+  "content_hash_stale": 0,
+  "writes_skipped": 0
+ },
+ "errors": {
+  "origin_misconfiguration": 0,
+  "text_minify_parse_failures": 0,
+  "total": 0
+ },
+ "html_assembly": {
+  "complete": 0,
+  "critical_css_skipped_byte_cap": 0,
+  "critical_css_skipped_high_coverage": 0,
+  "css_aborted": 0,
+  "skipped": 0
+ },
+ "image_budget_rescued": {
+  "avif": 0,
+  "webp": 2
+ },
+ "image_incomplete_matrices": 0,
+ "image_no_savings_skipped": 2,
+ "image_size_refused": {
+  "avif": 8,
+  "webp": 8
+ },
+ "image_unconverted_fallthrough": 6,
+ "learned_quality": {
+  "fallbacks": 0,
+  "predictions": 18
+ },
+ "notifications": {
+  "accepted_non_default_option_context": 471,
+  "dedup_heal_rate_limited": 0,
+  "dedup_healed": 0,
+  "missing_copy_healed": 0,
+  "received": 471,
+  "rejected_malformed": 0,
+  "rejected_option_context": 0,
+  "rejected_sentinel": 0,
+  "rejected_version": 0,
+  "skipped_dedup": 415,
+  "skipped_inflight": 0
+ },
+ "origin_refresh": {
+  "change_rebuilt": 0,
+  "deferred": 0,
+  "purges": 0,
+  "rate_limited": 0,
+  "rebuild_refused": 0,
+  "rechecked": 0,
+  "unchanged": 0,
+  "unchanged_restamped": 0
+ },
+ "policy": {
+  "async_css_enabled": 0,
+  "async_css_record_dropped_empty_derivation": 0,
+  "async_css_suppressed_low_coverage": 0,
+  "async_css_suppressed_unvalidated": 0,
+  "computed": 0,
+  "script_deferral_enabled": 0
+ },
+ "quality_baselining": {
+  "capped_jpeg": 0,
+  "skip_reencode": 0
+ },
+ "read_borrow_wrap_discards": 0,
+ "selector_invocations": 54,
+ "serve_classes": {
+  "class_unrecognized": 0,
+  "flags_unrecognized": 0,
+  "notify_suppressed": 0,
+  "optimized": 2989,
+  "original_cold": 122,
+  "original_declined": 0,
+  "original_pending": 701,
+  "original_skew": 0
+ },
+ "serve_savings": {
+  "css": {
+   "by_encoding": {
+    "br": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "gzip": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "identity": {
+     "bytes": 3111924,
+     "hits": 699
+    }
+   },
+   "hits": 699,
+   "optimized_bytes": 3111924,
+   "original_bytes": 6874054
+  },
+  "html": {
+   "by_encoding": {
+    "br": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "gzip": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "identity": {
+     "bytes": 0,
+     "hits": 0
+    }
+   },
+   "hits": 0,
+   "optimized_bytes": 0,
+   "original_bytes": 0
+  },
+  "image": {
+   "by_encoding": {
+    "br": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "gzip": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "identity": {
+     "bytes": 146412037,
+     "hits": 1487
+    }
+   },
+   "hits": 1487,
+   "optimized_bytes": 146412037,
+   "original_bytes": 501652492
+  },
+  "js": {
+   "by_encoding": {
+    "br": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "gzip": {
+     "bytes": 0,
+     "hits": 0
+    },
+    "identity": {
+     "bytes": 3834540,
+     "hits": 675
+    }
+   },
+   "hits": 675,
+   "optimized_bytes": 3834540,
+   "original_bytes": 6753240
+  }
+ },
+ "serve_savings_by_host": {
+  "hosts": [
+   {
+    "hits": 1709,
+    "host": "site-b.test",
+    "optimized_bytes": 92224794,
+    "original_bytes": 309920789
+   }
+  ],
+  "limit": 32,
+  "other": {
+   "hits": 1152,
+   "optimized_bytes": 61133707,
+   "original_bytes": 205358997
+  },
+  "site": "site-b.test"
+ },
+ "source_reads_from_durable_original": 54,
+ "ssimulacra2": {
+  "avg_score_x100": 7336,
+  "checks": 36,
+  "declines": 2,
+  "reencodes": 12,
+  "tombstone_hits": 0
+ },
+ "stale_serves": {
+  "stale_if_error": 0,
+  "swr_coalesced": 0
+ },
+ "started_at_ms": 1793330333189,
+ "svg": {
+  "bytes_saved": 0,
+  "candidates_evaluated": 20,
+  "candidates_rejected": 18,
+  "fidelity_rejected": 0,
+  "path_count_rejected": 0,
+  "served": 0,
+  "size_rejected": 0,
+  "timeout_exceeded": 0,
+  "vectorize_time_us": 0,
+  "vectorized": 0,
+  "written": 0
+ },
+ "syscall_filter": "filtered",
+ "thread_pool": {
+  "inflight": 0,
+  "size": 12
+ },
+ "uptime_seconds": 219,
+ "variants": {
+  "brotli": 28,
+  "gzip": 28,
+  "proactive": 36,
+  "written": 132
+ },
+ "verdicts": {
+  "css": {
+   "already_optimal": {
+    "bytes": 24,
+    "count": 2
+   }
+  },
+  "image": {
+   "already_optimal": {
+    "bytes": 30262,
+    "count": 2
+   }
+  },
+  "js": {
+   "already_optimal": {
+    "bytes": 16,
+    "count": 2
+   }
+  }
+ },
+ "zerocopy": {
+  "copy_then_verify_discards": 0,
+  "proactive_copyouts": 0,
+  "torn_aborts": 0
+ }
+}

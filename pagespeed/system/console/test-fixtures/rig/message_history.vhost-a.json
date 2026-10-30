@@ -1,0 +1,534 @@
+{
+ "messages": [
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:55 GMT] [Info] [560] CycloneCache enabled at /var/cache/mod_pagespeed//cyclone.dat",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [560] SharedMemCache: pagespeed_default_shm/metadata_cache, sectors = 128, entries/sector = 2226,  64-byte blocks/sector = 4452, total footprint: 52445184",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [560] Initializing shared memory for path: /var/cache/mod_pagespeed/ flush .",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] Reusing shared memory for path: /var/cache/mod_pagespeed/ flush .",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] Reusing shared memory for path: /var/cache/mod_pagespeed/ flush .",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] http://localhost/we-amp.jpg is being re-fetched asynchronously (lock 08LDIxvx4Qov3OUjdQqH.lock held elsewhere)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [572] HTTPCache key=http://localhost/we-amp.jpg fragment=localhost: remembering recent failure for 299 seconds.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost:81/we-amp.jpg is being re-fetched asynchronously (lock TNox5iKtk0n0iZO3vh8f.lock held elsewhere)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] HTTPCache key=http://localhost:81/we-amp.jpg fragment=localhost: remembering recent failure for 299 seconds.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost/example/rewrite_javascript.js is being re-fetched asynchronously (lock 8pMqGBrUM17-4-ivvXfi.lock held elsewhere)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost:81/example/rewrite_javascript.js is being re-fetched asynchronously (lock sUJlSLgdfNNzr3CQPW5B.lock held elsewhere)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost/example/rewrite_images.html:6-8: Resized image `http://localhost/example/images/Puzzle.jpg' from 1023x766 to 256x192",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost/example/rewrite_images.html:6-8: Shrinking image `http://localhost/example/images/Puzzle.jpg' (241260 bytes) to `http://localhost/example/images/256x192xPuzzle.jpg.pagespeed.ic.DtRDtXfOsk.jpg' (10509 bytes)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost/example/rewrite_images.html:9-10: Shrinking image `http://localhost/example/images/Cuppa.png' (1763 bytes) to `http://localhost/example/images/xCuppa.png.pagespeed.ic.jf3PtqQ39N.png' (770 bytes)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost/example/rewrite_images.html:11-13: Shrinking image `http://localhost/example/images/BikeCrashIcn.png' (26548 bytes) to `http://localhost/example/images/xBikeCrashIcn.png.pagespeed.ic.-f3rxqdUg6.jpg' (4514 bytes)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost:81/example/rewrite_images.html:6-8: Resized image `http://localhost:81/example/images/Puzzle.jpg' from 1023x766 to 256x192",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost:81/example/rewrite_images.html:6-8: Shrinking image `http://localhost:81/example/images/Puzzle.jpg' (241260 bytes) to `http://localhost:81/example/images/256x192xPuzzle.jpg.pagespeed.ic.DtRDtXfOsk.jpg' (10509 bytes)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost:81/example/rewrite_images.html:9-10: Shrinking image `http://localhost:81/example/images/Cuppa.png' (1763 bytes) to `http://localhost:81/example/images/xCuppa.png.pagespeed.ic.jf3PtqQ39N.png' (770 bytes)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:56 GMT] [Info] [571] http://localhost:81/example/rewrite_images.html:11-13: Shrinking image `http://localhost:81/example/images/BikeCrashIcn.png' (26548 bytes) to `http://localhost:81/example/images/xBikeCrashIcn.png.pagespeed.ic.-f3rxqdUg6.jpg' (4514 bytes)",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:57 GMT] [Info] [572] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:58 GMT] [Info] [572] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [572] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:18:59 GMT] [Info] [571] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [571] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:00 GMT] [Info] [572] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [571] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:01 GMT] [Info] [572] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [571] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:02 GMT] [Info] [572] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/2x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] No permission to rewrite 'https://www.gstatic.com/images/branding/product/1x/pagespeed_32dp.png'",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] [http://localhost/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:03 GMT] [Info] [572] [http://localhost:81/example/rewrite_javascript.html:17] Retaining contents of script tag; probably data for external script.",
+   "severity": "info"
+  },
+  {
+   "message": "[Fri, 30 Oct 2026 03:19:07 GMT] [Warning] [572] mod_pagespeed: admin handler 'pagespeed_admin' received request from 172.17.0.4; intended for loopback. Restrict access at the web-server layer (Apache: <Location> Require local; nginx: allow 127.0.0.1; deny all; IIS: InfoUrlsLocalOnly). See https://www.modpagespeed.com/1.1/docs/admin-console/#url-path-acls-are-brittle",
+   "severity": "warning"
+  }
+ ],
+ "next": 133,
+ "scope": "process"
+}

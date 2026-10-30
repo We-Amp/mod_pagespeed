@@ -1,0 +1,797 @@
+{
+ "after": {
+  "module": {
+   "a": {
+    "ipro_daemon_fallback_notified": 415,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_fallthrough": 122,
+    "ipro_daemon_fallthrough_css": 14,
+    "ipro_daemon_fallthrough_image": 28,
+    "ipro_daemon_fallthrough_js": 12,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_served": 2983,
+    "ipro_daemon_served_css": 725,
+    "ipro_daemon_served_image": 1553,
+    "ipro_daemon_served_js": 705,
+    "ipro_daemon_served_original": 701,
+    "ipro_daemon_served_other": 0
+   },
+   "b": {
+    "ipro_daemon_fallback_notified": 415,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_fallthrough": 122,
+    "ipro_daemon_fallthrough_css": 14,
+    "ipro_daemon_fallthrough_image": 28,
+    "ipro_daemon_fallthrough_js": 12,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_served": 2983,
+    "ipro_daemon_served_css": 725,
+    "ipro_daemon_served_image": 1553,
+    "ipro_daemon_served_js": 705,
+    "ipro_daemon_served_original": 701,
+    "ipro_daemon_served_other": 0
+   },
+   "global": {
+    "ipro_daemon_fallback_notified": 415,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_fallthrough": 122,
+    "ipro_daemon_fallthrough_css": 14,
+    "ipro_daemon_fallthrough_image": 28,
+    "ipro_daemon_fallthrough_js": 12,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_served": 2983,
+    "ipro_daemon_served_css": 725,
+    "ipro_daemon_served_image": 1553,
+    "ipro_daemon_served_js": 705,
+    "ipro_daemon_served_original": 701,
+    "ipro_daemon_served_other": 0
+   }
+  },
+  "optimizer": {
+   "serve_classes": {
+    "class_unrecognized": 0,
+    "flags_unrecognized": 0,
+    "notify_suppressed": 0,
+    "optimized": 2983,
+    "original_cold": 122,
+    "original_declined": 0,
+    "original_pending": 701,
+    "original_skew": 0
+   },
+   "serve_savings": {
+    "css": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 3104374,
+       "hits": 694
+      }
+     },
+     "hits": 694,
+     "optimized_bytes": 3104374,
+     "original_bytes": 6857354
+    },
+    "html": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 0,
+       "hits": 0
+      }
+     },
+     "hits": 0,
+     "optimized_bytes": 0,
+     "original_bytes": 0
+    },
+    "image": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 146412037,
+       "hits": 1487
+      }
+     },
+     "hits": 1487,
+     "optimized_bytes": 146412037,
+     "original_bytes": 501652492
+    },
+    "js": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 3834540,
+       "hits": 675
+      }
+     },
+     "hits": 675,
+     "optimized_bytes": 3834540,
+     "original_bytes": 6753240
+    }
+   },
+   "serve_savings_by_host": {
+    "hosts": [
+     {
+      "hits": 1147,
+      "host": "site-a.test",
+      "optimized_bytes": 61126157,
+      "original_bytes": 205342297
+     }
+    ],
+    "limit": 32,
+    "other": {
+     "hits": 1709,
+     "optimized_bytes": 92224794,
+     "original_bytes": 309920789
+    },
+    "site": "site-a.test"
+   },
+   "verdicts": {
+    "css": {
+     "already_optimal": {
+      "bytes": 24,
+      "count": 2
+     }
+    },
+    "image": {
+     "already_optimal": {
+      "bytes": 30262,
+      "count": 2
+     }
+    },
+    "js": {
+     "already_optimal": {
+      "bytes": 16,
+      "count": 2
+     }
+    }
+   }
+  },
+  "optimizer_status_ok": true,
+  "taken_at": 1793330542.0481756
+ },
+ "assets": {
+  "original_bytes": {
+   "Beach.jpg": 1267966,
+   "BikeCrashIcn.png": 26548,
+   "CradleAnimation.gif": 583374,
+   "Cuppa.png": 1763,
+   "IronChef2.gif": 24941,
+   "OptPuzzle.jpg": 21660,
+   "PageSpeedAnimation.gif": 280417,
+   "PageSpeedAnimationSmall.gif": 26251,
+   "Puzzle.jpg": 241260,
+   "Puzzle2.jpg": 31066,
+   "blocking_rewrite_test_dont_reuse_1.jpg": 1267966,
+   "font.woff2": 4096,
+   "icon.svg": 95,
+   "pagespeed_logo.png": 15131,
+   "script1.js": 3302,
+   "script2.js": 6632,
+   "script3.js": 9962,
+   "script4.js": 13354,
+   "script5.js": 16774,
+   "script6.js": 8,
+   "style1.css": 3340,
+   "style2.css": 6700,
+   "style3.css": 10100,
+   "style4.css": 13540,
+   "style5.css": 16980,
+   "style6.css": 12
+  },
+  "type": {
+   "Beach.jpg": "image",
+   "BikeCrashIcn.png": "image",
+   "CradleAnimation.gif": "image",
+   "Cuppa.png": "image",
+   "IronChef2.gif": "image",
+   "OptPuzzle.jpg": "image",
+   "PageSpeedAnimation.gif": "image",
+   "PageSpeedAnimationSmall.gif": "image",
+   "Puzzle.jpg": "image",
+   "Puzzle2.jpg": "image",
+   "blocking_rewrite_test_dont_reuse_1.jpg": "image",
+   "font.woff2": "other",
+   "icon.svg": "other",
+   "pagespeed_logo.png": "image",
+   "script1.js": "js",
+   "script2.js": "js",
+   "script3.js": "js",
+   "script4.js": "js",
+   "script5.js": "js",
+   "script6.js": "js",
+   "style1.css": "css",
+   "style2.css": "css",
+   "style3.css": "css",
+   "style4.css": "css",
+   "style5.css": "css",
+   "style6.css": "css"
+  }
+ },
+ "before": {
+  "module": {
+   "a": {
+    "ipro_daemon_fallback_notified": 322,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_fallthrough": 122,
+    "ipro_daemon_fallthrough_css": 14,
+    "ipro_daemon_fallthrough_image": 28,
+    "ipro_daemon_fallthrough_js": 12,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_served": 2332,
+    "ipro_daemon_served_css": 570,
+    "ipro_daemon_served_image": 1212,
+    "ipro_daemon_served_js": 550,
+    "ipro_daemon_served_original": 546,
+    "ipro_daemon_served_other": 0
+   },
+   "b": {
+    "ipro_daemon_fallback_notified": 322,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_fallthrough": 122,
+    "ipro_daemon_fallthrough_css": 14,
+    "ipro_daemon_fallthrough_image": 28,
+    "ipro_daemon_fallthrough_js": 12,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_served": 2332,
+    "ipro_daemon_served_css": 570,
+    "ipro_daemon_served_image": 1212,
+    "ipro_daemon_served_js": 550,
+    "ipro_daemon_served_original": 546,
+    "ipro_daemon_served_other": 0
+   },
+   "global": {
+    "ipro_daemon_fallback_notified": 322,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_fallthrough": 122,
+    "ipro_daemon_fallthrough_css": 14,
+    "ipro_daemon_fallthrough_image": 28,
+    "ipro_daemon_fallthrough_js": 12,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_served": 2332,
+    "ipro_daemon_served_css": 570,
+    "ipro_daemon_served_image": 1212,
+    "ipro_daemon_served_js": 550,
+    "ipro_daemon_served_original": 546,
+    "ipro_daemon_served_other": 0
+   }
+  },
+  "optimizer": {
+   "serve_classes": {
+    "class_unrecognized": 0,
+    "flags_unrecognized": 0,
+    "notify_suppressed": 0,
+    "optimized": 2332,
+    "original_cold": 122,
+    "original_declined": 0,
+    "original_pending": 546,
+    "original_skew": 0
+   },
+   "serve_savings": {
+    "css": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 2439404,
+       "hits": 549
+      }
+     },
+     "hits": 549,
+     "optimized_bytes": 2439404,
+     "original_bytes": 5388214
+    },
+    "html": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 0,
+       "hits": 0
+      }
+     },
+     "hits": 0,
+     "optimized_bytes": 0,
+     "original_bytes": 0
+    },
+    "image": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 114490374,
+       "hits": 1168
+      }
+     },
+     "hits": 1168,
+     "optimized_bytes": 114490374,
+     "original_bytes": 392229344
+    },
+    "js": {
+     "by_encoding": {
+      "br": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "gzip": {
+       "bytes": 0,
+       "hits": 0
+      },
+      "identity": {
+       "bytes": 3010824,
+       "hits": 530
+      }
+     },
+     "hits": 530,
+     "optimized_bytes": 3010824,
+     "original_bytes": 5302544
+    }
+   },
+   "serve_savings_by_host": {
+    "hosts": [
+     {
+      "hits": 937,
+      "host": "site-a.test",
+      "optimized_bytes": 49605347,
+      "original_bytes": 166603337
+     }
+    ],
+    "limit": 32,
+    "other": {
+     "hits": 1310,
+     "optimized_bytes": 70335255,
+     "original_bytes": 236316765
+    },
+    "site": "site-a.test"
+   },
+   "verdicts": {
+    "css": {
+     "already_optimal": {
+      "bytes": 24,
+      "count": 2
+     }
+    },
+    "image": {
+     "already_optimal": {
+      "bytes": 30262,
+      "count": 2
+     }
+    },
+    "js": {
+     "already_optimal": {
+      "bytes": 16,
+      "count": 2
+     }
+    }
+   }
+  },
+  "optimizer_status_ok": true,
+  "taken_at": 1793330540.107186
+ },
+ "client": {
+  "a": {
+   "css": {
+    "_original_identity_bytes": 456048,
+    "gzip": {
+     "bytes": 17331,
+     "hits": 15
+    },
+    "identity": {
+     "bytes": 137688,
+     "hits": 39
+    }
+   },
+   "image": {
+    "_original_identity_bytes": 34095087,
+    "identity": {
+     "bytes": 10042902,
+     "hits": 108
+    }
+   },
+   "js": {
+    "_original_identity_bytes": 450288,
+    "gzip": {
+     "bytes": 7992,
+     "hits": 15
+    },
+    "identity": {
+     "bytes": 170496,
+     "hits": 39
+    }
+   },
+   "other": {
+    "_original_identity_bytes": 37719,
+    "identity": {
+     "bytes": 37719,
+     "hits": 18
+    }
+   }
+  },
+  "b": {
+   "css": {
+    "_original_identity_bytes": 912096,
+    "gzip": {
+     "bytes": 34662,
+     "hits": 30
+    },
+    "identity": {
+     "bytes": 275376,
+     "hits": 78
+    }
+   },
+   "image": {
+    "_original_identity_bytes": 68190174,
+    "identity": {
+     "bytes": 20085804,
+     "hits": 216
+    }
+   },
+   "js": {
+    "_original_identity_bytes": 900576,
+    "gzip": {
+     "bytes": 15984,
+     "hits": 30
+    },
+    "identity": {
+     "bytes": 340992,
+     "hits": 78
+    }
+   },
+   "other": {
+    "_original_identity_bytes": 75438,
+    "identity": {
+     "bytes": 75438,
+     "hits": 36
+    }
+   }
+  }
+ },
+ "conditional": {
+  "not_modified": 52,
+  "requests": 52
+ },
+ "head": {
+  "requests": 52
+ },
+ "probe_hit_deltas": {
+  "conditional": 0,
+  "get": 1,
+  "head": 1
+ },
+ "rounds": 3,
+ "vhosts": {
+  "a": {
+   "host": "site-a.test",
+   "port": 80
+  },
+  "b": {
+   "host": "site-b.test",
+   "port": 81
+  }
+ },
+ "warm": {
+  "a:Beach.jpg": {
+   "original": 1267966,
+   "settled_bytes": 315051,
+   "tries": 2
+  },
+  "a:BikeCrashIcn.png": {
+   "original": 26548,
+   "settled_bytes": 4792,
+   "tries": 2
+  },
+  "a:CradleAnimation.gif": {
+   "original": 583374,
+   "settled_bytes": 345658,
+   "tries": 2
+  },
+  "a:Cuppa.png": {
+   "original": 1763,
+   "settled_bytes": 566,
+   "tries": 2
+  },
+  "a:IronChef2.gif": {
+   "original": 24941,
+   "settled_bytes": 20278,
+   "tries": 2
+  },
+  "a:OptPuzzle.jpg": {
+   "original": 21660,
+   "settled_bytes": 4853,
+   "tries": 2
+  },
+  "a:PageSpeedAnimation.gif": {
+   "original": 280417,
+   "settled_bytes": 28270,
+   "tries": 2
+  },
+  "a:PageSpeedAnimationSmall.gif": {
+   "original": 26251,
+   "settled_bytes": 21798,
+   "tries": 2
+  },
+  "a:Puzzle.jpg": {
+   "original": 241260,
+   "settled_bytes": 33160,
+   "tries": 2
+  },
+  "a:Puzzle2.jpg": {
+   "original": 31066,
+   "settled_bytes": 11270,
+   "tries": 2
+  },
+  "a:blocking_rewrite_test_dont_reuse_1.jpg": {
+   "original": 1267966,
+   "settled_bytes": 315051,
+   "tries": 2
+  },
+  "a:font.woff2": {
+   "original": 4096,
+   "settled_bytes": 4096,
+   "tries": 2
+  },
+  "a:icon.svg": {
+   "original": 95,
+   "settled_bytes": 95,
+   "tries": 2
+  },
+  "a:pagespeed_logo.png": {
+   "original": 15131,
+   "settled_bytes": 15131,
+   "tries": 2
+  },
+  "a:script1.js": {
+   "original": 3302,
+   "settled_bytes": 1872,
+   "tries": 2
+  },
+  "a:script2.js": {
+   "original": 6632,
+   "settled_bytes": 3762,
+   "tries": 2
+  },
+  "a:script3.js": {
+   "original": 9962,
+   "settled_bytes": 5652,
+   "tries": 2
+  },
+  "a:script4.js": {
+   "original": 13354,
+   "settled_bytes": 7584,
+   "tries": 2
+  },
+  "a:script5.js": {
+   "original": 16774,
+   "settled_bytes": 9534,
+   "tries": 2
+  },
+  "a:script6.js": {
+   "original": 8,
+   "settled_bytes": 8,
+   "tries": 2
+  },
+  "a:style1.css": {
+   "original": 3340,
+   "settled_bytes": 1510,
+   "tries": 2
+  },
+  "a:style2.css": {
+   "original": 6700,
+   "settled_bytes": 3030,
+   "tries": 2
+  },
+  "a:style3.css": {
+   "original": 10100,
+   "settled_bytes": 4570,
+   "tries": 2
+  },
+  "a:style4.css": {
+   "original": 13540,
+   "settled_bytes": 6130,
+   "tries": 2
+  },
+  "a:style5.css": {
+   "original": 16980,
+   "settled_bytes": 7690,
+   "tries": 2
+  },
+  "a:style6.css": {
+   "original": 12,
+   "settled_bytes": 12,
+   "tries": 2
+  },
+  "b:Beach.jpg": {
+   "original": 1267966,
+   "settled_bytes": 315051,
+   "tries": 2
+  },
+  "b:BikeCrashIcn.png": {
+   "original": 26548,
+   "settled_bytes": 4792,
+   "tries": 2
+  },
+  "b:CradleAnimation.gif": {
+   "original": 583374,
+   "settled_bytes": 345658,
+   "tries": 2
+  },
+  "b:Cuppa.png": {
+   "original": 1763,
+   "settled_bytes": 566,
+   "tries": 2
+  },
+  "b:IronChef2.gif": {
+   "original": 24941,
+   "settled_bytes": 20278,
+   "tries": 2
+  },
+  "b:OptPuzzle.jpg": {
+   "original": 21660,
+   "settled_bytes": 4853,
+   "tries": 2
+  },
+  "b:PageSpeedAnimation.gif": {
+   "original": 280417,
+   "settled_bytes": 28270,
+   "tries": 2
+  },
+  "b:PageSpeedAnimationSmall.gif": {
+   "original": 26251,
+   "settled_bytes": 21798,
+   "tries": 2
+  },
+  "b:Puzzle.jpg": {
+   "original": 241260,
+   "settled_bytes": 33160,
+   "tries": 2
+  },
+  "b:Puzzle2.jpg": {
+   "original": 31066,
+   "settled_bytes": 11270,
+   "tries": 2
+  },
+  "b:blocking_rewrite_test_dont_reuse_1.jpg": {
+   "original": 1267966,
+   "settled_bytes": 315051,
+   "tries": 2
+  },
+  "b:font.woff2": {
+   "original": 4096,
+   "settled_bytes": 4096,
+   "tries": 2
+  },
+  "b:icon.svg": {
+   "original": 95,
+   "settled_bytes": 95,
+   "tries": 2
+  },
+  "b:pagespeed_logo.png": {
+   "original": 15131,
+   "settled_bytes": 15131,
+   "tries": 2
+  },
+  "b:script1.js": {
+   "original": 3302,
+   "settled_bytes": 1872,
+   "tries": 2
+  },
+  "b:script2.js": {
+   "original": 6632,
+   "settled_bytes": 3762,
+   "tries": 2
+  },
+  "b:script3.js": {
+   "original": 9962,
+   "settled_bytes": 5652,
+   "tries": 2
+  },
+  "b:script4.js": {
+   "original": 13354,
+   "settled_bytes": 7584,
+   "tries": 2
+  },
+  "b:script5.js": {
+   "original": 16774,
+   "settled_bytes": 9534,
+   "tries": 2
+  },
+  "b:script6.js": {
+   "original": 8,
+   "settled_bytes": 8,
+   "tries": 2
+  },
+  "b:style1.css": {
+   "original": 3340,
+   "settled_bytes": 1510,
+   "tries": 2
+  },
+  "b:style2.css": {
+   "original": 6700,
+   "settled_bytes": 3030,
+   "tries": 2
+  },
+  "b:style3.css": {
+   "original": 10100,
+   "settled_bytes": 4570,
+   "tries": 2
+  },
+  "b:style4.css": {
+   "original": 13540,
+   "settled_bytes": 6130,
+   "tries": 2
+  },
+  "b:style5.css": {
+   "original": 16980,
+   "settled_bytes": 7690,
+   "tries": 2
+  },
+  "b:style6.css": {
+   "original": 12,
+   "settled_bytes": 12,
+   "tries": 2
+  }
+ }
+}

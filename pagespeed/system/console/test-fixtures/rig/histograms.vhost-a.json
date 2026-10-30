@@ -1,0 +1,304 @@
+{
+ "histograms": [
+  {
+   "avg": 3.66667,
+   "buckets": [
+    {
+     "count": 4,
+     "limit": 10,
+     "start": 0
+    },
+    {
+     "count": 2,
+     "limit": 20,
+     "start": 10
+    }
+   ],
+   "count": 6,
+   "max": 12,
+   "median": 10,
+   "min": 0,
+   "name": "image_rewrite_latency_ok_ms",
+   "p90": 12,
+   "p95": 12,
+   "p99": 12,
+   "stddev": 5.21749
+  },
+  {
+   "avg": 1.57576,
+   "buckets": [
+    {
+     "count": 66,
+     "limit": 20,
+     "start": 0
+    }
+   ],
+   "count": 66,
+   "max": 12,
+   "median": 6.18182,
+   "min": 0,
+   "name": "Rewrite Latency Histogram",
+   "p90": 10.9091,
+   "p95": 11.4545,
+   "p99": 12,
+   "stddev": 3.10942
+  },
+  {
+   "avg": 1,
+   "buckets": [
+    {
+     "count": 66,
+     "limit": 2,
+     "start": 1
+    }
+   ],
+   "count": 66,
+   "max": 1,
+   "median": 1,
+   "min": 1,
+   "name": "pcache-cohorts-beacon_cohort_get_count",
+   "p90": 1,
+   "p95": 1,
+   "p99": 1,
+   "stddev": 0
+  },
+  {
+   "avg": 12.5714,
+   "buckets": [
+    {
+     "count": 28,
+     "limit": 2000,
+     "start": 0
+    }
+   ],
+   "count": 28,
+   "max": 28,
+   "median": 15,
+   "min": 7,
+   "name": "pcache-cohorts-beacon_cohort_hit_latency_us",
+   "p90": 26,
+   "p95": 27,
+   "p99": 28,
+   "stddev": 4.42742
+  },
+  {
+   "avg": 139,
+   "buckets": [
+    {
+     "count": 4,
+     "limit": 2000,
+     "start": 0
+    }
+   ],
+   "count": 4,
+   "max": 163,
+   "median": null,
+   "min": 118,
+   "name": "pcache-cohorts-beacon_cohort_insert_latency_us",
+   "p90": null,
+   "p95": null,
+   "p99": null,
+   "stddev": 18.9868
+  },
+  {
+   "avg": 90.5,
+   "buckets": [
+    {
+     "count": 4,
+     "limit": 10000,
+     "start": 0
+    }
+   ],
+   "count": 4,
+   "max": 99,
+   "median": null,
+   "min": 83,
+   "name": "pcache-cohorts-beacon_cohort_insert_size_bytes",
+   "p90": null,
+   "p95": null,
+   "p99": null,
+   "stddev": 7.53326
+  },
+  {
+   "avg": 90.5,
+   "buckets": [
+    {
+     "count": 28,
+     "limit": 10000,
+     "start": 0
+    }
+   ],
+   "count": 28,
+   "max": 99,
+   "median": 53.0357,
+   "min": 83,
+   "name": "pcache-cohorts-beacon_cohort_lookup_size_bytes",
+   "p90": 91.9286,
+   "p95": 95.4643,
+   "p99": 99,
+   "stddev": 7.53326
+  },
+  {
+   "avg": 1,
+   "buckets": [
+    {
+     "count": 66,
+     "limit": 2,
+     "start": 1
+    }
+   ],
+   "count": 66,
+   "max": 1,
+   "median": 1,
+   "min": 1,
+   "name": "pcache-cohorts-dom_get_count",
+   "p90": 1,
+   "p95": 1,
+   "p99": 1,
+   "stddev": 0
+  },
+  {
+   "avg": 1755.76,
+   "buckets": [
+    {
+     "count": 59,
+     "limit": 4000,
+     "start": 0
+    },
+    {
+     "count": 1,
+     "limit": 8000,
+     "start": 4000
+    },
+    {
+     "count": 4,
+     "limit": 12000,
+     "start": 8000
+    },
+    {
+     "count": 2,
+     "limit": 16000,
+     "start": 12000
+    }
+   ],
+   "count": 66,
+   "max": 12090,
+   "median": 2305.08,
+   "min": 214,
+   "name": "Html Time us Histogram",
+   "p90": 4000,
+   "p95": 11000,
+   "p99": 12090,
+   "stddev": 3037.01
+  },
+  {
+   "avg": 27779,
+   "buckets": [
+    {
+     "count": 1,
+     "limit": 2000,
+     "start": 1000
+    },
+    {
+     "count": 1,
+     "limit": 3000,
+     "start": 2000
+    },
+    {
+     "count": 1,
+     "limit": 6000,
+     "start": 5000
+    },
+    {
+     "count": 1,
+     "limit": 7000,
+     "start": 6000
+    },
+    {
+     "count": 1,
+     "limit": 9000,
+     "start": 8000
+    },
+    {
+     "count": 1,
+     "limit": 14000,
+     "start": 13000
+    },
+    {
+     "count": 2,
+     "limit": 17000,
+     "start": 16000
+    },
+    {
+     "count": 1,
+     "limit": 19000,
+     "start": 18000
+    },
+    {
+     "count": 1,
+     "limit": 20000,
+     "start": 19000
+    },
+    {
+     "count": 1,
+     "limit": 24000,
+     "start": 23000
+    },
+    {
+     "count": 1,
+     "limit": 27000,
+     "start": 26000
+    },
+    {
+     "count": 1,
+     "limit": 28000,
+     "start": 27000
+    },
+    {
+     "count": 1,
+     "limit": 30000,
+     "start": 29000
+    },
+    {
+     "count": 1,
+     "limit": 41000,
+     "start": 40000
+    },
+    {
+     "count": 1,
+     "limit": 46000,
+     "start": 45000
+    },
+    {
+     "count": 1,
+     "limit": 51000,
+     "start": 50000
+    },
+    {
+     "count": 1,
+     "limit": 57000,
+     "start": 56000
+    },
+    {
+     "count": 1,
+     "limit": 68000,
+     "start": 67000
+    },
+    {
+     "count": 1,
+     "limit": 79000,
+     "start": 78000
+    }
+   ],
+   "count": 20,
+   "max": 78526,
+   "median": 20000,
+   "min": 1870,
+   "name": "http_fetch_latency_us",
+   "p90": 57000,
+   "p95": 68000,
+   "p99": 68000,
+   "stddev": 21559.2
+  }
+ ]
+}

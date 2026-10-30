@@ -1,0 +1,28 @@
+{
+ "browser": {
+  "enabled": false
+ },
+ "browser_sandbox": "disabled",
+ "checks": {
+  "cache_configured": {
+   "pass": true
+  },
+  "cache_open": {
+   "pass": true
+  },
+  "shared_config_version": {
+   "pass": true
+  }
+ },
+ "connections": {
+  "active": 1,
+  "max": 32
+ },
+ "git_commit": "6906c05",
+ "inflight": 0,
+ "ready": true,
+ "status": "ok",
+ "syscall_filter": "filtered",
+ "uptime_seconds": 219,
+ "version": "2.6.0"
+}
