@@ -497,8 +497,8 @@ TEST_F(CacheExtenderTest, DoExtendForImagesOnly) {
 
 // SVG is XML, not an image, so the image filters leave it alone, but cache
 // extension covers it: a hashed URL with a long lifetime and the same bytes
-// under the same content type. (The server adapters add nosniff to every
-// served .pagespeed. resource, so it is not visible at this level.)
+// under its stored image/svg+xml content type, served with a
+// Content-Security-Policy: sandbox header.
 class CacheExtenderSvgTest : public CacheExtenderTest {
  protected:
   static constexpr char kSvgData[] =
@@ -529,6 +529,15 @@ TEST_F(CacheExtenderSvgTest, ExtendSvgImage) {
   EXPECT_STREQ("image/svg+xml", headers.Lookup1(HttpAttributes::kContentType));
   EXPECT_GE(headers.cache_ttl_ms(), Timer::kMonthMs);
   EXPECT_TRUE(headers.IsProxyCacheable());
+  EXPECT_STREQ("sandbox",
+               headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
+
+  // Other image types do not get the sandbox header.
+  GoogleString jpg_content;
+  ResponseHeaders jpg_headers;
+  ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "b.jpg", "jpg",
+                            &jpg_content, &jpg_headers));
+  EXPECT_EQ(nullptr, jpg_headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
 }
 
 TEST_F(CacheExtenderSvgTest, SvgNotInlinedOrRewrittenByImageFilters) {

@@ -140,6 +140,19 @@ TEST_F(CssImageRewriterTest, CacheExtendsImagesSimple) {
                   kExpectSuccess | kNoClearFetcher);
 }
 
+TEST_F(CssImageRewriterTest, CacheExtendsSvgImages) {
+  const ContentType* svg = MimeTypeToContentType("image/svg+xml");
+  ASSERT_TRUE(svg != nullptr);
+  SetResponseWithDefaultHeaders("x.svg", *svg, "<svg xmlns='http://www.w3.org/2000/svg'/>", 100);
+
+  static const char css_before[] = "body { background: url(x.svg); }\n";
+  const GoogleString css_after = StrCat(
+      "body{background:url(", Encode("", "ce", "0", "x.svg", "svg"), ")}");
+
+  ValidateRewrite("cache_extends_svg", css_before, css_after,
+                  kExpectSuccess | kNoClearFetcher);
+}
+
 TEST_F(CssImageRewriterTest, CacheExtendsImagesInGroupRule) {
   // Images referenced inside a @supports body live in the group node's body
   // stylesheet, not the top-level rulesets walk. The group prelude is
