@@ -1,0 +1,1 @@
+- **Admin: harden cache actions and configuration output on exposed consoles.** Deleting a single cached URL from the admin console now requires `EnableCachePurge`, like purge. Key and credential values now show as `***` in configuration output. Update recommended for any console reachable beyond localhost.

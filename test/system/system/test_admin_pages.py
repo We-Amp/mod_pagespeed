@@ -20,6 +20,7 @@ that still says no-store.
 """
 
 import json
+import re
 
 import pytest
 
@@ -122,6 +123,25 @@ class TestAdminPages:
         assert not missing, f"{path}: JSON lacks {missing}; keys: {sorted(data)}"
         if check is not None:
             check(data, path)
+
+    @pytest.mark.parametrize("admin_path", ADMIN_PATHS)
+    def test_config_redacts_secret_options(
+        self, client: PageSpeedClient, server_config, admin_path
+    ):
+        """Key and credential options print as *** in the configuration output."""
+        path = f"{_admin_path(server_config, admin_path)}/config"
+        response = client.get(path)
+        require_no_auth_gate(response, f"Admin page {path}")
+        require_status_ok(response, f"Admin page {path}")
+        data = json.loads(response.text)
+        pattern = re.compile(
+            r"^\s*(UrlSigningKey|BlockingRewriteKey|DownstreamCacheRebeaconingKey|ProxyAuth|RequestOptionOverride|StickyQueryParameters|FetchProxy)"
+            r" \(\w+\)\s+(\S.*)$",
+            re.MULTILINE,
+        )
+        for field in ("config", "effective_config"):
+            for name, value in pattern.findall(data[field]):
+                assert value.strip() == "***", f"{path}: {field} prints {name} unredacted"
 
     @pytest.mark.parametrize("admin_path", ADMIN_PATHS)
     def test_admin_root_responds(self, client: PageSpeedClient, server_config, admin_path):

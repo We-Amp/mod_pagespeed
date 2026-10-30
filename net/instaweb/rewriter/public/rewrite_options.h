@@ -755,6 +755,13 @@ class RewriteOptions {
       safe_to_print_ = safe_to_print;
     }
 
+    // A secret option holds a credential or key.  Its value is shown as
+    // kRedactedValue in every human- or admin-facing rendering
+    // (OptionsToString), whether or not it is set.  Mark an option secret
+    // right where it is registered; nothing else needs to know about it.
+    bool is_secret() const { return secret_; }
+    void set_secret(bool secret) { secret_ = secret; }
+
    private:
     const char* id_;
     const char* help_text_;
@@ -762,6 +769,7 @@ class RewriteOptions {
     OptionScope scope_;
     bool do_not_use_for_signature_computation_;  // Default is false.
     bool safe_to_print_ = false;  // Safe to print in debug filter output.
+    bool secret_ = false;  // Value is redacted when options are rendered.
     int index_;
 
     PropertyBase(const PropertyBase&) = delete;
@@ -793,6 +801,7 @@ class RewriteOptions {
     bool is_used_for_signature_computation() const {
       return property()->is_used_for_signature_computation();
     }
+    bool is_secret() const { return property()->is_secret(); }
     virtual const PropertyBase* property() const = 0;
   };
 
@@ -3042,6 +3051,11 @@ class RewriteOptions {
     return signature_;
   }
 
+  // Placeholder printed in place of a secret option's value.
+  static const char kRedactedValue[];
+
+  // Renders the options for admin and log output.  Secret options (see
+  // PropertyBase::is_secret) print kRedactedValue instead of their value.
   virtual GoogleString OptionsToString() const;
   GoogleString FilterSetToString(const FilterSet& filter_set) const;
   GoogleString EnabledFiltersToString() const;
@@ -3286,11 +3300,11 @@ class RewriteOptions {
  protected:
   // Adds a new Property to 'properties' (the last argument).
   template <class RewriteOptionsSubclass, class OptionClass>
-  static void AddProperty(typename OptionClass::ValueType default_value,
-                          OptionClass RewriteOptionsSubclass::* offset,
-                          const char* id, StringPiece option_name,
-                          OptionScope scope, const char* help_text,
-                          bool safe_to_print, Properties* properties) {
+  static PropertyBase* AddProperty(
+      typename OptionClass::ValueType default_value,
+      OptionClass RewriteOptionsSubclass::* offset, const char* id,
+      StringPiece option_name, OptionScope scope, const char* help_text,
+      bool safe_to_print, Properties* properties) {
     PropertyBase* property =
         new PropertyLeaf<RewriteOptionsSubclass, OptionClass>(
             std::move(default_value), offset, id, option_name);
@@ -3298,7 +3312,13 @@ class RewriteOptions {
     property->set_help_text(help_text);
     property->set_safe_to_print(safe_to_print);
     properties->push_back(property);
+    return property;
   }
+
+  // Marks the already-registered option `option_name` in `properties` as
+  // secret (see PropertyBase::is_secret).  logs DFATAL on an unknown name so a
+  // rename cannot silently drop the redaction.
+  static void MarkOptionSecret(Properties* properties, StringPiece option_name);
 
   static void AddDeprecatedProperty(StringPiece option_name,
                                     OptionScope scope) {
@@ -3616,13 +3636,13 @@ class RewriteOptions {
   // Adds a property with a unique option_name_ field, allowing use of
   // SetOptionFromName.
   template <class OptionClass>
-  static void AddBaseProperty(typename OptionClass::ValueType default_value,
-                              OptionClass RewriteOptions::* offset,
-                              const char* id, StringPiece option_name,
-                              OptionScope scope, const char* help,
-                              bool safe_to_print) {
-    AddProperty(std::move(default_value), offset, id, option_name, scope, help,
-                safe_to_print, properties_);
+  static PropertyBase* AddBaseProperty(
+      typename OptionClass::ValueType default_value,
+      OptionClass RewriteOptions::* offset, const char* id,
+      StringPiece option_name, OptionScope scope, const char* help,
+      bool safe_to_print) {
+    return AddProperty(std::move(default_value), offset, id, option_name, scope,
+                       help, safe_to_print, properties_);
   }
 
   static void AddProperties();

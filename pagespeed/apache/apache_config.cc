@@ -82,7 +82,8 @@ void ApacheConfig::AddProperties() {
       "CookieName.  If CookieValue is specified, checks for that.  If "
       "Redirect is specified, a failure results in a redirection to that URL "
       "otherwise a 403 is generated.",
-      false /* safe_to_print */);
+      false /* safe_to_print */)
+      ->set_secret(true);
 
   AddApacheProperty(
       false, &ApacheConfig::force_buffering_, "afb", kForceBuffering,
