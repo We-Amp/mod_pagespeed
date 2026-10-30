@@ -151,6 +151,36 @@ class TestAdminPaths:
             f"Uppercase admin path should respond, got {response.status}"
         )
 
+    @pytest.mark.iis_only
+    @pytest.mark.parametrize("suffix", ["x", "2", "_extra", ".js", "x/statistics"])
+    def test_admin_lookalike_paths_not_routed(
+        self, client: PageSpeedClient, admin_path: str, suffix: str
+    ):
+        """Paths that merely start with the admin path are not admin pages."""
+        response = client.get(f"{admin_path}{suffix}")
+
+        require_no_auth_gate(response, "Lookalike admin path")
+        assert response.status == 404, (
+            f"{admin_path}{suffix} should not reach the admin handler, "
+            f"got {response.status}"
+        )
+        content_type = response.headers.get("Content-Type", "")
+        assert "application/json" not in content_type.lower(), (
+            f"{admin_path}{suffix} should not return admin JSON"
+        )
+
+    @pytest.mark.iis_only
+    def test_admin_exact_path_and_query_routed(
+        self, client: PageSpeedClient, admin_path: str
+    ):
+        """The exact admin path and the path followed by a query are routed."""
+        for url in (admin_path, f"{admin_path}?x=1", f"{admin_path}/statistics"):
+            response = client.get(url)
+            require_no_auth_gate(response, "Admin endpoint")
+            assert response.status in (200, 301, 302), (
+                f"{url} should reach the admin handler, got {response.status}"
+            )
+
 
 # ============================================================================
 # TestAdminSecurity: Test XSS protection in admin pages

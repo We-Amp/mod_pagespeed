@@ -168,6 +168,7 @@ cc_library(
         ":iis_deferred_release",
         ":iis_entity_chunk",
         ":iis_global_constants",
+        ":iis_admin_path_match",
         ":iis_ip_string",
         ":iis_proxy_fetch_completion",
         ":iis_unclaimed_ref",
@@ -284,6 +285,18 @@ cc_library(
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
         "//pagespeed/system:daemon_serve_arm",
+    ],
+)
+
+# Admin handler path matching (path boundary rule), split out of
+# iis_http_module.cpp so it can be unit-tested without the IIS headers.
+cc_library(
+    name = "iis_admin_path_match",
+    srcs = ["iis_admin_path_match.cc"],
+    hdrs = ["iis_admin_path_match.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
 
