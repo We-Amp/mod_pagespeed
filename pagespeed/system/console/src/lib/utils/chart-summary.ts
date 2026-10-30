@@ -75,6 +75,30 @@ export function timeTickLabel(tsSec: number | null, incrSec: number, timeZone?: 
   });
 }
 
+/**
+ * Labels for a whole time axis. The label precision follows the smallest gap
+ * between ticks, and a label that an earlier tick already shows is left
+ * blank, so no two ticks on an axis read the same ("17:18:18" twice for
+ * ticks half a second apart).
+ */
+export function timeTickLabels(splits: ReadonlyArray<number | null>, timeZone?: string): string[] {
+  let step = Infinity;
+  let prev: number | null = null;
+  for (const v of splits) {
+    if (v === null || !Number.isFinite(v)) continue;
+    if (prev !== null && v - prev > 0) step = Math.min(step, v - prev);
+    prev = v;
+  }
+  if (!Number.isFinite(step)) step = 60;
+  const seen = new Set<string>();
+  return splits.map((v) => {
+    const label = timeTickLabel(v, step, timeZone);
+    if (label === "" || seen.has(label)) return "";
+    seen.add(label);
+    return label;
+  });
+}
+
 /** A duration in the largest unit that keeps it readable: "20 s", "6 min", "2 h". */
 function spanText(seconds: number): string {
   if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;

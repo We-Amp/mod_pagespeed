@@ -20,7 +20,7 @@
     alignedData,
     axisFont,
     seriesSummary,
-    timeTickLabel,
+    timeTickLabels,
     valueAxisWidth,
     type ChartSeries,
   } from "./utils/chart-summary";
@@ -111,10 +111,7 @@
           // Room for an hh:mm:ss label between ticks; the step between
           // ticks decides whether seconds are shown.
           space: 80,
-          values: (_u, splits) => {
-            const step = splits.length > 1 ? Math.abs(splits[1] - splits[0]) : 60;
-            return splits.map((v) => timeTickLabel(v, step));
-          },
+          values: (_u, splits) => timeTickLabels(splits),
         },
         {
           stroke: text,

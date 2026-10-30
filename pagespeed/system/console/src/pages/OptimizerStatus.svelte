@@ -31,7 +31,7 @@
   } from "$lib/utils/daemon";
   import { formatBytes, formatCount, formatDuration, formatPercent } from "$lib/utils/format";
   import { foldStatus, optimizerSection, sampleStatus, statusView, type StatusSample } from "$lib/utils/optimizer-status";
-  import { serveSavingsView } from "$lib/utils/serve-savings";
+  import { SAVINGS_QUALIFIER, serveSavingsView } from "$lib/utils/serve-savings";
   import { hostSavingsView } from "$lib/utils/host-savings";
 
   const { api, lens } = useConsole();
@@ -329,7 +329,7 @@
       <h3 id="serve-savings-heading">Serve savings</h3>
       <p class="section-note" data-testid="serve-savings-source">
         Recorded by this web server's module each time it serves an optimized
-        response from the optimizer's cache.
+        response from the optimizer's cache. {SAVINGS_QUALIFIER}
       </p>
       {#if savings === null}
         <p class="empty" data-testid="serve-savings-absent">This optimizer version reports no serve savings.</p>

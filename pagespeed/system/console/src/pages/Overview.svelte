@@ -4,6 +4,7 @@
 -->
 
 <script module lang="ts">
+  import { SAVINGS_QUALIFIER } from "$lib/utils/serve-savings";
   import { ALERT_RULES, AlertTracker, RATE_ALERT_HOLD_MS } from "$lib/alerts";
   import { createAckStore } from "$lib/utils/finding-acks";
 
@@ -295,6 +296,9 @@
               </div>
             {/if}
           </dl>
+          {#if serveSavings}
+            <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
+          {/if}
           <p class="since" data-testid="since-optimizer" title={optimizerSince?.iso ?? undefined}>
             {optimizerSince?.text ?? "since restart"} (optimizer restart)
             {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}

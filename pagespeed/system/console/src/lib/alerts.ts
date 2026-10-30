@@ -32,7 +32,7 @@ import type { DaemonHealthResponse, DaemonStatsResponse } from "$lib/api/types";
 import { MODULE_DOCS } from "$lib/data/product-facts-console";
 import { memoryAckStore, type AckStore } from "$lib/utils/finding-acks";
 import { formatClock } from "$lib/utils/format";
-import { EMPTY_MESSAGE_TEXT, type MessageDigest, type MessageGroup } from "$lib/utils/message-groups";
+import { coveredWindowText, EMPTY_MESSAGE_TEXT, type MessageDigest, type MessageGroup } from "$lib/utils/message-groups";
 import { WARMUP_MS } from "$lib/utils/since";
 import { isDirtyBuild } from "$lib/utils/versions";
 
@@ -104,6 +104,8 @@ export interface AlertRule {
   count?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => number;
   /** What `count` counts, singular and plural ("warning", "warnings"). */
   countNoun?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => CountNoun;
+  /** The window `count` covers ("in the last 15 min", or since the log began when it is younger). */
+  countWindow?: (cur: AlertSnapshot, prev: AlertSnapshot | null) => string;
 }
 
 export interface CountNoun {
@@ -124,6 +126,8 @@ export interface ActiveAlert {
   count?: number;
   /** What `count` counts: "warnings", or "warnings and errors" when errors are among them. */
   countNoun?: CountNoun;
+  /** The window `count` covers, as a phrase ("in the last 15 min"). */
+  countWindow?: string;
   /** Epoch ms when the finding started firing (kept while it keeps firing). */
   since: number;
 }
@@ -289,6 +293,11 @@ function recentNoun(groups: readonly MessageGroup[]): CountNoun {
   return groups.some((g) => g.level === "error" || g.level === "fatal")
     ? { one: "warning or error", many: "warnings and errors" }
     : { one: "warning", many: "warnings" };
+}
+
+/** The window the recent-warning count covers: 15 minutes, or less when the retained log is younger. */
+function recentWindow(s: AlertSnapshot, longUnit = false): string {
+  return coveredWindowText(s.messages?.firstMs ?? null, s.at ?? Date.now(), VOLUME_WINDOW_MS, undefined, longUnit);
 }
 
 const OPTIMIZABLE_FALLTHROUGH = [
@@ -646,7 +655,7 @@ export const ALERT_RULES: readonly AlertRule[] = [
       const groups = recentWarnings(cur) ?? [];
       const total = groups.reduce((n, g) => n + g.recent, 0);
       const noun = recentNoun(groups);
-      return `${plural(total, noun.one, noun.many)} in the last 15 minutes, of ${plural(groups.length, "kind", "kinds")}.`;
+      return `${plural(total, noun.one, noun.many)} ${recentWindow(cur, true)}, of ${plural(groups.length, "kind", "kinds")}.`;
     },
     // A kind whose message is empty reads as the Logs page shows it, never as a bare count.
     details: (cur) =>
@@ -655,6 +664,7 @@ export const ALERT_RULES: readonly AlertRule[] = [
         .map((g) => `×${fmt(g.recent)} ${g.template.trim() === "" ? EMPTY_MESSAGE_TEXT : capText(g.template, 160)}`),
     count: (cur) => (recentWarnings(cur) ?? []).reduce((n, g) => n + g.recent, 0),
     countNoun: (cur) => recentNoun(recentWarnings(cur) ?? []),
+    countWindow: (cur) => recentWindow(cur),
     fix: "Logs lists them grouped by kind, newest first; the kinds that need action have their own findings here.",
   },
 ];
@@ -688,7 +698,8 @@ export function healthSummary(
   const recent = [...alerts, ...acknowledged].find((a) => a.id === "recent-warnings");
   const n = recent?.count;
   const noun = recent?.countNoun ?? { one: "warning", many: "warnings" };
-  const warnings = n === undefined ? "" : ` · ${n.toLocaleString()} ${n === 1 ? noun.one : noun.many} in the last 15 min`;
+  const window = recent?.countWindow ?? "in the last 15 min";
+  const warnings = n === undefined ? "" : ` · ${n.toLocaleString()} ${n === 1 ? noun.one : noun.many} ${window}`;
   const acked = acknowledged.length > 0 ? ` · ${acknowledged.length} acknowledged` : "";
   if (alerts.length === 0) {
     if (!moduleOk) return { text: "Module statistics unavailable", level: "warning" };
@@ -710,6 +721,7 @@ interface RuleState {
   details: string[];
   count?: number;
   countNoun?: CountNoun;
+  countWindow?: string;
 }
 
 /** Evaluates the rules sample by sample; keeps firing state and acknowledgements. */
@@ -738,6 +750,7 @@ export class AlertTracker {
           details: rule.details ? rule.details(cur, this.prev) : [],
           count: rule.count ? rule.count(cur, this.prev) : undefined,
           countNoun: rule.countNoun ? rule.countNoun(cur, this.prev) : undefined,
+          countWindow: rule.countWindow ? rule.countWindow(cur, this.prev) : undefined,
         });
         continue;
       }
@@ -813,6 +826,7 @@ export class AlertTracker {
         details: st.details,
         count: st.count,
         countNoun: st.countNoun,
+        countWindow: st.countWindow,
         since: st.since,
       });
     }

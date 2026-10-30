@@ -1,0 +1,24 @@
+{
+  "scope": "vhost",
+  "host": "example.test:0",
+  "timestamp_ms": 1793330536122,
+  "variables": {
+    "ipro_daemon_served": 0,
+    "ipro_daemon_served_original": 0,
+    "ipro_daemon_fallthrough": 3,
+    "ipro_daemon_served_css": 0,
+    "ipro_daemon_served_js": 0,
+    "ipro_daemon_served_image": 0,
+    "ipro_daemon_served_other": 0,
+    "ipro_daemon_fallthrough_css": 0,
+    "ipro_daemon_fallthrough_js": 0,
+    "ipro_daemon_fallthrough_image": 0,
+    "ipro_daemon_fallback_notified": 0,
+    "ipro_daemon_fallback_notify_failed": 0,
+    "ipro_daemon_refresh_notified": 0,
+    "ipro_daemon_refresh_notify_failed": 0,
+    "ipro_daemon_heal_notified": 0,
+    "ipro_daemon_heal_notify_failed": 0,
+    "process_start_ms": 1793330425475
+  }
+}

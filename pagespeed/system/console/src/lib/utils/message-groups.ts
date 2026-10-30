@@ -31,6 +31,33 @@ export interface MessageDigest {
   source: "module" | "console";
   /** The module left rows out to stay under its size cap. */
   truncated: boolean;
+  /** Epoch ms of the oldest retained line that carried a time; null when unknown. */
+  firstMs?: number | null;
+}
+
+/**
+ * The window a count over `windowMs` honestly covers: "in the last 15 min"
+ * when the retained log reaches back that far (or its start is unknown), and
+ * "in the retained messages since HH:MM" when the log is younger than the
+ * window, so a 4-minute buffer never reads as 15 minutes.
+ */
+export function coveredWindowText(
+  firstMs: number | null,
+  nowMs: number,
+  windowMs: number = MESSAGE_WINDOW_MS,
+  clock: (ms: number) => string = clockHm,
+  longUnit = false,
+): string {
+  if (firstMs !== null && firstMs > 0 && nowMs - firstMs < windowMs) {
+    return `in the retained messages since ${clock(firstMs)}`;
+  }
+  return `in the last ${windowMs / 60_000} ${longUnit ? "minutes" : "min"}`;
+}
+
+function clockHm(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** The window "recent" counts over: the last 15 minutes. */
@@ -68,7 +95,17 @@ function compareGroups(a: MessageGroup, b: MessageGroup): number {
  * with no readable time is never recent.
  */
 export function groupMessages(messages: unknown, nowMs: number, windowMs: number = MESSAGE_WINDOW_MS): MessageGroup[] {
-  if (!Array.isArray(messages)) return [];
+  return groupMessagesWithStart(messages, nowMs, windowMs).groups;
+}
+
+/** groupMessages plus the time of the oldest line that carried one (null when none did). */
+function groupMessagesWithStart(
+  messages: unknown,
+  nowMs: number,
+  windowMs: number,
+): { groups: MessageGroup[]; firstMs: number | null } {
+  if (!Array.isArray(messages)) return { groups: [], firstMs: null };
+  let firstMs: number | null = null;
   const byKey = new Map<string, MessageGroup>();
   const windowStart = nowMs - windowMs;
   let current: number | null = null;
@@ -79,6 +116,7 @@ export function groupMessages(messages: unknown, nowMs: number, windowMs: number
     const level = levelOf((entry as { severity?: unknown }).severity);
     const body = messageLineBody(text);
     if (body.length < text.length) current = messageLineTimeMs(text);
+    if (current !== null && current > 0 && (firstMs === null || current < firstMs)) firstMs = current;
     const template = messageTemplate(body);
     const key = `${level}\u0000${template}`;
     let group = byKey.get(key);
@@ -90,7 +128,7 @@ export function groupMessages(messages: unknown, nowMs: number, windowMs: number
     if (current !== null && current > group.lastMs) group.lastMs = current;
     if (current !== null && current >= windowStart) group.recent += 1;
   }
-  return [...byKey.values()].sort(compareGroups);
+  return { groups: [...byKey.values()].sort(compareGroups), firstMs };
 }
 
 /**
@@ -115,10 +153,17 @@ export function toMessageDigest(answer: unknown, nowMs: number, windowMs: number
         lastMs: wholeOf(r.last_ms),
       });
     }
-    return { groups: groups.sort(compareGroups), source: "module", truncated: a.truncated === true };
+    const first = wholeOf(a.first_ms);
+    return {
+      groups: groups.sort(compareGroups),
+      source: "module",
+      truncated: a.truncated === true,
+      firstMs: first > 0 ? first : null,
+    };
   }
   if (Array.isArray(a.messages)) {
-    return { groups: groupMessages(a.messages, nowMs, windowMs), source: "console", truncated: false };
+    const { groups, firstMs } = groupMessagesWithStart(a.messages, nowMs, windowMs);
+    return { groups, source: "console", truncated: false, firstMs };
   }
   return null;
 }

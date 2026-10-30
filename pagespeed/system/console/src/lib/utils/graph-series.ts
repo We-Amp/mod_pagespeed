@@ -88,6 +88,16 @@ export function latestForDisplay(series: readonly Sample[]): number | null {
   return null;
 }
 
+/**
+ * The value to report as "Latest" for a share (a percentage per interval):
+ * the final sample only. An interval without requests (0 of 0) is a gap, and
+ * a gap reads as no value ("—"), never as an older interval's figure or 0%.
+ */
+export function lastSampleForDisplay(series: readonly Sample[]): number | null {
+  const v = series.length > 0 ? series[series.length - 1] : null;
+  return v !== null && Number.isFinite(v) ? v : null;
+}
+
 /** Chart title, marked "(per second)" when the rate view actually applies —
  *  a gauge is never marked. */
 export function graphTitle(name: string, deltaView: boolean, isGauge = false): string {

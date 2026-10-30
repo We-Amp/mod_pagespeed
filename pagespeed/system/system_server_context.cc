@@ -81,6 +81,8 @@ SystemServerContext::SystemServerContext(RewriteDriverFactory* factory,
       html_rewrite_time_us_histogram_(nullptr),
       local_statistics_(nullptr),
       hostname_identifier_(StrCat(hostname, ":", IntegerToString(port))),
+      display_host_(port == 0 ? GoogleString(hostname)
+                              : StrCat(hostname, ":", IntegerToString(port))),
       system_caches_(nullptr),
       cache_path_(nullptr) {
   global_system_rewrite_options()->set_description(hostname_identifier_);
@@ -455,7 +457,7 @@ void SystemServerContext::StatisticsHandler(const RewriteOptions& options,
   Statistics* stats =
       is_global_request ? factory()->statistics() : statistics();
   admin_site_->StatisticsHandler(options, source, fetch, stats,
-                                 is_global_request, hostname_identifier());
+                                 is_global_request, display_host());
 }
 
 void SystemServerContext::ConsoleJsonHandler(const QueryParams& params,
@@ -487,7 +489,7 @@ void SystemServerContext::PrintConfig(AdminSite::AdminSource source,
                                       AsyncFetch* fetch) {
   admin_site_->PrintConfig(source, fetch, *global_system_rewrite_options(),
                            *global_system_rewrite_options(), false,
-                           hostname_identifier());
+                           display_host());
 }
 
 void SystemServerContext::MessageHistoryHandler(const RewriteOptions& options,

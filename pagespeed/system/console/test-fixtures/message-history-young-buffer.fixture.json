@@ -1,0 +1,31 @@
+{
+  "scope": "process",
+  "next": 817,
+  "now_ms": 1793291017000,
+  "first_ms": 1793290786000,
+  "window_s": 900,
+  "truncated": false,
+  "groups": [
+    {
+      "level": "info",
+      "template": "No permission to rewrite 'URL'",
+      "count": 751,
+      "last_ms": 1793291016000,
+      "recent": 751
+    },
+    {
+      "level": "warning",
+      "template": "Resource fetch of URL failed after N ms",
+      "count": 14,
+      "last_ms": 1793291000000,
+      "recent": 14
+    },
+    {
+      "level": "info",
+      "template": "Configured admin console reachable",
+      "count": 52,
+      "last_ms": 1793290921000,
+      "recent": 52
+    }
+  ]
+}

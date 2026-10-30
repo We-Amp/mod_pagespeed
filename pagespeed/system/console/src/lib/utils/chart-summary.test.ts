@@ -9,6 +9,7 @@ import {
   chartWindowLabel,
   seriesSummary,
   timeTickLabel,
+  timeTickLabels,
   valueAxisWidth,
 } from "./chart-summary";
 
@@ -88,6 +89,24 @@ describe("timeTickLabel", () => {
 
   it("is empty for a missing tick", () => {
     expect(timeTickLabel(null, 60, "UTC")).toBe("");
+  });
+});
+
+describe("timeTickLabels", () => {
+  const t = Date.UTC(2026, 9, 29, 17, 18, 18) / 1000;
+  it("never repeats a label on one axis (ticks half a second apart)", () => {
+    const splits = [t, t + 0.5, t + 1, t + 1.5, t + 2];
+    const labels = timeTickLabels(splits, "UTC");
+    const shown = labels.filter((l) => l !== "");
+    expect(new Set(shown).size).toBe(shown.length);
+    expect(labels).toEqual(["17:18:18", "", "17:18:19", "", "17:18:20"]);
+  });
+  it("keeps every label of evenly spaced minute ticks", () => {
+    expect(timeTickLabels([t, t + 60, t + 120], "UTC")).toEqual(["17:18", "17:19", "17:20"]);
+  });
+  it("tolerates gaps and a single tick", () => {
+    expect(timeTickLabels([null, t], "UTC")).toEqual(["", "17:18"]);
+    expect(timeTickLabels([], "UTC")).toEqual([]);
   });
 });
 
