@@ -87,6 +87,10 @@ void ApacheRequestToRequestHeaders(const request_rec& request,
                                    RequestHeaders* request_headers,
                                    HeaderPredicateFn* predicate) {
   RequestPredicatePair rpp(request_headers, predicate);
+  if (request.method != nullptr) {
+    request_headers->set_method(
+        RequestHeaders::MethodFromString(request.method));
+  }
   if (request.proto_num >= 1000) {
     // proto_num is the version number of protocol; 1.1 = 1001
     request_headers->set_major_version(request.proto_num / 1000);

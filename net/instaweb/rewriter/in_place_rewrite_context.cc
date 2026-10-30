@@ -248,6 +248,10 @@ void RecordingFetch::HandleDone(bool success) {
 }
 
 bool RecordingFetch::CanInPlaceRewrite() {
+  // A HEAD response carries no body to record or rewrite.
+  if (request_headers()->method() == RequestHeaders::kHead) {
+    return false;
+  }
   // We are rewriting only 200 responses.
   if (response_headers()->status_code() != HttpStatus::kOK) {
     return false;

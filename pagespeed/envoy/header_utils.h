@@ -15,12 +15,28 @@ namespace net_instaweb {
 
 class HeaderUtils {
  public:
+  // Whether a response to a request with this method may be served from the
+  // cache: GET and HEAD only.
+  static bool MayServeFromCache(RequestHeaders::Method method) {
+    return method == RequestHeaders::kGet || method == RequestHeaders::kHead;
+  }
+
+  // Whether the response to a request with this method may be stored in the
+  // cache: GET only.
+  static bool MayStoreInCache(RequestHeaders::Method method) {
+    return method == RequestHeaders::kGet;
+  }
+
   static std::unique_ptr<RequestHeaders> toPageSpeedRequestHeaders(
       Envoy::Http::HeaderMap& headers) {
     std::unique_ptr<RequestHeaders> request_headers =
         std::make_unique<RequestHeaders>();
     auto callback = [&request_headers](const Envoy::Http::HeaderEntry& entry)
         -> Envoy::Http::HeaderMap::Iterate {
+      if (entry.key().getStringView() == ":method") {
+        request_headers->set_method(
+            RequestHeaders::MethodFromString(entry.value().getStringView()));
+      }
       request_headers->Add(entry.key().getStringView(),
                            entry.value().getStringView());
       return Envoy::Http::HeaderMap::Iterate::Continue;

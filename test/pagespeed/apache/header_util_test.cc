@@ -44,6 +44,7 @@ class HeaderUtilTest : public testing::Test {
     // reads would otherwise be reads of whatever was in the struct.
     request_.err_headers_out = apr_table_make(request_.pool, 10);
     request_.content_encoding = nullptr;
+    request_.method = "GET";
   }
 
   void TearDown() override {
@@ -338,6 +339,23 @@ TEST_F(HeaderUtilTest, SelectiveRequestHeaders) {
   EXPECT_STREQ("b", selective.Lookup1("a"));
   EXPECT_TRUE(selective.Lookup1("c") == nullptr);
   EXPECT_EQ(1, selective.NumAttributes());
+}
+
+TEST_F(HeaderUtilTest, PropagatesRequestMethod) {
+  const struct {
+    const char* name;
+    RequestHeaders::Method method;
+  } kCases[] = {
+      {"GET", RequestHeaders::kGet},   {"HEAD", RequestHeaders::kHead},
+      {"POST", RequestHeaders::kPost}, {"PUT", RequestHeaders::kPut},
+      {"DELETE", RequestHeaders::kDelete},
+  };
+  for (const auto& test_case : kCases) {
+    request_.method = test_case.name;
+    RequestHeaders headers;
+    ApacheRequestToRequestHeaders(request_, &headers);
+    EXPECT_EQ(test_case.method, headers.method()) << test_case.name;
+  }
 }
 
 }  // namespace net_instaweb

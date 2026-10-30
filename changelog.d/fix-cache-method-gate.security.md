@@ -1,0 +1,1 @@
+- Hardened response caching so responses to requests other than GET and HEAD are never stored in or served from the cache. Update recommended.

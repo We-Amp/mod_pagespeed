@@ -718,6 +718,15 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
       fetch_url.Spec(), server_context_, request_context, options_, this);
 
   // Copy request headers to base_fetch (use already parsed headers)
+  // Envoy drops the body of a response to HEAD itself, and keeps the
+  // headers only when the reply is built with the body: the fetch is
+  // therefore run as a GET and the client's method is kept for the cache
+  // decisions below.
+  client_method_ = ps_request_headers->method();
+  base_fetch_->request_headers()->set_method(
+      client_method_ == net_instaweb::RequestHeaders::kHead
+          ? net_instaweb::RequestHeaders::kGet
+          : client_method_);
   for (int i = 0; i < ps_request_headers->NumAttributes(); ++i) {
     base_fetch_->request_headers()->Add(ps_request_headers->Name(i),
                                         ps_request_headers->Value(i));
@@ -776,7 +785,9 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
   // is already in the cache. If found, we serve it directly. If not found,
   // FetchInPlaceResource will return kNotInCacheStatus and we'll record the
   // response for future optimization in the encode path.
-  if (ShouldTryIpro(fetch_url, options_)) {
+  // Only GET and HEAD requests are answered from the cache.
+  if (net_instaweb::HeaderUtils::MayServeFromCache(client_method_) &&
+      ShouldTryIpro(fetch_url, options_)) {
     // Create a RewriteDriver for the IPRO lookup, using custom options
     // (from query params and request headers like PageSpeedFilters,
     // CssFlattenMaxBytes) if they were computed.
@@ -865,6 +876,12 @@ void HttpPageSpeedDecoderFilter::setDecoderFilterCallbacks(
 }
 
 void HttpPageSpeedDecoderFilter::prepareForIproRecording() {
+  // Only responses to GET requests are recorded into the cache.
+  if (base_fetch_ == nullptr ||
+      !net_instaweb::HeaderUtils::MayStoreInCache(client_method_)) {
+    return;
+  }
+
   // Use stripped URL (without PageSpeed query params) for consistency with
   // the IPRO lookup. This matches the Apache implementation which uses
   // stripped_gurl_.Spec() for the InPlaceResourceRecorder.
@@ -1138,6 +1155,8 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
           auto ps_request_headers =
               net_instaweb::HeaderUtils::toPageSpeedRequestHeaders(
                   envoy_request_headers.ref());
+          envoy_async_fetch_->request_headers()->set_method(
+              ps_request_headers->method());
           for (int i = 0; i < ps_request_headers->NumAttributes(); ++i) {
             envoy_async_fetch_->request_headers()->Add(
                 ps_request_headers->Name(i), ps_request_headers->Value(i));
