@@ -80,5 +80,24 @@ TEST_F(IisExperimentAssignmentTest, NoExperimentArmIsKept) {
   EXPECT_FALSE(clone->Enabled(RewriteOptions::kExtendCacheCss));
 }
 
+// Options fetched from a remote configuration source are merged into the
+// request's options after the arm was assigned. The merge drops the arm; the
+// recorded assignment puts it back, with the arm's filters.
+TEST_F(IisExperimentAssignmentTest, ArmSurvivesMergeOfRemoteOptions) {
+  auto request_options = NewExperimentOptions();
+  request_options->SetExperimentState(2);
+  IisExperimentAssignment assignment;
+  assignment.Record(*request_options);
+
+  auto remote_options = NewExperimentOptions();
+  request_options->Merge(*remote_options);
+  EXPECT_NE(2, request_options->experiment_id());
+
+  EXPECT_TRUE(assignment.ApplyTo(request_options.get()));
+  EXPECT_EQ(2, request_options->experiment_id());
+  EXPECT_TRUE(request_options->Enabled(RewriteOptions::kCombineCss));
+  EXPECT_FALSE(request_options->Enabled(RewriteOptions::kExtendCacheCss));
+}
+
 }  // namespace
 }  // namespace net_instaweb
