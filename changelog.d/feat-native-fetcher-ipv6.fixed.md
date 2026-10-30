@@ -1,0 +1,1 @@
+- nginx: with `UseNativeFetcher on`, fetches now work for origins that resolve to IPv6 addresses (and for literal IPv6 hosts). The `ipv6=on|off` setting of the nginx `resolver` directive is honoured. Previously only IPv4 results were used and AAAA-only hosts failed (apache/incubator-pagespeed-ngx#354).
