@@ -156,6 +156,16 @@ TEST_F(CssOutlineFilterTest, OutlineStyle) {
   OutlineStyle("outline_styles_no_hash");
 }
 
+// Browsers ignore integrity= on an inline <style>, but outlining copies the
+// attribute onto the new <link>, where it would be enforced against bytes it
+// does not match. Such styles stay inline. The match is case-insensitive.
+TEST_F(CssOutlineFilterTest, DoNotOutlineIntegrityStyle) {
+  SetupOutliner();
+  ValidateNoChanges("integrity_not_outlined",
+                    "<style integrity=\"sha384-x\">a { color: red; }</style>"
+                    "<style INTEGRITY=\"sha384-y\">b { color: blue; }</style>");
+}
+
 TEST_F(CssOutlineFilterTest, OutlineStyleMD5) {
   SetupOutliner();
   UseMd5Hasher();

@@ -25,6 +25,7 @@
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/string.h"
@@ -66,7 +67,16 @@ void CssOutlineFilter::StartElementImpl(HtmlElement* element) {
     inline_chars_ = nullptr;
   }
   if (element->keyword() == HtmlName::kStyle &&
-      element->FindAttribute(HtmlName::kScoped) == nullptr) {
+      ScriptTagScanner::HasIntegrityAttribute(element)) {
+    // Browsers ignore integrity= on an inline <style>, but outlining copies
+    // the attribute onto the new <link>, where it would be enforced against
+    // bytes it does not match. Leave it inline.
+    driver()->InsertDebugComment(
+        "CSS not outlined: integrity attribute would become enforced on "
+        "the outlined stylesheet",
+        element);
+  } else if (element->keyword() == HtmlName::kStyle &&
+             element->FindAttribute(HtmlName::kScoped) == nullptr) {
     // <style scoped> can't be directly converted to a <link>. We could
     // theoretically convert it to a <style scoped>@import ... </style>, but
     // given the feature has very little browser support, it's probably not

@@ -110,6 +110,14 @@ void JsInlineFilter::StartElementImpl(HtmlElement* element) {
       script_tag_scanner_.ParseScriptElement(element, &src);
   if (classification == ScriptTagScanner::kJavaScript) {
     should_inline_ = (src != nullptr) && (src->DecodedValueOrNull() != nullptr);
+    // Inlining drops integrity= enforcement (browsers ignore it on an inline
+    // script), so the check the author asked for would silently stop
+    // happening. Leave the script alone.
+    if (should_inline_ && ScriptTagScanner::HasIntegrityAttribute(element)) {
+      should_inline_ = false;
+      driver()->InsertDebugComment(
+          "JS not inlined because of the integrity attribute", element);
+    }
     // Inlining a script with async/defer (or IE for/event) would change its
     // execution semantics: async/defer are ignored on scripts without src=,
     // so the script would run synchronously mid-parse instead.

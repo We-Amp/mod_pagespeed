@@ -285,6 +285,19 @@ class CssFilterTestCustomOptions : public CssFilterTest {
   void SetUp() override {}
 };
 
+// A stylesheet carrying integrity= pins its bytes: rewriting it would make
+// the browser refuse to apply it. The attribute name match is
+// ASCII-case-insensitive; the same link without integrity is still rewritten.
+TEST_F(CssFilterTest, IntegrityLinkNotRewritten) {
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss, kInputStyle, 100);
+  ValidateNoChanges("sri_lower",
+                    "<link rel=stylesheet href=a.css integrity=\"sha384-x\">");
+  ValidateNoChanges("sri_upper",
+                    "<link rel=stylesheet href=a.css INTEGRITY=\"sha384-x\">");
+  ValidateExpected("sri_absent", "<link rel=stylesheet href=a.css>",
+                   "<link rel=stylesheet href=A.a.css.pagespeed.cf.0.css>");
+}
+
 TEST_F(CssFilterTestCustomOptions, CssPreserveUrls) {
   options()->SoftEnableFilterForTesting(RewriteOptions::kInlineCss);
   options()->SoftEnableFilterForTesting(RewriteOptions::kRewriteCss);

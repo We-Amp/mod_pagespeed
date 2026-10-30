@@ -41,6 +41,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -427,6 +428,15 @@ void CssCombineFilter::StartElementImpl(HtmlElement* element) {
           }
         }
       }
+    }
+
+    // Combining deletes the original <link> along with its integrity=
+    // attribute, discarding the author's SRI guarantee (the per-file hash
+    // could never match the combined bytes anyway). Treat it as a barrier,
+    // explicitly rather than via the generic attribute check below.
+    if (ScriptTagScanner::HasIntegrityAttribute(element)) {
+      NextCombination("integrity attribute");
+      return;
     }
 
     if (!nonstandard_attributes.empty()) {

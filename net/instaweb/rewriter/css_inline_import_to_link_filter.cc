@@ -27,6 +27,7 @@
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -207,7 +208,10 @@ void CssInlineImportToLinkFilter::InlineImportToLinkStyle() {
   if (style_characters_ != nullptr && driver_->IsRewritable(style_element_) &&
       style_element_->FindAttribute(HtmlName::kHref) == nullptr &&
       style_element_->FindAttribute(HtmlName::kRel) == nullptr &&
-      style_element_->FindAttribute(HtmlName::kScoped) == nullptr) {
+      style_element_->FindAttribute(HtmlName::kScoped) == nullptr &&
+      // The style's attributes are copied onto each new <link>; an integrity=
+      // there would be enforced against bytes it does not match.
+      !ScriptTagScanner::HasIntegrityAttribute(style_element_)) {
     // Parse imports until we hit the end of them; if there's anything else
     // in the CSS we leave that in the inline style.
     Css::Parser parser(style_characters_->contents());

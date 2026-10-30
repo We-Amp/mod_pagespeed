@@ -118,6 +118,16 @@ TEST_F(CssInlineImportToLinkFilterTest, DoNotConvertScoped) {
       "@import url(assets/styles.css);</style>");
 }
 
+// The style's attributes are copied onto each new <link>, where an integrity=
+// would be enforced against bytes it does not match. Leave such a style alone.
+TEST_F(CssInlineImportToLinkFilterTest, DoNotConvertIntegrityStyle) {
+  AddFilter(RewriteOptions::kInlineImportToLink);
+  ValidateStyleUnchanged(
+      "<style integrity=\"sha384-x\">@import url(assets/styles.css);</style>");
+  ValidateStyleUnchanged(
+      "<style INTEGRITY=\"sha384-x\">@import url(assets/styles.css);</style>");
+}
+
 TEST_F(CssInlineImportToLinkFilterTest, ConvertStyleWithMultipleImports) {
   AddFilter(RewriteOptions::kInlineImportToLink);
   ValidateStyleToLink(
