@@ -104,7 +104,7 @@ TEST_F(CriticalImagesFinderTest, UpdateCriticalImagesCacheEntrySuccess) {
   ArrayInputStream input(GetCriticalImagesUpdatedValue()->value().data(),
                          GetCriticalImagesUpdatedValue()->value().size());
   CriticalImages parsed_proto;
-  parsed_proto.ParseFromZeroCopyStream(&input);
+  ASSERT_TRUE(parsed_proto.ParseFromZeroCopyStream(&input));
   ASSERT_TRUE(parsed_proto.has_html_critical_image_support());
   const CriticalKeys& html_support = parsed_proto.html_critical_image_support();
   EXPECT_EQ(1, html_support.key_evidence_size());

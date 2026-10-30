@@ -60,7 +60,6 @@ const char* kInvalidFiles[] = {
     "corrupt.jpg",    // Invalid huffman code in the image data section.
 };
 
-const size_t kValidJpegImageCount = std::size(kValidJpegImages);
 const size_t kInvalidFileCount = std::size(kInvalidFiles);
 
 // Verify that decoded image is accurate for each pixel.

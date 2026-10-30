@@ -72,7 +72,9 @@ class OobSlotIndexCache : public CacheInterface {
               ->mutable_input(0)
               ->set_index(kOobSlotIndex);
           GoogleString corrupted;
-          partitions.SerializeToString(&corrupted);
+          // Serializing the mutated in-memory message cannot fail here;
+          // the bytes are corruption test input either way.
+          (void)partitions.SerializeToString(&corrupted);
           callback_->set_value(MappedSharedString(SharedString(corrupted)));
           ++*num_corrupted_;
         }
