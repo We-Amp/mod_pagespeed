@@ -1,7 +1,1 @@
-- **Redirects no longer pick up repeated PageSpeed query parameters.** When the
-  module strips its own query parameters (for example `?PageSpeed=noscript`)
-  and the origin answers with a same-site redirect, it adds them back to the
-  `Location` only if the target does not already carry them, and before any
-  `#fragment`. Redirects to another host are left untouched. Reported in
-  https://github.com/apache/incubator-pagespeed-mod/issues/1622 and
-  https://github.com/apache/incubator-pagespeed-mod/issues/1024.
+- **Redirects no longer pick up repeated or unwanted PageSpeed query parameters.** When the module strips its own query parameters (for example `?PageSpeed=noscript`) and the origin answers with a same-site redirect, it still adds them back to `Location` so the redirected request keeps its options, but now only if the target does not already carry them, and before any `#fragment`. A redirect that points at the original URL with those parameters removed (for example `/?PageSpeed=noscript` to `/`) is left as the origin wrote it, so sites can keep those URLs out of search indexes. Redirects to another host are untouched. Reported in https://github.com/apache/incubator-pagespeed-mod/issues/1622 and https://github.com/apache/incubator-pagespeed-mod/issues/1024.

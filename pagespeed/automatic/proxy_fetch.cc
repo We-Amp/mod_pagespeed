@@ -612,7 +612,14 @@ void ProxyFetch::HandleHeadersComplete() {
       GoogleUrl base_url(url_);
       GoogleUrl locn_url(base_url, loc);
       // Only add them back if we're being redirected back to the same domain.
-      if (base_url.Origin() == locn_url.Origin()) {
+      // A Location equal to the request URL without our parameters (fragment
+      // ignored) is the origin deliberately stripping them: leave it alone.
+      bool canonicalising =
+          base_url.IsWebValid() && locn_url.IsWebValid() &&
+          base_url.AllExceptQuery() == locn_url.AllExceptQuery() &&
+          base_url.has_query() == locn_url.has_query() &&
+          base_url.Query() == locn_url.Query();
+      if (base_url.Origin() == locn_url.Origin() && !canonicalising) {
         // Re-add only the PageSpeed parameters the Location does not already
         // carry, so a redirect chain never accumulates repeats of them.
         QueryParams ours, theirs;
