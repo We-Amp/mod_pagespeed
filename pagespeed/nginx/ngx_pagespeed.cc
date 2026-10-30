@@ -1107,11 +1107,19 @@ ngx_int_t copy_response_headers_to_ngx(
 namespace {
 
 struct ps_main_conf_t {
+  // The driver factory of this configuration cycle.  The cycle owns it: the
+  // first server cleanup of the cycle deletes it (so the worker threads stop
+  // before the proxy fetch factories go), and the main conf cleanup deletes
+  // it when no server did, as for a cycle that never reached ps_init_module.
   NgxRewriteDriverFactory* driver_factory;
   MessageHandler* handler;
+  // Set once this cycle's factory has been deleted.
+  bool factory_deleted;
 };
 
 struct ps_srv_conf_t {
+  // The main conf of the cycle this server belongs to.
+  ps_main_conf_t* main_conf;
   // If pagespeed is configured in some server block but not this one our
   // per-request code will be invoked but server context will be null.  In those
   // cases we need to short circuit, not changing anything.  Currently our
@@ -1379,7 +1387,22 @@ void ps_cleanup_loc_conf(void* data) {
   cfg_l->options = nullptr;
 }
 
-bool factory_deleted = false;
+// Deletes the cycle's factory once.  `active_driver_factory` is cleared only
+// when it points at this very factory, so a cycle that is discarded (a failed
+// reload) never untracks the factory of the cycle that is still live.
+void ps_delete_cycle_factory(ps_main_conf_t* cfg_m) {
+  if (cfg_m->factory_deleted || cfg_m->driver_factory == nullptr) {
+    return;
+  }
+  NgxRewriteDriverFactory* factory = cfg_m->driver_factory;
+  if (active_driver_factory == factory) {
+    active_driver_factory = nullptr;
+  }
+  delete factory;
+  cfg_m->driver_factory = nullptr;
+  cfg_m->factory_deleted = true;
+}
+
 void ps_cleanup_srv_conf(void* data) {
   ps_srv_conf_t* cfg_s = static_cast<ps_srv_conf_t*>(data);
 
@@ -1387,12 +1410,8 @@ void ps_cleanup_srv_conf(void* data) {
   // to be shut down when we destroy any proxy_fetch_factories. This
   // will prevent any queued callbacks to destroyed proxy fetch factories
   // from being executed
-  if (!factory_deleted && cfg_s->server_context != nullptr) {
-    if (active_driver_factory == cfg_s->server_context->factory()) {
-      active_driver_factory = nullptr;
-    }
-    delete cfg_s->server_context->factory();
-    factory_deleted = true;
+  if (cfg_s->main_conf != nullptr && cfg_s->server_context != nullptr) {
+    ps_delete_cycle_factory(cfg_s->main_conf);
   }
   if (cfg_s->proxy_fetch_factory != nullptr) {
     delete cfg_s->proxy_fetch_factory;
@@ -1410,13 +1429,12 @@ void ps_cleanup_main_conf(void* data) {
   ps_main_conf_t* cfg_m = static_cast<ps_main_conf_t*>(data);
   delete cfg_m->handler;
   cfg_m->handler = nullptr;
+
+  // A cycle without a pagespeed server (or one discarded before
+  // ps_init_module) still owns the factory it created.
+  ps_delete_cycle_factory(cfg_m);
   NgxRewriteDriverFactory::Terminate();
   NgxRewriteOptions::Terminate();
-
-  // reset the factory deleted flag, so we will clean up properly next time,
-  // in case of a configuration reload.
-  // TODO(oschaaf): get rid of the factory_deleted flag
-  factory_deleted = false;
 }
 
 template <typename ConfT>
@@ -1463,21 +1481,16 @@ void* ps_create_main_conf(ngx_conf_t* cf) {
   if (cfg_m == nullptr) {
     return nullptr;
   }
-  // factory_deleted is process-global.  It is set by the first server
-  // cleanup of a cycle that deletes the cycle's factory, and cleared by that
-  // same cycle's main-conf cleanup, which is the last cleanup the cycle runs.
-  // A new cycle's main conf is therefore created with the marker clear; the
-  // reset below only makes that explicit.
-  DCHECK(!factory_deleted);
-  factory_deleted = false;
   NgxRewriteOptions::Initialize();
   NgxRewriteDriverFactory::Initialize();
 
   cfg_m->driver_factory = new NgxRewriteDriverFactory(
       *process_context, new SystemThreadSystem(), "" /* hostname, not used */,
       -1 /* port, not used */);
-  active_driver_factory = cfg_m->driver_factory;
-  active_driver_factory->LoggingInit(ngx_cycle->log, false);
+  // active_driver_factory is not retargeted here: this cycle has not
+  // succeeded yet, and the live cycle's factory must stay tracked if it
+  // fails.  ps_init_module makes it the active one.
+  cfg_m->driver_factory->LoggingInit(ngx_cycle->log, false);
   cfg_m->driver_factory->Init();
   ps_set_conf_cleanup_handler(cf, ps_cleanup_main_conf, cfg_m);
   return cfg_m;
@@ -1488,6 +1501,8 @@ void* ps_create_srv_conf(ngx_conf_t* cf) {
   if (cfg_s == nullptr) {
     return nullptr;
   }
+  cfg_s->main_conf = static_cast<ps_main_conf_t*>(
+      ngx_http_conf_get_module_main_conf(cf, ngx_pagespeed));
   ps_set_conf_cleanup_handler(cf, ps_cleanup_srv_conf, cfg_s);
   return cfg_s;
 }
@@ -5174,10 +5189,12 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
         }
       }
     }
+    // This cycle is the live one now.
+    active_driver_factory = cfg_m->driver_factory;
   } else {
-    delete cfg_m->driver_factory;
-    cfg_m->driver_factory = nullptr;
-    active_driver_factory = nullptr;
+    // No pagespeed server in this cycle.  The previous cycle's factory, if
+    // any, stays the tracked one until that cycle's own cleanup deletes it.
+    ps_delete_cycle_factory(cfg_m);
   }
   return NGX_OK;
 }
