@@ -40,6 +40,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -47,7 +48,6 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
-#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -314,8 +314,7 @@ TEST_F(CacheExtenderTest, DoNotExtendOversizedGzip) {
 
   // Inflates one byte past the largest handled response; compresses to a
   // tiny body that is comfortably cacheable at its compressed size.
-  GoogleString js(RewriteOptions::kDefaultMaxCacheableResponseContentLength +
-                      1,
+  GoogleString js(RewriteOptions::kDefaultMaxCacheableResponseContentLength + 1,
                   'a');
   GoogleString compressed;
   {
@@ -331,9 +330,8 @@ TEST_F(CacheExtenderTest, DoNotExtendOversizedGzip) {
   SetFetchResponse(AbsolutifyUrl("c.js"), response_headers, compressed);
   rewrite_driver()->AddFilters();
 
-  ValidateNoChanges(
-      "no_extend_oversized_gzip",
-      "<script type='text/javascript' src='c.js'></script>\n");
+  ValidateNoChanges("no_extend_oversized_gzip",
+                    "<script type='text/javascript' src='c.js'></script>\n");
   EXPECT_EQ(0, num_cache_extended_->Get());
 }
 
@@ -537,7 +535,8 @@ TEST_F(CacheExtenderSvgTest, ExtendSvgImage) {
   ResponseHeaders jpg_headers;
   ASSERT_TRUE(FetchResource(kTestDomain, kFilterId, "b.jpg", "jpg",
                             &jpg_content, &jpg_headers));
-  EXPECT_EQ(nullptr, jpg_headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
+  EXPECT_EQ(nullptr,
+            jpg_headers.Lookup1(HttpAttributes::kContentSecurityPolicy));
 }
 
 TEST_F(CacheExtenderSvgTest, SvgNotInlinedOrRewrittenByImageFilters) {
@@ -546,10 +545,10 @@ TEST_F(CacheExtenderSvgTest, SvgNotInlinedOrRewrittenByImageFilters) {
   options()->EnableFilter(RewriteOptions::kResizeImages);
   options()->set_image_inline_max_bytes(10000);
   InitSvg();
-  ValidateExpected("svg_not_inlined", "<img src='d.svg' width='1' height='1'/>",
-                   StrCat("<img src='", Encode("", kFilterId, "0", "d.svg",
-                                               "svg"),
-                          "' width='1' height='1'/>"));
+  ValidateExpected(
+      "svg_not_inlined", "<img src='d.svg' width='1' height='1'/>",
+      StrCat("<img src='", Encode("", kFilterId, "0", "d.svg", "svg"),
+             "' width='1' height='1'/>"));
 }
 
 TEST_F(CacheExtenderSvgTest, SvgNotExtendedWhenImageExtensionDisabled) {
@@ -815,10 +814,10 @@ TEST_F(CacheExtenderTest, ModuleScriptExtendedOnSameHost) {
   // imports keep resolving and the rewrite is safe.
   InitTest(kShortTtlSec);
   const char kModuleScript[] = "<script type=\"module\" src=\"c.js\"></script>";
-  ValidateExpected("module_extended_same_host", kModuleScript,
-                   StrCat("<script type=\"module\" src=\"",
-                          Encode("", kFilterId, "0", "c.js", "js"),
-                          "\"></script>"));
+  ValidateExpected(
+      "module_extended_same_host", kModuleScript,
+      StrCat("<script type=\"module\" src=\"",
+             Encode("", kFilterId, "0", "c.js", "js"), "\"></script>"));
   EXPECT_EQ(1, num_cache_extended_->Get())
       << "Number of cache extended resources is wrong";
 }
@@ -853,10 +852,10 @@ TEST_F(CacheExtenderTest, IntegrityScriptExtendedOnSameHost) {
   InitTest(kShortTtlSec);
   const char kIntegrityScript[] =
       "<script src=\"c.js\" integrity=\"sha384-x\"></script>";
-  ValidateExpected("integrity_extended_same_host", kIntegrityScript,
-                   StrCat("<script src=\"",
-                          Encode("", kFilterId, "0", "c.js", "js"),
-                          "\" integrity=\"sha384-x\"></script>"));
+  ValidateExpected(
+      "integrity_extended_same_host", kIntegrityScript,
+      StrCat("<script src=\"", Encode("", kFilterId, "0", "c.js", "js"),
+             "\" integrity=\"sha384-x\"></script>"));
   EXPECT_EQ(1, num_cache_extended_->Get())
       << "Number of cache extended resources is wrong";
 }

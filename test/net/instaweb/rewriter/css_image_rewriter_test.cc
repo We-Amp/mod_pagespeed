@@ -143,7 +143,8 @@ TEST_F(CssImageRewriterTest, CacheExtendsImagesSimple) {
 TEST_F(CssImageRewriterTest, CacheExtendsSvgImages) {
   const ContentType* svg = MimeTypeToContentType("image/svg+xml");
   ASSERT_TRUE(svg != nullptr);
-  SetResponseWithDefaultHeaders("x.svg", *svg, "<svg xmlns='http://www.w3.org/2000/svg'/>", 100);
+  SetResponseWithDefaultHeaders(
+      "x.svg", *svg, "<svg xmlns='http://www.w3.org/2000/svg'/>", 100);
 
   static const char css_before[] = "body { background: url(x.svg); }\n";
   const GoogleString css_after = StrCat(
