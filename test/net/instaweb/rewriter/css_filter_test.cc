@@ -2616,6 +2616,40 @@ TEST_F(CssFilterTest, InlineCsp) {
              "<!--Avoiding modifying inline style with CSP present-->"));
 }
 
+TEST_F(CssFilterTest, InlineCspNonceOrUnsafeInlineMinifies) {
+  EnableDebug();
+
+  static const char kCss[] =
+      "<style nonce=\"abc123\">* { display: stylish; }</style>";
+  static const char kMinCss[] =
+      "<style nonce=\"abc123\">*{display:stylish}</style>";
+  static const char kNonceCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"style-src 'nonce-abc123'\">";
+  ValidateExpected("inline_css_nonce", StrCat(kNonceCsp, kCss),
+                   StrCat(kNonceCsp, kMinCss));
+
+  static const char kUnsafeInlineCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"style-src 'unsafe-inline'\">";
+  ValidateExpected("inline_css_unsafe_inline", StrCat(kUnsafeInlineCsp, kCss),
+                   StrCat(kUnsafeInlineCsp, kMinCss));
+}
+
+TEST_F(CssFilterTest, InlineCspHashLeavesStyleUnchanged) {
+  EnableDebug();
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"style-src 'sha256-abc123' 'nonce-abc123'\">";
+  static const char kCss[] =
+      "<style nonce=\"abc123\">* { display: stylish; }</style>";
+  ValidateExpected(
+      "inline_css_hash", StrCat(kCsp, kCss),
+      StrCat(kCsp, kCss,
+             "<!--Avoiding modifying inline style with CSP present-->"));
+}
+
 TEST_F(CssFilterTest, RenderCsp) {
   EnableDebug();
   SetResponseWithDefaultHeaders("styles/a.css", kContentTypeCss, kInputStyle,

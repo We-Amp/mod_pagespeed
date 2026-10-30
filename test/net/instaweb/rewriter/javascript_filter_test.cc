@@ -1827,6 +1827,43 @@ TEST_F(JavascriptFilterTest, InlineCsp3) {
                    StrCat(kCsp, kScriptMin));
 }
 
+TEST_F(JavascriptFilterTest, InlineCspNonceOrUnsafeInlineMinifies) {
+  InitFilters();
+  EnableDebug();
+
+  static const char kScript[] =
+      "<script nonce=\"abc123\"> var a  = 42;</script>";
+  static const char kScriptMin[] =
+      "<script nonce=\"abc123\">var a=42;</script>";
+  static const char kNonceCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src 'nonce-abc123'\">";
+  ValidateExpected("inline_csp_nonce", StrCat(kNonceCsp, kScript),
+                   StrCat(kNonceCsp, kScriptMin));
+
+  static const char kUnsafeInlineCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src 'unsafe-inline'\">";
+  ValidateExpected("inline_csp_unsafe_inline",
+                   StrCat(kUnsafeInlineCsp, kScript),
+                   StrCat(kUnsafeInlineCsp, kScriptMin));
+}
+
+TEST_F(JavascriptFilterTest, InlineCspHashLeavesScriptUnchanged) {
+  InitFilters();
+  EnableDebug();
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src 'sha256-abc123' 'nonce-abc123'\">";
+  static const char kScript[] =
+      "<script nonce=\"abc123\"> var a  = 42;</script>";
+  ValidateExpected(
+      "inline_csp_hash", StrCat(kCsp, kScript),
+      StrCat(kCsp, kScript,
+             "<!--Avoiding modifying inline script with CSP present-->"));
+}
+
 TEST_F(JavascriptFilterTest, CspBaseUri) {
   InitFilters();
   EnableDebug();
