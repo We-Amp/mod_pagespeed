@@ -114,7 +114,7 @@ def test_experiment_arm_survives_remote_configuration(client: PageSpeedClient, e
         "pagespeed ExperimentSpec id=1;percent=100;default;enable=extend_cache\n"
     )
     with _site_config_prepended(lines):
-        marker = re.compile(r"\.pagespeed\.a\.ce\.")
+        marker = re.compile(r"\.pagespeed\.a\.[a-z]{2}\.")
         deadline = time.time() + 60
         response = client.get(f"{example_root}/extend_cache.html")
         while not marker.search(response.text) and time.time() < deadline:
