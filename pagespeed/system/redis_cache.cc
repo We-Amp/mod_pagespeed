@@ -116,7 +116,7 @@ RedisCache::RedisCache(StringPiece host, int port, ThreadSystem* thread_system,
 }
 
 GoogleString RedisCache::ServerDescription() const {
-  return StrCat(main_host_, ":", IntegerToString(main_port_));
+  return ExternalServerSpec(main_host_, main_port_).ToString();
 }
 
 // static
@@ -135,8 +135,7 @@ void RedisCache::StartUp(bool connect_now) {
     std::unique_ptr<Connection> conn(
         new Connection(this, main_host_, main_port_, database_index_));
     main_connection_ = conn.get();
-    connections_.emplace(StrCat(main_host_, ":", IntegerToString(main_port_)),
-                         std::move(conn));
+    connections_.emplace(ServerDescription(), std::move(conn));
   }
   main_connection_->StartUp(connect_now);
 }
@@ -726,7 +725,9 @@ RedisCache::RedisContext RedisCache::Connection::TryConnect() {
   timeout.tv_usec = redis_cache_->timeout_us_ % Timer::kSecondUs;
 
   RedisContext loc_redis(
-      redisConnectWithTimeout(host_.c_str(), port_, timeout));
+      port_ == ExternalServerSpec::kUnixSocketPort
+          ? redisConnectUnixWithTimeout(host_.c_str(), timeout)
+          : redisConnectWithTimeout(host_.c_str(), port_, timeout));
   redis_cache_->thread_synchronizer_->Signal("RedisConnect.After.Signal");
   redis_cache_->thread_synchronizer_->Wait("RedisConnect.After.Wait");
 
@@ -738,10 +739,41 @@ RedisCache::RedisContext RedisCache::Connection::TryConnect() {
   } else if (redisSetTimeout(loc_redis.get(), timeout) != REDIS_OK) {
     LogRedisContextError(loc_redis.get(),
                          "Error while setting timeout on redis context");
+  } else if (!Authenticate(loc_redis.get())) {
+    // Already logged.
   } else {
     return loc_redis;
   }
   return nullptr;
+}
+
+bool RedisCache::Connection::Authenticate(redisContext* context) {
+  const GoogleString& password = redis_cache_->auth_password_;
+  if (password.empty()) {
+    return true;
+  }
+  const GoogleString& user = redis_cache_->auth_user_;
+  RedisReply reply;
+  if (user.empty()) {
+    reply.reset(static_cast<redisReply*>(
+        redisCommand(context, "AUTH %b", password.data(), password.size())));
+  } else {
+    reply.reset(static_cast<redisReply*>(
+        redisCommand(context, "AUTH %b %b", user.data(), user.size(),
+                     password.data(), password.size())));
+  }
+  if (reply == nullptr) {
+    LogRedisContextError(context, "Error while authenticating to redis");
+    return false;
+  }
+  if (reply->type == REDIS_REPLY_ERROR) {
+    // The server's error text never contains the password.
+    redis_cache_->message_handler_->Message(kError,
+                                            "Redis AUTH rejected by %s: %s",
+                                            ToString().c_str(), reply->str);
+    return false;
+  }
+  return true;
 }
 
 bool RedisCache::Connection::IsHealthyLockHeld() const {

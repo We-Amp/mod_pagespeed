@@ -138,6 +138,24 @@ class MemcachedCacheTest : public CacheTestBase {
   ExternalClusterSpec cluster_spec_;
 };
 
+// Same flow over a unix domain socket.  $MEMCACHED_SOCKET names the socket of
+// a memcached started with -s; the case skips when it is unset.
+TEST_F(MemcachedCacheTest, PutGetDeleteOverUnixSocket) {
+  const char* socket_path = getenv("MEMCACHED_SOCKET");
+  if (socket_path == nullptr) {
+    LOG(ERROR) << "Skipped: set $MEMCACHED_SOCKET to a memcached unix socket";
+    return;
+  }
+  cluster_spec_.servers = {
+      ExternalServerSpec(socket_path, ExternalServerSpec::kUnixSocketPort)};
+  ASSERT_TRUE(InitMemcachedOrSkip(false));
+  CheckPut("Name", "Value");
+  CheckGet("Name", "Value");
+  CheckNotFound("Another Name");
+  CheckDelete("Name");
+  CheckNotFound("Name");
+}
+
 // Simple flow of putting in an item, getting it, deleting it.
 TEST_F(MemcachedCacheTest, PutGetDelete) {
   if (!InitMemcachedOrSkip(true)) {

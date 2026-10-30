@@ -22,7 +22,9 @@
 #include "pagespeed/system/redis_cache.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -31,10 +33,12 @@
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
+#include "pagespeed/system/external_server_spec.h"
 #include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
@@ -183,6 +187,57 @@ class RedisCacheTest : public CacheTestBase {
                                        &handler_, &timer_, kReconnectionDelayMs,
                                        kTimeoutUs, &statistics_,
                                        kDatabaseIndex, kTTLSec));
+  }
+
+  // Settings for the real-server authentication cases, from the environment:
+  //   REDIS_AUTH_PORT           port of a server started with requirepass
+  //   REDIS_AUTH_PASSWORD       that password
+  //   REDIS_AUTH_USER           an ACL user on the same server
+  //   REDIS_AUTH_USER_PASSWORD  that user's password
+  //   REDIS_AUTH_SOCKET         unix socket path of the same server
+  // Cases skip when REDIS_AUTH_PORT is unset.
+  struct AuthEnv {
+    int port = 0;
+    GoogleString password, user, user_password, socket;
+  };
+
+  bool PrepareAuthOrSkip(AuthEnv* env) {
+    const char* port = getenv("REDIS_AUTH_PORT");
+    if (port == nullptr || !StringToInt(port, &env->port)) {
+      LOG(ERROR) << "Redis authentication tests are skipped because "
+                 << "$REDIS_AUTH_PORT is not set to an integer.";
+      return false;
+    }
+    auto get = [](const char* name, GoogleString* out) {
+      const char* v = getenv(name);
+      CHECK(v != nullptr) << name << " must be set with REDIS_AUTH_PORT";
+      *out = v;
+    };
+    get("REDIS_AUTH_PASSWORD", &env->password);
+    get("REDIS_AUTH_USER", &env->user);
+    get("REDIS_AUTH_USER_PASSWORD", &env->user_password);
+    const char* socket = getenv("REDIS_AUTH_SOCKET");
+    if (socket != nullptr) {
+      env->socket = socket;
+    }
+    const char* host = getenv("REDIS_HOST");
+    if (host != nullptr) {
+      redis_host_env_ = host;
+    }
+    return true;
+  }
+
+  // Appends a cache for `host`:`port` that authenticates with the given
+  // credentials, on a real-server database, and starts it.
+  void InitRedisWithCredentials(const GoogleString& host, int port,
+                                const GoogleString& user,
+                                const GoogleString& password) {
+    cache_.emplace_back(new RedisCache(
+        host, port, thread_system_.get(), &handler_, &timer_,
+        kReconnectionDelayMs, kRealServerTimeoutUs, &statistics_,
+        kRealServerDatabaseIndex[0], kTTLSec));
+    cache_.back()->SetCredentials(user, password);
+    cache_.back()->StartUp();
   }
 
   static void SetUpTestCase() {
@@ -906,6 +961,173 @@ TEST_F(RedisCacheOperationTimeoutTest, Put) {
 
 TEST_F(RedisCacheOperationTimeoutTest, Delete) {
   CheckOperationTimesOut([this] { CheckDelete("Key"); });
+}
+
+// Answers each connection like a server that requires AUTH: records the
+// requests it reads, accepts AUTH and SELECT, answers one GET and closes.
+class RedisAuthRecordingServerThread : public TcpServerThreadForTesting {
+ public:
+  RedisAuthRecordingServerThread(apr_port_t listen_port,
+                                 ThreadSystem* thread_system,
+                                 std::vector<std::vector<GoogleString>>* seen,
+                                 std::mutex* seen_mutex)
+      : TcpServerThreadForTesting(listen_port, "redis_auth_recording_server",
+                                  thread_system),
+        seen_(seen),
+        seen_mutex_(seen_mutex) {}
+
+  ~RedisAuthRecordingServerThread() override { ShutDown(); }
+
+ private:
+  void HandleClientConnection(apr_socket_t* sock) override {
+    static const char* const kAnswers[] = {"+OK\r\n", "+OK\r\n",
+                                           "$9\r\nSomeValue\r\n"};
+    std::vector<GoogleString> requests;
+    for (const char* answer : kAnswers) {
+      char buf[4096];
+      apr_size_t size = sizeof(buf);
+      if (apr_socket_recv(sock, buf, &size) != APR_SUCCESS) {
+        break;
+      }
+      requests.emplace_back(buf, size);
+      apr_size_t answer_size = strlen(answer);
+      apr_socket_send(sock, answer, &answer_size);
+    }
+    {
+      std::lock_guard<std::mutex> lock(*seen_mutex_);
+      seen_->push_back(std::move(requests));
+    }
+    apr_socket_close(sock);
+  }
+
+  std::vector<std::vector<GoogleString>>* seen_;
+  std::mutex* seen_mutex_;
+};
+
+TEST_F(RedisCacheTest, AuthWithPassword) {
+  AuthEnv env;
+  if (!PrepareAuthOrSkip(&env)) {
+    return;
+  }
+  InitRedisWithCredentials(redis_host_env_, env.port, "", env.password);
+  CheckPut("AuthKey", "AuthValue");
+  CheckGet("AuthKey", "AuthValue");
+  CheckDelete("AuthKey");
+  CheckNotFound("AuthKey");
+}
+
+TEST_F(RedisCacheTest, AuthWithAclUser) {
+  AuthEnv env;
+  if (!PrepareAuthOrSkip(&env)) {
+    return;
+  }
+  InitRedisWithCredentials(redis_host_env_, env.port, env.user,
+                           env.user_password);
+  CheckPut("AclKey", "AclValue");
+  CheckGet("AclKey", "AclValue");
+  CheckDelete("AclKey");
+}
+
+TEST_F(RedisCacheTest, AuthWithWrongPasswordFailsAndDoesNotLogIt) {
+  AuthEnv env;
+  if (!PrepareAuthOrSkip(&env)) {
+    return;
+  }
+  const GoogleString wrong = "not-the-password-0b1c";
+  InitRedisWithCredentials(redis_host_env_, env.port, "", wrong);
+  CheckPut("WrongKey", "WrongValue");
+  CheckNotFound("WrongKey");
+  EXPECT_GT(handler_.TotalMessages(), 0);
+  GoogleString log;
+  StringWriter writer(&log);
+  handler_.Dump(&writer);
+  EXPECT_THAT(log, HasSubstr("AUTH"));
+  EXPECT_THAT(log, ::testing::Not(HasSubstr(wrong)));
+  EXPECT_THAT(log, ::testing::Not(HasSubstr(env.password)));
+}
+
+TEST_F(RedisCacheTest, WithoutCredentialsAuthServerIsRefused) {
+  AuthEnv env;
+  if (!PrepareAuthOrSkip(&env)) {
+    return;
+  }
+  InitRedisWithCredentials(redis_host_env_, env.port, "", "");
+  CheckPut("NoAuthKey", "NoAuthValue");
+  CheckNotFound("NoAuthKey");
+}
+
+TEST_F(RedisCacheTest, AuthOverUnixSocket) {
+  AuthEnv env;
+  if (!PrepareAuthOrSkip(&env)) {
+    return;
+  }
+  ASSERT_FALSE(env.socket.empty()) << "REDIS_AUTH_SOCKET must be set";
+  InitRedisWithCredentials(env.socket, ExternalServerSpec::kUnixSocketPort,
+                           env.user, env.user_password);
+  EXPECT_EQ(StrCat("unix:", env.socket), cache_[0]->ServerDescription());
+  CheckPut("SocketKey", "SocketValue");
+  CheckGet("SocketKey", "SocketValue");
+  CheckDelete("SocketKey");
+}
+
+TEST_F(RedisCacheTest, ReconnectAuthenticatesAgain) {
+  std::vector<std::vector<GoogleString>> seen;
+  std::mutex seen_mutex;
+  cache_.emplace_back(new RedisCache(
+      "localhost", custom_server_port_, thread_system_.get(), &handler_,
+      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
+      kTTLSec));
+  cache_[0]->SetCredentials("alice", "pw-4f2a");
+  auto start_server = [&] {
+    WaitForCustomServerShutdown();
+    custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
+        custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
+    ASSERT_TRUE(custom_server_->Start());
+    ASSERT_EQ(custom_server_port_, custom_server_->GetListeningPort());
+  };
+  start_server();
+  cache_[0]->StartUp();
+  CheckGet(kSomeKey, kSomeValue);
+
+  // The server closed the connection after one GET; the next request finds
+  // that out, and the one after reconnects, which must authenticate again.
+  WaitForCustomServerShutdown();
+  start_server();
+  CheckNotFound(kSomeKey);
+  EXPECT_TRUE(Cache()->IsHealthy());
+  CheckGet(kSomeKey, kSomeValue);
+  WaitForCustomServerShutdown();
+
+  std::lock_guard<std::mutex> lock(seen_mutex);
+  ASSERT_EQ(2u, seen.size());
+  for (const std::vector<GoogleString>& connection : seen) {
+    ASSERT_GE(connection.size(), 2u);
+    // Two-argument form, AUTH first, SELECT only after it.
+    EXPECT_EQ(
+        "*3\r\n$4\r\nAUTH\r\n$5\r\nalice\r\n$7\r\npw-4f2a\r\n", connection[0]);
+    EXPECT_THAT(connection[1], HasSubstr("SELECT"));
+  }
+}
+
+TEST_F(RedisCacheTest, PasswordOnlyAuthUsesSingleArgumentForm) {
+  std::vector<std::vector<GoogleString>> seen;
+  std::mutex seen_mutex;
+  cache_.emplace_back(new RedisCache(
+      "localhost", custom_server_port_, thread_system_.get(), &handler_,
+      &timer_, kReconnectionDelayMs, kTimeoutUs, &statistics_, kDatabaseIndex,
+      kTTLSec));
+  cache_[0]->SetCredentials("", "pw-4f2a");
+  custom_server_ = std::make_unique<RedisAuthRecordingServerThread>(
+      custom_server_port_, thread_system_.get(), &seen, &seen_mutex);
+  ASSERT_TRUE(custom_server_->Start());
+  ASSERT_EQ(custom_server_port_, custom_server_->GetListeningPort());
+  cache_[0]->StartUp();
+  CheckGet(kSomeKey, kSomeValue);
+  WaitForCustomServerShutdown();
+  std::lock_guard<std::mutex> lock(seen_mutex);
+  ASSERT_EQ(1u, seen.size());
+  ASSERT_GE(seen[0].size(), 1u);
+  EXPECT_EQ("*2\r\n$4\r\nAUTH\r\n$7\r\npw-4f2a\r\n", seen[0][0]);
 }
 
 }  // namespace net_instaweb

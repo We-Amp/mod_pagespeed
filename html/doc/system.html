@@ -349,6 +349,12 @@ du -s -h --apparent-size /path/to/pagespeed_cache/rname
   <dt>Nginx:<dd><pre class="prettyprint"
      >pagespeed MemcachedServers "host1:port1,host2:port2,host3:port3";</pre>
 </dl>
+    <p>
+      A memcached listening on a Unix domain socket is named as
+      <code>unix:/absolute/path</code>, for example
+      <code>MemcachedServers "unix:/var/run/memcached.sock"</code>.
+      Socket paths cannot contain commas.
+    </p>
     <p class="note">
       To start memcached with 1Gb of memory, use <code>memcached -p PORT -m 1024
       -u WEBSERVER_USERNAME</code>.  The default size of 64Mb might be too low
@@ -493,6 +499,11 @@ total_items:           4166384
      >pagespeed RedisServer "host:port";</pre>
 </dl>
     <p>
+      A redis server listening on a Unix domain socket is named as
+      <code>unix:/absolute/path</code>, for example
+      <code>RedisServer "unix:/var/run/redis/redis.sock"</code>.
+    </p>
+    <p>
       You can configure how long PageSpeed is willing to wait for a response
       from Redis before timing out a request, which defaults to 50ms:
     </p>
@@ -534,6 +545,29 @@ total_items:           4166384
   <dt>Nginx:<dd><pre class="prettyprint"
     >pagespeed RedisTTLSec ttl_in_seconds;</pre>
 </dl>
+    <p>
+      If the redis server requires authentication, set
+      <code>RedisPassword</code>.  PageSpeed sends it with <code>AUTH</code>
+      right after every connection it makes to the server (and, for a cluster,
+      to every node), including after a reconnect.  With redis 6 or later
+      access control lists, also set <code>RedisUser</code> to authenticate as
+      that user; without it the password is used for the default user.
+      <code>RedisPassword</code> is never written to the logs, and the
+      configuration pages and admin console show it as <code>***</code>.
+    </p>
+<dl>
+  <dt>Apache:<dd><pre class="prettyprint"
+    >ModPagespeedRedisPassword "password"
+ModPagespeedRedisUser "user"</pre>
+  <dt>Nginx:<dd><pre class="prettyprint"
+    >pagespeed RedisPassword "password";
+pagespeed RedisUser "user";</pre>
+</dl>
+    <p>
+      Keep the configuration file readable only by the account that runs the
+      server, and use a connection you trust: AUTH does not encrypt traffic, so
+      prefer a Unix socket or a private network.
+    </p>
 
     <h2 id="flush_cache">Flushing PageSpeed Server-Side Cache</h2>
     <p>

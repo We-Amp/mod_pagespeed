@@ -254,6 +254,7 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewRedis(
       factory_->message_handler(), factory_->timer(),
       config->redis_reconnection_delay_ms(), config->redis_timeout_us(),
       factory_->statistics(), redis_database_index, redis_ttl_sec);
+  redis_server->SetCredentials(config->redis_user(), config->redis_password());
   factory_->TakeOwnership(redis_server);
   redis_servers_.push_back(redis_server);
   if (redis_pool_.get() == nullptr) {
@@ -299,7 +300,8 @@ SystemCaches::ExternalCacheInterfaces SystemCaches::NewExternalCache(
                IntegerToString(config->redis_database_index()), ";",
                IntegerToString(config->redis_reconnection_delay_ms()), ";",
                IntegerToString(config->redis_timeout_us()), ";",
-               IntegerToString(config->redis_ttl_sec()));
+               IntegerToString(config->redis_ttl_sec()), ";",
+               config->redis_user(), ";", config->redis_password());
 #if PAGESPEED_ENABLE_MEMCACHED
   } else if (use_memcached) {
     spec_signature = StrCat("m;", config->memcached_servers().ToString(), ";",

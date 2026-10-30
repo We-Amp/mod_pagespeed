@@ -25,6 +25,7 @@
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
+#include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_message_handler.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
@@ -452,6 +453,36 @@ TEST_F(SystemRewriteOptionsTest, StrictAdminAccessOnExplicitAllowlist) {
       options_.AdminAccessAllowed(denied, /*client_is_loopback=*/false));
   EXPECT_FALSE(
       options_.AdminAccessAllowed(denied, /*client_is_loopback=*/true));
+}
+
+TEST_F(SystemRewriteOptionsTest, RedisPasswordIsRedactedInOptionsOutput) {
+  GoogleString msg;
+  MockMessageHandler handler(thread_system_.NewMutex());
+  EXPECT_EQ(options_.ParseAndSetOptionFromName1(
+                SystemRewriteOptions::kRedisPassword, "hunter2-s3cret", &msg,
+                &handler),
+            RewriteOptions::kOptionOk);
+  EXPECT_EQ(options_.ParseAndSetOptionFromName1(
+                SystemRewriteOptions::kRedisUser, "cache-user", &msg, &handler),
+            RewriteOptions::kOptionOk);
+  EXPECT_EQ("hunter2-s3cret", options_.redis_password());
+  EXPECT_EQ("cache-user", options_.redis_user());
+  GoogleString output = options_.OptionsToString();
+  EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("hunter2-s3cret")));
+  EXPECT_THAT(output, ::testing::ContainsRegex(
+                          "RedisPassword \\(rdp\\) +\\*\\*\\*"));
+  EXPECT_THAT(output, ::testing::HasSubstr("cache-user"));
+}
+
+TEST_F(SystemRewriteOptionsTest, RedisServerUnixSocket) {
+  GoogleString msg;
+  MockMessageHandler handler(thread_system_.NewMutex());
+  EXPECT_EQ(options_.ParseAndSetOptionFromName1(
+                SystemRewriteOptions::kRedisServer, "unix:/tmp/redis.sock",
+                &msg, &handler),
+            RewriteOptions::kOptionOk);
+  EXPECT_TRUE(options_.redis_server().is_unix_socket());
+  EXPECT_EQ("unix:/tmp/redis.sock", options_.redis_server().ToString());
 }
 
 }  // namespace net_instaweb

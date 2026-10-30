@@ -26,6 +26,16 @@ namespace net_instaweb {
 bool ExternalServerSpec::SetFromString(StringPiece value_string,
                                        int default_port,
                                        GoogleString* error_detail) {
+  if (value_string.starts_with("unix:")) {
+    StringPiece socket_path = value_string.substr(5);
+    if (socket_path.empty() || socket_path[0] != '/') {
+      *error_detail = "Unix socket server must be in format unix:/<path>";
+      return false;
+    }
+    host = socket_path.as_string();
+    port = kUnixSocketPort;
+    return true;
+  }
   StringPieceVector host_port;
   SplitStringPieceToVector(value_string, ":", &host_port,
                            false /* omit_empty_strings */);
