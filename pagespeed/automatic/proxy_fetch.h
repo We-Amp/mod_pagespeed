@@ -144,7 +144,6 @@ class ProxyFetchPropertyCallback : public PropertyPage {
 
  private:
   PageType page_type_;
-  UserAgentMatcher::DeviceType device_type_;
   ProxyFetchPropertyCallbackCollector* collector_;
   GoogleString url_;
   ProxyFetchPropertyCallback(const ProxyFetchPropertyCallback&) = delete;

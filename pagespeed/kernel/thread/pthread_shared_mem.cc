@@ -129,7 +129,7 @@ class PthreadSharedMemSegment : public AbstractSharedMemSegment {
  public:
   // We will be representing memory mapped in the [base, base + size) range.
   PthreadSharedMemSegment(char* base, size_t size, MessageHandler* handler)
-      : base_(base), size_(size) {}
+      : base_(base) {}
 
   ~PthreadSharedMemSegment() override {}
 
@@ -190,7 +190,6 @@ class PthreadSharedMemSegment : public AbstractSharedMemSegment {
   }
 
   char* const base_;
-  const size_t size_;
 
   PthreadSharedMemSegment(const PthreadSharedMemSegment&) = delete;
   PthreadSharedMemSegment& operator=(const PthreadSharedMemSegment&) = delete;
