@@ -1096,7 +1096,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			if (custom_options.get() == nullptr) {
 				custom_options.reset(innerContext->server_context()->global_options()->Clone());
 			}
-			custom_options->Merge(*remote_options);
+			MergeRemoteOptions(*remote_options, *innerContext->experiment_assignment(), custom_options.get());
 			delete remote_options;
 			remote_options = nullptr;
 		}
@@ -1696,7 +1696,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					if (custom_options.get() == nullptr) {
 						custom_options.reset(innerContext->server_context()->global_options()->Clone());
 					}
-					custom_options->Merge(*remote_options);
+					MergeRemoteOptions(*remote_options, *innerContext->experiment_assignment(), custom_options.get());
 					delete remote_options;
 					remote_options = nullptr;
 				}

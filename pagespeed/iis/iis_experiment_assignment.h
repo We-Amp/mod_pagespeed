@@ -47,6 +47,18 @@ class IisExperimentAssignment {
   int state_;
 };
 
+// Merges options fetched from a remote configuration source into the
+// request's options. The merge resets the experiment id; the request's arm is
+// given back unless the remote configuration turned the experiment off.
+inline void MergeRemoteOptions(const RewriteOptions& remote,
+                               const IisExperimentAssignment& assignment,
+                               RewriteOptions* options) {
+  options->Merge(remote);
+  if (options->running_experiment()) {
+    assignment.ApplyTo(options);
+  }
+}
+
 }  // namespace net_instaweb
 
 #endif  // IIS_EXPERIMENT_ASSIGNMENT_H_

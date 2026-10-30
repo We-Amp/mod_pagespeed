@@ -80,5 +80,42 @@ TEST_F(IisExperimentAssignmentTest, NoExperimentArmIsKept) {
   EXPECT_FALSE(clone->Enabled(RewriteOptions::kExtendCacheCss));
 }
 
+// Options fetched from a remote configuration source are merged into the
+// request's options after the arm was assigned. The merge resets the arm; the
+// shared helper puts it back, with the arm's filters winning over the remote
+// ones (arm 2 is not the default arm), as on the nginx port.
+TEST_F(IisExperimentAssignmentTest, ArmSurvivesMergeOfRemoteOptions) {
+  auto request_options = NewExperimentOptions();
+  request_options->SetExperimentState(2);
+  IisExperimentAssignment assignment;
+  assignment.Record(*request_options);
+
+  auto remote_options = NewExperimentOptions();
+  remote_options->EnableFilter(RewriteOptions::kExtendCacheCss);
+  MergeRemoteOptions(*remote_options, assignment, request_options.get());
+
+  EXPECT_EQ(2, request_options->experiment_id());
+  EXPECT_EQ("b", request_options->GetExperimentStateStr());
+  EXPECT_TRUE(request_options->Enabled(RewriteOptions::kCombineCss));
+  EXPECT_FALSE(request_options->Enabled(RewriteOptions::kExtendCacheCss));
+}
+
+// A remote configuration that turns the experiment off wins: the arm is not
+// imposed again.
+TEST_F(IisExperimentAssignmentTest, RemoteRunExperimentOffGetsNoArmBack) {
+  auto request_options = NewExperimentOptions();
+  request_options->SetExperimentState(2);
+  IisExperimentAssignment assignment;
+  assignment.Record(*request_options);
+
+  auto remote_options = NewExperimentOptions();
+  remote_options->set_running_experiment(false);
+  MergeRemoteOptions(*remote_options, assignment, request_options.get());
+
+  EXPECT_FALSE(request_options->running_experiment());
+  EXPECT_NE(2, request_options->experiment_id());
+  EXPECT_EQ("", request_options->GetExperimentStateStr());
+}
+
 }  // namespace
 }  // namespace net_instaweb
