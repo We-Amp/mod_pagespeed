@@ -14,7 +14,7 @@ is removed and that the cookie is written exactly once. It changes the test
 site's pagespeed.config for its own duration (restored, pool recycled, on every
 exit path).
 
-Environment variables (optional; defaults match the standard lane):
+Environment variables (optional; defaults match the test setup created by run_iis_tests.ps1):
     PAGESPEED_IIS_APPPOOL: application pool of the site (PageSpeedTestPool)
     PAGESPEED_IIS_SITE_CONFIG: the pagespeed.config the site reads
         (C:\\inetpub\\pagespeed_test\\pagespeed.config)
