@@ -127,6 +127,84 @@ for (const [name, h] of Object.entries(HANDLERS)) {
   await page.close();
 }
 
+// --- 4. Inline scripts that call the support namespace --------------------
+// The filters also emit small inline scripts that call into the support
+// script from a separate <script> element. The strings mirror
+// DeferIframeFilter::kDeferIframeIframeJs, LazyloadImagesFilter::
+// kLoadAllImages and kOverrideAttributeFunctions, the dedup snippet of
+// DedupInlinedImagesFilter and the delay-images scripts; the filters' C++
+// tests pin the same text.
+const INLINE = {
+  deferIframe: {
+    code: 'if(window.pagespeed&&pagespeed.deferIframe){' +
+          'pagespeed.deferIframe.convertToIframe();}',
+    ns: 'deferIframe', method: 'convertToIframe' },
+  lazyLoadAll: {
+    code: 'if(window.pagespeed&&pagespeed.lazyLoadImages){' +
+          'pagespeed.lazyLoadImages.loadAllImages();}',
+    ns: 'lazyLoadImages', method: 'loadAllImages' },
+  lazyOverride: {
+    code: 'if(window.pagespeed&&pagespeed.lazyLoadImages){' +
+          'pagespeed.lazyLoadImages.overrideAttributeFunctions();}',
+    ns: 'lazyLoadImages', method: 'overrideAttributeFunctions' },
+  dedup: {
+    code: 'if(window.pagespeed&&pagespeed.dedupInlinedImages){' +
+          "pagespeed.dedupInlinedImages.inlineImg('a','b','c');}",
+    ns: 'dedupInlinedImages', method: 'inlineImg' },
+  delayLowRes: {
+    code: 'if(window.pagespeed&&pagespeed.delayImagesInline){' +
+          "pagespeed.delayImagesInline.addLowResImages('a','b');\n" +
+          'pagespeed.delayImagesInline.replaceWithLowRes();}',
+    ns: 'delayImagesInline', method: 'replaceWithLowRes' },
+  delayHighRes: {
+    code: 'if(window.pagespeed&&pagespeed.delayImages){' +
+          'pagespeed.delayImages.replaceWithHighRes();}',
+    ns: 'delayImages', method: 'replaceWithHighRes' },
+  delayLazyHighRes: {
+    code: 'if(window.pagespeed&&pagespeed.delayImages){' +
+          'pagespeed.delayImages.registerLazyLoadHighRes();}',
+    ns: 'delayImages', method: 'registerLazyLoadHighRes' },
+};
+
+function inlinePage(code) {
+  return `<!DOCTYPE html><html><head>
+    <script src="http://test/psajs/support.js"><\/script></head><body>
+    <script data-pagespeed-no-defer>${code}<\/script></body></html>`;
+}
+
+{
+  const { page, errors } = await openPage(
+      inlinePage('pagespeed.deferIframe.convertToIframe();'));
+  check(errors.some((e) => /pagespeed/.test(e)),
+        'control: unguarded inline call raises a ReferenceError');
+  await page.close();
+}
+
+for (const [name, h] of Object.entries(INLINE)) {
+  // Support script blocked: no error.
+  let r = await openPage(inlinePage(h.code));
+  check(r.errors.length === 0,
+        `inline ${name}: no error with the support script blocked (got ${JSON.stringify(r.errors)})`);
+  await r.page.close();
+
+  // Namespace object present but the member missing (a bare
+  // window.pagespeed = {} from another script): still no error.
+  r = await openPage(inlinePage(h.code), 'window.pagespeed = {};');
+  check(r.errors.length === 0,
+        `inline ${name}: no error with an empty pagespeed namespace (got ${JSON.stringify(r.errors)})`);
+  await r.page.close();
+
+  // Support script present: the call goes through.
+  const support = `window.__calls = 0; window.pagespeed = { ${h.ns}: {
+      addLowResImages: function() {}, ${h.method}: function() { __calls++; }
+    } };`;
+  r = await openPage(inlinePage(h.code), support);
+  const calls = await r.page.evaluate(() => window.__calls);
+  check(r.errors.length === 0 && calls === 1,
+        `inline ${name}: reaches the support script (calls=${calls}, errors=${JSON.stringify(r.errors)})`);
+  await r.page.close();
+}
+
 await browser.close();
 console.log(failures ? `${failures} FAILURE(S)` : 'ALL PASS');
 process.exit(failures ? 1 : 0);

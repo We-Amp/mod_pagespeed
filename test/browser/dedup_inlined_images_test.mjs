@@ -36,7 +36,8 @@ const DATA_URL = 'data:image/gif;base64,' +
 
 const snippet = (from, to, script) =>
   `<script type="text/javascript" id="${script}" data-pagespeed-no-defer>` +
-  `pagespeed.dedupInlinedImages.inlineImg('${from}','${to}','${script}');` +
+  `if(window.pagespeed&&pagespeed.dedupInlinedImages){` +
+  `pagespeed.dedupInlinedImages.inlineImg('${from}','${to}','${script}');}` +
   `<\/script>`;
 
 const testPage = `<!DOCTYPE html><html><body>

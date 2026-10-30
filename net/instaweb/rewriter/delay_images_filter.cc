@@ -259,11 +259,12 @@ void DelayImagesFilter::InsertLowResImagesAndJs(HtmlElement* element,
     GoogleString escaped_url, escaped_data;
     EscapeToJsStringLiteral(url, false /* add_quotes */, &escaped_url);
     EscapeToJsStringLiteral(data, false /* add_quotes */, &escaped_data);
-    inline_data_script =
-        StrCat("\npagespeed.delayImagesInline.addLowResImages('", escaped_url,
-               "', '", escaped_data, "');");
+    inline_data_script = StrCat(
+        "\nif(window.pagespeed&&pagespeed.delayImagesInline){"
+        "pagespeed.delayImagesInline.addLowResImages('",
+        escaped_url, "', '", escaped_data, "');");
     StrAppend(&inline_data_script,
-              "\npagespeed.delayImagesInline.replaceWithLowRes();\n");
+              "\npagespeed.delayImagesInline.replaceWithLowRes();}\n");
     HtmlElement* low_res_element =
         driver()->NewElement(current_element, HtmlName::kScript);
     driver()->AddAttribute(low_res_element, HtmlName::kDataPagespeedNoDefer,
@@ -285,9 +286,13 @@ void DelayImagesFilter::InsertHighResJs(HtmlElement* body_element) {
   }
   GoogleString js;
   if (lazyload_highres_images_) {
-    StrAppend(&js, "\npagespeed.delayImages.registerLazyLoadHighRes();\n");
+    StrAppend(&js,
+              "\nif(window.pagespeed&&pagespeed.delayImages){"
+              "pagespeed.delayImages.registerLazyLoadHighRes();}\n");
   } else {
-    StrAppend(&js, "\npagespeed.delayImages.replaceWithHighRes();\n");
+    StrAppend(&js,
+              "\nif(window.pagespeed&&pagespeed.delayImages){"
+              "pagespeed.delayImages.replaceWithHighRes();}\n");
   }
   HtmlElement* script = driver()->NewElement(body_element, HtmlName::kScript);
   driver()->AddAttribute(script, HtmlName::kDataPagespeedNoDefer,

@@ -81,9 +81,10 @@ constexpr char kCuppaPngWildcardData[] = "data:image/png;base64*";
 constexpr char kInlinedScriptFormat[] =
     "<script type=\"text/javascript\""
     " id=\"pagespeed_script_%d\" data-pagespeed-no-defer>"
+    "if(window.pagespeed&&pagespeed.dedupInlinedImages){"
     "pagespeed.dedupInlinedImages.inlineImg("
     "'pagespeed_img_0%d','pagespeed_img_0%d','pagespeed_script_%d'"
-    ");</script>";
+    ");}</script>";
 
 constexpr char kHtmlWrapperFormat[] =
     "<head>\n"
@@ -208,10 +209,12 @@ TEST_F(DedupInlinedImagesTest, DedupSecondSmallImageWithId) {
                                 "<script type=\"text/javascript\""
                                 " id=\"pagespeed_script_2\""
                                 " data-pagespeed-no-defer>"
+                                "if(window.pagespeed&&"
+                                "pagespeed.dedupInlinedImages){"
                                 "pagespeed.dedupInlinedImages.inlineImg("
                                 "'xyzzy',"
                                 "'pagespeed_img_01',"
-                                "'pagespeed_script_2');"
+                                "'pagespeed_script_2');}"
                                 "</script>")));
 }
 
@@ -226,10 +229,12 @@ TEST_F(DedupInlinedImagesTest, DedupSecondSmallImageWithAttributes) {
                                 "<script type=\"text/javascript\""
                                 " id=\"pagespeed_script_2\""
                                 " data-pagespeed-no-defer>"
+                                "if(window.pagespeed&&"
+                                "pagespeed.dedupInlinedImages){"
                                 "pagespeed.dedupInlinedImages.inlineImg("
                                 "'pagespeed_img_01',"
                                 "'plugh',"
-                                "'pagespeed_script_2');"
+                                "'pagespeed_script_2');}"
                                 "</script>")));
 }
 

@@ -62,10 +62,12 @@ const char LazyloadImagesFilter::kImageOnloadCode[] =
     "pagespeed.lazyLoadImages.loadIfVisibleAndMaybeBeacon(this);}}";
 
 const char LazyloadImagesFilter::kLoadAllImages[] =
-    "pagespeed.lazyLoadImages.loadAllImages();";
+    "if(window.pagespeed&&pagespeed.lazyLoadImages){"
+    "pagespeed.lazyLoadImages.loadAllImages();}";
 
 const char LazyloadImagesFilter::kOverrideAttributeFunctions[] =
-    "pagespeed.lazyLoadImages.overrideAttributeFunctions();";
+    "if(window.pagespeed&&pagespeed.lazyLoadImages){"
+    "pagespeed.lazyLoadImages.overrideAttributeFunctions();}";
 
 const char LazyloadImagesFilter::kIsLazyloadScriptInsertedPropertyName[] =
     "is_lazyload_script_inserted";
