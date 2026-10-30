@@ -141,6 +141,25 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 
 		if (cf->GetConfig(paths, input, *options, message_handler_, &global_config))
 		{
+			// The pool sizes (NumRewriteThreads, NumExpensiveRewriteThreads)
+			// may also be set in the site's own file, which wins over the
+			// machine-wide one. Only those two are taken from it here; its
+			// options are layered per request as before.
+			if (!site_root.empty() && site_root != config_path &&
+				GetFileAttributesA(site_root.c_str()) != INVALID_FILE_ATTRIBUTES)
+			{
+				IisRewriteOptions site_scratch(nullptr);
+				std::list<std::string> site_paths;
+				site_paths.push_back(site_root);
+				global_settings site_settings;
+				cf->GetConfig(site_paths, input, site_scratch, message_handler_, &site_settings);
+				if (site_settings.num_rewrite_threads > 0) {
+					global_config.num_rewrite_threads = site_settings.num_rewrite_threads;
+				}
+				if (site_settings.num_expensive_rewrite_threads > 0) {
+					global_config.num_expensive_rewrite_threads = site_settings.num_expensive_rewrite_threads;
+				}
+			}
 			// A configuration has been read in this process. This parse
 			// matches with no hostname, so a directive inside a host- or
 			// path-matched block is invisible to it: only a value it

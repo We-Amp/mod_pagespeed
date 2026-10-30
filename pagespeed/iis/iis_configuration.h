@@ -39,6 +39,8 @@ struct global_settings {
 		, use_per_vhost_statistics(true)
 		, message_buffer_size(1024*128)
 		, shm_cache_size_kb(0)
+		, num_rewrite_threads(0)
+		, num_expensive_rewrite_threads(0)
 		//, rate_limit_background_fetches(true)
 		//, force_caching(false)
 		//, list_outstanding_urls_on_error(false)
@@ -53,6 +55,10 @@ struct global_settings {
 	//bool list_outstanding_urls_on_error;
 	//bool track_original_content_length;
 	int shm_cache_size_kb;
+	// NumRewriteThreads / NumExpensiveRewriteThreads; 0 means "use the built-in
+	// size" (the directive's "auto" and its default).
+	int num_rewrite_threads;
+	int num_expensive_rewrite_threads;
 };
 
 }

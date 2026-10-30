@@ -369,6 +369,26 @@ IisRewriteOptions::ParseAndSetOptions(
 		msg = "Failed to set MessageBufferSize value";
         result = RewriteOptions::kOptionValueInvalid;
       }
+    } else if (IsDirective(directive, "NumRewriteThreads") ||
+               IsDirective(directive, "NumExpensiveRewriteThreads")) {
+      // "auto" (and its alias 0) keeps the built-in size; a positive count
+      // sets the pool size of every worker process of the application pool.
+      int count = 0;
+      if (IsDirective(arg, "auto")) {
+        result = RewriteOptions::kOptionOk;
+      } else if (StringToInt(arg.as_string(), &count) && count >= 0) {
+        result = RewriteOptions::kOptionOk;
+      } else {
+        msg = directive.as_string() + " must be 'auto' or a whole number of 0 or more";
+        result = RewriteOptions::kOptionValueInvalid;
+      }
+      if (result == RewriteOptions::kOptionOk) {
+        if (IsDirective(directive, "NumRewriteThreads")) {
+          global_config.num_rewrite_threads = count;
+        } else {
+          global_config.num_expensive_rewrite_threads = count;
+        }
+      }
     } else if (IsDirective(directive, "UseNativeFetcher")) {
 		if (!SetBoolFlag(&global_config.use_native_fetcher,arg)) {
 			msg = "Failed to set UseNativeFetcher value";

@@ -142,9 +142,32 @@ class IisRewriteDriverFactory : public SystemRewriteDriverFactory {
 		use_native_fetcher_ = x;
 	} 
 
+	// The built-in size of a rewrite pool, used when NumRewriteThreads /
+	// NumExpensiveRewriteThreads is unset or "auto": half the CPUs, and at
+	// least 4.  A positive |configured| count always wins.
+	static int PoolThreadCount(int configured, unsigned int num_cpus) {
+		if (configured > 0) {
+			return configured;
+		}
+		const unsigned int half = num_cpus >> 1;
+		return static_cast<int>(half > 4 ? half : 4);
+	}
+
 	int expires();
 	void reset_expired();
 protected:
+  // Reports the pool sizes this worker process builds, and where they came
+  // from, instead of the base class's process-count based wording.
+  void LogThreadCountResolution() override;
+
+public:
+  // Logs the same line again. The line logged while the factory initialises
+  // is written before the message history and the event-log setting exist, so
+  // the process context repeats it once they do.
+  void ReportPoolSizes() { LogThreadCountResolution(); }
+
+protected:
+
   QueuedWorkerPool* CreateWorkerPool(WorkerPoolCategory pool,
                                      StringPiece name) override;
 
@@ -159,6 +182,8 @@ private:
   std::wstring app_pool_name_;
   bool use_per_vhost_statistics_;
   bool use_native_fetcher_;
+  bool rewrite_threads_configured_ = false;
+  bool expensive_rewrite_threads_configured_ = false;
   GoogleString site_app_id_;
 
   // Owned by the superclass.

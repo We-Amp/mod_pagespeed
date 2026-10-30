@@ -233,6 +233,19 @@ private:
 		set_message_handler(iis_message_handler_);
 		set_html_parse_message_handler(iis_html_parse_message_handler_);
 
+		// The pool sizes come from the directives, or from the built-in
+		// size.  They are set before Init() resolves the thread counts, so the
+		// counts that are logged are the counts the pools are built with.
+		{
+			SYSTEM_INFO sysinfo;
+			GetSystemInfo( &sysinfo );
+			const global_settings* settings = process_context->settings();
+			rewrite_threads_configured_ = settings->num_rewrite_threads > 0;
+			expensive_rewrite_threads_configured_ = settings->num_expensive_rewrite_threads > 0;
+			set_num_rewrite_threads(PoolThreadCount(settings->num_rewrite_threads, sysinfo.dwNumberOfProcessors));
+			set_num_expensive_rewrite_threads(PoolThreadCount(settings->num_expensive_rewrite_threads, sysinfo.dwNumberOfProcessors));
+		}
+
 		// We can't support convert_meta_tags as we don't see the response body before we send out the headers.
 		system_options->ForbidFiltersByCommaSeparatedList("convert_meta_tags", nullptr);
 		// we need to seal the system_options to prevent a debug dcheck
@@ -712,23 +725,31 @@ private:
 	}
 	QueuedWorkerPool* IisRewriteDriverFactory::CreateWorkerPool(
 		WorkerPoolCategory pool, StringPiece name) {
-		SYSTEM_INFO sysinfo;
-		GetSystemInfo( &sysinfo );
-
-		auto numCPU = sysinfo.dwNumberOfProcessors;
 	  switch (pool) {
-		case kHtmlWorkers:
-
-			return new QueuedWorkerPool(__max(4,numCPU), name, thread_system());
+		case kHtmlWorkers: {
+			SYSTEM_INFO sysinfo;
+			GetSystemInfo( &sysinfo );
+			return new QueuedWorkerPool(__max(4, sysinfo.dwNumberOfProcessors), name, thread_system());
+		}
 		case kRewriteWorkers:
-			return new QueuedWorkerPool(__max(4,numCPU>>1), name, thread_system());
+			return new QueuedWorkerPool(num_rewrite_threads(), name, thread_system());
 		case kLowPriorityRewriteWorkers:
-		  return new QueuedWorkerPool(__max(4,numCPU>>1),
-									  name,
-									  thread_system());
+			return new QueuedWorkerPool(num_expensive_rewrite_threads(), name, thread_system());
 		default:
 		  return RewriteDriverFactory::CreateWorkerPool(pool, name);
 	  }
+	}
+
+	void IisRewriteDriverFactory::LogThreadCountResolution() {
+		// kWarning, like the other ports: the default log level has to show it.
+		message_handler()->Message(
+			kWarning,
+			"PageSpeed optimization threads: %d rewrite (%s), %d expensive rewrite (%s), "
+			"per worker process. Set NumRewriteThreads and NumExpensiveRewriteThreads "
+			"to choose the counts.",
+			num_rewrite_threads(), rewrite_threads_configured_ ? "NumRewriteThreads" : "built-in size",
+			num_expensive_rewrite_threads(),
+			expensive_rewrite_threads_configured_ ? "NumExpensiveRewriteThreads" : "built-in size");
 	}
 
 

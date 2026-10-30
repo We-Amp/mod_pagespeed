@@ -284,6 +284,7 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		driver_factory_->SetServerContextMessageHandler(server_context);
 		driver_factory_->RootInit();
 		driver_factory_->ChildInit();
+		driver_factory_->ReportPoolSizes();
 
 		// The daemon startup check.  Engages when the site set EITHER
 		// daemon option -- one alone is the shared half-configuration

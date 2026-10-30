@@ -18,6 +18,7 @@
 #include "gtest/gtest.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "pagespeed/iis/iis_configuration.h"
+#include "pagespeed/iis/iis_rewrite_driver_factory.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -899,6 +900,55 @@ TEST_F(IisConfigurationTest,
   EXPECT_FALSE(any_crash.load())
       << "GetConfiguration threw under concurrent load";
   EXPECT_GT(total_files.load(), 0);
+}
+
+// NumRewriteThreads and NumExpensiveRewriteThreads are read into the
+// process-wide settings the driver factory sizes its pools from.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesAreRead) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(
+      "pagespeed NumRewriteThreads 6\n"
+      "pagespeed NumExpensiveRewriteThreads 3\n",
+      "", &rwo);
+  EXPECT_EQ(6, global_config_.num_rewrite_threads);
+  EXPECT_EQ(3, global_config_.num_expensive_rewrite_threads);
+}
+
+// Unset, "auto" and 0 all leave the built-in size in place.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesAutoAndDefault) {
+  IisRewriteOptions unset(nullptr);
+  ParseAndGetConfig("pagespeed EnableFilters combine_css\n", "", &unset);
+  EXPECT_EQ(0, global_config_.num_rewrite_threads);
+  EXPECT_EQ(0, global_config_.num_expensive_rewrite_threads);
+
+  IisRewriteOptions autos(nullptr);
+  ParseAndGetConfig(
+      "pagespeed NumRewriteThreads auto\n"
+      "pagespeed NumExpensiveRewriteThreads 0\n",
+      "", &autos);
+  EXPECT_EQ(0, global_config_.num_rewrite_threads);
+  EXPECT_EQ(0, global_config_.num_expensive_rewrite_threads);
+}
+
+// A negative or non-numeric count is refused and changes nothing.
+TEST_F(IisConfigurationTest, ThreadCountDirectivesRejectBadValues) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig(
+      "pagespeed NumRewriteThreads -2\n"
+      "pagespeed NumExpensiveRewriteThreads many\n",
+      "", &rwo);
+  EXPECT_EQ(0, global_config_.num_rewrite_threads);
+  EXPECT_EQ(0, global_config_.num_expensive_rewrite_threads);
+}
+
+// A configured count always wins; otherwise half the CPUs, at least 4.
+TEST(IisPoolThreadCountTest, ConfiguredCountWinsOverBuiltInSize) {
+  using net_instaweb::IisRewriteDriverFactory;
+  EXPECT_EQ(1, IisRewriteDriverFactory::PoolThreadCount(1, 64));
+  EXPECT_EQ(12, IisRewriteDriverFactory::PoolThreadCount(12, 2));
+  EXPECT_EQ(4, IisRewriteDriverFactory::PoolThreadCount(0, 2));
+  EXPECT_EQ(4, IisRewriteDriverFactory::PoolThreadCount(0, 8));
+  EXPECT_EQ(16, IisRewriteDriverFactory::PoolThreadCount(0, 32));
 }
 
 // A directive line with no option name (a bare "pagespeed", or one followed
