@@ -168,6 +168,17 @@ cc_binary(
     name = "pagespeed_filter.so",
     linkshared = True,
     linkstatic = True,
+    linkopts = select({
+        # The .so is loaded into a host Envoy binary (see the usage note
+        # above): Envoy's own symbols, e.g. the workspace-status version
+        # info (build_scm_revision/build_scm_status) referenced by the
+        # version_lib in this closure, resolve from the host process at
+        # load time. GNU ld leaves undefined symbols in a shared library
+        # alone; ld64 errors on them unless told to look them up
+        # dynamically (the usual way to link a loadable module on macOS).
+        "@platforms//os:macos": ["-Wl,-undefined,dynamic_lookup"],
+        "//conditions:default": [],
+    }),
     tags = _MANUAL,
     visibility = ["//visibility:public"],
     deps = [

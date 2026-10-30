@@ -588,6 +588,21 @@ build:envoy-filter --config=clang-libstdcxx13
 # (linux/openat2.h) that the dev image's Ubuntu 20.04 lacks; the filter does
 # not use io_uring.
 build:envoy-filter --@envoy//bazel:enable_liburing=false
+# macOS variant of the same config (bazelisk build --config=envoy-filter-macos
+# //pagespeed/envoy:...): the Linux base above chains clang-libstdcxx13, whose
+# GCC-13 libstdc++ include/lib paths are Linux-only (Bazel also rejects those
+# absolute -I paths outside the execution root), and its build:clang base
+# passes -fuse-ld=lld, for which this platform has no ld64.lld. Compose the
+# envoy-specific flag with build:macos instead (Apple clang + libc++; cyclone
+# gets its C++23 per_file_copt from there). Liburing stays off as everywhere.
+build:envoy-filter-macos --config=macos
+build:envoy-filter-macos --@envoy//bazel:enable_liburing=false
+# Envoy compiles its own sources with -Werror, so the libc++
+# unsupported-deployment-target banner would fail its build at the
+# toolchain default. Pin the same floor the from-source macOS build
+# uses; harmless duplication once that lands.
+build:envoy-filter-macos --macos_minimum_os=11.0
+build:envoy-filter-macos --host_macos_minimum_os=11.0
 
 try-import %workspace%/clang.bazelrc
 try-import %workspace%/local_tsan.bazelrc
