@@ -459,6 +459,7 @@ class RewriteOptions {
   static const char kUseExperimentalJsMinifier[];
   static const char kUseFallbackPropertyCacheValues[];
   static const char kUseImageScanlineApi[];
+  static const char kExposeVersionInHeaders[];
   static const char kXModPagespeedHeaderValue[];
   static const char kXPsaBlockingRewrite[];
   // Options that require special handling, e.g. non-scalar values
@@ -2556,6 +2557,31 @@ class RewriteOptions {
   }
   const GoogleString& x_header_value() const { return x_header_value_.value(); }
 
+  // Server-wide opt-in (ExposeVersionInHeaders, process scope only): the
+  // generic PageSpeed header value becomes the product version.
+  bool expose_version_in_headers() const {
+    return expose_version_in_headers_.value();
+  }
+  void set_expose_version_in_headers(bool x) {
+    set_option(x, &expose_version_in_headers_);
+  }
+
+  // The value to put in the X-Mod-Pagespeed / X-Page-Speed response header.
+  // Precedence: an explicit XHeaderValue (even an empty one), then the
+  // ExposeVersionInHeaders opt-in (the port-supplied default of
+  // XHeaderValue, i.e. the product version), then the generic "on".
+  GoogleString EffectiveXHeaderValue() const {
+    if (x_header_value_.was_set()) {
+      return x_header_value_.value();
+    }
+    if (expose_version_in_headers_.value() &&
+        !x_header_value_.value().empty()) {
+      return x_header_value_.value();
+    }
+    return kGenericXHeaderValue;
+  }
+  static constexpr const char* kGenericXHeaderValue = "on";
+
   void set_avoid_renaming_introspective_javascript(bool x) {
     set_option(x, &avoid_renaming_introspective_javascript_);
   }
@@ -3379,8 +3405,13 @@ class RewriteOptions {
   // Protected option values so that derived class can modify.
   Option<BeaconUrl> beacon_url_;
 
-  // The value we put for the X-Mod-Pagespeed header. Default is our version.
+  // Custom value for the X-Mod-Pagespeed header. Ports set the default to the
+  // product version, shown only with ExposeVersionInHeaders; see
+  // EffectiveXHeaderValue().
   Option<GoogleString> x_header_value_;
+
+  // Process scope. See expose_version_in_headers().
+  Option<bool> expose_version_in_headers_;
 
  protected:
   // Property representing options that got deprecated. Doesn't

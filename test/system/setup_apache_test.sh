@@ -2532,6 +2532,7 @@ EOF
     sudo tee "$APACHE_CONF_DIR/mods-available/pagespeed.conf" > /dev/null << 'EOF'
 <IfModule pagespeed_module>
     ModPagespeed on
+    @@EXPOSE_VERSION_LINE@@
     AddOutputFilterByType MOD_PAGESPEED_OUTPUT_FILTER text/html
 
     ModPagespeedFileCachePath "/var/cache/mod_pagespeed/"
@@ -2615,6 +2616,17 @@ EOF
     Header set Cache-control "no-cache"
 </Directory>
 EOF
+
+    # Version-in-headers mode (opt-in): PAGESPEED_TEST_EXPOSE_VERSION=1 runs the
+    # suite with ExposeVersionInHeaders on (server-wide), so the PageSpeed
+    # response header carries the product version instead of the generic "on".
+    if [ "${PAGESPEED_TEST_EXPOSE_VERSION:-0}" = "1" ]; then
+        sudo sed -i 's/@@EXPOSE_VERSION_LINE@@/ModPagespeedExposeVersionInHeaders on/' \
+            "$APACHE_CONF_DIR/mods-available/pagespeed.conf"
+    else
+        sudo sed -i '/@@EXPOSE_VERSION_LINE@@/d' \
+            "$APACHE_CONF_DIR/mods-available/pagespeed.conf"
+    fi
 
     # Set ServerName to avoid warning
     echo "ServerName localhost" | sudo tee "$APACHE_CONF_DIR/conf-available/servername.conf" > /dev/null

@@ -1799,6 +1799,13 @@ jobs:
                 /packages/mod-pagespeed_*_amd64.deb
               mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
               chown -R www-data:www-data /var/cache/mod_pagespeed /var/log/pagespeed
+              # The header carries the version only with the server-wide opt-in;
+              # the version assertion below needs it (installed new package only).
+              {
+                echo "<IfModule pagespeed_module>"
+                echo "  ModPagespeedExposeVersionInHeaders on"
+                echo "</IfModule>"
+              } >> /etc/apache2/apache2.conf
               apache2ctl configtest
               force_restart_apache
               wait_for_apache
@@ -1989,6 +1996,13 @@ jobs:
                 /packages/mod-pagespeed-*.x86_64.rpm
               mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
               chown -R apache:apache /var/cache/mod_pagespeed /var/log/pagespeed
+              # The header carries the version only with the server-wide opt-in;
+              # the version assertion below needs it (installed new package only).
+              {
+                echo "<IfModule pagespeed_module>"
+                echo "  ModPagespeedExposeVersionInHeaders on"
+                echo "</IfModule>"
+              } >> /etc/httpd/conf/httpd.conf
               httpd -t
               force_restart_httpd
               wait_for_apache

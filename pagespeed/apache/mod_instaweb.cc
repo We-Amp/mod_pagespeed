@@ -531,7 +531,7 @@ InstawebContext* build_context_for_request(request_rec* request) {
   // Set X-Mod-Pagespeed header.
   // TODO(sligocki): Move inside PSOL.
   apr_table_set(request->headers_out, kModPagespeedHeader,
-                options->x_header_value().c_str());
+                options->EffectiveXHeaderValue().c_str());
 
   apr_table_unset(request->headers_out, HttpAttributes::kContentLength);
   apr_table_unset(request->headers_out, "Content-MD5");

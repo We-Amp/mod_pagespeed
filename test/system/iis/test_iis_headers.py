@@ -29,6 +29,7 @@ Environment Variables:
     PAGESPEED_TEST_ROOT: Root path for test pages
 """
 
+import os
 import re
 from typing import Dict, Optional
 
@@ -410,7 +411,8 @@ class TestPageSpeedHeaders:
     def test_x_page_speed_version(
         self, client: PageSpeedClient, example_root: str
     ):
-        """X-Page-Speed header should contain version information."""
+        """X-Page-Speed is the generic "on" by default and carries the version
+        only with ExposeVersionInHeaders (PAGESPEED_TEST_EXPOSE_VERSION=1)."""
         response = client.get(f"{example_root}/extend_cache.html")
         assert_http_status(response, 200)
 
@@ -419,10 +421,15 @@ class TestPageSpeedHeaders:
 
         version_header = x_page_speed or x_mod_pagespeed
         if version_header:
-            # Version should be in format like "1.13.35.2-0" or similar
-            assert re.match(r"[\d.]+", version_header), (
-                f"Version header should start with version number: {version_header}"
-            )
+            if os.environ.get("PAGESPEED_TEST_EXPOSE_VERSION") == "1":
+                # Version should be in format like "1.13.35.2-0" or similar
+                assert re.match(r"[\d.]+", version_header), (
+                    f"Version header should start with version number: {version_header}"
+                )
+            else:
+                assert version_header == "on", (
+                    f"Header should be the generic value 'on': {version_header}"
+                )
 
     @pytest.mark.iis_only
     def test_x_original_content_length(

@@ -287,6 +287,11 @@ LICENSE_SINCE="1.16.0-rc.14"
 # (the statically linked BSD/MIT/Zlib/IJG components ask that their notices
 # accompany a binary redistribution). Below it the gap is noted, not failed.
 TPN_SINCE="1.16.0"
+# First upstream core version (X.Y.Z) that knows the ExposeVersionInHeaders
+# directive. The post-upgrade step writes the opt-in drop-in only from here on:
+# an older release rejects the unknown directive at configtest. Compared on the
+# core version, so any 2.7.0 prerelease spelling (-pre.N, -rc.N) counts.
+EXPOSE_OPTIN_SINCE="2.7.0"
 PKG_DOCDIR=/usr/share/doc/mod-pagespeed
 DAEMON_UNIT=pagespeed-optimizer
 DAEMON_RUN=/run/pagespeed-optimizer
@@ -1105,6 +1110,15 @@ fi
 # silent-degrade scan only sees lines the upgraded module wrote.
 LOG_OFFSET="$(in_ctr "stat -c %s ${ERROR_LOG} 2>/dev/null || echo 0")"
 LOG_OFFSET="${LOG_OFFSET//[^0-9]/}"; LOG_OFFSET="${LOG_OFFSET:-0}"
+# The PageSpeed header reports the generic "on" unless the server-wide opt-in is
+# set; the version-header assertion below needs it. A separate drop-in keeps the
+# customized conffile byte-identical (checked below).
+if [[ "$MODULE_IS_LOCAL" -eq 1 ]] || semver_ge "${RC%%-*}" "$EXPOSE_OPTIN_SINCE"; then
+  in_ctr "printf '<IfModule pagespeed_module>\n    ModPagespeedExposeVersionInHeaders on\n</IfModule>\n' > ${DROPIN_DIR}/expose-version.conf"
+  if [[ "$FAMILY" == deb ]]; then
+    in_ctr "a2enconf -q expose-version" >/dev/null
+  fi
+fi
 if configtest; then
   pass "post-upgrade configtest: Syntax OK (1.15 conffile + daemon drop-in accepted by ${RC})"
 else

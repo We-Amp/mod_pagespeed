@@ -333,7 +333,7 @@ class ProxyInterfaceTest : public ProxyInterfaceTestBase {
                         "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
                         "Cache-Control: max-age=0, private\r\n"
-                        "X-Page-Speed: \r\n"
+                        "X-Page-Speed: on\r\n"
                         "HeadersComplete: 1\r\n\r\n"),
                  get_headers.ToString());
   }
@@ -523,7 +523,7 @@ TEST_F(ProxyInterfaceTest, HeadRequest) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Cache-Control: max-age=0, private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
   EXPECT_EQ(set_text, get_text);
@@ -545,7 +545,7 @@ TEST_F(ProxyInterfaceTest, HeadRequest) {
       "HTTP/1.0 200 OK\r\n"
       "Content-Type: text/html\r\n"
       "X-Background-Fetch: 0\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
   EXPECT_TRUE(get_text.empty());
@@ -583,7 +583,7 @@ TEST_F(ProxyInterfaceTest, RedirectRequestWhenDomainRewriterEnabled) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Cache-Control: max-age=0, private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n",
       get_headers.ToString());
 }
@@ -758,7 +758,7 @@ TEST_F(ProxyInterfaceTest, HeadResourceRequest) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:56:26 GMT\r\n"
       "Cache-Control: max-age=300,private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n";
 
   // We're not going to image-compress so we don't need our mock image
@@ -801,7 +801,7 @@ TEST_F(ProxyInterfaceTest, HeadResourceRequest) {
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:56:26 GMT\r\n"
       "Cache-Control: max-age=300,private\r\n"
-      "X-Page-Speed: \r\n"
+      "X-Page-Speed: on\r\n"
       "HeadersComplete: 1\r\n\r\n";
 
   EXPECT_EQ(expected_response_headers_string, response_headers.ToString());
@@ -3050,9 +3050,8 @@ TEST_F(ProxyInterfaceTest, MixedCaseNoCacheDirectives) {
                RewriteHtmlCacheHeader("mc-plain", "max-age=300"));
   EXPECT_STREQ("max-age=0, no-cache",
                RewriteHtmlCacheHeader("mc-no-cache", "No-Cache"));
-  EXPECT_STREQ(
-      "max-age=0, no-cache",
-      RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
+  EXPECT_STREQ("max-age=0, no-cache",
+               RewriteHtmlCacheHeader("mc-must-revalidate", "Must-Revalidate"));
 }
 
 // Rewritten HTML must never invite shared caches via s-maxage: the HTML
@@ -3070,9 +3069,8 @@ TEST_F(ProxyInterfaceTest, NoSMaxAgeOnRewrittenHtml) {
   EXPECT_STREQ("max-age=0, no-cache",
                RewriteHtmlCacheHeader("smaxage-only", "s-maxage=10"));
   // Directives that must survive still do.
-  EXPECT_STREQ(
-      "max-age=0, no-cache, no-store",
-      RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
+  EXPECT_STREQ("max-age=0, no-cache, no-store",
+               RewriteHtmlCacheHeader("smaxage-ns", "no-store, s-maxage=10"));
 }
 
 // Rewritten HTML names the headers its image URLs depend on in Vary, and the
@@ -3692,7 +3690,8 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
    private:
     RewriteDriver* driver_;
     PerOriginPageReaderFilter(const PerOriginPageReaderFilter&) = delete;
-    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) = delete;
+    PerOriginPageReaderFilter& operator=(const PerOriginPageReaderFilter&) =
+        delete;
   };
 
   class PerOriginPageReaderFilterCreator
@@ -3706,8 +3705,10 @@ class ProxyInterfaceOriginPropertyPageTest : public ProxyInterfaceTest {
     }
 
    private:
-    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) = delete;
-    PerOriginPageReaderFilterCreator& operator=(const PerOriginPageReaderFilterCreator&) = delete;
+    PerOriginPageReaderFilterCreator(const PerOriginPageReaderFilterCreator&) =
+        delete;
+    PerOriginPageReaderFilterCreator& operator=(
+        const PerOriginPageReaderFilterCreator&) = delete;
   };
 
   void SetUp() override {

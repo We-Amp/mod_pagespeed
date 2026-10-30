@@ -566,7 +566,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
     // The module's own header, as the classic path states it: without it a
     // response this module answered is indistinguishable from one the server
     // produced, for an operator and for the loop check alike.
-    const GoogleString& version = options->x_header_value();
+    const GoogleString version = options->EffectiveXHeaderValue();
     if (!version.empty()) {
       iis_response->SetHeader(kPageSpeedHeader, version.c_str(),
                               static_cast<USHORT>(version.size()), TRUE);

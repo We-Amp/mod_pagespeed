@@ -304,6 +304,7 @@ const char RewriteOptions::kUseExperimentalJsMinifier[] =
 const char RewriteOptions::kUseFallbackPropertyCacheValues[] =
     "UseFallbackPropertyCacheValues";
 const char RewriteOptions::kUseImageScanlineApi[] = "UseImageScanlineApi";
+const char RewriteOptions::kExposeVersionInHeaders[] = "ExposeVersionInHeaders";
 const char RewriteOptions::kXModPagespeedHeaderValue[] = "XHeaderValue";
 const char RewriteOptions::kXPsaBlockingRewrite[] = "BlockingRewriteKey";
 
@@ -1353,6 +1354,19 @@ void RewriteOptions::AddProperties() {
   // query param, and it is excluded from the signature below, so neither a
   // config file that still carries it nor a request that smuggles it in can
   // mint a fresh metadata-cache partition.
+  // Server-wide only. It feeds a response header, never cached content or
+  // URLs, so enabling it must not move any host to a new metadata-cache
+  // partition: excluded from the signature.
+  AddBaseProperty(
+      false, &RewriteOptions::expose_version_in_headers_, "eveh",
+      kExposeVersionInHeaders, kProcessScopeStrict,
+      "Report the product version in the X-Mod-Pagespeed / X-Page-Speed "
+      "response header instead of the generic value \"on\". Server-wide "
+      "only; an explicit XHeaderValue still wins.",
+      true);
+  properties_->property(properties_->size() - 1)
+      ->set_do_not_use_for_signature_computation(true);
+
   AddBaseProperty(
       "", &RewriteOptions::allow_vary_on_deprecated_, "avo", kAllowVaryOn,
       kDirectoryScope,

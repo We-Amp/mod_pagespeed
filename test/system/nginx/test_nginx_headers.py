@@ -19,6 +19,7 @@ These tests verify HTTP header handling for nginx with ngx_pagespeed.
 They test response headers, conditional requests, and content negotiation.
 """
 
+import os
 import random
 import re
 
@@ -46,7 +47,8 @@ class TestXPageSpeedHeader:
     def test_x_pagespeed_header(
         self, client: PageSpeedClient, example_root: str
     ):
-        """Verify X-Page-Speed response header is present with version."""
+        """Verify X-Page-Speed is the generic "on" by default, and the version
+        only with ExposeVersionInHeaders (PAGESPEED_TEST_EXPOSE_VERSION=1)."""
         response = client.get(f"{example_root}/combine_css.html")
         assert_http_status(response, 200)
 
@@ -54,10 +56,14 @@ class TestXPageSpeedHeader:
         page_speed = response.header("X-Page-Speed")
         assert page_speed, "Expected X-Page-Speed header in response"
 
-        # Header should contain version number (e.g., 1.1.0-beta.1 or 1.13.35.2-0)
-        version_pattern = r"\d+\.\d+\.\d+[\w.\-]*"
-        assert re.search(version_pattern, page_speed), \
-            f"X-Page-Speed should contain version number, got: {page_speed}"
+        if os.environ.get("PAGESPEED_TEST_EXPOSE_VERSION") == "1":
+            # Header should contain version number (e.g., 2.7.0 or 2.7.0-rc.1)
+            version_pattern = r"\d+\.\d+\.\d+[\w.\-]*"
+            assert re.search(version_pattern, page_speed), \
+                f"X-Page-Speed should contain version number, got: {page_speed}"
+        else:
+            assert page_speed == "on", \
+                f"X-Page-Speed should be the generic value, got: {page_speed}"
 
     def test_x_pagespeed_header_on_html(
         self, client: PageSpeedClient, example_root: str
