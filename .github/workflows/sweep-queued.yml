@@ -24,8 +24,7 @@ concurrency:
   group: sweep-queued
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   sweep:

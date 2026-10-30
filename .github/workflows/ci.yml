@@ -35,8 +35,7 @@ concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'dispatch' || 'run' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   pr:
@@ -125,6 +124,8 @@ jobs:
     uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-full.yml@master
 
   rat:
+    permissions:
+      contents: read
     name: License audit (Apache RAT)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -150,6 +151,8 @@ jobs:
           if-no-files-found: warn
 
   public-hygiene:
+    permissions:
+      contents: read
     name: Public-tree hygiene gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -169,6 +172,8 @@ jobs:
         run: tools/ci/test_check_public_hygiene.sh
 
   ci-tooling-tests:
+    permissions:
+      contents: read
     name: CI tooling self-tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -241,6 +246,7 @@ jobs:
   # runs on a push only) and full (off unless its trigger matches); failure
   # and cancelled still fail the gate.
   gate:
+    permissions: {}
     name: CI gate
     needs: [rat, public-hygiene, ci-tooling-tests, pr, full-scope, full]
     if: always()

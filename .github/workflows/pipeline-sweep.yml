@@ -19,8 +19,7 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   sweep:

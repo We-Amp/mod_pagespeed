@@ -30,8 +30,7 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: tidy-sweep-${{ github.ref }}-${{ inputs.check }}

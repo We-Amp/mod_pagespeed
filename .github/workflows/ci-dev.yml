@@ -19,8 +19,7 @@ concurrency:
   group: ci-dev
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   pr:

@@ -46,8 +46,7 @@ name: pipeline-pr
 on:
   workflow_call:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   # Path filters for the guards that only matter when their inputs change: a
@@ -560,6 +559,8 @@ jobs:
   # request; bumping the pin is a reviewed change. The report-only scan
   # below uses the live database to surface fresh advisories promptly.
   blocking-dep-scan:
+    permissions:
+      contents: read
     name: Blocking Dep Scan (npm)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -619,6 +620,8 @@ jobs:
   # filing the tracking issue belongs to the scheduled tier's hosted report
   # job, which holds the issue permission.
   dep-scan:
+    permissions:
+      contents: read
     name: Dependency Scan (report-only)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -664,6 +667,8 @@ jobs:
   # Browser tests of the client scripts, in headless Chromium. Sparse
   # checkout: they need nothing else.
   browser-js-tests:
+    permissions:
+      contents: read
     name: Browser client-JS tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -686,6 +691,8 @@ jobs:
   # and fail when the checked-in copies (or .source-hash) differ. Sparse
   # checkout: data2c is built from its single source file, no Bazel.
   regen-js-diff:
+    permissions:
+      contents: read
     name: Regenerated client-JS diff
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -716,6 +723,8 @@ jobs:
   # load the committed console bundle with mocked admin endpoints (no server,
   # no build).
   console-tests:
+    permissions:
+      contents: read
     name: Console SPA tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -735,6 +744,8 @@ jobs:
   # verify the signed package repositories. This fails if either fragment
   # regresses to a placeholder or an empty key block, or embeds another key.
   signing-key:
+    permissions:
+      contents: read
     name: Repo signing key embedded
     needs: changes
     if: ${{ needs.changes.outputs.signing_key == 'true' }}
@@ -752,6 +763,8 @@ jobs:
   # exports in a version script, a vendored third_party/serf tree, or a serf
   # Bazel repo rule). Comments that mention it for history do not trip it.
   serf-removed:
+    permissions:
+      contents: read
     name: Serf stays removed
     needs: changes
     if: ${{ needs.changes.outputs.serf == 'true' }}
@@ -769,6 +782,8 @@ jobs:
   # cve-ignore.yaml fixed_in entry is above the pin, or an ignore entry is
   # stale (suppresses no finding in the committed snapshot). Pure python3.
   cpp-cve-completeness:
+    permissions:
+      contents: read
     name: Completeness gate (every C++ dep annotated)
     needs: changes
     if: ${{ needs.changes.outputs.cve == 'true' }}
@@ -789,6 +804,8 @@ jobs:
   # an empty or degraded snapshot cannot disable the gate. The scheduled live
   # refresh of the snapshot belongs to the nightly tier.
   cpp-cve-snapshot-scan:
+    permissions:
+      contents: read
     name: CVE scan vs committed snapshot (per-PR, offline)
     needs: changes
     if: ${{ needs.changes.outputs.cve == 'true' }}
@@ -828,6 +845,8 @@ jobs:
   # boots systemd containers and needs the build runners; it arrives in the
   # next step and consumes these outputs.
   upgrade-rehearsal-plan:
+    permissions:
+      contents: read
     name: Upgrade rehearsal plan (version + distro matrix)
     needs: changes
     if: ${{ needs.changes.outputs.upgrade == 'true' }}
@@ -863,6 +882,8 @@ jobs:
   # native pair and run in the sidecar-pair jobs of the full tier
   # (pipeline-full.yml), after the merge.
   sidecar-tests:
+    permissions:
+      contents: read
     name: Sidecar tests (.NET 8 and 10)
     needs: changes
     if: ${{ needs.changes.outputs.sidecar == 'true' }}
@@ -1017,6 +1038,8 @@ jobs:
           echo "::error::MODULE.bazel.lock was stale; pushed a regenerated lock to ${HEAD_REF}. Re-run CI on the new commit."
 
   vendor:
+    permissions:
+      contents: read
     name: Vendor Dependencies
     needs: changes
     if: ${{ needs.changes.outputs.fleet == 'true' }}
@@ -1205,6 +1228,8 @@ jobs:
 
 
   linux-build:
+    permissions:
+      contents: read
     name: Linux Build
     needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1392,6 +1417,8 @@ jobs:
 
 
   linux-unit-tests:
+    permissions:
+      contents: read
     name: Linux Unit Tests
     needs: [changes, vendor, linux-build]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1561,6 +1588,8 @@ jobs:
 
 
   lint:
+    permissions:
+      contents: read
     name: Lint (clang-tidy + clang-format)
     needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1802,6 +1831,8 @@ jobs:
 
 
   js-minify-corpus:
+    permissions:
+      contents: read
     name: JS Minify Corpus
     needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -1964,6 +1995,8 @@ jobs:
 
 
   html-parse-corpus:
+    permissions:
+      contents: read
     name: HTML Parse Corpus Goldens
     needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -2070,6 +2103,8 @@ jobs:
 
 
   fuzz-smoke:
+    permissions:
+      contents: read
     name: Fuzz smoke (deterministic replay plus 60s libFuzzer)
     needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
@@ -2330,6 +2365,8 @@ jobs:
 
 
   windows-build:
+    permissions:
+      contents: read
     name: Windows Build
     needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-windows' }}
@@ -2643,6 +2680,8 @@ jobs:
 
 
   windows-unit-tests:
+    permissions:
+      contents: read
     name: Windows Unit Tests
     needs: [changes, vendor, windows-build]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-windows' }}
@@ -2931,6 +2970,8 @@ jobs:
   # changes job). The module under test comes from the windows-build bundle; nothing
   # is built here. The job holds no secret and no write token.
   iis-sys-tests:
+    permissions:
+      contents: read
     name: IIS System Tests
     needs: [changes, windows-build, windows-unit-tests]
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
@@ -3177,6 +3218,8 @@ jobs:
           if-no-files-found: ignore
 
   upgrade-rehearsal:
+    permissions:
+      contents: read
     name: Upgrade rehearsal (${{ matrix.distro }})
     needs: upgrade-rehearsal-plan
     runs-on: ubuntu-latest
@@ -3228,6 +3271,8 @@ jobs:
   # linux-build when the fleet scope skips the build runner legs.
   # ---------------------------------------------------------------------
   apache-sys-tests:
+    permissions:
+      contents: read
     name: Apache System Tests (changed port)
     needs: [changes, linux-build]
     if: ${{ needs.changes.outputs.apache_sys == 'true' }}
@@ -3350,6 +3395,8 @@ jobs:
         run: docker rm -f "ci-systest-pr-apache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" 2>/dev/null || true
 
   nginx-sys-tests:
+    permissions:
+      contents: read
     name: nginx System Tests (changed port)
     needs: [changes, linux-build]
     if: ${{ needs.changes.outputs.nginx_sys == 'true' }}
@@ -3465,6 +3512,7 @@ jobs:
   # privileged stress rigs) are skipped. This job only says so, in an
   # annotation and the job summary, so a skipped check is never a silent one.
   fleet-off-notice:
+    permissions: {}
     name: Shared build runners are switched off
     if: ${{ vars.FLEET_ENABLED == 'false' }}
     runs-on: ubuntu-latest
@@ -3490,6 +3538,7 @@ jobs:
   # Any other skip is a routing mistake and fails here, so the CI gate never
   # accepts it silently.
   fleet-only-skip-check:
+    permissions: {}
     name: IIS system tests ran or were switched off
     needs: [changes, windows-build, windows-unit-tests, iis-sys-tests]
     if: ${{ always() }}
