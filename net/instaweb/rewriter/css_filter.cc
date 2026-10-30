@@ -1024,8 +1024,7 @@ void CssFilter::EndElementImpl(HtmlElement* element) {
 
 void CssFilter::StartInlineRewrite(HtmlCharactersNode* char_node,
                                    HtmlElement* parent_element) {
-  if (driver()->content_security_policy().HasDirectiveOrDefaultSrc(
-          CspDirective::kStyleSrc)) {
+  if (!driver()->content_security_policy().CanModifyInlineStyle()) {
     driver()->InsertDebugComment(kInlineCspMessage, parent_element);
     return;
   }

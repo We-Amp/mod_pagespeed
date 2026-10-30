@@ -370,14 +370,14 @@ CspSourceExpression CspSourceExpression::ParseQuoted(StringPiece input) {
         StringCaseStartsWith(input, "sha384-") ||
         StringCaseStartsWith(input, "sha512-")) {
       input.remove_prefix(7);
-      return ParseBase64(input) ? CspSourceExpression(kHashOrNonce)
+      return ParseBase64(input) ? CspSourceExpression(kHash)
                                 : CspSourceExpression(kUnknown);
     }
   }
 
   if (StringCaseStartsWith(input, "nonce-")) {
     input.remove_prefix(6);
-    return ParseBase64(input) ? CspSourceExpression(kHashOrNonce)
+    return ParseBase64(input) ? CspSourceExpression(kNonce)
                               : CspSourceExpression(kUnknown);
   }
   return CspSourceExpression(kUnknown);
@@ -441,8 +441,11 @@ std::unique_ptr<CspSourceList> CspSourceList::Parse(StringPiece input) {
       case CspSourceExpression::kUnsafeHashedAttributes:
         result->saw_unsafe_hashed_attributes_ = true;
         break;
-      case CspSourceExpression::kHashOrNonce:
-        result->saw_hash_or_nonce_ = true;
+      case CspSourceExpression::kHash:
+        result->saw_hash_ = true;
+        break;
+      case CspSourceExpression::kNonce:
+        result->saw_nonce_ = true;
         break;
       default:
         result->expressions_.push_back(std::move(expr));
@@ -597,6 +600,28 @@ bool CspPolicy::PermitsInlineStyle() const {
   }
 
   return (style_src->saw_unsafe_inline() && !style_src->saw_hash_or_nonce());
+}
+
+bool CspPolicy::CanModifyInlineScript() const {
+  const CspSourceList* script_src = EffectiveSourceList(
+      CspDirective::kScriptSrcElem, CspDirective::kScriptSrc);
+  if (script_src == nullptr) {
+    return true;
+  }
+  return !script_src->saw_hash() &&
+         (script_src->saw_nonce() || (script_src->saw_unsafe_inline() &&
+                                      !script_src->saw_strict_dynamic()));
+}
+
+bool CspPolicy::CanModifyInlineStyle() const {
+  const CspSourceList* style_src =
+      EffectiveSourceList(CspDirective::kStyleSrcElem, CspDirective::kStyleSrc);
+  if (style_src == nullptr) {
+    return true;
+  }
+  return !style_src->saw_hash() &&
+         (style_src->saw_nonce() ||
+          (style_src->saw_unsafe_inline() && !style_src->saw_strict_dynamic()));
 }
 
 bool CspPolicy::PermitsInlineStyleAttribute() const {

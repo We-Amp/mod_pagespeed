@@ -54,7 +54,8 @@ class CspSourceExpression {
     kUnsafeEval,
     kStrictDynamic,
     kUnsafeHashedAttributes,
-    kHashOrNonce,
+    kHash,
+    kNonce,
     kUnknown
   };
 
@@ -163,7 +164,8 @@ class CspSourceList {
         saw_unsafe_eval_(false),
         saw_strict_dynamic_(false),
         saw_unsafe_hashed_attributes_(false),
-        saw_hash_or_nonce_(false) {}
+        saw_hash_(false),
+        saw_nonce_(false) {}
 
   static std::unique_ptr<CspSourceList> Parse(StringPiece input);
   const std::vector<CspSourceExpression>& expressions() const {
@@ -177,7 +179,9 @@ class CspSourceList {
     return saw_unsafe_hashed_attributes_;
   }
 
-  bool saw_hash_or_nonce() const { return saw_hash_or_nonce_; }
+  bool saw_hash() const { return saw_hash_; }
+  bool saw_nonce() const { return saw_nonce_; }
+  bool saw_hash_or_nonce() const { return saw_hash_ || saw_nonce_; }
 
   bool Matches(const GoogleUrl& origin_url, const GoogleUrl& url) const;
 
@@ -208,7 +212,8 @@ class CspSourceList {
   bool saw_unsafe_eval_;
   bool saw_strict_dynamic_;
   bool saw_unsafe_hashed_attributes_;
-  bool saw_hash_or_nonce_;
+  bool saw_hash_;
+  bool saw_nonce_;
 };
 
 // An individual policy. Note that a page is constrained by an intersection
@@ -230,6 +235,15 @@ class CspPolicy {
   bool PermitsInlineScriptAttribute() const;
   bool PermitsInlineStyle() const;
   bool PermitsInlineStyleAttribute() const;
+
+  // Whether the text of an inline <script> / <style> block may be rewritten
+  // without changing whether the browser accepts it. True when no policy
+  // restricts the block, or when the governing source list authorizes inline
+  // blocks through 'unsafe-inline' or a nonce (the nonce is an attribute of
+  // the element, so it survives rewriting the text) and lists no hash source
+  // (a hash covers the exact original bytes).
+  bool CanModifyInlineScript() const;
+  bool CanModifyInlineStyle() const;
 
   // Whether an image with a data: URL is permitted: img-src (falling
   // back to default-src) must either be absent or contain an explicit
@@ -293,6 +307,14 @@ class CspContext {
 
   bool PermitsInlineStyleAttribute() const {
     return AllPermit(&CspPolicy::PermitsInlineStyleAttribute);
+  }
+
+  bool CanModifyInlineScript() const {
+    return AllPermit(&CspPolicy::CanModifyInlineScript);
+  }
+
+  bool CanModifyInlineStyle() const {
+    return AllPermit(&CspPolicy::CanModifyInlineStyle);
   }
 
   bool PermitsDataImage() const {
