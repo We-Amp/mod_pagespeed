@@ -192,12 +192,15 @@ class FreshenMetadataUpdateManager {
       metadata_cache_->Delete(partition_key_);
     } else if (partitions_.get() != nullptr) {
       GoogleString buf;
+      bool serialized;
       {
         StringOutputStream sstream(&buf);  // finalizes buf in destructor
-        partitions_->SerializeToZeroCopyStream(&sstream);
+        serialized = partitions_->SerializeToZeroCopyStream(&sstream);
       }
       // Write the updated partition info to the metadata cache.
-      metadata_cache_->PutSwappingString(partition_key_, &buf);
+      if (serialized) {
+        metadata_cache_->PutSwappingString(partition_key_, &buf);
+      }
     }
     delete this;
   }
@@ -1924,6 +1927,7 @@ void RewriteContext::WritePartition() {
     if (!is_uncacheable_rewrite) {
       CacheInterface* metadata_cache = server_context->metadata_cache();
       GoogleString buf;
+      bool serialized;
       {
 #ifndef NDEBUG
         for (int i = 0, n = partitions_->partition_size(); i < n; ++i) {
@@ -1936,17 +1940,20 @@ void RewriteContext::WritePartition() {
         frozen_.set_value(true);
 #endif
         StringOutputStream sstream(&buf);  // finalizes buf in destructor
-        partitions_->SerializeToZeroCopyStream(&sstream);
+        serialized = partitions_->SerializeToZeroCopyStream(&sstream);
       }
 
       // Unchanged on-the-fly resources usually have their metadata
       // rewritten needlessly on fetches, so in that case do a Read
       // first and check whether the new bits are any different, as in
       // most cases a read is cheaper than a write.
-      if (IsFetchRewrite() && (kind() == kOnTheFlyResource)) {
-        WriteIfChanged::ReadCheckAndWrite(partition_key_, &buf, metadata_cache);
-      } else {
-        metadata_cache->PutSwappingString(partition_key_, &buf);
+      if (serialized) {
+        if (IsFetchRewrite() && (kind() == kOnTheFlyResource)) {
+          WriteIfChanged::ReadCheckAndWrite(partition_key_, &buf,
+                                            metadata_cache);
+        } else {
+          metadata_cache->PutSwappingString(partition_key_, &buf);
+        }
       }
     }
   } else {
