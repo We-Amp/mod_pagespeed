@@ -52,7 +52,7 @@ TEST_F(StringHashTest, ShortKeysUseManyProbeTags) {
   std::set<size_t> preserve_tags;
   std::set<size_t> fold_tags;
   for (int i = 0; i < 1000; ++i) {
-    GoogleString key = Key(i, false);  // at most 7 characters
+    GoogleString key = Key(i, false);  // at most 6 characters
     ASSERT_LE(key.size(), 8u);
     preserve_tags.insert(Tag(CasePreserveStringHash()(key)));
     fold_tags.insert(Tag(CaseFoldStringHash()(key)));

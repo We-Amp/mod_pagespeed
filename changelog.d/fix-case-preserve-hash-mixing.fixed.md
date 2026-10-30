@@ -1,1 +1,0 @@
-- **Lookups in the cache and lock tables spread keys evenly.** The case-folding and case-preserving string hashes now mix their results before the hash tables use them, so short keys no longer collide on the table's probe tag.

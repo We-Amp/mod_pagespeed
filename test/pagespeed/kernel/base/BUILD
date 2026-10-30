@@ -79,6 +79,7 @@ pagespeed_cc_test(
         ":kernel_test_util",
         "//pagespeed/kernel/base:std_timer",
         "//pagespeed/kernel/sharedmem",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@spdlog//:spdlog",  # logging_shutdown_race_test.cc includes spdlog sinks directly
     ],

@@ -196,7 +196,7 @@ class HtmlKeywords {
   // were not dominant, and keeping the data compact helped the processor
   // cache. absl::flat_hash_map is similarly compact (one slot per entry plus
   // a control byte); its speed relative to sparse_hash_map has not been
-  // measured, and its lookups go through the mixed hashers below, so the
+  // measured, and its lookups go through the mixed hashers from string_hash.h, so the
   // sparsehash dependency could be dropped.
   //
   // The hashers mix their result through absl::HashOf (see string_hash.h), so
