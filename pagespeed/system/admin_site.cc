@@ -38,6 +38,7 @@
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rule_pack_provider.h"
 #include "net/instaweb/rewriter/public/server_context.h"
