@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <functional>
+#include <list>
 #include <map>
 #include <memory>
 #include <string>
@@ -1000,6 +1001,112 @@ TEST_F(IisConfigurationTest, PoolThreadSettingsComeFromBothFilesEveryTime) {
   EXPECT_EQ(3, third.num_expensive_rewrite_threads);
 
   for (const std::string& f : {machine, site_b, site_c}) {
+    DeleteFileA(f.c_str());
+  }
+  RemoveDirectoryA(dir.c_str());
+}
+
+// The settings of a new site context come from the machine-wide file and,
+// for the pool sizes, the site's own file, for every context of a process: not
+// only for the first one that parses the file, whatever the process-wide
+// cache holds, and after either file was edited.
+TEST_F(IisConfigurationTest, SiteContextSettingsDoNotDependOnTheCache) {
+  char temp[MAX_PATH];
+  ASSERT_GT(GetTempPathA(MAX_PATH, temp), 0u);
+  const std::string dir = std::string(temp) + "pagespeed-machine-wide-" +
+                          std::to_string(GetCurrentProcessId());
+  CreateDirectoryA(dir.c_str(), nullptr);
+  auto write = [&](const std::string& name, const std::string& text) {
+    const std::string path = dir + "\\" + name;
+    FILE* f = fopen(path.c_str(), "wb");
+    EXPECT_NE(nullptr, f);
+    if (f != nullptr) {
+      fwrite(text.data(), 1, text.size(), f);
+      fclose(f);
+    }
+    return path;
+  };
+  const std::string machine = write("machine.config",
+                                    "pagespeed MessageBufferSize 4096\n"
+                                    "pagespeed UseNativeFetcher on\n"
+                                    "pagespeed NumRewriteThreads 2\n");
+  const std::string site =
+      write("site.config", "pagespeed NumRewriteThreads 3\n");
+
+  net_instaweb::NullMessageHandler quiet;
+  const net_instaweb::global_settings defaults;
+  std::map<std::string, std::string> input;
+  input["path"] = "/";
+  input["fullpath"] = "/";
+  input["config"] = "base";
+
+  // The process-wide cache, as the module factory uses it: it fills the
+  // settings only when it parses a file.
+  ConfigFactory shared;
+  auto read_through_cache = [&](net_instaweb::global_settings* g) {
+    net_instaweb::IisRewriteOptions options(nullptr);
+    std::list<std::string> paths(1, machine);
+    shared.GetConfig(paths, input, options, &quiet, g);
+  };
+  net_instaweb::global_settings first, second;
+  read_through_cache(&first);
+  read_through_cache(&second);
+  EXPECT_EQ(4096, first.message_buffer_size);
+  // This is the behaviour the module works around: the second read finds the
+  // file cached and gets nothing.
+  EXPECT_EQ(defaults.message_buffer_size, second.message_buffer_size);
+  EXPECT_FALSE(second.use_native_fetcher);
+
+  auto expect_values = [](const net_instaweb::global_settings& g,
+                          int buffer_size, int rewrite_threads) {
+    EXPECT_EQ(buffer_size, g.message_buffer_size);
+    EXPECT_TRUE(g.use_native_fetcher);
+    EXPECT_EQ(rewrite_threads, g.num_rewrite_threads);
+  };
+
+  // Three site contexts created in one process, in the order the factory
+  // uses: the cached read, then the settings read. The site's pool size wins
+  // over the machine-wide one, and the machine-wide values are all there.
+  for (int i = 0; i < 3; ++i) {
+    net_instaweb::global_settings g;
+    read_through_cache(&g);
+    ReadSiteContextSettings(machine, site, &quiet, &g);
+    expect_values(g, 4096, 3);
+  }
+
+  // A context rebuilt after the site's file was edited.
+  write("site.config", "pagespeed NumRewriteThreads 5\n");
+  {
+    net_instaweb::global_settings g;
+    read_through_cache(&g);
+    ReadSiteContextSettings(machine, site, &quiet, &g);
+    expect_values(g, 4096, 5);
+  }
+
+  // A context rebuilt after the machine-wide file was edited, once the
+  // cache's one-second window has passed and the modification time decides.
+  Sleep(1100);
+  write("machine.config",
+        "pagespeed MessageBufferSize 8192\n"
+        "pagespeed UseNativeFetcher on\n"
+        "pagespeed NumRewriteThreads 2\n");
+  {
+    net_instaweb::global_settings g;
+    read_through_cache(&g);
+    ReadSiteContextSettings(machine, site, &quiet, &g);
+    expect_values(g, 8192, 5);
+  }
+
+  // A machine-wide file that does not exist: the built-in defaults.
+  {
+    net_instaweb::global_settings g;
+    ReadSiteContextSettings(dir + "\\absent.config", "", &quiet, &g);
+    EXPECT_EQ(defaults.message_buffer_size, g.message_buffer_size);
+    EXPECT_FALSE(g.use_native_fetcher);
+    EXPECT_EQ(0, g.num_rewrite_threads);
+  }
+
+  for (const std::string& f : {machine, site}) {
     DeleteFileA(f.c_str());
   }
   RemoveDirectoryA(dir.c_str());

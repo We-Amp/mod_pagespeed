@@ -142,18 +142,18 @@ IisProcessContext* IisModuleFactory::GetProcessContext(const GoogleString& site_
 
 		if (cf->GetConfig(paths, input, *options, message_handler_, &global_config))
 		{
-			// The pool sizes (NumRewriteThreads, NumExpensiveRewriteThreads)
-			// come from the machine-wide file, or from the site's own file,
-			// which wins for this site. They are read afresh: the cache above
-			// fills global_config only when a file is parsed, which a second
-			// site of this process, or a rebuilt context, would miss.
+			// The settings of the new context come from the machine-wide file
+			// and, for the pool sizes, the site's own file (which wins for this
+			// site). They are read afresh: the cache above fills global_config
+			// only when a file is parsed, which a second site of this process, or
+			// a rebuilt context, would miss.
 			{
 				NullMessageHandler quiet;
 				std::string site_for_threads =
 					(!site_root.empty() &&
 					 GetFileAttributesA(site_root.c_str()) != INVALID_FILE_ATTRIBUTES)
 						? site_root : std::string();
-				ReadPoolThreadSettings(config_path, site_for_threads, &quiet, &global_config);
+				ReadSiteContextSettings(config_path, site_for_threads, &quiet, &global_config);
 			}
 			// A configuration has been read in this process. This parse
 			// matches with no hostname, so a directive inside a host- or
