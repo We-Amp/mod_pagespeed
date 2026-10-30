@@ -112,6 +112,8 @@ describe("hostSavingsView: per-host rows add up to the totals", () => {
     }
   });
 
+  // Records CURRENT behaviour (a HEAD request is counted as a full serve)
+  // pending a product decision.
   it("the client's own request count explains each host's hits", () => {
     // Per optimizable file and vhost: GETs in three encodings plus one HEAD are
     // counted as optimizer serves; a conditional request (304) is not.
@@ -172,7 +174,15 @@ describe("serveSavingsView on the real serve_savings block", () => {
     expect(daemonSavedRaw(daemonGlobal.serve_savings)).toBe(saved);
   });
 
-  it("serves by encoding add up to the class's hits", () => {
+  // Documents a gap: in this rig the optimizer recorded every serve as identity
+  // (Apache compressed downstream via mod_deflate and the rig has no brotli
+  // module), so the br/gzip rows are zero and the sums below are trivially
+  // satisfied. It becomes meaningful once the optimizer serves stored encodings.
+  it("serves by encoding add up to the class's hits (all identity in this rig)", () => {
+    for (const cls of CLASSES) {
+      const enc = daemonGlobal.serve_savings[cls].by_encoding;
+      expect(enc.gzip.hits + enc.br.hits, `${cls} compressed serves`).toBe(0);
+    }
     for (const cls of CLASSES) {
       const enc = daemonGlobal.serve_savings[cls].by_encoding as Record<string, { hits: number; bytes: number }>;
       expect(sum(Object.values(enc).map((e) => e.hits))).toBe(daemonGlobal.serve_savings[cls].hits);
@@ -232,6 +242,8 @@ describe("module counters", () => {
     expect(moduleSummary(vars).servedByOptimizer).toBe(vars.ipro_daemon_served);
   });
 
+  // Records CURRENT behaviour (the optimizer does not count a 304) pending a
+  // product decision.
   it("in the measured window the module's per-class served counters = the optimizer's hits + the 304s", () => {
     // The module counts a conditional request answered 304 as an optimizer
     // serve; the optimizer records serve bytes for full responses only. The

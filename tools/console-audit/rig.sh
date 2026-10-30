@@ -5,7 +5,7 @@
 # Console verification rig: Apache plus the SHIPPED mod_pagespeed and
 # pagespeed-optimizer packages in a booted-systemd Ubuntu 24.04 container, with
 # the optimizer's management API socket enabled so the console's optimizer
-# panels have data. Two vhosts (:80 default, :81 site-b.test) so per-vhost and
+# panels have data. Two named vhosts (site-a.test on :80, site-b.test on :81) so per-vhost and
 # whole-server answers differ.
 #
 #   rig.sh up [--version V]   build image, boot, install, configure, warm
@@ -37,6 +37,7 @@ VERSION="${RIG_VERSION:-$(pin_version)}"
 CTR="${RIG_CTR:-console-audit-rig}"
 PORT_A="${RIG_PORT_A:-18090}"; PORT_B="${RIG_PORT_B:-18091}"
 PLATFORM="${RIG_PLATFORM:-linux/amd64}"
+ARCH="${PLATFORM#linux/}"   # package architecture: amd64 or arm64
 WORK="${RIG_WORK:-$HOME/.cache/console-audit-rig}"
 MODULE_REPO="${RIG_MODULE_REPO:-We-Amp/mod_pagespeed}"
 OPTIMIZER_REPO="${RIG_OPTIMIZER_REPO:-We-Amp/pagespeed-optimizer}"
@@ -66,12 +67,12 @@ probe_remote() {
 
 fetch_packages() {
   mkdir -p "$WORK/pkgs"
-  [[ -f "$WORK/pkgs/pagespeed-optimizer_${VERSION}_amd64.deb" ]] || \
+  [[ -f "$WORK/pkgs/pagespeed-optimizer_${VERSION}_${ARCH}.deb" ]] || \
     gh release download "optimizer-v${VERSION}" -R "$OPTIMIZER_REPO" -D "$WORK/pkgs" \
-      -p "pagespeed-optimizer_${VERSION}_amd64.deb" --clobber
-  ls "$WORK"/pkgs/mod-pagespeed_"${VERSION}"-r*_amd64.deb >/dev/null 2>&1 || \
+      -p "pagespeed-optimizer_${VERSION}_${ARCH}.deb" --clobber
+  ls "$WORK"/pkgs/mod-pagespeed_"${VERSION}"-r*_${ARCH}.deb >/dev/null 2>&1 || \
     gh release download "module-v${VERSION}" -R "$MODULE_REPO" -D "$WORK/pkgs" \
-      -p "mod-pagespeed_${VERSION}-r*_amd64.deb" --clobber
+      -p "mod-pagespeed_${VERSION}-r*_${ARCH}.deb" --clobber
   ls -1 "$WORK/pkgs"
 }
 
@@ -207,9 +208,16 @@ case "$CMD" in
     mkdir -p "$OUT"
     docker cp "$HERE/workload.py" "$CTR:/usr/local/bin/console-audit-workload.py"
     in_ctr "python3 /usr/local/bin/console-audit-workload.py capture /var/lib/console-audit/leaves"
+    if [[ ! -f "$HERE/workload/expected.json" && ! -f "$OUT/expected.json" ]]; then
+      die "no expected.json: run 'rig.sh workload' before 'rig.sh capture'"
+    fi
+    # Keep the committed expected.json unless a fresh workload produced a new one.
+    KEEP="$(mktemp)"; [[ -f "$OUT/expected.json" ]] && cp "$OUT/expected.json" "$KEEP"
     rm -f "$OUT"/*.json "$OUT"/*.txt
     docker cp "$CTR:/var/lib/console-audit/leaves/." "$OUT/"
-    [[ -f "$HERE/workload/expected.json" ]] && cp "$HERE/workload/expected.json" "$OUT/expected.json"
+    if [[ -f "$HERE/workload/expected.json" ]]; then cp "$HERE/workload/expected.json" "$OUT/expected.json"
+    elif [[ -s "$KEEP" ]]; then cp "$KEEP" "$OUT/expected.json"; fi
+    rm -f "$KEEP"
     echo "rig: captured $(ls "$OUT" | wc -l | tr -d ' ') files into $OUT" ;;
   test)
     a="$(probe http://localhost/pagespeed_admin/stats_json)"
@@ -244,6 +252,6 @@ case "$CMD" in
     in_ctr "systemctl is-active apache2 pagespeed-optimizer" || true ;;
   urls)
     echo "on the docker host: http://127.0.0.1:${PORT_A}/pagespeed_admin/  http://127.0.0.1:${PORT_A}/pagespeed_global_admin/  http://127.0.0.1:${PORT_B}/pagespeed_admin/" ;;
-  down) docker rm -f "$CTR" >/dev/null && echo "rig: removed $CTR" ;;
+  down) docker rm -f "$CTR" >/dev/null 2>&1 || true; echo "rig: removed $CTR (if it existed)" ;;
   *) sed -n '3,25p' "$0"; exit 2 ;;
 esac

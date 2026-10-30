@@ -13,9 +13,9 @@
 # Usage:
 #   scripts/refresh-stat-fixture.sh                    # public demo server
 #   scripts/refresh-stat-fixture.sh http://host:8080/pagespeed_admin
-#   scripts/refresh-stat-fixture.sh --rig              # also the leaf fixtures
+#   scripts/refresh-stat-fixture.sh --rig              # leaf fixtures only
 #
-# --rig additionally runs the controlled workload on the local verification
+# --rig (instead of the fetch below) runs the controlled workload on the local verification
 # rig (tools/console-audit/rig.sh, which must be up) and captures the real JSON
 # of every console leaf into test-fixtures/rig/, together with the client-side
 # expected values. The page-model tests in src/lib/utils/rig-fixtures.test.ts
