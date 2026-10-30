@@ -175,6 +175,7 @@ class RewriteOptions {
     kJpegSubsampling,
     kLazyloadImages,
     kLeftTrimUrls,
+    // Accepted-but-inert; the name still parses for config compatibility.
     kLocalStorageCache,
     kMakeGoogleAnalyticsAsyncDeprecated,
     kMakeShowAdsAsync,

@@ -718,6 +718,7 @@ const RewriteOptions::Filter kDangerousFilterSet[] = {
     RewriteOptions::kExplicitCloseTagsDeprecated,
     RewriteOptions::kFixReflows,
     RewriteOptions::kFlushSubresourcesDeprecated,
+    RewriteOptions::kLocalStorageCache,
     RewriteOptions::kMakeGoogleAnalyticsAsyncDeprecated,
     RewriteOptions::kMobilize,
     RewriteOptions::kMobilizePrecomputeDeprecated,
@@ -2181,6 +2182,9 @@ bool RewriteOptions::AddByNameToFilterSet(const StringPiece& option,
              "Filter 'in_place_optimize_for_browser' is deprecated and has "
              "no effect; image format negotiation at the original URL is "
              "controlled by the optimizer worker, not this filter."},
+            {kLocalStorageCache,
+             "Filter 'local_storage_cache' is deprecated and has no effect: "
+             "it is retired, and no cookie or script is added to pages."},
             {kMobilize, "Filter 'mobilize' is deprecated and has no effect."},
             {kMobilizePrecomputeDeprecated,
              "Filter 'mobilize_precompute' is deprecated and has no "

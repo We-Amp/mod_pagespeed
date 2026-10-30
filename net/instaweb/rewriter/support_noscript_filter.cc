@@ -85,9 +85,9 @@ bool SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() const {
       case RewriteOptions::kDedupInlinedImages:
       case RewriteOptions::kDelayImages:
       case RewriteOptions::kLazyloadImages:
-      case RewriteOptions::kLocalStorageCache:
         filter_enabled = request_properties->SupportsImageInlining();
         break;
+      case RewriteOptions::kLocalStorageCache:
       case RewriteOptions::kMobilize:
         filter_enabled = false;
         break;

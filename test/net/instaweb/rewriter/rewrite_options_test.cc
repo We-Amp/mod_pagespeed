@@ -2161,6 +2161,24 @@ TEST_F(RewriteOptionsTest, MobilizeIsADeprecatedNoOp) {
   EXPECT_EQ(1U, handler.messages().size());
 }
 
+TEST_F(RewriteOptionsTest, LocalStorageCacheIsARetiredNoOp) {
+  // The local_storage_cache filter name still parses (config compatibility)
+  // and warns once when enabled; disabling or forbidding it is silent.
+  TestMessageHandler handler;
+  EXPECT_TRUE(options_.EnableFiltersByCommaSeparatedList("local_storage_cache",
+                                                         &handler));
+  ASSERT_EQ(1U, handler.messages().size());
+  EXPECT_NE(GoogleString::npos,
+            handler.messages()[0].find(
+                "Filter 'local_storage_cache' is deprecated and has no effect"))
+      << handler.messages()[0];
+  EXPECT_TRUE(options_.DisableFiltersByCommaSeparatedList("local_storage_cache",
+                                                          &handler));
+  EXPECT_TRUE(options_.ForbidFiltersByCommaSeparatedList("local_storage_cache",
+                                                         &handler));
+  EXPECT_EQ(1U, handler.messages().size());
+}
+
 TEST_F(RewriteOptionsTest, LogMobilizationSamplesWarns) {
   TestMessageHandler handler;
   GoogleString msg;

@@ -48,7 +48,6 @@
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/expensive_operation_callback.h"
 #include "net/instaweb/rewriter/public/image.h"
-#include "net/instaweb/rewriter/public/local_storage_cache_filter.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
@@ -1768,15 +1767,6 @@ void ImageRewriteFilter::BeginRewriteImageUrl(HtmlElement* element,
     return;
   }
 
-  // If the image will be inlined and the local storage cache is enabled, add
-  // the LSC marker attribute to this element so that the LSC filter knows to
-  // insert the relevant javascript functions.
-  if (driver()->request_properties()->SupportsImageInlining()) {
-    LocalStorageCacheFilter::InlineState state;
-    LocalStorageCacheFilter::AddStorableResource(
-        src->DecodedValueOrNull(), driver(), true /* ignore cookie */, element,
-        &state);
-  }
   Context* context = new Context(
       0 /* No CSS inlining, it's html */, this, driver(),
       nullptr /*not nested */, resource_context.release(),
@@ -1972,11 +1962,6 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
           << "Modifying a URL slot despite "
           << "image_inlining_identify_and_cache_without_rewriting set.";
       src->SetValue(data_url);
-      // Note the use of the ORIGINAL url not the data url.
-      LocalStorageCacheFilter::AddLscAttributes(src_value, *cached, driver(),
-                                                element);
-      // AddLscAttributes uses the width and height attributes so must be called
-      // before we delete them with:
       DeleteMatchingImageDimsAfterInline(cached, element);
       image_inline_count_->Add(1);
       rewrote_url = true;
@@ -1986,8 +1971,6 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
 
   // Rewrite URL in case this image was not inlined (and URL rewriting allowed).
   if (!image_inlined && !slot->preserve_urls()) {
-    // Not inlined means we cannot store it in local storage.
-    LocalStorageCacheFilter::RemoveLscAttributes(element, driver());
     if (cached->optimizable()) {
       // Rewritten HTTP url
       src->SetValue(ResourceSlot::RelativizeOrPassthrough(
@@ -2390,20 +2373,6 @@ void ImageRewriteFilter::StartElementImpl(HtmlElement* element) {
     if (attribute.category != semantic_type::kImage ||
         attribute.url->DecodedValueOrNull() == nullptr) {
       continue;
-    }
-
-    // The LSC filter only knows how to handle the src attribute.
-    if (attribute.url->keyword() == HtmlName::kSrc) {
-      // Ask the LSC filter to work out how to handle this element. A return
-      // value of true means we don't have to rewrite it so can skip that.
-      // The state is carried forward to after we initiate rewriting since
-      // we might still have to modify the element.
-      LocalStorageCacheFilter::InlineState state;
-      if (LocalStorageCacheFilter::AddStorableResource(
-              attribute.url->DecodedValueOrNull(), driver(),
-              false /* check cookie */, element, &state)) {
-        continue;
-      }
     }
 
     BeginRewriteImageUrl(element, attribute.url);

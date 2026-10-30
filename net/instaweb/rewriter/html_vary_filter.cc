@@ -50,7 +50,7 @@ void HtmlVaryFilter::HtmlVaryTokens(const RewriteOptions& options,
                     options.Enabled(RewriteOptions::kConvertToAvifLossless) ||
                     options.Enabled(RewriteOptions::kConvertToAvifAnimated) ||
                     options.Enabled(RewriteOptions::kRecompressAvif);
-  // inline_images, delay_images, dedup_inlined_images and local_storage_cache
+  // inline_images, delay_images and dedup_inlined_images
   // read the User-Agent (inlining support, low-res previews, device class, the
   // lazyload allowlist, the noscript redirect) and instrument the
   // critical-image beacon per browser, so they count even when image URLs are
@@ -60,7 +60,6 @@ void HtmlVaryFilter::HtmlVaryTokens(const RewriteOptions& options,
       options.Enabled(RewriteOptions::kInlineImages) ||
       options.Enabled(RewriteOptions::kDelayImages) ||
       options.Enabled(RewriteOptions::kDedupInlinedImages) ||
-      options.Enabled(RewriteOptions::kLocalStorageCache) ||
       options.Enabled(RewriteOptions::kLazyloadImages) ||
       options.Enabled(RewriteOptions::kResizeToRenderedImageDimensions) ||
       options.Enabled(RewriteOptions::kPrioritizeCriticalImages);

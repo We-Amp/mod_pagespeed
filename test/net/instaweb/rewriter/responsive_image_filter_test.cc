@@ -20,7 +20,6 @@
 #include "net/instaweb/rewriter/public/responsive_image_filter.h"
 
 #include "net/instaweb/rewriter/public/delay_images_filter.h"
-#include "net/instaweb/rewriter/public/local_storage_cache_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
@@ -359,7 +358,7 @@ TEST_F(ResponsiveImageFilterTest, NoPartialInline2) {
   ValidateExpected("no_partial_inline2", input_html, output_html);
 }
 
-TEST_F(ResponsiveImageFilterTest, LocalStorageFilter) {
+TEST_F(ResponsiveImageFilterTest, RetiredLocalStorageFilterAddsNothing) {
   options()->EnableFilter(RewriteOptions::kResponsiveImages);
   options()->EnableFilter(RewriteOptions::kResizeImages);
   options()->EnableFilter(RewriteOptions::kInlineImages);
@@ -367,20 +366,11 @@ TEST_F(ResponsiveImageFilterTest, LocalStorageFilter) {
   rewrite_driver()->AddFilters();
   SetHtmlMimetype();
 
-  GoogleString local_storage_cache_js =
-      StrCat("<script type=\"text/javascript\" data-pagespeed-no-defer>",
-             server_context()->static_asset_manager()->GetAsset(
-                 StaticAssetEnum::LOCAL_STORAGE_CACHE_JS, options()),
-             LocalStorageCacheFilter::kLscInitializer, "</script>");
-
-  // Note: Currently images used by the responsive filter do not get
-  // local storage attributes and thus cannot be saved into local storage.
-  // If we figure out a way (and think it's worth the effort) to make these
-  // work together, we will need to update this test.
+  // local_storage_cache is retired: enabling it adds no script and no
+  // local-storage attributes, so the output is the plain inlined image.
   const char input_html[] = "<img src=small_16x16.png width=16 height=16>";
   GoogleString output_html =
-      StrCat(local_storage_cache_js, "<img width=16 height=16 src=\"",
-             k16x16PngDataUrl, "\">");
+      StrCat("<img width=16 height=16 src=\"", k16x16PngDataUrl, "\">");
   ValidateExpected("local_storage", input_html, output_html);
 }
 

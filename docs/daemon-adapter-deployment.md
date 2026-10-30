@@ -510,9 +510,9 @@ the browser. Rewritten HTML therefore names the headers its markup depends on
 in `Vary`, on every port: `Accept` when a WebP or AVIF conversion is on,
 `Save-Data` when the Save-Data qualities differ from the base qualities, and
 `User-Agent` when WebP, distinct small-screen qualities, `inline_images`,
-`delay_images`, `dedup_inlined_images`, `local_storage_cache`,
+`delay_images`, `dedup_inlined_images`,
 `lazyload_images`, `resize_to_rendered_image_dimensions` or
-`prioritize_critical_images` apply (the last seven read the browser even when
+`prioritize_critical_images` apply (the last six read the browser even when
 image URLs are preserved). The
 default configuration (`CoreFilters`) therefore sends
 `Vary: Accept, Save-Data, User-Agent`. The list is a function of the
