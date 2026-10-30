@@ -966,4 +966,22 @@ TEST_F(IisConfigurationTest, Utf8ByteOrderMarkNoticeOnlyWhenPresent) {
   EXPECT_EQ(1, recorder.CountContaining("byte order mark"));
 }
 
+// A UTF-16 file is refused with one clear warning and sets no options.
+TEST_F(IisConfigurationTest, Utf16FileIsRefusedWithWarning) {
+  const std::string utf16("\xFF\xFE" "p\0a\0", 6);
+
+  RecordingMessageHandler recorder;
+  ConfigurationFile* cf =
+      CreateTestConfigFile(utf16, &recorder, global_config_, nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  IisRewriteOptions rwo(nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+
+  EXPECT_EQ(1, recorder.CountContaining("UTF-16"));
+  EXPECT_EQ(0, recorder.CountContaining("byte order mark"));
+  EXPECT_EQ("", rwo.daemon_socket_path());
+}
+
 }  // namespace
