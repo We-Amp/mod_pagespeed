@@ -82,6 +82,15 @@ cmake(
             "ws2_32.lib",      # Winsock
             "Iphlpapi.lib",    # if_nametoindex
         ],
+        # curl's macOS proxy support (macos.c) calls
+        # SCDynamicStoreCopyProxies. curl's CMake appends the framework to
+        # its CURL_LIBS, but rules_foreign_cc does not propagate those from
+        # a static build, so every consumer of libcurl.a needs it on its
+        # own link line.
+        "@platforms//os:macos": [
+            "-framework",
+            "SystemConfiguration",
+        ],
         "//conditions:default": [],
     }),
     deps = select({
@@ -124,6 +133,17 @@ cmake(
             "CURL_USE_OPENSSL": "OFF",
             "CURL_CA_BUNDLE": "none",
             "CURL_CA_PATH": "none",
+            # CMake auto-detects Homebrew brotli/zstd/libidn2/nghttp2 on a
+            # dev Mac and compiles them into libcurl.a, leaving undefined
+            # symbols that no consumer can resolve (Envoy bundles brotli
+            # and nghttp2, nothing provides zstd/libidn2). The Linux dev
+            # image installs none of them (docker/Dockerfile), so the
+            # reference build ships curl without these features; pin the
+            # same feature set here.
+            "CURL_BROTLI": "OFF",
+            "CURL_ZSTD": "OFF",
+            "USE_NGHTTP2": "OFF",
+            "USE_LIBIDN2": "OFF",
         },
         "@platforms//os:windows": {
             # Use Windows Schannel for SSL
