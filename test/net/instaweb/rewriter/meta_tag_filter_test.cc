@@ -160,6 +160,38 @@ TEST_F(MetaTagFilterTest, TestCharsetNoUpstream) {
   EXPECT_FALSE(headers()->Lookup(HttpAttributes::kContentType, &values));
 }
 
+TEST_F(MetaTagFilterTest, CachingFieldsRecomputedAfterCharset) {
+  headers()->SetStatusAndReason(HttpStatus::kOK);
+  headers()->ComputeCaching();
+  ASSERT_FALSE(headers()->cache_fields_dirty());
+  ValidateNoChanges("caching_charset", kMetaTagCharsetOnly);
+  EXPECT_STREQ("text/html; charset=UTF-8",
+               headers()->Lookup1(HttpAttributes::kContentType));
+  EXPECT_FALSE(headers()->cache_fields_dirty());
+}
+
+TEST_F(MetaTagFilterTest, CachingFieldsReflectNewContentType) {
+  // Forced caching applies only to non-HTML responses. With no Content-Type
+  // the response counts as non-HTML and is force cached; the meta tag then
+  // supplies text/html, so the stored caching fields must be recomputed and
+  // no longer treat the response as cacheable.
+  headers()->RemoveAll(HttpAttributes::kContentType);
+  headers()->SetStatusAndReason(HttpStatus::kOK);
+  headers()->SetDate(timer()->NowMs());
+  headers()->Add(HttpAttributes::kCacheControl, "no-cache");
+  headers()->ComputeCaching();
+  headers()->ForceCaching(300 * Timer::kSecondMs);
+  ASSERT_FALSE(headers()->cache_fields_dirty());
+  EXPECT_TRUE(headers()->IsBrowserCacheable());
+  EXPECT_TRUE(headers()->IsProxyCacheable());
+  ValidateNoChanges("caching_content_type", kMetaTagDoc);
+  EXPECT_STREQ("text/html;  charset=UTF-8",
+               headers()->Lookup1(HttpAttributes::kContentType));
+  EXPECT_FALSE(headers()->cache_fields_dirty());
+  EXPECT_FALSE(headers()->IsBrowserCacheable());
+  EXPECT_FALSE(headers()->IsProxyCacheable());
+}
+
 const char kMetaTagDoNothing[] =
     "<html><head>"
     "<meta http-equiv=\"\" content=\"\">"
