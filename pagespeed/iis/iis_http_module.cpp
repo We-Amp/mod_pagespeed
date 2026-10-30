@@ -1324,9 +1324,8 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			driver->SetRequestHeaders(*innerContext->base_fetch()->request_headers());
 
 			innerContext->set_driver(driver);
-			innerContext->server_context()->message_handler()->Message(
-				kInfo, "Trying to serve rewritten resource in-place: %s",
-				innerContext->gurl()->spec_c_str());
+			VLOG(1) << "Trying to serve rewritten resource in-place: "
+				<< innerContext->gurl()->spec_c_str();
 
 			// TODO(oschaaf): seems unused
 			innerContext->set_in_place(true);

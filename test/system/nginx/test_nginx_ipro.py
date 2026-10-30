@@ -24,6 +24,7 @@ The first request may return the original resource, while subsequent
 requests return the optimized version once it's ready.
 """
 
+import json
 import random
 import re
 
@@ -386,6 +387,57 @@ class TestNginxIproContentType:
             "text/javascript",
             "application/x-javascript",
         ]), f"Content-Type should be JavaScript type, got: {content_type}"
+
+
+class TestNginxIproMessageHistory:
+    """Per-request in-place lines must not flood the admin message history."""
+
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_ipro_requests_do_not_fill_message_history(
+        self,
+        client: PageSpeedClient,
+        server_config,
+        test_root: str,
+        stats_snapshot,
+    ):
+        """N in-place requests add at most one line to the message history,
+        while the ipro_served statistic still counts every request."""
+        requests = 20
+        token = f"r={random.randint(1, 10**9)}"
+        url = f"{test_root}/ipro/cc200/example.css?{token}"
+        history_url = f"{server_config.admin_path}/message_history"
+
+        # Warm: wait until the optimized copy is served, so the loop below
+        # is all in-place hits.
+        client.fetch_until(
+            url, condition=lambda r: len(r.body) < 43, timeout=60.0
+        )
+
+        # The buffer may already be full, so count only what was written
+        # after this point, and only lines naming this test's URL.
+        next_before = json.loads(client.get(history_url).text)["next"]
+        stats_before = stats_snapshot()
+
+        for _ in range(requests):
+            assert_http_status(client.get(url), 200)
+
+        stats_after = stats_snapshot()
+        history = json.loads(
+            client.get(f"{history_url}?since={next_before}").text
+        )
+        ours = [m for m in history["messages"] if token in m["message"]]
+
+        assert len(ours) <= 1, (
+            f"{requests} in-place requests added {len(ours)} "
+            f"message-history lines: {ours[:3]}"
+        )
+        served = stats_after.get("ipro_served", 0) - stats_before.get(
+            "ipro_served", 0
+        )
+        assert served >= requests, (
+            f"ipro_served grew by {served} for {requests} in-place requests"
+        )
 
 
 if __name__ == "__main__":

@@ -894,18 +894,13 @@ int IisModuleBaseFetch::CollectHeaders()
 		if (status_ok) { 
 			//ctx->in_place = false;
 			server_context->rewrite_stats()->ipro_served()->Add(1);
-			server_context->message_handler()->Message(
-				kInfo, "Serving rewritten resource in-place: %s",
-				ctx_->url());
+			VLOG(1) << "Serving rewritten resource in-place: " << ctx_->url();
 		} else
 		if (pagespeed_headers->status_code() == CacheUrlAsyncFetcher::kNotInCacheStatus)
 		{
 			server_context->rewrite_stats()->ipro_not_in_cache()->Add(1);
-			server_context->message_handler()->Message(
-					kInfo,
-					"Could not rewrite resource in-place "
-					"because URL is not in cache: %s",
-					ctx_->gurl()->spec_c_str());
+			VLOG(1) << "Could not rewrite resource in-place "
+				"because URL is not in cache: " << ctx_->gurl()->spec_c_str();
 			// A HEAD carries no body, so there is nothing to record.  The
 			// send notification leaves for any method but GET and POST,
 			// so a recorder created here would never see the body and

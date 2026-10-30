@@ -51,8 +51,14 @@ class IisLogSink : public pagespeed_logging::LogSink {
         message_type = net_instaweb::MessageType::kFatal;
         break;
       default:  // For VLOG(s)
-        message_type = net_instaweb::MessageType::kInfo;
-        break;
+        // Verbose lines go to the debugger only, never into the message
+        // history: per-request lines would push real warnings out of it.
+        {
+          std::string verbose(message, message_len);
+          verbose.push_back('\n');
+          OutputDebugStringA(verbose.c_str());
+        }
+        return;
     }
 
     GoogleString msg(message, message_len);
