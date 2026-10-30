@@ -309,13 +309,21 @@ void ImageUrlEncoder::SetAvifLevel(const RewriteOptions& options,
   // (SupportsAvif* all key off accepts_avif_), so the TIER is selected by which
   // AVIF filters are enabled -- NOT by any UA signal -- exactly as WebP's tier is
   // gated by the enabled WebP filters.
+  //
+  // The animated level is selected by the animated-conversion filter alone:
+  // without it the animated level yields the same options and output bytes as
+  // the lossless+alpha level (see ImageRewriteFilter's AVIF_ANIMATED case), so
+  // keying on it would store identical output under a second key.  Recompression
+  // therefore selects the lossless+alpha level for an animated-capable client
+  // too, as SetLibWebpLevel does for WebP.
   if (request_properties.SupportsAvifAnimated() &&
-      (options.Enabled(RewriteOptions::kRecompressAvif) ||
-       options.Enabled(RewriteOptions::kConvertToAvifAnimated))) {
+      options.Enabled(RewriteOptions::kConvertToAvifAnimated)) {
     avif_level = ResourceContext::AVIF_ANIMATED;
-  } else if (request_properties.SupportsAvifLosslessAlpha() &&
-             (options.Enabled(RewriteOptions::kRecompressAvif) ||
-              options.Enabled(RewriteOptions::kConvertToAvifLossless))) {
+  } else if ((request_properties.SupportsAvifLosslessAlpha() &&
+              (options.Enabled(RewriteOptions::kRecompressAvif) ||
+               options.Enabled(RewriteOptions::kConvertToAvifLossless))) ||
+             (request_properties.SupportsAvifAnimated() &&
+              options.Enabled(RewriteOptions::kRecompressAvif))) {
     avif_level = ResourceContext::AVIF_LOSSY_LOSSLESS_ALPHA;
   } else if (request_properties.SupportsAvifRewrittenUrls() &&
              (options.Enabled(RewriteOptions::kRecompressAvif) ||
