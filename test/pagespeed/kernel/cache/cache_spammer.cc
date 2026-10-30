@@ -100,11 +100,10 @@ void CacheSpammer::RunTests(int num_threads, int num_iters, int num_inserts,
 
   // First, create all the threads.
   for (int i = 0; i < num_threads; ++i) {
-    spammers[i] =
-        new CacheSpammer(thread_runtime, ThreadSystem::kJoinable,
-                         cache,  // lru_cache_.get() will make this fail.
-                         expecting_evictions, do_deletes, value_prefix,
-                         num_iters, num_inserts);
+    spammers[i] = new CacheSpammer(
+        thread_runtime, ThreadSystem::kJoinable,
+        cache,  // lru_cache_.get() will make this fail.
+        expecting_evictions, do_deletes, value_prefix, num_iters, num_inserts);
   }
 
   // Then, start them.
