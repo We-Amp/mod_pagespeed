@@ -64,7 +64,6 @@ class FileDriver {
  private:
   HtmlParse* html_parse_;
   LoggingFilter logging_filter_;
-  StatisticsLog* stats_log_;
   HtmlWriterFilter html_write_filter_;
   bool filters_added_;
   FileSystem* file_system_;

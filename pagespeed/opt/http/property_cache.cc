@@ -65,7 +65,6 @@ PropertyCache::PropertyCache(PropertyStore* property_store, Timer* timer,
                              Statistics* stats, ThreadSystem* threads)
     : property_store_(property_store),
       timer_(timer),
-      stats_(stats),
       thread_system_(threads),
       mutations_per_1000_writes_threshold_(
           kDefaultMutationsPer1000WritesThreshold),
