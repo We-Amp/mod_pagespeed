@@ -17,7 +17,6 @@
 #include "pagespeed/iis/iis_configuration.h"
 #include "pagespeed/iis/iis_rewrite_options.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
-#include "pagespeed/kernel/base/string_util.h"
 
 using namespace std;
 using namespace net_instaweb;
@@ -110,7 +109,11 @@ class ConfigurationFile:public ReferenceCounter
 		char *ptr=tempbuf;
 		// A UTF-16 file (PowerShell 5.1 Out-File and ">" write UTF-16LE) cannot
 		// be parsed as bytes of text: refuse it with a clear warning.
-		if (net_instaweb::HasUtf16ByteOrderMark(net_instaweb::StringPiece(ptr, length)))
+		if (length >= 2
+		    && ((static_cast<unsigned char>(ptr[0]) == 0xFF
+		         && static_cast<unsigned char>(ptr[1]) == 0xFE)
+		        || (static_cast<unsigned char>(ptr[0]) == 0xFE
+		            && static_cast<unsigned char>(ptr[1]) == 0xFF)))
 		{
 			mh->Message(kWarning, "The configuration file is saved as UTF-16 and is ignored; save it as UTF-8 or ASCII.");
 			delete [] tempbuf;
@@ -120,8 +123,10 @@ class ConfigurationFile:public ReferenceCounter
 		// editors) put a UTF-8 byte order mark (EF BB BF) in front of the text.
 		// Skip it, or the first directive no longer matches its name and is
 		// dropped without a message. Runs once per parse of one file.
-		net_instaweb::StringPiece body(ptr, length);
-		if (net_instaweb::StripUtf8ByteOrderMark(&body))
+		if (length >= 3
+		    && static_cast<unsigned char>(ptr[0]) == 0xEF
+		    && static_cast<unsigned char>(ptr[1]) == 0xBB
+		    && static_cast<unsigned char>(ptr[2]) == 0xBF)
 		{
 			ptr += 3;
 			mh->Message(kInfo, "Ignoring the UTF-8 byte order mark at the start of %s.", path.empty() ? "the configuration text" : path.c_str());

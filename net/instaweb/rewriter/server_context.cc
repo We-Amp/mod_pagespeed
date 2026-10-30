@@ -54,6 +54,7 @@
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
@@ -1568,22 +1569,18 @@ void ServerContext::ApplyConfigLine(StringPiece linesp,
 
 void ServerContext::ApplyRemoteConfig(const GoogleString& config,
                                       RewriteOptions* options) {
-  // Handle a byte order mark the way local configuration files do: a UTF-16
-  // file cannot be parsed as text and is ignored; a UTF-8 mark is skipped.
+  // A remote file saved with a UTF-16 or UTF-32 byte order mark cannot be
+  // read as text and is ignored; a UTF-8 mark is skipped.
   StringPiece text(config);
-  if (HasUtf16ByteOrderMark(text)) {
-    message_handler_->Message(
-        kWarning,
-        "The remote configuration is saved as UTF-16 and is ignored; save it "
-        "as UTF-8 or ASCII.");
+  StringPiece charset = GetCharsetForBom(text);
+  if (!charset.empty() && charset != kUtf8Charset) {
+    message_handler_->Message(kWarning,
+                              "The remote configuration is saved as %s and is "
+                              "ignored; save it as UTF-8 or ASCII.",
+                              charset.as_string().c_str());
     return;
   }
-  if (StripUtf8ByteOrderMark(&text)) {
-    message_handler_->Message(
-        kInfo,
-        "Ignoring the UTF-8 byte order mark at the start of the remote "
-        "configuration.");
-  }
+  StripUtf8Bom(&text);
   // Split the remote config file line by line, and apply each line with
   // ServerContext::ApplyConfigLine
   StringPieceVector str_values;

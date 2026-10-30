@@ -29,7 +29,9 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/charset_util.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -37,6 +39,7 @@
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
+#include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {
@@ -122,21 +125,22 @@ TEST_F(ServerContextRemoteConfigTest, SuccessResponseIsApplied) {
 }
 
 TEST_F(ServerContextRemoteConfigTest, Utf8ByteOrderMarkIsIgnored) {
-  SetConfigResponse(HttpStatus::kOK,
-                    StrCat("\xEF\xBB\xBF", kConfigBody));
+  SetConfigResponse(HttpStatus::kOK, StrCat(kUtf8Bom, kConfigBody));
   EXPECT_TRUE(RemoteConfigApplied());
 }
 
 TEST_F(ServerContextRemoteConfigTest, Utf16ByteOrderMarkIsWarnedAndIgnored) {
-  // "EnableFilters ..." as little-endian UTF-16 text after the FF FE mark.
-  GoogleString body("\xFF\xFE", 2);
-  for (const char* p = kConfigBody; *p != '\0'; ++p) {
-    body.push_back(*p);
-    body.push_back('\0');
-  }
-  SetConfigResponse(HttpStatus::kOK, body);
+  // A UTF-16LE mark on a line of its own, then a configuration that would
+  // apply if the mark were not checked.
+  SetConfigResponse(HttpStatus::kOK,
+                    StrCat(kUtf16LittleEndianBom, "\n", kConfigBody));
   EXPECT_FALSE(RemoteConfigApplied());
-  EXPECT_LT(0, message_handler()->MessagesOfType(kWarning));
+  GoogleString messages;
+  StringWriter writer(&messages);
+  message_handler()->Dump(&writer);
+  EXPECT_THAT(messages,
+              testing::HasSubstr("The remote configuration is saved as "
+                                 "utf-16le and is ignored"));
 }
 
 TEST_F(ServerContextRemoteConfigTest, NotModifiedRevalidationIsApplied) {

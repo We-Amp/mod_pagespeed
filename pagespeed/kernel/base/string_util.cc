@@ -582,23 +582,4 @@ bool SplitStringPieceToIntegerVector(StringPiece src, StringPiece separators,
   return true;
 }
 
-bool HasUtf16ByteOrderMark(StringPiece text) {
-  if (text.size() < 2) {
-    return false;
-  }
-  unsigned char b0 = static_cast<unsigned char>(text[0]);
-  unsigned char b1 = static_cast<unsigned char>(text[1]);
-  return (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF);
-}
-
-bool StripUtf8ByteOrderMark(StringPiece* text) {
-  if (text->size() >= 3 && static_cast<unsigned char>((*text)[0]) == 0xEF &&
-      static_cast<unsigned char>((*text)[1]) == 0xBB &&
-      static_cast<unsigned char>((*text)[2]) == 0xBF) {
-    text->remove_prefix(3);
-    return true;
-  }
-  return false;
-}
-
 }  // namespace net_instaweb
