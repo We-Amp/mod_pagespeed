@@ -104,9 +104,9 @@
       offRevision++;
     }),
   );
-  function isOff(route: { leaves?: string[] }): boolean {
+  function isOff(route: { leaves?: string[]; leavesPerVhost?: string[] }): boolean {
     void offRevision;
-    return unavailable.allOff(route.leaves);
+    return unavailable.allOff(!scope.isGlobal && route.leavesPerVhost ? route.leavesPerVhost : route.leaves);
   }
 
   // What the top bar says about the server: answered or not (not a health check).
@@ -299,7 +299,8 @@
             >{route.label}</a>
             <!-- The hint sits beside the link, not in it: the link's name stays the page's name. -->
             {#if off}
-              <span class="nav-off" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}" title="Turned off on this console">off</span>
+              <span class="nav-off" aria-hidden="true">off</span>
+              <span class="sr-only" id="nav-off-{route.path.slice(2).replace(/\W+/g, '-')}">Turned off on this console</span>
             {:else if hint}<span class="nav-key" aria-hidden="true">{hint}</span>{/if}
           </li>
         {/each}
@@ -564,6 +565,15 @@
     color: var(--ps-text-secondary);
     font-style: italic;
     pointer-events: none;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .nav-item {

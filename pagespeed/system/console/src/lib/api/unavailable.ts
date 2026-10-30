@@ -27,6 +27,17 @@ export function leafKey(path: string): string {
   return `${base}?${names.join("&")}`;
 }
 
+/**
+ * Whether a refusal of `path` may switch the whole leaf off. A leaf that
+ * answers for one named entry (a cache lookup, a URL's variants or bytes)
+ * can be refused for that entry alone, so such a refusal is shown but not
+ * remembered.
+ */
+export function rememberable(path: string): boolean {
+  const base = path.split("?")[0];
+  return !(base === "/cache" || base === "/v1/daemon/cache/alternates" || base === "/v1/daemon/cache/content");
+}
+
 export class UnavailableLeaves {
   private readonly leaves = new Map<string, number>();
   private readonly listeners = new Set<() => void>();

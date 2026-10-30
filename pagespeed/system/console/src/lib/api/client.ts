@@ -26,7 +26,7 @@ import type {
 } from "./types";
 
 import { NetworkError, connection } from "./connection";
-import { UNAVAILABLE_STATUSES, leafKey, unavailable } from "./unavailable";
+import { UNAVAILABLE_STATUSES, leafKey, rememberable, unavailable } from "./unavailable";
 
 // Identical GETs in flight at the same time share one request, whichever
 // page or client instance asked: the daemon proxy serves one read per
@@ -81,7 +81,10 @@ function isTurnedOff(path: string, status: number, text: string): boolean {
   if (status === 404 && path.startsWith("/v1/daemon/")) return false;
   try {
     const body = JSON.parse(text.replace(/^\)\]\}'?\s*\n/, "")) as { error?: unknown };
+    // The module's codes are strings; the optimizer's own answer (passed
+    // through by the daemon proxy) is an object.
     if (typeof body.error === "string" && body.error) return false;
+    if (body.error !== null && typeof body.error === "object") return false;
   } catch {
     // Not JSON: a refusal from a proxy or the web server.
   }
@@ -143,9 +146,10 @@ export class AdminApiClient {
     if (!response.ok) {
       if (init === undefined && isTurnedOff(path, response.status, text)) {
         const key = leafKey(path);
-        // A 404 may be about one entry; only a refusal that is about the
-        // leaf itself is remembered.
-        if (response.status !== 404) unavailable.mark(key, response.status);
+        // A 404, or a refusal of a leaf that answers for one entry, may be
+        // about that entry alone; only a refusal of the leaf itself is
+        // remembered.
+        if (response.status !== 404 && rememberable(path)) unavailable.mark(key, response.status);
         throw new UnavailableError(response.status, response.statusText, key);
       }
       throw this.errorFromBody(response.status, response.statusText, text);

@@ -140,13 +140,13 @@ test("the sidebar keeps a turned-off page, marked off", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "Console pages" });
   const logs = nav.getByRole("link", { name: "Logs" });
   await expect(logs).toBeVisible();
-  await expect(logs).toHaveAccessibleDescription("off");
+  await expect(logs).toHaveAccessibleDescription("Turned off on this console");
   // Configuration is marked once its leaf has been refused.
   await nav.getByRole("link", { name: "Configuration" }).click();
   await expectCard(page, "config-unavailable");
-  await expect(nav.getByRole("link", { name: "Configuration" })).toHaveAccessibleDescription("off");
+  await expect(nav.getByRole("link", { name: "Configuration" })).toHaveAccessibleDescription("Turned off on this console");
   // A page whose leaves answer carries no mark.
-  await expect(nav.getByRole("link", { name: "Statistics" })).not.toHaveAccessibleDescription("off");
+  await expect(nav.getByRole("link", { name: "Statistics" })).not.toHaveAccessibleDescription("Turned off on this console");
 });
 
 test("a turned-off leaf is asked once, then never again", async ({ page }) => {
@@ -168,4 +168,13 @@ test("a leaf that answers 500 is still an error, not 'off'", async ({ page }) =>
   await openConsole(page, ADMIN, "#/configuration");
   await expect(page.getByRole("alert").filter({ hasText: "config unavailable" })).toBeVisible();
   await expect(page.getByTestId("config-unavailable")).toHaveCount(0);
+});
+
+test("a per-vhost console marks Logs off when its card shows", async ({ page }) => {
+  await mockAdmin(page, "pagespeed_admin", { ...F.allReplies(), config: F.CONFIG_VHOST, message_history: FORBIDDEN });
+  await openConsole(page, "pagespeed_admin", "#/logs");
+  await expectCard(page, "logs-unavailable");
+  await expect(
+    page.getByRole("navigation", { name: "Console pages" }).getByRole("link", { name: "Logs" }),
+  ).toHaveAccessibleDescription("Turned off on this console");
 });

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminApiClient, ApiError, UnavailableError, isUnavailable } from "./client";
 import { NetworkError, connection } from "./connection";
 import { Poller } from "./poller";
-import { leafKey, unavailable } from "./unavailable";
+import { unavailable } from "./unavailable";
 
 function reply(status: number, body: string): Response {
   return new Response(body, { status });
@@ -49,14 +49,37 @@ describe("a leaf the server has turned off", () => {
     expect(unavailable.has("/v1/daemon/logs")).toBe(true);
   });
 
-  it("the cache leaf keeps its views apart", async () => {
-    expect(leafKey("/cache")).toBe("/cache");
-    expect(leafKey("/cache?url=http%3A%2F%2Fa")).toBe("/cache?url");
-    fetchMock.mockImplementationOnce(async () => reply(403, ""));
+  it("a refusal of one entry on a keyed leaf is shown but not remembered", async () => {
     const api = new AdminApiClient("");
-    await api.getCacheEntry("http://a/").catch(() => {});
+    fetchMock.mockImplementationOnce(async () => reply(403, ""));
+    expect(isUnavailable(await api.getCacheEntry("http://a/").catch((e: unknown) => e))).toBe(true);
     fetchMock.mockImplementationOnce(async () => new Response("{}", { status: 200 }));
-    await expect(api.getCacheStructure()).resolves.toEqual({});
+    await expect(api.getCacheEntry("http://b/")).resolves.toEqual({});
+    const key = { url: "/a.png", host: "h", scheme: "https" } as const;
+    fetchMock.mockImplementationOnce(async () => reply(403, ""));
+    expect(isUnavailable(await api.daemonCacheAlternates(key).catch((e: unknown) => e))).toBe(true);
+    fetchMock.mockImplementationOnce(async () => new Response("{}", { status: 200 }));
+    await expect(api.daemonCacheAlternates({ ...key, url: "/b.png" })).resolves.toEqual({});
+    expect(unavailable.has("/cache")).toBe(false);
+    expect(unavailable.has("/v1/daemon/cache/alternates")).toBe(false);
+  });
+
+  it("the optimizer's own object-shaped error is a coded refusal, not 'off'", async () => {
+    fetchMock.mockImplementation(async () =>
+      reply(403, JSON.stringify({ error: { code: "FORBIDDEN", message: "no" } })),
+    );
+    const err = await new AdminApiClient("").daemonCacheUrls(0, 10).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(isUnavailable(err)).toBe(false);
+    expect(unavailable.has("/v1/daemon/cache/urls")).toBe(false);
+  });
+
+  it("the remembered set is cleared when the server comes back after an outage", async () => {
+    unavailable.mark("/config", 403);
+    connection.record("/stats_json", null, 1);
+    expect(unavailable.has("/config")).toBe(true);
+    connection.record("/stats_json", 200, 2);
+    expect(unavailable.has("/config")).toBe(false);
   });
 
   it("404 on a module leaf is unavailable but not remembered", async () => {

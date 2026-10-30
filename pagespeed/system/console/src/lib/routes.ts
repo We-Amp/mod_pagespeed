@@ -30,6 +30,8 @@ export interface Route {
    * entry "off" when the server has refused every one of them.
    */
   leaves?: string[];
+  /** The leaves a per-vhost console reads, when fewer (Logs never asks the optimizer there). */
+  leavesPerVhost?: string[];
   component: () => Promise<{ default: Component }>;
 }
 
@@ -156,6 +158,7 @@ export const routes: Route[] = [
     group: "optimizer",
     hostAware: true,
     leaves: ["/message_history", "/v1/daemon/logs"],
+    leavesPerVhost: ["/message_history"],
     component: () => import("../pages/Logs.svelte"),
   },
   {
