@@ -114,4 +114,8 @@ if [ "${SANITIZER:-}" = coverage ]; then
     "$(bazel info execution_root)/" "${OUT}/proc/self/cwd/"
 fi
 
+# The coverage build copies $SRC into $OUT afterwards, following symlinks:
+# without this, Bazel's convenience symlinks would drag its whole output tree
+# along.
+rm -f bazel-bin bazel-out bazel-testlogs "bazel-$(basename "$(pwd)")"
 bazel shutdown
