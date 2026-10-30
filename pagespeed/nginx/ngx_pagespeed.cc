@@ -1390,11 +1390,11 @@ void ps_cleanup_loc_conf(void* data) {
 // Deletes the cycle's factory once.  `active_driver_factory` is cleared only
 // when it points at this very factory, so a cycle that is discarded (a failed
 // reload) never untracks the factory of the cycle that is still live.
-void ps_delete_cycle_factory(ps_main_conf_t* cfg_m,
-                             NgxRewriteDriverFactory* factory) {
-  if (cfg_m->factory_deleted) {
+void ps_delete_cycle_factory(ps_main_conf_t* cfg_m) {
+  if (cfg_m->factory_deleted || cfg_m->driver_factory == nullptr) {
     return;
   }
+  NgxRewriteDriverFactory* factory = cfg_m->driver_factory;
   if (active_driver_factory == factory) {
     active_driver_factory = nullptr;
   }
@@ -1411,8 +1411,7 @@ void ps_cleanup_srv_conf(void* data) {
   // will prevent any queued callbacks to destroyed proxy fetch factories
   // from being executed
   if (cfg_s->main_conf != nullptr && cfg_s->server_context != nullptr) {
-    ps_delete_cycle_factory(cfg_s->main_conf,
-                            cfg_s->server_context->factory());
+    ps_delete_cycle_factory(cfg_s->main_conf);
   }
   if (cfg_s->proxy_fetch_factory != nullptr) {
     delete cfg_s->proxy_fetch_factory;
@@ -1433,9 +1432,7 @@ void ps_cleanup_main_conf(void* data) {
 
   // A cycle without a pagespeed server (or one discarded before
   // ps_init_module) still owns the factory it created.
-  if (cfg_m->driver_factory != nullptr) {
-    ps_delete_cycle_factory(cfg_m, cfg_m->driver_factory);
-  }
+  ps_delete_cycle_factory(cfg_m);
   NgxRewriteDriverFactory::Terminate();
   NgxRewriteOptions::Terminate();
 }
@@ -5201,7 +5198,7 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   } else {
     // No pagespeed server in this cycle.  The previous cycle's factory, if
     // any, stays the tracked one until that cycle's own cleanup deletes it.
-    ps_delete_cycle_factory(cfg_m, cfg_m->driver_factory);
+    ps_delete_cycle_factory(cfg_m);
   }
   return NGX_OK;
 }

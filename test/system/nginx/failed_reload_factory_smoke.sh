@@ -33,7 +33,7 @@ set -u
 WORKSPACE="${WORKSPACE:-/workspace}"
 MODULE="${MODULE:-$WORKSPACE/bazel-bin/pagespeed/nginx/ngx_pagespeed_module.so}"
 NGINX_BIN="${NGINX_BINARY:-/usr/local/src/nginx/objs/nginx}"
-D=/tmp/failed-reload-factory-smoke
+D=$(mktemp -d)  # private to this run: no stale pid file can be picked up
 PORT="${BASE_PORT:-8531}"
 BLOCKED_PORT="${BLOCKED_PORT:-$((PORT + 1))}"
 
@@ -59,8 +59,7 @@ stop_nginx() {  # stop the nginx this script started (its pid file), no other
 command -v python3 > /dev/null 2>&1 \
   || { echo "FAIL: python3 not found"; exit 1; }
 
-stop_nginx  # a previous run killed outright may have left its master alive
-rm -rf "$D"; mkdir -p "$D/logs" "$D/cache" "$D/www"
+mkdir -p "$D/logs" "$D/cache" "$D/www"
 
 # Hold BLOCKED_PORT so that a server listening on it cannot start.
 python3 -c '
@@ -83,8 +82,12 @@ Hello.
 </html>
 HTML
 
-# $1 = extra http-level text, $2 = extra server blocks
+# $1 = extra http-level text, $2 = extra server blocks, $3 = directives for
+# the main server.  Every written configuration stamps its generation in
+# X-Gen, so a response shows which configuration generation answered.
+GEN=0
 write_conf() {
+  GEN=$((GEN + 1))
   cat > "$D/nginx.conf" <<CONF
 worker_processes 1;
 pid $D/nginx.pid;
@@ -102,6 +105,7 @@ http {
         listen $PORT;
         server_name localhost;
         root $D/www;
+        add_header X-Gen $GEN;
         $3
     }
     $2
@@ -118,10 +122,14 @@ BAD_PLAIN_SERVER="server { listen 127.0.0.1:$BLOCKED_PORT; root $D/www; }"
 
 URL="http://127.0.0.1:$PORT/commented.html"
 
-serves_optimized() {  # 0 when the page comes back with its comment removed
-  local body
-  body=$(curl -s --max-time 10 "$URL")
-  case "$body" in
+serves_optimized() {  # $1 = generation; 0 when that generation answers
+  local resp                  # with the page's comment removed
+  resp=$(curl -si --max-time 10 "$URL" | tr -d '\r')
+  case "$resp" in
+    *"X-Gen: $1"*) ;;
+    *) return 1 ;;
+  esac
+  case "$resp" in
     *'<!--'*) return 1 ;;
     *Hello*) return 0 ;;
     *) return 1 ;;
@@ -130,7 +138,7 @@ serves_optimized() {  # 0 when the page comes back with its comment removed
 
 reload() {  # reload and give the master a moment to finish the attempt
   kill -HUP "$(cat "$D/nginx.pid")"
-  sleep 2
+  sleep 5  # nginx retries a failed bind for a while before it gives up
 }
 
 write_conf "" "" "$PS_SERVER"
@@ -140,7 +148,8 @@ sleep 1
 # The first request also warms the cache; the optimized form needs a second.
 curl -s --max-time 10 "$URL" > /dev/null
 sleep 1
-serves_optimized || fail "baseline: the page is not served optimized"
+LIVE_GEN=$GEN
+serves_optimized "$LIVE_GEN" || fail "baseline: the page is not served optimized"
 
 for CASE in A B; do
   FAILED_BEFORE=$(grep -c "bind() to 127.0.0.1:$BLOCKED_PORT failed" \
@@ -158,15 +167,16 @@ for CASE in A B; do
     || fail "case $CASE: the reload did not fail at the listen socket"
   kill -0 "$(cat "$D/nginx.pid")" 2>/dev/null \
     || fail "case $CASE: the master is gone after a failed reload"
-  serves_optimized \
+  serves_optimized "$LIVE_GEN" \
     || fail "case $CASE: the old configuration stopped serving after the failed reload"
 
   # A good reload must still work afterwards.
   write_conf "" "" "$PS_SERVER"
   reload
+  LIVE_GEN=$GEN
   curl -s --max-time 10 "$URL" > /dev/null
   sleep 1
-  serves_optimized || fail "case $CASE: not served optimized after a good reload"
+  serves_optimized "$LIVE_GEN" || fail "case $CASE: not served optimized after a good reload"
 done
 
 stop_nginx
