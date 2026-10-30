@@ -130,6 +130,11 @@ const char kIproDaemonRefreshNotifyFailed[] =
 // the URL.  Every one is already inside `ipro_daemon_served_original`.  A
 // count that keeps climbing while the optimizer worker is healthy means the
 // worker is not producing variants for those URLs.
+// A stylesheet or script is counted once per URL per window per process (only
+// on the request that does the gzip look), while an image is counted on every
+// serve.
+const char kIproDaemonServedOriginalOnly[] = "ipro_daemon_served_original_only";
+
 // THE THIRD NOTIFICATION PAIR, and likewise NOT part of the partition: this
 // counts notifications sent after the substrate served a stored original and
 // either found that the optimized copy the optimizer had written for a
@@ -144,8 +149,6 @@ const char kIproDaemonRefreshNotifyFailed[] =
 // process -- for a URL whose copy the optimizer does not write back, for
 // instance because its content type was switched off after the compressed
 // copies were stored.
-const char kIproDaemonServedOriginalOnly[] = "ipro_daemon_served_original_only";
-
 const char kIproDaemonHealNotified[] = "ipro_daemon_heal_notified";
 
 // The failure half, on the same terms as the two pairs above: only SEND
