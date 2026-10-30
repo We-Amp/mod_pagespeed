@@ -260,7 +260,7 @@ TEST_F(SystemThreadCountTest, MoreProcessesNeverMeansMoreThreadsEach) {
 }
 
 // ---------------------------------------------------------------------------
-// ThreadCountsKnownAtInit() == true: nginx, IIS and Envoy.  Resolution runs
+// ThreadCountsKnownAtInit() == true: IIS and Envoy.  Resolution runs
 // from Init(), before the configuration is read, so a directive arrives after
 // the counts were already resolved.
 // ---------------------------------------------------------------------------
@@ -314,9 +314,10 @@ TEST_F(SystemThreadCountTest, ExplicitThenAutoReturnsToThePolicy) {
 }
 
 // ---------------------------------------------------------------------------
-// ThreadCountsKnownAtInit() == false: Apache.  Init() leaves the counts
-// unresolved, the configuration is read, and FinalizeThreadCounts() runs from
-// post-config -- so a directive arrives *before* resolution.
+// ThreadCountsKnownAtInit() == false: Apache and nginx.  Init() leaves the
+// counts unresolved, the configuration is read, and FinalizeThreadCounts() runs
+// from post-config (Apache) or ps_init_module (nginx) -- so a directive
+// arrives *before* resolution.
 // ---------------------------------------------------------------------------
 
 TEST_F(SystemThreadCountTest, DeferredInitLeavesCountsUnresolved) {

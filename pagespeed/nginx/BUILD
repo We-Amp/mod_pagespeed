@@ -318,6 +318,7 @@ cc_library(
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:ipro_recorder",
+        "//pagespeed/system:optimization_thread_policy",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",
         "//pagespeed/kernel/webbotauth:webbotauth_warmer",

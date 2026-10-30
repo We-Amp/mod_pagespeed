@@ -86,7 +86,8 @@ NgxRewriteDriverFactory::NgxRewriteDriverFactory(
       port_(port),
       process_script_variables_mode_(ProcessScriptVariablesMode::kOff),
       process_script_variables_set_(false),
-      shut_down_(false) {
+      shut_down_(false),
+      worker_process_count_(kUnknownProcessConcurrency) {
   InitializeDefaultOptions();
   default_options()->set_beacon_url("/ngx_pagespeed_beacon");
   // Note: file_cache_clean_inode_limit was removed, CycloneCache handles cleanup

@@ -405,6 +405,18 @@ OptimizationThreadCounts ComputeOptimizationThreadCounts(
   return counts;
 }
 
+int ForkedWorkerProcessCount(int configured_workers, bool multi_process,
+                             bool workers_pinned) {
+  if (!multi_process) {
+    return 1;
+  }
+  if (workers_pinned) {
+    return kUnknownProcessConcurrency;
+  }
+  return configured_workers > 0 ? configured_workers
+                                : kUnknownProcessConcurrency;
+}
+
 EffectiveCpuBudget DetectEffectiveCpuBudget() {
   return CombineCpuBudget(ReadOnlineCpus(), ReadAffinityCpus(),
                           ReadCgroupCpus());

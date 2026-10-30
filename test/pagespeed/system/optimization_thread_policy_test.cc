@@ -602,12 +602,9 @@ TEST(DeploymentShapesTest, MatchesTheAdrConsequencesTable) {
       // The same server tuned down to two children, where the share starts
       // to bind instead of the floor.
       {"apache event, 2 children configured, 8 cores", 8, 2, 2, 2, 2},
-      // The remaining rows are the formula only.  Neither nginx nor IIS
-      // reports a divisor yet, so both take the unknown-divisor floor
-      // in this release whatever these rows say; naming them for a port would
-      // read as a claim about shipped behaviour.  They are kept because they
-      // are the shapes the policy exists to serve, and because they are what
-      // the deferred work has to reproduce.
+      // The remaining rows are the formula only.  The nginx shapes, with the
+      // divisor derived from worker_processes, are pinned in
+      // NginxShapesTest below.  IIS does not report a divisor yet.
       {"8 processes, 8 cores (fully forked out)", 8, 8, 1, 1, 1},
       // The single-process many-core shape.  Note the fixed cap of 4 that the
       // documentation promised was never what such a server actually ran --
@@ -626,6 +623,90 @@ TEST(DeploymentShapesTest, MatchesTheAdrConsequencesTable) {
     EXPECT_EQ(shape.expected_budget, counts.budget) << shape.name;
     EXPECT_EQ(shape.expected_rewrite, counts.rewrite) << shape.name;
     EXPECT_EQ(shape.expected_expensive, counts.expensive) << shape.name;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The divisor for a server that forks identical workers from a master: nginx.
+// ---------------------------------------------------------------------------
+
+TEST(ForkedWorkerProcessCountTest, ConfiguredWorkersAreTheDivisor) {
+  EXPECT_EQ(1, ForkedWorkerProcessCount(1, true, false));
+  EXPECT_EQ(4, ForkedWorkerProcessCount(4, true, false));
+  EXPECT_EQ(64, ForkedWorkerProcessCount(64, true, false));
+}
+
+// `master_process off` serves from the one process, whatever
+// worker_processes says.
+TEST(ForkedWorkerProcessCountTest, NoMasterMeansOneProcess) {
+  EXPECT_EQ(1, ForkedWorkerProcessCount(8, false, false));
+  EXPECT_EQ(1, ForkedWorkerProcessCount(0, false, false));
+  EXPECT_EQ(1, ForkedWorkerProcessCount(-1, false, false));
+}
+
+// worker_cpu_affinity: each worker is pinned after the budget was read, so
+// the divisor is unknown and every worker keeps the floor, 1 + 1.  Without a
+// master there is one process and nothing is pinned per worker.
+TEST(ForkedWorkerProcessCountTest, PinnedWorkersAreUnknown) {
+  EXPECT_EQ(kUnknownProcessConcurrency,
+            ForkedWorkerProcessCount(4, true, true));
+  EXPECT_EQ(kUnknownProcessConcurrency,
+            ForkedWorkerProcessCount(128, true, true));
+  EXPECT_EQ(1, ForkedWorkerProcessCount(4, false, true));
+  OptimizationThreadCounts counts = ComputeOptimizationThreadCounts(
+      128, ForkedWorkerProcessCount(4, true, true));
+  EXPECT_EQ(1, counts.rewrite);
+  EXPECT_EQ(1, counts.expensive);
+}
+
+// A count that is not a count (nginx's NGX_CONF_UNSET is -1) is no answer,
+// so the policy takes its floor rather than guess.
+TEST(ForkedWorkerProcessCountTest, NonPositiveCountIsUnknown) {
+  EXPECT_EQ(kUnknownProcessConcurrency,
+            ForkedWorkerProcessCount(0, true, false));
+  EXPECT_EQ(kUnknownProcessConcurrency,
+            ForkedWorkerProcessCount(-1, true, false));
+}
+
+struct NginxShape {
+  const char* name;
+  int effective_cores;
+  int worker_processes;
+  bool master_process;
+  int expected_rewrite;
+  int expected_expensive;
+};
+
+// cores x worker_processes x policy -> the counts each nginx worker builds.
+TEST(NginxShapesTest, WorkerProcessesDivideTheBudget) {
+  const NginxShape kShapes[] = {
+      {"1 worker, 16 cores", 16, 1, true, 8, 8},
+      {"1 worker, 64 cores", 64, 1, true, 32, 32},
+      {"4 workers, 16 cores", 16, 4, true, 2, 2},
+      {"4 workers, 8 cores", 8, 4, true, 1, 1},
+      // worker_processes auto: one worker per online CPU.
+      {"auto workers, 8 cores", 8, 8, true, 1, 1},
+      // worker_processes auto on a 64-CPU host inside a 2-CPU container:
+      // nginx counts the host's CPUs, the budget counts the container's.
+      {"auto workers on a 64-cpu host, 2-cpu container", 2, 64, true, 1, 1},
+      {"master_process off, 16 cores", 16, 4, false, 8, 8},
+      {"1 worker, 1 core", 1, 1, true, 1, 1},
+  };
+  for (const NginxShape& shape : kShapes) {
+    OptimizationThreadCounts counts = ComputeOptimizationThreadCounts(
+        shape.effective_cores,
+        ForkedWorkerProcessCount(shape.worker_processes, shape.master_process,
+                                 false));
+    EXPECT_EQ(shape.expected_rewrite, counts.rewrite) << shape.name;
+    EXPECT_EQ(shape.expected_expensive, counts.expensive) << shape.name;
+    // The aggregate over all workers stays within the machine, except at the
+    // one-thread floor.
+    if (counts.budget > 1) {
+      const int processes = shape.master_process ? shape.worker_processes : 1;
+      EXPECT_LE((counts.rewrite + counts.expensive) * processes,
+                shape.effective_cores)
+          << shape.name;
+    }
   }
 }
 

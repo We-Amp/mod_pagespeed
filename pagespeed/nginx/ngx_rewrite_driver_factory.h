@@ -114,6 +114,17 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
 
   void LoggingInit(ngx_log_t* log, bool may_install_crash_handler);
 
+  // The thread-count divisor: how many worker processes the master forks,
+  // each with its own copy of this factory's worker pools.  Set from the core
+  // module's configuration in ps_init_module, before FinalizeThreadCounts().
+  void set_worker_process_count(int count) { worker_process_count_ = count; }
+
+  // worker_processes is final only once the whole configuration, including
+  // the core module's defaults, has been read -- after this factory's Init()
+  // in ps_create_main_conf.  ps_init_module resolves the counts instead.
+  bool ThreadCountsKnownAtInit() override { return false; }
+  int ConcurrentProcessCount() override { return worker_process_count_; }
+
   void ShutDownMessageHandlers() override;
 
   void SetCircularBuffer(SharedCircularBuffer* buffer) override;
@@ -151,6 +162,7 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   ProcessScriptVariablesMode process_script_variables_mode_;
   bool process_script_variables_set_;
   bool shut_down_;
+  int worker_process_count_;
 
   NgxRewriteDriverFactory(const NgxRewriteDriverFactory&) = delete;
   NgxRewriteDriverFactory& operator=(const NgxRewriteDriverFactory&) = delete;
