@@ -148,10 +148,20 @@ const char* RulePackStateName(RulePackStatus::State state) {
   return "none";
 }
 
-// A per-vhost console may only touch URLs of the host it serves.
+// The port a URL names explicitly, or 0 when it takes its scheme's default.
+// An explicit default port is dropped by URL canonicalization, so http://h and
+// https://h both read as 0; that keeps a console behind a TLS-terminating
+// proxy working while still telling h:8080 apart from h.
+int ExplicitPort(const GoogleUrl& url) {
+  const int port = url.IntPort();
+  return GoogleUrl::isPortGurlUnspecified(port) ? 0 : port;
+}
+
+// A per-vhost console may only touch URLs of the host and port it serves.
 bool TargetBelongsToRequestHost(const GoogleUrl& request_url,
                                 const GoogleUrl& target) {
-  return StringCaseEqual(request_url.Host(), target.Host());
+  return StringCaseEqual(request_url.Host(), target.Host()) &&
+         ExplicitPort(request_url) == ExplicitPort(target);
 }
 
 // Renders a double as a bare JSON number, or the JSON literal null for a
@@ -511,6 +521,17 @@ void AdminSite::PrintCaches(
                        message_handler_);
         return;
       }
+    }
+    // Deleting an entry is a cache-changing action like purge, so it is
+    // available only when cache purging is enabled.
+    if (query_params.Has("Delete") && !options->enable_cache_purge()) {
+      WriteJsonError(
+          fetch, HttpStatus::kForbidden,
+          StrCat("Cache delete not enabled: please add '",
+                 server_context->FormatOption("EnableCachePurge", "on"),
+                 "' to your configuration file."),
+          message_handler_);
+      return;
     }
     // Delegate to ShowCacheHandler to get the cached value for that URL.
     // Always use JSON format now.

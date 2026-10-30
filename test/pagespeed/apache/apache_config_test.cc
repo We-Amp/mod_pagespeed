@@ -29,6 +29,7 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/option_context_worst_case.h"
 #include "test/net/instaweb/rewriter/rewrite_options_test_base.h"
+#include "test/pagespeed/kernel/base/gmock.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/null_thread_system.h"
 
@@ -398,6 +399,19 @@ TEST_F(ApacheConfigTest, RulePackFileListPerScope) {
   ASSERT_EQ(OptionContextStatus::kOk, OptionContext::Compute(config_, &c1, &s1));
   ASSERT_EQ(OptionContextStatus::kOk, OptionContext::Compute(*merged, &c2, &s2));
   EXPECT_EQ(c1, c2);
+}
+
+TEST_F(ApacheConfigTest, RedactsProxyAuthInOptionsOutput) {
+  config_.set_proxy_auth("cookie-name=cookie-value-5c1d");
+  config_.set_url_signing_key("signing-key-9b7e");
+  GoogleString output = config_.OptionsToString();
+  EXPECT_THAT(output,
+              ::testing::Not(::testing::HasSubstr("cookie-value-5c1d")));
+  EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("signing-key-9b7e")));
+  EXPECT_THAT(output,
+              ::testing::ContainsRegex("ProxyAuth \\(prxa\\) +\\*\\*\\*"));
+  EXPECT_THAT(output,
+              ::testing::ContainsRegex("UrlSigningKey \\(usk\\) +\\*\\*\\*"));
 }
 
 TEST_F(ApacheConfigTest, Auth) {

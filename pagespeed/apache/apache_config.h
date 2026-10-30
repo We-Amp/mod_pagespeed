@@ -137,13 +137,13 @@ class ApacheConfig : public SystemRewriteOptions {
 
   // Adds an option to apache_properties_.
   template <class OptionClass>
-  static void AddApacheProperty(typename OptionClass::ValueType default_value,
-                                OptionClass ApacheConfig::* offset,
-                                const char* id, StringPiece option_name,
-                                const char* help, bool safe_to_print) {
-    AddProperty(std::move(default_value), offset, id, option_name,
-                RewriteOptions::kServerScope, help, safe_to_print,
-                apache_properties_);
+  static PropertyBase* AddApacheProperty(
+      typename OptionClass::ValueType default_value,
+      OptionClass ApacheConfig::* offset, const char* id,
+      StringPiece option_name, const char* help, bool safe_to_print) {
+    return AddProperty(std::move(default_value), offset, id, option_name,
+                       RewriteOptions::kServerScope, help, safe_to_print,
+                       apache_properties_);
   }
 
   static void AddProperties();

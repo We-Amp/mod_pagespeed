@@ -41,7 +41,7 @@ class TestVhostInheritance:
         config = json.loads(response.text)["config"]
         assert isinstance(config, str) and config, f"empty config: {response.text[:200]}"
         assert "http://nonspdy.example.com/" in config, config
-        assert re.search(r"\(blrw\)\s+psatest", config), config
+        assert re.search(r"\(blrw\)\s+\*\*\*", config), config
 
 
 if __name__ == "__main__":

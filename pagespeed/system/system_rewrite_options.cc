@@ -91,6 +91,8 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty("", &SystemRewriteOptions::fetcher_proxy_, "afp",
                     RewriteOptions::kFetcherProxy, "Set the fetch proxy",
                     false);
+  // The proxy address may carry credentials (user:pass@host).
+  MarkOptionSecret(system_properties_, RewriteOptions::kFetcherProxy);
   AddSystemProperty("", &SystemRewriteOptions::file_cache_path_, "afcp",
                     RewriteOptions::kFileCachePath,
                     "Set the path for file cache", false);

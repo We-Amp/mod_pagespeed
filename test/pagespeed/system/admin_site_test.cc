@@ -3533,6 +3533,170 @@ TEST_F(AdminSiteDaemonTest, DeleteRefusesCrossOriginPost) {
   EXPECT_THAT(body, ::testing::HasSubstr("cross-origin"));
 }
 
+TEST_F(AdminSiteDaemonTest, RefusesDeleteWhenPurgeDisabled) {
+  // Purge is disabled in the test options, so a cache-entry delete that
+  // passes the method and origin gates is refused rather than performed.
+  GoogleString body;
+  auto fetch = FetchAdminPage(daemon_site_.get(),
+                              "http://example.com/pagespeed_admin/"
+                              "cache?url=http://example.com/x.css&Delete",
+                              RequestHeaders::kPost, &body, false /* vhost */,
+                              "XMLHttpRequest");
+  EXPECT_EQ(403, fetch->response_headers()->status_code());
+  EXPECT_THAT(body, ::testing::HasSubstr("\"success\":false"));
+  EXPECT_THAT(body, ::testing::HasSubstr("EnableCachePurge"));
+  auto global = FetchAdminPage(daemon_site_.get(),
+                               "http://example.com/pagespeed_global_admin/"
+                               "cache?url=http://example.com/x.css&Delete",
+                               RequestHeaders::kPost, &body, true /* global */,
+                               "XMLHttpRequest");
+  EXPECT_EQ(403, global->response_headers()->status_code());
+}
+
+TEST_F(AdminSiteDaemonTest, AllowsDeleteWhenPurgeEnabled) {
+  EnableCachePurge();
+  // Runs against the base fixture's fully wired server context: the delete
+  // looks the entry up through a rewrite driver.
+  GoogleString body;
+  StringAsyncFetch fetch(rewrite_driver()->request_context(), &body);
+  fetch.request_headers()->set_method(RequestHeaders::kPost);
+  fetch.request_headers()->Add("X-Requested-With", "XMLHttpRequest");
+  GoogleUrl gurl(
+      "http://example.com/pagespeed_admin/"
+      "cache?url=http://example.com/x.css&Delete");
+  QueryParams query_params;
+  query_params.ParseFromUrl(gurl);
+  daemon_site_->AdminPage(
+      false /* vhost */, gurl, query_params, rewrite_driver()->options(),
+      nullptr /* cache_path */, &fetch, nullptr /* system_caches */,
+      nullptr /* filesystem_metadata_cache */, nullptr /* http_cache */,
+      nullptr /* metadata_cache */, nullptr /* page_property_cache */,
+      server_context(), factory()->statistics(), factory()->statistics(),
+      static_cast<SystemServerContext*>(server_context_.get())
+          ->global_system_rewrite_options(),
+      "" /* request_body */, StringPiece());
+  EXPECT_NE(403, fetch.response_headers()->status_code());
+  EXPECT_NE(405, fetch.response_headers()->status_code());
+  EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr("EnableCachePurge")));
+}
+
+TEST_F(AdminSiteDaemonTest, VhostRefusesTargetsOnAnotherPort) {
+  // A per-vhost console is scoped to the host and port it serves.
+  for (const char* target :
+       {"http://example.com:8081/x.css", "http://example.com:81/x.css"}) {
+    GoogleString body;
+    auto lookup = FetchAdminPage(
+        daemon_site_.get(),
+        StrCat("http://example.com/pagespeed_admin/cache?url=", target),
+        RequestHeaders::kGet, &body, false /* vhost */);
+    EXPECT_EQ(403, lookup->response_headers()->status_code()) << target;
+    EXPECT_THAT(body, ::testing::HasSubstr("another host")) << target;
+    body.clear();
+    auto purge = FetchAdminPage(
+        daemon_site_.get(),
+        StrCat("http://example.com/pagespeed_admin/cache?purge=", target),
+        RequestHeaders::kPost, &body, false /* vhost */, "XMLHttpRequest");
+    EXPECT_EQ(403, purge->response_headers()->status_code()) << target;
+    EXPECT_THAT(body, ::testing::HasSubstr("another host")) << target;
+  }
+  // The same port, spelled out or implied, stays in scope.
+  GoogleString body;
+  auto same = FetchAdminPage(
+      daemon_site_.get(),
+      "http://example.com:8081/pagespeed_admin/cache?purge="
+      "http://example.com:8081/x.css",
+      RequestHeaders::kPost, &body, false /* vhost */, "XMLHttpRequest");
+  EXPECT_EQ(200, same->response_headers()->status_code());
+  body.clear();
+  auto implied = FetchAdminPage(
+      daemon_site_.get(),
+      "http://example.com/pagespeed_admin/cache?purge="
+      "http://example.com:80/x.css",
+      RequestHeaders::kPost, &body, false /* vhost */, "XMLHttpRequest");
+  EXPECT_EQ(200, implied->response_headers()->status_code());
+}
+
+// Registry-driven: every option flagged secret must print as "***" in every
+// admin output, so an option added later and flagged at registration is
+// covered without touching this test.
+TEST_F(AdminSiteDaemonTest, RedactsSecretOptions) {
+  const char kMarker[] = "marker-value-8f3a";
+  SystemRewriteOptions* global =
+      static_cast<SystemServerContext*>(server_context_.get())
+          ->global_system_rewrite_options();
+  std::vector<GoogleString> secret_names;
+  for (const RewriteOptions::OptionBase* option : global->all_options()) {
+    if (option->is_secret()) {
+      secret_names.push_back(GoogleString(option->option_name()));
+    }
+  }
+  // The keys known today are flagged; the registry may hold more.
+  for (const char* name :
+       {RewriteOptions::kUrlSigningKey, RewriteOptions::kXPsaBlockingRewrite,
+        RewriteOptions::kDownstreamCacheRebeaconingKey,
+        RewriteOptions::kRequestOptionOverride,
+        RewriteOptions::kStickyQueryParameters,
+        RewriteOptions::kFetcherProxy}) {
+    EXPECT_THAT(secret_names, ::testing::Contains(name));
+  }
+  for (const RewriteOptions::OptionBase* option : global->all_options()) {
+    EXPECT_FALSE(option->is_secret() && option->property()->safe_to_print())
+        << option->option_name();
+  }
+  for (const GoogleString& name : secret_names) {
+    GoogleString msg;
+    ASSERT_EQ(RewriteOptions::kOptionOk,
+              global->SetOptionFromName(name, kMarker, &msg))
+        << name << ": " << msg;
+    ASSERT_EQ(RewriteOptions::kOptionOk,
+              options()->SetOptionFromName(name, kMarker, &msg))
+        << name << ": " << msg;
+  }
+  ASSERT_FALSE(secret_names.empty());
+  EXPECT_THAT(global->OptionsToString(),
+              ::testing::Not(::testing::HasSubstr(kMarker)));
+  for (const GoogleString& name : secret_names) {
+    EXPECT_THAT(
+        global->OptionsToString(),
+        ::testing::ContainsRegex(StrCat(name, " \\([a-z]+\\) +\\*\\*\\*")))
+        << name;
+  }
+  struct {
+    const char* url;
+    bool is_global;
+  } const kOutputs[] = {
+      {"http://example.com/pagespeed_admin/config", false},
+      {"http://example.com/pagespeed_global_admin/config", true},
+  };
+  for (const auto& output : kOutputs) {
+    GoogleString body;
+    auto fetch = FetchAdminPage(daemon_site_.get(), output.url,
+                                RequestHeaders::kGet, &body, output.is_global);
+    EXPECT_EQ(200, fetch->response_headers()->status_code()) << output.url;
+    EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr(kMarker)))
+        << output.url;
+    EXPECT_THAT(body, ::testing::HasSubstr("***")) << output.url;
+  }
+  // The legacy statistics page serves the same configuration output.
+  GoogleString body;
+  StringAsyncFetch stats_fetch(rewrite_driver()->request_context(), &body);
+  GoogleUrl stats_url("http://example.com/pagespeed_statistics?config");
+  QueryParams stats_params;
+  stats_params.ParseFromUrl(stats_url);
+  SystemServerContext* system_context =
+      static_cast<SystemServerContext*>(server_context_.get());
+  daemon_site_->StatisticsPage(
+      false /* vhost */, stats_params, rewrite_driver()->options(),
+      &stats_fetch, nullptr /* system_caches */,
+      nullptr /* filesystem_metadata_cache */, nullptr /* http_cache */,
+      nullptr /* metadata_cache */, nullptr /* page_property_cache */,
+      system_context, factory()->statistics(), factory()->statistics(),
+      system_context->global_system_rewrite_options());
+  EXPECT_THAT(body, ::testing::HasSubstr("\"config\""));
+  EXPECT_THAT(body, ::testing::Not(::testing::HasSubstr(kMarker)));
+  EXPECT_THAT(body, ::testing::HasSubstr("***"));
+}
+
 TEST_F(AdminSiteDaemonTest, GlobalPurgeOnlyFromGlobalAdmin) {
   GoogleString body;
   auto fetch = FetchAdminPage(
