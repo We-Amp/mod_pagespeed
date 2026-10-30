@@ -52,7 +52,6 @@ extern "C" {
 
 #include <algorithm>
 #include <string>
-#include <typeinfo>
 #include <vector>
 
 #include "base/logging.h"
