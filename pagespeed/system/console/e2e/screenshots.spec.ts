@@ -2,8 +2,9 @@
 // Copyright (c) 2024-2026 We-Amp B.V.
 
 import { test } from "@playwright/test";
+import { LIVE_BASE } from "./support/live";
 
-const BASE = "http://localhost:8080/pagespeed_admin/";
+const BASE = LIVE_BASE;
 
 const pages = [
   { hash: "#/statistics", name: "statistics" },

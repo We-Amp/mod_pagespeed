@@ -738,7 +738,27 @@ jobs:
           docker exec -i -e BZL_FLAGS -e PAGESPEED_DAEMON_LANE=require "${CTR}" bash -s <<'EOS'
           set -euo pipefail
           BAZEL_CONFIG="${BZL_FLAGS} --action_env=CC=clang --action_env=CXX=clang++" \
-            ./test/system/run_system_tests.sh
+            ./test/system/run_system_tests.sh --keep-running
+          EOS
+
+      # The admin console's live Playwright project, against the Apache test
+      # server the step above left running (nightly only: the pull request
+      # tier runs the mocked project). One worker, one browser.
+      - name: Run the console's live Playwright project
+        run: |
+          docker exec -i -e CONSOLE_LIVE_URL=http://localhost:80 "${CTR}" bash -s <<'EOS'
+          set -euo pipefail
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+          for _ in $(seq 1 30); do
+            curl -fsS -o /dev/null "${CONSOLE_LIVE_URL}/pagespeed_admin/" && break
+            sleep 2
+          done
+          curl -fsS -o /dev/null "${CONSOLE_LIVE_URL}/pagespeed_admin/"
+          cd /workspace/pagespeed/system/console
+          corepack pnpm install --frozen-lockfile
+          sudo ./node_modules/.bin/playwright install-deps chromium
+          corepack pnpm exec playwright install chromium
+          corepack pnpm exec playwright test --project=live --workers=1 --reporter=list,html
           EOS
 
       - name: Collect the logs on failure
@@ -746,6 +766,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p "${RUNNER_TEMP}/apache-daemon-logs"
+          docker cp "${CTR}:/workspace/pagespeed/system/console/playwright-report" "${RUNNER_TEMP}/apache-daemon-logs/console-live-report" || true
           docker logs --tail 400 "${CTR}" > "${RUNNER_TEMP}/apache-daemon-logs/container.log" 2>&1 || true
           docker cp "${CTR}:/var/log/apache2/error.log" "${RUNNER_TEMP}/apache-daemon-logs/error.log" || true
 
