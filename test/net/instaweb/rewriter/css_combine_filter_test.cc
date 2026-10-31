@@ -1704,6 +1704,24 @@ TEST_F(CssCombineFilterTest, FetchWithNoInputsIsRefused) {
       Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0", "", "css")));
 }
 
+TEST_F(CssCombineFilterTest, FetchResultDoesNotDecideHtmlCombination) {
+  // Partition() does not put a stylesheet that starts with an @import after
+  // another one.  A fetch of that combination is still served, but it must
+  // leave the rewriting of a page with the same two links to Partition().
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss, kYellow, 100);
+  SetResponseWithDefaultHeaders(kCssB, kContentTypeCss,
+                                "@import url(c.css);\n.b {color: blue;}", 100);
+  GoogleString content;
+  EXPECT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0",
+                              MultiUrl(kCssA, kCssB), "css"),
+                       &content));
+  EXPECT_NE(GoogleString::npos, content.find(kYellow));
+  EXPECT_NE(GoogleString::npos, content.find("@import"));
+  ValidateNoChanges("import_in_second_after_fetch",
+                    StrCat(CssLinkHref(kCssA), CssLinkHref(kCssB)));
+}
+
 TEST_F(CssCombineFilterTest, NoCombineParseErrors) {
   // Notice: This CSS file does not close its { and thus will break the
   // next stylesheet if they are combined, changing the page.

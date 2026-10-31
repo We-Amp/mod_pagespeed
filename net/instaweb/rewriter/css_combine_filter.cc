@@ -307,6 +307,17 @@ class CssCombineFilter::Context : public RewriteContext {
   const char* id() const override { return filter_->id(); }
   OutputResourceKind kind() const override { return kRewrittenResource; }
 
+  // A fetch concatenates whatever inputs its URL names, while only
+  // Partition() applies the rules that decide which stylesheets may be
+  // combined, so a fetch's result must not become the entry that HTML
+  // rewrites of the same inputs read.
+  bool FetchWritesPartition() const override { return false; }
+
+  GoogleString CacheKeySuffix() const override {
+    // Bumped so that entries stored by earlier versions are not reused.
+    return "v1";
+  }
+
  private:
   void FinalizePartition(OutputPartitions* partitions, CachedResult* partition,
                          OutputResourceVector* outputs) {

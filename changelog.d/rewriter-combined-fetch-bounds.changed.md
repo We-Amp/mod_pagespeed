@@ -1,0 +1,1 @@
+- **A request for a combined resource no longer fills the cache entry that page rewriting uses**, so the first page view after the cache is emptied performs its own combine.

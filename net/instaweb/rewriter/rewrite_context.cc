@@ -1917,8 +1917,11 @@ void RewriteContext::PartitionDone(RewriteResult result_or_busy) {
 void RewriteContext::WritePartition() {
   ServerContext* server_context = FindServerContext();
   // If this was an IPRO rewrite which was forced for uncacheable rewrite, we
-  // should not write partition data.
-  if (ok_to_write_output_partitions_ && !server_context->shutting_down()) {
+  // should not write partition data.  Nor may a fetch write it for a filter
+  // whose partitioning the fetch path does not run.
+  const bool fetch_may_write = !IsFetchRewrite() || FetchWritesPartition();
+  if (fetch_may_write && ok_to_write_output_partitions_ &&
+      !server_context->shutting_down()) {
     // rewrite_uncacheable() is set in IPRO flow only, therefore there'll be
     // just one slot. If this was uncacheable rewrite, we should skip writing
     // to the metadata cache.

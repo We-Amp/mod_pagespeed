@@ -1001,23 +1001,46 @@ TEST_F(JsCombineFilterTest, TestCombineShard) {
 
 TEST_F(JsCombineFilterTest, PartlyInvalidFetchCache) {
   // Regression test where a combination involving a 404 gets fetched,
-  // and then rewritten --- incorrectly.
-  // Note: arguably this shouldn't get cached at all; but it certainly
-  // should not result in an inappropriate result.
+  // and then the page is rewritten.  The fetch fails and leaves nothing
+  // behind for the HTML path, which then rewrites the page exactly as it
+  // would have without the fetch: the two scripts that exist are combined
+  // and the missing one is left alone.
   SetFetchResponse404("404.js");
   SetResponseWithDefaultHeaders(kJsUrl1, kContentTypeJavascript, "var a;", 100);
   SetResponseWithDefaultHeaders(kJsUrl2, kContentTypeJavascript, "var b;", 100);
   EXPECT_FALSE(TryFetchResource(Encode(
       kTestDomain, "jc", "0", MultiUrl(kJsUrl1, kJsUrl2, "404.js"), "js")));
-  ValidateNoChanges("partly_invalid", StrCat("<script src=a.js></script>",
-                                             "<script src=b.js></script>"
-                                             "<script src=404.js></script>"));
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  ParseUrl(kTestDomain,
+           StrCat("<script src=a.js></script>", "<script src=b.js></script>",
+                  "<script src=404.js></script>"));
+  ASSERT_EQ(4, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl(kJsUrl1, kJsUrl2));
+  VerifyUse(scripts[1], kJsUrl1);
+  VerifyUse(scripts[2], kJsUrl2);
+  EXPECT_EQ("404.js", scripts[3].url);
 }
 
 TEST_F(JsCombineFilterTest, FetchWithNoInputsIsRefused) {
   // A combined-resource URL whose name lists no inputs has nothing to
   // reconstruct from; it must be refused before it reaches the combiner.
   EXPECT_FALSE(TryFetchResource(Encode(kTestDomain, "jc", "0", "", "js")));
+}
+
+TEST_F(JsCombineFilterTest, FetchResultDoesNotDecideHtmlCombination) {
+  // PartitionImpl() does not combine a strict-mode script with another one.
+  // A fetch of that combination is still served, but it must leave the
+  // rewriting of a page with the same two scripts to PartitionImpl().
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, "jc", "0", MultiUrl(kJsUrl1, kStrictUrl1), "js"),
+      &content));
+  EXPECT_NE(GoogleString::npos, content.find("use strict"));
+  ValidateNoChanges("strict_after_fetch",
+                    StrCat("<script src=", kJsUrl1, "></script>",
+                           "<script src=", kStrictUrl1, "></script>"));
 }
 
 TEST_F(JsCombineFilterTest, CharsetDetermination) {
