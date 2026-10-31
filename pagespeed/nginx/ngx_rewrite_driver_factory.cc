@@ -196,6 +196,15 @@ void NgxRewriteDriverFactory::ShutDown() {
   }
 }
 
+void NgxRewriteDriverFactory::EmitThreadCountSummary(
+    bool minimum_used, const GoogleString& message) {
+  if (minimum_used || ngx_message_handler_ == nullptr) {
+    SystemRewriteDriverFactory::EmitThreadCountSummary(minimum_used, message);
+    return;
+  }
+  ngx_message_handler_->NoticeMessage(message);
+}
+
 void NgxRewriteDriverFactory::ShutDownMessageHandlers() {
   ngx_message_handler_->set_buffer(nullptr);
   ngx_html_parse_message_handler_->set_buffer(nullptr);
