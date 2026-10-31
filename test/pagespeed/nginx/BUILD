@@ -313,3 +313,20 @@ pagespeed_cc_test(
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
+
+# Source pins for the request lifetime around the module's event callback
+# (the port cannot be linked into a test; see above): the in-place decline
+# leaves the posted requests to the callback, which runs them once it is done
+# with the request, and the callback neither finalizes a request its upstream
+# still owns nor ends one without holding the upstream's reference.
+pagespeed_cc_test(
+    name = "ngx_request_lifetime_pin_test",
+    srcs = ["ngx_request_lifetime_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:nginx_sources",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)

@@ -299,6 +299,17 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
 
   int rc;
   bool run_posted = true;
+  // An upstream (proxy_pass and the other *_pass modules) that is still
+  // delivering the response owns the request: its event handlers are
+  // installed, the reference count is its, and its cleanup handler, which
+  // drops that reference, is on the request's cleanup list.  That is the
+  // state of the html transform of a proxied page while the origin is still
+  // sending it.  Sampled BEFORE the handler below runs: the in-place lookup's
+  // decline path starts the upstream from inside that call and balances its
+  // own r->count++ with the NGX_DONE it returns, so an upstream started there
+  // must not count here.
+  const bool upstream_active =
+      r->upstream != nullptr && r->upstream->cleanup != nullptr;
   // If we are unlucky enough to have our connection finalized mid-ipro-lookup,
   // we must enter a different flow. Also see ps_in_place_check_header_filter().
   if ((ctx->base_fetch->base_fetch_type_ != kIproLookup) &&
@@ -318,6 +329,29 @@ void NgxBaseFetch::ReadCallback(const ps_event_data& data) {
 #endif
 
   ngx_connection_t* c = r->connection;
+  // While the upstream owns the request it is not finalized for output that
+  // has only gone down the filter chain: that would install nginx's writer
+  // and ngx_http_test_reading over the upstream's handlers, leaving the
+  // request's lifetime to them without the reference the upstream's cleanup
+  // expects.  Any other result ends the request under the upstream, so the
+  // reference its cleanup handler drops is held first, as
+  // ngx_http_upstream_create() does before calling that handler on a live
+  // request; and the posted requests are then run whatever the branch above
+  // decided, because ending the request posts nginx's terminate handler and
+  // nothing else runs it when the client is already gone (an upstream that
+  // is filling a cache stays active after a client close).  The held
+  // reference keeps r and c alive through the finalize, and the posted-request
+  // loop stops once the terminate handler has destroyed the connection.
+  if (upstream_active) {
+    if (rc == NGX_AGAIN) {
+      if (run_posted) {
+        ngx_http_run_posted_requests(c);
+      }
+      return;
+    }
+    r->main->count++;
+    run_posted = true;
+  }
   ngx_http_finalize_request(r, rc);
 
   if (run_posted) {

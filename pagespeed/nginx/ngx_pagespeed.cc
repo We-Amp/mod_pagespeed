@@ -1959,7 +1959,13 @@ ngx_int_t ps_decline_request(ngx_http_request_t* r) {
   r->read_event_handler = ngx_http_block_reading;
   r->write_event_handler = ngx_http_core_run_phases;
   ngx_http_core_run_phases(r);
-  ngx_http_run_posted_requests(r->connection);
+  // The posted requests are left to the caller.  This function is reached
+  // only from NgxBaseFetch::ReadCallback(), which still uses r after it
+  // returns and runs them itself once it is done with it.  When the phases
+  // above ended the request -- the client is gone and writing the response
+  // failed -- the posted list holds nginx's terminate handler, which frees r
+  // whatever its count is; running it here would hand the caller a freed
+  // request.
   return NGX_DONE;
 }
 
