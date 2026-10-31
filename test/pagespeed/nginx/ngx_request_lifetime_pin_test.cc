@@ -109,5 +109,45 @@ TEST(NgxRequestLifetimePinTest, DeclineLeavesThePostedRequestsToItsCaller) {
          "requests";
 }
 
+TEST(NgxRequestLifetimePinTest, OutputUnderAnActiveUpstreamIsNotFinalized) {
+  // While an upstream (proxy_pass and the other *_pass modules) is still
+  // delivering the response it owns the request: its handlers are installed,
+  // the reference count is its, and its cleanup handler, which drops that
+  // reference, is on the cleanup list. The callback therefore (a) samples
+  // whether an upstream is active BEFORE the handler runs, because the
+  // in-place decline path starts one inside that call and balances its own
+  // reference; (b) does not finalize a request the upstream owns when it has
+  // only passed output down the chain; and (c) holds the upstream's reference
+  // when it ends such a request, so the cleanup handler cannot drop the last
+  // one from inside nginx's terminate loop, and then runs the posted requests
+  // on every branch, so the terminate handler that ending posts is run even
+  // when the client is already gone.
+  const GoogleString callback =
+      FunctionBody(ReadStrippedSource(kNgxBaseFetchCc), kReadCallback);
+  ASSERT_FALSE(callback.empty())
+      << "NgxBaseFetch::ReadCallback was renamed; this pin needs updating";
+  const size_t sampled = callback.find(
+      "constboolupstream_active="
+      "r->upstream!=nullptr&&r->upstream->cleanup!=nullptr;");
+  const size_t handler =
+      callback.find("rc=ps_base_fetch::ps_base_fetch_handler(r);");
+  ASSERT_NE(GoogleString::npos, handler)
+      << "ReadCallback no longer calls ps_base_fetch_handler";
+  EXPECT_NE(GoogleString::npos, sampled)
+      << "ReadCallback no longer records whether an upstream owns the request";
+  EXPECT_LT(sampled, handler)
+      << "the upstream must be sampled before the handler runs: the decline "
+         "path starts one inside it";
+  const size_t owned = callback.find(
+      "if(upstream_active){if(rc==NGX_AGAIN){if(run_posted){"
+      "ngx_http_run_posted_requests(c);}return;}r->main->count++;"
+      "run_posted=true;}ngx_http_finalize_request(r,rc);");
+  EXPECT_NE(GoogleString::npos, owned)
+      << "ReadCallback finalizes a request its upstream still owns, ends one "
+         "without holding the upstream's reference, or ends one without "
+         "running the posted requests afterwards";
+  EXPECT_LT(handler, owned);
+}
+
 }  // namespace
 }  // namespace net_instaweb
