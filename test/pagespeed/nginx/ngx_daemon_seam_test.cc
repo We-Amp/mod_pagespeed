@@ -484,7 +484,8 @@ TEST_F(NgxDaemonSeamTest, TheInPlaceBlockIsEnteredForGetAndHeadOnly) {
   // sit behind this one condition, so pinning it pins both at once.  The
   // comment above the condition spells GET and HEAD in prose and carries no
   // NGX_HTTP_ token, so the spelling here is unambiguous.  The same
-  // condition leaves internally redirected requests to the server.
+  // condition leaves internally redirected requests, and requests the server
+  // and the module read differently, to the server.
   const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
   const size_t fn = cc.find("ps_resource_handler(ngx_http_request_t*r");
   ASSERT_NE(GoogleString::npos, fn)
@@ -497,11 +498,13 @@ TEST_F(NgxDaemonSeamTest, TheInPlaceBlockIsEnteredForGetAndHeadOnly) {
   const GoogleString condition =
       "if(options->in_place_rewriting_enabled()&&options->"
       "enabled()&&options->IsAllowed(url.Spec())&&(r->method&"
-      "(NGX_HTTP_GET|NGX_HTTP_HEAD))&&!r->internal){";
+      "(NGX_HTTP_GET|NGX_HTTP_HEAD))&&!r->internal&&"
+      "ps_in_place_url_agrees(r,url)){";
   const size_t block = body.find(condition);
   ASSERT_NE(GoogleString::npos, block)
-      << "the in-place block admits more than GET and HEAD, or an "
-         "internally redirected request";
+      << "the in-place block admits more than GET and HEAD, an internally "
+         "redirected request, or a request the server and the module read "
+         "differently";
   // Both branches really are inside it: the daemon record mark and the
   // classic lookup sit between the block's braces.
   const size_t open = block + condition.size() - 1;

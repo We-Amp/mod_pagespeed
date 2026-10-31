@@ -440,5 +440,134 @@ class TestNginxIproMessageHistory:
         )
 
 
+class TestNginxIproRequestSpelling:
+    """In-place optimization serves and records a resource only under a URL
+    the server and the module read alike.
+
+    The server routes a request on its own normalized reading of the request
+    line; the module keys the in-place cache on the URL it parsed.  Spellings
+    the two merely encode differently are optimized in place as before;
+    spellings they read as different paths or hosts are answered by the
+    server itself and are neither served from nor stored into another URL's
+    or host's entry.
+    """
+
+    # ipro/cc200/example.css: 41 bytes as served by the server, fewer once
+    # optimized in place.
+    ORIGINAL_SIZE = 41
+
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_percent_encoded_spellings_are_optimized_in_place(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """An escaped letter and an escaped slash in the path name the same
+        file to the server as the plain spelling; both are optimized in place.
+        """
+        token = random.randint(1, 100000)
+        for path in (
+            f"{test_root}/ipro/cc200/%65xample.css",
+            f"{test_root}/ipro%2Fcc200/example.css",
+        ):
+            response = client.fetch_until(
+                f"{path}?r={token}",
+                condition=lambda r: len(r.body) < self.ORIGINAL_SIZE,
+                timeout=60.0,
+            )
+            assert_http_status(response, 200)
+            assert len(response.body) < self.ORIGINAL_SIZE, path
+
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_doubled_slash_spelling_is_optimized_in_place(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """The server merges a run of slashes (merge_slashes, the default);
+        the request is still optimized in place."""
+        token = random.randint(1, 100000)
+        response = client.fetch_until(
+            f"{test_root}/ipro//cc200/example.css?r={token}",
+            condition=lambda r: len(r.body) < self.ORIGINAL_SIZE,
+            timeout=60.0,
+        )
+        assert_http_status(response, 200)
+        assert len(response.body) < self.ORIGINAL_SIZE
+
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_path_spellings_the_server_reads_differently_are_left_to_it(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """A backslash is an ordinary byte to the server, and a slash run
+        ahead of a dot segment is merged by the server before the segment is
+        resolved.  Such a request gets the server's own answer, not the
+        optimized entry of the path the module reads, and stores nothing
+        under that path."""
+        token = random.randint(1, 100000)
+        plain = f"{test_root}/ipro/cc200/example.css?r={token}"
+        response = client.fetch_until(
+            plain,
+            condition=lambda r: len(r.body) < self.ORIGINAL_SIZE,
+            timeout=60.0,
+        )
+        assert_http_status(response, 200)
+
+        # No such file to the server, and the optimized entry of the slash
+        # spelling is not served in its place.
+        for path in (
+            f"{test_root}/ipro\\cc200\\example.css",
+            f"{test_root}/ipro/cc200\\example.css",
+        ):
+            assert_http_status(client.get(f"{path}?r={token}"), 404, path)
+
+        # The server serves the plain file for this spelling; the module reads
+        # a path below ipro/ipro/.  The answer is the server's own, and nothing
+        # is stored under the module's reading.
+        detour = f"{test_root}/ipro//../ipro/cc200/example.css?r={token}"
+        response = client.get(detour)
+        assert_http_status(response, 200)
+        assert len(response.body) == self.ORIGINAL_SIZE
+        assert_http_status(
+            client.get(f"{test_root}/ipro/ipro/cc200/example.css?r={token}"),
+            404,
+        )
+
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_host_spelling_the_server_reads_differently_is_left_to_it(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """The server matches its server blocks on the host bytes as sent.  A
+        host with a percent-encoded label is served by the server's default
+        block and is neither served from nor stored into the entry of the host
+        it decodes to."""
+        token = random.randint(1, 100000)
+        path = f"{test_root}/ipro/cc200/example.css?r={token}"
+        plain_host = {"Host": f"ipro-host.example.com:{client.port}"}
+        spelled_host = {"Host": f"ipro-h%6fst.example.com:{client.port}"}
+
+        # Nothing is stored under the plain host by the spelled request: the
+        # first request with the plain host still gets the original.
+        response = client.get(path, headers=spelled_host)
+        assert_http_status(response, 200)
+        assert len(response.body) == self.ORIGINAL_SIZE
+        response = client.get(path, headers=plain_host)
+        assert_http_status(response, 200)
+        assert len(response.body) == self.ORIGINAL_SIZE
+
+        # Once the plain host's entry is optimized, the spelled host does not
+        # get it.
+        response = client.fetch_until(
+            path,
+            condition=lambda r: len(r.body) < self.ORIGINAL_SIZE,
+            timeout=60.0,
+            headers=plain_host,
+        )
+        assert_http_status(response, 200)
+        response = client.get(path, headers=spelled_host)
+        assert_http_status(response, 200)
+        assert len(response.body) == self.ORIGINAL_SIZE
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
