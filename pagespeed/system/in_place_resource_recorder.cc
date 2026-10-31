@@ -58,6 +58,29 @@ const char kNumEmpty[] = "ipro_recorder_empty";
 // Monotonic and never reset, so a test reads it before and after.
 std::atomic<int64_t> g_num_constructed{0};
 
+// Whether InflatingFetch turns a body with these headers into its identity
+// form.  It does for no content coding at all and for a single gzip or
+// deflate, matched as whole header values the way the inflater matches them;
+// a body in any other coding -- br, zstd, or a stacked list such as
+// "gzip, br" -- passes through it byte for byte.
+bool CanDecodeContentEncoding(const ResponseHeaders& headers) {
+  ConstStringStarVector codings;
+  headers.Lookup(HttpAttributes::kContentEncoding, &codings);
+  int num_codings = 0;
+  for (const GoogleString* coding : codings) {
+    if (coding == nullptr || coding->empty() ||
+        StringCaseEqual(*coding, "identity")) {
+      continue;
+    }
+    if (!StringCaseEqual(*coding, HttpAttributes::kGzip) &&
+        !StringCaseEqual(*coding, HttpAttributes::kDeflate)) {
+      return false;
+    }
+    ++num_codings;
+  }
+  return num_codings <= 1;
+}
+
 }  // namespace
 
 int64 InPlaceResourceRecorder::num_constructed() {
@@ -184,6 +207,23 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
 
   if (!consider_response_headers_called_) {
     consider_response_headers_called_ = true;
+    // These are the headers of the bytes about to stream past: whether what
+    // arrives is the identity form of the resource or an encoding of it.  A
+    // body in a coding the inflater cannot undo must not be recorded at all,
+    // since DoneAndSetHeaders() would drop its Content-Encoding and store the
+    // encoded bytes as the identity form.  Not remembered against the URL:
+    // the coding is negotiated per request, and the next client may well be
+    // answered with a plain body.  The response itself is untouched.
+    if (!CanDecodeContentEncoding(*response_headers)) {
+      if (RecordSpecificOutcome(num_skipped_transient_)) {
+        handler_->Message(kInfo,
+                          "IPRO: not recording %s: unsupported "
+                          "Content-Encoding",
+                          url_.c_str());
+      }
+      failure_ = true;
+      return;
+    }
     // In first call, set up headers for potential deflating. We basically only
     // care about Content-Encoding, plus AsyncFetch gets unhappy with 0
     // status code.
