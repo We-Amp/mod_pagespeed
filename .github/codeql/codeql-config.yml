@@ -11,3 +11,7 @@ name: mod_pagespeed CodeQL configuration
 # bundle as well only re-raises the same findings on every rebuild.
 paths-ignore:
   - pagespeed/system/console/admin_console.html
+
+# The *_dbg.js scripts here are build outputs generated from sources that are
+# analysed directly, like the console bundle above.
+  - net/instaweb/rewriter/generated/
