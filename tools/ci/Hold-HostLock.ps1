@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 <#
 .SYNOPSIS
   Host-wide lock for jobs that bind fixed local ports (the IIS system tests).
