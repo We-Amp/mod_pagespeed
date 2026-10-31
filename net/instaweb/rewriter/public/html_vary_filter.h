@@ -71,11 +71,18 @@ class HtmlVaryFilter : public CommonFilter {
   static void HtmlVaryTokens(const RewriteOptions& options,
                              StringVector* tokens);
 
-  // Adds each token of HtmlVaryTokens that the response headers do not
-  // already name (case-insensitive), unless the headers carry Vary: *. The
-  // tokens it added are recorded on the driver
+  // Adds each token of HtmlVaryTokens that the driver's response headers do
+  // not already name (case-insensitive), unless the headers carry Vary: *.
+  // The tokens it added are recorded on the driver
   // (RewriteDriver::html_vary_tokens_added()). Does nothing when the response
   // headers are not wired, or no longer mutable after the first flush.
+  // Idempotent. Callers that hand the response headers to another thread for
+  // the parse (ProxyFetch) call this before the hand-off, so the headers are
+  // final before any other thread can read them; StartDocument then finds
+  // the tokens present and does not write.
+  static void AddVaryTokens(RewriteDriver* driver);
+
+  // Calls AddVaryTokens for this filter's driver.
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override {}
   void EndElementImpl(HtmlElement* element) override {}

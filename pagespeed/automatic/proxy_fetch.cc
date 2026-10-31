@@ -37,6 +37,7 @@
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
+#include "net/instaweb/rewriter/public/html_vary_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
@@ -1019,6 +1020,16 @@ bool ProxyFetch::HandleWrite(const StringPiece& str,
       // is not possible because downstream code (e.g. convert_meta_tags,
       // property cache filters) expects headers to not yet be complete.
       AddPagespeedHeader();
+      if (started_parse_) {
+        // The HTML Vary tokens depend on the options alone. Add them here,
+        // before the parse is handed to the html worker below, rather than
+        // leaving the write to HtmlVaryFilter::StartDocument on that worker:
+        // this thread's fetch chain still reads these headers when the fetch
+        // completes (ProxyFetch::HandleDone and the wrappers around it), and
+        // nothing orders those reads against the worker. The filter then
+        // finds the tokens present and does not write.
+        HtmlVaryFilter::AddVaryTokens(driver_);
+      }
 
       if ((property_cache_callback_ != nullptr) && started_parse_) {
         // Connect the ProxyFetch in the PropertyCacheCallbackCollector.  This
@@ -1122,14 +1133,16 @@ void ProxyFetch::HandleDone(bool success) {
       SharedAsyncFetch::HandleHeadersComplete();
       Write(buffered, server_context_->message_handler());
     }
-  } else if (!response_headers()->headers_complete()) {
+  } else if (!started_parse_ && !response_headers()->headers_complete()) {
     // This is a fetcher failure, like connection refused, not just an error
-    // status code.
+    // status code. Once the parse has started the headers were complete (the
+    // parse begins only after they are) and belong to the html worker, which
+    // may still be adding to them before its first flush, so this thread
+    // does not touch them.
     response_headers()->SetStatusAndReason(HttpStatus::kNotFound);
   }
 
-  VLOG(1) << "Fetch result:" << success << " " << url_ << " : "
-          << response_headers()->status_code();
+  VLOG(1) << "Fetch result:" << success << " " << url_;
   if (started_parse_) {
     ScopedMutex lock(mutex_.get());
     done_outstanding_ = true;
