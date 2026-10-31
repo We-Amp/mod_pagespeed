@@ -116,9 +116,11 @@ void DisableCacheControlHeader(request_rec* request);
 // origin's copy is removed from whichever table it came from.
 //
 // Returns false, leaving both tables untouched, if no s-maxage should be
-// added (for example no-cache, private, or no-transform is present).  On
-// true, *had_original says whether the response had a Cache-Control at all
-// and *original holds the origin's value (multiple headers joined with ", ").
+// added (for example no-cache, private, or no-transform is present, or the
+// request was authenticated: it carried Authorization, or request->user is
+// set).  On true, *had_original says whether the response had a Cache-Control
+// at all and *original holds the origin's value (multiple headers joined with
+// ", ").
 bool ApplyInPlaceSMaxAge(request_rec* request, int s_maxage_sec,
                          bool* had_original, GoogleString* original);
 

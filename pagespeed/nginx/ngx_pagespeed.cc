@@ -3676,7 +3676,17 @@ ngx_int_t ps_etag_header_filter(ngx_http_request_t* r) {
   // daemon path the recorder already exists when this gate is evaluated, and
   // the conjunct is the only thing that keeps the origin's Cache-Control
   // from being rewritten here.
-  if (ctx && ctx->recorder && !ctx->daemon_recorder) {
+  //
+  // Never on the response to a request that carried Authorization.  The
+  // recorder refuses to store such a response unless the origin marked it
+  // public (ResponseHeaders::IsProxyCacheable), and s-maxage is one of the
+  // directives that lets a shared cache store a response to an authenticated
+  // request and reuse it for other clients (RFC 9111 section 3.5): adding it
+  // here would grant downstream caches a permission the origin did not give.
+  // This is the header the recorder's has_authorization is computed from, so
+  // the two cannot disagree.
+  if (ctx && ctx->recorder && !ctx->daemon_recorder &&
+      r->headers_in.authorization == nullptr) {
     ps_srv_conf_t* cfg_s = ps_get_srv_config(r);
     int s_maxage_sec =
         cfg_s->server_context->global_options()->EffectiveInPlaceSMaxAgeSec();

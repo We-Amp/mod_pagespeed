@@ -61,6 +61,24 @@ class TestAuthorizationBasic:
             time.sleep(0.2)
         assert_stat_delta(before, after, "ipro_recorder_not_cacheable", 1)
 
+    def test_authorized_resource_gets_no_shared_cache_lifetime(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """An authorized response keeps the origin's Cache-Control as sent.
+
+        While a resource is unoptimized the module merges a short s-maxage
+        into the response, but s-maxage lets a shared cache store the
+        response to a request that carried Authorization and reuse it for
+        other clients.  The origin sends no Cache-Control here, and the
+        module must not add one.
+        """
+        response = client.get(f"{test_root}/auth/medium_purple.css", headers=_AUTH)
+        require_status_ok(response, "authorized auth/medium_purple.css")
+        cache_control = response.header("Cache-Control") or ""
+        assert "s-maxage" not in cache_control, (
+            f"authorized response carries Cache-Control [{cache_control}]"
+        )
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

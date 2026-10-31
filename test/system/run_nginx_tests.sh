@@ -611,6 +611,14 @@ EOF
             add_header Cache-Control "no-cache" always;
         }
 
+        # Resources behind HTTP Basic auth (user1) are served but never
+        # cached, optimized or given a shared-cache lifetime.  Matches
+        # Apache's debug.conf.template auth/ block.
+        location ^~ /mod_pagespeed_test/auth/ {
+            auth_basic "Restricted Files";
+            auth_basic_user_file $DOC_ROOT/mod_pagespeed_test/auth/passwd.conf;
+        }
+
         # Beaconing stays off globally (so lazyload_images etc. work without
         # browser beacon data), but the prioritize_critical_images round-trip
         # test needs real beacon instrumentation on its example page. Scoped

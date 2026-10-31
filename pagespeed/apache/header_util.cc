@@ -285,6 +285,18 @@ void DisableCacheControlHeader(request_rec* request) {
 
 bool ApplyInPlaceSMaxAge(request_rec* request, int s_maxage_sec,
                          bool* had_original, GoogleString* original) {
+  // Never on the response to an authenticated request: one that carried
+  // Authorization, or one Apache authenticated by any scheme (request->user).
+  // The recorder classifies both as authorized and refuses to store such a
+  // response unless the origin marked it public, and s-maxage is one of the
+  // directives that lets a shared cache store a response to an authenticated
+  // request and reuse it for other clients (RFC 9111 section 3.5): adding it
+  // would grant downstream caches a permission the origin did not give.
+  if (apr_table_get(request->headers_in, HttpAttributes::kAuthorization) !=
+          nullptr ||
+      request->user != nullptr) {
+    return false;
+  }
   StringVector values;
   // err_headers_out first, then headers_out: the order Apache uses when it
   // merges the two tables.
