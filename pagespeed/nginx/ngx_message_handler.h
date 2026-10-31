@@ -55,6 +55,9 @@ class NgxMessageHandler : public SystemMessageHandler {
   void set_log(ngx_log_t* log) { log_ = log; }
   ngx_log_t* log() { return log_; }
 
+  // Logs at NGX_LOG_NOTICE, which MessageType has no equivalent for.
+  void NoticeMessage(const GoogleString& message);
+
  protected:
   void MessageSImpl(MessageType type, const GoogleString& message) override;
 

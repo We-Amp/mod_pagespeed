@@ -820,31 +820,42 @@ void SystemRewriteDriverFactory::LogThreadCountResolutionIfChanged() {
   LogThreadCountResolution();
 }
 
+void SystemRewriteDriverFactory::EmitThreadCountSummary(
+    bool minimum_used, const GoogleString& message) {
+  message_handler()->Message(kWarning, "%s", message.c_str());
+}
+
 void SystemRewriteDriverFactory::LogThreadCountResolution() {
-  // kWarning, not kInfo: see the declaration.  Apache's default LogLevel is
-  // warn, and this line has to reach an operator who has not changed it.
+  // kWarning by default, not kInfo: see the declaration.  Apache's default
+  // LogLevel is warn, and this line has to reach an operator who has not
+  // changed it.  Ports whose default level is lower override
+  // EmitThreadCountSummary().
   if (concurrent_processes_ <= 0) {
-    message_handler()->Message(
-        kWarning,
-        "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
-        "(per server process). Could not determine how many server processes "
-        "share this machine, so the minimum was used; set NumRewriteThreads "
-        "and NumExpensiveRewriteThreads to choose the counts yourself. "
-        "Effective CPU budget: %d whole cores (limited by %s).",
-        num_rewrite_threads_, num_expensive_rewrite_threads_,
-        cpu_budget_.effective_cores, CpuBudgetSourceName(cpu_budget_.source));
+    EmitThreadCountSummary(
+        true,
+        absl::StrFormat(
+            "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+            "(per server process). Could not determine how many server "
+            "processes share this machine, so the minimum was used; set "
+            "NumRewriteThreads and NumExpensiveRewriteThreads to choose the "
+            "counts yourself. Effective CPU budget: %d whole cores (limited "
+            "by %s).",
+            num_rewrite_threads_, num_expensive_rewrite_threads_,
+            cpu_budget_.effective_cores,
+            CpuBudgetSourceName(cpu_budget_.source)));
     return;
   }
-  message_handler()->Message(
-      kWarning,
-      "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
-      "(per server process). Effective CPU budget: %d whole cores (limited by "
-      "%s); server processes: %d; %s. Override with NumRewriteThreads and "
-      "NumExpensiveRewriteThreads.",
-      num_rewrite_threads_, num_expensive_rewrite_threads_,
-      cpu_budget_.effective_cores, CpuBudgetSourceName(cpu_budget_.source),
-      concurrent_processes_,
-      IsServerThreaded() ? "threaded server" : "non-threaded server");
+  EmitThreadCountSummary(
+      false,
+      absl::StrFormat(
+          "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
+          "(per server process). Effective CPU budget: %d whole cores "
+          "(limited by %s); server processes: %d; %s. Override with "
+          "NumRewriteThreads and NumExpensiveRewriteThreads.",
+          num_rewrite_threads_, num_expensive_rewrite_threads_,
+          cpu_budget_.effective_cores, CpuBudgetSourceName(cpu_budget_.source),
+          concurrent_processes_,
+          IsServerThreaded() ? "threaded server" : "non-threaded server"));
 }
 
 }  // namespace net_instaweb

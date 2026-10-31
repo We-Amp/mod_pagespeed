@@ -101,6 +101,16 @@ void NgxMessageHandler::MessageSImpl(MessageType type,
   AddMessageToBuffer(type, message);
 }
 
+void NgxMessageHandler::NoticeMessage(const GoogleString& message) {
+  if (log_ == nullptr) {
+    MessageSImpl(kInfo, message);
+    return;
+  }
+  ngx_log_error(NGX_LOG_NOTICE, log_, 0 /*ngx_err_t*/, "[%s %s] %s",
+                kModuleName, kModPagespeedVersion, message.c_str());
+  AddMessageToBuffer(kInfo, message);
+}
+
 void NgxMessageHandler::FileMessageSImpl(MessageType type, const char* file,
                                          int line,
                                          const GoogleString& message) {

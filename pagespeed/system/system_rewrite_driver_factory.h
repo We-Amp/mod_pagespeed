@@ -357,6 +357,12 @@ class SystemRewriteDriverFactory : public RewriteDriverFactory {
   // can describe their deployment shape in more detail override this.
   virtual void LogThreadCountResolution();
 
+  // Writes the summary built by LogThreadCountResolution().  The default is
+  // kWarning.  minimum_used is true when the minimum counts were used because
+  // the process count could not be determined, which an operator should see.
+  virtual void EmitThreadCountSummary(bool minimum_used,
+                                      const GoogleString& message);
+
   bool thread_counts_finalized() { return thread_counts_finalized_; }
 
  private:

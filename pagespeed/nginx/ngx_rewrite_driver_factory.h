@@ -125,6 +125,11 @@ class NgxRewriteDriverFactory : public SystemRewriteDriverFactory {
   bool ThreadCountsKnownAtInit() override { return false; }
   int ConcurrentProcessCount() override { return worker_process_count_; }
 
+  // Informational unless the minimum counts had to be used: nginx's default
+  // error_log level is error, but the summary is not a warning.
+  void EmitThreadCountSummary(bool minimum_used,
+                              const GoogleString& message) override;
+
   void ShutDownMessageHandlers() override;
 
   void SetCircularBuffer(SharedCircularBuffer* buffer) override;
