@@ -188,14 +188,14 @@ size_t GoogleUrl::LeafEndPosition(const GURL& gurl) {
 size_t GoogleUrl::LeafEndPosition() const { return LeafEndPosition(*gurl_); }
 
 size_t GoogleUrl::LeafStartPosition(const GURL& gurl) {
-  const url::Parsed& parsed = gurl.parsed_for_possibly_invalid_spec();
-  size_t start_reverse_search_from = npos;
-  if (parsed.query.is_valid() && (parsed.query.begin > 0)) {
-    // query includes '?', so start the search from the character
-    // before it.
-    start_reverse_search_from = parsed.query.begin - 1;
+  // The leaf ends where the path ends, so look for its last '/' from there
+  // backward: a '/' inside the query or the fragment is not a path separator
+  // and must not be taken for the start of the leaf.
+  size_t leaf_end = LeafEndPosition(gurl);
+  if (leaf_end == npos) {
+    return npos;
   }
-  return gurl.possibly_invalid_spec().rfind('/', start_reverse_search_from);
+  return gurl.possibly_invalid_spec().rfind('/', leaf_end);
 }
 
 // Returns the offset at which the leaf starts in the fully
@@ -257,7 +257,7 @@ StringPiece GoogleUrl::AllAfterQuery() const {
   }
 }
 
-// Find the last slash before the question-mark, if any.  See
+// Find the last slash of the path, before any query or fragment.  See
 // http://en.wikipedia.org/wiki/URI_scheme -- the query-string
 // syntax is not well-defined.  But the query-separator is well-defined:
 // it's a ? so I believe this implies that the first ? has to delimit
@@ -306,20 +306,15 @@ StringPiece GoogleUrl::LeafSansQuery() const {
   if (leaf_start == npos) {
     return StringPiece();
   }
+  // The leaf runs from after the last '/' of the path to the end of the
+  // path: neither the query nor the fragment is part of it.
   size_t after_last_slash = leaf_start + 1;
-  const std::string& spec = gurl_->spec();
-  size_t leaf_length = spec.size() - after_last_slash;
-  if (!gurl_->has_query()) {
-    return StringPiece(spec.data() + after_last_slash, leaf_length);
-  }
-  url::Parsed parsed = gurl_->parsed_for_possibly_invalid_spec();
-  if (!parsed.query.is_valid()) {
+  size_t leaf_end = LeafEndPosition();
+  if (leaf_end == npos || leaf_end < after_last_slash) {
     return StringPiece();
-  } else {
-    // parsed.query.len doesn't include the '?'
-    return StringPiece(spec.data() + after_last_slash,
-                       leaf_length - (parsed.query.len + 1));
   }
+  return StringPiece(gurl_->spec().data() + after_last_slash,
+                     leaf_end - after_last_slash);
 }
 
 // For "http://a.com/b/c/d?e=f/g returns "http://a.com" without trailing slash
@@ -366,11 +361,15 @@ StringPiece GoogleUrl::PathSansLeaf() const {
   if (path_start == npos || leaf_start == npos) {
     // Things like data: URLs do not have leaves, etc.
     return StringPiece();
-  } else {
-    size_t after_last_slash = leaf_start + 1;
-    return StringPiece(gurl_->spec().data() + path_start,
-                       after_last_slash - path_start);
   }
+  size_t after_last_slash = leaf_start + 1;
+  if (after_last_slash < path_start) {
+    // The last '/' lies before the path, so there is no directory to return
+    // and certainly not one that runs past the spec.
+    return StringPiece();
+  }
+  return StringPiece(gurl_->spec().data() + path_start,
+                     after_last_slash - path_start);
 }
 
 StringPiece GoogleUrl::NetPath() const {
