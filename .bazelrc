@@ -372,6 +372,15 @@ build:ci --noshow_loading_progress
 # the same configs. External services and the remote-cache choice stay on the
 # command line.
 build:ci-build --action_env=CC=clang --action_env=CXX=clang++
+# Enforce first-party warnings as errors on the CI build leg (-Wall is
+# already on by default). First-party source roots only; external repos
+# are silenced at the boundary line below, and clang's -w suppresses a
+# warning before -Werror could fire, so third-party code cannot fail the
+# leg. Scoped per-file, mirroring the win-asan idiom.
+build:ci-build --per_file_copt=//pagespeed/.*,//net/.*,//test/.*,//base/.*,//third_party/.*,//tools/.*@-Werror,-ferror-limit=0
+# Third-party code is not ours to fix; keep first-party diagnostics
+# unchanged (same boundary the macOS build uses).
+build:ci-build --per_file_copt=external/.*@-w
 
 build:ci-asan --config=clang-asan
 build:ci-asan --action_env=CC=clang --action_env=CXX=clang++
