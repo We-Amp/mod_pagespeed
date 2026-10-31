@@ -124,6 +124,8 @@ AGNOSTIC_FLAGS = {
     "-Wall", "-Wextra",
     "-w",
     "-Werror", "-ferror-limit=0",
+    "-Wno-unused-parameter", "-Wno-missing-field-initializers",
+    "-Wno-sign-compare",
     "-Wno-deprecated-declarations",
     "-Wno-unknown-warning-option",
     # debug-info level: valid for C and C++ alike (sanitizer configs use it

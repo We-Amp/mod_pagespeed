@@ -381,6 +381,16 @@ build:ci-build --per_file_copt=//pagespeed/.*,//net/.*,//test/.*,//base/.*,//thi
 # Third-party code is not ours to fix; keep first-party diagnostics
 # unchanged (same boundary the macOS build uses).
 build:ci-build --per_file_copt=external/.*@-w
+# Second step: compile with -Wextra under the same enforcement. The
+# scoped exemptions below are deliberate and kept indefinitely:
+# unused-parameter is interface noise across a filter-heavy codebase,
+# gperf-generated sources cannot carry field initializers, and the
+# vendored css_parser keeps its own sign-compare findings (we do not
+# edit third-party sources).
+build:ci-build --copt=-Wextra
+build:ci-build --copt=-Wno-unused-parameter
+build:ci-build --per_file_copt=.*\.gp\.cc@-Wno-missing-field-initializers
+build:ci-build --per_file_copt=.*css_parser.*@-Wno-sign-compare
 
 build:ci-asan --config=clang-asan
 build:ci-asan --action_env=CC=clang --action_env=CXX=clang++
