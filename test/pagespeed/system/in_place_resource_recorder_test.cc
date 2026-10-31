@@ -268,6 +268,32 @@ TEST_F(InPlaceResourceRecorderTest, IncompleteResponse) {
               ::testing::HasSubstr("incomplete/truncated response"));
 }
 
+TEST_F(InPlaceResourceRecorderTest,
+       RefusedRecordingDoesNotWarnAboutTruncation) {
+  // A recorder that refused the response at the preliminary headers is
+  // finished by the server before the body ends, so it is handed an
+  // incomplete response.  That is not a truncated recording and must not be
+  // logged as one: the refusal keeps its own counter and its own message.
+  ResponseHeaders headers;
+  headers.set_status_code(HttpStatus::kOK);
+  SetDefaultLongCacheHeaders(&kContentTypeHtml, &headers);
+  headers.ComputeCaching();
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &headers);
+  ASSERT_TRUE(recorder->failed());
+  recorder.release()->DoneAndSetHeaders(&headers,
+                                        false /* incomplete response */);
+
+  EXPECT_EQ(1, IproVar("ipro_recorder_dropped_content_type"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(), ::testing::HasSubstr("content type is not"));
+  EXPECT_THAT(MessageDump(),
+              ::testing::Not(::testing::HasSubstr("incomplete/truncated")));
+}
+
 TEST_F(InPlaceResourceRecorderTest, CheckCacheableContentTypes) {
   CheckCacheableContentType(&kContentTypeJpeg);
   CheckCacheableContentType(&kContentTypeCss);
