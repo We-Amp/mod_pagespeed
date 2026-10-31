@@ -90,8 +90,11 @@ variables:
 
 - the IIS role is installed and the job manages it (sites, application pools,
   `w3wp`, `appcmd`); the runner service account is a local administrator;
-- one runner instance per host: the tests own the test ports and the default
-  web site, and never run concurrently with another IIS job;
+- the tests own the test ports and the default web site, so a host may run
+  several runner instances but only one IIS job at a time: each IIS job takes
+  a host-wide lock (`tools/ci/Hold-HostLock.ps1`, mutex
+  `Global\WeAmp-IIS-SystemTests`) before it touches the host and releases it
+  in its last step;
 - the Windows toolchain of the `fleet-windows` class is present as far as the
   job needs it: Visual Studio 2022 (found with `vswhere`; a host without it
   only warns on the IIS system tests, which run a module that is already
