@@ -382,11 +382,13 @@ void InPlaceResourceRecorder::SaveCacheControl(const char* cache_control) {
 
 void InPlaceResourceRecorder::DoneAndSetHeaders(
     ResponseHeaders* response_headers, bool entire_response_received) {
-  if (!entire_response_received) {
+  if (!entire_response_received && !failure_) {
     // To record successfully, we must have a complete response.  Otherwise you
     // get https://github.com/apache/incubator-pagespeed-mod/issues/1081.
     // A truncated response is a genuine recording failure: leave it uncounted
-    // by the specific buckets so it lands in num_failed_ below.
+    // by the specific buckets so it lands in num_failed_ below.  A recording
+    // that was already refused is finished by the server before the body
+    // ends; that is not a truncation, and it has logged its own reason.
     handler_->Message(
         kWarning, "IPRO: failed to record %s: incomplete/truncated response",
         url_.c_str());
