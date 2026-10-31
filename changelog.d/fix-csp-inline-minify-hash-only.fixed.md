@@ -1,1 +1,0 @@
-- **Inline scripts and styles are minified again under a Content-Security-Policy that uses nonces or `'unsafe-inline'`.** Previously any `script-src` or `style-src` made the module leave inline blocks untouched. It now backs off only when the policy lists hash sources (a hash covers the exact original bytes) or does not allow inline blocks; the `nonce` attribute is kept as is.

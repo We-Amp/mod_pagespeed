@@ -1,1 +1,0 @@
-- nginx: with buffered proxying, rewritten HTML that a slow client has not yet read is now sent when the origin delivers more of the page or finishes, instead of as soon as the client can read it, so it can wait while the origin pauses. The page still arrives complete.

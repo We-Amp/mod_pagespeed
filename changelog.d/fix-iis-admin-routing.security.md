@@ -1,1 +1,0 @@
-- **IIS: access restrictions on the admin pages.** This release tightens which request paths the IIS module serves as its admin and global admin pages. Affects the IIS module in releases up to and including 2.6.0. **Update recommended.**

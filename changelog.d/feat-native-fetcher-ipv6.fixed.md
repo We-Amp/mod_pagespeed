@@ -1,1 +1,0 @@
-- nginx: the native fetcher connects to IPv6 origins; IPv4 addresses are preferred when a host has both.
