@@ -21,6 +21,8 @@
 
 #include "net/instaweb/rewriter/critical_keys.pb.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -126,5 +128,37 @@ TEST_F(CriticalFinderSupportUtilTest, ValidateAndExpireNonceExactMatchOnly) {
   // The exact nonce validates and consumes the entry.
   EXPECT_TRUE(ValidateAndExpireNonce(now_ms, "nonce-abc", &keys));
   EXPECT_FALSE(keys.pending_nonce(0).has_nonce());
+}
+
+TEST_F(CriticalFinderSupportUtilTest,
+       ValidateAndExpireNonceRefusesLongerThanIssued) {
+  // A beacon nonce longer than the ones the server hands out is refused before
+  // it is compared with any pending entry, so the sender does not choose how
+  // much work each comparison does. The server never stores an entry of that
+  // length; one is planted here so that the refusal is observable.
+  StringSet keys;
+  keys.insert("a");
+  UpdateCandidateKeys(keys, &critical_keys_proto_, true);
+  BeaconMetadata result;
+  PrepareForBeaconInsertionHelper(
+      &critical_keys_proto_, factory()->nonce_generator(), rewrite_driver(),
+      true /* using_candidate_key_detection */, &result);
+  ASSERT_EQ(kBeaconWithNonce, result.status);
+  const GoogleString issued = result.nonce;
+  const GoogleString longer = StrCat(issued, "A");
+  const int64 now_ms = timer()->NowMs();
+
+  CriticalKeys::PendingNonce* planted =
+      critical_keys_proto_.add_pending_nonce();
+  planted->set_timestamp_ms(now_ms);
+  planted->set_nonce(longer);
+  const int planted_index = critical_keys_proto_.pending_nonce_size() - 1;
+
+  EXPECT_FALSE(ValidateAndExpireNonce(now_ms, longer, &critical_keys_proto_));
+  EXPECT_TRUE(critical_keys_proto_.pending_nonce(planted_index).has_nonce());
+
+  // The nonce that was issued still validates and consumes its entry.
+  EXPECT_TRUE(ValidateAndExpireNonce(now_ms, issued, &critical_keys_proto_));
+  EXPECT_FALSE(ValidateAndExpireNonce(now_ms, issued, &critical_keys_proto_));
 }
 }  // namespace net_instaweb
