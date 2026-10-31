@@ -11,3 +11,6 @@ name: mod_pagespeed CodeQL configuration
 # bundle as well only re-raises the same findings on every rebuild.
 paths-ignore:
   - pagespeed/system/console/admin_console.html
+
+# Generated scripts and their embedded copies, built from sources that are analysed directly.
+  - net/instaweb/rewriter/generated/

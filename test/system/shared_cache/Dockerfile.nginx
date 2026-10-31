@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 # The distribution's nginx with the published module and optimizer packages.
-FROM ubuntu:24.04
+# Pinned by digest (Scorecard). Refresh: docker buildx imagetools inspect ubuntu:24.04 --format '{{json .Manifest.Digest}}'
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 # The optimizer release the tree pins, and the module package of that pair
 # (whose library run.sh may replace with a fresh build).
 ARG PAIR_VERSION=2.5.0
