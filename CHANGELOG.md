@@ -19,31 +19,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hardening for slow HTTP/2 clients with zero-copy serving.** Update
   recommended for nginx sites that use `CycloneZeroCopyServe`. The new
   `zerocopy_serve_stall_timeouts` statistic counts streams ended this way.
-- nginx: fixed memory-safety issues when a client closes its connection while a response is still being prepared, which could stop a worker. Affected: 2.6.0 and earlier. Update recommended for nginx sites.
-- Hardened the optimization cache so that a request for a crafted optimized
-  resource URL can no longer change which script, stylesheet or image other
-  visitors receive. Affected: 2.6.0 and earlier. Update recommended for nginx,
-  Apache and IIS sites.
-- nginx: in-place optimization now stores a response only under the URL it was fetched for, so a crafted request can no longer place content under another URL. Affected: 2.6.0 and earlier. Update recommended for nginx sites.
+- nginx: fixed memory-safety issues when a client closes its connection while a response is still being prepared, which could stop a worker. Affected: 2.6.0 and earlier. Update recommended for nginx sites. (ANT-2026-FKYTGW3G, ANT-2026-D2CGZAXQ)
+- nginx: in-place optimization now stores a response only under the URL it was fetched for, so a crafted request can no longer place content under another URL. Affected: 2.6.0 and earlier. Update recommended for nginx sites. (ANT-2026-YDZ31UJD)
 - In-place optimization no longer stores a compressed origin response under
   the wrong encoding, which could leave stylesheets and scripts unreadable for
   every visitor. Affected: 2.6.0 and earlier, where the origin compresses with
   brotli or zstd. Update recommended for nginx and Apache sites that proxy to
-  an origin.
-- Hardened the handling of optimized resource URLs so that a single crafted request can no longer stop a server worker or exhaust its memory. Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Hardened the optimization cache so that a request for a crafted optimized resource URL can no longer change which script, stylesheet or image other visitors receive. Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+  an origin. (ANT-2026-DODNRAXY)
+- Hardened the handling of optimized resource URLs so that a single crafted request can no longer stop a server worker or exhaust its memory. Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS sites. (ANT-2026-9KEPAA75, ANT-2026-O8N7KFK0, ANT-2026-DGDUO0GS)
+- Hardened the optimization cache so that a request for a crafted optimized resource URL can no longer change which script, stylesheet or image other visitors receive. Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS sites. (ANT-2026-7XM52IDN, ANT-2026-S7LKX6K7, ANT-2026-DCJ2Z3D4, ANT-2026-XB6YFWVT)
 - nginx: corrected a regression in a 2.5.0 hardening change that let a single
   oversized request briefly stall a worker. Affected: 2.5.0 to 2.6.0. Update
-  recommended for nginx sites.
+  recommended for nginx sites. (ANT-2026-OVE7NGRH)
 - Responses to requests that carry an `Authorization` header no longer get a
   cache lifetime that lets a shared cache, such as a CDN or a caching proxy,
   store them and serve them to other clients. Affected: 2.6.0 and earlier.
-  Update recommended for nginx and Apache sites behind a shared cache.
+  Update recommended for nginx and Apache sites behind a shared cache. (ANT-2026-RC2EIY9O)
 - Corrected a regression in a 2.5.0 hardening change that could serve a small
   inline script to a page in a different character set than the one it was
   checked in, so that on sites that mix character sets, page text could be read
   as script. Affected: 2.5.0 to 2.6.0. Update recommended for sites with pages
-  in more than one character set.
+  in more than one character set. (ANT-2026-O0ZSTJDY)
 
 ### Added
 
@@ -91,9 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A request for a combined resource no longer fills the cache entry that page rewriting uses**, so the first page view after the cache is emptied performs its own combine.
 - **Combined-resource URLs beyond the size limits the server itself generates are refused.** Pages never produce such URLs.
 - **A URL fragment no longer counts when the file type of a rewritten resource is inferred from its URL.** This affects edge cases only.
-- **Responses to requests that carry an `Authorization` header no longer get
-  the short shared-cache lifetime used for in-place optimization.** The
-  configured in-place lifetime is unchanged for other responses.
+- **Responses to authenticated requests, whether by an `Authorization` header or by the web server's own authentication, no longer get the short shared-cache lifetime used for in-place optimization.** The configured in-place lifetime is unchanged for other responses.
 
 ### Fixed
 
