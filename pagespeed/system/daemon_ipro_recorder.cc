@@ -63,6 +63,25 @@ GoogleString JoinHeader(const ResponseHeaders& headers, StringPiece name) {
   return joined;
 }
 
+// Whether the headers state no content coding other than identity, read over
+// EVERY value of the field.  Lookup1 answers null for a repeated header, so a
+// coding stated on a second line used to read as "no coding" and let a body
+// in that coding be captured as the origin's own bytes -- a coding the body
+// sniff below cannot catch, since only gzip has magic bytes.  A single value
+// is judged as before: anything but identity refuses.
+bool StatesIdentityCodingOnly(const ResponseHeaders& headers) {
+  ConstStringStarVector values;
+  if (!headers.Lookup(HttpAttributes::kContentEncoding, &values)) {
+    return true;
+  }
+  for (const GoogleString* value : values) {
+    if (value != nullptr && !StringCaseEqual(*value, "identity")) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 DaemonIproRecorder::DaemonIproRecorder(const DaemonAbi* abi, void* cache,
@@ -117,9 +136,7 @@ void DaemonIproRecorder::ConsiderResponseHeaders(
   // about to stream past is the origin's bytes or an encoded form of them.
   // Deciding now costs nothing; deciding at the end costs a buffered copy of
   // a body that was never recordable.
-  const char* encoding =
-      response_headers->Lookup1(HttpAttributes::kContentEncoding);
-  if (encoding != nullptr && !StringCaseEqual(encoding, "identity")) {
+  if (!StatesIdentityCodingOnly(*response_headers)) {
     failure_ = true;
   } else {
     // The encoding of the bytes about to be captured, remembered for
@@ -157,11 +174,15 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
   // question from the other end, sniffing the captured body for gzip magic
   // bytes, and DoneAndSetHeaders keeps that sniff here as the backstop.  A
   // seam that never showed preliminary headers keeps the finalized value
-  // and the gate's refusal decides it.
-  const char* content_encoding =
-      response_headers.Lookup1(HttpAttributes::kContentEncoding);
-  if (content_encoding != nullptr && !captured_identity_) {
-    input->content_encoding = content_encoding;
+  // and the gate's refusal decides it -- the WHOLE list, as with Vary below:
+  // a coding stated one per header line must reach the gate, not read as
+  // none.  Into a member, borrowed by the gate after this returns.
+  if (!captured_identity_) {
+    content_encoding_storage_ =
+        JoinHeader(response_headers, HttpAttributes::kContentEncoding);
+    if (!content_encoding_storage_.empty()) {
+      input->content_encoding = content_encoding_storage_;
+    }
   }
   const char* etag = response_headers.Lookup1(HttpAttributes::kEtag);
   if (etag != nullptr) {

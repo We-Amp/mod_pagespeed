@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <vector>
 
 #include "net/instaweb/rewriter/public/option_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -621,6 +622,56 @@ TEST_F(DaemonIproRecorderTest, AnEncodedBodyIsNotTheOriginal) {
   const DaemonRecordOutcome outcome =
       Run(&headers, kBody, true, nullptr, &preliminary);
   EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_FALSE(outcome.stored);
+}
+
+TEST_F(DaemonIproRecorderTest, AStackedContentCodingIsNotTheOriginal) {
+  // The same decision over a coding stated as a LIST: in one value, or one
+  // coding per header line.  A repeated field is one list, and reading only
+  // its first line -- or, as a single-value lookup does, none of them -- lets
+  // a body in a coding the sniff below cannot catch through as the original.
+  struct Case {
+    std::vector<GoogleString> codings;
+  } const cases[] = {
+      {{"gzip, br"}},
+      {{"gzip", "br"}},
+      {{"br", "gzip"}},
+      {{"identity", "br"}},
+  };
+  for (const Case& c : cases) {
+    ResponseHeaders preliminary;
+    MakeOkHeaders(&preliminary);
+    for (const GoogleString& coding : c.codings) {
+      preliminary.Add(HttpAttributes::kContentEncoding, coding);
+    }
+    preliminary.ComputeCaching();
+
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    const DaemonRecordOutcome outcome =
+        Run(&headers, kBody, true, nullptr, &preliminary);
+    EXPECT_FALSE(outcome.gate_ran)
+        << "Content-Encoding: " << JoinCollection(c.codings, " / ");
+    EXPECT_FALSE(outcome.stored)
+        << "Content-Encoding: " << JoinCollection(c.codings, " / ");
+  }
+}
+
+TEST_F(DaemonIproRecorderTest,
+       AStackedCodingOnHeadersTheCaptureNeverSawStillRefuses) {
+  // The finalized-headers half of the same rule: a seam that never showed
+  // preliminary headers hands the gate the finalized Content-Encoding, and a
+  // coding stated one per header line must reach it as the whole list.
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  headers.Add(HttpAttributes::kContentEncoding, "gzip");
+  headers.Add(HttpAttributes::kContentEncoding, "br");
+  headers.ComputeCaching();
+
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  EXPECT_TRUE(outcome.gate_ran);
+  EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict);
+  EXPECT_STREQ(daemon_record_reason::kContentEncoded, outcome.reason);
   EXPECT_FALSE(outcome.stored);
 }
 

@@ -196,6 +196,8 @@ class DaemonIproRecorder : public IproRecorder {
   // lines -- an ordinary result of two modules each adding one -- are already
   // long enough.
   GoogleString vary_storage_;
+  // The finalized Content-Encoding lines, joined, for the same reason.
+  GoogleString content_encoding_storage_;
   bool failure_ = false;
   // Set when the body ran past the durable-originals cap.  Distinct from
   // `failure_` so the outcome can be reported as the ordinary thing it is
