@@ -2469,6 +2469,20 @@ TEST_F(CssFilterTest, SimpleFetchUnhealthy) {
   EXPECT_EQ(kOutputStyle, output);
 }
 
+// The leading letter of a legacy CSS URL is accepted so that such URLs still
+// resolve; it no longer carries meaning, so the result is the one built for
+// the requesting client, as for the A. form.
+TEST_F(CssFilterTest, LegacyLetterUrlStillFetches) {
+  SetResponseWithDefaultHeaders(StrCat(kTestDomain, "style.css"),
+                                kContentTypeCss, kInputStyle, 100);
+  for (const char* leaf :
+       {"W.style.css.pagespeed.cf.0.css", "V.style.css.pagespeed.cf.0.css"}) {
+    GoogleString output;
+    ASSERT_TRUE(FetchResourceUrl(StrCat(kTestDomain, leaf), &output)) << leaf;
+    EXPECT_EQ(kOutputStyle, output) << leaf;
+  }
+}
+
 // Make sure we correctly decode the previously unexpected I.. format.
 // http://github.com/apache/incubator-pagespeed-mod/issues/427
 TEST_F(CssFilterTest, EmptyLeafFetch) {

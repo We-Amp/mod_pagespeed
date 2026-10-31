@@ -123,6 +123,39 @@ TEST_F(CssUrlEncoderTest, TestLegacyInlineWebpLossyLosslessAlphaDecoding) {
   EXPECT_EQ("a.css", decoded_url);
 }
 
+TEST_F(CssUrlEncoderTest, LegacyLetterLeavesRequestDerivedContextAlone) {
+  // The leading letter is chosen by whoever requests the URL. The context has
+  // been filled in from the request and selects the metadata cache entry, so
+  // no letter may move it in either direction. The URL still decodes.
+  const char* const kEncodedUrls[] = {"V.a.css", "W.a.css", "I.a.css",
+                                      "A.a.css"};
+  for (const char* encoded_url : kEncodedUrls) {
+    // A request without webp support stays without it.
+    StringVector url_vector;
+    ResourceContext context;
+    context.set_libwebp_level(ResourceContext::LIBWEBP_NONE);
+    context.set_inline_images(false);
+    EXPECT_TRUE(encoder_.Decode(encoded_url, &url_vector, &context, &handler_));
+    EXPECT_EQ(ResourceContext::LIBWEBP_NONE, context.libwebp_level())
+        << encoded_url;
+    EXPECT_FALSE(context.inline_images()) << encoded_url;
+    ASSERT_EQ(1U, url_vector.size());
+    EXPECT_EQ("a.css", url_vector[0]);
+
+    // A request with full webp support keeps it.
+    url_vector.clear();
+    context.set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA);
+    context.set_inline_images(true);
+    EXPECT_TRUE(encoder_.Decode(encoded_url, &url_vector, &context, &handler_));
+    EXPECT_EQ(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA,
+              context.libwebp_level())
+        << encoded_url;
+    EXPECT_TRUE(context.inline_images()) << encoded_url;
+    ASSERT_EQ(1U, url_vector.size());
+    EXPECT_EQ("a.css", url_vector[0]);
+  }
+}
+
 TEST_F(CssUrlEncoderTest, TestSetInliningImages) {
   GoogleString user_agent_string = "Chrome/";
   ResourceContext resource_context;

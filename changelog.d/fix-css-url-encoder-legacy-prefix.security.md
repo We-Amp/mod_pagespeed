@@ -1,0 +1,4 @@
+- Hardened the optimization cache so that a request for a crafted optimized
+  resource URL can no longer change which script, stylesheet or image other
+  visitors receive. Affected: 2.6.0 and earlier. Update recommended for nginx,
+  Apache and IIS sites.

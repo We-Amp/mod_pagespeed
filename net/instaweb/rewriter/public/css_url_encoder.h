@@ -47,7 +47,10 @@ class ResourceContext;
 //
 // Note that a lot of this is legacy encoding now, and that we just
 // unconditionally use the "A." encoding and rely on content hash and
-// metadata cache + user-agent sniffing to keep things consistent.
+// metadata cache + user-agent sniffing to keep things consistent. Decode
+// accepts any leading letter so that old URLs still resolve, but the letter
+// has no meaning any more: it does not alter the ResourceContext, which
+// reflects what the request itself supports.
 class CssUrlEncoder : public UrlSegmentEncoder {
  public:
   CssUrlEncoder() {}

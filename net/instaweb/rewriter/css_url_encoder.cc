@@ -55,24 +55,13 @@ bool CssUrlEncoder::Decode(const StringPiece& encoded, StringVector* urls,
                      encoded.as_string().c_str());
     return false;
   }
-  switch (encoded[0]) {
-    case 'V':
-      data->set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_LOSSLESS_ALPHA);
-      data->set_inline_images(true);
-      break;
-    case 'W':
-      data->set_libwebp_level(ResourceContext::LIBWEBP_LOSSY_ONLY);
-      data->set_inline_images(true);
-      break;
-    case 'I':
-      data->set_libwebp_level(ResourceContext::LIBWEBP_NONE);
-      data->set_inline_images(true);
-      break;
-    case 'A':  // NOLINT(bugprone-branch-clone)
-      break;
-    default:
-      break;
-  }
+  // The leading letter is the legacy encoding of the browser's webp and
+  // inlining support (see css_url_encoder.h). It is accepted so that old URLs
+  // still resolve, but it is not applied to *data: that context was filled in
+  // from the request itself, selects the metadata cache entry, and is what
+  // the images nested in the stylesheet are rewritten for. A letter chosen by
+  // whoever requests the URL must not file the result under the entry that
+  // browsers with other capabilities read.
 
   GoogleString* url = StringVectorAdd(urls);
   StringPiece remaining = encoded.substr(2);
