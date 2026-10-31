@@ -89,6 +89,25 @@ pagespeed_cc_test(
     ],
 )
 
+# The in-place URL agreement: the server's reading of the request and the
+# module's must name the same path on the same host before a response is
+# looked up or recorded in place. A pure function over StringPiece, tested
+# standalone, plus a source pin that the in-place branch consults it with the
+# server's URI and the module's path (the port cannot be linked into a test;
+# see above).
+pagespeed_cc_test(
+    name = "ngx_inplace_url_agreement_test",
+    srcs = ["ngx_inplace_url_agreement_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/nginx:ngx_inplace_url_agreement",
+    ],
+)
+
 # The daemon record completion queue, caps, drop counter and open-attempt
 # latch -- the nginx-free half of the daemon record arm, tested standalone.
 pagespeed_cc_test(

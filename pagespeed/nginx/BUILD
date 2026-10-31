@@ -104,6 +104,23 @@ cc_library(
     ],
 )
 
+# The in-place URL agreement: the server's reading of the request and the
+# module's must name the same path on the same host before a response is
+# looked up or recorded in place -- a pure function over StringPiece, unit
+# tested standalone (//test/pagespeed/nginx:ngx_inplace_url_agreement_test).
+# The module targets below compile ngx_inplace_url_agreement.cc directly in
+# their srcs for the same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_inplace_url_agreement",
+    srcs = ["ngx_inplace_url_agreement.cc"],
+    hdrs = ["ngx_inplace_url_agreement.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
 # Body accounting for the native fetcher: bytes past the announced
 # content-length are not part of the response, and a response that closes
 # short of it is not complete. A pure function over lengths, unit tested
@@ -261,6 +278,7 @@ cc_library(
         "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
+        "ngx_inplace_url_agreement.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_pagespeed.cc",
@@ -289,6 +307,7 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
+        "ngx_inplace_url_agreement.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -403,6 +422,7 @@ cc_library(
         "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
+        "ngx_inplace_url_agreement.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_pagespeed.cc",
@@ -431,6 +451,7 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
+        "ngx_inplace_url_agreement.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -540,6 +561,7 @@ cc_library(
         "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
+        "ngx_inplace_url_agreement.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_request_body.cc",
@@ -567,6 +589,7 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
+        "ngx_inplace_url_agreement.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",

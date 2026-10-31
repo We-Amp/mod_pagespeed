@@ -60,6 +60,7 @@
 #include "ngx_daemon_serve_notify.h"
 #include "ngx_etag_match.h"
 #include "ngx_gzip_setter.h"
+#include "ngx_inplace_url_agreement.h"
 #include "ngx_list_iterator.h"
 #include "ngx_message_handler.h"
 #include "ngx_request_body.h"
@@ -1936,6 +1937,30 @@ GoogleString ps_determine_url(ngx_http_request_t* r) {
                 str_to_string_piece(r->unparsed_uri));
 }
 
+// In-place optimization keys its lookups and recordings on the URL the
+// module parsed from the request line; the server selected the location,
+// applied its access rules and chooses the response on its own reading of
+// that line.  An entry is only right when both readings name the same
+// resource, so a request they read differently is left to the server as it
+// is: no lookup, no recording.  Decided in NgxInPlaceUrlAgrees (unit-tested)
+// from the server's normalized URI and the host the module built its URL
+// from, against the path and host of the URL it parsed, with the server
+// block's merge_slashes setting.
+bool ps_in_place_url_agrees(ngx_http_request_t* r, const GoogleUrl& url) {
+  const ngx_http_core_srv_conf_t* cscf = static_cast<ngx_http_core_srv_conf_t*>(
+      ngx_http_get_module_srv_conf(r, ngx_http_core_module));
+  if (NgxInPlaceUrlAgrees(str_to_string_piece(r->uri), ps_determine_host(r),
+                          url.PathSansQuery(), url.Host(),
+                          cscf->merge_slashes != 0)) {
+    return true;
+  }
+  ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                 "ps in-place left to the server, the server and the module "
+                 "read the request differently: %V",
+                 &r->uri);
+  return false;
+}
+
 // we are still at pagespeed phase
 ngx_int_t ps_decline_request(ngx_http_request_t* r) {
   ps_request_ctx_t* ctx = ps_get_request_context(r);
@@ -3382,10 +3407,13 @@ ngx_int_t ps_resource_handler(ngx_http_request_t* r, bool html_rewrite,
   //
   // In-place optimization also leaves internally redirected requests to the
   // server: it does not look them up and does not record them (r->internal
-  // is set on the pass after an internal redirect).
+  // is set on the pass after an internal redirect).  And it leaves a request
+  // the server and the module read differently to the server, for the same
+  // two reasons (see ps_in_place_url_agrees).
   if (options->in_place_rewriting_enabled() && options->enabled() &&
       options->IsAllowed(url.Spec()) &&
-      (r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) && !r->internal) {
+      (r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)) && !r->internal &&
+      ps_in_place_url_agrees(r, url)) {
     const IproDisposition disposition =
         IproDispositionFor(cfg_s->server_context->daemon_health());
     if (disposition == IproDisposition::kDaemonSubstrate) {
