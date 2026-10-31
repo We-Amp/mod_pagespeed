@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "net/instaweb/http/public/async_fetch.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -1282,6 +1283,36 @@ TEST_F(JsCombineFilterTest, TestMaxCombinedJsSize) {
   VerifyCombined(scripts[3], MultiUrl(kJsUrl3, kJsUrl4));
   VerifyUse(scripts[4], kJsUrl3);
   VerifyUse(scripts[5], kJsUrl4);
+}
+
+TEST_F(JsCombineFilterTest, CombinationStopsAtCacheableSize) {
+  // Even when max_combined_js_bytes() does not bind, a combination stops at
+  // the size that can be cached, which is also where a fetch of it would be
+  // refused.
+  const int kScriptBytes = 1000;
+  GoogleString script =
+      StrCat("var s = '", GoogleString(kScriptBytes - 12, 'x'), "';\n");
+  ASSERT_EQ(kScriptBytes, script.size());
+  SimulateJsResource("big1.js", script);
+  SimulateJsResource("big2.js", script);
+  SimulateJsResource("big3.js", script);
+  http_cache()->set_max_cacheable_response_content_length(2 * kScriptBytes +
+                                                          kScriptBytes / 2);
+
+  ScriptInfoVector scripts;
+  PrepareToCollectScriptsInto(&scripts);
+  SetupWriter();
+  html_parse()->StartParse(kTestDomain);
+  html_parse()->ParseText("<script src=big1.js></script>");
+  html_parse()->ParseText("<script src=big2.js></script>");
+  html_parse()->ParseText("<script src=big3.js></script>");
+  html_parse()->FinishParse();
+
+  ASSERT_EQ(4, scripts.size());
+  VerifyCombined(scripts[0], MultiUrl("big1.js", "big2.js"));
+  VerifyUse(scripts[1], "big1.js");
+  VerifyUse(scripts[2], "big2.js");
+  EXPECT_EQ("big3.js", scripts[3].url);
 }
 
 TEST_F(JsCombineFilterTest, NoCombineNoDeferAttribute) {

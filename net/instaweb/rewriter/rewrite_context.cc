@@ -90,6 +90,8 @@ const char kRewriteContextLockPrefix[] = "rc:";
 // There is no partition index for other dependency fields. Use a constant
 // to denote that.
 const int kOtherDependencyPartitionIndex = -1;
+// How many inputs of a resource fetch are loaded at the same time.
+const int kMaxConcurrentFetchInputs = 4;
 
 }  // namespace
 
@@ -734,6 +736,8 @@ class RewriteContext::FetchContext {
         success_(false),
         detached_(false),
         skip_fetch_rewrite_(false),
+        num_inputs_started_(0),
+        input_bytes_(0),
         num_deadline_alarm_invocations_(
             rewrite_context_->Driver()->statistics()->GetVariable(
                 kNumDeadlineAlarmInvocations)) {}
@@ -1001,6 +1005,21 @@ class RewriteContext::FetchContext {
   void set_skip_fetch_rewrite(bool x) { skip_fetch_rewrite_ = x; }
   bool skip_fetch_rewrite() { return skip_fetch_rewrite_; }
 
+  // The inputs of a fetch are whatever the requested URL names, so
+  // RewriteContext::FetchInputs() loads them a few at a time and starts no
+  // more once the ones loaded so far are InputsTooBig().
+  int num_inputs_started() const { return num_inputs_started_; }
+  void set_num_inputs_started(int n) { num_inputs_started_ = n; }
+  void AddInputBytes(int64 bytes) { input_bytes_ += bytes; }
+
+  // True once the inputs loaded so far add up to more than a single
+  // resource may be to be loaded, or an output may be to be cached.
+  bool InputsTooBig() const {
+    return !rewrite_context_->FindServerContext()
+                ->http_cache()
+                ->IsCacheableBodySize(input_bytes_);
+  }
+
  private:
   void AdjustCacheControl() {
     ResourceVector inputs;
@@ -1028,6 +1047,8 @@ class RewriteContext::FetchContext {
   bool success_;
   bool detached_;
   bool skip_fetch_rewrite_;
+  int num_inputs_started_;
+  int64 input_bytes_;
   Variable* const num_deadline_alarm_invocations_;
 
   FetchContext(const FetchContext&) = delete;
@@ -1719,7 +1740,18 @@ GoogleString RewriteContext::LockName() const {
 void RewriteContext::FetchInputs() {
   ++num_predecessors_;
 
-  for (int i = 0, n = slots_.size(); i < n; ++i) {
+  // A fetch's inputs are whatever its URL names, so they are loaded a few at
+  // a time, and no more are started once the ones loaded so far exceed the
+  // budget; ResourceFetchDone() calls back here to go on with the rest.
+  int first_slot = IsFetchRewrite() ? fetch_->num_inputs_started() : 0;
+  for (int i = first_slot, n = slots_.size(); i < n; ++i) {
+    if (IsFetchRewrite()) {
+      if ((outstanding_fetches_ >= kMaxConcurrentFetchInputs) ||
+          fetch_->InputsTooBig()) {
+        break;
+      }
+      fetch_->set_num_inputs_started(i + 1);
+    }
     const ResourceSlotPtr& slot = slots_[i];
     ResourcePtr resource(slot->resource());
     if (!(resource->loaded() && resource->HttpStatusOk())) {
@@ -1797,7 +1829,15 @@ void RewriteContext::ResourceFetchDone(
     DCHECK(slot.get() != nullptr);
     DCHECK_EQ(resource.get(), slot->resource().get());
   }
-  Activate();
+  if (IsFetchRewrite()) {
+    // A lone input was already held to this limit when it was loaded.
+    if (success && (num_slots() > 1)) {
+      fetch_->AddInputBytes(resource->UncompressedContentsSize());
+    }
+    FetchInputs();
+  } else {
+    Activate();
+  }
 }
 
 void RewriteContext::ResourceRevalidateDone(InputInfo* input_info,
@@ -2347,7 +2387,16 @@ void RewriteContext::StartRewriteForFetch() {
   CheckNotFrozen();
   CachedResult* partition = partitions_->add_partition();
   bool ok_to_rewrite = true;
-  for (int i = 0, n = slots_.size(); i < n; ++i) {
+  if (fetch_->InputsTooBig()) {
+    // FetchInputs() stopped loading inputs, or the last one it loaded took
+    // them over the budget; either way this is not a combination the server
+    // would produce or could cache.
+    fetch_->handler()->Message(
+        kInfo, "Rejected resource URL %s: inputs too big",
+        fetch_->output_resource()->UrlEvenIfHashNotSet().c_str());
+    ok_to_rewrite = false;
+  }
+  for (int i = 0, n = slots_.size(); ok_to_rewrite && (i < n); ++i) {
     ResourcePtr resource(slot(i)->resource());
     if (resource->loaded() && resource->HttpStatusOk() &&
         !(Options()->disable_rewrite_on_no_transform() &&
@@ -2669,6 +2718,17 @@ bool RewriteContext::PrepareFetch(const OutputResourcePtr& output_resource,
   GoogleUrlStarVector url_vector;
   if (resource_context_ != nullptr) {
     EncodeUserAgentIntoResourceContext(resource_context_.get());
+  }
+  // RewriteDriver::CreateOutputResourceWithPath never produces a longer leaf,
+  // so this is not a URL the server generated; refuse it before decoding what
+  // it names.
+  if (output_resource->full_name().EventualSize(*FindServerContext()->hasher(),
+                                                driver->SignatureLength()) >
+      Options()->max_url_segment_size()) {
+    message_handler->Message(kInfo,
+                             "Rejected resource URL %s: segment too long",
+                             output_resource->UrlEvenIfHashNotSet().c_str());
+    return false;
   }
   if (DecodeFetchUrls(output_resource, message_handler, &url_vector)) {
     // A name that decodes to no URLs at all names nothing to reconstruct

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
@@ -141,8 +142,12 @@ class CssCombineFilter::CssCombiner : public ResourceCombiner {
   bool ContentSizeTooBig() const override {
     int64 combined_css_max_size =
         rewrite_driver_->options()->max_combined_css_bytes();
-    return (combined_css_max_size >= 0 &&
-            combined_css_max_size < combined_css_size_);
+    // A fetch of the combination is refused once its inputs exceed what can
+    // be cached (see RewriteContext::FetchInputs()), so stop there as well.
+    return ((combined_css_max_size >= 0 &&
+             combined_css_max_size < combined_css_size_) ||
+            !server_context_->http_cache()->IsCacheableBodySize(
+                combined_css_size_));
   }
 
   void AccumulateCombinedSize(const ResourcePtr& resource) override {
