@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/javascript_code_block.h"
@@ -147,7 +148,10 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
     if (combined_js_max_size >= 0 && combined_js_size_ > combined_js_max_size) {
       return true;
     }
-    return false;
+    // A fetch of the combination is refused once its inputs exceed what can
+    // be cached (see RewriteContext::FetchInputs()), so stop there as well.
+    return !server_context_->http_cache()->IsCacheableBodySize(
+        combined_js_size_);
   }
 
   void AccumulateCombinedSize(const ResourcePtr& resource) override {
@@ -392,10 +396,16 @@ class JsCombineFilter::Context : public RewriteContext {
   const char* id() const override { return filter_->id(); }
   OutputResourceKind kind() const override { return kRewrittenResource; }
 
+  // A fetch concatenates whatever inputs its URL names, while only
+  // PartitionImpl() applies the rules that decide which scripts may be
+  // combined, so a fetch's result must not become the entry that HTML
+  // rewrites of the same inputs read.
+  bool FetchWritesPartition() const override { return false; }
+
   GoogleString CacheKeySuffix() const override {
     // Updated to make sure certain bugfixes actually deploy, and we don't
     // end up using old broken cached version.
-    return "v5";
+    return "v6";
   }
 
  private:

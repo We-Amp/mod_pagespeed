@@ -560,6 +560,16 @@ class RewriteContext {
                                MessageHandler* message_handler,
                                GoogleUrlStarVector* url_vector);
 
+  // Whether a fetch of this context's output may store its result in the
+  // metadata cache, under the key that an HTML rewrite of the same inputs
+  // reads.  A fetch reconstructs exactly what its URL names, so for most
+  // filters that result is the one the HTML path would compute, and storing
+  // it saves the next HTML rewrite the work.  A filter whose Partition()
+  // applies rules that the fetch path never runs returns false here, so that
+  // what a fetch produces never decides how pages are rewritten; the fetch is
+  // still served and its output still goes to the HTTP cache.
+  virtual bool FetchWritesPartition() const { return true; }
+
   // Adjust headers sent out for a stale or in-place result. We may send out
   // stale results in the fallback fetch pathway, but these results should not
   // be cached much.  By default we strip Set-Cookie* headers and Etags, and

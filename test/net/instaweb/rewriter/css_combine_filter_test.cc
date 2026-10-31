@@ -24,6 +24,8 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "net/instaweb/http/public/counting_url_async_fetcher.h"
+#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
 #include "net/instaweb/rewriter/public/debug_filter.h"
@@ -1697,6 +1699,81 @@ TEST_F(CssCombineFilterTest, InvalidFetchCache) {
                                       CssLinkHref("404b.css")));
 }
 
+TEST_F(CssCombineFilterTest, FetchWithNoInputsIsRefused) {
+  // A combined-resource URL whose name lists no inputs has nothing to
+  // reconstruct from; it must be refused before it reaches the combiner.
+  EXPECT_FALSE(TryFetchResource(
+      Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0", "", "css")));
+}
+
+TEST_F(CssCombineFilterTest, FetchResultDoesNotDecideHtmlCombination) {
+  // Partition() does not put a stylesheet that starts with an @import after
+  // another one.  A fetch of that combination is still served, but it must
+  // leave the rewriting of a page with the same two links to Partition().
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss, kYellow, 100);
+  SetResponseWithDefaultHeaders(kCssB, kContentTypeCss,
+                                "@import url(c.css);\n.b {color: blue;}", 100);
+  GoogleString content;
+  EXPECT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0",
+                              MultiUrl(kCssA, kCssB), "css"),
+                       &content));
+  EXPECT_NE(GoogleString::npos, content.find(kYellow));
+  EXPECT_NE(GoogleString::npos, content.find("@import"));
+  ValidateNoChanges("import_in_second_after_fetch",
+                    StrCat(CssLinkHref(kCssA), CssLinkHref(kCssB)));
+}
+
+TEST_F(CssCombineFilterTest, FetchOfManyInputsCombinesInOrder) {
+  // The inputs of a fetch are loaded a few at a time; the combination still
+  // holds all of them, in order.
+  StringVector names;
+  GoogleString expected;
+  for (int i = 0; i < 20; ++i) {
+    names.push_back(absl::StrFormat("%d.css", i));
+    GoogleString body = absl::StrFormat(".c%d {color: blue;}\n", i);
+    SetResponseWithDefaultHeaders(names.back(), kContentTypeCss, body, 100);
+    StrAppend(&expected, body);
+  }
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(
+      Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0", names, "css"),
+      &content));
+  EXPECT_EQ(expected, content);
+  EXPECT_EQ(20, counting_url_async_fetcher()->fetch_count());
+}
+
+TEST_F(CssCombineFilterTest, FetchOfInputsBeyondCacheableSizeIsRefused) {
+  // A URL may name the same input many times.  Once the inputs loaded so far
+  // exceed what could be cached, the rest are not loaded and the fetch is
+  // refused.
+  const int kMaxBytes = 1000;
+  http_cache()->set_max_cacheable_response_content_length(kMaxBytes);
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss,
+                                GoogleString(kMaxBytes / 3, ' '), 100);
+  EXPECT_TRUE(
+      TryFetchResource(Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0",
+                              StringVector(2, kCssA), "css")));
+
+  lru_cache()->ClearStats();
+  EXPECT_FALSE(
+      TryFetchResource(Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0",
+                              StringVector(100, kCssA), "css")));
+  // The metadata, the output and a few of the 100 inputs were looked up.
+  EXPECT_GT(10, lru_cache()->num_hits() + lru_cache()->num_misses());
+}
+
+TEST_F(CssCombineFilterTest, FetchWithOversizedNameIsRefused) {
+  // No URL with a segment longer than MaxSegmentLength is ever generated, so
+  // none is served either, and nothing such a URL names is looked at.
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss, kYellow, 100);
+  GoogleString url = Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0",
+                            StringVector(200, kCssA), "css");
+  EXPECT_LT(options()->max_url_segment_size(), static_cast<int>(url.size()));
+  EXPECT_FALSE(TryFetchResource(url));
+  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
+}
+
 TEST_F(CssCombineFilterTest, NoCombineParseErrors) {
   // Notice: This CSS file does not close its { and thus will break the
   // next stylesheet if they are combined, changing the page.
@@ -2207,6 +2284,17 @@ TEST_F(CssCombineMaxSizeTest, TwoFiles) {
 
 TEST_F(CssCombineMaxSizeTest, TwoFilesPlusOneByte) {
   const int max_bytes = 2 * STATIC_STRLEN(kYellow) + 1;
+  const int num_output_files = 3;
+  const int num_files_in_output[num_output_files] = {2, 2, 1};
+  CombineAndCheck(kYellow, max_bytes, num_output_files, num_files_in_output);
+}
+
+TEST_F(CssCombineMaxSizeTest, CombinationStopsAtCacheableSize) {
+  // Without MaxCombinedCssBytes, a combination still stops at the size that
+  // can be cached, which is also where a fetch of it would be refused.
+  http_cache()->set_max_cacheable_response_content_length(
+      2 * STATIC_STRLEN(kYellow) + 1);
+  const int max_bytes = -1;
   const int num_output_files = 3;
   const int num_files_in_output[num_output_files] = {2, 2, 1};
   CombineAndCheck(kYellow, max_bytes, num_output_files, num_files_in_output);
