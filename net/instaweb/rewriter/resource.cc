@@ -31,13 +31,16 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/hasher.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"  // for HttpAttributes, etc
 #include "pagespeed/kernel/http/http_options.h"
@@ -66,6 +69,7 @@ Resource::Resource(const RewriteDriver* driver, const ContentType* type)
       disable_rewrite_on_no_transform_(true),
       is_authorized_domain_(true),
       respect_vary_(ResponseHeaders::kRespectVaryOnResources),
+      extract_mutex_(server_context_->thread_system()->NewMutex()),
       extracted_state_(kExtractNotComputed) {}
 
 Resource::Resource()
@@ -79,6 +83,7 @@ Resource::Resource()
       disable_rewrite_on_no_transform_(true),
       is_authorized_domain_(true),
       respect_vary_(ResponseHeaders::kRespectVaryOnResources),
+      extract_mutex_(new NullMutex),
       extracted_state_(kExtractNotComputed) {}
 
 Resource::~Resource() {}
@@ -259,6 +264,7 @@ bool Resource::Link(HTTPValue* value, MessageHandler* handler) {
   DCHECK(UseHttpCache());
   const SharedString& contents_and_headers = value->share();
   // Invalidate extracted_contents_.
+  ScopedMutex lock(extract_mutex_.get());
   extracted_state_ = kExtractNotComputed;
   extracted_contents_.clear();
   extracted_headers_ = nullptr;
@@ -283,6 +289,10 @@ const ResponseHeaders* Resource::UncompressedHeaders() const {
 }
 
 bool Resource::EnsureExtractedIfNeeded() const {
+  // The first caller inflates; any other caller waits for it here, then finds
+  // the state computed. From then on the extracted_* members are only read,
+  // until the next Link().
+  ScopedMutex lock(extract_mutex_.get());
   if (extracted_state_ == kExtractNotComputed) {
     if (!response_headers_.IsGzipped()) {
       extracted_state_ = kExtractUseBase;

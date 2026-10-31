@@ -30,6 +30,8 @@
 #include "pagespeed/kernel/base/string.h"       // for GoogleString
 #include "pagespeed/kernel/base/string_util.h"  // for StrCat, etc
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/base/thread.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -42,6 +44,7 @@
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
+#include "test/pagespeed/kernel/thread/worker_test_base.h"
 
 namespace net_instaweb {
 
@@ -162,6 +165,39 @@ class UrlInputResourceTest : public RewriteTestBase {
         << "A gzip body inflating past the handled size must not be inflated";
   }
 
+  // Reads a resource's uncompressed contents and headers on a thread of its
+  // own once released, the way the filter on the low-priority rewrite thread
+  // and the deadline handler on the rewrite thread can each be the first
+  // reader of one input.
+  class ExtractOnThread : public ThreadSystem::Thread {
+   public:
+    ExtractOnThread(ThreadSystem* thread_system, const ResourcePtr& resource)
+        : Thread(thread_system, "extract", ThreadSystem::kJoinable),
+          resource_(resource),
+          ready_(thread_system),
+          go_(thread_system),
+          content_length_(-1) {}
+
+    void Run() override {
+      ready_.Notify();
+      go_.Wait();
+      resource_->ExtractUncompressedContents().CopyToString(&contents_);
+      resource_->UncompressedHeaders()->FindContentLength(&content_length_);
+    }
+
+    void WaitUntilReady() { ready_.Wait(); }
+    void Release() { go_.Notify(); }
+    const GoogleString& contents() const { return contents_; }
+    int64 content_length() const { return content_length_; }
+
+   private:
+    ResourcePtr resource_;
+    WorkerTestBase::SyncPoint ready_;
+    WorkerTestBase::SyncPoint go_;
+    GoogleString contents_;
+    int64 content_length_;
+  };
+
   UrlInputResource* MakeUrlInputResource(const GoogleString& url,
                                          bool is_authorized_domain) {
     return new UrlInputResource(rewrite_driver(), &kContentTypeJpeg, url,
@@ -212,6 +248,57 @@ TEST_F(UrlInputResourceTest, TestOversizedGzippedResourceNotInflated) {
       url, url, kTestDomain, true /* is_background_fetch */,
       false /* is_authorized_domain */, true /* is_auth_domain_expected */,
       "unauth://other.com/1.txt", kTestDomain);
+}
+
+// Two threads can each be the first to read the inflated contents of one
+// gzip-encoded input: on a fetch, the filter on the low-priority rewrite thread
+// and the deadline handler on the rewrite thread share the input. The body must
+// be inflated once, and both readers must see all of it with headers that
+// describe the inflated body.
+TEST_F(UrlInputResourceTest, ConcurrentFirstReadsOfGzippedResourceInflateOnce) {
+  // Large enough that one inflate is still running when the other reader
+  // arrives, and well inside the size we are willing to inflate.
+  const size_t kBodySize = 12 << 20;
+  GoogleString contents;
+  contents.reserve(kBodySize + 64);
+  for (int i = 0; contents.size() < kBodySize; ++i) {
+    StrAppend(&contents, "var v", IntegerToString(i), " = ",
+              IntegerToString(i * 31), ";\n");
+  }
+  GoogleString compressed;
+  StringWriter writer(&compressed);
+  ASSERT_TRUE(GzipInflater::Deflate(contents, GzipInflater::kGzip, &writer));
+
+  GoogleString url = "http://other.com/1.txt";
+  PrepareGzippedResourceFetch(url, compressed);
+  ResourcePtr resource(MakeUrlInputResource(url, false));
+  RequestContextPtr request_context(
+      RequestContext::NewTestRequestContext(factory()->thread_system()));
+  ResourceFetchHelper(url, url, kTestDomain, true /* is_background_fetch */,
+                      false /* is_authorized_domain */,
+                      true /* is_auth_domain_expected */, resource,
+                      "unauth://other.com/1.txt", kTestDomain, request_context);
+  // Nothing has read the contents yet, so the inflate is still ahead.
+
+  ExtractOnThread first(factory()->thread_system(), resource);
+  ExtractOnThread second(factory()->thread_system(), resource);
+  ASSERT_TRUE(first.Start());
+  ASSERT_TRUE(second.Start());
+  first.WaitUntilReady();
+  second.WaitUntilReady();
+  first.Release();
+  second.Release();
+  first.Join();
+  second.Join();
+
+  EXPECT_EQ(contents.size(), first.contents().size());
+  EXPECT_EQ(contents.size(), second.contents().size());
+  EXPECT_TRUE(contents == first.contents());
+  EXPECT_TRUE(contents == second.contents());
+  EXPECT_EQ(static_cast<int64>(contents.size()), first.content_length());
+  EXPECT_EQ(static_cast<int64>(contents.size()), second.content_length());
+  EXPECT_FALSE(
+      resource->UncompressedHeaders()->Has(HttpAttributes::kContentEncoding));
 }
 
 // Test of referer (BackgroundFetch): When the resource fetching request header
