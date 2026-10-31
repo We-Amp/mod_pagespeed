@@ -123,6 +123,7 @@ AGNOSTIC_FLAGS = {
     # warnings that both frontends accept
     "-Wall", "-Wextra",
     "-w",
+    "-Werror", "-ferror-limit=0",
     "-Wno-deprecated-declarations",
     "-Wno-unknown-warning-option",
     # debug-info level: valid for C and C++ alike (sanitizer configs use it
