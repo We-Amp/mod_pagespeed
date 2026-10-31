@@ -188,9 +188,9 @@ void CssHierarchyTest::ExpandHierarchy(CssHierarchy* top) {
   EXPECT_TRUE(top->Parse());
   EXPECT_TRUE(top->ExpandChildren());
 
-  GoogleString child_contents[] = {nested_child1_css_, nested_child2_css_};
-  GoogleString grandchild_contents[] = {kTopChild1Child1Css,
-                                        kTopChild2Child1Css};
+  const StringPiece child_contents[] = {nested_child1_css_, nested_child2_css_};
+  const StringPiece grandchild_contents[] = {kTopChild1Child1Css,
+                                             kTopChild2Child1Css};
 
   for (int i = 0, n = top->children().size(); i < n && i < 2; ++i) {
     CssHierarchy* child = top->children()[i];
