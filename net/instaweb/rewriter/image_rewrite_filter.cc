@@ -1386,21 +1386,16 @@ RewriteResult ImageRewriteFilter::RewriteLoadedResourceImpl(
   // the new dimension will be embedded into the rewritten image URL. However,
   // if reizing turns out to be a failure, we don't want the new dimension in
   // the rewritten URL. For the latter case, we will reset the "name" of the
-  // output resource.
+  // output resource. The name is relative to the output resource's own
+  // directory, which on a fetch is the directory of the requested URL and
+  // need not be the input's; so re-encode the URL that was decoded from the
+  // current name above, rather than the leaf of the input URL, and the
+  // renamed output keeps naming the resource it was made from.
   if (!is_resized) {
     resource_context.clear_desired_image_dims();
     GoogleString name;
-    GoogleUrl mapped_gurl;        // Not used
-    GoogleString failure_reason;  // Not used
-    if (driver()->GenerateOutputResourceNameAndUrl(
-            encoder(), &resource_context, input_resource, &name, &mapped_gurl,
-            &failure_reason)) {
-      result->mutable_full_name()->set_name(name);
-    } else {
-      LOG(DFATAL) << "Failed to generate name and URL for the output resource.";
-      image_ongoing_rewrites_->Add(-1);
-      return kRewriteFailed;
-    }
+    encoder_.Encode(urls, &resource_context, &name);
+    result->mutable_full_name()->set_name(name);
   }
 
   // Now re-compress the (possibly resized) image, and decide if it's

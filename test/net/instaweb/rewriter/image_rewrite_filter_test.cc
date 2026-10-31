@@ -2449,6 +2449,52 @@ TEST_F(ImageRewriteTest, FetchInvalid) {
   EXPECT_FALSE(FetchResourceUrl(encoded_url, &out));
 }
 
+TEST_F(ImageRewriteTest, UnresizedFetchFromOtherDirectoryStillNamesItsInput) {
+  // The name in a fetched URL may place the input in a directory other than
+  // the fetched URL's own (",_" in a name stands for "/"). When the image is
+  // recompressed but not resized, the output is renamed to drop the dimension
+  // prefix. That renamed URL is recorded for the input and later emitted into
+  // pages, so it must still decode to the input it was made from.
+  AddFilter(RewriteOptions::kRecompressJpeg);
+  GoogleString image_url = StrCat(kTestDomain, "images/photo.jpg");
+  AddFileToMockFetcher(image_url, kPuzzleJpgFile, kContentTypeJpeg, 100);
+  GoogleString out;
+  EXPECT_TRUE(FetchResourceUrl(
+      StrCat(kTestDomain, "assets/x,_images,_photo.jpg.pagespeed.ic.0.jpg"),
+      &out));
+
+  Parse("other_directory", "<img src='images/photo.jpg'>");
+  StringVector image_urls;
+  CollectImgSrcs("other_directory", output_buffer_, &image_urls);
+  ASSERT_EQ(1UL, image_urls.size());
+  GoogleUrl rewritten_gurl(html_gurl(), image_urls[0]);
+  StringVector decoded_urls;
+  ASSERT_TRUE(rewrite_driver()->DecodeUrl(rewritten_gurl, &decoded_urls));
+  ASSERT_EQ(1UL, decoded_urls.size());
+  EXPECT_EQ(image_url, decoded_urls[0]);
+}
+
+TEST_F(ImageRewriteTest, UnresizedRewriteDropsDimensionPrefix) {
+  // With resize_images on, the page's width and height go into the output
+  // name before the image is looked at. Here they equal the image's own size,
+  // so it is recompressed but not resized, and the name it ends up with must
+  // carry no dimension prefix.
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  rewrite_driver()->AddFilters();
+  AddFileToMockFetcher(StrCat(kTestDomain, kPuzzleJpgFile), kPuzzleJpgFile,
+                       kContentTypeJpeg, 100);
+  Parse("natural_size",
+        StrCat("<img src='", kPuzzleJpgFile, "' width='1023' height='766'>"));
+  StringVector image_urls;
+  CollectImgSrcs("natural_size", output_buffer_, &image_urls);
+  ASSERT_EQ(1UL, image_urls.size());
+  GoogleUrl rewritten_gurl(html_gurl(), image_urls[0]);
+  EXPECT_TRUE(rewritten_gurl.LeafSansQuery().starts_with(
+      StrCat("x", kPuzzleJpgFile, ".pagespeed.ic.")))
+      << image_urls[0];
+}
+
 TEST_F(ImageRewriteTest, Rewrite404) {
   // Make sure we don't fail when rewriting with invalid input.
   SetFetchResponse404("404.jpg");
