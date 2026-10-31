@@ -45,6 +45,11 @@ namespace {
 
 using SupportMap = std::map<GoogleString, int>;
 
+// Length of the nonces handed out by AddNonceToCriticalSelectors: the first
+// 11 web64 characters (66 bits) of an encoded 64-bit value. No nonce the
+// server issues is longer than this.
+const size_t kNonceSize = 11;
+
 // *dest += addend, but capping at kint32max
 inline void SaturatingAddTo(int32 addend, int32* dest) {
   int64 result = *dest;
@@ -146,9 +151,9 @@ void AddNonceToCriticalSelectors(const int64 timestamp_ms,
   StringPiece nonce_piece(reinterpret_cast<char*>(&nonce_value),
                           sizeof(nonce_value));
   Web64Encode(nonce_piece, nonce);
-  if (nonce->size() > 11) {
+  if (nonce->size() > kNonceSize) {
     // Only keep the first 66 bits of nonce since original value is 64 bits.
-    nonce->resize(11);
+    nonce->resize(kNonceSize);
   }
   ClearInvalidNonces(timestamp_ms, critical_keys);
   // Look for an invalid entry to reuse.
@@ -177,8 +182,12 @@ void AddNonceToCriticalSelectors(const int64 timestamp_ms,
 // AddNonceToCriticalSelectors.
 bool ValidateAndExpireNonce(int64 now_ms, StringPiece nonce,
                             CriticalKeys* critical_keys) {
-  if (nonce.empty()) {
-    // Someone sent us a clearly bogus beacon result.
+  if (nonce.empty() || nonce.size() > kNonceSize) {
+    // Someone sent us a clearly bogus beacon result. A nonce longer than any
+    // we issue is refused here rather than compared: ConstantTimeCompare below
+    // runs for the length of its longer argument, once per pending entry, so
+    // the sender must not get to choose that length. The length of a genuine
+    // nonce is public, so returning early here reveals nothing.
     return false;
   }
   ClearInvalidNonces(now_ms, critical_keys);
