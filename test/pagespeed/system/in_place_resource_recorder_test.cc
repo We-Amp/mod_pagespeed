@@ -448,6 +448,88 @@ TEST_F(InPlaceResourceRecorderTest, SplitOperationWithGzipWithCompressedCache) {
   TestWithGzip(kLateGzipHeader);
 }
 
+TEST_F(InPlaceResourceRecorderTest, BrotliResponseIsNotRecorded) {
+  // A reverse-proxied response in a coding the inflater cannot undo must not
+  // be recorded: stored byte for byte, it would be served as the identity
+  // form of the URL to every later client.  The coding is negotiated per
+  // request, so the URL is not remembered as uncacheable either.
+  DisableGzip();
+  ResponseHeaders prelim_headers;
+  prelim_headers.set_status_code(HttpStatus::kOK);
+  prelim_headers.Add(HttpAttributes::kContentEncoding, "br");
+
+  ResponseHeaders final_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &final_headers);
+  final_headers.Add(HttpAttributes::kContentEncoding, "br");
+  final_headers.ComputeCaching();
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+  EXPECT_TRUE(recorder->failed());
+  // Stands in for a compressed body: bytes that are not the stylesheet.
+  recorder->Write("not the identity form of the resource", message_handler());
+  recorder.release()->DoneAndSetHeaders(&final_headers, true /* complete */);
+
+  HTTPValue value_out;
+  ResponseHeaders headers_out;
+  EXPECT_EQ(kNotFoundResult,
+            HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+  EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_failed"));
+  EXPECT_EQ(1, IproVar("ipro_recorder_skipped_transient"));
+  ExpectTerminalInvariant();
+  EXPECT_THAT(MessageDump(),
+              ::testing::HasSubstr("unsupported Content-Encoding"));
+}
+
+TEST_F(InPlaceResourceRecorderTest, StackedContentCodingsAreNotRecorded) {
+  // The inflater undoes only the last coding of a list, so a stacked list --
+  // in one header value, one coding per header line, or two gzip layers -- is
+  // as unrecordable as a coding it does not know.
+  struct Case {
+    std::vector<GoogleString> codings;
+  } const cases[] = {
+      {{"br"}},         {{"zstd"}},         {{"gzip, br"}},
+      {{"gzip", "br"}}, {{"gzip", "gzip"}}, {{"gzip, deflate"}},
+  };
+  for (const Case& c : cases) {
+    ResponseHeaders prelim_headers;
+    prelim_headers.set_status_code(HttpStatus::kOK);
+    for (const GoogleString& coding : c.codings) {
+      prelim_headers.Add(HttpAttributes::kContentEncoding, coding);
+    }
+    std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+    recorder->ConsiderResponseHeaders(
+        InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+    EXPECT_TRUE(recorder->failed())
+        << "Content-Encoding: " << JoinCollection(c.codings, ", ");
+  }
+}
+
+TEST_F(InPlaceResourceRecorderTest, SingleGzipOrDeflateCodingStillRecords) {
+  // What the inflater does undo keeps recording: no coding, identity, a lone
+  // gzip or deflate, also when identity is stated on its own header line.
+  // DecompressGzipIfNeeded above carries the gzip case through to the cache.
+  struct Case {
+    std::vector<GoogleString> codings;
+  } const cases[] = {
+      {{}}, {{"gzip"}}, {{"deflate"}}, {{"identity"}}, {{"identity", "gzip"}},
+  };
+  for (const Case& c : cases) {
+    ResponseHeaders prelim_headers;
+    prelim_headers.set_status_code(HttpStatus::kOK);
+    for (const GoogleString& coding : c.codings) {
+      prelim_headers.Add(HttpAttributes::kContentEncoding, coding);
+    }
+    std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+    recorder->ConsiderResponseHeaders(
+        InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+    EXPECT_FALSE(recorder->failed())
+        << "Content-Encoding: " << JoinCollection(c.codings, ", ");
+  }
+}
+
 TEST_F(InPlaceResourceRecorderTest, BailEarlyOnUnexpectedContentType) {
   EXPECT_STREQ("prelim", BailsForContentType(kContentTypeHtml.mime_type()));
   EXPECT_STREQ("prelim", BailsForContentType(kContentTypePdf.mime_type()));
