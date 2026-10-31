@@ -41,10 +41,12 @@ class HeaderUtilTest : public testing::Test {
     MockApache::PrepareRequest(&request_);
     // request_ starts as an uninitialized C struct: PrepareRequest fills the
     // pool and the tables it needs, and the two AddOriginContentEncoding
-    // reads would otherwise be reads of whatever was in the struct.
+    // reads and the ApplyInPlaceSMaxAge read of user would otherwise be reads
+    // of whatever was in the struct.
     request_.err_headers_out = apr_table_make(request_.pool, 10);
     request_.content_encoding = nullptr;
     request_.method = "GET";
+    request_.user = nullptr;
   }
 
   void TearDown() override {
@@ -322,6 +324,47 @@ TEST_F(InPlaceSMaxAgeTest, PrivateInErrHeadersOutLeavesTablesUntouched) {
   EXPECT_FALSE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
   EXPECT_EQ(nullptr, GetCacheControl());
   EXPECT_EQ(1, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, AuthorizedRequestIsNotStamped) {
+  // s-maxage lets a shared cache store the response to a request that carried
+  // Authorization and reuse it for other clients, so the origin's
+  // Cache-Control goes out as sent.
+  apr_table_set(request_.headers_in, HttpAttributes::kAuthorization,
+                "Basic dXNlcjE6cGFzc3dvcmQ=");
+  SetCacheControl("max-age=600");
+  bool had = false;
+  GoogleString original;
+  EXPECT_FALSE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_STREQ("max-age=600", GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.headers_out));
+  EXPECT_EQ(0, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, AuthorizedRequestWithoutCacheControlIsNotStamped) {
+  // With no Cache-Control from the origin, the response to an authenticated
+  // request stays without one rather than gaining s-maxage alone.
+  apr_table_set(request_.headers_in, HttpAttributes::kAuthorization,
+                "Bearer dXNlcjE6cGFzc3dvcmQ=");
+  bool had = true;
+  GoogleString original;
+  EXPECT_FALSE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_EQ(nullptr, GetCacheControl());
+  EXPECT_EQ(0, CountCacheControl(request_.err_headers_out));
+}
+
+TEST_F(InPlaceSMaxAgeTest, AuthenticatedUserIsNotStamped) {
+  // Apache sets request->user for a request it authenticated by any scheme,
+  // with or without an Authorization header; the recorder classifies that
+  // request as authorized, and so does the stamp.
+  static char kUser[] = "user1";
+  request_.user = kUser;
+  SetCacheControl("max-age=600");
+  bool had = false;
+  GoogleString original;
+  EXPECT_FALSE(ApplyInPlaceSMaxAge(&request_, 10, &had, &original));
+  EXPECT_STREQ("max-age=600", GetCacheControl());
+  EXPECT_EQ(1, CountCacheControl(request_.headers_out));
 }
 
 TEST_F(HeaderUtilTest, SelectiveRequestHeaders) {

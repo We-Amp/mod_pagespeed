@@ -234,6 +234,34 @@ class TestNginxIproHeaderPreservation:
         # IPRO typically uses the origin's TTL or a reasonable default
         assert max_age > 0, f"max-age should be positive, got {max_age}"
 
+    @pytest.mark.nginx_only
+    @pytest.mark.requires_module
+    def test_ipro_authorized_response_gets_no_shared_cache_lifetime(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        """An authorized response keeps the origin's Cache-Control as sent.
+
+        auth/ is behind auth_basic (user1) in the lane config.  While a
+        resource is unoptimized the module merges a short s-maxage into the
+        response, but s-maxage lets a shared cache store the response to a
+        request that carried Authorization and reuse it for other clients.
+        The origin sends no Cache-Control here, and the module must not add
+        one, on the first fetch or any later one.
+        """
+        url = f"{test_root}/auth/medium_purple.css?r={random.randint(1, 100000)}"
+        headers = {"Authorization": "Basic dXNlcjE6cGFzc3dvcmQ="}
+
+        assert_http_status(client.get(url), 401)
+
+        for _ in range(2):
+            response = client.get(url, headers=headers)
+            assert_http_status(response, 200)
+            assert_contains(response, "background: MediumPurple;")
+            cache_control = response.header("Cache-Control") or ""
+            assert "s-maxage" not in cache_control, (
+                f"authorized response carries Cache-Control [{cache_control}]"
+            )
+
 class TestNginxIproGzipHandling:
     """Tests for IPRO with gzip compression on nginx."""
 

@@ -762,9 +762,33 @@ TEST_F(NgxDaemonSeamTest, TheSmaxageRewriteSkipsTheDaemonSubstrate) {
          "updating";
   const GoogleString body = cc.substr(fn, fn_end - fn);
   EXPECT_NE(GoogleString::npos,
-            body.find("if(ctx&&ctx->recorder&&!ctx->daemon_recorder){"))
+            body.find("if(ctx&&ctx->recorder&&!ctx->daemon_recorder&&"))
       << "the s-maxage rewrite applies to a daemon-side recorder; on that "
          "substrate the response served is the origin's own";
+}
+
+TEST_F(NgxDaemonSeamTest, TheSmaxageRewriteSkipsAnAuthorizedRequest) {
+  // s-maxage lets a shared cache store the response to a request that carried
+  // Authorization and reuse it for other clients (RFC 9111 section 3.5), so
+  // the gate reads the request header nginx parsed -- the same header the
+  // recorder's has_authorization is computed from.  The gate runs inside a
+  // live nginx, so this pin is the unit-level hold on it; the lane test in
+  // test/system/nginx/test_nginx_ipro.py covers the behaviour.
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  const size_t fn = cc.find("ps_etag_header_filter(ngx_http_request_t*r");
+  ASSERT_NE(GoogleString::npos, fn)
+      << "ps_etag_header_filter was renamed; this pin needs updating";
+  const size_t fn_end = cc.find("staticngx_int_tps_read_file_buffer(", fn);
+  ASSERT_NE(GoogleString::npos, fn_end)
+      << "the function after ps_etag_header_filter moved; this pin needs "
+         "updating";
+  const GoogleString body = cc.substr(fn, fn_end - fn);
+  EXPECT_NE(GoogleString::npos,
+            body.find("if(ctx&&ctx->recorder&&!ctx->daemon_recorder&&"
+                      "r->headers_in.authorization==nullptr){"))
+      << "the s-maxage rewrite applies to the response to a request that "
+         "carried Authorization; s-maxage lets a shared cache store that "
+         "response and reuse it for other clients";
 }
 
 TEST_F(NgxDaemonSeamTest, TheCompletionPoolIsOwnedByTheRecordArm) {
