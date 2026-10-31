@@ -83,6 +83,7 @@ class CssInlineFilter : public CommonFilter {
 
   bool ShouldInline(const ResourcePtr& resource,
                     const StringPiece& attrs_attribute,
+                    const StringPiece& htmls_charset,
                     GoogleString* reason) const;
   void RenderInline(const ResourcePtr& resource, const CachedResult& cached,
                     const GoogleUrl& base_url, const StringPiece& text,

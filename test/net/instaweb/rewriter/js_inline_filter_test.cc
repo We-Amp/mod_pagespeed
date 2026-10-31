@@ -26,6 +26,7 @@
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/response_headers.h"
@@ -703,6 +704,67 @@ TEST_F(JsInlineFilterTest, CharsetMatchInlined) {
   const char kUtf8Page[] = "<meta charset=\"utf-8\">";
   ValidateExpected("match", StrCat(kUtf8Page, "<script src=utf8.js></script>"),
                    StrCat(kUtf8Page, "<script>", body, "</script>"));
+}
+
+// Two pages in different charsets share one script whose charset is given by
+// the <script charset=> attribute. Whichever page is rewritten first, the utf-8
+// page gets the script inlined and the gbk page keeps it external: the answer
+// is not carried from one page to the other through the metadata cache.
+TEST_F(JsInlineFilterTest, SharedScriptDecidedPerPageCharsetInEitherOrder) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  const GoogleString body = "var s = '\xE4\xB8\xAD';\n";
+  SetResponseWithDefaultHeaders(StrCat(kTestDomain, "shared.js"),
+                                kContentTypeJavascript, body, 3000);
+  const char kUtf8Page[] = "<meta charset=\"utf-8\">";
+  const char kGbkPage[] = "<meta charset=\"gbk\">";
+  const char kScript[] = "<script src=shared.js charset=utf-8></script>";
+  const GoogleString inlined =
+      StrCat("<script charset=utf-8>", body, "</script>");
+
+  ValidateExpected("utf8_first", StrCat(kUtf8Page, kScript),
+                   StrCat(kUtf8Page, inlined));
+  ValidateNoChanges("gbk_second", StrCat(kGbkPage, kScript));
+
+  lru_cache()->Clear();
+  ValidateNoChanges("gbk_first", StrCat(kGbkPage, kScript));
+  ValidateExpected("utf8_second", StrCat(kUtf8Page, kScript),
+                   StrCat(kUtf8Page, inlined));
+}
+
+// Here the script's charset comes from its Content-Type, and the script is
+// minified before the inliner looks at it. The page rewritten second gets the
+// minified script rebuilt from the metadata cache; it must still carry that
+// charset, so that a page in another charset is decided on its own.
+TEST_F(JsInlineFilterTest, MinifiedScriptKeepsItsCharsetForEachPage) {
+  SetHtmlMimetype();
+  options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
+  options()->EnableFilter(RewriteOptions::kInlineJavascript);
+  rewrite_driver()->AddFilters();
+
+  ResponseHeaders utf8_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeJavascript, &utf8_headers);
+  utf8_headers.MergeContentType("text/javascript; charset=UTF-8");
+  const char kNonAscii[] = "\xE4\xB8\xAD";
+  const GoogleString body =
+      StrCat("var s = '", kNonAscii, "';  // trimmed by the minifier\n");
+  SetFetchResponse(StrCat(kTestDomain, "shared.js"), utf8_headers, body);
+  const char kUtf8Page[] =
+      "<meta charset=\"utf-8\"><script src=shared.js></script>";
+  const char kGbkPage[] =
+      "<meta charset=\"gbk\"><script src=shared.js></script>";
+
+  // The utf-8 page gets the script inlined; the gbk page keeps it external.
+  Parse("utf8_first", kUtf8Page);
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("src=")) << output_buffer_;
+  Parse("gbk_second", kGbkPage);
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("src=")) << output_buffer_;
+
+  lru_cache()->Clear();
+  Parse("gbk_first", kGbkPage);
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("src=")) << output_buffer_;
+  Parse("utf8_second", kUtf8Page);
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("src=")) << output_buffer_;
 }
 
 // A BOM names the script's charset when nothing else does.

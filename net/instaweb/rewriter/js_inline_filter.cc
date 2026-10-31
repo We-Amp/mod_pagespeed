@@ -30,6 +30,7 @@
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/charset_util.h"
+#include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -52,11 +53,15 @@ class JsInlineFilter::Context : public InlineRewriteContext {
     if (charset != nullptr) {
       attrs_charset_ = GoogleString(charset);
     }
+    // Taken now, while the page is parsed: the cache key and the decision in
+    // ShouldInline() are both made later and must see the same page charset.
+    filter->driver()->containing_charset().CopyToString(&htmls_charset_);
   }
 
   bool ShouldInline(const ResourcePtr& resource,
                     GoogleString* reason) const override {
-    return filter_->ShouldInline(resource, attrs_charset_, reason);
+    return filter_->ShouldInline(resource, attrs_charset_, htmls_charset_,
+                                 reason);
   }
 
   void RenderInline(const ResourcePtr& resource, const StringPiece& text,
@@ -66,6 +71,16 @@ class JsInlineFilter::Context : public InlineRewriteContext {
 
   const char* id() const override {
     return RewriteOptions::kJavascriptInlineId;
+  }
+
+  // ShouldInline() depends on the charsets of the page and of the <script>
+  // element, not only on the script, so pages that differ in either must not
+  // share a metadata cache entry. Both values are page text, so they enter
+  // the key as a hash.
+  GoogleString CacheKeySuffix() const override {
+    GoogleString charsets = StrCat(htmls_charset_, "/", attrs_charset_);
+    LowerString(&charsets);
+    return FindServerContext()->lock_hasher()->Hash(charsets);
   }
 
   bool PolicyPermitsRendering() const override {
@@ -79,6 +94,7 @@ class JsInlineFilter::Context : public InlineRewriteContext {
  private:
   JsInlineFilter* filter_;
   GoogleString attrs_charset_;
+  GoogleString htmls_charset_;
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
 };
@@ -161,6 +177,7 @@ void JsInlineFilter::EndElementImpl(HtmlElement* element) {
 
 bool JsInlineFilter::ShouldInline(const ResourcePtr& resource,
                                   const StringPiece& attrs_charset,
+                                  const StringPiece& htmls_charset,
                                   GoogleString* reason) const {
   // Don't inline if it's too big.
   StringPiece contents(resource->ExtractUncompressedContents());
@@ -184,7 +201,6 @@ bool JsInlineFilter::ShouldInline(const ResourcePtr& resource,
   // The bytes are copied into the page as they are, so a script in a different
   // charset than the page is only safe to inline when every byte means the
   // same in both (plain ASCII; NUL bytes betray UTF-16/32).
-  StringPiece htmls_charset(driver()->containing_charset());
   StringPiece script_charset = RewriteFilter::GetCharsetForScript(
       resource.get(), attrs_charset, htmls_charset);
   if (!StringCaseEqual(htmls_charset, script_charset)) {

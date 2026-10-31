@@ -73,6 +73,7 @@ class JsInlineFilter : public CommonFilter {
 
   bool ShouldInline(const ResourcePtr& resource,
                     const StringPiece& attrs_charset,
+                    const StringPiece& htmls_charset,
                     GoogleString* reason) const;
   void RenderInline(const ResourcePtr& resource, const StringPiece& text,
                     HtmlElement* element);

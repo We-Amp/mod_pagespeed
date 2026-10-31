@@ -621,6 +621,64 @@ TEST_F(CssInlineFilterTest, DoInlineWithIncompatibleBomAndAscii) {
       "", css_with_bom, true, css, "");
 }
 
+// Two pages in different charsets share one stylesheet whose charset is given
+// by the <link charset=> attribute. Whichever page is rewritten first, the
+// utf-8 page gets the stylesheet inlined and the gbk page keeps it external:
+// the answer is not carried from one page to the other through the metadata
+// cache.
+TEST_F(CssInlineFilterTest,
+       SharedStylesheetDecidedPerPageCharsetInEitherOrder) {
+  AddFilter(RewriteOptions::kInlineCss);
+  const GoogleString css = "a:after{content:'\xE4\xB8\xAD'}";
+  SetResponseWithDefaultHeaders(StrCat(kTestDomain, "shared.css"),
+                                kContentTypeCss, css, 3000);
+  const char kUtf8Page[] = "<meta charset=\"utf-8\">";
+  const char kGbkPage[] = "<meta charset=\"gbk\">";
+  const char kLink[] = "<link rel=stylesheet href=shared.css charset=utf-8>";
+  const GoogleString inlined = StrCat("<style charset=utf-8>", css, "</style>");
+
+  ValidateExpected("utf8_first", StrCat(kUtf8Page, kLink),
+                   StrCat(kUtf8Page, inlined));
+  ValidateNoChanges("gbk_second", StrCat(kGbkPage, kLink));
+
+  lru_cache()->Clear();
+  ValidateNoChanges("gbk_first", StrCat(kGbkPage, kLink));
+  ValidateExpected("utf8_second", StrCat(kUtf8Page, kLink),
+                   StrCat(kUtf8Page, inlined));
+}
+
+// Here the stylesheet's charset comes from its Content-Type, and the stylesheet
+// is minified before the inliner looks at it. The page rewritten second gets
+// the minified stylesheet rebuilt from the metadata cache; it must still carry
+// that charset, so that a page in another charset is decided on its own.
+TEST_F(CssInlineFilterTest, MinifiedStylesheetKeepsItsCharsetForEachPage) {
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kInlineCss);
+  rewrite_driver()->AddFilters();
+
+  ResponseHeaders utf8_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &utf8_headers);
+  utf8_headers.MergeContentType("text/css; charset=UTF-8");
+  const GoogleString css = "a:after { content: '\xE4\xB8\xAD'; }\n";
+  SetFetchResponse(StrCat(kTestDomain, "shared.css"), utf8_headers, css);
+  const char kUtf8Page[] =
+      "<meta charset=\"utf-8\"><link rel=stylesheet href=shared.css>";
+  const char kGbkPage[] =
+      "<meta charset=\"gbk\"><link rel=stylesheet href=shared.css>";
+
+  // The utf-8 page gets the stylesheet inlined; the gbk page keeps a link.
+  Parse("utf8_first", kUtf8Page);
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("href=")) << output_buffer_;
+  Parse("gbk_second", kGbkPage);
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("href=")) << output_buffer_;
+
+  lru_cache()->Clear();
+  Parse("gbk_first", kGbkPage);
+  EXPECT_NE(GoogleString::npos, output_buffer_.find("href=")) << output_buffer_;
+  Parse("utf8_second", kUtf8Page);
+  EXPECT_EQ(GoogleString::npos, output_buffer_.find("href=")) << output_buffer_;
+}
+
 // See: http://www.alistapart.com/articles/alternate/
 //  and http://www.w3.org/TR/html4/present/styles.html#h-14.3.1
 TEST_F(CssInlineFilterTest, AlternateStylesheet) {
