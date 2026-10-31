@@ -833,7 +833,7 @@ void SystemRewriteDriverFactory::LogThreadCountResolution() {
   if (concurrent_processes_ <= 0) {
     EmitThreadCountSummary(
         true,
-        StringPrintf(
+        absl::StrFormat(
             "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
             "(per server process). Could not determine how many server "
             "processes share this machine, so the minimum was used; set "
@@ -847,7 +847,7 @@ void SystemRewriteDriverFactory::LogThreadCountResolution() {
   }
   EmitThreadCountSummary(
       false,
-      StringPrintf(
+      absl::StrFormat(
           "PageSpeed optimization threads: %d rewrite, %d expensive rewrite "
           "(per server process). Effective CPU budget: %d whole cores "
           "(limited by %s); server processes: %d; %s. Override with "
