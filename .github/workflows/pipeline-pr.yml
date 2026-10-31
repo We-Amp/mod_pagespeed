@@ -3010,7 +3010,7 @@ jobs:
     needs: [changes, windows-build, windows-unit-tests]
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
     if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.changes.outputs.iis == 'true' }}
-    timeout-minutes: 100
+    timeout-minutes: 130
     defaults:
       run:
         shell: powershell
@@ -3148,10 +3148,10 @@ jobs:
       # last step of the job releases it (tools/ci/Hold-HostLock.ps1); if the
       # job is cancelled, ending its processes frees the mutex as well.
       - name: Wait for the host's IIS test slot
-        timeout-minutes: 50
+        timeout-minutes: 80
         run: |
           $ErrorActionPreference = 'Stop'
-          .\tools\ci\Hold-HostLock.ps1 -Action acquire -WaitMinutes 45
+          .\tools\ci\Hold-HostLock.ps1 -Action acquire -WaitMinutes 75 -MaxHoldMinutes 120
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # A previous job may have left Application Verifier or page heap armed

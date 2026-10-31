@@ -1446,7 +1446,7 @@ jobs:
     needs: windows-build
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-iis' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
-    timeout-minutes: 90
+    timeout-minutes: 170
     defaults:
       run:
         shell: powershell
@@ -1511,6 +1511,16 @@ jobs:
             exit 1
           }
           Write-Host "pagespeed_iis.dll verified against the bundle checksum"
+
+      # Runners that share a host share ports 8080 and 8443 and the host-wide
+      # Application Verifier settings, so only one IIS job runs on a host at a
+      # time; see tools/ci/Hold-HostLock.ps1 and the PR lane's job.
+      - name: Wait for the host's IIS test slot
+        timeout-minutes: 80
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tools\ci\Hold-HostLock.ps1 -Action acquire -WaitMinutes 75 -MaxHoldMinutes 100
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Purge the pagespeed cache and recycle DefaultAppPool
         run: |
@@ -1695,6 +1705,14 @@ jobs:
           } catch { Write-Host "LocalDumps cleanup: $($_.Exception.Message)" }
           Remove-Item -LiteralPath (Join-Path $env:APPVERIF_DUMP_ROOT 'staged') -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "Application Verifier and page heap disabled, LocalDumps removed"
+
+      - name: Release the host's IIS test slot
+        if: always()
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Continue'
+          .\tools\ci\Hold-HostLock.ps1 -Action release
+          $global:LASTEXITCODE = 0
 
   # ---------------------------------------------------------------------
   # Linux arm64 on hosted arm64 runners (there is no arm64 class). The

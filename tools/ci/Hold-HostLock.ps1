@@ -24,8 +24,8 @@ param(
   [Parameter(Mandatory = $true)][ValidateSet('acquire', 'release', 'hold')][string]$Action,
   [string]$Name = 'Global\WeAmp-IIS-SystemTests',
   [string]$StateDir = $(if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'host-lock' } else { Join-Path $env:TEMP 'host-lock' }),
-  [int]$WaitMinutes = 45,
-  [int]$MaxHoldMinutes = 90
+  [int]$WaitMinutes = 75,
+  [int]$MaxHoldMinutes = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,7 +62,11 @@ if ($Action -eq 'acquire') {
   $argList = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$self`"",
     '-Action', 'hold', '-Name', $Name, '-StateDir', "`"$StateDir`"",
     '-WaitMinutes', $WaitMinutes, '-MaxHoldMinutes', $MaxHoldMinutes)
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -WindowStyle Hidden -PassThru
+  # Redirected output keeps the holder from holding this step's output pipe
+  # open, which would stall the step until its timeout.
+  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -WindowStyle Hidden -PassThru `
+    -RedirectStandardOutput (Join-Path $StateDir 'holder.out.log') `
+    -RedirectStandardError (Join-Path $StateDir 'holder.err.log')
   Set-Content -LiteralPath $pidFile -Value $p.Id
   $limit = $started.AddMinutes($WaitMinutes + 1)
   while (-not (Test-Path -LiteralPath $ready)) {
