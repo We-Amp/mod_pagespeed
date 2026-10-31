@@ -12,6 +12,5 @@ name: mod_pagespeed CodeQL configuration
 paths-ignore:
   - pagespeed/system/console/admin_console.html
 
-# The *_dbg.js scripts here are build outputs generated from sources that are
-# analysed directly, like the console bundle above.
+# Generated scripts and their embedded copies, built from sources that are analysed directly.
   - net/instaweb/rewriter/generated/
