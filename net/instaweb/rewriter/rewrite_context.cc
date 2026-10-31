@@ -2668,7 +2668,10 @@ bool RewriteContext::PrepareFetch(const OutputResourcePtr& output_resource,
     EncodeUserAgentIntoResourceContext(resource_context_.get());
   }
   if (DecodeFetchUrls(output_resource, message_handler, &url_vector)) {
-    bool is_valid = true;
+    // A name that decodes to no URLs at all names nothing to reconstruct
+    // from, and the filters' Rewrite() implementations expect at least one
+    // slot, so refuse it the same way as a name that does not decode.
+    bool is_valid = !url_vector.empty();
     for (auto url : url_vector) {
       if (!url->IsWebValid()) {
         is_valid = false;

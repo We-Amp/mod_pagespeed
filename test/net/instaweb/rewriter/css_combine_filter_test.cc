@@ -1697,6 +1697,13 @@ TEST_F(CssCombineFilterTest, InvalidFetchCache) {
                                       CssLinkHref("404b.css")));
 }
 
+TEST_F(CssCombineFilterTest, FetchWithNoInputsIsRefused) {
+  // A combined-resource URL whose name lists no inputs has nothing to
+  // reconstruct from; it must be refused before it reaches the combiner.
+  EXPECT_FALSE(TryFetchResource(
+      Encode(kTestDomain, RewriteOptions::kCssCombinerId, "0", "", "css")));
+}
+
 TEST_F(CssCombineFilterTest, NoCombineParseErrors) {
   // Notice: This CSS file does not close its { and thus will break the
   // next stylesheet if they are combined, changing the page.

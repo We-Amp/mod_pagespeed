@@ -1014,6 +1014,12 @@ TEST_F(JsCombineFilterTest, PartlyInvalidFetchCache) {
                                              "<script src=404.js></script>"));
 }
 
+TEST_F(JsCombineFilterTest, FetchWithNoInputsIsRefused) {
+  // A combined-resource URL whose name lists no inputs has nothing to
+  // reconstruct from; it must be refused before it reaches the combiner.
+  EXPECT_FALSE(TryFetchResource(Encode(kTestDomain, "jc", "0", "", "js")));
+}
+
 TEST_F(JsCombineFilterTest, CharsetDetermination) {
   GoogleString x_js_url = "x.js";
   GoogleString y_js_url = "y.js";

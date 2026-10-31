@@ -251,6 +251,11 @@ OutputResourcePtr ResourceCombiner::Combine(MessageHandler* handler) {
 bool ResourceCombiner::WriteCombination(const ResourceVector& combine_resources,
                                         const OutputResourcePtr& combination,
                                         MessageHandler* handler) {
+  if (combine_resources.empty()) {
+    // There is nothing to combine, and the output headers below start from
+    // those of the first input.
+    return false;
+  }
   bool written = true;
   // TODO(sligocki): Write directly to a temp file rather than doing the extra
   // string copy.
