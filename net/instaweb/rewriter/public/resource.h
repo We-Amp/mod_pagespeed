@@ -46,6 +46,7 @@
 
 namespace net_instaweb {
 
+class AbstractMutex;
 class CachedResult;
 class GoogleUrl;
 class InputInfo;
@@ -159,15 +160,19 @@ class Resource : public RefCounted<Resource> {
   int64 CacheExpirationTimeMs() const;
 
   // Returns the uncompressed contents stored in value_. Although this is marked
-  // as const, it mutates the internal state of this object and is not thread
-  // safe. If you need headers at the same time, make sure to use
-  // UncompressedHeaders() at the same time.
+  // as const, the first call inflates a gzip-encoded body into the internal
+  // state of this object. That step is serialized by extract_mutex_, because a
+  // fetch reads one input from both the rewrite thread and the low-priority
+  // rewrite thread; a caller that arrives while the inflate is in progress
+  // waits for it. The result is only read until the next Link(). If you need
+  // headers at the same time, make sure to use UncompressedHeaders() at the
+  // same time.
   StringPiece ExtractUncompressedContents() const;
   const ResponseHeaders* UncompressedHeaders() const;
 
   // Returns the size of the the ExtractUncompressedContents(). Like
   // ExtractUncompressedContents(), this method can mutate the internal state of
-  // the object and is not thread safe.
+  // the object.
   size_t UncompressedContentsSize() const {
     StringPiece val = ExtractUncompressedContents();
     return val.length();
@@ -341,13 +346,16 @@ class Resource : public RefCounted<Resource> {
   bool disable_rewrite_on_no_transform_;
   bool is_authorized_domain_;
   ResponseHeaders::VaryOption respect_vary_;
+
+  // Held while the extracted_* members below are computed or invalidated.
+  std::unique_ptr<AbstractMutex> extract_mutex_;
   mutable enum ExtractState {
     kExtractNotComputed,
     kExtractUseBase,
     kExtractUseExtracted
-  } extracted_state_;
-  mutable GoogleString extracted_contents_;
-  mutable std::unique_ptr<ResponseHeaders> extracted_headers_;
+  } extracted_state_;                        // guarded by extract_mutex_
+  mutable GoogleString extracted_contents_;  // same
+  mutable std::unique_ptr<ResponseHeaders> extracted_headers_;  // same
 
   Resource(const Resource&) = delete;
   Resource& operator=(const Resource&) = delete;
