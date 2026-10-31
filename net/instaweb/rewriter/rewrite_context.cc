@@ -642,6 +642,10 @@ class RewriteContext::ResourceReconstructCallback
     // Compute the final post-write state of the object, including the hash.
     // Also takes care of dropping creation lock.
     resource_->EndWrite(driver_->message_handler());
+    // An output written by a rewrite learns its charset from that rewrite; one
+    // rebuilt here has only its response headers to go by. Later rewrites that
+    // compare the resource's charset with the page's rely on it being set.
+    resource_->set_charset(response_headers()->DetermineCharset());
 
     // Make sure to compute the URL, as we'll be killing the rewrite driver
     // shortly, and the driver is needed for URL computation.

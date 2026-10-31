@@ -31,7 +31,10 @@
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/charset_util.h"
+#include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
@@ -55,11 +58,25 @@ class CssInlineFilter::Context : public InlineRewriteContext {
     if (charset != nullptr) {
       attrs_charset_ = GoogleString(charset);
     }
+    // Taken now, while the page is parsed: the cache key and the decision in
+    // ShouldInline() are both made later and must see the same page charset.
+    filter->driver()->containing_charset().CopyToString(&htmls_charset_);
   }
 
   bool ShouldInline(const ResourcePtr& resource,
                     GoogleString* reason) const override {
-    return filter_->ShouldInline(resource, attrs_charset_, reason);
+    return filter_->ShouldInline(resource, attrs_charset_, htmls_charset_,
+                                 reason);
+  }
+
+  // ShouldInline() depends on the charsets of the page and of the <link>
+  // element, not only on the stylesheet, so pages that differ in either must
+  // not share a metadata cache entry. Both values are page text, so they enter
+  // the key as a hash.
+  GoogleString CacheKeySuffix() const override {
+    GoogleString charsets = StrCat(htmls_charset_, "/", attrs_charset_);
+    LowerString(&charsets);
+    return FindServerContext()->lock_hasher()->Hash(charsets);
   }
 
   bool PolicyPermitsRendering() const override {
@@ -85,6 +102,7 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   CssInlineFilter* filter_;
   GoogleUrl base_url_;
   GoogleString attrs_charset_;
+  GoogleString htmls_charset_;
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -182,6 +200,7 @@ bool CssInlineFilter::HasClosingStyleTag(StringPiece contents) {
 
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
                                    const StringPiece& attrs_charset,
+                                   const StringPiece& htmls_charset,
                                    GoogleString* reason) const {
   // If the contents are bigger than our threshold, don't inline.
   StringPiece contents(resource->ExtractUncompressedContents());
@@ -205,7 +224,6 @@ bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
 
   // If the charset is incompatible with the HTML's, we may not be able to
   // inline.
-  StringPiece htmls_charset(driver()->containing_charset());
   GoogleString css_charset = RewriteFilter::GetCharsetForStylesheet(
       resource.get(), attrs_charset, htmls_charset);
   if (!StringCaseEqual(htmls_charset, css_charset)) {
