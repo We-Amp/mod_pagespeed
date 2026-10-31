@@ -219,28 +219,58 @@ mkdir -p /var/www/html
 echo '<html><body><p>EA4 smoke</p></body></html>' > /var/www/html/index.html
 chown nobody:nobody /var/www/html/index.html
 
-HDR_VALUE=""
-# 12 attempts × 2s = 24s upper bound. First-request readiness has been
-# observed to take up to ~12s on a cold cache dir under EL9 (slower disk
-# on the CI VM); the previous 16s budget (8×2s) was just on the edge.
-for attempt in $(seq 1 12); do
-    CURL_HEAD="$(curl -sI --max-time 5 -H 'Host: localhost' http://localhost/ 2>&1 || true)"
-    HDR_LINE="$(printf '%s\n' "$CURL_HEAD" \
-        | grep -iE '^X-Mod-Pagespeed|^X-Page-Speed' || true)"
-    if [ -n "$HDR_LINE" ]; then
-        HDR_VALUE="$HDR_LINE"
-        log "  attempt ${attempt}/12: header observed"
-        break
-    fi
-    STATUS_LINE="$(printf '%s\n' "$CURL_HEAD" | head -1 | tr -d '\r')"
-    log "  attempt ${attempt}/12: no header yet (status: ${STATUS_LINE:-no response})"
-    sleep 2
-done
-
-if [ -z "$HDR_VALUE" ]; then
+# fetch_pagespeed_header: poll up to 12 x 2s (first-request readiness has been
+# observed to take up to ~12s on a cold cache dir under EL9). Sets CURL_HEAD
+# (the full response head) and HDR_VALUE (the PageSpeed header line, CR
+# stripped); fails the run when no header shows up.
+fetch_pagespeed_header() {
+    HDR_VALUE=""
+    for attempt in $(seq 1 12); do
+        CURL_HEAD="$(curl -sI --max-time 5 -H 'Host: localhost' http://localhost/ 2>&1 || true)"
+        HDR_VALUE="$(printf '%s\n' "$CURL_HEAD" \
+            | grep -iE '^X-Mod-Pagespeed|^X-Page-Speed' | head -1 | tr -d '\r' || true)"
+        if [ -n "$HDR_VALUE" ]; then
+            log "  attempt ${attempt}/12: header observed"
+            return 0
+        fi
+        STATUS_LINE="$(printf '%s\n' "$CURL_HEAD" | head -1 | tr -d '\r')"
+        log "  attempt ${attempt}/12: no header yet (status: ${STATUS_LINE:-no response})"
+        sleep 2
+    done
     log "Failed to observe X-Mod-Pagespeed header after 12 attempts"
     fail "X-Mod-Pagespeed header missing"
-fi
+}
+
+# restart_and_wait_httpd: restart via cPanel's wrapper, then wait for :80 to answer.
+restart_and_wait_httpd() {
+    /scripts/restartsrv_httpd >/dev/null 2>&1 || fail "/scripts/restartsrv_httpd nonzero"
+    local ok=0
+    for _ in $(seq 1 30); do
+        if ss -tln '( sport = :80 )' 2>/dev/null | grep -q ':80 ' \
+           && curl -s -o /dev/null --max-time 2 http://localhost/ 2>/dev/null; then
+            ok=1; break
+        fi
+        sleep 1
+    done
+    [ "$ok" = "1" ] || fail "Apache did not come up after restart ($1)"
+}
+
+# 3a: by default the header carries the generic value "on" and no version.
+fetch_pagespeed_header
+log "Default header observed: $HDR_VALUE"
+HDR_NAME_CHECK="$(printf '%s\n' "$HDR_VALUE" | tr 'A-Z' 'a-z')"
+case "$HDR_NAME_CHECK" in
+    "x-mod-pagespeed: on") log "Default header assertion passed (exactly 'on')" ;;
+    *) fail "Default header '$HDR_VALUE' is not exactly 'X-Mod-Pagespeed: on'" ;;
+esac
+
+# 3b-opt-in: the version only appears with the server-wide opt-in. Write it
+# as a server-level fragment EA4 loads (conf.d/*.conf), restart, and re-read.
+EXPOSE_CONF=/etc/apache2/conf.d/zz-expose-version.conf
+printf '<IfModule pagespeed_module>\n    ModPagespeedExposeVersionInHeaders on\n</IfModule>\n' > "$EXPOSE_CONF"
+log "Wrote $EXPOSE_CONF; restarting httpd"
+restart_and_wait_httpd "expose-version opt-in"
+fetch_pagespeed_header
 log "Header observed: $HDR_VALUE"
 
 if ! echo "$HDR_VALUE" | grep -qF "$EXPECTED_VERSION_STRING"; then
@@ -255,6 +285,10 @@ if printf '%s\n' "$CURL_HEAD" | grep -qi '^X-PageSpeed-Warn'; then
     fail "X-PageSpeed-Warn header present on an optimized response: $(printf '%s\n' "$CURL_HEAD" | grep -i '^X-PageSpeed-Warn' | tr -d '\r')"
 fi
 log "No X-PageSpeed-Warn header (module optimizes unconditionally)"
+
+# Remove the opt-in so the later phases start from the pristine installed
+# config (Phase 3b restarts httpd, which picks the removal up).
+rm -f "$EXPOSE_CONF"
 
 # --- Phase 3b: Absent-.so degradation (<IfFile> fail-safe) ---
 # With the module .so missing, the <IfFile>-guarded LoadModule in
