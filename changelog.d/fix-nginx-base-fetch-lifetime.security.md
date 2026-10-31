@@ -1,0 +1,1 @@
+- nginx: fixed memory-safety issues when a client closes its connection while a response is still being prepared, which could stop a worker. Affected: 2.6.0 and earlier. Update recommended for nginx sites.
