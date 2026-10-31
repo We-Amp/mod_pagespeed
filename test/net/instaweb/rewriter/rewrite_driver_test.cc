@@ -1346,6 +1346,20 @@ TEST_F(RewriteDriverTest, LoadResourcesContentType) {
   EXPECT_TRUE(resource.get() != nullptr);
   EXPECT_EQ(&kContentTypeJavascript, resource->type());
 
+  // The type comes from the path alone: a fragment takes no part in it, with
+  // or without a '/' inside, just as the query takes none.
+  WriteFile("/htmlcontent/baz.css", "");
+  ResourcePtr fragment_resource(
+      rewrite_driver()->CreateInputResourceAbsoluteUncheckedForTestsOnly(
+          "http://www.example.com/static/baz.css#v2.js"));
+  EXPECT_TRUE(fragment_resource.get() != nullptr);
+  EXPECT_EQ(&kContentTypeCss, fragment_resource->type());
+  ResourcePtr slash_in_fragment_resource(
+      rewrite_driver()->CreateInputResourceAbsoluteUncheckedForTestsOnly(
+          "http://www.example.com/static/baz.css#part/two.js"));
+  EXPECT_TRUE(slash_in_fragment_resource.get() != nullptr);
+  EXPECT_EQ(&kContentTypeCss, slash_in_fragment_resource->type());
+
   // Write file with bogus extension.
   WriteFile("/htmlcontent/bar.bogus", "");
   // Load it normally.
@@ -1354,6 +1368,26 @@ TEST_F(RewriteDriverTest, LoadResourcesContentType) {
           "http://www.example.com/static/bar.bogus"));
   EXPECT_TRUE(resource2.get() != nullptr);
   EXPECT_TRUE(nullptr == resource2->type());
+}
+
+// The name and the directory of a rewritten resource are read from the path.
+// A fragment, even one with a '/' in it, is not part of the name and does not
+// move the base, and a name that only appears after the '#' is no resource.
+TEST_F(RewriteDriverTest, ResourceNameAndBaseComeFromPathNotFragment) {
+  options()->EnableFilter(RewriteOptions::kExtendCacheCss);
+  rewrite_driver()->AddFilters();
+
+  RewriteFilter* filter;
+  GoogleUrl with_fragment(
+      "http://test.com/dir/a.css.pagespeed.ce.0.css#part/two");
+  OutputResourcePtr resource(
+      rewrite_driver()->DecodeOutputResource(with_fragment, &filter));
+  ASSERT_TRUE(resource.get() != nullptr);
+  EXPECT_EQ("http://test.com/dir/", resource->resolved_base());
+  EXPECT_STREQ("a.css", resource->name());
+
+  EXPECT_FALSE(CanDecodeUrl(
+      "http://test.com/dir/plain.css#part/a.css.pagespeed.ce.0.css"));
 }
 
 TEST_F(RewriteDriverTest, ResolveAnchorUrl) {
