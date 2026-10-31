@@ -72,6 +72,27 @@ def _nginx_repository_impl(repository_ctx):
         repository_ctx.file("objs/ngx_auto_config.h", _NGX_AUTO_CONFIG_STUB)
         repository_ctx.file("objs/ngx_auto_headers.h", _NGX_AUTO_HEADERS_STUB)
 
+    # nginx's src/core/ngx_regex.h includes <pcre2.h> (or <pcre.h>)
+    # unconditionally: ./configure always finds a PCRE. On Linux the header
+    # is in /usr/include, which is on the compiler's default search path, so
+    # nothing extra is needed there. Homebrew's prefix is NOT on Apple
+    # clang's default search path, so on macOS the header directory is
+    # symlinked into this repository as `pcre/` and put on the include path
+    # by the macOS branch of the includes select in bazel/nginx.BUILD.
+    # Bazel rejects absolute -I paths in target copts, hence the symlink.
+    # Both the PCRE2 and the PCRE1 (nginx's fallback) layouts of both
+    # Homebrew prefixes are probed.
+    for pcre_include in (
+        "/opt/homebrew/opt/pcre2/include",
+        "/opt/homebrew/opt/pcre/include",
+        "/usr/local/opt/pcre2/include",
+        "/usr/local/opt/pcre/include",
+    ):
+        pcre_result = repository_ctx.execute(["test", "-d", pcre_include])
+        if pcre_result.return_code == 0:
+            repository_ctx.symlink(pcre_include, "pcre")
+            break
+
     # Write the BUILD file
     repository_ctx.file("BUILD.bazel", repository_ctx.read(
         repository_ctx.path(repository_ctx.attr.build_file)
