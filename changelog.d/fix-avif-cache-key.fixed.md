@@ -1,1 +1,0 @@
-- **AVIF images are no longer optimized twice under two cache keys.** With AVIF recompression on and animated AVIF conversion off, a client that accepts animated AVIF was keyed separately from other AVIF clients although both received identical output. They now share one cache entry, as WebP clients already do.

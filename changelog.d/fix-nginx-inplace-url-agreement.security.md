@@ -1,1 +1,0 @@
-- nginx: in-place optimization now stores a response only under the URL it was fetched for, so a crafted request can no longer place content under another URL. Affected: 2.6.0 and earlier. Update recommended for nginx sites.

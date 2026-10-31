@@ -1,1 +1,0 @@
-- packaging: the nginx distro packages and the sidecar module are now built with full RELRO like the other artifacts

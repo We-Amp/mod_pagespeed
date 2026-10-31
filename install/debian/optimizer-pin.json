@@ -19,7 +19,7 @@
     "the pair speaks one cache format. The pin-pair check in CI asserts that",
     "equality; do not hand-edit this file without re-running it."
   ],
-  "tag": "optimizer-v2.6.0",
-  "optimizer_commit": "6906c05dd90f5437a14686b7753b7aab80306a40",
-  "sha256sums_sha256": "68c2ed22e3b599c688ac180b42893ce2aa0282aba50d60437beb240f6ebd1581"
+  "tag": "optimizer-v2.7.0",
+  "optimizer_commit": "9e244acbe33b3f39cde9a0e4e34769122b34e180",
+  "sha256sums_sha256": "2238a84287ab4870b2a081efbb08352f3e4c1eb6d79339649eefbd5d074eb44f"
 }

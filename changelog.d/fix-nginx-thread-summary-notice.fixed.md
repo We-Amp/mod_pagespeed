@@ -1,1 +1,0 @@
-- **nginx: the thread-sizing summary is now logged at notice level instead of warn on every start and `nginx -t`.**

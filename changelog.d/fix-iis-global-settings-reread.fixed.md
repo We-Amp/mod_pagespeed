@@ -1,1 +1,0 @@
-- **IIS applies the machine-wide `MessageBufferSize` and `UseNativeFetcher` to every site.** Set in the machine-wide `pagespeed.config`, they were picked up only by the first site in a worker process and could be lost after a configuration file was edited; the other sites used the built-in defaults. Every site now gets them. https://github.com/We-Amp/mod_pagespeed/issues/511

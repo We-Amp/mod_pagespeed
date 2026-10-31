@@ -1,3 +1,513 @@
+# mod_pagespeed 2.7.0 Release Notes
+
+**Release date:** 2026-10-31
+**Status:** Stable
+**Packages:** `mod-pagespeed` (Apache), `nginx-module-pagespeed`, the IIS
+installer and the cPanel package, with the matching `pagespeed-optimizer`;
+the container images, the NuGet packages including the ASP.NET Core sidecar
+packages (`WeAmp.PageSpeed.Sidecar`,
+`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`) and the Helm chart's
+application version carry the same version.
+
+mod_pagespeed 2.7.0 is the current release: the module and the optimizer
+worker, released together on 2026-10-31 and installed as a matching pair. The
+packages in the signed apt and yum repositories, the container images, the
+NuGet packages (including the ASP.NET Core sidecar packages) and the Helm
+chart's application version all carry the product version.
+
+## Highlights
+
+- **Security: this release fixes a set of issues in the rewriter, the optimization cache and the nginx port that were found by Anthropic's OSS Scanner, the open-source security scanning program mod_pagespeed is enrolled in. Update recommended.** See Security below.
+- **Security: fixes for the IIS module, the admin console, response caching,
+  zero-copy serving on nginx and the ASP.NET Core package. Update recommended.** See Security below.
+- **Response headers no longer include the product version by default.**
+  `X-Mod-Pagespeed` and `X-Page-Speed` now report `on`; a server-wide option
+  restores the version. See Upgrade notes.
+- **IIS: requests relayed by a reverse proxy on the same server no longer
+  count as local for the admin pages.** See Upgrade notes.
+- **Redis authentication, and Unix sockets for Redis and memcached.**
+- **`local_storage_cache` is retired.** Existing configurations keep loading.
+- **Many long-standing issues from the archived upstream trackers are
+  resolved in this release**, from CSS custom properties and script
+  combining to image dimensions and redirects. The long-standing upstream
+  issues page lists them all.
+- **Configurations written for the Google-era and Apache incubator modules
+  still load.** mod_pagespeed accepts every `ModPagespeed` directive and
+  filter name of mod_pagespeed 1.13.35.2 and 1.14.36.1 and the `pagespeed`
+  directives of ngx_pagespeed, and keeps the `.pagespeed.` resource URL
+  format; the Upgrade notes list the exceptions and the defaults that
+  changed.
+
+Affected ranges use package version numbers, as on the 2.6 release notes.
+The ASP.NET Core package's 2.0.x versions were NuGet-only releases.
+
+## Security
+
+- IIS: tightened which request paths the module serves as its admin and
+  global admin pages. Affected: 1.15.0 to 2.6.0. Update recommended for IIS
+  sites.
+- IIS: tightened access to the admin, statistics, console and message pages
+  and the start-up diagnostic page for sites behind a reverse proxy on the
+  same server; `AdminDomains` and `StatisticsDomains` now apply on IIS. The
+  new site option `TreatProxiedRequestsAsLocal` restores the previous
+  behaviour. Affected: 1.15.0 to 2.6.0. Update recommended for IIS sites that
+  run behind a reverse proxy. See Upgrade notes.
+- Admin console: hardened cache actions and configuration output on
+  consoles reachable beyond localhost. Deleting a single cached URL now
+  requires `EnableCachePurge`, as a purge does, and key and credential
+  values show as `***` in configuration output. Affected: all releases up to
+  2.6.0. Update recommended for any console reachable beyond localhost.
+- Admin console: hardened against resource exhaustion; expensive reads are
+  bounded and repeated log lines are grouped. Affected: all releases up to
+  2.6.0. Update recommended.
+- Hardened response caching so that responses to requests other than GET
+  and HEAD are never stored in or served from the cache. Affected: all
+  releases up to 2.6.0. Update recommended.
+- nginx with `CycloneZeroCopyServe`: hardening for slow HTTP/2 clients. A
+  stream whose client stops reading is ended after `send_timeout` and its
+  resources are released; the new statistic `zerocopy_serve_stall_timeouts`
+  counts them. Affected: 1.15.0 to 2.6.0, only where `CycloneZeroCopyServe`
+  is on. Update recommended for nginx sites that use `CycloneZeroCopyServe`.
+- ASP.NET Core package: responses served from the cache could be missing
+  headers the application sets, including security headers. Cached
+  responses, `304` responses and revalidated responses now carry them, and
+  a response whose headers cannot be kept safely with a cache entry is not
+  cached. Affected: all package releases up to 2.6.0. Update recommended.
+  See Upgrade notes.
+
+The fixes below address issues found by Anthropic's OSS Scanner (https://red.anthropic.com/oss-scanner), which scans mod_pagespeed as an enrolled open-source project; we thank the program for the reports. Each fix carries its scanner identifier in the changelog, and the identifiers are listed with the bullets below.
+
+- Hardened the handling of optimized resource URLs so that a single crafted
+  request can no longer stop a server worker or exhaust its memory.
+  Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS
+  sites. (ANT-2026-9KEPAA75, ANT-2026-O8N7KFK0, ANT-2026-DGDUO0GS)
+- nginx: fixed memory-safety issues when a client closes its connection
+  while a response is still being prepared, which could stop a worker.
+  Affected: 2.6.0 and earlier. Update recommended for nginx sites. (ANT-2026-FKYTGW3G, ANT-2026-D2CGZAXQ)
+- Hardened the optimization cache so that a request for a crafted optimized
+  resource URL can no longer change which script, stylesheet or image other
+  visitors receive. Affected: 2.6.0 and earlier. Update recommended for
+  nginx, Apache and IIS sites. (ANT-2026-7XM52IDN, ANT-2026-S7LKX6K7, ANT-2026-DCJ2Z3D4, ANT-2026-XB6YFWVT)
+- nginx: in-place optimization now stores a response only under the URL it
+  was fetched for, so a crafted request can no longer place content under
+  another URL. Affected: 2.6.0 and earlier. Update recommended for nginx
+  sites. (ANT-2026-YDZ31UJD)
+- Responses to requests that carry an `Authorization` header no longer get a
+  cache lifetime that lets a shared cache, such as a CDN or a caching proxy,
+  store them and serve them to other clients. Affected: 2.6.0 and earlier.
+  Update recommended for nginx and Apache sites behind a shared cache. (ANT-2026-RC2EIY9O)
+- In-place optimization no longer stores a compressed origin response under
+  the wrong encoding, which could leave stylesheets and scripts unreadable
+  for every visitor. Affected: 2.6.0 and earlier, where the origin compresses
+  with brotli or zstd. Update recommended for nginx and Apache sites that
+  proxy to an origin. (ANT-2026-DODNRAXY)
+- nginx: corrected a regression in a 2.5.0 hardening change that let a
+  single oversized request briefly stall a worker. Affected: 2.5.0 to
+  2.6.0. Update recommended for nginx sites. (ANT-2026-OVE7NGRH)
+- Corrected a regression in a 2.5.0 hardening change that could serve a
+  small inline script to a page in a different character set than the one
+  it was checked in, so that on sites that mix character sets, page text
+  could be read as script. Affected: 2.5.0 to 2.6.0. Update recommended for
+  sites with pages in more than one character set. (ANT-2026-O0ZSTJDY)
+
+## Action required when upgrading
+
+- **nginx: servers with fewer workers than half their CPU cores run more
+  optimization threads after the upgrade**, including servers on the
+  compiled-in default of one worker. To keep the previous one thread per
+  pool, set `pagespeed NumRewriteThreads 1;` and
+  `pagespeed NumExpensiveRewriteThreads 1;` in the http block. Servers that
+  set `worker_cpu_affinity` keep one thread per pool without them. The
+  startup line "PageSpeed optimization threads: ..." shows the counts in
+  use.
+- **IIS: admin pages behind a reverse proxy on the same server.** Requests
+  that carry forwarding headers (such as `X-Forwarded-For` or
+  `X-ARR-ClientIP`) no longer count as local, for the admin, statistics,
+  console and message pages and for the start-up diagnostic page. To keep
+  using them through such a proxy, add `pagespeed TreatProxiedRequestsAsLocal
+  on` to the site's `pagespeed.config`, or allow a host with
+  `pagespeed AdminDomains allow <host>` (`StatisticsDomains`,
+  `ConsoleDomains` and `MessagesDomains` for the other pages).
+- **The version in response headers.** `X-Mod-Pagespeed` (Apache) and
+  `X-Page-Speed` (nginx, IIS) now carry `on` instead of the version;
+  detection by the presence of the header is unchanged, and an explicit
+  `XHeaderValue` still wins. If a script or monitor reads the version from
+  these headers, set the new server-wide option `ExposeVersionInHeaders on`
+  as part of the upgrade: Apache `ModPagespeedExposeVersionInHeaders on`;
+  nginx `pagespeed ExposeVersionInHeaders on;`; IIS
+  `pagespeed ExposeVersionInHeaders on`. The option is accepted only
+  server-wide (inside a virtual host or server block it fails the
+  configuration test), and earlier releases reject it as unknown, so add it
+  with the upgrade, not before. The optimizer's own `X-PageSpeed` header
+  carries no version, as before.
+- **Upgrade the ASP.NET Core package and the optimizer worker together.**
+  With a worker older than 2.6.0, the package fetches optimized variants
+  again from the origin instead of serving them from the cache.
+- **ASP.NET Core: cache entries are fetched again once.** Entries cached by
+  an earlier version are fetched again from the origin after the upgrade,
+  and clients revalidate cached responses once because their `ETag`
+  changes. No configuration change or cache purge is needed.
+- **nginx: pages requested over HTTP/1.1 and TLS are fetched again once.**
+  Entries an earlier version cached for those requests were stored under
+  `http`; after the upgrade they are looked up under `https`, so they are
+  fetched again from the origin and optimized again. No configuration
+  change or cache purge is needed.
+- **Remove `local_storage_cache` from your configuration** to silence the
+  new warning. Pages no longer get the local-storage cookie or the inline
+  script, and the `num_local_storage_cache_*` statistics are gone.
+- **`AddResourceHeader` replaces the origin's header of the same name**
+  instead of sending a second value. Several `AddResourceHeader` directives
+  for one name still all apply, so if you need more than one value, add a
+  directive for each.
+- **Shared caches and image originals.** An image served as its original
+  now carries the same image-selection `Vary` header
+  (`Accept, Save-Data, User-Agent, Sec-CH-DPR`) as an optimized variant, so
+  a shared cache no longer keeps the original after AVIF or WebP variants
+  exist.
+- **Log matching.** In-place hit and miss lines on nginx and IIS are now
+  written at debug level; use the `ipro_*` statistics as the counters.
+- **In-place optimization behind an origin that compresses only with
+  brotli.** Such an origin's responses are now served unoptimized. To keep
+  optimizing them, let the origin answer the server's own fetches with gzip
+  or without compression.
+- **Upgrading from 1.13.x, 1.14.36.1 or an ngx_pagespeed build.** The
+  configuration carries over: the Apache `ModPagespeed...` directives (in
+  `pagespeed.conf`, virtual hosts and `.htaccess`), the nginx
+  `pagespeed ...` directives in the same `http`, `server`, `location` and
+  `if` blocks, the filter names in `EnableFilters`, `DisableFilters` and
+  query parameters, and the older option spellings such as
+  `ModPagespeedImgInlineMaxBytes`. `.pagespeed.` resource URLs already in
+  pages and CDN caches keep resolving; the module rebuilds them from the
+  originals on first request. On Debian and Ubuntu,
+  `apt-get install mod-pagespeed` replaces `mod-pagespeed-stable` or
+  `mod-pagespeed-beta` in the same run and keeps an edited `pagespeed.conf`;
+  on Enterprise Linux the move is `dnf swap mod-pagespeed-stable
+  mod-pagespeed`. A `LoadModule` line that names `mod_pagespeed_ap24.so`
+  still loads the module. The cache does not carry over: the module opens a
+  new cache under `FileCachePath`, leaves the old files in place, and fills
+  the new one as traffic arrives, so expect more origin fetches for a while.
+  Exceptions:
+  - Apache 2.2 is no longer supported; Apache 2.4 is.
+  - nginx: the `nginx-module-pagespeed` package loads
+    `ngx_pagespeed_module.so` itself and is built for the nginx version your
+    distribution ships. Remove any `load_module` line for an older build.
+  - nginx: `pagespeed FileCacheInodeLimit` and
+    `pagespeed FileCacheCleanIntervalMs` are no longer accepted; remove them.
+    Apache accepts both with a warning. The disk cache keeps itself within
+    `FileCacheSizeKb`.
+  - Retired filters and options load with a warning and have no effect:
+    `local_storage_cache`, `mobilize`, `insert_ga`, `defer_iframe`,
+    `div_structure`, `explicit_close_tags`, `flush_subresources`,
+    `make_google_analytics_async`, `split_html`, `in_place_optimize_for_browser`,
+    `AllowVaryOn`, `PrivateNotVaryForIE`, `UseExperimentalJsMinifier`,
+    `AnalyticsID` and `UseAnalyticsJs`.
+  - Images optimized at their original URLs are no longer converted per
+    browser. WebP and AVIF variants are still served from the rewritten
+    URLs.
+  - nginx: `pagespeed` settings in a `location` block also apply inside its
+    nested locations and `if` blocks.
+  - Purging through the admin page needs a POST. The `PURGE` request method
+    still works.
+  - The Apache packages install the optimizer worker and point the module
+    at it in `pagespeed_daemon.conf`. To keep the module's own in-place
+    optimization, comment out the two directives in that file.
+  - The defaults that changed in this release are listed above: the version
+    in `X-Mod-Pagespeed` and `X-Page-Speed`, and the nginx optimization
+    thread count. The migration pages on modpagespeed.com list every
+    directive and filter in detail.
+
+## Fixed
+
+_Module (all ports unless named)_
+
+- **`combine_javascript` no longer breaks scripts that declare top-level
+  `const`, `let` or `class`.** Such scripts are now left uncombined.
+  Reported in https://github.com/apache/incubator-pagespeed-mod/issues/1887.
+- **`rewrite_css` keeps CSS custom properties exactly as written.** Names
+  such as `--Test` and `--test` stay distinct and their values are no
+  longer minified. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1971 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/2066.
+- **The CSS parser recovers from a stray semicolon after the last rule**
+  (`a{b:c};`); such sheets were served without optimization.
+- **JavaScript and CSS minification keep licence comments.** Block
+  comments that start with `/*!` or contain `@license` or `@preserve` are
+  kept, in single-file and combined output. In stylesheets they are kept
+  verbatim at the top of the minified file (after any `@charset` rule),
+  also when stylesheets are combined or `@import` rules are flattened;
+  ordinary comments are still removed. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1800 (see also
+  https://github.com/apache/incubator-pagespeed-mod/issues/520).
+- **JavaScript minification handles `for (let {a} of xs)` and
+  `for (let [a] of xs)` loop headers.** Scripts and ES modules that
+  destructure in such a header were reported as having a parse error and
+  served unminified.
+- **Image handlers and inline scripts no longer throw "pagespeed is not
+  defined" when the support script is missing.** The `onload` and
+  `onerror` handlers added by the critical-image beacon, lazy-load and
+  delay-images filters, and the small inline scripts the lazy-load,
+  delay-images, inline-image deduplication and deferred-iframe filters add
+  to the page, check that the support script ran first, so a page where
+  that script is blocked or stripped by another tool no longer logs a
+  `ReferenceError`. An inlined image now needs to be slightly larger before
+  it is deduplicated, because the restoring script is a little longer.
+  Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1316 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/1977.
+- **Inline scripts and styles are minified again under a
+  Content-Security-Policy that uses nonces or `'unsafe-inline'`.** The
+  module backs off only when the policy lists hash sources or does not
+  allow inline blocks; the `nonce` attribute is kept as is.
+- **Stylesheets and scripts with an `integrity` attribute are left as
+  written.** `rewrite_css` minified such a stylesheet, so the browser
+  refused it and the page rendered unstyled. They are also no longer moved
+  to another host, inlined (which dropped the integrity check the page
+  asked for), or turned from a `<style integrity>` block into a separate
+  stylesheet link. Reported in
+  https://github.com/apache/incubator-pagespeed-ngx/issues/1619.
+- **Redirects no longer pick up repeated or unwanted PageSpeed query
+  parameters.** They are added back to a same-site `Location` only when the
+  target does not already carry them, and before any `#fragment`; a
+  redirect that deliberately drops them is left as the origin wrote it. A
+  `Location` whose query differs from the request only in parameter order,
+  in `a` versus `a=` or in `+` versus `%20` counts as the same, and a
+  parameter the `Location` already carries is recognised with either
+  prefix (`ModPagespeed` or `PageSpeed`) and whatever the case of the
+  option name. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1622
+  and https://github.com/apache/incubator-pagespeed-mod/issues/1024.
+- **Resource and admin responses carry each header once.** An
+  `AddResourceHeader` for a header the origin already sent now replaces it
+  instead of sending two values, and, on Apache, `X-Content-Type-Options:
+  nosniff` is no longer repeated on admin and optimizer JSON responses or
+  on in-place optimized responses. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1760 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/1988.
+- **In-place optimization no longer floods the message history.**
+  Per-request hit and miss lines are written at debug level on nginx and
+  IIS. Reported in
+  https://github.com/apache/incubator-pagespeed-ngx/issues/1720.
+- **AVIF images are no longer optimized twice under two cache keys** when
+  AVIF recompression is on and animated AVIF conversion is off.
+- **The optimizer cache asks again for resources it served as stored
+  originals.** A resource stored while the optimizer worker was stopped no
+  longer waits for its stored copy to expire; a later request asks the
+  worker again, at most once per URL every ten seconds. The new statistic
+  `ipro_daemon_served_original_only` counts serves from an entry with no
+  optimized variants. Image originals now carry the image-selection `Vary`
+  header; see Upgrade notes.
+- **HTML responses that are passed through unparsed because they exceed the
+  learned parse-size limit now carry the same `Vary` tokens as rewritten
+  pages**, and the response headers are no longer updated by one thread
+  while another is still reading them.
+- **The error for render-only directives no longer names a retired
+  product**; it points at the optimizer worker.
+- **nginx: a failed `nginx -s reload` no longer leaks memory or disturbs
+  the running configuration.**
+- **nginx: the native fetcher connects to IPv6 origins**; IPv4 addresses
+  are preferred when a host has both.
+- **nginx with `CycloneZeroCopyServe`: large cached responses over
+  cleartext HTTP/2 no longer stall after the first 64 KB.**
+- **Per-server statistics pages report the disk-cache counters**
+  (`cyclone_cache_*` and `file_cache_*`) instead of 0 whenever
+  per-virtual-host statistics are on, which is the nginx default. They read
+  0 on a healthy server, so dashboards and alerts built on them showed a
+  dead cache. The disk cache is shared by every server, so these counters
+  show server-wide totals.
+- **IIS accepts a UTF-8 byte order mark at the start of
+  `pagespeed.config`.** The mark is skipped with a notice; a UTF-16 file is
+  refused with a clear warning.
+- **Remote configuration that starts with a UTF-8 byte order mark applies
+  as if the mark were absent.** Its first directive used to be lost. A
+  remote file saved as UTF-16 or UTF-32 is ignored with a warning that
+  says so.
+- **IIS: A/B experiments apply the visitor's arm to the HTML.** Visitors
+  got an experiment cookie, but the page was rewritten without that arm's
+  filters, so experiment results on IIS were not meaningful. The cookie is
+  still written once. With a remote configuration source the arm is now
+  also kept, so it appears in rewritten resource URLs and the experiment
+  statistics count the request.
+- **IIS applies the machine-wide `MessageBufferSize` and `UseNativeFetcher`
+  to every site.** Set in the machine-wide `pagespeed.config`, they were
+  picked up only by the first site in a worker process and could be lost
+  after a configuration file was edited; the other sites used the built-in
+  defaults.
+- **Windows: the cache works when the cache directory path contains
+  non-ASCII characters.**
+- **nginx no longer logs a misleading truncated-response warning when in-place optimization skips a response early (for example for a content coding it does not record).**
+- **The in-place recorder now recognises stacked content codings (such as gzip followed by brotli) as encoded content.**
+
+_Admin console_
+
+- **The console states what its numbers measure.** Savings headlines say
+  they are measured in transfer bytes and include compression; warning
+  counts say how far back the retained log reaches; chart axes, the Graphs
+  page's default range and empty shares are fixed, and module and optimizer
+  counters are labelled separately; the admin JSON reports the host name
+  without a trailing `:0`.
+- **The whole-server Rule packs page lists the packs each virtual host
+  configures**, with their state, and shows those hosts' decision logs,
+  instead of reporting that no rule pack is configured.
+- **Layout and accessibility fixes.** The Histograms table scrolls inside
+  its frame instead of widening the page, and the Histograms tables and
+  the Configuration text are named, keyboard-focusable regions. On
+  Statistics, the JavaScript and Memcached counter families are no longer
+  listed twice; long counter lists start collapsed apart from the key
+  counters, and a search opens the matching families. The Caches page
+  prints sizes as MB and each path once, and notes that some counters are
+  kept per web-server process, so they can differ from Statistics. Savings
+  figures keep their unit on one line, and the Optimizer status version
+  reads like the module's ("v2.6.0"). The keyboard shortcut help says
+  where Refresh applies.
+
+_Optimizer worker and its nginx module_
+
+- **Early Hints (`103`) are sent over HTTP/2 and HTTP/3** when the nginx
+  module is built against nginx 1.29.0 or newer, and for clean URLs without
+  a file extension (such as `/about`) when the client asks for HTML.
+- **HTTP/3 requests find the cached pages for their site.** They were
+  looked up under an empty host name.
+- **nginx: HTTP/1.1 requests over TLS are cached under `https`.** They
+  were cached under `http`, so they shared entries with plain-HTTP
+  requests for the same host and URL and did not share them with HTTP/2
+  and HTTP/3 requests. Requests over TLS now use `https` whatever the
+  protocol, and plain HTTP uses `http`; `pagespeed_trust_x_forwarded_proto`
+  behaves as before. See Upgrade notes.
+- **Critical CSS keeps the above-the-fold rules of minified `@supports(...)`
+  blocks.**
+- **JavaScript minification in the optimizer worker keeps licence
+  comments** (`/*! ... */`, `@license`, `@preserve`), as the module's does,
+  so the licence notices of bundled libraries survive.
+- **The optimizer worker's JavaScript minifier handles `for (let {a} of
+  xs)` and `for (let [a] of xs)` loop headers**, so ES modules that use
+  them (such as some framework build output) are minified instead of
+  served as they were with a parse-error warning.
+- **WebP and PNG images with an EXIF orientation are optimized upright.**
+  Only JPEG orientation was honoured, so photos taken with the camera turned
+  came out sideways; converted and resized variants now display upright,
+  and the width and height the optimizer adds match the upright image. A
+  PNG with an orientation tag that would be optimized in its own format is
+  served as the origin sent it.
+- **The EXIF orientation reader for JPEG images tightens its bounds
+  handling of malformed metadata.**
+- **Images the optimizer leaves as they were carry an `ETag`** when the
+  origin sends neither `ETag` nor `Last-Modified`, and answer a matching
+  `If-None-Match` with `304 Not Modified`.
+- **nginx: the cache volume is deleted and recreated only when it is
+  damaged.** When another process, such as the optimizer worker, holds it,
+  the module leaves it in place, logs the reason and serves without the
+  cache until the next successful open.
+- **Windows: a cache reset no longer fails when the web server module or
+  the ASP.NET Core package is reading the cache at that moment.**
+- **The C library's `ps_last_error_message()` includes the cache's own
+  reason** when `ps_cache_open` fails. The C interface is unchanged.
+- **Script-coverage analysis covers only scripts the analysis browser
+  received**, so a script that could not be loaded no longer gets a
+  coverage figure and a deferral recommendation.
+
+_ASP.NET Core package_
+
+- **The `ETag` on a response served from the cache is derived from the
+  response body.** Two different bodies of the same length cached in the
+  same second could share an `ETag`, so a client could keep stale content.
+  Identical content keeps the same `ETag`, so conditional requests still
+  get `304 Not Modified`.
+- **The worker host logs when the optimizer worker it started exits on its
+  own**: an error with the exit code, run time and the last lines of its
+  error output for a non-zero exit, a warning for a clean exit.
+- **The ASP.NET Core package's `/console/` admin UI reaches the optimizer
+  worker from host-network containers**, where it could fail with a bad
+  gateway error.
+
+## Changed
+
+- **Response headers report `on` instead of the product version by
+  default.** See Upgrade notes.
+- **nginx sizes its optimization threads from the machine.** Without
+  `NumRewriteThreads` and `NumExpensiveRewriteThreads`, each nginx worker
+  ran one thread in each of the two optimization pools, whatever the
+  hardware. Each worker now gets half the CPU cores nginx may use
+  (container CPU limits and CPU affinity included) divided by
+  `worker_processes`, and at least one thread, as Apache already does with
+  its child processes. A server with few workers on a many-core machine
+  optimizes faster and uses more CPU while its cache warms;
+  `worker_processes auto`, servers with as many workers as cores, and
+  servers that set `worker_cpu_affinity` keep one thread per pool. The two
+  directives still set the counts, and the startup line "PageSpeed
+  optimization threads: ..." reports the worker count it divided by. IIS
+  keeps its built-in size. See Upgrade notes.
+- **`local_storage_cache` is retired; it is accepted and ignored with a
+  warning.** It kept inlined CSS and images in the browser's local storage
+  and tracked them in a cookie that could grow until the server refused
+  requests with "400 request header too large". The filter name is still
+  accepted in every configuration syntax, in `EnableFilters` and in query
+  parameters. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1528,
+  https://github.com/apache/incubator-pagespeed-mod/issues/1275 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/1880.
+- **`inline_google_font_css` requests `display=swap`** when the loader URL
+  sets no `display=`, so text stays visible while the web font loads. An
+  explicit `display=` is kept. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1867.
+- **`rewrite_images`: inlined images keep their `width` and `height`
+  attributes**, so browsers can reserve layout space and avoid layout
+  shift. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/2073 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/2068.
+- **IIS honours `NumRewriteThreads` and `NumExpensiveRewriteThreads`.** They
+  set the pool sizes of each site in each worker process, from the
+  machine-wide `pagespeed.config` or the site's own file (the site's wins);
+  `auto` or unset keeps the built-in size, and the startup log reports the
+  sizes in use.
+- **The admin console explains views the server has turned off** ("Not
+  available on this console. The server administrator has turned this view
+  off.") instead of showing an error, and stops asking for that view.
+- **The admin console's Caches page labels its cache figures by what they
+  measure**: the hits row now reads "Reads served (RAM + disk)", and the
+  misses row, which always showed 0, is gone.
+- **The optimizer worker warns when the deprecated `quality_cap_margin` is
+  set**, in the configuration file or through a configuration update. The
+  setting has no effect; use `no_quality_cap` to turn the quality cap off.
+- **The nginx distribution packages and the sidecar module are built with
+  full RELRO**, like the other packages.
+- **The ASP.NET Core NuGet packages carry the repository URL and commit and
+  embed Source Link**, so a debugger can step into the middleware source.
+- **In-place optimization no longer records origin responses with a content
+  coding the server cannot decode**, such as brotli, zstd or several
+  codings stacked. Such URLs are served as the origin sends them until the
+  origin negotiates gzip or no compression. See Upgrade notes.
+- **Responses to authenticated requests, whether by an `Authorization` header or by the web server's own authentication, no longer get the short shared-cache lifetime used for in-place optimization.** The configured in-place lifetime is unchanged for other responses.
+- **A request for a combined resource no longer fills the cache entry that
+  page rewriting uses**, so the first page view after the cache is emptied
+  performs its own combine.
+- **Combined-resource URLs beyond the size limits the server itself
+  generates are refused.** Pages never produce such URLs.
+- **A URL fragment no longer counts when the file type of a rewritten
+  resource is inferred from its URL.** This affects edge cases only.
+- **nginx: with buffered proxying and a client slower than the origin, pending rewritten output is now flushed on the origin's next data pass or at its end** rather than as soon as the client can read, so output can wait while the origin pauses; completeness is unchanged, and unbuffered proxying and non-proxied HTML are unaffected.
+
+## Added
+
+- **Redis authentication, and Unix sockets for Redis and memcached.** The
+  new `RedisPassword` option (with an optional `RedisUser` for Redis ACL
+  users) makes the Apache, nginx and IIS modules authenticate after every
+  connect and reconnect, so a Redis server that requires a password can be
+  used as the external cache. The password is never logged and shows as
+  `***` in configuration output. `RedisServer` and `MemcachedServers` also
+  accept `unix:/path/to/socket` (not available on Windows).
+- **`extend_cache_images` covers SVG images**, including SVG referenced from
+  stylesheets: a content-hashed URL and a long cache lifetime, bytes and
+  content type unchanged. SVG is still never inlined, resized or
+  recompressed. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1221.
+- **`ExposeVersionInHeaders`** (server-wide, default off) restores the
+  product version in `X-Mod-Pagespeed` and `X-Page-Speed`.
+- **IIS: `TreatProxiedRequestsAsLocal`** (site option, default off) restores
+  the previous treatment of requests relayed by a reverse proxy on the same
+  server.
+- **Statistics:** `zerocopy_serve_stall_timeouts` (nginx) and
+  `ipro_daemon_served_original_only`.
+
 # mod_pagespeed 2.6.0 Release Notes
 
 **Release date:** 2026-10-28

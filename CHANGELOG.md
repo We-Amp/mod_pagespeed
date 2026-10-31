@@ -7,6 +7,204 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-31
+
+### Security
+
+- **Admin: harden cache actions and configuration output on exposed consoles.** Deleting a single cached URL from the admin console now requires `EnableCachePurge`, like purge. Key and credential values now show as `***` in configuration output. Update recommended for any console reachable beyond localhost.
+- **IIS: access restrictions on the admin pages.** This release tightens which request paths the IIS module serves as its admin and global admin pages. Affects the IIS module in releases up to and including 2.6.0. **Update recommended.**
+- Hardened response caching so responses to requests other than GET and HEAD are never stored in or served from the cache. Update recommended.
+- **Admin: bounded expensive console reads and deduplicated repeated log lines.** Update recommended.
+- **IIS: access options for the admin, statistics and diagnostic pages.** A request relayed by a reverse proxy on the same server is no longer treated as local, and `AdminDomains` and `StatisticsDomains` now apply on IIS. The new site option `TreatProxiedRequestsAsLocal` restores the previous behaviour. Update recommended for IIS sites that run behind a reverse proxy.
+- **Hardening for slow HTTP/2 clients with zero-copy serving.** Update
+  recommended for nginx sites that use `CycloneZeroCopyServe`. The new
+  `zerocopy_serve_stall_timeouts` statistic counts streams ended this way.
+- nginx: fixed memory-safety issues when a client closes its connection while a response is still being prepared, which could stop a worker. Affected: 2.6.0 and earlier. Update recommended for nginx sites.
+- Hardened the optimization cache so that a request for a crafted optimized
+  resource URL can no longer change which script, stylesheet or image other
+  visitors receive. Affected: 2.6.0 and earlier. Update recommended for nginx,
+  Apache and IIS sites.
+- nginx: in-place optimization now stores a response only under the URL it was fetched for, so a crafted request can no longer place content under another URL. Affected: 2.6.0 and earlier. Update recommended for nginx sites.
+- In-place optimization no longer stores a compressed origin response under
+  the wrong encoding, which could leave stylesheets and scripts unreadable for
+  every visitor. Affected: 2.6.0 and earlier, where the origin compresses with
+  brotli or zstd. Update recommended for nginx and Apache sites that proxy to
+  an origin.
+- Hardened the handling of optimized resource URLs so that a single crafted request can no longer stop a server worker or exhaust its memory. Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Hardened the optimization cache so that a request for a crafted optimized resource URL can no longer change which script, stylesheet or image other visitors receive. Affected: 2.6.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- nginx: corrected a regression in a 2.5.0 hardening change that let a single
+  oversized request briefly stall a worker. Affected: 2.5.0 to 2.6.0. Update
+  recommended for nginx sites.
+- Responses to requests that carry an `Authorization` header no longer get a
+  cache lifetime that lets a shared cache, such as a CDN or a caching proxy,
+  store them and serve them to other clients. Affected: 2.6.0 and earlier.
+  Update recommended for nginx and Apache sites behind a shared cache.
+- Corrected a regression in a 2.5.0 hardening change that could serve a small
+  inline script to a page in a different character set than the one it was
+  checked in, so that on sites that mix character sets, page text could be read
+  as script. Affected: 2.5.0 to 2.6.0. Update recommended for sites with pages
+  in more than one character set.
+
+### Added
+
+- `extend_cache_images` now also covers SVG images: they get a content-hashed URL and a long cache lifetime, with the bytes and the `image/svg+xml` content type unchanged. SVG referenced from stylesheets is covered too. SVG is still never inlined, resized or recompressed. Originally reported at https://github.com/apache/incubator-pagespeed-mod/issues/1221.
+- **Redis authentication, and Unix sockets for Redis and memcached.** The new
+  `RedisPassword` option (with an optional `RedisUser` for Redis ACL users)
+  makes the Apache, nginx and IIS modules authenticate after every connect
+  and reconnect, so a Redis server that requires a password can be used as the
+  external cache. The password is never logged and shows as `***` in
+  configuration output. `RedisServer` and `MemcachedServers` also accept
+  `unix:/path/to/socket` (not available on Windows).
+
+### Changed
+
+- **The admin console explains views the server has turned off.** When a web server or proxy in front of the console refuses a read-only view (Logs, Configuration, URLs, Rule packs, or the message-log findings on Overview), the page now says "Not available on this console. The server administrator has turned this view off." with a link to the documentation, instead of an error. The console no longer asks for that view again, shows no reconnect banner, and marks the page "off" in the sidebar.
+- `inline_google_font_css`: a Google Fonts loader URL without a `display=` parameter is now requested with `display=swap`, so the inlined `@font-face` rules carry `font-display: swap` and text stays visible while the web font loads. An explicit `display=` in the page is kept as written. Originally reported in the archived upstream repository: https://github.com/apache/incubator-pagespeed-mod/issues/1867
+- **`local_storage_cache` is retired; it is accepted and ignored with a warning.**
+  The filter kept inlined CSS and images in the browser's local storage and
+  tracked them in a cookie that could grow until the server refused requests
+  with "400 request header too large". Existing configurations keep loading:
+  the filter name is still accepted in every configuration syntax, in
+  `EnableFilters` and in query parameters, and now logs one warning that it has
+  no effect. Pages no longer get the local-storage cookie or the inline script,
+  and the `num_local_storage_cache_*` statistics are gone. Remove the filter
+  from your configuration. Reported in the archived upstream repository:
+  https://github.com/apache/incubator-pagespeed-mod/issues/1528,
+  https://github.com/apache/incubator-pagespeed-mod/issues/1275 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/1880
+- **Response headers no longer include the product version by default.** The
+  `X-Mod-Pagespeed` (Apache) and `X-Page-Speed` (nginx, IIS, Envoy) headers now
+  report `on`; detection by the presence of the header is unchanged. Set the
+  new server-wide option `ExposeVersionInHeaders on` to restore the version
+  (`ModPagespeedExposeVersionInHeaders on` in Apache, `pagespeed
+  ExposeVersionInHeaders on;` in nginx). An explicit `XHeaderValue` still wins.
+- packaging: the nginx distro packages and the sidecar module are now built with full RELRO like the other artifacts
+- **IIS honours `NumRewriteThreads` and `NumExpensiveRewriteThreads`.** The two directives had no effect on IIS, so the optimization pools always had their built-in size. They now set the pool sizes of each site, in each worker process, read from the machine-wide `pagespeed.config` or the site's own file (the site's wins); `auto` or unset keeps the built-in size, and the startup log reports the sizes in use.
+- `rewrite_images`: inlined images now keep their `width` and `height` attributes. They used to be removed when they matched the image, so browsers could not reserve layout space before the image decoded; keeping them avoids layout shift (CLS). Thanks to the reporters of apache/incubator-pagespeed-mod#2073 and #2068 (https://github.com/apache/incubator-pagespeed-mod/issues/2073, https://github.com/apache/incubator-pagespeed-mod/issues/2068).
+- **nginx sizes its optimization threads from the machine.** Without `NumRewriteThreads` and `NumExpensiveRewriteThreads`, each nginx worker ran one thread in each of the two optimization pools, whatever the hardware. Each worker now gets half the CPU cores nginx may use (container CPU limits and CPU affinity included) divided by `worker_processes`, and at least one thread, as Apache already does with its child processes. A server with few workers on a many-core machine optimizes faster after this change and uses more CPU while its cache warms; `worker_processes auto`, servers with as many workers as cores, and servers that set `worker_cpu_affinity` keep one thread per pool. The two directives still set the counts explicitly, and the startup line "PageSpeed optimization threads: ..." now reports the worker count it divided by.
+- The admin console now labels the statistics time base "web server restart or reload", because a graceful configuration reload also starts the counters over and the console cannot tell the two apart.
+- nginx: with buffered proxying, rewritten HTML that a slow client has not yet read is now sent when the origin delivers more of the page or finishes, instead of as soon as the client can read it, so it can wait while the origin pauses. The page still arrives complete.
+- **In-place optimization no longer records origin responses with a content
+  coding the server cannot decode**, such as brotli, zstd or several codings
+  stacked. Such URLs are served as the origin sends them until the origin
+  negotiates gzip or no compression. See Upgrade notes.
+- **A request for a combined resource no longer fills the cache entry that page rewriting uses**, so the first page view after the cache is emptied performs its own combine.
+- **Combined-resource URLs beyond the size limits the server itself generates are refused.** Pages never produce such URLs.
+- **A URL fragment no longer counts when the file type of a rewritten resource is inferred from its URL.** This affects edge cases only.
+- **Responses to requests that carry an `Authorization` header no longer get
+  the short shared-cache lifetime used for in-place optimization.** The
+  configured in-place lifetime is unchanged for other responses.
+
+### Fixed
+
+- **`combine_javascript` no longer breaks scripts that declare top-level `const`,
+  `let` or `class`.** The combined scripts run through `eval()`, which kept
+  those declarations private, so a later script could no longer see a
+  function declared as `const checkForm = ...`. Such scripts are now left
+  uncombined. Thanks to the original reporter:
+  https://github.com/apache/incubator-pagespeed-mod/issues/1887
+- **`rewrite_css` keeps CSS custom properties exactly as written.** Custom
+  property names such as `--Test` and `--test` stay distinct instead of being
+  lowercased into one, and their values are no longer minified: `--gap: 0px`
+  keeps its unit and `--c: #ff0` keeps its colour notation, so scripts and
+  `var()` consumers see what the stylesheet author wrote. Reported in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1971 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/2066.
+- CSS parser: recover from a stray semicolon after the last rule of a sheet. A sheet such as `a{b:c};` previously failed to parse as a whole and was served unoptimized.
+- **IIS accepts a UTF-8 byte order mark at the start of `pagespeed.config`.** A file saved by Windows PowerShell 5.1 or an editor that adds the mark used to lose its first directive with only a confusing unknown-option warning, which could leave the module off or without its optimizer service. The mark is now skipped and a notice is logged; a UTF-16 file is refused with a clear warning.
+- **In-place optimization no longer floods the message history.** Every
+  in-place hit and miss used to write an informational line into the shared
+  message history, pushing real warnings and errors out of the console's
+  Messages page within seconds on a busy site. Those per-request lines are now
+  written at debug level on nginx, Envoy and IIS (visible with the debug log
+  level); the `ipro_*` statistics remain the counters. Reported at
+  https://github.com/apache/incubator-pagespeed-ngx/issues/1720.
+- **JavaScript minification keeps licence comments.** `rewrite_javascript` used to remove every comment except IE conditional-compilation comments, which dropped the copyright notices that many libraries' licences require in redistributed copies. Block comments that start with `/*!` or contain `@license` or `@preserve` are now kept, in single-file and combined output alike; ordinary comments are still removed. Originally reported in the archived upstream repository: https://github.com/apache/incubator-pagespeed-mod/issues/1800 (see also https://github.com/apache/incubator-pagespeed-mod/issues/520)
+- **Redirects no longer pick up repeated or unwanted PageSpeed query parameters.** When the module strips its own query parameters (for example `?PageSpeed=noscript`) and the origin answers with a same-site redirect, it still adds them back to `Location` so the redirected request keeps its options, but now only if the target does not already carry them, and before any `#fragment`. A redirect that points at the original URL with those parameters removed (for example `/?PageSpeed=noscript` to `/`) is left as the origin wrote it, so sites can keep those URLs out of search indexes. Redirects to another host are untouched. Reported in https://github.com/apache/incubator-pagespeed-mod/issues/1622 and https://github.com/apache/incubator-pagespeed-mod/issues/1024.
+- **A failed `nginx -s reload` no longer leaks memory or disturbs the running
+  configuration.** Each configuration cycle now owns its own optimizer state, so
+  a reload that fails to start leaves the live cycle's state tracked for a clean
+  shutdown and releases the state it had built, including when the new
+  configuration has no pagespeed server.
+- **AVIF images are no longer optimized twice under two cache keys.** With AVIF recompression on and animated AVIF conversion off, a client that accepts animated AVIF was keyed separately from other AVIF clients although both received identical output. They now share one cache entry, as WebP clients already do.
+- **Resource and admin responses carry each header once.** An
+  `AddResourceHeader` for a header the origin already sent (for example
+  `Access-Control-Allow-Origin`) now replaces it instead of sending two values,
+  and, on Apache, `X-Content-Type-Options: nosniff` is no longer repeated on the
+  admin and daemon JSON responses or on in-place optimized responses. Reported upstream in
+  https://github.com/apache/incubator-pagespeed-mod/issues/1760 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/1988.
+- **Inline scripts and styles are minified again under a Content-Security-Policy that uses nonces or `'unsafe-inline'`.** Previously any `script-src` or `style-src` made the module leave inline blocks untouched. It now backs off only when the policy lists hash sources (a hash covers the exact original bytes) or does not allow inline blocks; the `nonce` attribute is kept as is.
+- **The error for render-only directives no longer names a retired product.** The message now points at the optimizer worker instead. Fixes #244.
+- nginx: the native fetcher connects to IPv6 origins; IPv4 addresses are preferred when a host has both.
+- **The optimizer cache now re-asks for resources it served as unoptimized originals, and marks image originals as negotiable.** A resource the module stored while the optimizer worker was stopped no longer waits for its stored copy to expire: a later request asks the worker again, at most once per URL every ten seconds, and the new `ipro_daemon_served_original_only` statistic counts serves answered from an entry that has no optimized variants. An image served as its original now carries the same image-selection `Vary` header (`Accept, Save-Data, User-Agent, Sec-CH-DPR`) as an optimized variant, so a shared cache no longer keeps the original after AVIF or WebP variants exist. Fixes #451, fixes #452.
+- **A/B experiments on IIS now apply the visitor's arm to the HTML.** Visitors were given an experiment cookie, but the page was rewritten without that arm's filters, so experiment results on IIS were not meaningful. The arm's settings are now applied to the rewritten HTML, and the cookie is still written once. https://github.com/We-Amp/mod_pagespeed/issues/312
+- **Image handlers no longer throw "pagespeed is not defined" when the support script is missing.**
+  The `onload` and `onerror` handlers that the critical-image beacon, lazy-load and delay-images
+  filters add to `<img>` elements now check that the support script ran before calling it, so a
+  page where that script is blocked, deferred or stripped by another tool no longer logs a
+  `ReferenceError` for every image. Originally reported at
+  https://github.com/apache/incubator-pagespeed-mod/issues/1316 and
+  https://github.com/apache/incubator-pagespeed-mod/issues/1977.
+- **Large cached responses served with `CycloneZeroCopyServe` over cleartext HTTP/2
+  no longer stall after the first 64 KB** when the client reads quickly.
+- **The admin console states what its numbers measure.** Savings headlines on the Overview, Savings and Optimizer pages now say they are measured in transfer bytes and include compression. Warning counts say how far back the retained log really reaches when it is younger than 15 minutes. Chart time axes no longer repeat a label, the Graphs page opens on the narrowest range that has history and shows how often history is logged, a share with no requests reads "—" instead of an older interval's figure, and the Savings page labels module counters and optimizer counters separately. The admin JSON now reports the host name without a trailing ":0" when the server has no explicit port.
+- **CSS minification keeps licence comments.** `rewrite_css` used to remove every comment, which dropped the copyright and licence notices that many stylesheets must carry in redistributed copies. Comments that start with `/*!` or contain `@license` or `@preserve` are now kept verbatim, at the top of the minified stylesheet (after any `@charset` rule), including when stylesheets are combined or `@import` rules are flattened; ordinary comments are still removed.
+- Remote configuration that starts with a UTF-8 byte order mark now applies as if the mark were absent. A remote file saved as UTF-16 or UTF-32 is ignored with a warning that says so.
+- **Redirects recognise equivalent query strings when PageSpeed parameters are added back.** A same-site redirect that differs from the request only in parameter order, in `a` versus `a=`, in `+` versus `%20`, or in the PageSpeed parameters themselves is left as the origin wrote it, and a redirect that already carries a PageSpeed parameter no longer gets it added again when it is written with the other prefix (`ModPagespeed` or `PageSpeed`) or with the option name in a different case.
+- **IIS applies the machine-wide `MessageBufferSize` and `UseNativeFetcher` to every site.** Set in the machine-wide `pagespeed.config`, they were picked up only by the first site in a worker process and could be lost after a configuration file was edited; the other sites used the built-in defaults. Every site now gets them. https://github.com/We-Amp/mod_pagespeed/issues/511
+- **IIS experiments keep their arm when remote configuration is in use.** With a remote configuration source and `RunExperiment on`, the options fetched from the remote source dropped the visitor's experiment arm, so the arm's id was missing from rewritten resource URLs and the experiment statistics did not count the request. The arm is now kept. https://github.com/We-Amp/mod_pagespeed/issues/510
+- **Inline scripts added by the image and iframe filters no longer throw when the support script is missing.**
+  The small scripts that the lazy-load, delay-images, inline-image deduplication and deferred-iframe
+  filters add to the page now check that the support script ran before calling it, so a page where
+  that script is blocked, deferred or stripped by another tool no longer logs a `ReferenceError`.
+  Deduplicating an inlined image now needs the image to be a little larger before it pays off, because
+  the restoring script is slightly longer.
+- The per-server statistics page now reports the disk-cache counters (`cyclone_cache_*` and `file_cache_*`) instead of 0 whenever per-virtual-host statistics are on, which is the nginx default. The disk cache is shared by every server, so these counters show server-wide totals.
+- **The Caches page labels its backend figures by what they measure.** The "Disk cache hits" row counted every read the cache served, from memory or from disk, so it now reads "Reads served (RAM + disk)". The "Disk cache misses" row was never counted and always showed 0, so it is gone. The block also says which figures belong to the server process that answered, counted since it started, and which describe the whole cache file; the Statistics page shows totals for all processes.
+- **Stylesheets and scripts with an `integrity` attribute are no longer changed.**
+  `rewrite_css` used to minify such a stylesheet, so the browser refused it and
+  the page rendered unstyled; it now leaves it as written. `rewrite_domains`
+  no longer moves an `integrity` stylesheet or script to another host, where
+  the browser would block it, and `outline_css` and the `@import`-to-link
+  conversion no longer turn a `<style integrity>` into a blocked `<link>`.
+  `inline_css` and `inline_javascript` no longer inline a stylesheet or script
+  that has `integrity`: inlining dropped the integrity check the page asked
+  for, so these now stay external files.
+- The JavaScript minifier now minifies scripts and ES modules that destructure in a `for (let {a} of xs)` or `for (let [a] of xs)` loop header. Before, such a file was reported as having a parse error and was served unminified.
+- The whole-server console's Rule packs page now lists the packs each virtual host configures, with their state, and shows those hosts' decision logs, instead of reporting that no rule pack is configured.
+- **Admin console layout and accessibility.** The Histograms table scrolls inside its frame instead of widening the page; the Histograms tables and the Configuration text are named, keyboard-focusable regions, and the Statistics regions have unique names (the JavaScript and Memcached counter families are no longer listed twice). Long counter lists start collapsed, apart from the key counters, and a search opens the matching families. Backend statistics print sizes as MB and each path once, and note that some counters are kept per web-server process, so they can differ from Statistics. Savings figures keep their unit on one line, the Optimizer status row headers match their rows, and its version reads like the module's ("v2.6.0"). The keyboard shortcut help now says where Refresh applies.
+- **Windows: the cache now works when the cache directory path contains
+  non-ASCII characters (Cyclone cache library updated).**
+- **HTML proxy path: the Vary tokens for rewritten HTML are added before the
+  response is handed to the rewriter thread.** A page that is passed through
+  unparsed because it exceeded the learned HTML parse-size limit now carries
+  the same Vary tokens as its rewritten form, and the response headers are no
+  longer updated by one thread while the fetch thread is still reading them.
+- **nginx: the thread-sizing summary is now logged at notice level instead of warn on every start and `nginx -t`.**
+- **The recorder now recognises stacked content codings** on the
+  optimizer-served path as well, so a response in a coding it cannot decode is
+  never recorded as plain.
+- **nginx no longer logs a misleading "incomplete/truncated response"
+  warning** when in-place recording skips a response early, for example one
+  whose content type is not optimized or whose content coding the server
+  cannot decode.
+
+### Upgrade Notes
+
+- **If a script or monitor reads the version from the `X-Mod-Pagespeed` or
+  `X-Page-Speed` header, set `ExposeVersionInHeaders on` in the server-wide
+  configuration as part of the upgrade.** The option is accepted only
+  server-wide (a use inside a virtual host or server block fails the
+  configuration test), and releases older than this one reject it as unknown,
+  so add it with the upgrade, not before.
+- **IIS: admin pages behind a reverse proxy on the same server.** Requests that carry forwarding headers (such as `X-Forwarded-For` or `X-ARR-ClientIP`) no longer count as local, for the admin, statistics, console and message pages and for the start-up diagnostic page. To keep using them through such a proxy, add `pagespeed TreatProxiedRequestsAsLocal on` to the site's `pagespeed.config`, or allow a host with `pagespeed AdminDomains allow <host>` (`StatisticsDomains`, `ConsoleDomains` and `MessagesDomains` for the other pages).
+- **nginx servers with fewer workers than half their CPU cores run more optimization threads after the upgrade**, including servers on the compiled-in default of one worker. To keep the previous one thread per pool, set `pagespeed NumRewriteThreads 1;` and `pagespeed NumExpensiveRewriteThreads 1;` in the http block. The startup line "PageSpeed optimization threads: ..." shows the counts in use.
+- **In-place optimization behind an origin that compresses only with
+  brotli.** Such an origin's responses are now served unoptimized. To keep
+  optimizing them, let the origin answer the server's own fetches with gzip or
+  without compression.
+
 ## [2.6.0] - 2026-10-28
 
 ### Security

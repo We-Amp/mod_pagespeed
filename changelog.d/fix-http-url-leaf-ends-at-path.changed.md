@@ -1,1 +1,0 @@
-- **A URL fragment no longer counts when the file type of a rewritten resource is inferred from its URL.** This affects edge cases only.
