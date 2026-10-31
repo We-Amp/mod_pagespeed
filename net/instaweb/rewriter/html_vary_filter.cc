@@ -75,10 +75,12 @@ void HtmlVaryFilter::HtmlVaryTokens(const RewriteOptions& options,
   }
 }
 
-void HtmlVaryFilter::StartDocumentImpl() {
+void HtmlVaryFilter::StartDocumentImpl() { AddVaryTokens(driver()); }
+
+void HtmlVaryFilter::AddVaryTokens(RewriteDriver* driver) {
   // Response headers are mutable only until the first flush, and may be
   // unwired entirely (non-HTML rewrites, some tests).
-  ResponseHeaders* headers = driver()->mutable_response_headers();
+  ResponseHeaders* headers = driver->mutable_response_headers();
   if (headers == nullptr) {
     return;
   }
@@ -87,12 +89,12 @@ void HtmlVaryFilter::StartDocumentImpl() {
     return;
   }
   StringVector tokens;
-  HtmlVaryTokens(*driver()->options(), &tokens);
+  HtmlVaryTokens(*driver->options(), &tokens);
   bool added_token = false;
   for (const GoogleString& token : tokens) {
     if (!headers->HasValueCaseInsensitive(HttpAttributes::kVary, token)) {
       headers->Add(HttpAttributes::kVary, token);
-      driver()->AddHtmlVaryTokenAdded(token);
+      driver->AddHtmlVaryTokenAdded(token);
       added_token = true;
     }
   }
