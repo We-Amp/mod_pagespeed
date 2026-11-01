@@ -29,7 +29,8 @@
 #      commit (check_optimizer_pin_pair.py).
 #   5. With --run-id (the id of a dry run of the release lane, read through
 #      `gh run view` and the log of its version job; read only): the run is
-#      the "Release" workflow, completed and successful, a dispatch; its
+#      the "Release" workflow (its file, .github/workflows/release.yml, is
+#      read too, since a name is only a display string), completed and successful, a dispatch; its
 #      version job says it was a dry run of exactly --tag at exactly the
 #      tag's commit (--tag-sha), so a run of another tag, or of the same tag
 #      before it moved, is refused; the optimizer fetch and, per package kind
@@ -47,14 +48,16 @@ FAILS=0
 bad() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 ok() { echo "ok: $*"; }
 
-# check_run RUN_JSON DERIVE_LOG TAG TAG_SHA
+# check_run RUN_JSON DERIVE_LOG TAG TAG_SHA WORKFLOW_PATH
 check_run() {
-  python3 -I - "$1" "$2" "$3" "$4" <<'PY'
+  python3 -I - "$1" "$2" "$3" "$4" "$5" <<'PY'
 import json, re, sys
 doc = json.load(open(sys.argv[1]))
 log = re.sub(r"\x1b\[[0-9;]*m", "", open(sys.argv[2]).read())
-want_tag, want_sha = sys.argv[3], sys.argv[4]
+want_tag, want_sha, path = sys.argv[3], sys.argv[4], sys.argv[5]
 errs = []
+if path != ".github/workflows/release.yml":
+    errs.append("run is of workflow file %r, not .github/workflows/release.yml" % path)
 if doc.get("workflowName") != "Release":
     errs.append("run is workflow %r, not the Release workflow" % doc.get("workflowName"))
 if doc.get("status") != "completed" or doc.get("conclusion") != "success":
@@ -128,9 +131,9 @@ sys.exit(1 if errs else 0)
 PY
 }
 
-# fetch_run ID REPO RUN_JSON DERIVE_LOG: read-only reads of one run.
+# fetch_run ID REPO RUN_JSON DERIVE_LOG PATH_FILE: read-only reads of one run.
 fetch_run() {
-  local id="$1" repo="$2" rj="$3" dl="$4" jid
+  local id="$1" repo="$2" rj="$3" dl="$4" pf="$5" jid
   gh run view "$id" -R "$repo" --json attempt,status,conclusion,event,workflowName,jobs > "$rj" 2>&1 \
     || { echo "FAIL: cannot read run $id: $(head -c 300 "$rj")"; return 1; }
   jid="$(python3 -I -c "
@@ -139,6 +142,8 @@ for j in json.load(open(sys.argv[1])).get('jobs', []):
     if re.fullmatch(r'(?:[^/]+ / )?Derive versions from the tag', j.get('name', '')):
         print(j['databaseId']); break
 " "$rj")"
+  gh api "repos/$repo/actions/runs/$id" --jq .path > "$pf" 2>&1 \
+    || { echo "FAIL: cannot read the workflow file of run $id: $(head -c 300 "$pf")"; return 1; }
   [ -n "$jid" ] || { echo "FAIL: run $id has no version job, cannot establish its tag"; return 1; }
   gh api --allow-escape-sequences "repos/$repo/actions/jobs/$jid/logs" > "$dl" 2>&1 \
     || { echo "FAIL: cannot read the version job log of run $id: $(head -c 300 "$dl")"; return 1; }
@@ -199,11 +204,11 @@ rehearse() {
 
   if [ -n "$runid" ]; then
     [ -n "$tagsha" ] && [ -n "$repo" ] || { echo "pair_rehearsal: --run-id needs --repo and --tag-sha" >&2; return 2; }
-    local w rj dl
-    w="$(mktemp -d)"; rj="$w/run.json"; dl="$w/derive.log"
-    if ! out="$(fetch_run "$runid" "$repo" "$rj" "$dl")"; then
+    local w rj dl pf
+    w="$(mktemp -d)"; rj="$w/run.json"; dl="$w/derive.txt"; pf="$w/path.txt"
+    if ! out="$(fetch_run "$runid" "$repo" "$rj" "$dl" "$pf")"; then
       printf '%s\n' "$out"; FAILS=$((FAILS + 1))
-    elif out="$(check_run "$rj" "$dl" "$tag" "$tagsha" 2>&1)"; then
+    elif out="$(check_run "$rj" "$dl" "$tag" "$tagsha" "$(tr -d '\n' < "$pf")" 2>&1)"; then
       ok "dry run $runid, install and serve passed: $out"
     else
       printf '%s\n' "$out"; FAILS=$((FAILS + 1))
@@ -273,7 +278,8 @@ self_test() {
 echo "$*" >> "$GH_CALLS"
 case "$1" in
   run) [ "$2" = view ] || exit 9; cat "$FIX_RUN" ;;
-  api) case "$*" in *-X*|*--method*|*" -f "*|*" -F "*|*--input*) exit 9 ;; esac; cat "$FIX_LOG" ;;
+  api) case "$*" in *-X*|*--method*|*" -f "*|*" -F "*|*--input*) exit 9 ;; esac
+       case "$*" in */actions/runs/*) echo "${FIX_PATH:-.github/workflows/release.yml}" ;; *) cat "$FIX_LOG" ;; esac ;;
   *) exit 9 ;;
 esac
 SH
@@ -285,15 +291,15 @@ SH
   local sha1=170368c80c3f1beacc9a93b40e78e8cc78c93447 sha2=da5e9a5c91666e10e38a250708726ca3dcb30542
   local ev1=(--run-id "$r1" --repo o/r --tag-sha "$sha1") ev2=(--run-id "$r2" --repo o/r --tag-sha "$sha2")
   pin optimizer-v2.7.0; ver 2.7.0
-  withrun "$fx/run-$r1.json" "$fx/derive-$r1.log" 0 "real dry run of 2.7.0-pre.1 (default jobs ran, hosted variants skipped)" \
+  withrun "$fx/run-$r1.json" "$fx/derive-$r1.txt" 0 "real dry run of 2.7.0-pre.1 (default jobs ran, hosted variants skipped)" \
     --tag module-v2.7.0-pre.1 "${base[@]}" "${ev1[@]}"
   pin optimizer-v2.6.0; ver 2.6.0
-  withrun "$fx/run-$r2.json" "$fx/derive-$r2.log" 0 "real dry run of 2.6.0-pre.2" \
+  withrun "$fx/run-$r2.json" "$fx/derive-$r2.txt" 0 "real dry run of 2.6.0-pre.2" \
     --tag module-v2.6.0-pre.2 "${base[@]}" "${ev2[@]}"
   # The tag the run rehearsed must be the tag asked for.
-  withrun "$fx/run-$r2.json" "$fx/derive-$r2.log" 1 "TEETH run of pre.2 offered for pre.1" \
+  withrun "$fx/run-$r2.json" "$fx/derive-$r2.txt" 1 "TEETH run of pre.2 offered for pre.1" \
     --tag module-v2.6.0-pre.1 "${base[@]}" "${ev2[@]}"
-  withrun "$fx/run-$r2.json" "$fx/derive-$r2.log" 1 "TEETH run built another commit" \
+  withrun "$fx/run-$r2.json" "$fx/derive-$r2.txt" 1 "TEETH run built another commit" \
     --tag module-v2.6.0-pre.2 "${base[@]}" --run-id "$r2" --repo o/r --tag-sha "$sha1"
   # Mutations of the real fixtures.
   mut() { # name want python-expression-on-d(run) [log-sed]
@@ -305,8 +311,8 @@ def job(n):
 exec(sys.argv[3])
 json.dump(d, open(sys.argv[2], "w"))
 PY
-    local log="$fx/derive-$r1.log"
-    if [ -n "${4:-}" ]; then sed "$4" "$log" > "$t/mut.log"; log="$t/mut.log"; fi
+    local log="$fx/derive-$r1.txt"
+    if [ -n "${4:-}" ]; then sed "$4" "$log" > "$t/mut.txt"; log="$t/mut.txt"; fi
     pin optimizer-v2.7.0; ver 2.7.0
     withrun "$t/mut.json" "$log" "$2" "$1" --tag module-v2.7.0-pre.1 "${base[@]}" "${ev1[@]}"
   }
@@ -329,9 +335,10 @@ PY
   mut "TEETH real dispatch at the release environment" 1 \
     'job("module / Create the GitHub release")["conclusion"]=None; job("module / Sign SHA256SUMS")["conclusion"]=None' \
     's/dry_run=true/dry_run=false/'
+  FIX_PATH=.github/workflows/lookalike.yml mut "TEETH look-alike workflow named Release" 1 'pass'
   mut "version job lines missing"          1 'pass' '/ tag=/d'
   # The run is read, not changed: only run view and api reads were made.
-  if ! grep -v -E '^(run view |api --allow-escape-sequences repos/o/r/actions/jobs/[0-9]+/logs$)' "$GH_CALLS" | grep -q .; then
+  if ! grep -v -E '^(run view |api --allow-escape-sequences repos/o/r/actions/jobs/[0-9]+/logs$|api repos/o/r/actions/runs/[0-9]+ --jq \.path$)' "$GH_CALLS" | grep -q .; then
     echo "  ok   only read calls were made ($(wc -l < "$GH_CALLS" | tr -d ' ') gh calls)"
   else echo "  FAIL a non-read gh call was made"; grep -v -E '^(run view |api )' "$GH_CALLS"; fails=$((fails + 1)); fi
   # No run id: the output says the evidence was not checked.

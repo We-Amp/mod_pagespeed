@@ -121,10 +121,28 @@ for _, body in runs:
                  "--repositories-bzl ", "--run-id ", "--tag-sha ", "--repo "]:
         if need not in body:
             v.append("the rehearsal is not given %s" % need.strip())
-    if not re.search(r"tee -a \"\$GITHUB_STEP_SUMMARY\"\s*$", body.strip(), re.M):
-        v.append("the rehearsal output does not end in the job summary")
+    last = [l.strip() for l in body.splitlines() if l.strip()][-1]
+    if last != 'bash tools/ci/pair_rehearsal.sh "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"':
+        v.append("the last line of the run block is not exactly the rehearsal piped to the job summary: %r" % last)
+    for ln in body.splitlines():
+        t = ln.strip()
+        if t.startswith("!") or re.search(r"\btrap\b", t):
+            v.append("the run block negates a command or sets a trap: %r" % t)
+        if "rev-parse" in t and t not in (
+                'ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")',):
+            v.append("a rev-parse other than the candidate's own commit: %r" % t)
+    if 'ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")' not in body:
+        v.append("the run id, repository and the candidate's commit are not passed as reviewed")
+    if '--tag "$TAG"' not in body or '--pin "$PIN"' not in body:
+        v.append("the tag and pin are not passed from TAG and PIN")
     if not re.search(r'case "\$TAG" in module-v\*\)', body):
         v.append("the tag input is not checked")
+
+# The rehearsal step's env: is exactly the three inputs, never a literal.
+envs = re.findall(r"^        env:\n((?:          .*\n)+)", code + "\n", re.M)
+want_env = ["TAG: ${{ inputs.tag }}", "RUN_ID: ${{ inputs.dry_run_id }}", "GH_TOKEN: ${{ github.token }}"]
+if len(envs) != 1 or [l.strip() for l in envs[0].splitlines()] != want_env:
+    v.append("the step env: is %r, not exactly %r" % ([l.strip() for l in envs[0].splitlines()] if envs else None, want_env))
 
 # The script: its only gh calls are reads.
 src = open(sys.argv[2]).read()
@@ -133,7 +151,7 @@ for m in re.finditer(r"^[^#\n]*\bgh (\S+)( \S+)?[^\n]*$", src, re.M):
     if "echo" in ln or "FAIL" in ln and "gh " not in ln.split("FAIL")[0]:
         continue
     sub = (m.group(1) + (m.group(2) or "")).strip()
-    if sub not in ("run view", "api --allow-escape-sequences"):
+    if not (sub == "run view" or sub.startswith("api")):
         v.append("pair_rehearsal.sh calls gh %s" % sub)
     if re.search(r"\s(-X|--method|-f|-F|--field|--raw-field|--input)\b", ln):
         v.append("pair_rehearsal.sh makes a gh write call")
@@ -224,6 +242,14 @@ widen "a cone-mode sparse checkout" "          sparse-checkout-cone-mode: false
 widen "an artifact upload"        "      - name: Rehearse the pair" "      - name: x
         uses: actions/upload-artifact@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Rehearse the pair"
+widen "a negated rehearsal"        "$RUN \"\${ARGS[@]}\"" "! $RUN \"\${ARGS[@]}\""
+widen "an exit trap"              "set -euo pipefail" "set -euo pipefail
+          trap 'exit 0' EXIT"
+widen "the repository's own HEAD as the tag commit" "\"\$(git -C candidate rev-parse HEAD)\"" "\"\$(git rev-parse HEAD)\""
+widen "a literal TAG"             "          TAG: \${{ inputs.tag }}" "          TAG: module-v1.0.0"
+widen "an empty RUN_ID"           "          RUN_ID: \${{ inputs.dry_run_id }}" "          RUN_ID: ''"
+widen "an extra env value"        "          GH_TOKEN: \${{ github.token }}" "          GH_TOKEN: \${{ github.token }}
+          SKIP: 1"
 widen "the summary dropped"       "| tee -a \"\$GITHUB_STEP_SUMMARY\"" ""
 
 # The script's own gh calls are reads: a widened copy of it is refused too.
