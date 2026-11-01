@@ -57,6 +57,16 @@ function testPage({ extraBody = '', shift = true, extraParams = '' } = {}) {
   const shiftScript = shift ? `<script>
       // Grow the spacer after load: shifts #main down without recent input,
       // producing a layout-shift entry.
+      window.__shiftSeen = false;
+      window.__lcpSeen = false;
+      try {
+        new PerformanceObserver(function(list) {
+          if (list.getEntries().length) window.__shiftSeen = true;
+        }).observe({ type: 'layout-shift', buffered: true });
+        new PerformanceObserver(function(list) {
+          if (list.getEntries().length) window.__lcpSeen = true;
+        }).observe({ type: 'largest-contentful-paint', buffered: true });
+      } catch (e) {}
       addEventListener('load', function() {
         setTimeout(function() {
           document.getElementById('spacer').style.height = '260px';
@@ -108,6 +118,16 @@ async function waitForBeacons(count, timeoutMs = 10000) {
   return beacons.length;
 }
 
+// Waits until the page has been told about its layout shift and its largest
+// contentful paint. Both entries are only produced once a frame presenting the
+// content is rendered, which a fixed sleep cannot guarantee on a loaded
+// machine. The page's observers are registered before the collector's, so by
+// the time these flags are set the collector has received the same entries.
+async function waitForShift(page) {
+  await page.waitForFunction('window.__shiftSeen === true && window.__lcpSeen === true',
+                             null, { timeout: 15000 });
+}
+
 let failures = 0;
 function check(ok, label) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}`);
@@ -124,7 +144,8 @@ const browser = await chromium.launch();
       { viewport: { width: 1024, height: 768 } });
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await sleep(400);  // let the layout shift happen and LCP settle
+  await waitForShift(page);  // the layout shift has been reported
+  await sleep(100);
   await page.goto(origin + '/away');  // pagehide + visibilitychange
   await waitForBeacons(1);
   await sleep(250);  // room for an (incorrect) second beacon to show up
@@ -211,7 +232,8 @@ const browser = await chromium.launch();
       'sendBeacon', { configurable: true, value: undefined });`);
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await sleep(400);
+  await waitForShift(page);
+  await sleep(100);
   await page.evaluate("__forceVisibility('hidden')");
   await waitForBeacons(1);
   check(beacons.length === 1,
@@ -345,7 +367,8 @@ const browser = await chromium.launch();
   await page.addInitScript(visibilityShim);
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await sleep(400);  // let the initial layout shift and LCP settle
+  await waitForShift(page);  // the initial layout shift has been reported
+  await sleep(100);
   await page.evaluate("__forceVisibility('hidden')");
   await waitForBeacons(1);
   check(beacons.length === 1,
