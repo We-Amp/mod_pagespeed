@@ -86,10 +86,15 @@ A `-pre` dry run never runs that check: its optimizer tag is
 the real tag's checks against the candidate before the tag is pushed: the pin
 names `optimizer-vX.Y.Z`, the pinned commit's `VERSION.txt` equals `X.Y.Z`
 (strict, no `--dry-run`), and both halves link one cache library commit. Given
-the run id of the lane's dry run, it also checks that the run was a dispatch at
-the tag's commit, that the optimizer fetch and the Debian and RPM
-install-and-serve smoke jobs passed (not skipped), and that no job that signs
-or publishes ran. It is dispatch only, hosted and read-only, with no
+the run id of the lane's dry run (`dry_run_id`; without it the summary says the
+evidence was not checked), it reads that run, read only, and requires: the
+`Release` workflow, completed and successful, a dispatch; its version job says
+it was a dry run of exactly the given tag at the tag's commit (so a run of
+`-pre.1` does not pass for `-pre.2`); the optimizer fetch passed; of the
+Debian and of the RPM install-and-serve smoke jobs, one variant (self-hosted
+or hosted) passed and the other was skipped; and `Sign SHA256SUMS` and
+`Create the GitHub release` exist and were skipped. The attempt number it
+read is printed. It is dispatch only, hosted and read-only, with no
 environment, secret or write permission; `tools/ci/test_pair_rehearsal_shape.sh`
 fails if that changes. It does not prove the public package repository
 metadata or signatures, the shared-cache check (which installs from the public

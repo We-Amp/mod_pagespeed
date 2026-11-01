@@ -22,7 +22,7 @@ on:
         required: true
         type: string
       dry_run_id:
-        description: 'Run id of the release lane dry run of this tag (optional: also checks its install-and-serve jobs)'
+        description: 'Run id of the release lane dry run of this tag (without it the install-and-serve evidence is NOT checked, and the summary says so)'
         required: false
         type: string
         default: ''
@@ -47,7 +47,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: master
-          sparse-checkout: tools/ci
+          sparse-checkout: |
+            /tools/ci/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Checkout the candidate tag
@@ -56,8 +58,9 @@ jobs:
           ref: refs/tags/${{ inputs.tag }}
           path: candidate
           sparse-checkout: |
-            install/debian/optimizer-pin.json
-            bazel/repositories.bzl
+            /install/debian/optimizer-pin.json
+            /bazel/repositories.bzl
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Rehearse the pair
@@ -79,7 +82,8 @@ jobs:
                 --repositories-bzl candidate/bazel/repositories.bzl)
           if [ -n "$RUN_ID" ]; then
             case "$RUN_ID" in *[!0-9]*) echo "::error::dry_run_id is not a run id"; exit 1 ;; esac
-            gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --json event,headSha,conclusion,jobs > run.json
-            ARGS+=(--run-json run.json --tag-sha "$(git -C candidate rev-parse HEAD)")
+            ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")
+          else
+            echo "::warning::no dry_run_id: the install-and-serve jobs and the dry run's tag were not checked"
           fi
           bash tools/ci/pair_rehearsal.sh "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

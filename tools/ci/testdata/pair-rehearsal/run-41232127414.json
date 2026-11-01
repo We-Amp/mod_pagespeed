@@ -1,0 +1,354 @@
+{
+ "attempt": 1,
+ "status": "completed",
+ "conclusion": "success",
+ "event": "workflow_dispatch",
+ "workflowName": "Release",
+ "jobs": [
+  {
+   "databaseId": 124628354112,
+   "name": "module / Event guard (refuses merge_group, unexpected events, refs and actors)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628376832,
+   "name": "module / Ref guard",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628442889,
+   "name": "module / Derive versions from the tag",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628481535,
+   "name": "module / CI run of the release commit (full tier)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628481568,
+   "name": "module / Fetch and verify the optimizer packages",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628481576,
+   "name": "module / Vendor Dependencies (sidecar, hosted)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628481581,
+   "name": "module / Vendor Dependencies",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628481590,
+   "name": "module / Security Gates (SBOM + Grype + VEX)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628481614,
+   "name": "module / System-test gate (CI run of the release commit)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628482790,
+   "name": "module / Vendor Dependencies (hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124628895121,
+   "name": "module / Sidecar Native Pair (x64, hosted)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124628895128,
+   "name": "module / Sidecar Native Pair (arm64, hosted)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629023609,
+   "name": "module / Vendor ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052231,
+   "name": "module / Nginx Distro Packages (arm64, plan)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052249,
+   "name": "module / Apache EL8 Build (glibc 2.28)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052285,
+   "name": "module / Nginx Distro Packages (x64)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052290,
+   "name": "module / Linux Release Build (x64)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052309,
+   "name": "module / Linux Release Build (arm64)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052310,
+   "name": "module / Unit Tests (Release)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052312,
+   "name": "module / Apache EL10 Build (glibc 2.39, native)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052335,
+   "name": "module / Windows Release Build",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629052490,
+   "name": "module / Nginx Distro Packages (el10)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629053257,
+   "name": "module / Linux Release Build (x64, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629053444,
+   "name": "module / Apache EL8 Build (glibc 2.28, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629053597,
+   "name": "module / Apache EL10 Build (glibc 2.39, native, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629053653,
+   "name": "module / Windows Release Build (hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629053682,
+   "name": "module / Nginx Distro Packages (x64, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629053695,
+   "name": "module / Nginx Distro Packages (el10, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629054153,
+   "name": "module / Unit Tests (Release, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124629089108,
+   "name": "module / Nginx Distro Packages (arm64, bookworm)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629089133,
+   "name": "module / Nginx Distro Packages (arm64, jammy)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629089135,
+   "name": "module / Nginx Distro Packages (arm64, noble)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629089265,
+   "name": "module / Nginx Distro Packages (arm64, el9)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124629089438,
+   "name": "module / Nginx Distro Packages (arm64, trixie)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630106227,
+   "name": "module / Windows build ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630127091,
+   "name": "module / Build the Windows installer",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630127489,
+   "name": "module / Sign the Windows binaries",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124630375821,
+   "name": "module / Gate, IIS installer / Event guard (refuses merge_group, unexpected events, refs and actors)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630376326,
+   "name": "module / Sign the Windows installer",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124630401520,
+   "name": "module / Gate, IIS installer / IIS MSI upgrade test",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630422639,
+   "name": "module / Linux build ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630446600,
+   "name": "module / Smoke Test (Nginx)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630446618,
+   "name": "module / Smoke Test (RPM)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630446673,
+   "name": "module / Smoke Test (Debian)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630447720,
+   "name": "module / Smoke Test (RPM, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124630447760,
+   "name": "module / Smoke Test (Debian, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124630448397,
+   "name": "module / Smoke Test (Nginx, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124630516776,
+   "name": "module / EL10 build ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630538279,
+   "name": "module / EA4 Build (el10)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124630539672,
+   "name": "module / EA4 Build (el10, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124632880452,
+   "name": "module / EL8 build ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124632906567,
+   "name": "module / EA4 Build (el9)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124632906580,
+   "name": "module / EA4 Build (el8)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124632907921,
+   "name": "module / EA4 Build (${{ matrix.os }}, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124632998876,
+   "name": "module / cPanel packages ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124633026274,
+   "name": "module / Gate, cPanel (el8) / Event guard (refuses merge_group, unexpected events, refs and actors)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124633026284,
+   "name": "module / Gate, cPanel (el9) / Event guard (refuses merge_group, unexpected events, refs and actors)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124633048090,
+   "name": "module / Gate, cPanel (el9) / cPanel smoke (el9)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124633054834,
+   "name": "module / Gate, cPanel (el8) / cPanel smoke (el8)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124633634023,
+   "name": "module / Nginx Distro Packages (arm64)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124633810985,
+   "name": "module / Packaged-Nginx Load Check (arm64)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124651785112,
+   "name": "module / Nginx packages ready",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124651806582,
+   "name": "module / Packaged-Nginx Load Check (x64)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124651806686,
+   "name": "module / Smoke Test (Nginx, packaged)",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124651807763,
+   "name": "module / Smoke Test (Nginx, packaged, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124651807986,
+   "name": "module / Packaged-Nginx Load Check (x64, hosted)",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124652934489,
+   "name": "module / Validate the asset set, SHA256SUMS and manifest",
+   "conclusion": "success"
+  },
+  {
+   "databaseId": 124653212639,
+   "name": "module / Create the GitHub release",
+   "conclusion": "skipped"
+  },
+  {
+   "databaseId": 124653213053,
+   "name": "module / Sign SHA256SUMS",
+   "conclusion": "skipped"
+  }
+ ]
+}
