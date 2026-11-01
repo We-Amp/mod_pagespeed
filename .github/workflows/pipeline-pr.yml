@@ -3010,7 +3010,7 @@ jobs:
     needs: [changes, windows-build, windows-unit-tests]
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
     if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.changes.outputs.iis == 'true' }}
-    timeout-minutes: 130
+    timeout-minutes: 50
     defaults:
       run:
         shell: powershell
@@ -3142,18 +3142,6 @@ jobs:
           python -m pip install --quiet -r test\system\requirements.txt
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install of the test dependencies failed"; exit 1 }
 
-      # Runners that share a host share ports 8080 and 8443, which the test
-      # site binds, so only one IIS system-test job runs on a host at a time.
-      # A background holder process owns a host-wide mutex from here until the
-      # last step of the job releases it (tools/ci/Hold-HostLock.ps1); if the
-      # job is cancelled, ending its processes frees the mutex as well.
-      - name: Wait for the host's IIS test slot
-        timeout-minutes: 80
-        run: |
-          $ErrorActionPreference = 'Stop'
-          .\tools\ci\Hold-HostLock.ps1 -Action acquire -WaitMinutes 75 -MaxHoldMinutes 120
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
       # A previous job may have left Application Verifier or page heap armed
       # for the worker; the system tests must run without either.
       - name: Clear stale Application Verifier settings
@@ -3251,15 +3239,6 @@ jobs:
             & .\tools\ci\Set-WerLocalDumps.ps1 -Disable -DumpDir $env:PAGESPEED_DUMP_DIR -Purge -Since ([DateTime]::Parse($env:IIS_RUN_T0)) | Out-Null
           }
           & .\test\system\setup_iis_full.ps1 -Action stop -SourceRoot $env:GITHUB_WORKSPACE 2>$null | Out-Null
-          $global:LASTEXITCODE = 0
-
-      # Last of the host-touching steps: let the next IIS job on this host in.
-      - name: Release the host's IIS test slot
-        if: ${{ always() }}
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = 'Continue'
-          .\tools\ci\Hold-HostLock.ps1 -Action release
           $global:LASTEXITCODE = 0
 
       - name: Upload the evidence
