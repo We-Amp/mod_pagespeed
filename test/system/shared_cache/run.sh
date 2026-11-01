@@ -25,6 +25,16 @@
 # response's Vary does not name Accept, Save-Data, User-Agent and Sec-CH-DPR,
 # or when the 304 names a different set than its 200.
 #
+# With PACKAGE_DIR=<dir> the packages come from that directory instead of the
+# repository: the module package of the tree under test (for apache,
+# mod-pagespeed_*.deb; for nginx, nginx-module-pagespeed_*.deb) and the
+# pinned optimizer's pagespeed-optimizer_<pin version>_*.deb.  Nothing is
+# fetched from the package repository then, and the module comes from its
+# package, so a module.so argument is refused.  A missing package is an error,
+# never a fall back to the repository.  What this cannot show: that the
+# repository carries the packages, that they are signed, and that
+# install.sh and apt resolve them as a customer's install does.
+#
 # Needs bash 4, python3 and docker.  Every container, the network and the
 # origin image carry a prefix unique to this run and are removed on exit;
 # nothing else is touched.
@@ -37,6 +47,12 @@ fi
 set -u
 SERVER=${1:?usage: run.sh apache|nginx [module.so]}
 SO=${2:-}
+# A job that means local packages (LOCAL_PACKAGES=true) must have staged them:
+# an empty PACKAGE_DIR would otherwise run the published mode under a local name.
+if [ "${LOCAL_PACKAGES:-}" = true ] && [ -z "${PACKAGE_DIR:-}" ]; then
+  echo "run.sh: LOCAL_PACKAGES=true but PACKAGE_DIR is empty" >&2
+  exit 2
+fi
 case "$SERVER" in apache|nginx) ;; *) echo "usage: run.sh apache|nginx [module.so]" >&2; exit 2 ;; esac
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
@@ -62,9 +78,34 @@ cleanup() {
 trap cleanup EXIT
 
 PAIR=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['tag'].removeprefix('optimizer-v'))" \
-  "$ROOT/install/debian/optimizer-pin.json") || exit 2
-docker build -q -t "$IMAGE" --build-arg "PAIR_VERSION=$PAIR" \
-  -f "$HERE/Dockerfile.$SERVER" "$HERE" >/dev/null || exit 2
+  "${OPTIMIZER_PIN:-$ROOT/install/debian/optimizer-pin.json}") || exit 2
+# The staging directory is the build context; pkgs/ is empty unless the
+# packages come from PACKAGE_DIR.
+CTX=$(mktemp -d) || exit 2
+trap 'rm -rf "$CTX"; cleanup' EXIT
+mkdir "$CTX/pkgs"
+cp "$HERE/Dockerfile.$SERVER" "$CTX/"
+PACKAGES=published
+if [ -n "${PACKAGE_DIR:-}" ]; then
+  PACKAGES=local
+  if [ -n "$SO" ]; then
+    echo "run.sh: PACKAGE_DIR and a module.so argument are exclusive (the module comes from its package)" >&2
+    exit 2
+  fi
+  case $SERVER in apache) MODPKG=mod-pagespeed ;; nginx) MODPKG=nginx-module-pagespeed ;; esac
+  tilde='~'
+  for pat in "${MODPKG}_*.deb" "pagespeed-optimizer_${PAIR/-/$tilde}_*.deb"; do
+    # shellcheck disable=SC2086  # the pattern is a glob
+    set -- "$PACKAGE_DIR"/$pat
+    if [ $# -ne 1 ] || [ ! -f "$1" ]; then
+      echo "run.sh: PACKAGE_DIR $PACKAGE_DIR must hold exactly one $pat" >&2
+      exit 2
+    fi
+    cp "$1" "$CTX/pkgs/"
+  done
+fi
+docker build -q -t "$IMAGE" --build-arg "PAIR_VERSION=$PAIR" --build-arg "PACKAGES=$PACKAGES" \
+  -f "$CTX/Dockerfile.$SERVER" "$CTX" >/dev/null || exit 2
 docker network create "$NET" >/dev/null || exit 2
 EXTRA=()
 if [ -n "$SO" ]; then
@@ -74,6 +115,13 @@ fi
 # carry no per-run name.
 docker run -d --name "$ORIGIN" --network "$NET" --network-alias origin "${EXTRA[@]}" \
   -v "$HERE:/harness:ro" "$IMAGE" bash /harness/start-origin.sh "$SERVER" >/dev/null || exit 2
+# Local packages mean nothing came from the package repository: the image
+# must carry no source of it (the published install adds one, a package
+# built here must not).
+if [ "$PACKAGES" = local ] && docker exec "$ORIGIN" grep -rqsi modpagespeed /etc/apt; then
+  echo "FAIL: PACKAGE_DIR mode, but the image has a modpagespeed package source under /etc/apt"
+  exit 1
+fi
 docker run -d --name "$NGINX_CACHE" --network "$NET" \
   -v "$HERE/nginx-cache.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine >/dev/null || exit 2
 docker run -d --name "$VARNISH" --network "$NET" \

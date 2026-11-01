@@ -217,6 +217,8 @@ jobs:
         run: tools/ci/test_slot_budget.sh
       - name: Nightly schedule
         run: tools/ci/test_nightly_schedule.sh
+      - name: Shared-cache check, local packages
+        run: tools/ci/test_shared_cache_local_packages.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
       - name: Build script supply-chain checks
