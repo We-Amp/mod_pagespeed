@@ -232,7 +232,11 @@ class PathologicalServer(object):
 
       for soc in readable:
         if soc is self._server_socket:
-          client_socket, _ = soc.accept()
+          try:
+            client_socket, _ = soc.accept()
+          except OSError:
+            # The peer went away between select() and accept().
+            continue
           self._read_list.append(client_socket)
         else:
           self._handle_reading(soc)
@@ -290,7 +294,13 @@ class PathologicalServer(object):
 
   def _handle_reading(self, soc):
     """Given a socket with something to read, read what's available."""
-    chunk = soc.recv(_RECV_CHUNK_SIZE)
+    try:
+      chunk = soc.recv(_RECV_CHUNK_SIZE)
+    except OSError:
+      # A client that gives up (for example on its own timeout) can reset the
+      # connection; that must not take the whole server down.
+      self._cleanup(soc)
+      return
     if not chunk:
       self._handle_error(soc)  # unexpected EOF
       return
@@ -306,7 +316,8 @@ class PathologicalServer(object):
 
       if not headers.startswith("GET "):
         raise Exception("Only GET requests are supported.")
-      self._writing[soc], hook = self._responses[headers.split()[1]]
+      self._writing[soc], hook = self._responses.get(
+          headers.split()[1], ("HTTP/1.1 404 Not Found\r\n\r\n", _nohook))
 
       # Move the socket to list of things waiting to write.
       self._read_list.remove(soc)
@@ -320,7 +331,14 @@ class PathologicalServer(object):
     # Responses (and anything a hook queued) are text; the socket wants bytes.
     if isinstance(self._writing[soc], str):
       self._writing[soc] = self._writing[soc].encode("utf-8")
-    sent = soc.send(self._writing[soc])
+    try:
+      sent = soc.send(self._writing[soc])
+    except OSError:
+      # The client closed (or reset) the connection before the response was
+      # written, as happens for the deliberately slow responses once the
+      # fetcher's own timeout has passed. Drop this connection only.
+      self._cleanup(soc)
+      return
     if not sent:
       self._handle_error(soc)
     # Offsets would be more efficient, but this is python so it's not worth it.
