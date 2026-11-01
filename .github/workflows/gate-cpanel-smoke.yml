@@ -12,8 +12,9 @@
 # is skipped while FLEET_ENABLED is not 'true'. The job holds no secret and no write
 # token; ssh keys stay on the host. The guest is named by CI_EA4_VM_<OS> in
 # the runner environment (docs/ci/runner-environment.md). A target whose guest
-# or checkpoint is not provisioned yet skips with a warning annotation, and so
-# does a prerelease tag, which has no package.
+# or checkpoint is not provisioned yet skips with a warning annotation. A
+# prerelease tag is tested like a release: the caller hands over the
+# rehearsal package.
 name: gate-cpanel-smoke
 
 on:
@@ -81,7 +82,6 @@ jobs:
       run:
         shell: powershell
     steps:
-      # A prerelease tag (it carries a hyphen) has no package: skip.
       - name: Check the guest
         id: guest
         env:
@@ -90,11 +90,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:OS -notmatch '^[a-z0-9]+$') { Write-Host "::error::unexpected operating system name"; exit 1 }
-          if ($env:RELEASE_TAG -like '*-*') {
-            Write-Host "::notice::prerelease tag: no cPanel package is built, so the smoke is skipped"
-            "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            exit 0
-          }
           $vmName = [Environment]::GetEnvironmentVariable("CI_EA4_VM_$($env:OS.ToUpper())")
           if (-not $vmName) { $vmName = "CP-$($env:OS.ToUpper())-base" }
           $snap = "01-cpanel-clean-$($env:OS)"

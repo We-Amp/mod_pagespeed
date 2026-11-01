@@ -19,12 +19,13 @@
 #   --out           receives the cPanel RPM
 #
 # Exit status 0 with the line `built=true` or `built=false` on stdout (and in
-# $GITHUB_OUTPUT when set). `built=false` is a skip with a reason on stderr:
-#   - el8 and el9: the stock RPM's name does not match what the spec expects.
-#     On a release that is an error (the cPanel channel would silently not
-#     ship); on a pre-release it is a skip, because the spec carries the
-#     release version only.
-#   - el10: any mismatch is a skip (this operating system is additive).
+# $GITHUB_OUTPUT when set). `built=false` is a skip with a reason on stderr,
+# for el10 only (this operating system is additive): any mismatch is a skip.
+# For el8 and el9 a stock RPM whose name does not match what the spec expects
+# is an error, on a release and on a pre-release alike: a rehearsal builds
+# the package a release would, so it must fail where a release fails. A
+# pre-release stock RPM is named `X.Y.Z~PRERELEASE`; the package built from it
+# carries that version.
 set -euo pipefail
 
 OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK=""
@@ -36,11 +37,9 @@ expected_name() {
   minor="$(sed -n 's/^MINOR=//p' "$f")"
   build="$(sed -n 's/^BUILD=//p' "$f")"
   last="$(sed -n 's/^LASTCHANGE=//p' "$f")"
-  echo "mod-pagespeed-${major}.${minor}.${build}-${last:-1}.x86_64.rpm"
+  local pre; pre="$(sed -n 's/^PRERELEASE=//p' "$f")"
+  echo "mod-pagespeed-${major}.${minor}.${build}${pre:+~$pre}-${last:-1}.x86_64.rpm"
 }
-
-# is_prerelease VERSION_FILE
-is_prerelease() { [ -n "$(sed -n 's/^PRERELEASE=//p' "$1")" ]; }
 
 # mirror_repo OS: the cPanel repository name for the version cross-check.
 mirror_repo() {
@@ -57,11 +56,16 @@ emit() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "built=$1" >> "$GITHUB_OUTPUT"; fi
 }
 
-# patch_spec SPEC RELEASE: set `%global mps_release`.
+# patch_spec SPEC RELEASE [PRERELEASE]: set `%global mps_release`, and with a
+# PRERELEASE append `~PRERELEASE` to `%global mps_version` (the rpm spelling,
+# and the name of the stock RPM the spec wraps).
 patch_spec() {
-  local spec="$1" rel="$2" tmp
+  local spec="$1" rel="$2" pre="${3:-}" tmp
   tmp="${spec}.tmp.$$"
-  awk -v rel="$rel" '/^%global mps_release / { print "%global mps_release " rel; next } { print }' "$spec" > "$tmp"
+  awk -v rel="$rel" -v pre="$pre" '
+    /^%global mps_release / { print "%global mps_release " rel; next }
+    /^%global mps_version / && pre != "" { print $0 "~" pre; next }
+    { print }' "$spec" > "$tmp"
   mv "$tmp" "$spec"
 }
 
@@ -152,11 +156,7 @@ run() {
       echo "::warning::stock RPM '$have' is not the '$want' the spec expects; skipping the el10 cPanel package (additive)" >&2
       emit false; return 0
     fi
-    if is_prerelease "$VERSION_FILE"; then
-      echo "::warning::stock RPM '$have' is not the '$want' the spec expects on a pre-release; skipping the cPanel package" >&2
-      emit false; return 0
-    fi
-    echo "::error::stock RPM '$have' is not the '$want' the spec expects on a release. The cPanel channel would not ship. Check MAJOR.MINOR.BUILD in net/instaweb/public/VERSION against %global mps_version in the spec." >&2
+    echo "::error::stock RPM '$have' is not the '$want' the spec expects. The cPanel package would not ship. Check MAJOR.MINOR.BUILD in net/instaweb/public/VERSION against %global mps_version in the spec." >&2
     return 1
   fi
 
@@ -179,7 +179,7 @@ run() {
   rm -rf "$WORK"; mkdir -p "$WORK/spec" "$WORK/upstream" "$WORK/build-out"
   cp -a "$SPEC_DIR/." "$WORK/spec/"
   cp "${rpms[0]}" "$WORK/upstream/"
-  patch_spec "$WORK/spec/ea-apache24-mod_pagespeed.spec" "$(sed -n 's/^LASTCHANGE=//p' "$VERSION_FILE" | head -n 1 | sed 's/^$/1/')"
+  patch_spec "$WORK/spec/ea-apache24-mod_pagespeed.spec" "$(sed -n 's/^LASTCHANGE=//p' "$VERSION_FILE" | head -n 1 | sed 's/^$/1/')" "$(sed -n 's/^PRERELEASE=//p' "$VERSION_FILE" | head -n 1)"
   inner_script > "$WORK/inner.sh"
   docker run --rm --init \
     -v "$WORK":/work -w /work \
@@ -199,9 +199,7 @@ self_test() {
 
   printf 'MAJOR=1\nMINOR=19\nBUILD=0\nPATCH=0\nPRERELEASE=\nLASTCHANGE=1\n' > "$t/V"
   chk "expected name" "$(expected_name "$t/V")" "mod-pagespeed-1.19.0-1.x86_64.rpm"
-  is_prerelease "$t/V" && { echo "FAIL: GA flagged pre-release"; fail=1; }
   printf 'MAJOR=1\nMINOR=19\nBUILD=0\nPRERELEASE=rc.1\nLASTCHANGE=1\n' > "$t/V2"
-  is_prerelease "$t/V2" || { echo "FAIL: rc not flagged"; fail=1; }
   chk "repo el8" "$(mirror_repo el8)" ea4-c8
   chk "repo el9" "$(mirror_repo el9)" ea4-c9
   chk "repo el10" "$(mirror_repo el10)" ea4-a10
@@ -215,10 +213,23 @@ self_test() {
   # skip and error decisions, without docker (the checks come first)
   mkdir -p "$t/up" "$t/spec-dir"
   : > "$t/up/mod-pagespeed-1.19.0-1.x86_64.rpm"
-  mkdir -p "$t/uprc"
+  # a pre-release is named with its `~` suffix; a stock RPM without it is a
+  # mismatch and an error, as on a release
+  chk "expected name rc" "$(expected_name "$t/V2")" "mod-pagespeed-1.19.0~rc.1-1.x86_64.rpm"
+  if run --os el9 --upstream "$t/up" --version-file "$t/V2" --out "$t/out" >/dev/null 2>&1; then
+    echo "FAIL: pre-release mismatch accepted"; fail=1
+  fi
+  # positive: the `~` name is accepted (the run gets past the name check and
+  # stops at the spec version check)
+  mkdir -p "$t/uprc" "$t/spec-old"
   : > "$t/uprc/mod-pagespeed-1.19.0~rc.1-1.x86_64.rpm"
-  run --os el9 --upstream "$t/uprc" --version-file "$t/V2" --out "$t/out" 2>/dev/null | grep -qx 'built=false' \
-    || { echo "FAIL: pre-release mismatch should skip"; fail=1; }
+  printf '%%global mps_version 1.18.0\n%%global mps_release 1\n' > "$t/spec-old/ea-apache24-mod_pagespeed.spec"
+  run --os el9 --upstream "$t/uprc" --version-file "$t/V2" --out "$t/out" --spec-dir "$t/spec-old" >"$t/err-rc" 2>&1 || true
+  grep -qF "%global mps_version 1.18.0" "$t/err-rc" && ! grep -qF "stock RPM" "$t/err-rc" \
+    || { echo "FAIL: ~ name not accepted: $(cat "$t/err-rc")"; fail=1; }
+  printf '%%global mps_version 1.19.0\n%%global mps_release 1\n' > "$t/spec-rc"
+  patch_spec "$t/spec-rc" 1 rc.1
+  chk "patched spec rc" "$(sed -n 's/^%global mps_version //p' "$t/spec-rc")" "1.19.0~rc.1"
   printf 'MAJOR=1\nMINOR=20\nBUILD=0\nPRERELEASE=\nLASTCHANGE=1\n' > "$t/V3"
   if run --os el9 --upstream "$t/up" --version-file "$t/V3" --out "$t/out" >/dev/null 2>&1; then
     echo "FAIL: release mismatch accepted"; fail=1
