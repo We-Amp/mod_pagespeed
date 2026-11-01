@@ -153,6 +153,7 @@ jobs:
   public-hygiene:
     permissions:
       contents: read
+      pull-requests: read
     name: Public-tree hygiene gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -170,6 +171,41 @@ jobs:
         run: tools/ci/test_check_ci_rot.sh
       - name: Hygiene gate credential-rule fixtures
         run: tools/ci/test_check_public_hygiene.sh
+      - name: AI-attribution gate fixtures
+        run: tools/ci/check_ai_attribution.sh --self-test
+      # The description, this pull request's commits and their authors are
+      # read through the API (read-only token; works for fork pull requests)
+      # and written to files. Untrusted text never reaches a shell string:
+      # only the number and the author login pass through env. Merge queue:
+      # no description exists, so the queue commit's own message is scanned
+      # (an empty one passes with a notice). Pushes are not scanned, so
+      # merged history is never re-read.
+      - name: AI-attribution gate (pull request)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          api="repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
+          gh api --paginate "${api}" --jq '.body // ""' > "${RUNNER_TEMP}/pr-body.txt"
+          gh api --paginate "${api}/commits" | jq -s 'add // []' > "${RUNNER_TEMP}/pr-commits.json"
+          tools/ci/check_ai_attribution.sh \
+            --body-from "${RUNNER_TEMP}/pr-body.txt" \
+            --commits-from "${RUNNER_TEMP}/pr-commits.json" \
+            --pr-author "${PR_AUTHOR}"
+      - name: AI-attribution gate (merge queue)
+        if: github.event_name == 'merge_group'
+        env:
+          MQ_MESSAGE: ${{ github.event.merge_group.head_commit.message }}
+          MQ_AUTHOR_EMAIL: ${{ github.event.merge_group.head_commit.author.email }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${MQ_MESSAGE}" > "${RUNNER_TEMP}/mq-message.txt"
+          args=(--message-from "${RUNNER_TEMP}/mq-message.txt")
+          if [ -n "${MQ_AUTHOR_EMAIL}" ]; then args+=(--author-email "${MQ_AUTHOR_EMAIL}"); fi
+          tools/ci/check_ai_attribution.sh "${args[@]}"
 
   ci-tooling-tests:
     permissions:
