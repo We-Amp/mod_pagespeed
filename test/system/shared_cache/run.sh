@@ -47,6 +47,12 @@ fi
 set -u
 SERVER=${1:?usage: run.sh apache|nginx [module.so]}
 SO=${2:-}
+# A job that means local packages (LOCAL_PACKAGES=true) must have staged them:
+# an empty PACKAGE_DIR would otherwise run the published mode under a local name.
+if [ "${LOCAL_PACKAGES:-}" = true ] && [ -z "${PACKAGE_DIR:-}" ]; then
+  echo "run.sh: LOCAL_PACKAGES=true but PACKAGE_DIR is empty" >&2
+  exit 2
+fi
 case "$SERVER" in apache|nginx) ;; *) echo "usage: run.sh apache|nginx [module.so]" >&2; exit 2 ;; esac
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"

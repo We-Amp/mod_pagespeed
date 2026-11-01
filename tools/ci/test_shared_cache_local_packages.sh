@@ -127,6 +127,10 @@ run PACKAGE_DIR="${T}/e" bash "${SC}/run.sh" apache
 if [ "${rc}" -eq 2 ] && ! grep -q '^build' "${LOG}" && grep -q 'exactly one' "${LOG}.out"; then ok "two module packages: refused, no build"
 else bad "two module packages must be refused without a build (rc=${rc}): $(cat "${LOG}" "${LOG}.out")"; fi
 
+run LOCAL_PACKAGES=true bash "${SC}/run.sh" apache "${T}/m.so"
+if [ "${rc}" -eq 2 ] && ! grep -q '^build' "${LOG}" && grep -q 'PACKAGE_DIR is empty' "${LOG}.out"; then ok "LOCAL_PACKAGES=true without PACKAGE_DIR: refused, no build"
+else bad "LOCAL_PACKAGES=true without PACKAGE_DIR must be refused without a build (rc=${rc}): $(cat "${LOG}" "${LOG}.out")"; fi
+
 run PACKAGE_DIR="${T}/nonexistent" bash "${SC}/run.sh" apache
 if [ "${rc}" -eq 2 ] && ! grep -q '^build' "${LOG}" && grep -q 'PACKAGE_DIR' "${LOG}.out"; then ok "missing directory: refused, no build"
 else bad "missing directory must be refused without a build (rc=${rc})"; fi
@@ -198,8 +202,21 @@ pd="$(awk '/^      shared_cache_packages:/{f=1;next} f&&/default:/{print $2;exit
   || bad "pipeline-nightly.yml must set LOCAL_PACKAGES: \${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}"
 [ "$(grep -c "LOCAL_PACKAGES:" "${PIPE}")" = 1 ] && ok "LOCAL_PACKAGES is set in one place" || bad "LOCAL_PACKAGES must be set in exactly one place"
 [ "$(grep -c "'local'" "${NIGHTLY}")" = 1 ] && ok "nightly.yml names local only in the run name" || bad "nightly.yml may name 'local' only in the run name"
-[ "$(count "'Nightly (local packages)'" "${NIGHTLY}")" = 1 ] && grep -q "^run-name:.*inputs.shared_cache_packages == 'local' && 'Nightly (local packages)'" "${NIGHTLY}" \
-  && ok "a local dispatch is titled Nightly (local packages)" || bad "run-name must title a local dispatch 'Nightly (local packages)'"
+RUN_NAME="run-name: \${{ github.event_name == 'workflow_dispatch' && inputs.shared_cache_packages == 'local' && 'Nightly (local packages)' || github.event_name == 'workflow_dispatch' && inputs.full_tier && 'Nightly (full)' || 'Nightly' }}"
+grep -qFx -- "${RUN_NAME}" "${NIGHTLY}" \
+  && ok "the run name is exactly: local first, then full, then plain" || bad "nightly.yml run-name must be exactly: ${RUN_NAME}"
+# The seam: the check steps hand the staged directory to run.sh, the module
+# package depends on the pinned pair, and the fetch runs only in local mode.
+[ "$(count '            export PACKAGE_DIR="${RUNNER_TEMP}/shared-cache/pkgs-apache"' "${PIPE}")" = 1 ] \
+  && ok "the Apache check exports PACKAGE_DIR" || bad "the Apache check step must export PACKAGE_DIR=\${RUNNER_TEMP}/shared-cache/pkgs-apache"
+[ "$(count '            export PACKAGE_DIR="${RUNNER_TEMP}/shared-cache/pkgs-nginx"' "${PIPE}")" = 1 ] \
+  && ok "the nginx check exports PACKAGE_DIR" || bad "the nginx check step must export PACKAGE_DIR=\${RUNNER_TEMP}/shared-cache/pkgs-nginx"
+[ "$(count 'install/debian/build.sh -a x64 -b . -o /out/pkgs-apache -d "${PAIR_PKG_VERSION}"' "${PIPE}")" = 1 ] \
+  && ok "the Apache package is built with the dependency on the pinned pair (-d)" || bad "the Apache package must be built with -d \"\${PAIR_PKG_VERSION}\""
+grep -A2 'name: Fetch the pinned optimizer package (local packages)' "${PIPE}" | grep -qF "if: env.LOCAL_PACKAGES == 'true'" \
+  && ok "the optimizer fetch runs only in local mode" || bad "the optimizer fetch step must carry if: env.LOCAL_PACKAGES == 'true'"
+[ "$(grep -cF 'if [ "${LOCAL_PACKAGES}" = true ]; then' "${PIPE}")" -ge 4 ] \
+  && ok "package builds and check steps are guarded by LOCAL_PACKAGES" || bad "the package builds and both check steps must be guarded by LOCAL_PACKAGES"
 grep -A8 'name: Record the package mode' "${PIPE}" | grep -q 'GITHUB_STEP_SUMMARY' \
   && ok "the shared-cache job writes its package mode to the job summary" || bad "the shared-cache job must write its package mode to GITHUB_STEP_SUMMARY"
 
