@@ -83,15 +83,13 @@ skipped, not failed), and so does every run while `FLEET_ENABLED` or
 variable: set it to `true` once a runner of each class is registered, so the
 jobs are skipped rather than queued while a class does not exist. A job
 of either class builds and runs the pull request's own code on a
-host with administrator rights, so the host is dedicated to its class, carries
-no other registration and holds no credential beyond the ones named here. The
-`fleet-iis` class means a Windows host with these facts, which are not
-variables:
+host with administrator rights, so the host holds no credential beyond the ones
+named here. The `fleet-iis` class means a Windows host with these facts, which
+are not variables:
 
 - the IIS role is installed and the job manages it (sites, application pools,
   `w3wp`, `appcmd`); the runner service account is a local administrator;
-- one runner instance per host: the tests own the test ports and the default
-  web site, and never run concurrently with another IIS job;
+- the tests own the test ports and the default web site on the host;
 - the Windows toolchain of the `fleet-windows` class is present as far as the
   job needs it: Visual Studio 2022 (found with `vswhere`; a host without it
   only warns on the IIS system tests, which run a module that is already
@@ -103,8 +101,7 @@ variables:
 The installer-upgrade and cPanel release gates run on a separate class,
 `fleet-hyperv`: a Windows host with the Hyper-V role and the test guests with
 their clean checkpoints. It follows the same rules as this class (events of
-this repository only, the same two repository variables, one runner instance
-per host) and needs:
+this repository only, the same two repository variables) and needs:
 
 - for the installer gate: the Hyper-V role and PowerShell Direct to the
   guests (the installer itself is built on a hosted runner, so WiX is not
