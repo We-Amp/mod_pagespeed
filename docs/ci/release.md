@@ -79,6 +79,28 @@ dry run says so in a `::notice::` (the pin is final, so the check is as
 strict as in a real run) and names the way to rehearse an unfinished pair: a
 dry-run dispatch of a `module-vX.Y.Z-pre.N` tag for the version being cut.
 
+A `-pre` dry run never runs that check: its optimizer tag is
+`optimizer-vX.Y.Z-pre.N`, which the pin never equals, so the lane passes
+`--dry-run` and the guard ignores a `-pre` tag. The **pair rehearsal**
+(`.github/workflows/pair-rehearsal.yml`, `tools/ci/pair_rehearsal.sh`) runs
+the real tag's checks against the candidate before the tag is pushed: the pin
+names `optimizer-vX.Y.Z`, the pinned commit's `VERSION.txt` equals `X.Y.Z`
+(strict, no `--dry-run`), and both halves link one cache library commit. Given
+the run id of the lane's dry run (`dry_run_id`; without it the summary says the
+evidence was not checked), it reads that run, read only, and requires: the
+`Release` workflow, completed and successful, a dispatch; its version job says
+it was a dry run of exactly the given tag at the tag's commit (so a run of
+`-pre.1` does not pass for `-pre.2`); the optimizer fetch passed; of the
+Debian and of the RPM install-and-serve smoke jobs, one variant (self-hosted
+or hosted) passed and the other was skipped; and `Sign SHA256SUMS` and
+`Create the GitHub release` exist and were skipped. The attempt number it
+read is printed. It is dispatch only, hosted and read-only, with no
+environment, secret or write permission; `tools/ci/test_pair_rehearsal_shape.sh`
+fails if that changes. It does not prove the public package repository
+metadata or signatures, the shared-cache check (which installs from the public
+repository), the optimizer lane's own handling of a `-pre` tag, or anything a
+real run only does (signing, publishing).
+
 Dry-run tags are `module-vX.Y.Z-pre.N`, where `X.Y.Z` is the version being
 cut (for example `module-v2.5.2-pre.1`). Do not cut new
 `module-v1.19.1-pre.N` tags: the upgrade rehearsals map 1.19.1 to cache
