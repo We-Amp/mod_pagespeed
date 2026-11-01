@@ -475,9 +475,7 @@ The Linux jobs run in the dev image as the host user. Each starts one named
 container (`nightly-<job>-<run id>-<attempt>`), runs its steps in it with
 `docker exec` so a test rig's processes survive from step to step, and
 removes it by that name in its last step. The container never mounts the
-container socket and is never privileged. The IIS jobs serialize per host,
-because each host of the fleet-iis class has one runner instance, and may run
-on different hosts at the same time.
+container socket and is never privileged.
 
 ## Report jobs
 
