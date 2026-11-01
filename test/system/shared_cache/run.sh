@@ -118,11 +118,14 @@ describe() {
 # takes seconds for a large image; the bytes change when it lands.  The
 # fallback also carries Age and Vary and holds still, so stability alone is
 # not enough: a client whose stable bytes equal an already-ready client's
-# baseline is still on the fallback and is polled until it diverges.
+# baseline is still on the fallback and is polled until it diverges.  The
+# origin's own bytes are never a baseline either: the recorded copy can carry
+# Age and Vary and hold still before the worker has written anything.
 for _ in $(seq 1 30); do
   in_origin curl -s --max-time 30 -o /dev/null http://localhost/ && break
   sleep 1
 done
+origin_hash=$(in_origin sha256sum /var/www/html/big.jpg | cut -c1-16)
 declare -A baseline
 for c in $CLIENTS; do
   deadline=$((SECONDS + READY_TIMEOUT_S))
@@ -134,6 +137,7 @@ for c in $CLIENTS; do
       if [ "$h" = "$last" ]; then same=$((same + 1)); else same=0; last=$h; fi
       if [ "$same" -ge "$STABLE_POLLS" ]; then
         shared=""
+        [ "$h" = "$origin_hash" ] && shared=" the origin"
         for o in "${!baseline[@]}"; do
           [ "${baseline[$o]}" = "$h" ] && shared="$shared $o"
         done
