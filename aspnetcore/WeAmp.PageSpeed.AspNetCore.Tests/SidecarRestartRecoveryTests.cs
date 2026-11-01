@@ -116,7 +116,9 @@ public class SidecarRestartRecoveryTests
         await harness.Manager.StartAsync(CancellationToken.None);
         harness.Manager.State.Should().Be(SidecarState.Running);
 
-        var child = ReadPids(harness.PidFile).Single();
+        // The health seam answers before the fake child has necessarily run far
+        // enough to record its pid, so wait for the record instead of racing it.
+        var child = (await WaitForPidsAsync(harness.PidFile, 1, TimeSpan.FromSeconds(10))).Single();
         harness.Manager.SetState(SidecarState.Restarting);
 
         using var hosted = new PageSpeedSidecarHostedService(
@@ -238,6 +240,20 @@ public class SidecarRestartRecoveryTests
         File.Exists(pidFile)
             ? File.ReadAllLines(pidFile).Select(int.Parse).ToArray()
             : Array.Empty<int>();
+
+    // Poll until the fake child has recorded at least `count` pids; returns what
+    // is there at the deadline otherwise, so the caller's assertion reports it.
+    private static async Task<int[]> WaitForPidsAsync(string pidFile, int count, TimeSpan budget)
+    {
+        var deadline = DateTime.UtcNow + budget;
+        var pids = ReadPids(pidFile);
+        while (pids.Length < count && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+            pids = ReadPids(pidFile);
+        }
+        return pids;
+    }
 
     // True once the pid no longer names a live process. GetProcessById only surfaces
     // live (or not-yet-reaped) processes, so ArgumentException means gone; polled
