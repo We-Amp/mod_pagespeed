@@ -82,8 +82,7 @@ Application Verifier and the other IIS lanes that run longer belong to the
 later tiers. `iis-sys-tests` clears stale verifier settings before the run and
 again afterwards, arms Windows Error Reporting full dumps for the worker, and
 on a failure ships an evidence artifact that includes this run's staged
-crash dumps. It blanks the guest password for the whole job, because it runs
-pull request code with administrator rights.
+crash dumps. It blanks the guest password for the whole job.
 
 ### Release gates on the `fleet-hyperv` class
 
@@ -475,9 +474,7 @@ The Linux jobs run in the dev image as the host user. Each starts one named
 container (`nightly-<job>-<run id>-<attempt>`), runs its steps in it with
 `docker exec` so a test rig's processes survive from step to step, and
 removes it by that name in its last step. The container never mounts the
-container socket and is never privileged. The IIS jobs serialize per host,
-because each host of the fleet-iis class has one runner instance, and may run
-on different hosts at the same time.
+container socket and is never privileged.
 
 ## Report jobs
 
