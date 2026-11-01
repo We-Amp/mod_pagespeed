@@ -19,13 +19,13 @@
 #   --out           receives the cPanel RPM
 #
 # Exit status 0 with the line `built=true` or `built=false` on stdout (and in
-# $GITHUB_OUTPUT when set). `built=false` is a skip with a reason on stderr:
-#   - el8 and el9: the stock RPM's name does not match what the spec expects.
-#     That is an error on a release and on a pre-release alike: a rehearsal
-#     builds the package a release would, so it must fail where a release
-#     fails. A pre-release stock RPM is named `X.Y.Z~PRERELEASE`; the package
-#     built from it carries that version.
-#   - el10: any mismatch is a skip (this operating system is additive).
+# $GITHUB_OUTPUT when set). `built=false` is a skip with a reason on stderr,
+# for el10 only (this operating system is additive): any mismatch is a skip.
+# For el8 and el9 a stock RPM whose name does not match what the spec expects
+# is an error, on a release and on a pre-release alike: a rehearsal builds
+# the package a release would, so it must fail where a release fails. A
+# pre-release stock RPM is named `X.Y.Z~PRERELEASE`; the package built from it
+# carries that version.
 set -euo pipefail
 
 OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK=""
@@ -40,9 +40,6 @@ expected_name() {
   local pre; pre="$(sed -n 's/^PRERELEASE=//p' "$f")"
   echo "mod-pagespeed-${major}.${minor}.${build}${pre:+~$pre}-${last:-1}.x86_64.rpm"
 }
-
-# is_prerelease VERSION_FILE
-is_prerelease() { [ -n "$(sed -n 's/^PRERELEASE=//p' "$1")" ]; }
 
 # mirror_repo OS: the cPanel repository name for the version cross-check.
 mirror_repo() {
@@ -202,9 +199,7 @@ self_test() {
 
   printf 'MAJOR=1\nMINOR=19\nBUILD=0\nPATCH=0\nPRERELEASE=\nLASTCHANGE=1\n' > "$t/V"
   chk "expected name" "$(expected_name "$t/V")" "mod-pagespeed-1.19.0-1.x86_64.rpm"
-  is_prerelease "$t/V" && { echo "FAIL: GA flagged pre-release"; fail=1; }
   printf 'MAJOR=1\nMINOR=19\nBUILD=0\nPRERELEASE=rc.1\nLASTCHANGE=1\n' > "$t/V2"
-  is_prerelease "$t/V2" || { echo "FAIL: rc not flagged"; fail=1; }
   chk "repo el8" "$(mirror_repo el8)" ea4-c8
   chk "repo el9" "$(mirror_repo el9)" ea4-c9
   chk "repo el10" "$(mirror_repo el10)" ea4-a10
@@ -224,6 +219,14 @@ self_test() {
   if run --os el9 --upstream "$t/up" --version-file "$t/V2" --out "$t/out" >/dev/null 2>&1; then
     echo "FAIL: pre-release mismatch accepted"; fail=1
   fi
+  # positive: the `~` name is accepted (the run gets past the name check and
+  # stops at the spec version check)
+  mkdir -p "$t/uprc" "$t/spec-old"
+  : > "$t/uprc/mod-pagespeed-1.19.0~rc.1-1.x86_64.rpm"
+  printf '%%global mps_version 1.18.0\n%%global mps_release 1\n' > "$t/spec-old/ea-apache24-mod_pagespeed.spec"
+  run --os el9 --upstream "$t/uprc" --version-file "$t/V2" --out "$t/out" --spec-dir "$t/spec-old" >"$t/err-rc" 2>&1 || true
+  grep -qF "%global mps_version 1.18.0" "$t/err-rc" && ! grep -qF "stock RPM" "$t/err-rc" \
+    || { echo "FAIL: ~ name not accepted: $(cat "$t/err-rc")"; fail=1; }
   printf '%%global mps_version 1.19.0\n%%global mps_release 1\n' > "$t/spec-rc"
   patch_spec "$t/spec-rc" 1 rc.1
   chk "patched spec rc" "$(sed -n 's/^%global mps_version //p' "$t/spec-rc")" "1.19.0~rc.1"

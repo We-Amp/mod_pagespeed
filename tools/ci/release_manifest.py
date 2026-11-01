@@ -188,8 +188,8 @@ def required(pkg_version, prerelease, msi=False):
     req.append(("nginx rpm el10", "asset-nginx-el10",
                 r"^nginx-module-pagespeed-%s-[^.]+\.el10\.x86_64\.rpm$" % v))
     if not prerelease:
-        # The cPanel packages are built against the spec's version; a
-        # pre-release tag does not match it and builds none.
+        # A pre-release ships no cPanel package: the lane builds one for the
+        # rehearsal only, as `rehearsal-ea4-*`, outside the asset set.
         for el in ("el9", "el8"):
             req.append(("ea4 rpm " + el, "asset-ea4-" + el,
                         r"^ea-apache24-mod_pagespeed-.*\.%s\..*\.rpm$" % el))

@@ -40,7 +40,8 @@
 # secret or a write token, and every one of them runs on a hosted runner.
 #
 # Artifacts. Names with the prefix `asset-` hold release files (the `validate`
-# job builds the asset set from exactly those); `tree` is the prepared source
+# job builds the asset set from exactly those); `rehearsal-ea4-*` holds the
+# cPanel packages of a pre-release tag, which ships none; `tree` is the prepared source
 # tree every build starts from; `testdata-*`, `debug-*`, `stock-el8`,
 # `unsigned-windows`, `signed-windows`, `msi-unsigned`, `msi-old` and
 # `release-signature` are inputs of later jobs and are not release files.
@@ -3136,7 +3137,8 @@ jobs:
           # succeeded there and been skipped in a dry run. The gates need the
           # fleet-hyperv class and can succeed without testing anything, so in a
           # real run each must have succeeded AND reported ran == true;
-          # in a dry run a skipped gate is allowed, with a warning.
+          # in a dry run a skipped gate is allowed, with a warning, but a gate
+          # that succeeded without running its smoke while the fleet is on is an error.
           for j in windows-sign msi-sign; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             echo "${j}: ${r} (dry run: ${DRY_RUN})"
@@ -3153,7 +3155,13 @@ jobs:
               [ "$ran" = true ] || { echo "::error::the ${j} gate did not run its smoke (it needs the fleet and its guest); a skipped gate is not a pass"; bad=1; }
             else
               [ "$r" = success ] || [ "$r" = skipped ] || bad=1
-              [ "$ran" = true ] || echo "::warning::${j} did not run its smoke in this dry run (result ${r}): it is unproven, and a real run requires it"
+              if [ "$ran" != true ]; then
+                if [ "$r" = success ] && [ "$FLEET_ENABLED" = true ]; then
+                  echo "::error::${j} succeeded but did not run its smoke; a real run would fail"; bad=1
+                else
+                  echo "::warning::${j} did not run its smoke in this dry run (result ${r}): it is unproven, and a real run requires it"
+                fi
+              fi
             fi
           done
           while read -r a b; do
