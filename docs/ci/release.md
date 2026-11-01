@@ -79,6 +79,23 @@ dry run says so in a `::notice::` (the pin is final, so the check is as
 strict as in a real run) and names the way to rehearse an unfinished pair: a
 dry-run dispatch of a `module-vX.Y.Z-pre.N` tag for the version being cut.
 
+A `-pre` dry run never runs that check: its optimizer tag is
+`optimizer-vX.Y.Z-pre.N`, which the pin never equals, so the lane passes
+`--dry-run` and the guard ignores a `-pre` tag. The **pair rehearsal**
+(`.github/workflows/pair-rehearsal.yml`, `tools/ci/pair_rehearsal.sh`) runs
+the real tag's checks against the candidate before the tag is pushed: the pin
+names `optimizer-vX.Y.Z`, the pinned commit's `VERSION.txt` equals `X.Y.Z`
+(strict, no `--dry-run`), and both halves link one cache library commit. Given
+the run id of the lane's dry run, it also checks that the run was a dispatch at
+the tag's commit, that the optimizer fetch and the Debian and RPM
+install-and-serve smoke jobs passed (not skipped), and that no job that signs
+or publishes ran. It is dispatch only, hosted and read-only, with no
+environment, secret or write permission; `tools/ci/test_pair_rehearsal_shape.sh`
+fails if that changes. It does not prove the public package repository
+metadata or signatures, the shared-cache check (which installs from the public
+repository), the optimizer lane's own handling of a `-pre` tag, or anything a
+real run only does (signing, publishing).
+
 Dry-run tags are `module-vX.Y.Z-pre.N`, where `X.Y.Z` is the version being
 cut (for example `module-v2.5.2-pre.1`). Do not cut new
 `module-v1.19.1-pre.N` tags: the upgrade rehearsals map 1.19.1 to cache

@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Pair rehearsal (docs/ci/release.md): before the release tag, check that the
+# module and the optimizer of the candidate are one pair, with the checks the
+# real tag runs. A `module-vX.Y.Z-pre.N` dry run of the release lane skips the
+# version pair check; this does not.
+#
+# Dispatch only, hosted, read-only: no environment, no secret, no write
+# permission, no call to another workflow. tools/ci/test_pair_rehearsal_shape.sh
+# keeps it that way.
+#
+# Try it:  gh workflow run pair-rehearsal.yml -f tag=module-v1.2.3-pre.1 -f dry_run_id=<release.yml dry run id>
+
+name: Pair rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Rehearsal tag of the candidate (module-vX.Y.Z-pre.N), or the release tag'
+        required: true
+        type: string
+      dry_run_id:
+        description: 'Run id of the release lane dry run of this tag (optional: also checks its install-and-serve jobs)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pair-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    name: Pair rehearsal
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The check comes from master, never from the tree being rehearsed.
+      - name: Checkout master (the check)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Checkout the candidate tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: candidate
+          sparse-checkout: |
+            install/debian/optimizer-pin.json
+            bazel/repositories.bzl
+          persist-credentials: false
+
+      - name: Rehearse the pair
+        env:
+          TAG: ${{ inputs.tag }}
+          RUN_ID: ${{ inputs.dry_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in module-v*) ;; *) echo "::error::not a module-v* tag"; exit 1 ;; esac
+          PIN=candidate/install/debian/optimizer-pin.json
+          OPT_COMMIT=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1]))['optimizer_commit'])" "$PIN")
+          case "$OPT_COMMIT" in *[!0-9a-f]*|"") echo "::error::the pin has no optimizer_commit"; exit 1 ;; esac
+          RAW="https://raw.githubusercontent.com/We-Amp/pagespeed-optimizer/$OPT_COMMIT"
+          curl -fsSL --retry 5 --retry-all-errors "$RAW/VERSION.txt" -o optimizer-VERSION.txt
+          curl -fsSL --retry 5 --retry-all-errors "$RAW/MODULE.bazel" -o optimizer-MODULE.bazel
+          ARGS=(--tag "$TAG" --pin "$PIN" --optimizer-version-file optimizer-VERSION.txt
+                --optimizer-module-bazel optimizer-MODULE.bazel
+                --repositories-bzl candidate/bazel/repositories.bzl)
+          if [ -n "$RUN_ID" ]; then
+            case "$RUN_ID" in *[!0-9]*) echo "::error::dry_run_id is not a run id"; exit 1 ;; esac
+            gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --json event,headSha,conclusion,jobs > run.json
+            ARGS+=(--run-json run.json --tag-sha "$(git -C candidate rev-parse HEAD)")
+          fi
+          bash tools/ci/pair_rehearsal.sh "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
