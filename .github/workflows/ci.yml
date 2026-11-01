@@ -180,18 +180,47 @@ jobs:
       # no description exists, so the queue commit's own message is scanned
       # (an empty one passes with a notice). Pushes are not scanned, so
       # merged history is never re-read.
-      - name: AI-attribution gate (pull request)
+      # The gate itself runs from the default branch, never from the tree
+      # under test, so a pull request cannot edit its own check (the pattern
+      # of the release lane's gate checkout). The self-test above exercises
+      # the pull request's copy of the script, in a step with no token.
+      # Bootstrap: until the script exists on the default branch, the two
+      # steps below skip with a notice, so the pull request that adds the
+      # script does not fail on its own first run.
+      - name: Checkout master (attribution gate script)
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: .default-branch-gate
+          sparse-checkout: tools/ci/check_ai_attribution.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # Only this step holds the token, and it runs no repository code: it
+      # fetches the description and commits into files.
+      - name: AI-attribution gate (collect pull request inputs)
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
           api="repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"
           gh api --paginate "${api}" --jq '.body // ""' > "${RUNNER_TEMP}/pr-body.txt"
           gh api --paginate "${api}/commits" | jq -s 'add // []' > "${RUNNER_TEMP}/pr-commits.json"
-          tools/ci/check_ai_attribution.sh \
+      # No secrets and no token here; the script is the default branch's.
+      - name: AI-attribution gate (pull request)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          gate=.default-branch-gate/tools/ci/check_ai_attribution.sh
+          if [ ! -f "${gate}" ]; then
+            echo "::notice::the default branch does not carry the attribution gate yet; skipping"
+            exit 0
+          fi
+          bash "${gate}" \
             --body-from "${RUNNER_TEMP}/pr-body.txt" \
             --commits-from "${RUNNER_TEMP}/pr-commits.json" \
             --pr-author "${PR_AUTHOR}"
@@ -202,10 +231,15 @@ jobs:
           MQ_AUTHOR_EMAIL: ${{ github.event.merge_group.head_commit.author.email }}
         run: |
           set -euo pipefail
+          gate=.default-branch-gate/tools/ci/check_ai_attribution.sh
+          if [ ! -f "${gate}" ]; then
+            echo "::notice::the default branch does not carry the attribution gate yet; skipping"
+            exit 0
+          fi
           printf '%s' "${MQ_MESSAGE}" > "${RUNNER_TEMP}/mq-message.txt"
           args=(--message-from "${RUNNER_TEMP}/mq-message.txt")
           if [ -n "${MQ_AUTHOR_EMAIL}" ]; then args+=(--author-email "${MQ_AUTHOR_EMAIL}"); fi
-          tools/ci/check_ai_attribution.sh "${args[@]}"
+          bash "${gate}" "${args[@]}"
 
   ci-tooling-tests:
     permissions:
