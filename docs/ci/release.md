@@ -267,7 +267,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), its ProductVersion `MAJOR.MINOR.BUILD.<release.yml run number>` so a rebuild of the same version upgrades the installed one, and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
 | `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows` |
 | `gate-iis-msi-upgrade` | fleet-hyperv (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
-| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
+| `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; a pre-release is tested like a release, with the `rehearsal-ea4-*` package |
 | `unit-tests` | fleet-heavy, pair | unit tests of the optimized build with redis and memcached containers |
 | `package-smoke-deb`, `package-smoke-rpm` | fleet-heavy, pair | install, upgrade over a synthetic old version, version header, removal, in a Debian and a Rocky container |
 | `package-smoke-nginx` | fleet-heavy, pair | the from-source nginx smoke with the module tarball |
@@ -281,13 +281,13 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
 A gate workflow can succeed without testing anything: it skips when its guest
-is not provisioned, and the cPanel gate skips on a pre-release (no package). So
+is not provisioned. So
 each gate workflow exposes an output `ran`, true only when the smoke actually
 executed. In a real run `validate` requires every gate to have succeeded and
-the installer gate and both cPanel gates (a release, not a pre-release) to have
+the installer gate and both cPanel gates (a pre-release tag included) to have
 reported `ran` true. The gates run only while `FLEET_ENABLED` is `true`, so a
 real release needs the fleet enabled at that moment and the guests provisioned.
-A dry run accepts a skipped gate. A missing `ran` output counts as false.
+A dry run accepts a skipped gate and warns that it is unproven. A missing `ran` output counts as false.
 
 Not done here on purpose: the publication of apt and yum repositories (the
 consumer pulls the release assets, see below), the signing of debs and rpms
@@ -445,7 +445,9 @@ required set (every package kind, suite and architecture above, the Windows inst
 named for the version, the sidecar pair and its debug files for both
 architectures and `sidecar-pair.json`, the optimizer pair, the source tarball, the SBOM and the
 VEX file; the cPanel packages of el9
-and el8 on a release, none on a pre-release).
+and el8 on a release, none on a pre-release; a pre-release builds them as
+`rehearsal-ea4-*` artifacts, outside the asset set, so the rehearsal exercises
+the cPanel build and gates).
 
 ## The asset contract
 
@@ -635,8 +637,8 @@ repository, which packs the pair into
 - A job that fails on a runner class is re-run alone with "Re-run failed
   jobs"; the `tree` artifact is kept for three days. After that, run the
   whole workflow again.
-- The cPanel jobs fail on a release when the stock rpm's name does not match
-  the spec: `%global mps_version` in `packaging/cpanel` must be bumped with the
+- The cPanel jobs fail, on a release and on a pre-release alike, when the stock
+  rpm's name does not match the spec (a pre-release's is `X.Y.Z~pre.N`): `%global mps_version` in `packaging/cpanel` must be bumped with the
   module version.
 
 ## Tooling

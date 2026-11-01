@@ -2293,8 +2293,10 @@ jobs:
   # ---------------------------------------------------------------------
   # cPanel (EasyApache 4) packages: a repackaging of the stock Apache rpm of
   # the matching floor (the el9 rpm of the x64 build, the el8 rpm of the el8
-  # build). Unsigned; the release lane does not sign rpms. A pre-release tag builds none (the
-  # spec carries the release version).
+  # build). Unsigned; the release lane does not sign rpms. A pre-release tag builds
+  # the package too, so a rehearsal exercises the build and the cPanel gates: the
+  # package is then uploaded as `rehearsal-ea4-*`, outside the `asset-` prefix,
+  # because a pre-release ships no cPanel package.
   # ---------------------------------------------------------------------
   ea4-build:
     name: EA4 Build (${{ matrix.os }})
@@ -2340,7 +2342,7 @@ jobs:
         if: steps.build.outputs.built == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: asset-ea4-${{ matrix.os }}
+          name: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-${{ matrix.os }}
           path: ${{ runner.temp }}/ea4-out/*.rpm
           retention-days: 14
           if-no-files-found: error
@@ -2397,7 +2399,7 @@ jobs:
         if: steps.build.outputs.built == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: asset-ea4-el10
+          name: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-el10
           path: ${{ runner.temp }}/ea4-out/*.rpm
           retention-days: 14
           if-no-files-found: error
@@ -2990,11 +2992,10 @@ jobs:
   # hold no secret and no write token. They run in a dry run as well; the
   # installer under test is the one in `asset-windows` (unsigned in a dry run,
   # signed in a real one). A gate workflow can succeed without having tested
-  # anything (it skips when its guest is not provisioned, and the cPanel gate
-  # skips on a pre-release, which has no package). So each gate workflow
+  # anything (it skips when its guest is not provisioned). So each gate workflow
   # exposes an output `ran`, true only when the smoke actually executed, and in
-  # a real run `validate` requires ran == 'true' from the installer gate and,
-  # on a release (not a pre-release), from both cPanel gates. A missing output
+  # a real run `validate` requires ran == 'true' from the installer gate and
+  # from both cPanel gates, a pre-release tag included. A missing output
   # reads as false: the gates fail closed until the gate workflows define it.
   # While the repository variable FLEET_IIS_ENABLED is not 'true' (no runner
   # of the class is registered) the gate jobs are skipped, not queued. A real
@@ -3025,7 +3026,7 @@ jobs:
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
     with:
       os: el9
-      rpm_artifact: asset-ea4-el9
+      rpm_artifact: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-el9
       release_tag: ${{ needs.version.outputs.release_tag }}
 
   gate-cpanel-smoke-el8:
@@ -3037,7 +3038,7 @@ jobs:
     uses: We-Amp/mod_pagespeed/.github/workflows/gate-cpanel-smoke.yml@master
     with:
       os: el8
-      rpm_artifact: asset-ea4-el8
+      rpm_artifact: ${{ needs.version.outputs.is_prerelease == 'true' && 'rehearsal' || 'asset' }}-ea4-el8
       release_tag: ${{ needs.version.outputs.release_tag }}
 
   # ---------------------------------------------------------------------
@@ -3134,9 +3135,8 @@ jobs:
           # The signing jobs run in a real run only: they must have
           # succeeded there and been skipped in a dry run. The gates need the
           # fleet-hyperv class and can succeed without testing anything, so in a
-          # real run each must have succeeded AND reported ran == true (the
-          # cPanel gates are exempt on a pre-release, which has no package);
-          # in a dry run a skipped gate is allowed.
+          # real run each must have succeeded AND reported ran == true;
+          # in a dry run a skipped gate is allowed, with a warning.
           for j in windows-sign msi-sign; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             echo "${j}: ${r} (dry run: ${DRY_RUN})"
@@ -3150,10 +3150,10 @@ jobs:
             in_pair="${in_pair}${j} "
             if [ "$DRY_RUN" = false ]; then
               [ "$r" = success ] || { echo "::error::the ${j} gate did not succeed"; bad=1; }
-              if [ "$IS_PRERELEASE" = true ] && [ "${j#gate-cpanel-smoke-}" != "$j" ]; then continue; fi
               [ "$ran" = true ] || { echo "::error::the ${j} gate did not run its smoke (it needs the fleet and its guest); a skipped gate is not a pass"; bad=1; }
             else
               [ "$r" = success ] || [ "$r" = skipped ] || bad=1
+              [ "$ran" = true ] || echo "::warning::${j} did not run its smoke in this dry run (result ${r}): it is unproven, and a real run requires it"
             fi
           done
           while read -r a b; do
