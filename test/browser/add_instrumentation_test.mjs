@@ -54,9 +54,22 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 
 // --- Test page: head timing script, LCP text, optional layout shift. -----
 function testPage({ extraBody = '', shift = true, extraParams = '' } = {}) {
+  // The shift only counts against a frame that has already been painted, so
+  // grow the spacer once the page has seen its first contentful paint (and
+  // two animation frames on) rather than at a fixed time, which on a slow
+  // machine can land before the first paint and produce no shift at all.
   const shiftScript = shift ? `<script>
-      // Grow the spacer after load: shifts #main down without recent input,
-      // producing a layout-shift entry.
+      function growSpacer() {
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            document.getElementById('spacer').style.height = '260px';
+          });
+        });
+      }
+      if (window.__lcpSeen) growSpacer(); else window.__onLcp = growSpacer;
+    <\/script>` : '';
+  // Flags the test reads to know the browser has produced the entries.
+  const observeScript = `<script>
       window.__shiftSeen = false;
       window.__lcpSeen = false;
       try {
@@ -64,15 +77,13 @@ function testPage({ extraBody = '', shift = true, extraParams = '' } = {}) {
           if (list.getEntries().length) window.__shiftSeen = true;
         }).observe({ type: 'layout-shift', buffered: true });
         new PerformanceObserver(function(list) {
-          if (list.getEntries().length) window.__lcpSeen = true;
+          if (list.getEntries().length && !window.__lcpSeen) {
+            window.__lcpSeen = true;
+            if (window.__onLcp) window.__onLcp();
+          }
         }).observe({ type: 'largest-contentful-paint', buffered: true });
       } catch (e) {}
-      addEventListener('load', function() {
-        setTimeout(function() {
-          document.getElementById('spacer').style.height = '260px';
-        }, 50);
-      });
-    <\/script>` : '';
+    <\/script>`;
   return `<!DOCTYPE html><html><head>
     <script>window.mod_pagespeed_start = Number(new Date());<\/script>
     <style>
@@ -85,6 +96,7 @@ function testPage({ extraBody = '', shift = true, extraParams = '' } = {}) {
     <div id="main">Largest contentful text block on this test page, big
       enough to produce a largest-contentful-paint entry.</div>
     ${extraBody}
+    ${observeScript}
     ${shiftScript}
     <script>${beaconJs}<\/script>
     <script>
@@ -118,14 +130,23 @@ async function waitForBeacons(count, timeoutMs = 10000) {
   return beacons.length;
 }
 
-// Waits until the page has been told about its layout shift and its largest
-// contentful paint. Both entries are only produced once a frame presenting the
-// content is rendered, which a fixed sleep cannot guarantee on a loaded
-// machine. The page's observers are registered before the collector's, so by
-// the time these flags are set the collector has received the same entries.
-async function waitForShift(page) {
-  await page.waitForFunction('window.__shiftSeen === true && window.__lcpSeen === true',
-                             null, { timeout: 15000 });
+// Waits until the browser has produced the entries the collector will report:
+// the largest contentful paint, and (unless the page has no shift) the layout
+// shift. Both need a rendered frame, which a fixed sleep cannot guarantee on a
+// loaded machine. Once the entries exist, the collector gets them: it observes
+// with buffered:true and drains takeRecords() when the page is hidden, so no
+// extra settling time is needed. Fails with the flags that never arrived.
+async function waitForPaintMetrics(page, { shift = true } = {}) {
+  const cond = 'window.__lcpSeen === true' +
+               (shift ? ' && window.__shiftSeen === true' : '');
+  try {
+    await page.waitForFunction(cond, null, { timeout: 15000 });
+  } catch (e) {
+    const seen = await page.evaluate(
+        '({lcp: window.__lcpSeen, shift: window.__shiftSeen})');
+    throw new Error('timed out waiting for paint metrics: lcp=' + seen.lcp +
+                    (shift ? ' layout-shift=' + seen.shift : ''));
+  }
 }
 
 let failures = 0;
@@ -144,8 +165,7 @@ const browser = await chromium.launch();
       { viewport: { width: 1024, height: 768 } });
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await waitForShift(page);  // the layout shift has been reported
-  await sleep(100);
+  await waitForPaintMetrics(page);
   await page.goto(origin + '/away');  // pagehide + visibilitychange
   await waitForBeacons(1);
   await sleep(250);  // room for an (incorrect) second beacon to show up
@@ -232,8 +252,7 @@ const browser = await chromium.launch();
       'sendBeacon', { configurable: true, value: undefined });`);
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await waitForShift(page);
-  await sleep(100);
+  await waitForPaintMetrics(page);
   await page.evaluate("__forceVisibility('hidden')");
   await waitForBeacons(1);
   check(beacons.length === 1,
@@ -338,7 +357,7 @@ const browser = await chromium.launch();
   await page.addInitScript(visibilityShim);
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await sleep(300);
+  await waitForPaintMetrics(page, { shift: false });
   await page.evaluate("__forceVisibility('hidden')");
   await waitForBeacons(1);
   check(beacons.length === 1,
@@ -367,8 +386,7 @@ const browser = await chromium.launch();
   await page.addInitScript(visibilityShim);
   await page.goto(origin + '/');
   await page.waitForLoadState('load');
-  await waitForShift(page);  // the initial layout shift has been reported
-  await sleep(100);
+  await waitForPaintMetrics(page);
   await page.evaluate("__forceVisibility('hidden')");
   await waitForBeacons(1);
   check(beacons.length === 1,
