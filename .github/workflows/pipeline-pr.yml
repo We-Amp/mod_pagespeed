@@ -1336,7 +1336,8 @@ jobs:
                 //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
-                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+                //test/pagespeed/apache/... //test/pagespeed/nginx/... \
+                //third_party/css_parser:css_parser_test
               # The modules carry their own crypto and are loaded into server
               # processes that have another one. Fail before the artifacts are
               # handed on if either module would bind to the host instead:
@@ -1586,7 +1587,8 @@ jobs:
                 -- //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
-                //test/pagespeed/apache/... //test/pagespeed/nginx/...
+                //test/pagespeed/apache/... //test/pagespeed/nginx/... \
+                //third_party/css_parser:css_parser_test
               rc=$?
               if [ $rc -ne 0 ]; then
                 # bazel-testlogs lives under the container-internal output
@@ -2991,7 +2993,8 @@ jobs:
             //test/pagespeed/iis/... `
             //test/pagespeed/system:daemon_adapter_test `
             //test/pagespeed/kernel/image:avif_test `
-            //test/pagespeed/kernel/packs/...
+            //test/pagespeed/kernel/packs/... `
+            //third_party/css_parser:css_parser_test
           exit $LASTEXITCODE
 
 
