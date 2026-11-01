@@ -43,6 +43,11 @@ on:
         description: Severity floor of the NVD scan (low, medium, high, critical)
         required: false
         default: "medium"
+      shared_cache_packages:
+        description: "Shared-cache check packages: published (the public package repository) or local (built from this tree, with the pinned optimizer release)"
+        type: choice
+        options: [published, local]
+        default: published
       full_tier:
         description: Also run the full tier (default branch only)
         type: boolean
@@ -138,6 +143,7 @@ jobs:
       protocols: ${{ inputs.protocols || '' }}
       arms: ${{ inputs.arms || 'cuzz-nopageheap:5,cuzz-pageheap:3' }}
       severity: ${{ inputs.severity || 'medium' }}
+      shared_cache_packages: ${{ inputs.shared_cache_packages || 'published' }}
 
   # The full tier, named `full` like the push tier's call in ci.yml, so its
   # checks read `full / <job name>` in both. It runs on every scheduled night

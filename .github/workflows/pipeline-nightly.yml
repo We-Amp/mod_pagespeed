@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: "medium"
+      shared_cache_packages:
+        description: "Shared-cache check packages: published (the public package repository) or local (built from this tree, with the pinned optimizer release)"
+        required: false
+        type: string
+        default: "published"
 
 permissions: {}
 
@@ -815,6 +820,10 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 150
+    env:
+      # local: the check installs packages built from this tree and the pinned
+      # optimizer release, not the public package repository's.
+      LOCAL_PACKAGES: ${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -842,6 +851,20 @@ jobs:
 
       - name: Stamp GIT_COMMIT
         run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Fetch the pinned optimizer package (local packages)
+        if: env.LOCAL_PACKAGES == 'true'
+        run: |
+          set -euo pipefail
+          # Verified against the pin file; the pair version is the one the
+          # module package depends on.
+          for s in apache nginx; do
+            bash test/system/shared_cache/fetch-optimizer-deb.sh "${RUNNER_TEMP}/shared-cache/pkgs-${s}" amd64
+          done
+          PIN_TAG=$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")
+          tilde='~'
+          PAIR="${PIN_TAG#optimizer-v}"
+          echo "PAIR_PKG_VERSION=${PAIR/-/$tilde}" >> "$GITHUB_ENV"
 
       - name: Ensure the dev image
         run: |
@@ -874,6 +897,7 @@ jobs:
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp/ci-home -e USER=dev -e "BZL_FLAGS=${BZL_FLAGS}" \
+            -e LOCAL_PACKAGES -e PAIR_PKG_VERSION \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${RUNNER_TEMP}/shared-cache:/out" \
@@ -886,6 +910,10 @@ jobs:
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out build ${BZL_FLAGS} //:libmod_pagespeed.so
               cp -L bazel-bin/libmod_pagespeed.so /out/mod_pagespeed.so
+              if [ "${LOCAL_PACKAGES}" = true ]; then
+                # The package of this tree, with the dependency on the pinned pair.
+                install/debian/build.sh -a x64 -b . -o /out/pkgs-apache -d "${PAIR_PKG_VERSION}"
+              fi
             '
 
       - name: Build the nginx module for Ubuntu 24.04's nginx
@@ -919,18 +947,34 @@ jobs:
             "${image}" \
             bash -c "set -e
               ./install/nginx/build_module_in_container.sh noble -o /out/ngx_pagespeed_module.so
+              if [ ${LOCAL_PACKAGES} = true ]; then
+                ./install/nginx/build_nginx_deb.sh -o /out/pkgs-nginx -s /out/ngx_pagespeed_module.so
+                chown -R $(id -u):$(id -g) /out/pkgs-nginx
+              fi
               chown $(id -u):$(id -g) /out/ngx_pagespeed_module.so"
 
       - name: Shared-cache check, Apache
         run: |
+          # Local packages: the module comes from the package built above.
+          # Otherwise: the published packages, the fresh library swapped in.
+          so="${RUNNER_TEMP}/shared-cache/mod_pagespeed.so"
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            export PACKAGE_DIR="${RUNNER_TEMP}/shared-cache/pkgs-apache"
+            so=""
+          fi
           SHARED_CACHE_PREFIX="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-a" \
-            bash test/system/shared_cache/run.sh apache "${RUNNER_TEMP}/shared-cache/mod_pagespeed.so"
+            bash test/system/shared_cache/run.sh apache ${so:+"$so"}
 
       - name: Shared-cache check, nginx
         if: ${{ !cancelled() }}
         run: |
+          so="${RUNNER_TEMP}/shared-cache/ngx_pagespeed_module.so"
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            export PACKAGE_DIR="${RUNNER_TEMP}/shared-cache/pkgs-nginx"
+            so=""
+          fi
           SHARED_CACHE_PREFIX="nightly-shared-cache-vary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-n" \
-            bash test/system/shared_cache/run.sh nginx "${RUNNER_TEMP}/shared-cache/ngx_pagespeed_module.so"
+            bash test/system/shared_cache/run.sh nginx ${so:+"$so"}
 
       - name: Remove what the checks left behind
         if: always()
