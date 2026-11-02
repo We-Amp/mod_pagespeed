@@ -168,8 +168,8 @@ jobs:
           key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
 
       # tools/vendor-deps.sh clones the git-only dependencies and fills the
-      # Bazel repository cache; it needs python3, git and a git identity that
-      # can read those repositories (the runner host's own).
+      # Bazel repository cache; it needs python3 and git. The repositories are
+      # public and cloned over anonymous https, so no git identity is needed.
       - name: Vendor all dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'
         run: bash tools/vendor-deps.sh vendor
