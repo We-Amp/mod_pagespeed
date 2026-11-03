@@ -185,7 +185,13 @@ class TestIfModifiedSince:
         stays bare; what must hold for every filter is that it never says more
         than the full response did.
         """
-        url = self._ce_url_of_input(client, f"{test_root}/ipro/{directory}/example.css")
+        input_url = f"{test_root}/ipro/{directory}/example.css"
+        # The server must mark the input itself, or this tests nothing.
+        original = client.get(f"{input_url}?PageSpeed=off")
+        assert_http_status(original, 200)
+        assert directive in cache_control_tokens(original), (
+            f"test setup: {input_url} is not served with {directive}")
+        url = self._ce_url_of_input(client, input_url)
 
         full = client.get(url)
         assert_http_status(full, 200)
