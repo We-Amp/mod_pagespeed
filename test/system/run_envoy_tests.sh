@@ -213,6 +213,11 @@ run_tests() {
     # Envoy uses /pagespeed_statistics (without "mod_" prefix used by Apache)
     export PAGESPEED_STATS_PATH="${PAGESPEED_STATS_PATH:-/pagespeed_statistics}"
 
+    # The filter's FileCachePath and the document root, for
+    # envoy/test_envoy_cache_flush.py (set by the sourced setup_envoy_test.sh).
+    export PAGESPEED_ENVOY_CACHE_DIR="$PAGESPEED_CACHE_DIR"
+    export PAGESPEED_ENVOY_DOC_ROOT="$ENVOY_CONFIG_DIR/www"
+
     # HTTPS configuration for TLS tests
     export PAGESPEED_HTTPS_HOST="${PAGESPEED_HTTPS_HOST:-localhost}"
     export PAGESPEED_HTTPS_PORT="${ENVOY_HTTPS_PORT:-${PAGESPEED_HTTPS_PORT:-8443}}"

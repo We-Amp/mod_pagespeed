@@ -46,6 +46,79 @@ bazel test --config=envoy-filter //test/pagespeed/envoy:http_filter_test
 bazel build --config=gcc //...
 ```
 
+### Compiler and linker settings inside the container
+
+The compiler the build should use is the LLVM 20 clang the image links into
+`/opt/llvm/bin` (`docker/Dockerfile`), and the container puts `/opt/llvm/bin`
+first on `PATH` (`docker-compose.yml`). Two settings make a local Bazel run
+use it end to end.
+
+**The toolchain compiler.** Bazel's auto-configured C++ toolchain (the
+`local_config_cc` repository) picks the compiler when that repository is
+generated: it reads `CC`, and with no `CC` anywhere it takes `gcc` from
+`PATH`. The container exports no `CC`. A command line that carries
+`--config=clang-libstdcxx13` (or one of the configs built on it, such as
+`clang-asan` and `clang-tsan`) still ends up on `/opt/llvm/bin/clang`: the
+`--config=clang` it chains to contributes `--action_env=CC=clang`, and that
+is what the detection sees. A command with no clang config at all silently
+builds with the system GCC instead. To pin the compiler whatever configs you
+pass, add the repository-rule counterpart of `--action_env`:
+
+```bash
+bazel test --config=clang-libstdcxx13 \
+    --repo_env=CC=clang --repo_env=CXX=clang++ \
+    //third_party/css_parser:css_parser_test
+```
+
+**The linker.** The clang configs link with `-fuse-ld=lld` (`.bazelrc`,
+`build:clang`), and the clang driver then looks for `ld.lld` — not `lld`.
+`/usr/bin` ships only the versioned name (`ld.lld-20`), so the image links
+`ld.lld` into `/opt/llvm/bin` next to clang (`docker/Dockerfile`). Bazel
+compiles with `-no-canonical-prefixes`, so a symlinked clang resolves tools
+in the symlink's directory rather than its real install dir, and falls back
+to `PATH` from there — keep `/opt/llvm/bin` on it (the `user.bazelrc` PATH
+override under
+[Common Issues](#host-environment-leaking-into-docker-builds-m4bison_pkgdatadir)
+does). Without a reachable `ld.lld`, linking fails with:
+
+```
+clang++: error: invalid linker name in argument '-fuse-ld=lld'
+```
+
+### What `--config=ci` expands to
+
+`build:ci` (`pagespeed.bazelrc`) is what the CI Linux jobs pass, and it is a
+**vendored** build. It expands to:
+
+- `--config=vendored` — dependencies resolve from the repository cache under
+  `vendor/repo-cache` and the two vendored source trees
+  (`--override_repository` for the Cyclone cache library and aom), with the
+  repository contents cache switched off (`--repo_contents_cache=`; the
+  repository cache lives inside the source tree, where Bazel refuses to keep
+  a contents cache). A plain clone has no `vendor/`: create it with
+  `tools/vendor-deps.sh` or build from a source tarball (see
+  [Offline Build](#offline-build)).
+- `--config=clang-libstdcxx13` — the config above.
+- `--config=remote-cache` — `--remote_cache=http://bazel-remote-cache:9090`.
+  That address is an alias that resolves only on the CI runners (the Linux
+  jobs map it with `--add-host`; a hosted job passes `--remote_cache=` to
+  switch it off). Locally, do not pass `--config=ci`: name the configs you
+  want (`--config=clang-libstdcxx13`, plus `--config=vendored` when a
+  vendored tree is what you have).
+- `--jobs=32`, `--nostamp`, `--define=go_build=disabled` and `-std=c++20`
+  forced for host and target; `.bazelrc` adds `--noshow_progress
+  --noshow_loading_progress`, and `test:ci` sets `--test_output=errors`.
+
+CI layers the compiler environment on top of that: the full-tier jobs add
+`--config=ci-build` (`.bazelrc`: `--action_env=CC=clang
+--action_env=CXX=clang++`), the PR-tier jobs pass `--config=ci
+--config=ci_lock` (`--lockfile_mode=error`), and the hosted arm64 job spells
+the two `--action_env` flags out on its command line. For a local run the
+flags that matter are the ones in the section above: with
+`--config=clang-libstdcxx13` the toolchain detection picks the image's clang
+either way, and the `--repo_env` pair pins it for command lines that carry no
+clang config.
+
 ### Running Tests
 
 ```bash
@@ -127,6 +200,11 @@ docker run -d -p 11211:11211 memcached:1.6-alpine
 ### Build Commands
 
 Same as inside Docker container - see [Building](#building) section above.
+The toolchain selection of [Compiler and linker settings inside the
+container](#compiler-and-linker-settings-inside-the-container) applies here
+too: a host that exports no `CC` builds with its system GCC, and
+`--repo_env=CC=clang --repo_env=CXX=clang++` (or an exported `CC`/`CXX`)
+selects the host's clang instead.
 
 ## Project Structure
 

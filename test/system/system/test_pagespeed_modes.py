@@ -202,6 +202,9 @@ def _module_header(response: Response) -> str:
     return response.header("X-Mod-Pagespeed") or response.header("X-Page-Speed")
 
 
+# nginx treats off as unplugged by design (ngx_rewrite_options.cc), which
+# TestPageSpeedOff's *_on_nginx cases cover; this test is about Apache's off.
+@pytest.mark.not_nginx
 @pytest.mark.requires_secondary
 @pytest.mark.requires_fixture("secondary_vhosts")
 class TestUnpluggedAndOffVhosts:

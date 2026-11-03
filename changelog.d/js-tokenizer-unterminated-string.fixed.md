@@ -1,0 +1,1 @@
+- **The JavaScript minifier no longer reports success on a script whose last string literal is cut off at an escaped quote.** Scripts in legacy multibyte encodings where a string ends in a 0x5C trail byte and no later quote follows are now left unminified, with the original code kept.

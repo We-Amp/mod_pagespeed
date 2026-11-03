@@ -445,6 +445,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `apache-asan-stress` | fleet-heavy, fleet only | ASan module under graceful reload and restart load in the Apache rig; the sweep step is the gate |
 | `apache-daemon-lane` | fleet-heavy | the Apache system tests with the daemon lane required, then the admin console's live Playwright project (one worker) against the test server left running; the report is kept on failure |
 | `shared-cache-vary` | fleet-heavy, fleet only | the Apache and nginx modules built from the tree, in the packaged install of the pinned optimizer pair, behind nginx `proxy_cache` and Varnish (stock and device-class keyed): fails when a cache hands one client another's image variant (`test/system/shared_cache/run.sh`). By default the packaged install comes from the public package repository, with the fresh library swapped in; the `shared_cache_packages=local` dispatch input installs the module packages built from the tree and the pinned optimizer release (verified against the pin) instead, so the check can run before the pair is published; such a dispatch is titled `Nightly (local packages)` and its job summary names the mode. It does not show repository contents, signatures or the `install.sh` path |
+| `hydration-browser` | fleet-heavy, fleet only | the Apache and nginx modules built from the tree, in the packaged install of the pinned optimizer pair, serving pinned React, Next, Vue, Nuxt and Svelte fixtures to real Chromium with detection on and off (`test/browser/hydration/run_module_check.sh`) |
 | `nginx-asan-stress` | fleet-heavy, fleet only | the same for the nginx module |
 | `nginx-protocol-matrix` | fleet-heavy, fleet only | the proxy-cache race smoke over HTTP/1.1 and HTTP/2 (`protocols` input to change the list) |
 | `full-tree-lint` | fleet-heavy, three shards | clang-tidy over the whole tree, split into three matrix shards by a hash of the file path, the backstop for what the pull request lint's include graph cannot see |
@@ -618,6 +619,8 @@ Notes on the full tier:
   workflow. Change a job's flags in `.bazelrc`, not in the YAML.
 - Sanitizer jobs wait for `linux-build` (not only for `vendor`), so they never
   compete with the build for a heavy slot.
+- Running the same builds locally, in the dev container: see the compiler and
+  linker settings in [DEVELOPER.md](../../DEVELOPER.md).
 - Containers run as the host user. The job supplies a passwd file that names
   that user `dev`, the name the dev image's sudo rules know. No job mounts the
   container socket or runs a privileged container.

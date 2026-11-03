@@ -1,0 +1,1 @@
+- Stopped Apache from storing a response that ended abnormally, such as one cut short by a failing backend, as a complete resource for in-place optimization; such a response is no longer served from the cache afterwards. Affected: 2.7.0 and earlier. Update recommended for Apache sites.

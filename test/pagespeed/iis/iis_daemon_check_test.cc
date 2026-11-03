@@ -117,8 +117,9 @@ class MirrorDaemonAbi : public DaemonAbi {
   // Everything below is never reached by StartupCheck.
   void WriteParamsInit(PsWriteParams*) const override {}
   void NotifyParamsInit(PsNotifyParams*) const override {}
-  int CacheWriteOriginal(void*, const char*, const char*, const char*,
-                         const PsWriteParams*, void**) const override {
+  int CacheWriteOriginalSite(void*, const char*, const char*, const char*,
+                             const char*, const PsWriteParams*,
+                             void**) const override {
     return kPsErrInvalidArg;
   }
   int WriteData(void*, const void*, size_t) const override {
@@ -146,12 +147,12 @@ class MirrorDaemonAbi : public DaemonAbi {
   int NotifyWorker(const char*, const PsNotifyParams*) const override {
     return kPsErrInvalidArg;
   }
-  int CacheReadBest(void*, const char*, const char*, const char*, uint32_t,
-                    void**) const override {
+  int CacheReadBestSite(void*, const char*, const char*, const char*,
+                        const char*, uint32_t, void**) const override {
     return kPsErrNotFound;
   }
-  int CacheReadAlternate(void*, const char*, const char*, const char*, uint8_t,
-                         void**) const override {
+  int CacheReadAlternateSite(void*, const char*, const char*, const char*,
+                             const char*, uint8_t, void**) const override {
     return kPsErrNotFound;
   }
   int ReadContent(const void*, const uint8_t**, size_t*) const override {

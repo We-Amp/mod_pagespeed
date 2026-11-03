@@ -1,0 +1,1 @@
+- nginx: hardened the handling of origin response headers, so that a response can no longer stop a worker or expose worker memory to clients. Affected: 2.7.0 and earlier. Update recommended for nginx sites.

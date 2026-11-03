@@ -1,0 +1,1 @@
+- Hardened request handling on IIS so that the module's own fetches no longer let a remote client obtain an optimized copy of a resource that IP and Domain Restrictions limit to local clients. Affected: 2.7.0 and earlier. Update recommended for IIS sites.

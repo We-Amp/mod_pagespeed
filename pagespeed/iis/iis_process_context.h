@@ -47,7 +47,12 @@ namespace net_instaweb
 		IisRewriteOptions* root_options() { return root_options_; };
 		DWORD page_size() { return page_size_; }
 		//RequestContext *CreatePagespeedRequestContext() {return new RequestContext(thread_system_->NewMutex());}
-		IisServerContext* GetServerContext(const GoogleString& site_app_id, const char * hostname, unsigned int port, const char * config_path);
+		// `site_id` and `site_name_utf8` are the IIS site's id and name; a site
+		// without a CacheFragment of its own gets one derived from them
+		// (DeriveIisSiteCacheFragment), so each IIS site has its own cache
+		// keyspace and every application of a site shares it.
+		IisServerContext* GetServerContext(const GoogleString& site_app_id, const char * hostname, unsigned int port, const char * config_path,
+			uint32_t site_id, const GoogleString& site_name_utf8);
 		void Shutdown();
 		global_settings *  settings() { return &settings_; }
 		void AddRef() { reference_count_.fetch_add(1); }
@@ -63,7 +68,7 @@ namespace net_instaweb
 		static void DrainDeferredReleases();
 		bool ok() { return ok_; };
 
-		// Diagnostic surface for OnBeginRequest's local-only error page.
+		// Diagnostic surface for OnResolveRequestCache's local-only error page.
 		// When ok() returns false, these report WHY initialization failed,
 		// so the response can give the operator actionable detail (e.g. the
 		// resolved cache path and the AppPool identity that couldn't write
@@ -125,6 +130,8 @@ namespace net_instaweb
 		struct FileCheck FileID1;
 		struct FileCheck FileID2;
 		GoogleString site_app_id() { return site_app_id_; }
+		// The IIS site id the server context was created for.
+		uint32_t site_id() const { return site_id_; }
 
 		static ProcessContext* PSOL_PROCESS_CONTEXT;
 
@@ -138,6 +145,7 @@ namespace net_instaweb
 		// (AV in IsPagespeedResource on a ~6s-old w3wp).
 		std::mutex init_mutex_;
 		const GoogleString site_app_id_;
+		uint32_t site_id_ = 0;
 		std::atomic<DWORD> reference_count_;
 		HTTP_MODULE_ID module_id_;
 		// Every pointer this class owns starts null at its declaration, so
@@ -169,7 +177,8 @@ namespace net_instaweb
 		bool daemon_handler_registered_ = false;
 
 		// Init-failure diagnostics. Populated by GetServerContext() on the
-		// non-ok() exit paths; consumed by IisHttpModule::OnBeginRequest to
+		// non-ok() exit paths; consumed by
+		// IisHttpModule::OnResolveRequestCache to
 		// render a per-failure-mode local-only error page.
 		InitFailureKind init_failure_kind_ = InitFailureKind::kOk;
 		GoogleString init_error_message_;

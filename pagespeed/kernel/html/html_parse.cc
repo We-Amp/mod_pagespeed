@@ -361,6 +361,14 @@ void HtmlParse::DisableFiltersInjectingScripts(const FilterList& filters) {
   }
 }
 
+void HtmlParse::DisableFiltersSkippedOnHydratedPages() {
+  for (HtmlFilter* filter : filters_) {
+    if (filter->SkippedOnHydratedPages()) {
+      filter->set_is_enabled(false);
+    }
+  }
+}
+
 // This is factored out of Flush() for testing purposes.
 void HtmlParse::ApplyFilter(HtmlFilter* filter) {
   // Keep track of the current filter in a state variable, for associating

@@ -59,6 +59,9 @@ namespace {
 
 const char kUrl[] = "/a/style.css";
 const char kHost[] = "example.com";
+// The site of the block that admitted the request, sha256("site-test").
+const char kSite[] =
+    "2007f4b98af3e43f6c81272c8606ea77a35978dd7a5c0ee623f15036edac5831";
 const char kScheme[] = "http";
 
 class DaemonRecordArmTest : public testing::Test {
@@ -120,6 +123,7 @@ class DaemonRecordArmTest : public testing::Test {
     input.url = kUrl;
     input.hostname = kHost;
     input.scheme = kScheme;
+    input.site = kSite;
     input.content_type = "text/css";
     input.cache_control_lines.push_back("max-age=600, public");
     input.etag = "\"abc\"";
@@ -1169,6 +1173,29 @@ TEST_F(DaemonRecordArmTest, AFailedNotificationIsReportedAndNotRetried) {
       EvaluateDaemonRecordGate(*abi_, input, 1000);
   ASSERT_EQ(DaemonRecordVerdict::kStoreAndNotify, decision.verdict);
   EXPECT_NE(kPsOk, NotifyDaemon(*abi_, "/tmp/socket", input, decision));
+}
+
+// --- the site ---------------------------------------------------------------
+
+TEST_F(DaemonRecordArmTest, AnInputWithoutASiteIsStoredAndAskedNowhere) {
+  const DaemonRecordInput eligible = EligibleInput();
+  const DaemonRecordDecision good =
+      EvaluateDaemonRecordGate(*abi_, eligible, 1000);
+  ASSERT_EQ(DaemonRecordVerdict::kStoreAndNotify, good.verdict);
+  DaemonRecordInput input = EligibleInput();
+  input.site = "";
+  const DaemonRecordDecision decision =
+      EvaluateDaemonRecordGate(*abi_, input, 1000);
+  EXPECT_EQ(DaemonRecordVerdict::kRefuse, decision.verdict);
+  EXPECT_STREQ(daemon_record_reason::kNoSiteId, decision.reason);
+  // The writer and the notification refuse on their own too, whatever
+  // decision they are handed.
+  int cache_marker = 0;
+  DaemonRecordWriter writer(abi_.get(), &cache_marker);
+  EXPECT_EQ(kPsErrInvalidArg, writer.Begin(input, good));
+  EXPECT_EQ(kPsErrInvalidArg, NotifyDaemon(*abi_, "/tmp/socket", input, good));
+  EXPECT_EQ(GoogleString::npos, CallLog().find("write_original")) << CallLog();
+  EXPECT_EQ(GoogleString::npos, CallLog().find("notify ")) << CallLog();
 }
 
 }  // namespace

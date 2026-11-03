@@ -29,7 +29,7 @@
 // case; each is read fresh on every call, so a test can change its mind
 // between loads.
 //
-//   PS_STUB_MAJOR / PS_STUB_MINOR  reported API version (default 1 / 8)
+//   PS_STUB_MAJOR / PS_STUB_MINOR  reported API version (default 1 / 12)
 //   PS_STUB_STRUCT_SIZE            what the UNSIZED initializer stamps into
 //                                  struct_size (default: the real size)
 //   PS_STUB_SCRIBBLE               bytes the SIZED initializer writes past
@@ -71,6 +71,17 @@
 //                                between the arm's two reads of it.  The
 //                                count restarts whenever the string changes
 //                                (unset it between cases that reuse a spec).
+//   PS_STUB_SITE_LOG               file each sited cache call is appended
+//                                  to as "<op> site=<site> url=<url>"
+//   PS_STUB_SITE                   when set, the keyspace the stored entries
+//                                  belong to: a sited read under any other
+//                                  site (or none) finds nothing, as the real
+//                                  library's per-site keys do
+//
+// THE CACHE ENTRY POINTS ARE THE SITED ONES ONLY.  ps_cache_write_original,
+// ps_cache_read_best and ps_cache_read_alternate are not exported at all, so
+// a module that resolved any of them would fail to load this library: every
+// suite that loads it proves the module binds the _site entry points alone.
 //
 // Two cases cannot be environment variables, because a symbol cannot be
 // un-exported at run time and its PRESENCE is what the loader acts on. Each is
@@ -100,6 +111,9 @@
 //                                published. Bound OPTIONALLY, so it must
 //                                still load; the degrade is that an error
 //                                line carries the error class alone.
+//   PS_STUB_OMIT_SITE            no _site cache entry points, while still
+//                                REPORTING 1.12: refused, because they are
+//                                bound unconditionally.
 //
 // WHY THIS FILE MODELS THE PEER'S VALIDATION RATHER THAN JUST SUCCEEDING.
 // A stand-in that accepts everything cannot fail the way the real library
@@ -112,6 +126,12 @@
 // content cap in both of its enforcement positions, the both-or-neither
 // option-context rule with the signature RECOMPUTED rather than trusted, and
 // the notification's struct-size thresholds.
+
+// The flavour without the sited cache calls leaves their helpers unused.
+#if defined(PS_STUB_OMIT_SITE) && defined(__clang__)
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunused-const-variable"
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -212,6 +232,8 @@ struct StubNotifyParams {
   const char* option_context;
   size_t option_context_length;
   const char* option_signature;
+  const char* site;
+  uint32_t notify_flags;
 };
 
 // The peer's published error codes, in its numbering.  Only the ones some
@@ -231,6 +253,11 @@ constexpr int kErrClosed = 7;
 constexpr uint8_t kSentinelOriginal = 0x0C;
 constexpr uint64_t kOriginalContentCap = 16ULL * 1024 * 1024;
 constexpr size_t kSignatureChars = 64;
+constexpr size_t kSiteIdChars = 64;
+constexpr uint32_t kNotifyFlagHostVouched = 0x1u;
+constexpr uint32_t kNotifyFlagFromModule = 0x2u;
+// The worker's llms.txt notification mask, which the module may not send.
+constexpr uint32_t kLlmsTxtMask = 0xFFFFFFFDu;
 constexpr size_t kMaxOptionContextBytes = 16384;
 
 // The write-parameter sizes the peer has ever published.  A declared size is
@@ -758,12 +785,61 @@ void StubApplyOriginalFlagsSequence(StubAlternate* alternate) {
   alternate->flags = static_cast<uint8_t>(value);
 }
 
+// The peer's site rule: NULL or "" is unsited; otherwise exactly
+// kSiteIdChars lowercase hex characters, or the call is refused.
+bool StubSiteIsValid(const char* site) {
+  if (site == nullptr || *site == '\0') {
+    return true;
+  }
+  const size_t length = strlen(site);
+  if (length != kSiteIdChars) {
+    return false;
+  }
+  for (size_t i = 0; i < length; ++i) {
+    const char c = site[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Whether a sited read may see the stored table: always, unless
+// PS_STUB_SITE names the one keyspace the table belongs to.
+bool StubSiteSeesEntries(const char* site) {
+  const char* owner = StubGetenv("PS_STUB_SITE");
+  if (owner == nullptr || *owner == '\0') {
+    return true;
+  }
+  return site != nullptr && strcmp(site, owner) == 0;
+}
+
+const char* StubSiteForLog(const char* site) {
+  return site == nullptr ? "(null)" : site;
+}
+
+// One line per sited cache call, "<op> site=<site> url=<url>", into the file
+// PS_STUB_SITE_LOG names.  A separate file so the call log's lines keep the
+// shape the older cases assert on.
+void SiteLog(const char* op, const char* site, const char* url) {
+  const char* path = StubGetenv("PS_STUB_SITE_LOG");
+  if (path == nullptr || *path == '\0') {
+    return;
+  }
+  FILE* f = fopen(path, "a");
+  if (f == nullptr) {
+    return;
+  }
+  fprintf(f, "%s site=%s url=%s\n", op, StubSiteForLog(site), url);
+  fclose(f);
+}
+
 }  // namespace
 
 extern "C" {
 
 int ps_version_major() { return static_cast<int>(EnvOr("PS_STUB_MAJOR", 1)); }
-int ps_version_minor() { return static_cast<int>(EnvOr("PS_STUB_MINOR", 8)); }
+int ps_version_minor() { return static_cast<int>(EnvOr("PS_STUB_MINOR", 12)); }
 
 // The size-unaware spelling: writes its own struct's worth, and stamps its
 // own sizeof -- which is what makes a layout disagreement detectable.
@@ -812,6 +888,58 @@ uint32_t ps_read_shared_config_generation(const char* cache_path) {
 }
 #endif  // PS_STUB_OMIT_GENERATION
 
+#ifdef PS_STUB_HTML_POLICY
+// The HTML cache policy (1.12), in the flavour that exports it.  Answers what
+// PS_STUB_HTML_ACTION and PS_STUB_HTML_REASON say; the rules themselves are
+// the real library's.  The formatter writes `key=value` pairs so a test can
+// read the fields back without a JSON parser.
+int ps_html_store_classify(int, const char* method, const char* url_path,
+                           uint32_t, int, const char* const*,
+                           const char* const*, size_t, uint64_t, int,
+                           const char*, size_t, uint64_t, uint32_t,
+                           int* out_reason, uint32_t* out_lifetime_s,
+                           uint32_t* out_flags, uint16_t* out_cc_flags,
+                           int* out_sidecar, char* detail_buf,
+                           size_t detail_capacity, size_t* out_detail_len) {
+  if (method == nullptr || url_path == nullptr) return -1;
+  const int action = static_cast<int>(EnvOr("PS_STUB_HTML_ACTION", 3));
+  if (action < 0) return action;
+  const int reason = static_cast<int>(EnvOr("PS_STUB_HTML_REASON", 0));
+  *out_reason = reason;
+  *out_lifetime_s = 60;
+  *out_flags = 1u | 16u | 32u;
+  *out_cc_flags = 0;
+  *out_sidecar = 0;
+  const char* detail = reason == 18 ? "meta_csrf_token" : "";
+  *out_detail_len = std::strlen(detail);
+  if (detail_capacity > 0) {
+    std::snprintf(detail_buf, detail_capacity, "%s", detail);
+  }
+  return action;
+}
+
+int ps_html_decision_format(const char* const* keys, const char* const* values,
+                            size_t count, char* buf, size_t capacity,
+                            size_t* out_len) {
+  size_t used = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const int n =
+        std::snprintf(buf + used, used < capacity ? capacity - used : 0,
+                      "%s=%s ", keys[i], values[i]);
+    if (n < 0) return -2;
+    used += static_cast<size_t>(n);
+  }
+  *out_len = used;
+  return used + 1 > capacity ? -3 : 0;
+}
+
+const char* ps_html_store_reason_name(int reason) {
+  if (reason == 0) return "none";
+  if (reason == 18) return "personalisation_signal";
+  return nullptr;
+}
+#endif  // PS_STUB_HTML_POLICY
+
 int ps_cache_open(const StubCacheConfig* config, void** out_cache) {
   if (out_cache == nullptr) return 5;
   static int placeholder = 0;
@@ -853,11 +981,13 @@ void ps_notify_params_init_sized(StubNotifyParams* params, size_t size) {
   params->struct_size = size;
 }
 
-int ps_cache_write_original(void* cache, const char* url, const char* hostname,
-                            const char* scheme, const StubWriteParams* params,
-                            void** out) {
+#ifndef PS_STUB_OMIT_SITE
+int ps_cache_write_original_site(void* cache, const char* url,
+                                 const char* hostname, const char* scheme,
+                                 const char* site,
+                                 const StubWriteParams* params, void** out) {
   if (cache == nullptr || params == nullptr || out == nullptr ||
-      url == nullptr || hostname == nullptr) {
+      url == nullptr || hostname == nullptr || !StubSiteIsValid(site)) {
     return kErrInvalidArg;
   }
   const size_t usable = ClampWriteParamsSize(params->struct_size);
@@ -903,6 +1033,7 @@ int ps_cache_write_original(void* cache, const char* url, const char* hostname,
       p.origin_etag == nullptr ? "" : p.origin_etag,
       p.origin_ct == nullptr ? "" : p.origin_ct);
   Log(line);
+  SiteLog("write_original", site, url);
 
   StubWriteHandle* handle =
       static_cast<StubWriteHandle*>(calloc(1, sizeof(StubWriteHandle)));
@@ -914,6 +1045,7 @@ int ps_cache_write_original(void* cache, const char* url, const char* hostname,
   *out = handle;
   return kOk;
 }
+#endif  // PS_STUB_OMIT_SITE
 
 int ps_write_data(void* handle, const void* data, size_t length) {
   if (handle == nullptr) {
@@ -1280,18 +1412,42 @@ int ps_notify_worker_ex(const char* socket_path,
     }
   }
 
+  // 1.12: the site and the flags, both or neither by struct size.  A caller
+  // whose struct predates them is unsited and unvouched.
+  const int agent_request =
+      params->struct_size >= offsetof(StubNotifyParams, agent_request) +
+                                 sizeof(params->agent_request)
+          ? params->agent_request
+          : 0;
+  const bool has_site_fields =
+      params->struct_size >= offsetof(StubNotifyParams, notify_flags) +
+                                 sizeof(params->notify_flags);
+  const char* site = has_site_fields ? params->site : nullptr;
+  const uint32_t flags = has_site_fields ? params->notify_flags : 0;
+  if (!StubSiteIsValid(site)) {
+    return kErrInvalidArg;
+  }
+  if ((flags & ~(kNotifyFlagHostVouched | kNotifyFlagFromModule)) != 0) {
+    return kErrInvalidArg;
+  }
+  // The module's own rules, as the peer enforces them.
+  if ((flags & kNotifyFlagFromModule) != 0 &&
+      (site == nullptr || *site == '\0' || params->content_type == 0 ||
+       agent_request != 0 || params->mask == kLlmsTxtMask ||
+       (flags & kNotifyFlagHostVouched) != 0)) {
+    return kErrInvalidArg;
+  }
+
   char line[1024];
   snprintf(line, sizeof(line),
            "notify socket=%s url=%s host=%s scheme=%s content_type=%d mask=%u "
-           "agent_request=%d params_size=%zu context_length=%zu signature=%s",
+           "agent_request=%d params_size=%zu context_length=%zu signature=%s "
+           "site=%s flags=%u",
            socket_path, params->url, params->hostname, params->scheme,
            params->content_type, static_cast<unsigned>(params->mask),
-           params->struct_size >= offsetof(StubNotifyParams, agent_request) +
-                                      sizeof(params->agent_request)
-               ? params->agent_request
-               : 0,
-           params->struct_size, context_length,
-           signature == nullptr ? "" : signature);
+           agent_request, params->struct_size, context_length,
+           signature == nullptr ? "" : signature, StubSiteForLog(site),
+           static_cast<unsigned>(flags));
   Log(line);
 
   if (EnvOr("PS_STUB_NOTIFY_FAIL", 0) != 0) {
@@ -1304,13 +1460,19 @@ int ps_notify_worker_ex(const char* socket_path,
 // The serve arm.
 // ---------------------------------------------------------------------------
 
-int ps_cache_read_best(void* cache, const char* url, const char* hostname,
-                       const char* scheme, uint32_t mask, void** out) {
+#ifndef PS_STUB_OMIT_SITE
+int ps_cache_read_best_site(void* cache, const char* url, const char* hostname,
+                            const char* scheme, const char* site, uint32_t mask,
+                            void** out) {
   if (cache == nullptr || url == nullptr || hostname == nullptr ||
-      out == nullptr) {
+      out == nullptr || !StubSiteIsValid(site)) {
     return kErrInvalidArg;
   }
   *out = nullptr;
+  SiteLog("read_best", site, url);
+  if (!StubSiteSeesEntries(site)) {
+    return kErrNotFound;
+  }
   StubAlternate table[16];
   const size_t count = StubParseAlternates(table, 16);
   int best_score = 0;
@@ -1347,14 +1509,16 @@ int ps_cache_read_best(void* cache, const char* url, const char* hostname,
   return kOk;
 }
 
-int ps_cache_read_alternate(void* cache, const char* url, const char* hostname,
-                            const char* scheme, uint8_t alternate_id,
-                            void** out) {
+int ps_cache_read_alternate_site(void* cache, const char* url,
+                                 const char* hostname, const char* scheme,
+                                 const char* site, uint8_t alternate_id,
+                                 void** out) {
   if (cache == nullptr || url == nullptr || hostname == nullptr ||
-      out == nullptr) {
+      out == nullptr || !StubSiteIsValid(site)) {
     return kErrInvalidArg;
   }
   *out = nullptr;
+  SiteLog("read_alternate", site, url);
   // A steered failure, standing for the states a real volume reaches:
   // busy while another process re-records, an I/O error, a corrupted
   // entry, a closed volume.  Before any alternate is consulted, because
@@ -1370,7 +1534,8 @@ int ps_cache_read_alternate(void* cache, const char* url, const char* hostname,
     return static_cast<int>(forced_status);
   }
   StubAlternate table[16];
-  const size_t count = StubParseAlternates(table, 16);
+  const size_t count =
+      StubSiteSeesEntries(site) ? StubParseAlternates(table, 16) : 0;
   for (size_t i = 0; i < count; ++i) {
     if (table[i].id != alternate_id) {
       continue;
@@ -1396,6 +1561,7 @@ int ps_cache_read_alternate(void* cache, const char* url, const char* hostname,
   Log(line);
   return kErrNotFound;
 }
+#endif  // PS_STUB_OMIT_SITE
 
 int ps_read_content(const void* result, const uint8_t** out_data,
                     size_t* out_length) {
@@ -1512,7 +1678,7 @@ int ps_evaluate_freshness(const StubFreshnessInput* input,
   if (effective == 0 && (input->origin_cc_flags & 0x0200u) == 0) {
     if (input->content_type == 1 || input->content_type == 2) {  // css, js
       effective = 300u;
-    } else if (input->content_type == 3) {                       // image
+    } else if (input->content_type == 3) {  // image
       effective = 3600u;
     }
   }
@@ -1662,6 +1828,39 @@ void ps_serve_stats_record_hit_host(void* handle, int content_type,
            "serve_hit_host type=%d original=%llu optimized=%llu mask=%x "
            "host=%.*s",
            content_type, static_cast<unsigned long long>(original_bytes),
+           static_cast<unsigned long long>(optimized_bytes),
+           static_cast<unsigned>(mask), shown, host == nullptr ? "" : host);
+  Log(line);
+}
+
+// The split recorder and its reader (1.12).  Optional on the module's side:
+// the pre-generation flavour lacks both, which proves an older optimizer
+// still gets the hit, without the split.  PS_STUB_ENCODED_ORIGIN_LENGTH names
+// the size the stub's entry reports; unset, the entry reports none.
+int ps_read_encoded_origin_length(const void* result, uint64_t* out) {
+  const char* value = getenv("PS_STUB_ENCODED_ORIGIN_LENGTH");
+  if (value == nullptr || out == nullptr) {
+    return 0;
+  }
+  *out = strtoull(value, nullptr, 10);
+  return 1;
+}
+
+void ps_serve_stats_record_hit_split(void* handle, int content_type,
+                                     uint64_t original_bytes,
+                                     uint64_t encoded_origin_bytes,
+                                     uint64_t optimized_bytes, uint32_t mask,
+                                     const char* host, size_t host_len) {
+  if (handle == nullptr) {
+    return;
+  }
+  const int shown = static_cast<int>(host_len > 120 ? 120 : host_len);
+  char line[256];
+  snprintf(line, sizeof(line),
+           "serve_hit_split type=%d original=%llu encoded=%llu "
+           "optimized=%llu mask=%x host=%.*s",
+           content_type, static_cast<unsigned long long>(original_bytes),
+           static_cast<unsigned long long>(encoded_origin_bytes),
            static_cast<unsigned long long>(optimized_bytes),
            static_cast<unsigned>(mask), shown, host == nullptr ? "" : host);
   Log(line);

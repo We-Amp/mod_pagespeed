@@ -64,6 +64,23 @@ const char kIproNotRewritable[] = "ipro_not_rewritable";
 // if this module were not installed.  Their SUM is the number of in-place
 // eligible requests on that substrate, which is what makes them continuous
 // with the classic three rather than a parallel vocabulary.
+// DaemonHtmlCache report-only.  evaluated = would_store + refused, plus any
+// classify_failed.  would_store_no_notify and would_store_bytes are inside
+// would_store; the refused_<reason> counters partition refused.  unavailable
+// counts HTML responses no installed library could classify, and is not inside
+// evaluated.
+const char* const kDaemonHtmlCounters[] = {
+    "daemon_html_evaluated",
+    "daemon_html_would_store",
+    "daemon_html_would_store_no_notify",
+    "daemon_html_would_store_bytes",
+    "daemon_html_refused",
+    "daemon_html_refused_other",
+    "daemon_html_unavailable",
+    "daemon_html_classify_failed",
+    "daemon_html_log_dropped",
+};
+
 const char kIproDaemonServed[] = "ipro_daemon_served";
 const char kIproDaemonServedOriginal[] = "ipro_daemon_served_original";
 const char kIproDaemonFallthrough[] = "ipro_daemon_fallthrough";
@@ -156,6 +173,10 @@ const char kIproDaemonHealNotified[] = "ipro_daemon_heal_notified";
 // climbing.
 const char kIproDaemonHealNotifyFailed[] = "ipro_daemon_heal_notify_failed";
 
+// Requests the optimizer-worker arms declined for naming no site.
+const char kDaemonServeDeclinedNoSite[] = "daemon_serve_declined_no_site";
+const char kDaemonRecordDeclinedNoSite[] = "daemon_record_declined_no_site";
+
 const char* kWaveFormCounters[RewriteDriverFactory::kNumWorkerPools] = {
     "html-worker-queue-depth", "rewrite-worker-queue-depth",
     "low-priority-worked-queue-depth"};
@@ -224,6 +245,28 @@ const char RewriteStats::kProcessStartMs[] = "process_start_ms";
 //
 // Note that there are other statistics owned by filters and subsystems,
 // that must get the some treatment.
+const char* const RewriteStats::kDaemonHtmlRefusedReasons[] = {
+    "method",
+    "status",
+    "incomplete",
+    "auth_request",
+    "cookie_request",
+    "set_cookie",
+    "private",
+    "no_store",
+    "no_lifetime",
+    "vary",
+    "headers",
+    "nonce_csp",
+    "nonce_link",
+    "content_type",
+    "encoding",
+    "size",
+    "url",
+    "personalisation_signal",
+    nullptr,
+};
+
 void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kResourceUrlDomainAcceptances);
   statistics->AddVariable(kResourceUrlDomainRejections);
@@ -257,6 +300,13 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproServed);
   statistics->AddVariable(kIproNotInCache);
   statistics->AddVariable(kIproNotRewritable);
+  for (const char* counter : kDaemonHtmlCounters) {
+    statistics->AddVariable(counter);
+  }
+  for (const char* const* reason = kDaemonHtmlRefusedReasons;
+       *reason != nullptr; ++reason) {
+    statistics->AddVariable(StrCat("daemon_html_refused_", *reason));
+  }
   statistics->AddVariable(kIproDaemonServed);
   statistics->AddVariable(kIproDaemonServedOriginal);
   statistics->AddVariable(kIproDaemonFallthrough);
@@ -277,6 +327,8 @@ void RewriteStats::InitStats(Statistics* statistics) {
   statistics->AddVariable(kIproDaemonServedOriginalOnly);
   statistics->AddVariable(kIproDaemonHealNotified);
   statistics->AddVariable(kIproDaemonHealNotifyFailed);
+  statistics->AddVariable(kDaemonServeDeclinedNoSite);
+  statistics->AddVariable(kDaemonRecordDeclinedNoSite);
   statistics->AddVariable(kDownstreamCachePurgeAttempts);
   statistics->AddVariable(kSuccessfulDownstreamCachePurges);
   statistics->AddTimedVariable(kTotalFetchCount, Statistics::kDefaultGroup);
@@ -357,6 +409,10 @@ RewriteStats::RewriteStats(bool has_waveforms, Statistics* stats,
       ipro_daemon_heal_notified_(stats->GetVariable(kIproDaemonHealNotified)),
       ipro_daemon_heal_notify_failed_(
           stats->GetVariable(kIproDaemonHealNotifyFailed)),
+      daemon_serve_declined_no_site_(
+          stats->GetVariable(kDaemonServeDeclinedNoSite)),
+      daemon_record_declined_no_site_(
+          stats->GetVariable(kDaemonRecordDeclinedNoSite)),
       downstream_cache_purge_attempts_(
           stats->GetVariable(kDownstreamCachePurgeAttempts)),
       successful_downstream_cache_purges_(

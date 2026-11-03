@@ -23,6 +23,7 @@
 #include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/dependencies.pb.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/dependency_tracker.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -35,8 +36,8 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
-#include "pagespeed/kernel/util/url_segment_encoder.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/util/url_segment_encoder.h"
 #include "pagespeed/opt/http/request_context.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
@@ -979,6 +980,67 @@ TEST_F(CollectDependenciesFilterTest, CollectsWoff2FontFace) {
   rewrite_driver()->FinishParse();
 }
 
+// Builds a stylesheet of exactly `size` bytes: `head`, then numbered
+// rulesets, then trailing whitespace.
+GoogleString MakeCssOfSize(StringPiece head, int64 size) {
+  GoogleString css(head.data(), head.size());
+  for (int i = 0;; ++i) {
+    const GoogleString rule = StrCat(".c", IntegerToString(i), "{color:red}\n");
+    if (static_cast<int64>(css.size() + rule.size()) > size) {
+      break;
+    }
+    StrAppend(&css, rule);
+  }
+  css.append(size - css.size(), ' ');
+  CHECK_EQ(size, static_cast<int64>(css.size()));
+  return css;
+}
+
+class CollectDependenciesParseMaxBytesTest
+    : public CollectDependenciesFilterTest {
+ protected:
+  static constexpr int64 kParseMaxBytes = 4096;
+
+  // Returns how many fonts are collected from a stylesheet of `size` bytes
+  // that declares one woff2 @font-face.
+  int CollectedFonts(StringPiece id, int64 size) {
+    options()->ClearSignatureForTesting();
+    options()->set_css_parse_max_bytes(kParseMaxBytes);
+    server_context()->ComputeSignature(options());
+    SetResponseWithDefaultHeaders(
+        "f.css", kContentTypeCss,
+        MakeCssOfSize("@font-face { font-family: Demo; src: url(x.woff2) "
+                      "format(\"woff2\"); }\n",
+                      size),
+        100);
+    rewrite_driver()->AddFilters();
+    ValidateNoChanges(id, "<link rel=stylesheet href=f.css>");
+    ResetDriver();
+    DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+    rewrite_driver()->StartParse(kTestDomain);
+    int fonts = -1;
+    if (tracker->read_in_info() != nullptr) {
+      fonts = tracker->read_in_info()->font_dependency_size();
+    }
+    rewrite_driver()->FinishParse();
+    return fonts;
+  }
+
+  int64 Exceeded() {
+    return statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get();
+  }
+};
+
+TEST_F(CollectDependenciesParseMaxBytesTest, OverBoundFontsNotCollected) {
+  EXPECT_EQ(0, CollectedFonts("font_over_bound", kParseMaxBytes + 1));
+  EXPECT_EQ(1, Exceeded());
+}
+
+TEST_F(CollectDependenciesParseMaxBytesTest, AtBoundFontsCollected) {
+  EXPECT_EQ(1, CollectedFonts("font_at_bound", kParseMaxBytes));
+  EXPECT_EQ(0, Exceeded());
+}
+
 TEST_F(CollectDependenciesFilterTest, PicksWoff2FromSrcFallbackList) {
   // Only the woff2 entry of a multi-format src list is collected, wherever
   // it sits in the list.
@@ -1768,6 +1830,114 @@ TEST_F(CollectDependenciesFilterTest, ImportFlatteningExposesFonts) {
   // The font carries its parent's validity info.
   EXPECT_EQ(deps.dependency(0).validity_info_size(),
             deps.font_dependency(0).validity_info_size());
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, SameUrlCollectedOnce) {
+  // A stylesheet named more than once gets one dependency, from the first
+  // element.
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  rewrite_driver()->AddFilters();
+
+  GoogleString input, output;
+  for (int i = 0; i < 10; ++i) {
+    StrAppend(&input, "<link rel=stylesheet href=a.css>");
+    StrAppend(&output, "<link rel=stylesheet href=A.a.css.pagespeed.cf.0.css>");
+  }
+  StrAppend(&input, "<link rel=stylesheet href=c.css>");
+  StrAppend(&output, "<link rel=stylesheet href=A.c.css.pagespeed.cf.0.css>");
+  ValidateExpected("same_url", input, output);
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  ASSERT_EQ(2, deps.dependency_size());
+  EXPECT_EQ("http://test.com/A.a.css.pagespeed.cf.0.css",
+            deps.dependency(0).url());
+  EXPECT_EQ("http://test.com/A.c.css.pagespeed.cf.0.css",
+            deps.dependency(1).url());
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, FontValidityInfoIsBounded) {
+  // What is stored for a stylesheet stays within the budget of 10000 copied
+  // entries.
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kExtendCacheImages);
+  GoogleString css;
+  for (int i = 0; i < 300; ++i) {
+    StrAppend(&css, "@font-face { src: url(font", IntegerToString(i),
+              ".woff2) }\n");
+  }
+  for (int i = 0; i < 300; ++i) {
+    const GoogleString image = StrCat("i", IntegerToString(i), ".png");
+    SetResponseWithDefaultHeaders(image, kContentTypePng, "image", 100 + i);
+    StrAppend(&css, ".r", IntegerToString(i), " { background: url(", image,
+              ") }\n");
+  }
+  SetResponseWithDefaultHeaders("bounded.css", kContentTypeCss, css, 100);
+  rewrite_driver()->AddFilters();
+
+  Parse("font_validity_bounded", "<link rel=stylesheet href=bounded.css>");
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  ASSERT_EQ(1, deps.dependency_size());
+  // The premise: the parent really has one entry per url().
+  EXPECT_LE(300, deps.dependency(0).validity_info_size());
+  // The first fonts are kept, in stylesheet order.
+  ASSERT_LT(0, deps.font_dependency_size());
+  EXPECT_EQ("http://test.com/font0.woff2", deps.font_dependency(0).url());
+  int copied_entries = 0;
+  for (const Dependency& font : deps.font_dependency()) {
+    // Whatever is collected still carries all of its parent's validity info.
+    EXPECT_EQ(deps.dependency(0).validity_info_size(),
+              font.validity_info_size());
+    copied_entries += font.validity_info_size();
+  }
+  EXPECT_GE(10000, copied_entries);
+  rewrite_driver()->FinishParse();
+}
+
+TEST_F(CollectDependenciesFilterTest, ImportValidityInfoIsBounded) {
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kExtendCacheImages);
+  GoogleString css;
+  for (int i = 0; i < 300; ++i) {
+    StrAppend(&css, "@import \"i", IntegerToString(i), ".css\";\n");
+  }
+  for (int i = 0; i < 300; ++i) {
+    const GoogleString image = StrCat("i", IntegerToString(i), ".png");
+    SetResponseWithDefaultHeaders(image, kContentTypePng, "image", 100 + i);
+    StrAppend(&css, ".r", IntegerToString(i), " { background: url(", image,
+              ") }\n");
+  }
+  SetResponseWithDefaultHeaders("bounded.css", kContentTypeCss, css, 100);
+  rewrite_driver()->AddFilters();
+
+  Parse("import_validity_bounded", "<link rel=stylesheet href=bounded.css>");
+
+  ResetDriver();
+  DependencyTracker* tracker = rewrite_driver()->dependency_tracker();
+  rewrite_driver()->StartParse(kTestDomain);
+  ASSERT_TRUE(tracker->read_in_info() != nullptr);
+  const Dependencies& deps = *tracker->read_in_info();
+  // The parent, followed by the first imports in stylesheet order.
+  ASSERT_LT(1, deps.dependency_size());
+  EXPECT_LE(300, deps.dependency(0).validity_info_size());
+  EXPECT_EQ("http://test.com/i0.css", deps.dependency(1).url());
+  int copied_entries = 0;
+  for (int i = 1; i < deps.dependency_size(); ++i) {
+    EXPECT_EQ(deps.dependency(0).validity_info_size(),
+              deps.dependency(i).validity_info_size());
+    copied_entries += deps.dependency(i).validity_info_size();
+  }
+  EXPECT_GE(10000, copied_entries);
   rewrite_driver()->FinishParse();
 }
 

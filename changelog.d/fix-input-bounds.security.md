@@ -1,0 +1,3 @@
+- Hardened image handling so that a crafted image can no longer stop a server worker or exhaust its memory. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Hardened the handling of compressed responses so that the memory a small compressed response can cost a server worker is bounded. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Apache: a small origin response can no longer stop a child process. Affected: 2.7.0 and earlier. Update recommended for Apache sites.

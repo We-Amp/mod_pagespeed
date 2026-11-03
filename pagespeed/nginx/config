@@ -215,13 +215,71 @@ NGX_PAGESPEED_LIBS="
 # Register the module with nginx
 if test -n "$ngx_module_link"; then
     # nginx 1.9.11+
-    ngx_module_type=HTTP_AUX_FILTER
-    ngx_module_name=ngx_pagespeed
+    ngx_module_type=HTTP_FILTER
+    # Two modules, as ngx_pagespeed_module.cc lists them for the Bazel-built
+    # module: the rewriting filter and the etag filter (a header filter that
+    # withdraws nginx's gzip_vary when the module states Vary itself and adds
+    # the in-place s-maxage).
+    ngx_module_name="ngx_pagespeed ngx_pagespeed_etag_filter"
     ngx_module_srcs="$NGX_PAGESPEED_SRCS"
     ngx_module_libs="$NGX_PAGESPEED_LIBS"
     ngx_module_incs="$NGX_PAGESPEED_INCS"
+    # The ngx_module_order of ngx_pagespeed_module.cc, name for name. nginx's
+    # loader puts each module before the lowest placed module named after it
+    # here, and filters run in reverse list order: the rewriting filter runs
+    # after postpone, SSI, charset, xslt, image, sub, addition, gunzip, userid
+    # and the headers filter (expires, add_header), just before compression,
+    # and the etag filter runs just after compression.
+    ngx_module_order="ngx_http_range_header_filter_module \
+        ngx_pagespeed_etag_filter ngx_http_gzip_filter_module \
+        ngx_http_brotli_filter_module ngx_pagespeed \
+        ngx_http_postpone_filter_module ngx_http_ssi_filter_module \
+        ngx_http_charset_filter_module ngx_http_xslt_filter_module \
+        ngx_http_image_filter_module ngx_http_sub_filter_module \
+        ngx_http_addition_filter_module ngx_http_gunzip_filter_module \
+        ngx_http_userid_filter_module ngx_http_headers_filter_module"
+    ps_names="$ngx_module_name"
+    ps_order="$ngx_module_order"
 
     . auto/module
+
+    if [ "$ngx_module_link" != DYNAMIC ]; then
+        # nginx applies ngx_module_order to dynamic modules only, so a static
+        # build applies it here, the way the loader does (ngx_add_module):
+        # each module, in ngx_module_name order, goes before the lowest placed
+        # module that the order names after it, or last if there is none.
+        ps_list=
+        for ps_module in $HTTP_FILTER_MODULES; do
+            case " $ps_names " in
+                *" $ps_module "*) ;;
+                *) ps_list="$ps_list $ps_module" ;;
+            esac
+        done
+        for ps_module in $ps_names; do
+            ps_later=
+            ps_seen=no
+            for ps_name in $ps_order; do
+                [ $ps_seen = yes ] && ps_later="$ps_later $ps_name"
+                [ "$ps_name" = "$ps_module" ] && ps_seen=yes
+            done
+            ps_new=
+            ps_placed=no
+            for ps_name in $ps_list; do
+                if [ $ps_placed = no ]; then
+                    case " $ps_later " in
+                        *" $ps_name "*)
+                            ps_new="$ps_new $ps_module"
+                            ps_placed=yes
+                            ;;
+                    esac
+                fi
+                ps_new="$ps_new $ps_name"
+            done
+            [ $ps_placed = yes ] || ps_new="$ps_new $ps_module"
+            ps_list="$ps_new"
+        done
+        HTTP_FILTER_MODULES="$ps_list"
+    fi
 else
     # older nginx
     HTTP_AUX_FILTER_MODULES="$HTTP_AUX_FILTER_MODULES ngx_pagespeed"

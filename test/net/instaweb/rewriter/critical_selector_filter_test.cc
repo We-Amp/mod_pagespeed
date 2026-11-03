@@ -266,6 +266,17 @@ TEST_F(CriticalSelectorFilterTest,
                            "<body><div>Stuff</div></body>"));
 }
 
+// Likewise a kept selector whose escape decodes to '<' and a letter.
+TEST_F(CriticalSelectorFilterTest, EscapedLessThanBeforeLetterKeepsTheLink) {
+  SetResponseWithDefaultHeaders(
+      "c.css", kContentTypeCss,
+      "label[for=\"\\3Cmain\"]{text-decoration:underline}", 100);
+  ValidateNoChanges("escaped_lt_letter",
+                    StrCat("<head>", CssLinkHref("c.css"),
+                           "</head>"
+                           "<body><div>Stuff</div></body>"));
+}
+
 TEST_F(CriticalSelectorFilterTest, CspForbidsInlineStyle) {
   // A style-src policy without 'unsafe-inline' would make the browser block
   // the inline <style> blocks this filter swaps in for <link> tags, so the

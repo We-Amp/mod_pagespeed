@@ -368,10 +368,11 @@ class FakeDaemonAbi : public DaemonAbi {
     memset(params, 0, sizeof(*params));
     params->struct_size = sizeof(*params);
   }
-  int CacheWriteOriginal(void* /*cache*/, const char* /*url*/,
-                         const char* /*hostname*/, const char* /*scheme*/,
-                         const PsWriteParams* /*params*/,
-                         void** /*out_handle*/) const override {
+  int CacheWriteOriginalSite(void* /*cache*/, const char* /*url*/,
+                             const char* /*hostname*/, const char* /*scheme*/,
+                             const char* /*site*/,
+                             const PsWriteParams* /*params*/,
+                             void** /*out_handle*/) const override {
     return kPsErrInvalidArg;
   }
   int WriteData(void* /*handle*/, const void* /*data*/,
@@ -416,16 +417,17 @@ class FakeDaemonAbi : public DaemonAbi {
   // a startup case read as evidence about an arm it never touched, and the
   // serve arm has its own suite driven through the real loader against the
   // real stand-in.
-  int CacheReadBest(void* /*cache*/, const char* /*url*/,
-                    const char* /*hostname*/, const char* /*scheme*/,
-                    uint32_t /*mask*/, void** out_result) const override {
+  int CacheReadBestSite(void* /*cache*/, const char* /*url*/,
+                        const char* /*hostname*/, const char* /*scheme*/,
+                        const char* /*site*/, uint32_t /*mask*/,
+                        void** out_result) const override {
     *out_result = nullptr;
     return kPsErrNotFound;
   }
-  int CacheReadAlternate(void* /*cache*/, const char* /*url*/,
-                         const char* /*hostname*/, const char* /*scheme*/,
-                         uint8_t /*alternate_id*/,
-                         void** out_result) const override {
+  int CacheReadAlternateSite(void* /*cache*/, const char* /*url*/,
+                             const char* /*hostname*/, const char* /*scheme*/,
+                             const char* /*site*/, uint8_t /*alternate_id*/,
+                             void** out_result) const override {
     *out_result = nullptr;
     return kPsErrNotFound;
   }
@@ -5694,6 +5696,24 @@ TEST_F(LoadDaemonAbiTest, LoadsALibraryWithoutTheGenerationReader) {
   EXPECT_EQ(0u, abi->SharedConfigGeneration("/unused"));
 }
 
+TEST_F(LoadDaemonAbiTest, ALibraryOlderThanTheHtmlPolicyStillLoads) {
+  std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(StubPath("libdaemon_stub.so"), &error_));
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_FALSE(abi->PublishesHtmlStorePolicy());
+  EXPECT_EQ(nullptr, abi->HtmlStoreReasonName(0));
+  size_t len = 0;
+  EXPECT_EQ(-1, abi->HtmlDecisionFormat(nullptr, nullptr, 0, nullptr, 0, &len));
+}
+
+TEST_F(LoadDaemonAbiTest, BindsTheHtmlPolicyWhenPresent) {
+  std::unique_ptr<DaemonAbi> abi(
+      LoadDaemonAbi(StubPath("libdaemon_stub_html_policy.so"), &error_));
+  ASSERT_TRUE(abi != nullptr) << error_;
+  EXPECT_TRUE(abi->PublishesHtmlStorePolicy());
+  EXPECT_STREQ("none", abi->HtmlStoreReasonName(0));
+}
+
 TEST_F(LoadDaemonAbiTest, BindsTheLastErrorReporterWhenPresent) {
   std::unique_ptr<DaemonAbi> abi(
       LoadDaemonAbi(StubPath("libdaemon_stub.so"), &error_));
@@ -5745,7 +5765,7 @@ TEST_F(LoadDaemonAbiTest, RefusesAMinorBelowTheFloor) {
 TEST_F(LoadDaemonAbiTest, AcceptsALaterMinor) {
   // The minor is a FLOOR, not an equality: a newer daemon must still load, or
   // every daemon release would strand every module build before it.
-  setenv("PS_STUB_MINOR", "9", 1);
+  setenv("PS_STUB_MINOR", "13", 1);
   std::unique_ptr<DaemonAbi> abi(
       LoadDaemonAbi(StubPath("libdaemon_stub.so"), &error_));
   EXPECT_TRUE(abi != nullptr) << error_;

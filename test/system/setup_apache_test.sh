@@ -24,6 +24,16 @@ APACHE_CONF_DIR=/etc/apache2
 MODULE_PATH="${MODULE_PATH:-$PROJECT_ROOT/bazel-bin/libmod_pagespeed.so}"
 APACHE_HTTPS_PORT="${APACHE_HTTPS_PORT:-8443}"
 APACHE_SECONDARY_PORT="${APACHE_SECONDARY_PORT:-8081}"
+# The two listeners behind the virtual-host cache keyspace tests
+# (system/test_site_cache_identity.py).
+APACHE_SITE_PORT_A="${APACHE_SITE_PORT_A:-8095}"
+APACHE_SITE_PORT_B="${APACHE_SITE_PORT_B:-8096}"
+# Lane fixture daemon_arm (system/test_daemon_site.py): the two listeners of
+# the optimizer-worker site virtual hosts, and the worker's management API on
+# loopback.
+APACHE_DAEMON_SITE_PORT_A="${APACHE_DAEMON_SITE_PORT_A:-8097}"
+APACHE_DAEMON_SITE_PORT_B="${APACHE_DAEMON_SITE_PORT_B:-8098}"
+APACHE_DAEMON_API_PORT="${APACHE_DAEMON_API_PORT:-8099}"
 
 # Lane-fixture bookkeeping (test/system/conftest.py KNOWN_LANE_FIXTURES): every
 # fixture this script provisions is recorded in $LANE_FIXTURES_FILE, and
@@ -64,6 +74,9 @@ DAEMON_CACHE_ROOT="$DAEMON_STATE_DIR/cache"
 # The module's volume path is the worker's cache directory plus /cache.
 DAEMON_VOLUME="$DAEMON_CACHE_ROOT/cache"
 DAEMON_PID="$LANE_STATE_DIR/daemon_worker.pid"
+# Restarts the worker with the same arguments (written by start_daemon_worker,
+# run by system/test_daemon_site.py).
+DAEMON_RESTART="$LANE_STATE_DIR/restart_daemon_worker.sh"
 DAEMON_LOG="$LANE_STATE_DIR/daemon_worker.log"
 # Set once the worker answers on its socket; the vhost writers read it.
 DAEMON_READY=""
@@ -212,17 +225,17 @@ setup_test_content() {
     # Copy test content
     if [ -d "$PROJECT_ROOT/install/mod_pagespeed_example" ]; then
         sudo rm -rf /var/www/html/mod_pagespeed_example
-        sudo cp -r "$PROJECT_ROOT/install/mod_pagespeed_example" /var/www/html/
+        sudo cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_example" /var/www/html/
     fi
 
     if [ -d "$PROJECT_ROOT/install/mod_pagespeed_test" ]; then
         sudo rm -rf /var/www/html/mod_pagespeed_test
-        sudo cp -r "$PROJECT_ROOT/install/mod_pagespeed_test" /var/www/html/
+        sudo cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_test" /var/www/html/
     fi
 
     if [ -d "$PROJECT_ROOT/install/do_not_modify" ]; then
         sudo rm -rf /var/www/html/do_not_modify
-        sudo cp -r "$PROJECT_ROOT/install/do_not_modify" /var/www/html/
+        sudo cp -r --preserve=timestamps "$PROJECT_ROOT/install/do_not_modify" /var/www/html/
     fi
 
     # debug.conf.template serves the purge/ and cache_flush/ trees from the
@@ -231,7 +244,7 @@ setup_test_content() {
     for tree in purge cache_flush; do
         if [ -d "$PROJECT_ROOT/install/mod_pagespeed_test/$tree" ]; then
             sudo rm -rf "/var/www/html/$tree"
-            sudo cp -r "$PROJECT_ROOT/install/mod_pagespeed_test/$tree" "/var/www/html/$tree"
+            sudo cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_test/$tree" "/var/www/html/$tree"
         fi
     done
 
@@ -248,7 +261,7 @@ setup_test_content() {
     if [ -d "$SCRIPT_DIR/external_origin/www.modpagespeed.com" ]; then
         sudo rm -rf /var/www/external_origin
         sudo mkdir -p /var/www/external_origin
-        sudo cp -r "$SCRIPT_DIR/external_origin/www.modpagespeed.com" /var/www/external_origin/
+        sudo cp -r --preserve=timestamps "$SCRIPT_DIR/external_origin/www.modpagespeed.com" /var/www/external_origin/
         sudo chown -R www-data:www-data /var/www/external_origin
     else
         log_warn "external_origin/www.modpagespeed.com not found: the https stand-in will not be served"
@@ -461,6 +474,13 @@ ModPagespeedPermitIdsForCssCombining "allowed-to-combine-2-*"
   ModPagespeedAvoidRenamingIntrospectiveJavascript off
 </Location>
 
+# automatic/test_rewrite_css.py::test_rewrite_css_images inlines a small image
+# into CSS; a request can only lower the threshold, so the page gets it from
+# the configuration.
+<Location /mod_pagespeed_example/rewrite_css_images.html>
+  ModPagespeedCssImageInlineMaxBytes 2048
+</Location>
+
 # debug.conf.template:250-251
 ModPagespeedLoadFromFile "http://localhost/mod_pagespeed_test/ipro/instant/" \
                          "/var/www/html/mod_pagespeed_test/ipro/instant/"
@@ -534,6 +554,16 @@ ModPagespeedLoadFromFile \
 # ErrorDocument; this block lets it run.
 <Directory "/var/www/html/mod_pagespeed_test/error_document" >
     AllowOverride All
+</Directory>
+
+# debug.conf.template: the flatten size limit is configuration only (not
+# settable per request); these directories give the flatten_css_imports tests
+# a small limit.
+<Directory "/var/www/html/mod_pagespeed_test/flatten_limit_tiny" >
+    ModPagespeedCssFlattenMaxBytes 5
+</Directory>
+<Directory "/var/www/html/mod_pagespeed_test/flatten_limit_medium" >
+    ModPagespeedCssFlattenMaxBytes 50
 </Directory>
 
 # debug.conf.template:52-54
@@ -1529,6 +1559,8 @@ configure_fixture_vhosts() {
   Header always set X-Test-Vhost "www.example.com"
   DocumentRoot "/var/www/html"
   ModPagespeedFileCachePath            "/var/cache/mod_pagespeed"
+  # One site on three virtual hosts: they share optimized resources.
+  ModPagespeedCacheFragment "mapped-domains"
   ModPagespeedLoadFromFile http://cdn.example.com /var/www/html
   ModPagespeedMapRewriteDomain cdn.example.com origin.example.com
   ModPagespeedRewriteLevel PassThrough
@@ -1541,6 +1573,8 @@ configure_fixture_vhosts() {
   Header always set X-Test-Vhost "origin.example.com"
   DocumentRoot "/var/www/html"
   ModPagespeedFileCachePath            "/var/cache/mod_pagespeed"
+  # One site on three virtual hosts: they share optimized resources.
+  ModPagespeedCacheFragment "mapped-domains"
   ModPagespeedLoadFromFile http://cdn.example.com /var/www/html
   ModPagespeedMapRewriteDomain cdn.example.com origin.example.com
   ModPagespeedRewriteLevel PassThrough
@@ -1553,6 +1587,8 @@ configure_fixture_vhosts() {
   Header always set X-Test-Vhost "cdn.example.com"
   DocumentRoot "/var/www/html"
   ModPagespeedFileCachePath            "/var/cache/mod_pagespeed"
+  # One site on three virtual hosts: they share optimized resources.
+  ModPagespeedCacheFragment "mapped-domains"
   ModPagespeedLoadFromFile http://cdn.example.com /var/www/html
   ModPagespeedMapRewriteDomain cdn.example.com origin.example.com
   ModPagespeedRewriteLevel PassThrough
@@ -1702,6 +1738,51 @@ EOF
     provide_fixture experiment_framework
 }
 
+# Lane fixture "self_fetch_access": the self-fetch-access.example.com vhost
+# system/test_self_fetch_access.py talks to, on the secondary port. The
+# location install/mod_pagespeed_test/self_fetch_access/local_only/ is open to
+# local clients only ("Require local"), and the admin <Location> blocks are
+# the packaged configuration's own, copied verbatim from
+# install/common/pagespeed.conf. A test client on one host is always local to
+# "Require local" (it connects from loopback or from the server's own
+# address), so this vhost trusts loopback as a forwarding proxy: a client that
+# connects from loopback and names a remote address in X-Forwarded-For is that
+# remote client here, while the module's own fetch, which connects to the
+# address the request arrived on and from that address, is not forwarded and
+# keeps its own address.
+configure_self_fetch_access_vhost() {
+    log_info "Configuring the self-fetch access vhost on port $APACHE_SECONDARY_PORT..."
+    local packaged="$PROJECT_ROOT/install/common/pagespeed.conf"
+    local admin_blocks
+    admin_blocks="$(awk '/^[[:space:]]*<Location \/pagespeed_(global_)?admin>/ {p = 1}
+                         p {print}
+                         p && /<\/Location>/ {p = 0}' "$packaged")"
+    if [ "$(printf '%s\n' "$admin_blocks" | grep -c 'Require local')" != 2 ]; then
+        log_error "$packaged: expected two admin <Location> blocks with Require local"
+        exit 1
+    fi
+    sudo a2enmod remoteip 2>/dev/null || true
+    local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-self-fetch-access.conf"
+    {
+        cat << EOF
+<VirtualHost *:$APACHE_SECONDARY_PORT>
+  ServerName self-fetch-access.example.com
+  Header always set X-Test-Vhost "self-fetch-access.example.com"
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  RemoteIPHeader X-Forwarded-For
+  RemoteIPInternalProxy 127.0.0.1
+  <Location /mod_pagespeed_test/self_fetch_access/local_only>
+    Require local
+  </Location>
+EOF
+        printf '%s\n' "$admin_blocks"
+        echo "</VirtualHost>"
+    } | sudo tee "$conf" > /dev/null
+    sudo a2ensite pagespeed-test-self-fetch-access 2>/dev/null || true
+    provide_fixture self_fetch_access
+}
+
 # Lane fixtures "rule_packs" and "rule_pack_log": the name-based virtual hosts
 # system/test_rule_packs.py talks to, on the secondary port. All three turn the
 # rule_packs filter on by name with the pack under
@@ -1824,6 +1905,7 @@ EOF
     provide_fixture rule_pack_log
     if [ -n "$DAEMON_READY" ]; then
         provide_fixture daemon_arm
+        provide_fixture daemon_html_report
     fi
     provide_fixture rule_pack_signing
     provide_fixture rule_pack_no_link_header
@@ -2363,8 +2445,37 @@ start_daemon_worker() {
     nohup sudo -u www-data "$DAEMON_ARTIFACT_DIR/factory_worker" \
         --cache-dir "$DAEMON_CACHE_ROOT" --socket "$DAEMON_SOCKET" \
         --cache-size 536870912 --log-level info \
+        --api-port "$APACHE_DAEMON_API_PORT" --api-no-auth \
         > "$DAEMON_LOG" 2>&1 &
     echo $! > "$DAEMON_PID"
+    # The same start, as a script the site tests run to restart the worker:
+    # it stops only the process the pid file names (the sudo that runs the
+    # worker, and the worker under it), and only while that is still this
+    # lane's.
+    cat > "$DAEMON_RESTART" << EOF
+#!/bin/bash
+set -u
+pid="\$(cat "$DAEMON_PID" 2>/dev/null)"
+if [ -n "\$pid" ] && tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null | grep -q "factory_worker"; then
+    sudo pkill -TERM -P "\$pid" 2>/dev/null || true
+    sudo kill -TERM "\$pid" 2>/dev/null || true
+    for i in \$(seq 1 100); do [ -d "/proc/\$pid" ] || break; sleep 0.1; done
+fi
+sudo rm -f "$DAEMON_SOCKET"
+nohup sudo -u www-data "$DAEMON_ARTIFACT_DIR/factory_worker" \\
+    --cache-dir "$DAEMON_CACHE_ROOT" --socket "$DAEMON_SOCKET" \\
+    --cache-size 536870912 --log-level info \\
+    --api-port "$APACHE_DAEMON_API_PORT" --api-no-auth \\
+    >> "$DAEMON_LOG" 2>&1 < /dev/null &
+echo \$! > "$DAEMON_PID"
+for i in \$(seq 1 100); do
+    if [ -S "$DAEMON_SOCKET" ]; then sudo chmod 666 "$DAEMON_SOCKET"; exit 0; fi
+    sleep 0.2
+done
+echo "the optimizer worker did not open its socket again" >&2
+exit 1
+EOF
+    chmod +x "$DAEMON_RESTART"
     local i
     for i in $(seq 1 100); do
         # The module reads the volume size the worker publishes while it
@@ -2488,6 +2599,82 @@ write_daemon_content() {
 
 # Lane fixture "daemon_arm": a plain virtual host with in-place optimization
 # handed to the daemon (no rule packs), next to the rulepacks.example.com one.
+# Cache keyspaces of virtual hosts (system/test_site_cache_identity.py):
+# site.example.test, shared.example.test and plain.example.test each have one
+# virtual host on each of two listeners, each with a document root holding a
+# stylesheet only that root has.  The shared.example.test hosts set one
+# explicit CacheFragment; the plain.example.test hosts carry no ModPagespeed
+# directive and run on the main server's PageSpeed configuration.
+configure_site_identity_vhosts() {
+    log_info "Configuring cache keyspace vhosts on ports $APACHE_SITE_PORT_A and $APACHE_SITE_PORT_B..."
+    local root=/var/www/site_identity dir
+    for dir in a b; do
+        sudo mkdir -p "$root/$dir"
+        printf '.site-%s-only {\n  color: #ff0000;\n}\n' "$dir" \
+            | sudo tee "$root/$dir/style.css" > /dev/null
+    done
+    local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-site-identity.conf"
+    local name port fragment
+    {
+        echo "Listen $APACHE_SITE_PORT_A"
+        echo "Listen $APACHE_SITE_PORT_B"
+        echo "<Directory $root>"
+        echo "  Require all granted"
+        echo "</Directory>"
+        for port in "$APACHE_SITE_PORT_A" "$APACHE_SITE_PORT_B"; do
+            dir=a
+            [ "$port" = "$APACHE_SITE_PORT_B" ] && dir=b
+            cat << EOF
+<VirtualHost *:$port>
+  ServerName plain.example.test
+  DocumentRoot "$root/$dir"
+  Header always set Cache-Control "max-age=3600"
+</VirtualHost>
+EOF
+        done
+        for name in site.example.test shared.example.test; do
+            for port in "$APACHE_SITE_PORT_A" "$APACHE_SITE_PORT_B"; do
+                dir=a
+                [ "$port" = "$APACHE_SITE_PORT_B" ] && dir=b
+                fragment=""
+                [ "$name" = shared.example.test ] \
+                    && fragment="  ModPagespeedCacheFragment site-identity-shared"
+                cat << EOF
+<VirtualHost *:$port>
+  ServerName $name
+  DocumentRoot "$root/$dir"
+  Header always set Cache-Control "max-age=3600"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rewrite_css
+  ModPagespeedInPlaceResourceOptimization on
+$fragment
+</VirtualHost>
+EOF
+            done
+        done
+    } | sudo tee "$conf" > /dev/null
+    sudo a2ensite pagespeed-test-site-identity 2>/dev/null || true
+}
+
+# Lane fixture "daemon_html_report": the pages test_daemon_html_report.py fetches.
+write_daemon_html_content() {
+    local dir="$1" sudo_cmd="$2" name
+    $sudo_cmd mkdir -p "$dir"
+    for name in plain cookie query secret expires addheader private setcookie varycookie; do
+        printf '<!doctype html><html><head><title>%s</title></head><body><p>%s</p></body></html>\n' "$name" "$name" \
+            | $sudo_cmd tee "$dir/$name.html" > /dev/null
+    done
+    printf '<!doctype html><html><head><meta name="csrf-token" content="value"><title>p</title></head><body></body></html>\n' \
+        | $sudo_cmd tee "$dir/personal.html" > /dev/null
+    {
+        printf '<!doctype html><html><head><title>l</title></head><body>\n'
+        head -c 70000 /dev/zero | tr '\0' 'x'
+        printf '\n<meta name="csrf-token" content="past the window"></body></html>\n'
+    } | $sudo_cmd tee "$dir/large.html" > /dev/null
+}
+
 configure_daemon_vhost() {
     if [ -z "$DAEMON_READY" ]; then
         # No worker: leave no daemon host behind from an earlier run.
@@ -2515,6 +2702,78 @@ configure_daemon_vhost() {
   #@@DAEMON@@
 </VirtualHost>
 EOF
+    write_daemon_html_content /var/www/html/daemon_html sudo
+    for html_host in daemon-html-off.example.com:off daemon-html-report.example.com:report-only; do
+        sudo tee -a "$conf" > /dev/null << EOF
+
+<VirtualHost *:@@APACHE_SECONDARY_PORT@@>
+  ServerName ${html_host%%:*}
+  DocumentRoot "/var/www/html"
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel CoreFilters
+  ModPagespeedDaemonHtmlCache ${html_host##*:}
+  <Files "addheader.html">
+    Header set X-Lane-Added "1"
+  </Files>
+  <Files "private.html">
+    Header set Cache-Control "private, no-store"
+  </Files>
+  <Files "setcookie.html">
+    Header set Set-Cookie "lane=1"
+  </Files>
+  <Files "varycookie.html">
+    Header append Vary Cookie
+  </Files>
+  <IfModule mod_expires.c>
+    <Files "expires.html">
+      ExpiresActive On
+      ExpiresDefault "access plus 600 seconds"
+    </Files>
+  </IfModule>
+  #@@DAEMON@@
+</VirtualHost>
+EOF
+    done
+    # system/test_daemon_site.py: one virtual host on each of two listeners,
+    # each the only one there, in front of the one worker.  Each document
+    # root holds stylesheets with a rule only that root has; loc/ in the first
+    # sets a CacheFragment from an .htaccess file.
+    local site_root=/var/www/daemon_site site name site_port
+    for site in a b; do
+        sudo rm -rf "$site_root/$site"
+        sudo mkdir -p "$site_root/$site/loc"
+        for name in named.css port.css restart.css after.css plain.css loc/plain.css; do
+            printf '.daemon-site-%s-only {\n  color: #ff0000;\n}\n' "$site" \
+                | sudo tee "$site_root/$site/$name" > /dev/null
+        done
+    done
+    echo "ModPagespeedCacheFragment daemon-site-location" \
+        | sudo tee "$site_root/a/loc/.htaccess" > /dev/null
+    sudo tee -a "$conf" > /dev/null << EOF
+
+Listen $APACHE_DAEMON_SITE_PORT_A
+Listen $APACHE_DAEMON_SITE_PORT_B
+<Directory $site_root>
+  Require all granted
+  AllowOverride All
+</Directory>
+EOF
+    for site in a b; do
+        site_port=$APACHE_DAEMON_SITE_PORT_A
+        [ "$site" = b ] && site_port=$APACHE_DAEMON_SITE_PORT_B
+        sudo tee -a "$conf" > /dev/null << EOF
+
+<VirtualHost *:$site_port>
+  ServerName daemon-$site.example.test
+  DocumentRoot "$site_root/$site"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedInPlaceResourceOptimization on
+  #@@DAEMON@@
+</VirtualHost>
+EOF
+    done
     sudo sed -i "s/@@APACHE_SECONDARY_PORT@@/$APACHE_SECONDARY_PORT/g" "$conf"
     apply_daemon_directives "$conf"
     sudo a2ensite pagespeed-test-daemon 2>/dev/null || true
@@ -2773,11 +3032,13 @@ EOF
     configure_fixture_server_scope
     configure_fixture_vhosts
     configure_rule_pack_vhosts
+    configure_self_fetch_access_vhost
     configure_daemon_vhost
     configure_external_origin
     configure_external_origin_https
     configure_flush_origin_proxy
     configure_remote_config_vhosts
+    configure_site_identity_vhosts
 
     # Enable required modules (including ssl for HTTPS)
     # reqtimeout is explicit so test_zerocopy_serve.py always exercises

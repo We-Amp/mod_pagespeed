@@ -514,6 +514,202 @@ TEST_F(ServerContextTest, CustomOptionsWithUrlNamerOptions) {
   EXPECT_FALSE(options->Enabled(RewriteOptions::kDelayImages));
 }
 
+// The configured size thresholds are the most a request can ask for. Each
+// value below is one byte past the configured (default) bound, the smallest
+// request that would loosen it, and each comes back as the configured value.
+TEST_F(ServerContextTest, RequestCannotRaiseSizeThresholds) {
+  RequestHeaders request_headers;
+  auto one_past = [](int64 bound) { return Integer64ToString(bound + 1); };
+  std::unique_ptr<RewriteOptions> options(GetCustomOptions(
+      StrCat("http://example.com/"
+             "?PageSpeedFilters=inline_images,inline_css,inline_javascript",
+             "&PageSpeedImageInlineMaxBytes=",
+             one_past(RewriteOptions::kDefaultImageInlineMaxBytes),
+             "&PageSpeedCssImageInlineMaxBytes=",
+             one_past(RewriteOptions::kDefaultCssImageInlineMaxBytes),
+             "&PageSpeedCssInlineMaxBytes=",
+             one_past(RewriteOptions::kDefaultCssInlineMaxBytes),
+             "&PageSpeedJsInlineMaxBytes=",
+             one_past(RewriteOptions::kDefaultJsInlineMaxBytes),
+             "&PageSpeedGoogleFontCssInlineMaxBytes=",
+             one_past(RewriteOptions::kDefaultGoogleFontCssInlineMaxBytes),
+             "&PageSpeedCssFlattenMaxBytes=",
+             one_past(RewriteOptions::kDefaultCssFlattenMaxBytes)),
+      &request_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultImageInlineMaxBytes,
+            options->ImageInlineMaxBytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssImageInlineMaxBytes,
+            options->CssImageInlineMaxBytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssInlineMaxBytes,
+            options->css_inline_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultJsInlineMaxBytes,
+            options->js_inline_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultGoogleFontCssInlineMaxBytes,
+            options->google_font_css_inline_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssFlattenMaxBytes,
+            options->css_flatten_max_bytes());
+
+  // Nor can it lift a bound with a value that a filter reads as no bound at
+  // all: a negative size turns into the largest size_t in the inline filters,
+  // and a flatten threshold of zero means unlimited.
+  options.reset(GetCustomOptions(
+      StrCat("http://example.com/"
+             "?PageSpeedFilters=inline_images,inline_css,inline_javascript"
+             "&PageSpeedImageInlineMaxBytes=-1"
+             "&PageSpeedCssImageInlineMaxBytes=-1",
+             "&PageSpeedCssInlineMaxBytes=",
+             Integer64ToString(-RewriteOptions::kDefaultCssInlineMaxBytes),
+             "&PageSpeedJsInlineMaxBytes=",
+             Integer64ToString(-RewriteOptions::kDefaultJsInlineMaxBytes),
+             "&PageSpeedGoogleFontCssInlineMaxBytes=",
+             Integer64ToString(
+                 -RewriteOptions::kDefaultGoogleFontCssInlineMaxBytes),
+             "&PageSpeedCssFlattenMaxBytes=0"),
+      &request_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultImageInlineMaxBytes,
+            options->ImageInlineMaxBytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssImageInlineMaxBytes,
+            options->CssImageInlineMaxBytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssInlineMaxBytes,
+            options->css_inline_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultJsInlineMaxBytes,
+            options->js_inline_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultGoogleFontCssInlineMaxBytes,
+            options->google_font_css_inline_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssFlattenMaxBytes,
+            options->css_flatten_max_bytes());
+
+  // A negative flatten threshold is unlimited as well. Zero for an inline
+  // threshold means inline nothing, which only lowers the bound and stays.
+  options.reset(GetCustomOptions(
+      "http://example.com/"
+      "?PageSpeedFilters=inline_css&PageSpeedCssFlattenMaxBytes=-1"
+      "&PageSpeedCssInlineMaxBytes=0",
+      &request_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultCssFlattenMaxBytes,
+            options->css_flatten_max_bytes());
+  EXPECT_EQ(0, options->css_inline_max_bytes());
+
+  // Lowering a threshold is what a request may do, and the lower value stays.
+  const int64 lowered = RewriteOptions::kDefaultCssInlineMaxBytes / 2;
+  options.reset(
+      GetCustomOptions(StrCat("http://example.com/?PageSpeedFilters=inline_css"
+                              "&PageSpeedCssInlineMaxBytes=",
+                              Integer64ToString(lowered)),
+                       &request_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(lowered, options->css_inline_max_bytes());
+}
+
+// The document image inlining budget is capped like the other thresholds,
+// from a query parameter or a request header.
+TEST_F(ServerContextTest, RequestCannotRaiseDocumentImageInlineBudget) {
+  RequestHeaders request_headers;
+  const GoogleString above_budget = Integer64ToString(
+      RewriteOptions::kDefaultDocumentImageInlineMaxBytes + 1);
+  std::unique_ptr<RewriteOptions> options(GetCustomOptions(
+      StrCat("http://example.com/?PageSpeedDocumentImageInlineMaxBytes=",
+             above_budget),
+      &request_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultDocumentImageInlineMaxBytes,
+            options->document_image_inline_max_bytes());
+
+  request_headers.Add("PageSpeedDocumentImageInlineMaxBytes", above_budget);
+  options.reset(
+      GetCustomOptions("http://example.com/", &request_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultDocumentImageInlineMaxBytes,
+            options->document_image_inline_max_bytes());
+
+  RequestHeaders lowering_headers;
+  options.reset(GetCustomOptions(
+      "http://example.com/?PageSpeedDocumentImageInlineMaxBytes=10",
+      &lowering_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(10, options->document_image_inline_max_bytes());
+
+  // A negative budget is capped too; zero, which inlines no image, stays.
+  options.reset(GetCustomOptions(
+      "http://example.com/?PageSpeedDocumentImageInlineMaxBytes=-1",
+      &lowering_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultDocumentImageInlineMaxBytes,
+            options->document_image_inline_max_bytes());
+  options.reset(GetCustomOptions(
+      "http://example.com/?PageSpeedDocumentImageInlineMaxBytes=0",
+      &lowering_headers, nullptr));
+  ASSERT_TRUE(options.get() != nullptr);
+  EXPECT_EQ(0, options->document_image_inline_max_bytes());
+}
+
+// The debug output budget is set in the server configuration only: a request
+// that turns debug on cannot change it, up or down, from a query parameter or
+// a request header.
+TEST_F(ServerContextTest, RequestCannotChangeDebugOutputBudget) {
+  const char* id = nullptr;
+  bool was_set = false;
+  GoogleString value;
+  for (const char* requested : {"0", "-1", "1", "1048577", "1000000000"}) {
+    RequestHeaders request_headers;
+    std::unique_ptr<RewriteOptions> options(
+        GetCustomOptions(StrCat("http://example.com/?PageSpeedFilters=debug"
+                                "&PageSpeedDebugOutputMaxBytes=",
+                                requested),
+                         &request_headers, nullptr));
+    ASSERT_TRUE(options.get() != nullptr) << requested;
+    EXPECT_TRUE(options->Enabled(RewriteOptions::kDebug)) << requested;
+    ASSERT_TRUE(
+        options->OptionValue("DebugOutputMaxBytes", &id, &was_set, &value))
+        << requested;
+    EXPECT_FALSE(was_set) << requested;
+    EXPECT_EQ("1048576", value) << requested;
+
+    RequestHeaders header_request;
+    header_request.Add("PageSpeedFilters", "debug");
+    header_request.Add("PageSpeedDebugOutputMaxBytes", requested);
+    options.reset(
+        GetCustomOptions("http://example.com/", &header_request, nullptr));
+    ASSERT_TRUE(options.get() != nullptr) << requested;
+    EXPECT_TRUE(options->Enabled(RewriteOptions::kDebug)) << requested;
+    ASSERT_TRUE(
+        options->OptionValue("DebugOutputMaxBytes", &id, &was_set, &value))
+        << requested;
+    EXPECT_FALSE(was_set) << requested;
+    EXPECT_EQ("1048576", value) << requested;
+  }
+}
+
+// Likewise from a cookie, where cookies may set options.
+TEST_F(ServerContextTest, CookieCannotChangeDebugOutputBudget) {
+  RewriteOptions* global_options = server_context()->global_options();
+  global_options->ClearSignatureForTesting();
+  global_options->set_allow_options_to_be_set_by_cookies(true);
+  global_options->ComputeSignature();
+  const char* id = nullptr;
+  bool was_set = false;
+  GoogleString value;
+  for (const char* requested : {"0", "-1", "1", "1048577", "1000000000"}) {
+    RequestHeaders request_headers;
+    request_headers.Add(HttpAttributes::kCookie,
+                        StrCat("PageSpeedFilters=debug;"
+                               "PageSpeedDebugOutputMaxBytes=",
+                               requested));
+    std::unique_ptr<RewriteOptions> options(
+        GetCustomOptions("http://example.com/", &request_headers, nullptr));
+    ASSERT_TRUE(options.get() != nullptr) << requested;
+    EXPECT_TRUE(options->Enabled(RewriteOptions::kDebug)) << requested;
+    ASSERT_TRUE(
+        options->OptionValue("DebugOutputMaxBytes", &id, &was_set, &value))
+        << requested;
+    EXPECT_FALSE(was_set) << requested;
+    EXPECT_EQ("1048576", value) << requested;
+  }
+}
+
 TEST_F(ServerContextTest, QueryOptionsWithInvalidUrl) {
   RequestHeaders request_headers;
   GoogleUrl gurl("bogus");

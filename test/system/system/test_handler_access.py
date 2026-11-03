@@ -141,16 +141,22 @@ class TestMessagesHandlerResponse:
     JSON, no-store/nosniff/no ETag).
     """
 
-    def test_messages_json(self, vhost_client):
+    @staticmethod
+    def _messages_path(server_config):
+        return "ngx_pagespeed_message" if server_config.is_nginx else MESSAGES
+
+    def test_messages_json(self, vhost_client, server_config):
         """start_test Messages handler answers JSON on every port"""
-        response = vhost_client("messages-allowed.example.com").get(f"/{MESSAGES}")
+        path = self._messages_path(server_config)
+        response = vhost_client("messages-allowed.example.com").get(f"/{path}")
         require_status_ok(response, "messages handler")
         assert_contains(response, r'"messages":\[')
         assert_contains(response, r'"scope":"process"')
 
-    def test_messages_not_cacheable(self, vhost_client):
+    def test_messages_not_cacheable(self, vhost_client, server_config):
         """start_test Messages handler is not cacheable on any port"""
-        response = vhost_client("messages-allowed.example.com").get(f"/{MESSAGES}")
+        path = self._messages_path(server_config)
+        response = vhost_client("messages-allowed.example.com").get(f"/{path}")
         require_status_ok(response, "messages handler")
         assert_header_contains(response, "Cache-Control", r"(?i)^no-store, private")
         assert_header_contains(response, "X-Content-Type-Options", r"(?i)^nosniff")

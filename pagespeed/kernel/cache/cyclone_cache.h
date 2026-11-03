@@ -202,6 +202,12 @@ class CycloneCache : public CacheInterface {
                    bool small_tier);
   void DeleteWithTier(const GoogleString& key, bool small_tier);
 
+  // The body of PutWithTier, run under the shared lock with the exceptions
+  // caught by the caller.  *failure_counted is set once the write has been
+  // counted in cyclone_cache_failures.
+  void PutLocked(const GoogleString& key, const SharedString& value,
+                 bool small_tier, bool* failure_counted);
+
   Config config_;
   // cache_ is read under a shared lock of handle_mutex_ for every operation
   // and cleared under an exclusive lock by ShutDown(), so the handle is never
@@ -225,6 +231,10 @@ class CycloneCache : public CacheInterface {
   // the device, so LookupWithTier logs it, sampled off this count the same
   // way.
   std::atomic<uint64_t> read_failure_log_count_{0};
+
+  // Deletes that hit an exception, sampled for their warning on their own
+  // count so they do not shift the write-failure sampling above.
+  std::atomic<uint64_t> delete_failure_log_count_{0};
 
   // Statistics variables
   Variable* hits_;

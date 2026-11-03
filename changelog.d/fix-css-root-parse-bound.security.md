@@ -1,0 +1,1 @@
+- Hardened CSS rewriting so that a very large stylesheet can no longer make a server worker use memory many times its size; the size the rewriter will parse is now bounded by a new directive with a 2 MiB default, and larger stylesheets are served unmodified. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

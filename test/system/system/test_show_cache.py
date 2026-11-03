@@ -36,8 +36,10 @@ from pagespeed_test_framework import (
     require_status_ok,
 )
 
-OPTIONS = "PageSpeedImageInlineMaxBytes=6765"
-NEW_OPTIONS = "PageSpeedImageInlineMaxBytes=6766"
+# Both values sit below the configured threshold (default 3072): a request can
+# only lower it, and the two must stay distinct to give distinct signatures.
+OPTIONS = "PageSpeedImageInlineMaxBytes=1000"
+NEW_OPTIONS = "PageSpeedImageInlineMaxBytes=1001"
 
 
 def _origin(server_config) -> str:

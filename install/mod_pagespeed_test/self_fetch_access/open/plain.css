@@ -1,0 +1,4 @@
+/* Self-fetch access test: an unrestricted stylesheet. */
+.sfa-open-marker   {
+    color :   #00ff00 ;
+}

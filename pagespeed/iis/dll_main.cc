@@ -39,6 +39,7 @@
 #include "pagespeed/iis/iis_module_factory.h"
 #include "pagespeed/iis/iis_configuration.h"
 #include "pagespeed/iis/iis_global_constants.h"
+#include "pagespeed/iis/iis_self_fetch.h"
 #include "pagespeed/iis/log_message_handler.h"
 
 #include <cstdio>
@@ -85,7 +86,9 @@ Timer* dll_timer = nullptr;
 
 
 // ---------------------------------------------------------------------------
-// MyGlobalModule — preserves the pristine URL before other modules modify it
+// MyGlobalModule — runs before any request module: preserves the pristine URL
+// before other modules modify it, and makes the module's own fetches present
+// as a remote client to IIS address restrictions
 // ---------------------------------------------------------------------------
 namespace net_instaweb {
 
@@ -98,6 +101,26 @@ class MyGlobalModule : public CGlobalModule {
   OnGlobalPreBeginRequest(IN IPreBeginRequestProvider* pProvider) override {
     UNREFERENCED_PARAMETER(pProvider);
     auto rq = pProvider->GetHttpContext()->GetRequest();
+
+    // The module fetches its own site's resources from this server, from
+    // loopback or the address the original request arrived on.  Without
+    // this, an IP and Domain Restrictions rule admitting that address would
+    // admit the fetch whoever the original client was, and the optimized
+    // copy of a restricted resource would reach that client.  So a request
+    // with the module's fetch marker from this server is given the client
+    // address 224.0.0.0 here, before IpRestrictionModule and every other
+    // request module (and the request log) read it.  See iis_self_fetch.h.
+    HTTP_REQUEST* raw = rq->GetRawHttpRequest();
+    PCSTR user_agent = rq->GetHeader(HttpHeaderUserAgent);
+    if (raw != nullptr && user_agent != nullptr &&
+        IisIsSelfFetch(StringPiece(user_agent),
+                       rq->GetRemoteAddress(), rq->GetLocalAddress())) {
+      SOCKADDR* remote = rq->GetRemoteAddress();
+      IisRelabelSelfFetch(raw->Address.pRemoteAddress);
+      if (remote != raw->Address.pRemoteAddress) {
+        IisRelabelSelfFetch(remote);
+      }
+    }
 
     PCWSTR tmpx = nullptr;
     DWORD len;
@@ -253,14 +276,18 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
       GL_PRE_BEGIN_REQUEST, PRIORITY_ALIAS_FIRST);
   if (FAILED(hr)) return hr;
 
-  // Register the HTTP module factory.
+  // Register the HTTP module factory. The request is taken up at
+  // RQ_RESOLVE_REQUEST_CACHE, the stage IIS runs after authentication and
+  // authorization, so every IIS access rule has refused or admitted the
+  // request before this module serves anything for it, including from its
+  // cache.
   net_instaweb::IisModuleFactory::set_module_id(pModuleInfo->GetId());
   hr = pModuleInfo->SetRequestNotifications(
       new net_instaweb::IisModuleFactory(
           net_instaweb::modulePath,
           pGlobalInfo->GetAppPoolName(),
           net_instaweb::message_handler),
-      RQ_SEND_RESPONSE | RQ_BEGIN_REQUEST,
+      RQ_SEND_RESPONSE | RQ_RESOLVE_REQUEST_CACHE,
       0);
   if (FAILED(hr)) return hr;
 
@@ -269,7 +296,7 @@ extern "C" __declspec(dllexport) HRESULT __stdcall RegisterModule(
   if (FAILED(hr)) return hr;
 
   hr = pModuleInfo->SetPriorityForRequestNotification(
-      RQ_BEGIN_REQUEST, PRIORITY_ALIAS_FIRST);
+      RQ_RESOLVE_REQUEST_CACHE, PRIORITY_ALIAS_FIRST);
   if (FAILED(hr)) return hr;
 
   return hr;

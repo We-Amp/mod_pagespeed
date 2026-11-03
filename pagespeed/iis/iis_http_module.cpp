@@ -37,6 +37,7 @@
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/serve_host_names.h"
+#include "pagespeed/system/site_cache_fragment.h"
 
 #include "pagespeed/kernel/base/stack_buffer.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
@@ -44,6 +45,7 @@
 
 #include "pagespeed/iis/iis_global_constants.h"
 #include "pagespeed/iis/iis_config_util.h"
+#include "pagespeed/iis/util.h"
 #include "pagespeed/iis/iis_proxy_fetch_completion.h"
 #include "pagespeed/iis/iis_daemon_record.h"
 #include "net/instaweb/public/global_constants.h"
@@ -417,7 +419,7 @@ namespace net_instaweb
 	}
 
 	REQUEST_NOTIFICATION_STATUS
-		IisHttpModule::OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
+		IisHttpModule::OnResolveRequestCache(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider)
 	{
 		if (!has_own_iispeed_config(pHttpContext))
 		{
@@ -458,6 +460,12 @@ namespace net_instaweb
 	}
 
 
+
+// The IIS site id of the site that admitted the request; 0 without one.
+static uint32_t RequestIisSiteId(IHttpContext* http_context) {
+  IHttpSite* site = http_context->GetSite();
+  return site != nullptr ? site->GetSiteId() : 0;
+}
 
 static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
                                         IisInnerRequestContext* request_context,
@@ -504,8 +512,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
       iis_options != nullptr &&
       iis_options->daemon_serve_honor_request_freshness());
 
+  // The site of the IIS site that admitted the request, from its server
+  // context's fragment (set per IIS site in GetServerContext); "" when the
+  // request's site is not the one the context was created for.
+  const GoogleString site = IisRequestSiteId(
+      RequestIisSiteId(http_context),
+      request_context->process_context()->site_id(),
+      server_context->global_options()->cache_fragment());
   DaemonServeRequest serve_request;
-  BuildDaemonServeRequest(http_context, *request_context->gurl(),
+  BuildDaemonServeRequest(http_context, *request_context->gurl(), site,
                           &serve_request);
   const DaemonServeDecision decision =
       reader->Serve(serve_request, server_context->timer()->NowMs() / 1000);
@@ -713,11 +728,15 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// oschaaf: state is to keep it thread safe
 		std::mbstate_t state = std::mbstate_t();
 		auto request = pHttpContext->GetRootContext()->GetRequest();
-		PCWSTR tmpx;
-		DWORD len;
+		PCWSTR tmpx = nullptr;
+		DWORD len = 0;
 		// We set this in our global prebegin request hook, in an attempt to beat
-		// any other modules/filters that modify the url
-		pHttpContext->GetRootContext()->GetServerVariable("X-PRISTINE-URL", &tmpx, &len);
+		// any other modules/filters that modify the url.  A failed lookup says
+		// nothing about the out-parameters, so it counts as an absent variable
+		// and its pointer is never read.
+		if (FAILED(pHttpContext->GetRootContext()->GetServerVariable("X-PRISTINE-URL", &tmpx, &len))) {
+			tmpx = nullptr;
+		}
 		if (tmpx == nullptr) {
 			log(pHttpContext, "Missing X-PRISTINE-URL -> retry on raw http request url..");
 			tmpx = pHttpContext->GetRootContext()->GetRequest()->GetRawHttpRequest()->CookedUrl.pFullUrl;
@@ -1349,7 +1368,12 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 					StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "GET")) {
 					DaemonRecordRequest record_request;
 					BuildDaemonRecordRequest(pHttpContext, *innerContext->gurl(),
-						options, &record_request);
+						options,
+						IisRequestSiteId(RequestIisSiteId(pHttpContext),
+							innerContext->process_context()->site_id(),
+							innerContext->server_context()
+								->global_options()->cache_fragment()),
+						&record_request);
 					innerContext->set_recorder(
 						MakeDaemonIproRecorderIfReady(
 							innerContext->server_context()->daemon_adapter(),
@@ -1544,6 +1568,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						else
 						{
 							innerContext->set_rewrite_html(true);
+							// DaemonHtmlCache has no capture on this server yet, so report-only
+							// says so rather than saying nothing.
+							if (innerContext->server_context()->global_options()->daemon_html_cache() ==
+							    net_instaweb::RewriteOptions::kDaemonHtmlCacheReportOnly) {
+								innerContext->server_context()->statistics()->GetVariable(
+								    "daemon_html_unavailable")->Add(1);
+							}
 						}
 					}
 				}
@@ -1768,6 +1799,7 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 							{
 								log(pHttpContext, "adding inflater for [%s], and removing content encoding header", encoding.c_str());
 								inflater->Init();
+								inflater->set_max_inflated_bytes(GzipInflater::kMaxInflatedHtmlBytes);
 								request_context->set_inflater(inflater);
 								pHttpContext->GetResponse()->DeleteHeader("Content-Encoding");
 							}
@@ -1999,7 +2031,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 										int num_inflated_bytes = inflater->InflateBytes(buf, net_instaweb::kStackBufferSize);
 										if (num_inflated_bytes < 0)
 										{
-											innerContext->process_context()->handler()->Message(net_instaweb::kWarning, "Corrupted inflation");
+											if (inflater->limit_exceeded())
+											{
+												innerContext->process_context()->handler()->Message(net_instaweb::kWarning, "Compressed HTML inflates to more than %d bytes", static_cast<int>(GzipInflater::kMaxInflatedHtmlBytes));
+											}
+											else
+											{
+												innerContext->process_context()->handler()->Message(net_instaweb::kWarning, "Corrupted inflation");
+											}
 										}
 										else if (num_inflated_bytes > 0)
 										{
@@ -2130,13 +2169,13 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 	{
 		// Zero-copy aliased serve (CycloneZeroCopyServe): the per-chunk
 		// async flush completions of the resource serve land here (the
-		// request is parked in RQ_BEGIN_REQUEST -- hence the notification
-		// check, a cheap guard against any spurious completion from a
+		// request is parked in RQ_RESOLVE_REQUEST_CACHE -- hence the
+		// notification check, a cheap guard against any spurious completion from a
 		// different pipeline stage); route them to the serve driver.  The
 		// base fetch is guaranteed alive: the inner request context holds
 		// a reference until CleanupStoredContext, which cannot run while a
 		// notification/completion is outstanding.
-		if (dwNotification == RQ_BEGIN_REQUEST)
+		if (dwNotification == RQ_RESOLVE_REQUEST_CACHE)
 		{
 			IisModuleRequestContext* request_context =
 			    IisModuleRequestContext::GetRequestContext(pHttpContext);
@@ -2372,8 +2411,14 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			return nullptr;
 		}
 
+		// The IIS site this request belongs to: its id and its name, as UTF-8.
+		IHttpSite* site = pHttpContext->GetSite();
+		const uint32_t iis_site_id = site != nullptr ? site->GetSiteId() : 0;
+		PCWSTR iis_site_name = site != nullptr ? site->GetSiteName() : nullptr;
+		const GoogleString iis_site_name_utf8 =
+			iis_site_name != nullptr ? ws2utf8(iis_site_name) : GoogleString();
 		auto server_context = process_context->GetServerContext(id, gurl->Host().as_string().c_str(), gurl->EffectiveIntPort(),
-			path.c_str());
+			path.c_str(), iis_site_id, iis_site_name_utf8);
 		if (server_context == nullptr) {
 			log(pHttpContext, "process_context->GetServerContext() returned null");
 			// GetServerContext sets init_failure_kind_ on the diagnostic

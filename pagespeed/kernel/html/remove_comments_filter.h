@@ -67,6 +67,7 @@ class RemoveCommentsFilter : public EmptyHtmlFilter {
   ~RemoveCommentsFilter() override;
 
   void Comment(HtmlCommentNode* comment) override;
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "RemoveComments"; }
 
  private:

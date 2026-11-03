@@ -60,6 +60,14 @@ class AmpDocumentFilter : public EmptyHtmlFilter {
   void EndDocument() override;
   void StartElement(HtmlElement* element) override;
   void Characters(HtmlCharactersNode* chars) override;
+  void Comment(HtmlCommentNode* comment) override;
+  void Cdata(HtmlCdataNode* cdata) override;
+  void Directive(HtmlDirectiveNode* directive) override;
+  void IEDirective(HtmlIEDirectiveNode* directive) override;
+
+  // The most that is buffered while waiting for the document to show whether
+  // it is AMP; past it the document is taken not to be.
+  static constexpr size_t kMaxBufferedBytes = 64 * 1024;
 
   const char* Name() const override { return "AmpDocumentFilter"; }
 
@@ -67,6 +75,11 @@ class AmpDocumentFilter : public EmptyHtmlFilter {
   HtmlParse* html_parse_;
   bool is_known_;
   bool saw_doctype_;
+  size_t buffered_bytes_;
+
+  // Accounts for an event that does not decide, and gives up waiting when
+  // too much has been buffered.
+  void NoteUndecidedEvent(size_t bytes);
   std::unique_ptr<BoolCallback> discovered_;
 
   AmpDocumentFilter(const AmpDocumentFilter&) = delete;

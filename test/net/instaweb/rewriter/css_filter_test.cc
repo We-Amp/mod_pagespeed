@@ -278,6 +278,16 @@ TEST_F(CssFilterTest, RewriteCss404) {
   ValidateExpected("404", input, expected_output);
 }
 
+// A file the origin labels text/plain is not rewritten.
+TEST_F(CssFilterTest, NotRewrittenWhenOriginTypeIsNotCss) {
+  SetResponseWithDefaultHeaders("note.txt", kContentTypeText, kInputStyle, 100);
+  ValidateNoChanges("origin_type_not_css",
+                    "<link rel=stylesheet href='note.txt'>");
+  GoogleString content;
+  EXPECT_FALSE(FetchResource(kTestDomain, RewriteOptions::kCssFilterId,
+                             "note.txt", "css", &content));
+}
+
 class CssFilterTestCustomOptions : public CssFilterTest {
  protected:
   // Derived classes should add their options and then call
@@ -471,6 +481,100 @@ TEST_F(CssFilterTestCustomOptions, FallbackWithGzipData) {
   EXPECT_FALSE(out_headers.IsGzipped());
 }
 
+// Builds a stylesheet of exactly `size` bytes out of numbered rulesets and
+// trailing whitespace, and stores its minified form in `minified`.
+GoogleString MakeCssOfSize(int64 size, GoogleString* minified) {
+  GoogleString css;
+  minified->clear();
+  for (int i = 0;; ++i) {
+    const GoogleString name = StrCat(".r", IntegerToString(i));
+    const GoogleString rule = StrCat(name, " { color: red }\n");
+    if (static_cast<int64>(css.size() + rule.size()) > size) {
+      break;
+    }
+    StrAppend(&css, rule);
+    StrAppend(minified, name, "{color:red}");
+  }
+  css.append(size - css.size(), ' ');
+  CHECK_EQ(size, static_cast<int64>(css.size()));
+  return css;
+}
+
+class CssFilterParseMaxBytesTest : public CssFilterTest {
+ protected:
+  static constexpr int64 kParseMaxBytes = 4096;
+
+  void SetUp() override {
+    CssFilterTest::SetUp();
+    options()->ClearSignatureForTesting();
+    options()->set_css_parse_max_bytes(kParseMaxBytes);
+    server_context()->ComputeSignature(options());
+    num_parse_max_bytes_exceeded_ =
+        statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded);
+  }
+
+  Variable* num_parse_max_bytes_exceeded_;
+};
+
+TEST_F(CssFilterParseMaxBytesTest, DefaultIsTwoMebibytes) {
+  EXPECT_EQ(2 * 1024 * 1024, RewriteOptions::kDefaultCssParseMaxBytes);
+  RewriteOptions defaults(factory()->thread_system());
+  EXPECT_EQ(RewriteOptions::kDefaultCssParseMaxBytes,
+            defaults.css_parse_max_bytes());
+}
+
+TEST_F(CssFilterParseMaxBytesTest, ExternalOverBoundIsLeftAlone) {
+  GoogleString minified;
+  const GoogleString css = MakeCssOfSize(kParseMaxBytes + 1, &minified);
+  ValidateRewriteExternalCss("over_bound", css, css, kExpectNoChange);
+  EXPECT_EQ(1, num_parse_max_bytes_exceeded_->Get());
+}
+
+TEST_F(CssFilterParseMaxBytesTest, ExternalAtBoundIsRewritten) {
+  GoogleString minified;
+  const GoogleString css = MakeCssOfSize(kParseMaxBytes, &minified);
+  ValidateRewriteExternalCss("at_bound", css, minified, kExpectSuccess);
+  EXPECT_EQ(0, num_parse_max_bytes_exceeded_->Get());
+}
+
+TEST_F(CssFilterParseMaxBytesTest, InlineOverBoundIsLeftAlone) {
+  GoogleString minified;
+  const GoogleString css = MakeCssOfSize(kParseMaxBytes + 1, &minified);
+  ValidateRewriteInlineCss("over_bound", css, css, kExpectNoChange);
+  EXPECT_EQ(1, num_parse_max_bytes_exceeded_->Get());
+}
+
+TEST_F(CssFilterParseMaxBytesTest, InlineAtBoundIsRewritten) {
+  GoogleString minified;
+  const GoogleString css = MakeCssOfSize(kParseMaxBytes, &minified);
+  ValidateRewriteInlineCss("at_bound", css, minified, kExpectSuccess);
+  EXPECT_EQ(0, num_parse_max_bytes_exceeded_->Get());
+}
+
+TEST_F(CssFilterParseMaxBytesTest, OverBoundSkipsFallbackRewriting) {
+  // Unparseable CSS would normally have its URLs rewritten by the fallback
+  // path; over the bound it is not looked at at all.
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kFallbackRewriteCssUrls);
+  server_context()->ComputeSignature(options());
+  GoogleString minified;
+  const GoogleString css =
+      StrCat(MakeCssOfSize(kParseMaxBytes - 4, &minified), " div{");
+  ASSERT_EQ(kParseMaxBytes + 1, static_cast<int64>(css.size()));
+  ValidateRewriteExternalCss("over_bound_fallback", css, css, kExpectNoChange);
+  EXPECT_EQ(1, num_parse_max_bytes_exceeded_->Get());
+}
+
+TEST_F(CssFilterTest, DefaultBoundLeavesLargeStylesheetAlone) {
+  Variable* exceeded =
+      statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded);
+  GoogleString minified;
+  const GoogleString css =
+      MakeCssOfSize(RewriteOptions::kDefaultCssParseMaxBytes + 1, &minified);
+  ValidateRewriteExternalCss("over_default", css, css, kExpectNoChange);
+  EXPECT_EQ(1, exceeded->Get());
+}
+
 TEST_F(CssFilterTest, LinkHrefCaseInsensitive) {
   // Make sure we check rel value case insensitively.
   // http://github.com/apache/incubator-pagespeed-mod/issues/354
@@ -528,6 +632,21 @@ TEST_F(CssFilterTest, DoesNotBreakOutOfInlineStyleViaEscapedClosingTag) {
       << output_buffer_;
   EXPECT_EQ(GoogleString::npos, output_buffer_.find("<script>alert"))
       << output_buffer_;
+}
+
+// CSS that could read as markup after a rewrite is left as it was.
+TEST_F(CssFilterTest, InlineStyleDoesNotGainLiteralMarkup) {
+  ValidateNoChanges("selector",
+                    "<style>li[title=\"1\\3C 2\\3E 0\"]{color:blue}</style>");
+  ValidateNoChanges("charset", "<style>@charset \"\\3Cpre\";</style>");
+  ValidateNoChanges("id_start_escape", "<style>#\\3Cnav{margin:2px}</style>");
+}
+
+// An inline <style> without markup characters is still minified.
+TEST_F(CssFilterTest, InlineStyleWithoutMarkupIsMinified) {
+  ValidateExpected("plain",
+                   "<style>\tp ,\n\nem\t{\tmargin :\t0 ;\n\n}\t</style>",
+                   "<style>p,em{margin:0}</style>");
 }
 
 // Make sure we allow rewriting to empty output (ex: input all commented out).
@@ -758,9 +877,6 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
       // Unexpected \0 in various places. Common browser hack.
       "@media screen\\0{ .select:before { width: 18px; } }",
       "@media screen and (min-width:0 \\0) { .foo { color: red; } }",
-      // Nonsensical, but syntactic, media query.
-      "@media not (-moz-dimension-constraints:20 < width < 300 and 45 < height "
-      "< 1000){a{color:red}}",
       // Empty media queries.
       "@media , { a { color: red; } }",
 
@@ -838,6 +954,15 @@ TEST_F(CssFilterTest, RewriteVariousCss) {
     GoogleString id = absl::StrFormat("distilled_css_good%d", i);
     ValidateRewrite(id, good_examples[i], good_examples[i], kExpectSuccess);
   }
+
+  // An @media range comparison survives an external stylesheet rewrite
+  // unchanged; an inline <style> block holding the same character is left
+  // alone by the filter instead.
+  const char kRangeComparisonQuery[] =
+      "@media not (-moz-dimension-constraints:20 < width < 300 and 45 < height "
+      "< 1000){a{color:red}}";
+  ValidateRewriteExternalCss("range_comparison_query", kRangeComparisonQuery,
+                             kRangeComparisonQuery, kExpectSuccess);
 
   // A '+' not directly attached to a number now lexes as an OPERATOR value
   // (for calc() addition), so this invalid declaration parses and minifies

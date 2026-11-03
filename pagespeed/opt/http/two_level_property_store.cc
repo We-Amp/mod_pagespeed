@@ -305,6 +305,36 @@ class TwoLevelPropertyStoreGetCallback
       const TwoLevelPropertyStoreGetCallback&) = delete;
 };
 
+// Joins the completion of the two Put calls issued by
+// TwoLevelPropertyStore::Put into a single call of the caller's done
+// callback. Owns itself.
+class PutJoiner {
+ public:
+  PutJoiner(Callback1<bool>* done, AbstractMutex* mutex)
+      : done_(done), mutex_(mutex), pending_(2), success_(true) {}
+
+  void LevelDone(bool success) {
+    {
+      ScopedMutex lock(mutex_.get());
+      success_ &= success;
+      if (--pending_ > 0) {
+        return;
+      }
+    }
+    // Both levels are done, so no other thread can reach this object now.
+    Callback1<bool>* done = done_;
+    const bool result = success_;
+    delete this;
+    done->Run(result);
+  }
+
+ private:
+  Callback1<bool>* done_;
+  std::unique_ptr<AbstractMutex> mutex_;
+  int pending_;
+  bool success_;
+};
+
 }  // namespace
 
 TwoLevelPropertyStore::TwoLevelPropertyStore(
@@ -354,14 +384,25 @@ void TwoLevelPropertyStore::Put(const GoogleString& url,
                                 const PropertyCache::Cohort* cohort,
                                 const PropertyCacheValues* values,
                                 BoolCallback* done) {
-  // TODO(pulkitg): Pass actual callback instead of NULL.
-  primary_property_store_->Put(url, options_signature_hash, cache_key_suffix,
-                               cohort, values, nullptr);
-  secondary_property_store_->Put(url, options_signature_hash, cache_key_suffix,
+  if (done == nullptr) {
+    primary_property_store_->Put(url, options_signature_hash, cache_key_suffix,
                                  cohort, values, nullptr);
-  if (done != nullptr) {
-    done->Run(true);
+    secondary_property_store_->Put(url, options_signature_hash,
+                                   cache_key_suffix, cohort, values, nullptr);
+    return;
   }
+
+  // done runs exactly once, after both levels have reported, with true only if
+  // both succeeded. Each level may complete inline or later on another thread.
+  // The joiner deletes itself when the second level reports, so it must not be
+  // touched after the second Put call.
+  PutJoiner* joiner = new PutJoiner(done, thread_system_->NewMutex());
+  primary_property_store_->Put(url, options_signature_hash, cache_key_suffix,
+                               cohort, values,
+                               NewCallback(joiner, &PutJoiner::LevelDone));
+  secondary_property_store_->Put(url, options_signature_hash, cache_key_suffix,
+                                 cohort, values,
+                                 NewCallback(joiner, &PutJoiner::LevelDone));
 }
 
 GoogleString TwoLevelPropertyStore::Name() const {

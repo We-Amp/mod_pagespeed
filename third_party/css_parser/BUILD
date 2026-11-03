@@ -6,6 +6,15 @@ load(
 
 licenses(["notice"])  # Apache 2
 
+# The parser assumes plain `char` is unsigned (UTF-8 bytes above 0x7F are
+# compared against 0x80 and friends). GCC and clang spell that -funsigned-char;
+# MSVC cl and clang-cl ignore that spelling ("unknown argument ignored") and
+# need /J, which both accept.
+_UNSIGNED_CHAR = select({
+    "@platforms//os:windows": ["/J"],
+    "//conditions:default": ["-funsigned-char"],
+})
+
 # Memory-safety harness for the CSS parser. Drives untrusted CSS
 # through every public Parser entry point; AddressSanitizer is the oracle.
 # Build/run under release-DCHECK-off + ASan:
@@ -15,9 +24,7 @@ licenses(["notice"])  # Apache 2
 cc_binary(
     name = "parser_fuzz",
     srcs = ["src/webutil/css/parser_fuzz.cc"],
-    copts = [
-        "-funsigned-char",
-    ],
+    copts = _UNSIGNED_CHAR,
     tags = ["manual"],  # opt-in: built explicitly, not on a bare //... wildcard
     deps = [
         ":css_parser",
@@ -35,9 +42,7 @@ cc_binary(
 cc_test(
     name = "parser_fuzz_corpus_test",
     srcs = ["src/webutil/css/parser_fuzz.cc"],
-    copts = [
-        "-funsigned-char",
-    ],
+    copts = _UNSIGNED_CHAR,
     tags = ["manual"],
     deps = [
         ":css_parser",
@@ -159,8 +164,7 @@ cc_library(
         "src/base/integral_types.h",
         "src/util/utf8/public/unilib_utf8_utils.h",
     ] + glob(["src/util/gtl/*.h"]),
-    copts = [
-        "-funsigned-char",
+    copts = _UNSIGNED_CHAR + [
         "-Wno-register",  # gperf-generated code uses deprecated 'register' keyword
     ],
     visibility = ["//visibility:public"],

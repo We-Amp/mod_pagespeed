@@ -911,6 +911,14 @@ jobs:
               install -m 755 bazel-bin/libmod_pagespeed.so /workspace/libmod_pagespeed.so
               strip --strip-debug /workspace/libmod_pagespeed.so
 
+              # The debug file must belong to the module that ships.
+              so_id="$(readelf -n /workspace/libmod_pagespeed.so | awk "/Build ID/{print \$3}")"
+              dbg_id="$(readelf -n /workspace/debug/libmod_pagespeed.so.debug | awk "/Build ID/{print \$3}")"
+              if [ -z "$so_id" ] || [ "$so_id" != "$dbg_id" ]; then
+                echo "debug file build ID $dbg_id does not match the module $so_id" >&2
+                exit 1
+              fi
+
               mkdir -p /workspace/packages
               OPT_PKG_VERSION="$(. net/instaweb/public/VERSION; v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE}" ] && v="${v}~${PRERELEASE}"; echo "$v")"
               # A dry run depends on the pinned optimizer (see the vendor job).
@@ -978,6 +986,7 @@ jobs:
           cp ngx_pagespeed-*-linux-"${SO_ARCH}".tar.gz "$OUT/asset/"
           cp packages-old/* "$OUT/oldpkgs/"
           cp debug/* "$OUT/debug/"
+          tar -C debug -czf "$OUT/asset/libmod_pagespeed-debug-linux-${SO_ARCH}.tar.gz" libmod_pagespeed.so.debug
           ls -lh "$OUT"/*
 
       - name: Upload the release files

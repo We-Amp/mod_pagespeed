@@ -1,0 +1,1 @@
+- **The `debug` filter shows image debug messages only for images optimized while debug was on.** An image optimized while debug was off does not show the image debug messages stored with the optimized image on a later debug request until its cached result expires or the cache is flushed; the per-request inlining note still appears.

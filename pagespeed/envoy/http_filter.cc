@@ -35,6 +35,7 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
@@ -125,6 +126,12 @@ HttpPageSpeedDecoderFilter::~HttpPageSpeedDecoderFilter() {
     base_fetch_->DecrementRefCount();
     base_fetch_ = nullptr;
   }
+  if (admin_fetch_ != nullptr) {
+    // Same for an admin fetch: a reply that completes later is dropped.
+    admin_fetch_->DetachDecoder();
+    admin_fetch_->DecrementRefCount();
+    admin_fetch_ = nullptr;
+  }
   // Clean up ProxyFetch-based HTML rewriting.
   if (envoy_async_fetch_ != nullptr) {
     // Mark the filter as destroyed so EnvoyAsyncFetch knows not to
@@ -138,6 +145,17 @@ HttpPageSpeedDecoderFilter::~HttpPageSpeedDecoderFilter() {
 }
 
 void HttpPageSpeedDecoderFilter::onDestroy() {}
+
+void HttpPageSpeedDecoderFilter::AttachAdminFetch(
+    net_instaweb::EnvoyAdminFetch* fetch) {
+  // A stream serves at most one admin path; release any earlier fetch the
+  // same way the destructor does.
+  if (admin_fetch_ != nullptr) {
+    admin_fetch_->DetachDecoder();
+    admin_fetch_->DecrementRefCount();
+  }
+  admin_fetch_ = fetch;
+}
 
 const LowerCaseString HttpPageSpeedDecoderFilter::headerKey() const {
   return LowerCaseString(config_->key());
@@ -188,7 +206,7 @@ bool HttpPageSpeedDecoderFilter::ComputeCustomOptions(
         stripped_gurl_->spec_c_str());
     // Even with invalid query params, we may have VHost options.
     if (base_options != server_context_->global_options()) {
-      custom_options_.reset(base_options->Clone());
+      custom_options_.reset(server_context_->NewRequestOptions(*base_options));
       return true;
     }
     return false;
@@ -198,14 +216,14 @@ bool HttpPageSpeedDecoderFilter::ComputeCustomOptions(
   const net_instaweb::RewriteOptions* query_options = rewrite_query_.options();
   if (query_options != nullptr) {
     // Create custom options by merging base options (global + VHost) with query options
-    custom_options_.reset(base_options->Clone());
+    custom_options_.reset(server_context_->NewRequestOptions(*base_options));
     custom_options_->Merge(*query_options);
     return true;
   }
 
   // No query options, but we may have VHost-specific options.
   if (base_options != server_context_->global_options()) {
-    custom_options_.reset(base_options->Clone());
+    custom_options_.reset(server_context_->NewRequestOptions(*base_options));
     return true;
   }
 
@@ -676,6 +694,11 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::decodeHeaders(
       absl::StrCat("http://", host, headers.Path()->value().getStringView());
   pristine_url_ = std::make_unique<net_instaweb::GoogleUrl>(url);
 
+  // Take in the cache flushes and purges recorded since the last request (a
+  // touched cache.flush, or the purge file), before any options are read, as
+  // the other ports do on each request.  Between polls this is a time check.
+  server_context_->FlushCacheIfNecessary();
+
   // Check for admin endpoints first
   auto* envoy_options = net_instaweb::EnvoyRewriteOptions::DynamicCast(
       server_context_->global_options());
@@ -1114,6 +1137,18 @@ FilterHeadersStatus HttpPageSpeedDecoderFilter::encodeHeaders(
     // Only rewrite successful HTML responses.
     int status_code = ps_response_headers->status_code();
     bool is_success = status_code >= 200 && status_code < 300;
+
+    // DaemonHtmlCache has no capture on this server, so report-only says so
+    // for each response the report would cover: a 200 of an HTML type, to a
+    // request other than HEAD, as on Apache and nginx.
+    if (is_html && status_code == 200 &&
+        client_method_ != net_instaweb::RequestHeaders::kHead &&
+        options_->daemon_html_cache() ==
+            net_instaweb::RewriteOptions::kDaemonHtmlCacheReportOnly) {
+      net_instaweb::Variable* unavailable =
+          server_context_->statistics()->GetVariable("daemon_html_unavailable");
+      if (unavailable != nullptr) unavailable->Add(1);
+    }
 
     if (is_html && is_success && !end_stream) {
       // This is an HTML response - set up HTML rewriting via ProxyFetch.

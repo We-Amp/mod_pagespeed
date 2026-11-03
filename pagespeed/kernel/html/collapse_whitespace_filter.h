@@ -49,6 +49,7 @@ class CollapseWhitespaceFilter : public EmptyHtmlFilter {
   void StartElement(HtmlElement* element) override;
   void EndElement(HtmlElement* element) override;
   void Characters(HtmlCharactersNode* characters) override;
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "CollapseWhitespace"; }
 
  private:

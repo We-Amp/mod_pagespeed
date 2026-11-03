@@ -64,6 +64,7 @@
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_parse.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -1067,6 +1068,26 @@ TEST_F(ImageRewriteTest, ImgSrcSetWithCacheExtender) {
       "srcset=\"xa.png.pagespeed.ic.0.png 1x, xb.png.pagespeed.ic.0.png 2x\">");
 }
 
+TEST_F(ImageRewriteTest, ImgSrcSetRewrittenOncePerElement) {
+  // The srcset is scheduled once for the element, however many image-valued
+  // attributes the element has.
+  AddFileToMockFetcher("a.png", kBikePngFile, kContentTypePng, 100);
+  AddFileToMockFetcher("b.png", kCuppaPngFile, kContentTypePng, 100);
+
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  rewrite_driver()->AddFilters();
+
+  SetupWriter();
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText(
+      "<img src=\"a.png\" src=\"a.png\" data-src=\"a.png\" "
+      "srcset=\"a.png 1x, b.png 2x\">");
+  rewrite_driver()->Flush();
+  // Three image-valued attributes plus two srcset candidates.
+  EXPECT_EQ(5, rewrite_driver()->num_initiated_rewrites());
+  rewrite_driver()->FinishParse();
+}
+
 TEST_F(ImageRewriteTest, ImageUrlValuedAttributeWithFlush) {
   options()->EnableFilter(RewriteOptions::kRecompressJpeg);
   options()->AddUrlValuedAttribute("li", "data-thumb", semantic_type::kImage);
@@ -1957,6 +1978,73 @@ TEST_F(ImageRewriteTest, DebugNoResizeTest) {
                                  "does not appear to need resizing.-->"));
 }
 
+// With debug off, the image filter keeps no debug messages: a later request
+// with debug on, served from the same cached rewrite, has none to show.
+TEST_F(ImageRewriteTest, NoDebugMessagesStoredWithDebugOff) {
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->EnableFilter(RewriteOptions::kConvertGifToPng);
+  rewrite_driver()->AddFilters();
+  GoogleString initial_url = StrCat(kTestDomain, kChefGifFile);
+  AddFileToMockFetcher(initial_url, kChefGifFile, kContentTypeGif, 100);
+  GoogleString html_input = StrCat("<img src='", initial_url, "'>");
+  ParseUrl(StrCat(kTestDomain, "debug_off.html"), html_input);
+  EXPECT_THAT(output_buffer_, HasSubstr(".pagespeed.ic."));
+  EXPECT_EQ(0, CountSubstring(output_buffer_, "<!--"));
+  Variable* image_rewrites =
+      statistics()->GetVariable(ImageRewriteFilter::kImageRewrites);
+  const int64 rewrites = image_rewrites->Get();
+  EXPECT_LT(0, rewrites);
+
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kDebug);
+  server_context()->ComputeSignature(options());
+  ParseUrl(StrCat(kTestDomain, "debug_on.html"), html_input);
+  // Served from the cached rewrite, not rewritten again.
+  EXPECT_EQ(rewrites, image_rewrites->Get());
+  EXPECT_THAT(output_buffer_, HasSubstr(".pagespeed.ic."));
+  EXPECT_EQ(0, CountSubstring(output_buffer_, "does not appear to need"));
+  EXPECT_EQ(0, CountSubstring(output_buffer_, "has no transparent pixels"));
+}
+
+// A page of many images with long URLs, with debug on, gets debug comments
+// up to the document's budget and one comment saying the rest was cut.
+TEST_F(ImageRewriteTest, DebugMessagesBoundedPerDocument) {
+  // Few enough images that none is shed as too busy; each has a few hundred
+  // bytes of debug messages, several times the budget in all.
+  const int64 kBudget = 512;
+  const int kImages = 8;
+  options()->EnableFilter(RewriteOptions::kDebug);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  ASSERT_EQ(RewriteOptions::kOptionOk,
+            options()->SetOptionFromName("DebugOutputMaxBytes",
+                                         Integer64ToString(kBudget)));
+  rewrite_driver()->AddFilters();
+  GoogleString html_input;
+  for (int i = 0; i < kImages; ++i) {
+    GoogleString url = StrCat(kTestDomain, GoogleString(150, 'p'), "/",
+                              IntegerToString(i), ".png");
+    AddFileToMockFetcher(url, kCuppaPngFile, kContentTypePng, 100);
+    StrAppend(&html_input, "<img src='", url, "'>");
+  }
+  ParseUrl(StrCat(kTestDomain, "many_images.html"), html_input);
+  const GoogleString truncated =
+      StrCat("<!--Debug output truncated at DebugOutputMaxBytes=",
+             Integer64ToString(kBudget), "-->");
+  EXPECT_EQ(1, CountSubstring(output_buffer_, truncated));
+  EXPECT_EQ(1, CountSubstring(output_buffer_, "Debug output truncated"));
+  int64 comment_bytes = 0;
+  for (size_t pos = output_buffer_.find("<!--"); pos != GoogleString::npos;
+       pos = output_buffer_.find("<!--", pos)) {
+    size_t end = output_buffer_.find("-->", pos);
+    ASSERT_NE(GoogleString::npos, end);
+    comment_bytes += end + 3 - pos;
+    pos = end + 3;
+  }
+  EXPECT_LE(comment_bytes, kBudget + static_cast<int64>(truncated.size()));
+  EXPECT_LT(0, CountSubstring(output_buffer_, "does not appear to need"));
+  EXPECT_EQ(kImages, CountSubstring(output_buffer_, "<img "));
+}
+
 TEST_F(ImageRewriteTest, DelayImagesLowResResizeMessageDims) {
   // The info message logged when a low-quality mobile image is resized must
   // report the resized height, not the width twice.  Puzzle.jpg is 1023x766,
@@ -2265,6 +2353,148 @@ TEST_F(ImageRewriteTest, InlineNoRewrite) {
   // dimension information because that is not explicitly enabled.
   TestSingleRewrite(kPuzzleJpgFile, kContentTypeJpeg, kContentTypeJpeg, "", "",
                     false, false);
+}
+
+namespace {
+
+// A 1x1 two-colour GIF, built from the format's fixed fields.
+GoogleString OnePixelGif() {
+  static const char kGif[] =
+      "GIF89a\x01\x00\x01\x00"                 // header, 1x1
+      "\x80\x00\x00"                           // two-colour table follows
+      "\x00\x00\x00\xff\xff\xff"               // black, white
+      ",\x00\x00\x00\x00\x01\x00\x01\x00\x00"  // image descriptor
+      "\x02\x02\x44\x01\x00"                   // LZW data
+      ";";                                     // trailer
+  return GoogleString(kGif, sizeof(kGif) - 1);
+}
+
+GoogleString RepeatString(StringPiece s, int n) {
+  GoogleString out;
+  for (int i = 0; i < n; ++i) {
+    StrAppend(&out, s);
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_F(ImageRewriteTest, ImagesInlinedUpToDocumentBudget) {
+  const GoogleString gif = OnePixelGif();
+  options()->set_image_inline_max_bytes(1000);
+  options()->set_document_image_inline_max_bytes(3 * gif.size());
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.gif", kContentTypeGif, gif, 100);
+  GoogleString data_url;
+  DataUrl(kContentTypeGif, BASE64, gif, &data_url);
+
+  // The budget holds exactly three copies: three are inlined, the fourth
+  // stays a link, whether the image's result is fresh or from the cache.
+  for (int i = 0; i < 2; ++i) {
+    Parse(StrCat("budget_at_", i), RepeatString("<img src=\"a.gif\">", 4));
+    EXPECT_EQ(3, CountSubstring(output_buffer_, data_url)) << output_buffer_;
+    EXPECT_EQ(1, CountSubstring(output_buffer_, "<img src=\"a.gif\">"));
+  }
+}
+
+TEST_F(ImageRewriteTest, ImageOverDocumentBudgetIsNotInlined) {
+  const GoogleString gif = OnePixelGif();
+  options()->set_image_inline_max_bytes(1000);
+  options()->set_document_image_inline_max_bytes(3 * gif.size() - 1);
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kDebug);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.gif", kContentTypeGif, gif, 100);
+  GoogleString data_url;
+  DataUrl(kContentTypeGif, BASE64, gif, &data_url);
+
+  // One byte short of three copies: the third would go over, so two are
+  // inlined and the other two stay links.
+  for (int i = 0; i < 2; ++i) {
+    Parse(StrCat("budget_over_", i), RepeatString("<img src=\"a.gif\">", 4));
+    EXPECT_EQ(2, CountSubstring(output_buffer_, data_url)) << output_buffer_;
+    EXPECT_EQ(2, CountSubstring(output_buffer_, "<img src=\"a.gif\">"));
+    EXPECT_EQ(2, CountSubstring(output_buffer_,
+                                "the document already holds the most inlined "
+                                "image bytes allowed"));
+  }
+}
+
+TEST_F(ImageRewriteTest, CssInlinedImagesCountTowardDocumentBudget) {
+  const GoogleString gif = OnePixelGif();
+  options()->set_image_inline_max_bytes(1000);
+  options()->set_css_image_inline_max_bytes(1000);
+  options()->set_document_image_inline_max_bytes(2 * gif.size());
+  options()->set_always_rewrite_css(true);
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.gif", kContentTypeGif, gif, 100);
+  GoogleString data_url;
+  DataUrl(kContentTypeGif, BASE64, gif, &data_url);
+  const char kStyle[] = "<style>.a{background:url(a.gif)}</style>";
+
+  // Identical style blocks share one rewrite, and later parses take it from
+  // the cache; each block that shows the image still counts, and so does the
+  // image element. The page holds two copies; the other two keep their
+  // original reference.
+  for (int i = 0; i < 2; ++i) {
+    Parse(StrCat("css_budget_", i),
+          StrCat(RepeatString(kStyle, 3), "<img src=\"a.gif\">"));
+    EXPECT_EQ(2, CountSubstring(output_buffer_, data_url)) << output_buffer_;
+    EXPECT_EQ(2, CountSubstring(output_buffer_, kStyle) +
+                     CountSubstring(output_buffer_, "<img src=\"a.gif\">"));
+  }
+}
+
+TEST_F(ImageRewriteTest, FlattenedImportImagesCountTowardDocumentBudget) {
+  const GoogleString gif = OnePixelGif();
+  options()->set_image_inline_max_bytes(1000);
+  options()->set_css_image_inline_max_bytes(1000);
+  options()->set_document_image_inline_max_bytes(2 * gif.size());
+  options()->set_always_rewrite_css(true);
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kFlattenCssImports);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.gif", kContentTypeGif, gif, 100);
+  SetResponseWithDefaultHeaders("b.css", kContentTypeCss,
+                                ".a{background:url(a.gif)}", 100);
+  GoogleString data_url;
+  DataUrl(kContentTypeGif, BASE64, gif, &data_url);
+
+  // An image inlined into an imported stylesheet counts toward the style
+  // block it is flattened into.
+  for (int i = 0; i < 2; ++i) {
+    Parse(StrCat("import_budget_", i),
+          RepeatString("<style>@import url(b.css);</style>", 3));
+    EXPECT_EQ(2, CountSubstring(output_buffer_, data_url)) << output_buffer_;
+  }
+}
+
+TEST_F(ImageRewriteTest, StylesheetInlinedImagesStopAtDocumentBudget) {
+  const GoogleString gif = OnePixelGif();
+  options()->set_css_image_inline_max_bytes(1000);
+  options()->set_document_image_inline_max_bytes(2 * gif.size());
+  options()->set_always_rewrite_css(true);
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  rewrite_driver()->AddFilters();
+  SetResponseWithDefaultHeaders("a.gif", kContentTypeGif, gif, 100);
+  SetResponseWithDefaultHeaders(
+      "a.css", kContentTypeCss,
+      ".a{background:url(a.gif)}.b{background:url(a.gif)}"
+      ".c{background:url(a.gif)}",
+      100);
+  GoogleString data_url;
+  DataUrl(kContentTypeGif, BASE64, gif, &data_url);
+
+  GoogleString css;
+  ASSERT_TRUE(FetchResourceUrl(
+      StrCat(kTestDomain, Encode("", "cf", "0", "a.css", "css")), &css));
+  EXPECT_EQ(2, CountSubstring(css, data_url)) << css;
+  EXPECT_EQ(3, CountSubstring(css, "url("));
 }
 
 TEST_F(ImageRewriteTest, InlineNoResize) {

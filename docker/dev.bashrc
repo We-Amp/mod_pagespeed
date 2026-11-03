@@ -16,20 +16,23 @@ export MEMCACHED_PORT="${MEMCACHED_PORT:-11211}"
 # Bazel cache configuration
 export BAZEL_CACHE_DIR="${BAZEL_CACHE_DIR:-/bazel-cache}"
 
-# Convenience aliases for common operations
-alias build='bazel build //...'
-alias test='bazel test //test/...'
-alias test-debug='bazel test --test_env=REDIS_PORT=${REDIS_PORT} --test_env=MEMCACHED_PORT=${MEMCACHED_PORT} -c dbg --test_output=streamed //test/...'
+# Convenience aliases for common operations. Every alias passes
+# --config=clang-libstdcxx13: plain --config=clang does not build the Cyclone
+# cache sources (Clang's __cpp_concepts is below what GCC 13's libstdc++
+# requires for std::expected).
+alias build='bazel build --config=clang-libstdcxx13 //...'
+alias test='bazel test --config=clang-libstdcxx13 //test/...'
+alias test-debug='bazel test --config=clang-libstdcxx13 --test_env=REDIS_PORT=${REDIS_PORT} --test_env=MEMCACHED_PORT=${MEMCACHED_PORT} -c dbg --test_output=streamed //test/...'
 
 # Build specific target
-alias build-kernel='bazel build //pagespeed/kernel/...'
-alias build-apache='bazel build //pagespeed/apache/...'
-alias build-envoy='bazel build //pagespeed/envoy/...'
+alias build-kernel='bazel build --config=clang-libstdcxx13 //pagespeed/kernel/...'
+alias build-apache='bazel build --config=clang-libstdcxx13 //pagespeed/apache/...'
+alias build-envoy='bazel build --config=clang-libstdcxx13 //pagespeed/envoy/...'
 
 # Test specific areas
-alias test-kernel='bazel test //test/pagespeed/kernel/...'
-alias test-apache='bazel test //test/pagespeed/apache/...'
-alias test-envoy='bazel test //test/pagespeed/envoy/...'
+alias test-kernel='bazel test --config=clang-libstdcxx13 //test/pagespeed/kernel/...'
+alias test-apache='bazel test --config=clang-libstdcxx13 //test/pagespeed/apache/...'
+alias test-envoy='bazel test --config=clang-libstdcxx13 //test/pagespeed/envoy/...'
 
 # Quick single test run with verbose output
 run-test() {
@@ -37,11 +40,11 @@ run-test() {
         echo "Usage: run-test //test/path/to:test_name"
         return 1
     fi
-    bazel test --test_output=streamed "$1"
+    bazel test --config=clang-libstdcxx13 --test_output=streamed "$1"
 }
 
-# Build with clang config (default in container)
-alias build-clang='bazel build --config=clang //...'
+# Build with the clang config that compiles everything (see above)
+alias build-clang='bazel build --config=clang-libstdcxx13 //...'
 
 # Build with sanitizers
 alias build-asan='bazel build --config=clang-asan //...'

@@ -41,6 +41,8 @@ class JsDeferDisabledFilter : public CommonFilter {
   ~JsDeferDisabledFilter() override;
 
   void DetermineEnabled(GoogleString* disabled_reason) override;
+  // See RewriteDriver::SkipJsDeferralOnHydratedPage().
+  bool SkippedOnHydratedPages() const override;
   const char* Name() const override { return "JsDeferDisabledFilter"; }
 
   static void InitStats(Statistics* statistics);

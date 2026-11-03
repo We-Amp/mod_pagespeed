@@ -30,12 +30,11 @@
 // OSS-Fuzz build (.oss-fuzz/build.sh) sets it for its fuzzer binary.  The
 // oracles trip within seconds on invalid input that the nightly fuzz
 // lane's classifier (tools/ci/classify-js-fuzz-artifacts.sh) files as
-// known classes: an unterminated string literal that the tokenizer closes
-// on an escaped quote, with a raw U+2028 the minifier turns into a
-// linebreak, trips the token-channel oracle and, once that is exempted,
-// the idempotence oracle.  An engine without that classifier would stop on
-// such input every session; the nightly lane keeps the oracles and the
-// classifier.
+// known classes: mutated garbage trips the oracles, and comment removal
+// can shift the decline position between the two passes (RC-D below).  An
+// engine without that
+// classifier would stop on such input every session; the nightly lane
+// keeps the oracles and the classifier.
 //
 // Oracle 1 — strict idempotence, modeled on the full DECLINE contract
 // (js_minify.h: "the output string will still be fully populated from the
@@ -172,6 +171,11 @@ const char* const kValidJsSeeds[] = {
     // this input, so output = minified prefix + unmodified remainder and
     // both oracles must hold across the pass-through.
     "var await = 1;\nawait\n{ } / x /.test(y);",
+    // Decline-path pin (issue #572): an unterminated string whose last
+    // quote is escaped, with a raw U+2028 inside.  Both passes must decline
+    // at the same position.
+    "'a\\'\xE2\x80\xA8"
+    "b",
     "#!/usr/bin/env node\nvar x = 1;",
     "import def from './m.js'\n/re/.source;\nexport {};",
     "a?.b?.(x)\nlet y = a ?? b ?? 0;",

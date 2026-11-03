@@ -18,18 +18,25 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <memory>
 
+#include "net/instaweb/http/public/async_fetch.h"
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
 #include "test/net/instaweb/rewriter/oob_slot_index_cache.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/html/html_parse_test_base.h"
+#include "test/pagespeed/kernel/thread/worker_test_base.h"
 
 namespace net_instaweb {
 
@@ -512,6 +519,188 @@ TEST_F(CssImageCombineTest, ServeFiles) {
   GoogleString output;
   EXPECT_TRUE(FetchResourceUrl(sprite_str, &output));
   ServeResourceFromManyContexts(sprite_str, output);
+}
+
+// Tells the test it is running, then keeps its worker busy until released,
+// so that whatever is added to that worker after it stays queued.
+class HoldWorkerFunction : public Function {
+ public:
+  HoldWorkerFunction(WorkerTestBase::SyncPoint* running,
+                     WorkerTestBase::SyncPoint* release)
+      : running_(running), release_(release) {}
+
+ protected:
+  void Run() override {
+    running_->Notify();
+    release_->Wait();
+  }
+
+ private:
+  WorkerTestBase::SyncPoint* running_;
+  WorkerTestBase::SyncPoint* release_;
+};
+
+// A queued placeholder that reports when the queue cancels it.
+class ReportCancelFunction : public Function {
+ public:
+  ReportCancelFunction(std::atomic<bool>* cancelled,
+                       WorkerTestBase::SyncPoint* event)
+      : cancelled_(cancelled), event_(event) {}
+
+ protected:
+  void Run() override {}
+  void Cancel() override {
+    cancelled_->store(true);
+    event_->Notify();
+  }
+
+ private:
+  std::atomic<bool>* cancelled_;
+  WorkerTestBase::SyncPoint* event_;
+};
+
+// A fetch that reports its completion on two sync points.
+class ReportDoneFetch : public StringAsyncFetch {
+ public:
+  ReportDoneFetch(const RequestContextPtr& context, GoogleString* buffer,
+                  std::atomic<bool>* done, WorkerTestBase::SyncPoint* event,
+                  WorkerTestBase::SyncPoint* done_event)
+      : StringAsyncFetch(context, buffer),
+        done_(done),
+        event_(event),
+        done_event_(done_event) {}
+
+ protected:
+  void HandleDone(bool success) override {
+    StringAsyncFetch::HandleDone(success);
+    done_->store(true);
+    event_->Notify();
+    done_event_->Notify();
+  }
+
+ private:
+  std::atomic<bool>* done_;
+  WorkerTestBase::SyncPoint* event_;
+  WorkerTestBase::SyncPoint* done_event_;
+};
+
+// Holds the driver's low-priority worker with one placeholder queued behind
+// it, and the queue bounded at one entry: the next task added to that worker
+// cancels the placeholder.
+class CssImageCombineFetchQueueTest : public CssImageCombineTest {
+ protected:
+  void SetUp() override {
+    CssImageCombineTest::SetUp();
+    ThreadSystem* threads = server_context()->thread_system();
+    running_ = std::make_unique<WorkerTestBase::SyncPoint>(threads);
+    release_ = std::make_unique<WorkerTestBase::SyncPoint>(threads);
+    event_ = std::make_unique<WorkerTestBase::SyncPoint>(threads);
+    fetch_done_event_ = std::make_unique<WorkerTestBase::SyncPoint>(threads);
+  }
+
+  GoogleString SpriteUrl() {
+    return Encode(kTestDomain, "is", "0",
+                  MultiUrl(kCuppaPngFile, kBikePngFile), "png");
+  }
+
+  void HoldLowPriorityWorker() {
+    low_priority_ = rewrite_driver()->low_priority_rewrite_worker();
+    low_priority_->Add(new HoldWorkerFunction(running_.get(), release_.get()));
+    running_->Wait();
+    low_priority_->Add(
+        new ReportCancelFunction(&placeholder_cancelled_, event_.get()));
+    low_priority_->set_max_queue_size(1);
+  }
+
+  void ReleaseLowPriorityWorker() {
+    low_priority_->set_max_queue_size(0);  // Unbounded again.
+    release_->Notify();
+    rewrite_driver()->WaitForShutDown();
+    ClearRewriteDriver();
+  }
+
+  QueuedWorkerPool::Sequence* low_priority_ = nullptr;
+  std::unique_ptr<WorkerTestBase::SyncPoint> running_;
+  std::unique_ptr<WorkerTestBase::SyncPoint> release_;
+  std::unique_ptr<WorkerTestBase::SyncPoint> event_;
+  std::unique_ptr<WorkerTestBase::SyncPoint> fetch_done_event_;
+  std::atomic<bool> placeholder_cancelled_{false};
+  std::atomic<bool> fetch_done_{false};
+};
+
+// The fetch of a sprite URL decodes and combines its images on the
+// low-priority rewrite queue, as the HTML path does, not on the thread that
+// serves the fetch: while that queue is held, the fetch cannot finish.
+TEST_F(CssImageCombineFetchQueueTest, FetchSpriteRunsOnLowPriorityQueue) {
+  HoldLowPriorityWorker();
+  GoogleString content;
+  ReportDoneFetch fetch(request_context(), &content, &fetch_done_, event_.get(),
+                        fetch_done_event_.get());
+  SetDriverRequestHeaders();
+  rewrite_driver()->FetchResource(SpriteUrl(), &fetch);
+
+  // Whichever comes first: the combine work queues behind the held worker
+  // (cancelling the placeholder), or the fetch completes without it.
+  event_->Wait();
+  EXPECT_TRUE(placeholder_cancelled_.load());
+  EXPECT_FALSE(fetch_done_.load());
+
+  ReleaseLowPriorityWorker();
+  fetch_done_event_->Wait();
+  EXPECT_TRUE(fetch.success());
+  EXPECT_EQ(HttpStatus::kOK, fetch.response_headers()->status_code());
+  EXPECT_FALSE(content.empty());
+}
+
+// When the low-priority queue cancels the combine task (load shedding), the
+// fetch fails with the normal failure response and serves no sprite, and the
+// failure is not remembered.
+TEST_F(CssImageCombineFetchQueueTest, FetchSpriteFailsWhenCombineCancelled) {
+  HoldLowPriorityWorker();
+  GoogleString content;
+  ReportDoneFetch fetch(request_context(), &content, &fetch_done_, event_.get(),
+                        fetch_done_event_.get());
+  SetDriverRequestHeaders();
+  rewrite_driver()->FetchResource(SpriteUrl(), &fetch);
+
+  event_->Wait();
+  if (!placeholder_cancelled_.load()) {
+    ADD_FAILURE() << "the fetch did not queue its work on the low-priority "
+                     "queue";
+    ReleaseLowPriorityWorker();
+    return;
+  }
+  // The combine task is the one queued entry now; one more cancels it.
+  std::atomic<bool> second_placeholder_cancelled(false);
+  WorkerTestBase::SyncPoint unused(server_context()->thread_system());
+  low_priority_->Add(
+      new ReportCancelFunction(&second_placeholder_cancelled, &unused));
+
+  // The fetch completes while the worker is still held.
+  fetch_done_event_->Wait();
+  EXPECT_FALSE(second_placeholder_cancelled.load());
+  EXPECT_FALSE(fetch.success());
+  EXPECT_EQ(HttpStatus::kNotFound, fetch.response_headers()->status_code());
+  EXPECT_TRUE(content.empty());
+  ReleaseLowPriorityWorker();
+
+  GoogleString again;
+  EXPECT_TRUE(FetchResourceUrl(SpriteUrl(), &again));
+  EXPECT_FALSE(again.empty());
+}
+
+// When the low-priority queue is shut down and rejects the combine task, the
+// fetch fails with the normal failure response.
+TEST_F(CssImageCombineTest, FetchSpriteFailsWhenLowPriorityQueueShutDown) {
+  server_context()->low_priority_rewrite_workers()->ShutDown();
+  GoogleString content;
+  ResponseHeaders response;
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, "is", "0", MultiUrl(kCuppaPngFile, kBikePngFile),
+             "png"),
+      &content, &response));
+  EXPECT_EQ(HttpStatus::kNotFound, response.status_code());
+  EXPECT_TRUE(content.empty());
 }
 
 // FYI: Takes ~10000 ms to run under Valgrind.

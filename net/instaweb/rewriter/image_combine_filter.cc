@@ -847,27 +847,53 @@ class ImageCombineFilter::Context : public RewriteContext {
   // Write the combination out.
   void Rewrite(int partition_index, CachedResult* partition,
                const OutputResourcePtr& output) override {
-    RewriteResult result = kRewriteOk;
-    if (!output->IsWritten()) {
-      // Note that this method expects to do something for only the fetch path,
-      // when only one partition should be in use --- in the rewrite path
-      // we should have already written everything out in Partition().
-      DCHECK_EQ(0, partition_index);
-      ImageCombineFilter::Combiner combiner(filter_, &library_);
-
-      ResourceVector resources;
-      bool ok = true;
-      for (int i = 0, n = num_slots(); (i < n) && ok; ++i) {
-        ResourcePtr resource(slot(i)->resource());
-        resources.push_back(resource);
-        RegisterResource(resource.get());
-        ok = EnsureLoaded(resource->url());
-      }
-      if (!ok || !combiner.Write(resources, output)) {
-        result = kRewriteFailed;
-      }
+    if (output->IsWritten()) {
+      RewriteDone(kRewriteOk, partition_index);
+      return;
     }
-    RewriteDone(result, partition_index);
+    // Note that this method expects to do something for only the fetch path,
+    // when only one partition should be in use --- in the rewrite path
+    // we should have already written everything out in Partition().
+    DCHECK_EQ(0, partition_index);
+    // Decoding and combining the images is as costly here as when
+    // partitioning for HTML, so it runs on the same low-priority queue
+    // rather than on the thread that serves the fetch.  A combination has no
+    // single input to fall back to, so a task the queue cancels or rejects
+    // fails the fetch.
+    Driver()->AddLowPriorityRewriteTask(MakeFunction(
+        this, &Context::WriteCombination, &Context::WriteCombinationCancel,
+        partition_index, OutputResourcePtr(output)));
+  }
+
+  // MakeFunction stores each argument with the parameter's type, so the
+  // parameter cannot be a reference; the pointer is taken by value.
+  void WriteCombination(int partition_index,
+                        // NOLINTNEXTLINE(performance-unnecessary-value-param)
+                        OutputResourcePtr output) {
+    ImageCombineFilter::Combiner combiner(filter_, &library_);
+
+    ResourceVector resources;
+    bool ok = true;
+    for (int i = 0, n = num_slots(); (i < n) && ok; ++i) {
+      ResourcePtr resource(slot(i)->resource());
+      resources.push_back(resource);
+      RegisterResource(resource.get());
+      ok = EnsureLoaded(resource->url());
+    }
+    if (!ok || !combiner.Write(resources, output)) {
+      RewriteDone(kRewriteFailed, partition_index);
+      return;
+    }
+    RewriteDone(kRewriteOk, partition_index);
+  }
+
+  void WriteCombinationCancel(
+      int partition_index,
+      // Same as WriteCombination: MakeFunction stores the argument with the
+      // parameter's type.
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      OutputResourcePtr output) {
+    RewriteDone(kTooBusy, partition_index);
   }
 
   bool PolicyPermitsRendering() const override {
@@ -1228,7 +1254,7 @@ bool ImageCombineFilter::AddCssBackgroundContext(
       new SpriteFutureSlot(resource, base_url, driver()->options(), values,
                            value_index, future.release());
   CssResourceSlotPtr slot(slot_obj);
-  parent->slot_factory()->UniquifySlot(slot);
+  slot = parent->slot_factory()->UniquifySlot(slot);
   // Spriting must run before all other filters so that the slot for the
   // resource a SpriteFutureSlot
   if (slot.get() != slot_obj) {

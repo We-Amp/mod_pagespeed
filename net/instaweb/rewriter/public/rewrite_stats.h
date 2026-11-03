@@ -117,6 +117,13 @@ class RewriteStats {
 
   // The daemon substrate's three serving outcomes; see the comment beside
   // their names in rewrite_stats.cc for why they are not the three above.
+  // The refusal reasons DaemonHtmlCache counts one by one, each as
+  // daemon_html_refused_<reason>, ending in nullptr.  These are the library's
+  // closed set of reason names; a name outside it goes to
+  // daemon_html_refused_other.  The reporter reads the counters by name
+  // (pagespeed/system/daemon_html_report.h).
+  static const char* const kDaemonHtmlRefusedReasons[];
+
   Variable* ipro_daemon_served() { return ipro_daemon_served_; }
   Variable* ipro_daemon_served_original() {
     return ipro_daemon_served_original_;
@@ -174,6 +181,16 @@ class RewriteStats {
   Variable* ipro_daemon_heal_notified() { return ipro_daemon_heal_notified_; }
   Variable* ipro_daemon_heal_notify_failed() {
     return ipro_daemon_heal_notify_failed_;
+  }
+
+  // Requests the optimizer-worker arms declined because they named no site:
+  // nothing was read, written or sent for them.  Non-zero means a server
+  // whose configuration gives a block no site, which should not happen.
+  Variable* daemon_serve_declined_no_site() {
+    return daemon_serve_declined_no_site_;
+  }
+  Variable* daemon_record_declined_no_site() {
+    return daemon_record_declined_no_site_;
   }
 
   Variable* downstream_cache_purge_attempts() {
@@ -256,6 +273,8 @@ class RewriteStats {
   Variable* ipro_daemon_served_original_only_;
   Variable* ipro_daemon_heal_notified_;
   Variable* ipro_daemon_heal_notify_failed_;
+  Variable* daemon_serve_declined_no_site_;
+  Variable* daemon_record_declined_no_site_;
   Variable* downstream_cache_purge_attempts_;
   Variable* successful_downstream_cache_purges_;
 

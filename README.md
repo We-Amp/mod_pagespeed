@@ -36,9 +36,14 @@ packages for Apache (`mod-pagespeed`) and Nginx (`nginx-module-pagespeed`) via
 `packages.modpagespeed.com`, and the signed IIS MSI. The Apache module
 package pairs with the `pagespeed-optimizer` daemon package at the same
 version and pulls it in as a dependency. The nginx dynamic
-module ships prebuilt and signed for Debian 12/13 and Ubuntu 22.04/24.04
+module ships prebuilt and signed for Debian 12/13 and Ubuntu 22.04/24.04/26.04
 (amd64 + arm64), each pinned to that distribution's stock nginx version.
 Debian 11 stays on the 1.15 line.
+A separate package, `nginx-module-pagespeed-nginxorg`, is built for
+nginx.org's stable nginx (as in the official nginx Docker image) on Debian 13,
+Ubuntu 24.04 and Enterprise Linux 9 (amd64/x86_64), one build per nginx
+version; see the
+[Nginx guide](docs/install-nginx.md).
 Then see the per-platform installation guides:
 
 - [Apache](docs/install-apache.md)

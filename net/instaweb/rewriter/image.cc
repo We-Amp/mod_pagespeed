@@ -21,7 +21,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <memory>
+#include <utility>
 
 extern "C" {
 #include <zlib.h>  // Provided by @envoy//bazel:zlib
@@ -417,6 +419,24 @@ class ImageImpl : public Image {
   GoogleString resize_debug_message_;
   GoogleString debug_message_url_;
 
+  // DrawImage() canvas.  While images are being drawn, the canvas lives here
+  // as one RGBA_8888 raster at its full size instead of in output_contents_;
+  // it is encoded once, the next time the output is needed.
+  bool MaterializeCanvas();
+  bool EncodeCanvas();
+  void DiscardCanvas();
+
+  std::unique_ptr<uint8[]> canvas_raster_;
+  size_t canvas_width_ = 0;
+  size_t canvas_height_ = 0;
+  // Whether the encoded canvas needs an alpha channel: the blank canvas was
+  // transparent, or an image with alpha was drawn on it.
+  bool canvas_has_alpha_ = false;
+  // output_contents_ is still the blank image GenerateBlankImage() wrote.
+  bool blank_canvas_ = false;
+  // A draw failed part way; the canvas has no usable contents.
+  bool canvas_broken_ = false;
+
   ImageImpl(const ImageImpl&) = delete;
   ImageImpl& operator=(const ImageImpl&) = delete;
 };
@@ -492,6 +512,7 @@ bool ImageImpl::GenerateBlankImage() {
           options_->use_transparent_for_blank_image, &output_contents_,
           handler_.get())) {
     output_valid_ = true;
+    blank_canvas_ = true;
     return true;
   }
   return false;
@@ -515,14 +536,32 @@ Image::~Image() {}
 // indicating encoding and dimensions of image.
 // Loosely based on code and FAQs found here:
 //    http://www.faqs.org/faqs/jpeg-faq/part1/
+//
+// The walk follows libjpeg's marker rules (jdmarker.c).
 void ImageImpl::FindJpegSize() {
   const StringPiece& buf = original_contents_;
   size_t pos = 2;  // Position of first data block after header.
   while (pos < buf.size()) {
+    // Find the next marker the way libjpeg does.
+    while (pos < buf.size() && CharToInt(buf[pos]) != 0xff) {
+      ++pos;
+    }
+    while (pos < buf.size() && CharToInt(buf[pos]) == 0xff) {
+      ++pos;
+    }
+    if (pos >= buf.size()) {
+      break;
+    }
     // Read block identifier
     int id = CharToInt(buf[pos++]);
-    if (id == 0xff) {  // Padding byte
+    if (id == 0x00) {  // Stuffed 0xff 0x00 is data, not a marker.
       continue;
+    }
+    if (id == 0x01 || (0xd0 <= id && id <= 0xd7)) {  // TEM, RSTn
+      continue;  // Parameterless: no length follows.
+    }
+    if (id == 0xd8 || id == 0xd9 || id == 0xda) {  // SOI, EOI, SOS
+      break;  // Before any SOFn, libjpeg rejects the image.
     }
     // At this point pos points to first data byte in block.  In any block,
     // first two data bytes are size (including these 2 bytes).  But first,
@@ -552,7 +591,8 @@ void ImageImpl::FindJpegSize() {
           JpegIntAtPosition(buf, pos + 1 + 2 * ImageHeaders::kJpegIntSize));
       break;
     }
-    pos += length;
+    // Consume the length bytes as libjpeg does.
+    pos += std::max(static_cast<size_t>(length), ImageHeaders::kJpegIntSize);
   }
   if (!ImageUrlEncoder::HasValidDimensions(dims_) || (dims_.height() <= 0) ||
       (dims_.width() <= 0)) {
@@ -886,6 +926,9 @@ void ImageImpl::UndoChange() {
 
 // Performs image optimization and output
 bool ImageImpl::ComputeOutputContents() {
+  if (canvas_raster_ != nullptr) {
+    return EncodeCanvas();
+  }
   if (rewrite_attempted_) {
     return output_valid_;
   }
@@ -1863,20 +1906,151 @@ StringPiece Image::Contents() {
   return contents;
 }
 
+bool ImageImpl::MaterializeCanvas() {
+  if (canvas_raster_ != nullptr) {
+    return true;
+  }
+  if (canvas_broken_) {
+    return false;
+  }
+  const size_t kBytesPerPixel = 4;  // RGBA_8888
+  if (blank_canvas_) {
+    // The blank image is all zero bytes: transparent black, or opaque black
+    // when it has no alpha channel.  Fill the raster directly instead of
+    // decoding it, and drop the encoded copy first, so that only one copy of
+    // the canvas is ever held.
+    const size_t width = dims_.width();
+    const size_t height = dims_.height();
+    size_t row_bytes = 0;
+    size_t total_bytes = 0;
+    if (dims_.width() <= 0 || dims_.height() <= 0 ||
+        !pagespeed::image_compression::CheckedMulSize(width, kBytesPerPixel,
+                                                      &row_bytes) ||
+        !pagespeed::image_compression::CheckedMulSize(row_bytes, height,
+                                                      &total_bytes)) {
+      return false;
+    }
+    GoogleString().swap(output_contents_);
+    output_valid_ = false;
+    canvas_raster_.reset(new uint8[total_bytes]);
+    canvas_has_alpha_ = options_->use_transparent_for_blank_image;
+    uint8* raster = canvas_raster_.get();
+    if (canvas_has_alpha_) {
+      memset(raster, 0, total_bytes);
+    } else {
+      memset(raster, 0, row_bytes);
+      for (size_t i = 0; i < width; ++i) {
+        raster[i * kBytesPerPixel + 3] = kAlphaOpaque;
+      }
+      for (size_t row = 1; row < height; ++row) {
+        memcpy(raster + row * row_bytes, raster, row_bytes);
+      }
+    }
+    canvas_width_ = width;
+    canvas_height_ = height;
+  } else {
+    // The canvas was encoded before (its output was read between draws):
+    // decode it once more.
+    std::unique_ptr<ScanlineReaderInterface> canvas_reader(CreateScanlineReader(
+        pagespeed::image_compression::IMAGE_PNG, output_contents_.data(),
+        output_contents_.length(), handler_.get()));
+    if (canvas_reader == nullptr) {
+      return false;
+    }
+    const size_t width = canvas_reader->GetImageWidth();
+    const size_t height = canvas_reader->GetImageHeight();
+    const PixelFormat format = canvas_reader->GetPixelFormat();
+    size_t row_bytes = 0;
+    size_t total_bytes = 0;
+    if (width == 0 || height == 0 ||
+        !pagespeed::image_compression::CheckedMulSize(width, kBytesPerPixel,
+                                                      &row_bytes) ||
+        !pagespeed::image_compression::CheckedMulSize(row_bytes, height,
+                                                      &total_bytes)) {
+      return false;
+    }
+    std::unique_ptr<uint8[]> raster(new uint8[total_bytes]);
+    for (size_t row = 0; row < height; ++row) {
+      uint8* line = nullptr;
+      if (!canvas_reader->ReadNextScanline(reinterpret_cast<void**>(&line)) ||
+          !ExpandPixelFormat(width, format, 0, line, RGBA_8888, 0,
+                             raster.get() + row * row_bytes, handler_.get())) {
+        return false;
+      }
+    }
+    canvas_reader.reset();
+    GoogleString().swap(output_contents_);
+    output_valid_ = false;
+    canvas_raster_ = std::move(raster);
+    canvas_has_alpha_ = (format == RGBA_8888);
+    canvas_width_ = width;
+    canvas_height_ = height;
+  }
+  canvas_pixel_work_ += static_cast<int64>(canvas_width_ * canvas_height_);
+  return true;
+}
+
+void ImageImpl::DiscardCanvas() {
+  canvas_raster_.reset();
+  canvas_broken_ = true;
+  blank_canvas_ = false;
+  GoogleString().swap(output_contents_);
+  output_valid_ = false;
+  rewrite_attempted_ = true;
+}
+
+bool ImageImpl::EncodeCanvas() {
+  GoogleString encoded;
+  std::unique_ptr<ScanlineWriterInterface> canvas_writer(
+      CreateUncompressedPngWriter(canvas_width_, canvas_height_, &encoded,
+                                  handler_.get(), canvas_has_alpha_));
+  if (canvas_writer == nullptr) {
+    PS_LOG_ERROR(handler_, "Failed to create canvas writer.");
+    DiscardCanvas();
+    return false;
+  }
+  const size_t kBytesPerPixel = 4;  // RGBA_8888
+  const size_t row_bytes = canvas_width_ * kBytesPerPixel;
+  std::unique_ptr<uint8[]> rgb_line;
+  if (!canvas_has_alpha_) {
+    rgb_line.reset(new uint8[canvas_width_ * 3]);
+  }
+  for (size_t row = 0; row < canvas_height_; ++row) {
+    uint8* line = canvas_raster_.get() + row * row_bytes;
+    if (!canvas_has_alpha_) {
+      for (size_t i = 0; i < canvas_width_; ++i) {
+        memcpy(rgb_line.get() + i * 3, line + i * kBytesPerPixel, 3);
+      }
+      line = rgb_line.get();
+    }
+    if (!canvas_writer->WriteNextScanline(reinterpret_cast<void*>(line))) {
+      PS_LOG_ERROR(handler_, "Failed to write canvas image.");
+      DiscardCanvas();
+      return false;
+    }
+  }
+  if (!canvas_writer->FinalizeWrite()) {
+    PS_LOG_ERROR(handler_, "Failed to close canvas file.");
+    DiscardCanvas();
+    return false;
+  }
+  canvas_writer.reset();
+  canvas_raster_.reset();
+  blank_canvas_ = false;
+  output_contents_.swap(encoded);
+  output_valid_ = true;
+  canvas_pixel_work_ += static_cast<int64>(canvas_width_ * canvas_height_);
+  return true;
+}
+
 bool ImageImpl::DrawImage(Image* image, int x, int y) {
-  // Create a reader for reading the original canvas image.
-  std::unique_ptr<ScanlineReaderInterface> canvas_reader(CreateScanlineReader(
-      pagespeed::image_compression::IMAGE_PNG, output_contents_.data(),
-      output_contents_.length(), handler_.get()));
-  if (canvas_reader == nullptr) {
+  // Decode the canvas once; later draws reuse the raster.
+  if (!MaterializeCanvas()) {
     PS_LOG_ERROR(handler_, "Cannot open canvas image.");
     return false;
   }
-
-  // Get the size and pixel format of the original canvas image.
-  const size_t canvas_width = canvas_reader->GetImageWidth();
-  const size_t canvas_height = canvas_reader->GetImageHeight();
-  const PixelFormat canvas_pixel_format = canvas_reader->GetPixelFormat();
+  const size_t canvas_width = canvas_width_;
+  const size_t canvas_height = canvas_height_;
 
   // Initialize a reader for reading the image which will be sprited.
   ImageImpl* impl = static_cast<ImageImpl*>(image);
@@ -1889,7 +2063,8 @@ bool ImageImpl::DrawImage(Image* image, int x, int y) {
     return false;
   }
 
-  // Get the size of the image which will be sprited.
+  // The decoded size of the image which will be sprited decides where its
+  // pixels go.
   const size_t image_width = image_reader->GetImageWidth();
   const size_t image_height = image_reader->GetImageHeight();
   const PixelFormat image_pixel_format = image_reader->GetPixelFormat();
@@ -1905,74 +2080,39 @@ bool ImageImpl::DrawImage(Image* image, int x, int y) {
     return false;
   }
 
-  bool has_transparency = false;
-  PixelFormat output_pixel_format = RGB_888;
-  if (image_pixel_format == RGBA_8888 || canvas_pixel_format == RGBA_8888) {
-    has_transparency = true;
-    output_pixel_format = RGBA_8888;
-  }
-
-  const size_t bytes_per_pixel =
-      GetNumChannelsFromPixelFormat(output_pixel_format, handler_.get());
-  const size_t bytes_per_scanline = canvas_width * bytes_per_pixel;
-  std::unique_ptr<uint8[]> scanline(new uint8[bytes_per_scanline]);
-
-  // Create a writer for writing the new canvas image.
-  GoogleString canvas_image;
-  std::unique_ptr<ScanlineWriterInterface> canvas_writer(
-      CreateUncompressedPngWriter(canvas_width, canvas_height, &canvas_image,
-                                  handler_.get(), has_transparency));
-  if (canvas_writer == nullptr) {
-    PS_LOG_ERROR(handler_, "Failed to create canvas writer.");
-    return false;
-  }
-
-  // Overlay the new image onto the canvas image.
-  for (int row = 0; row < static_cast<int>(canvas_height); ++row) {
-    uint8* canvas_line = nullptr;
-    if (!canvas_reader->ReadNextScanline(
-            reinterpret_cast<void**>(&canvas_line))) {
-      PS_LOG_ERROR(handler_, "Failed to read canvas image.");
+  // Overlay the new image onto the canvas, one scanline of the image at a
+  // time.
+  const size_t kBytesPerPixel = 4;  // RGBA_8888
+  const size_t row_bytes = canvas_width * kBytesPerPixel;
+  for (size_t row = 0; row < image_height; ++row) {
+    uint8* image_line = nullptr;
+    if (!image_reader->ReadNextScanline(
+            reinterpret_cast<void**>(&image_line))) {
+      PS_LOG_INFO(handler_, "Failed to read the image which will be sprited.");
+      DiscardCanvas();
       return false;
     }
+    uint8* canvas_line = canvas_raster_.get() + (y + row) * row_bytes;
 
-    if (row >= y && row < y + static_cast<int>(image_height)) {
-      uint8* image_line = nullptr;
-      if (!image_reader->ReadNextScanline(
-              reinterpret_cast<void**>(&image_line))) {
-        PS_LOG_INFO(handler_,
-                    "Failed to read the image which will be sprited.");
-        return false;
-      }
+    // Set the rest of the scanline to white. This operation has no effect
+    // on the webpage; it just gives a clean background to the sprite image.
+    memset(canvas_line, kAlphaOpaque, x * kBytesPerPixel);
+    memset(canvas_line + (x + image_width) * kBytesPerPixel, kAlphaOpaque,
+           (canvas_width - image_width - x) * kBytesPerPixel);
 
-      // Set the entire scanline to white. This operation has no effect
-      // on the webpage; it just gives a clean background to the
-      // sprite image.
-      memset(scanline.get(), kAlphaOpaque, x * bytes_per_pixel);
-      memset(scanline.get() + (x + image_width) * bytes_per_pixel, kAlphaOpaque,
-             (canvas_width - image_width - x) * bytes_per_pixel);
-
-      ExpandPixelFormat(image_width, image_pixel_format, 0, image_line,
-                        output_pixel_format, x, scanline.get(), handler_.get());
-    } else {
-      ExpandPixelFormat(canvas_width, canvas_pixel_format, 0, canvas_line,
-                        output_pixel_format, 0, scanline.get(), handler_.get());
-    }
-
-    if (!canvas_writer->WriteNextScanline(
-            reinterpret_cast<void*>(scanline.get()))) {
-      PS_LOG_ERROR(handler_, "Failed to write canvas image.");
+    if (!ExpandPixelFormat(image_width, image_pixel_format, 0, image_line,
+                           RGBA_8888, x, canvas_line, handler_.get())) {
+      DiscardCanvas();
       return false;
     }
   }
 
-  if (!canvas_writer->FinalizeWrite()) {
-    PS_LOG_ERROR(handler_, "Failed to close canvas file.");
-    return false;
+  if (image_pixel_format == RGBA_8888) {
+    canvas_has_alpha_ = true;
   }
-
-  output_contents_ = canvas_image;
-  output_valid_ = true;
+  canvas_pixel_work_ += static_cast<int64>(canvas_width * image_height);
+  output_valid_ = false;
+  rewrite_attempted_ = false;
   return true;
 }
 

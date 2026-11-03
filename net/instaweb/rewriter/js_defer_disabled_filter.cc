@@ -41,6 +41,10 @@ void JsDeferDisabledFilter::DetermineEnabled(GoogleString* disabled_reason) {
   set_is_enabled(ShouldApply(driver()));
 }
 
+bool JsDeferDisabledFilter::SkippedOnHydratedPages() const {
+  return driver()->SkipJsDeferralOnHydratedPage();
+}
+
 bool JsDeferDisabledFilter::ShouldApply(RewriteDriver* driver) {
   // Deferral works by disabling scripts during parse and re-executing them
   // from injected inline JS; a CSP that forbids inline scripts blocks that

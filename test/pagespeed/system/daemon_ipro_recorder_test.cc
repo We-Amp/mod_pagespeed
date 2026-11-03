@@ -56,6 +56,7 @@
 #include "pagespeed/system/daemon_record_arm.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
+#include "test/pagespeed/system/recording_daemon_abi.h"
 
 namespace net_instaweb {
 
@@ -66,6 +67,9 @@ const char kBody[] = "body{color:red}";
 // sniffs for, and meaningless as CSS. Embedded NULs, so it is never handed
 // anywhere as a NUL-terminated string.
 const char kGzipBody[] = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03";
+// The site of the block that admitted the request, sha256("site-test").
+const char kSite[] =
+    "2007f4b98af3e43f6c81272c8606ea77a35978dd7a5c0ee623f15036edac5831";
 
 class DaemonIproRecorderTest : public testing::Test {
  public:
@@ -95,6 +99,7 @@ class DaemonIproRecorderTest : public testing::Test {
     request_.url = "/a/style.css";
     request_.hostname = "example.com";
     request_.scheme = "http";
+    request_.site = kSite;
     request_.accept = "text/css,*/*";
     request_.user_agent = "Mozilla/5.0";
     request_.accept_encoding = "gzip";
@@ -899,6 +904,59 @@ TEST_F(DaemonIproRecorderTest, AResponseThatBreaksBeforeTheGateCountsNothing) {
                                           nullptr, nullptr, &rewrite_stats);
   EXPECT_FALSE(outcome.gate_ran);
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
+}
+
+// --- the site ---------------------------------------------------------------
+
+TEST_F(DaemonIproRecorderTest, ARequestWithoutASiteIsRecordedNowhere) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), &timer_);
+  for (const char* site :
+       {"", "not-a-site", "site:896d7b6145f1c83a9a4528fb99321bf8",
+        "2007F4B98AF3E43F6C81272C8606EA77A35978DD7A5C0EE623F15036EDAC5831"}) {
+    request_.site = site;
+    RecordingDaemonAbi recording(abi_.get());
+    ResponseHeaders headers;
+    MakeOkHeaders(&headers);
+    DaemonRecordOutcome outcome;
+    DaemonIproRecorder* recorder = new DaemonIproRecorder(
+        &recording, &cache_token_, "/tmp/socket", request_,
+        kDefaultHttpOptionsForTests, &timer_, nullptr, &rewrite_stats);
+    recorder->set_outcome_sink_for_testing(&outcome);
+    recorder->Write(kBody, nullptr);
+    recorder->DoneAndSetHeaders(&headers, true);
+    EXPECT_TRUE(outcome.done) << site;
+    EXPECT_FALSE(outcome.gate_ran) << site;
+    EXPECT_EQ(DaemonRecordVerdict::kRefuse, outcome.verdict) << site;
+    EXPECT_STREQ(daemon_record_reason::kNoSiteId, outcome.reason) << site;
+    EXPECT_FALSE(outcome.stored) << site;
+    EXPECT_FALSE(outcome.notified) << site;
+    EXPECT_EQ(0, recording.calls()) << site;
+  }
+  EXPECT_EQ(4, rewrite_stats.daemon_record_declined_no_site()->Get());
+  EXPECT_EQ(GoogleString(), CallLog());
+}
+
+TEST_F(DaemonIproRecorderTest, TheWriteAndTheNotificationAreInTheSite) {
+  RecordingDaemonAbi recording(abi_.get());
+  ResponseHeaders headers;
+  MakeOkHeaders(&headers);
+  DaemonRecordOutcome outcome;
+  DaemonIproRecorder* recorder = new DaemonIproRecorder(
+      &recording, &cache_token_, "/tmp/socket", request_,
+      kDefaultHttpOptionsForTests, &timer_, nullptr, nullptr);
+  recorder->set_outcome_sink_for_testing(&outcome);
+  recorder->Write(kBody, nullptr);
+  recorder->DoneAndSetHeaders(&headers, true);
+  ASSERT_TRUE(outcome.stored);
+  ASSERT_TRUE(outcome.notified);
+  ASSERT_EQ(1u, recording.sites().size());
+  EXPECT_EQ(kSite, recording.sites()[0]);
+  ASSERT_EQ(1u, recording.notifies().size());
+  EXPECT_EQ(kSite, recording.notifies()[0].site);
+  EXPECT_EQ(kPsNotifyFlagFromModule, recording.notifies()[0].notify_flags);
+  EXPECT_EQ(0, recording.notifies()[0].agent_request);
 }
 
 }  // namespace

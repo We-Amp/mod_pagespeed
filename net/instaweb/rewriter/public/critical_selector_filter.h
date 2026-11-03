@@ -57,6 +57,7 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   explicit CriticalSelectorFilter(RewriteDriver* rewrite_driver);
   ~CriticalSelectorFilter() override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "CriticalSelectorFilter"; }
   const char* id() const override { return "cl"; }
 

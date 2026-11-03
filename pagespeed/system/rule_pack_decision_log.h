@@ -15,9 +15,10 @@ namespace net_instaweb {
 
 class MessageHandler;
 
-// The decision log of one rule pack in one process: JSON lines appended to
-// <dir>/decisions-YYYY-MM-DD.jsonl (UTC date), where <dir> is
-// <LogDir>/packs/<pack-id>.
+// A decision log in one process: JSON lines appended to
+// <dir>/decisions-YYYY-MM-DD.jsonl (UTC date). The rule_packs filter keeps one
+// per pack, in <LogDir>/packs/<pack-id>; DaemonHtmlCache keeps one, in
+// <LogDir>/daemon-html.
 //
 // Every process of a server (Apache children, nginx workers, IIS worker
 // processes) appends to the same file. Each line goes out in one write on a
@@ -26,8 +27,9 @@ class MessageHandler;
 // on a local file system. A new file is opened when the UTC date changes;
 // files are never renamed, so there is no cross-process rotation race.
 //
-// Per process, a line is written at most once per dedup key (the caller
-// builds the key from host, path, rule, pack hash, mode, action and reason).
+// Per process, a line is written at most once per dedup key (the rule_packs
+// filter builds the key from host, path, rule, pack hash, mode, action and
+// reason).
 // The key set is bounded; when it is full it is cleared, so the contract is
 // "at most once per key per process lifetime, give or take a full set". N
 // processes may write the same line N times.
@@ -52,7 +54,9 @@ class RulePackDecisionLog {
     kDropped,    // not written: the day's cap, or the file cannot be written
   };
 
-  explicit RulePackDecisionLog(std::string dir);
+  // `label` names this log in the messages it writes.
+  explicit RulePackDecisionLog(std::string dir,
+                               std::string label = "rule pack decision log");
   ~RulePackDecisionLog();
 
   RulePackDecisionLog(const RulePackDecisionLog&) = delete;
@@ -64,6 +68,11 @@ class RulePackDecisionLog {
   // per day.
   Result Write(std::string_view dedup_key, std::string_view line,
                int64_t now_ms, MessageHandler* handler);
+
+  // At most `lines` lines per second from this process, counted on the
+  // second of `now_ms`; a line past that is kDropped and its key is not
+  // remembered. 0 (the default) means no limit.
+  void set_max_lines_per_second(int lines) { max_lines_per_second_ = lines; }
 
   const std::string& dir() const { return dir_; }
 
@@ -87,6 +96,8 @@ class RulePackDecisionLog {
   bool Append(std::string_view data);
 
   const std::string dir_;
+  const std::string label_;
+  int max_lines_per_second_ = 0;
   int64_t max_bytes_per_day_ = kMaxBytesPerDay;
 
   std::mutex mutex_;
@@ -98,6 +109,8 @@ class RulePackDecisionLog {
 #endif
   bool capped_ = false;
   int lines_since_stat_ = 0;
+  int64_t rate_second_ = -1;
+  int rate_lines_ = 0;
   std::unordered_set<size_t> seen_;
 };
 

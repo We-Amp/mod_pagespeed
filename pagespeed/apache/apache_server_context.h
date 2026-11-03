@@ -21,6 +21,7 @@
 #define PAGESPEED_APACHE_APACHE_SERVER_CONTEXT_H_
 
 #include <memory>
+#include <mutex>
 #include <set>
 
 #include "net/instaweb/http/public/request_context.h"
@@ -31,8 +32,10 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_html_report.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/serve_host_names.h"
+#include "pagespeed/system/site_cache_fragment.h"
 #include "pagespeed/system/system_server_context.h"
 
 struct ap_directive_t;
@@ -96,6 +99,10 @@ class ApacheServerContext : public SystemServerContext {
   // This server's daemon adapter, or nullptr before the startup check has
   // run.  Borrowed; the record arm asks it for the per-process cache handle.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
+
+  // The counters and decision log of DaemonHtmlCache report-only, built on
+  // first use so a server that never sets the option has none.
+  DaemonHtmlReporter* daemon_html_reporter();
 
   // Creates the UDS-backed DaemonReader for the /v1/daemon/* admin
   // endpoints, from this server's DaemonApiSocketPath, or
@@ -212,6 +219,8 @@ class ApacheServerContext : public SystemServerContext {
 
   std::unique_ptr<ProxyFetchFactory> proxy_fetch_factory_;
   std::unique_ptr<DaemonAdapter> daemon_adapter_;
+  std::once_flag daemon_html_reporter_once_;
+  std::unique_ptr<DaemonHtmlReporter> daemon_html_reporter_;
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 
   ApacheServerContext(const ApacheServerContext&) = delete;
@@ -266,6 +275,14 @@ bool ApacheConfigStatesServerName(const ap_directive_t* tree,
 // configuration; empty without a tree or a (non-virtual) main record.
 std::set<const server_rec*> ApacheStatedServerNamesFromTree(
     const ap_directive_t* tree, const server_rec* main_server);
+
+// Adds what `server` is, for its cache keyspace, to `identity`: the stated
+// names of ApacheConfiguredHostNames, its wildcard ServerAlias names and the
+// addresses of its <VirtualHost> line.
+void AppendApacheSiteIdentity(
+    const server_rec* server, const server_rec* main_server,
+    const std::set<const server_rec*>& stated_server_names,
+    SiteIdentity* identity);
 
 }  // namespace net_instaweb
 

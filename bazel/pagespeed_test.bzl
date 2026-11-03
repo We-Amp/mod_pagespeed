@@ -48,7 +48,6 @@ def pagespeed_cc_test(
         local = False,
         size = "medium",
         target_compatible_with = None):
-    test_lib_tags = []
     kwargs = {
         "name": name,
         "copts": copts,

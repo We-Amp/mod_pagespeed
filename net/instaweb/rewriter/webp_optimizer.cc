@@ -24,9 +24,11 @@
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/image/jpeg_reader.h"
 #include "pagespeed/kernel/image/jpeg_utils.h"
+#include "pagespeed/kernel/image/scanline_utils.h"
 
 extern "C" {
 #ifdef USE_SYSTEM_LIBWEBP
@@ -48,6 +50,8 @@ extern "C" {
 }
 
 using pagespeed::image_compression::JpegUtils;
+using pagespeed::image_compression::kScanlineMaxDimension;
+using pagespeed::image_compression::kScanlineMaxImagePixels;
 
 namespace net_instaweb {
 
@@ -172,6 +176,18 @@ bool WebpOptimizer::DoReadJpegPixels(J_COLOR_SPACE color_space,
   reader_.PrepareForRead(original_jpeg.data(), original_jpeg.size());
 
   if (jpeg_read_header(jpeg_decompress, TRUE) != JPEG_HEADER_OK) {
+    return false;
+  }
+
+  // Refuse images beyond the decode caps before decoding.
+  if (jpeg_decompress->image_width > kScanlineMaxDimension ||
+      jpeg_decompress->image_height > kScanlineMaxDimension ||
+      static_cast<uint64>(jpeg_decompress->image_width) *
+              jpeg_decompress->image_height >
+          kScanlineMaxImagePixels) {
+    PS_LOG_INFO(message_handler_,
+                "Image dimensions %ux%u exceed the supported maximum.",
+                jpeg_decompress->image_width, jpeg_decompress->image_height);
     return false;
   }
 

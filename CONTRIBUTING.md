@@ -34,7 +34,10 @@ report names:
 All Linux builds run inside the Docker development container (Clang,
 GCC 13, Bazel, plus Redis and Memcached for the cache tests). The full
 developer guide, including native builds, build configurations and common
-problems, is [DEVELOPER.md](DEVELOPER.md).
+problems, is [DEVELOPER.md](DEVELOPER.md); its "Compiler and linker settings
+inside the container" section covers what a local Bazel run needs on top of
+the `--config` flags (the `--repo_env` compiler settings and the `ld.lld`
+the clang configs link through).
 
 ```bash
 docker compose up -d

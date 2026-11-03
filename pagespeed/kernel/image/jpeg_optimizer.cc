@@ -318,14 +318,15 @@ bool JpegOptimizer::OptimizeLossy(jpeg_decompress_struct* jpeg_decompress,
 
   bool valid_jpeg = true;
 
-  JSAMPROW row_pointer[1];
-  row_pointer[0] = static_cast<JSAMPLE*>(
-      malloc(static_cast<size_t>(jpeg_decompress->output_width) *
-             jpeg_decompress->output_components));
-  if (row_pointer[0] == nullptr) {
-    PS_LOG_ERROR(message_handler_, "Failed to allocate JPEG scanline buffer");
-    return false;
-  }
+  // The scanline buffer comes from the decompressor's image pool rather than
+  // malloc: a libjpeg error inside the loop below longjmps back to
+  // DoCreateOptimizedJpeg and would skip a free() placed after the loop,
+  // whereas the pool is released by jpeg_finish_decompress() on success and
+  // by jpeg_abort_decompress() on failure. An allocation failure is an
+  // ERREXIT, handled by the same jump.
+  JSAMPARRAY row_pointer = (*jpeg_decompress->mem->alloc_sarray)(
+      reinterpret_cast<j_common_ptr>(jpeg_decompress), JPOOL_IMAGE,
+      jpeg_decompress->output_width * jpeg_decompress->output_components, 1);
   while (jpeg_compress_.next_scanline < jpeg_compress_.image_height) {
     const JDIMENSION num_scanlines_read =
         jpeg_read_scanlines(jpeg_decompress, row_pointer, 1);
@@ -341,7 +342,6 @@ bool JpegOptimizer::OptimizeLossy(jpeg_decompress_struct* jpeg_decompress,
     }
   }
 
-  free(row_pointer[0]);
   return valid_jpeg;
 }
 
@@ -351,21 +351,6 @@ bool JpegOptimizer::OptimizeLossless(jpeg_decompress_struct* jpeg_decompress,
   if (options.lossy) {
     PS_LOG_DFATAL(message_handler_,
                   "Lossy options are not allowed in lossless compression.");
-    return false;
-  }
-
-  // Unlike the scanline paths, which hold one row at a time,
-  // jpeg_read_coefficients buffers the DCT coefficients of the whole image,
-  // an allocation proportional to the dimensions declared in the header.
-  // Refuse anything beyond the decode caps before that allocation happens.
-  if (jpeg_decompress->image_width > kScanlineMaxDimension ||
-      jpeg_decompress->image_height > kScanlineMaxDimension ||
-      static_cast<uint64>(jpeg_decompress->image_width) *
-              jpeg_decompress->image_height >
-          kScanlineMaxImagePixels) {
-    PS_LOG_INFO(message_handler_,
-                "Image dimensions %ux%u exceed the supported maximum.",
-                jpeg_decompress->image_width, jpeg_decompress->image_height);
     return false;
   }
 
@@ -434,6 +419,18 @@ bool JpegOptimizer::DoCreateOptimizedJpeg(
 
   // Read jpeg data into the decompression struct.
   jpeg_read_header(jpeg_decompress, TRUE);
+
+  // Refuse images beyond the decode caps before reading them.
+  if (jpeg_decompress->image_width > kScanlineMaxDimension ||
+      jpeg_decompress->image_height > kScanlineMaxDimension ||
+      static_cast<uint64>(jpeg_decompress->image_width) *
+              jpeg_decompress->image_height >
+          kScanlineMaxImagePixels) {
+    PS_LOG_INFO(message_handler_,
+                "Image dimensions %ux%u exceed the supported maximum.",
+                jpeg_decompress->image_width, jpeg_decompress->image_height);
+    return false;
+  }
 
   bool valid_jpeg = false;
   if (options.lossy) {

@@ -1,0 +1,1 @@
+- **A page or stylesheet now inlines at most 4 MiB of images by default.** Images beyond that keep their URL. Set `DocumentImageInlineMaxBytes` to change the limit.

@@ -87,6 +87,10 @@ class JsCombineFilter::JsCombiner : public ResourceCombiner {
 
   bool ResourceCombinable(Resource* resource, GoogleString* failure_reason,
                           MessageHandler* handler) override {
+    if (!HasCombinationContentType(resource, failure_reason)) {
+      return false;
+    }
+
     // Get the charset for the given resource.
     StringPiece this_charset = RewriteFilter::GetCharsetForScript(
         resource, attribute_charset_, rewrite_driver_->containing_charset());
@@ -359,7 +363,9 @@ class JsCombineFilter::Context : public RewriteContext {
     for (int p = 0, np = num_output_partitions(); p < np; ++p) {
       const CachedResult* partition = output_partition(p);
       int partition_size = partition->input_size();
-      if (partition_size > 1) {
+      // A partition without a URL (a combination that could not be written)
+      // has nothing to render.
+      if (partition_size > 1 && partition->optimizable()) {
         // Make sure we can edit every element here.
         bool can_rewrite = true;
         for (int i = 0; i < partition_size; ++i) {

@@ -545,13 +545,22 @@ TEST_F(DaemonSeamTest, TheServeHitNamesAHostTheVirtualHostVouchesFor) {
     if (!isspace(static_cast<unsigned char>(c))) body.push_back(c);
   }
   EXPECT_NE(GoogleString::npos,
-            body.find("decision.stored_mask,VouchedServeHost(stripped_gurl_."
+            body.find("GoogleStringhost=VouchedServeHost(stripped_gurl_."
                       "Host(),ApacheConfiguredHostNames(request_->server,"
                       "server_context_->apache_factory()->main_server(),"
                       "server_context_->apache_factory()->"
-                      "stated_server_names())));"))
+                      "stated_server_names()));"))
       << "the recorded serve hit no longer names a host the virtual host's "
          "configuration vouches for";
+  // Both recorders (with and without the encoded origin size) pass that host.
+  size_t host_calls = 0;
+  for (size_t at = body.find("decision.stored_mask,host);");
+       at != GoogleString::npos;
+       at = body.find("decision.stored_mask,host);", at + 1)) {
+    ++host_calls;
+  }
+  EXPECT_EQ(2u, host_calls)
+      << "both recorders (with and without the split) must pass the host";
   EXPECT_EQ(GoogleString::npos,
             body.find("decision.stored_mask,daemon_serve_host_)"))
       << "the recorded serve hit names the request's own host again";

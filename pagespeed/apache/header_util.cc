@@ -270,6 +270,34 @@ class ApacheCachingHeaders : public CachingHeaders {
   ApacheCachingHeaders& operator=(const ApacheCachingHeaders&) = delete;
 };
 
+namespace {
+
+// The private and no-store stated on any Cache-Control line of a response.
+struct CacheControlLimits {
+  bool is_private = false;
+  bool no_store = false;
+};
+
+void NoteCacheControlLimits(StringPiece field_value,
+                            CacheControlLimits* limits) {
+  StringPieceVector elements;
+  SplitStringPieceToVector(field_value, ",", &elements,
+                           true /* omit empty strings */);
+  for (StringPiece element : elements) {
+    StringPiece::size_type eq = element.find('=');
+    StringPiece name =
+        eq == StringPiece::npos ? element : element.substr(0, eq);
+    TrimWhitespace(&name);
+    if (StringCaseEqual(name, HttpAttributes::kPrivate)) {
+      limits->is_private = true;
+    } else if (StringCaseEqual(name, HttpAttributes::kNoStore)) {
+      limits->no_store = true;
+    }
+  }
+}
+
+}  // namespace
+
 void DisableCacheControlHeader(request_rec* request) {
   // Turn off Cache-Control header for the HTTP requests.
   ApacheCachingHeaders headers(request);
@@ -277,7 +305,28 @@ void DisableCacheControlHeader(request_rec* request) {
   // tables (Lookup reads err_headers_out too), so compute it before touching
   // either table. The response must carry only ours: drop the origin's from
   // err_headers_out, then write ours to headers_out.
-  const GoogleString value = headers.GenerateDisabledCacheControl();
+  GoogleString value = headers.GenerateDisabledCacheControl();
+
+  // Never more storable than the operator or the origin said: a private or
+  // no-store on any Cache-Control line, in either table, stays on ours.
+  StringVector lines;
+  if (request->err_headers_out != nullptr) {
+    apr_table_do(CollectCacheControlCallback, &lines, request->err_headers_out,
+                 HttpAttributes::kCacheControl, nullptr);
+  }
+  apr_table_do(CollectCacheControlCallback, &lines, request->headers_out,
+               HttpAttributes::kCacheControl, nullptr);
+  CacheControlLimits stated, kept;
+  for (const GoogleString& line : lines) {
+    NoteCacheControlLimits(line, &stated);
+  }
+  NoteCacheControlLimits(value, &kept);
+  if (stated.is_private && !kept.is_private) {
+    StrAppend(&value, ", ", HttpAttributes::kPrivate);
+  }
+  if (stated.no_store && !kept.no_store) {
+    StrAppend(&value, ", ", HttpAttributes::kNoStore);
+  }
   apr_table_unset(request->err_headers_out, HttpAttributes::kCacheControl);
   apr_table_set(request->headers_out, HttpAttributes::kCacheControl,
                 value.c_str());

@@ -18,17 +18,25 @@ Save-Data. This checks, on the wire under nginx with the worker running, that
     moves while the fall-through counter does not);
   * a stylesheet names none of the device headers.
 
+The cases fetch their own copy of the photo (lane-1.jpg ... lane-N.jpg,
+written by run_nginx_tests.sh), purged through the worker's management API
+(PAGESPEED_DAEMON_API) first, so the stored original is seen from the cache
+before any variant of that copy exists; a copy whose first cache answer is
+already a variant is set aside for the next one.
+
 Needs the lane fixtures rule_packs and daemon_arm (the daemon.example.com
 server with its worker running, PAGESPEED_DAEMON_LANE=1 or require); other
 lanes skip it.
 """
 
+import json
 import os
 import time
 
 import pytest
 
 from pagespeed_test_framework import VhostClient, require_status_ok
+from pagespeed_test_framework.client import PageSpeedClient
 
 pytestmark = [
     pytest.mark.nginx_only,
@@ -36,7 +44,10 @@ pytestmark = [
 ]
 
 HOST = "daemon.example.com"
-IMAGE_PATH = "/daemon_lane/lane.jpg"
+# The copies of the photo run_nginx_tests.sh writes for these cases.
+IMAGE_COPIES = [f"/daemon_lane/lane-{n}.jpg" for n in range(1, 6)]
+# How long a copy has for its first answer from the cache.
+FIRST_ANSWER_DEADLINE_S = 30.0
 CSS_PATH = "/daemon_lane/lane.css"
 # The desktop-no-webp class needs the worker to keep a re-encoded JPEG of the
 # photo; a worker pin that declines it shows up here as a settle timeout.
@@ -80,6 +91,15 @@ def _is_variant(response) -> bool:
     return response.status == 200 and VARIANT_ETAG_MARK in response.header("ETag")
 
 
+def _summary(seen) -> list:
+    return [(name, r.header("Age"), r.header("ETag")) for name, r in seen]
+
+
+def _daemon_counters(site, server_config) -> dict:
+    stats = site.get_statistics(stats_path=server_config.stats_path, disable_pagespeed=False)
+    return {k: v for k, v in sorted(stats.items()) if k.startswith("ipro_daemon")}
+
+
 @pytest.fixture(scope="module")
 def site(server_config) -> VhostClient:
     raw = os.environ.get("PAGESPEED_RULE_PACKS_PORT")
@@ -89,38 +109,96 @@ def site(server_config) -> VhostClient:
 
 
 @pytest.fixture(scope="module")
-def served(site):
-    """The settled variant of each request class, and every response on the way
-    there that the cache answered (the stored original included).
+def api() -> PageSpeedClient:
+    value = os.environ.get("PAGESPEED_DAEMON_API", "")
+    host, _, port = value.rpartition(":")
+    if not host or not port.isdigit():
+        pytest.fail(f"PAGESPEED_DAEMON_API must be host:port, got {value!r}")
+    return PageSpeedClient(host, int(port))
 
+
+def _purge(api, path):
+    response = api.post(
+        "/v1/cache/purge",
+        data=json.dumps({"url": path, "hostname": HOST}),
+        # The API's guard for state-changing requests.
+        headers={"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"},
+    )
+    # A 403 for a host the worker was never notified for: it holds nothing
+    # for that host to purge.
+    never_served = response.status == 403 and "never served" in response.text
+    assert response.status == 200 or never_served, (path, response.status, response.text)
+
+
+def _first_cache_answer(site, path, seen):
+    """Fetch `path` as every request class until the cache answers one."""
+    deadline = time.time() + FIRST_ANSWER_DEADLINE_S
+    while time.time() < deadline:
+        for name, headers in CLIENTS.items():
+            response = site.get(path, headers=headers)
+            require_status_ok(response, f"{HOST}{path} ({name})")
+            if response.header("Age"):
+                seen.append((name, response))
+                return response
+        time.sleep(0.02)
+    return None
+
+
+@pytest.fixture(scope="module")
+def served(site, api, server_config):
+    """The copy of the photo the cases use, the settled variant of each request
+    class, and every response on the way there that the cache answered (the
+    stored original first).
+
+    The copy is purged and fetched once, which records it; its first answer
+    from the cache must be the stored original, or the next copy is tried.
     The worker builds a general variant first and the class-specific ones
     (phone, Save-Data, Sec-CH-DPR) later, so a class has settled once its
     variant differs from every other class's.
     """
-    seen = []
+    tried = {}
+    for path in IMAGE_COPIES:
+        _purge(api, path)
+        recorded = site.get(path, headers=CLIENTS["desktop"])
+        require_status_ok(recorded, f"{HOST}{path} (record)")
+        seen = []
+        if recorded.header("Age"):
+            seen.append(("desktop", recorded))
+            first = recorded
+        else:
+            first = _first_cache_answer(site, path, seen)
+        tried[path] = _summary(seen)
+        if first is not None and not _is_variant(first):
+            break
+    else:
+        pytest.fail(
+            f"no copy was answered from the cache with its stored original before a variant: {tried}; "
+            f"counters: {_daemon_counters(site, server_config)}"
+        )
     variants = {}
     deadline = time.time() + WORKER_DEADLINE_S
     while True:
         for name, headers in CLIENTS.items():
-            response = site.get(IMAGE_PATH, headers=headers)
-            require_status_ok(response, f"{HOST}{IMAGE_PATH} ({name})")
+            response = site.get(path, headers=headers)
+            require_status_ok(response, f"{HOST}{path} ({name})")
             if response.header("Age"):
                 seen.append((name, response))
             if _is_variant(response):
                 variants[name] = response
         etags = [r.header("ETag") for r in variants.values()]
         if len(variants) == len(CLIENTS) and len(set(etags)) == len(etags):
-            return variants, seen
+            return path, variants, seen
         if time.time() >= deadline:
             pytest.fail(
-                f"the request classes did not settle on distinct variants within {WORKER_DEADLINE_S}s; "
-                f"etags: { {n: r.header('ETag') for n, r in variants.items()} }"
+                f"the request classes of {path} did not settle on distinct variants within {WORKER_DEADLINE_S}s; "
+                f"etags: { {n: r.header('ETag') for n, r in variants.items()} }; "
+                f"counters: {_daemon_counters(site, server_config)}"
             )
         time.sleep(2.0)
 
 
 def test_each_request_class_gets_its_own_variant(served):
-    variants, _ = served
+    _, variants, _ = served
     assert variants["desktop"].header("Content-Type") == "image/webp", dict(variants["desktop"].headers)
     assert variants["phone"].header("Content-Type") == "image/webp", dict(variants["phone"].headers)
     assert variants["desktop-no-webp"].header("Content-Type") == "image/jpeg", dict(
@@ -134,13 +212,14 @@ def test_each_request_class_gets_its_own_variant(served):
     assert len(variants["save-data"].body) < len(variants["desktop"].body)
 
 
-def test_every_cache_served_response_names_the_selection_headers(served):
-    variants, seen = served
+def test_every_cache_served_response_names_the_selection_headers(site, server_config, served):
+    path, variants, seen = served
     assert seen, "the cache answered nothing"
     originals = [(n, r) for n, r in seen if VARIANT_ETAG_MARK not in r.header("ETag")]
     assert originals, (
-        "no stored original was served from the cache before the variants existed; "
-        "the original-carries-the-selection-Vary case was not exercised"
+        f"no stored original of {path} was served from the cache before the variants existed; "
+        f"the original-carries-the-selection-Vary case was not exercised; seen: {_summary(seen)}; "
+        f"counters: {_daemon_counters(site, server_config)}"
     )
     for name, response in seen:
         assert SELECTION_VARY <= _vary_tokens(response), (name, dict(response.headers))
@@ -150,17 +229,17 @@ def test_every_cache_served_response_names_the_selection_headers(served):
 
 @pytest.mark.parametrize("name", list(CLIENTS))
 def test_304_and_head_carry_the_vary_of_the_200(site, served, name):
-    variants, _ = served
+    path, variants, _ = served
     headers = CLIENTS[name]
     variant = variants[name]
     tokens = _vary_tokens(variant)
     etag = variant.header("ETag")
 
-    revalidated = site.get(IMAGE_PATH, headers={**headers, "If-None-Match": etag})
+    revalidated = site.get(path, headers={**headers, "If-None-Match": etag})
     assert revalidated.status == 304, (name, revalidated.status, dict(revalidated.headers))
     assert _vary_tokens(revalidated) == tokens, (name, dict(revalidated.headers))
 
-    head = site.head(IMAGE_PATH, headers=headers)
+    head = site.head(path, headers=headers)
     assert head.status == 200, (name, head.status, dict(head.headers))
     assert head.body == b"", (name, len(head.body))
     assert _vary_tokens(head) == tokens, (name, dict(head.headers))
@@ -168,7 +247,7 @@ def test_304_and_head_carry_the_vary_of_the_200(site, served, name):
 
 @pytest.mark.parametrize("name", list(CLIENTS))
 def test_second_fetch_is_served_from_the_cache(site, server_config, served, name):
-    variants, _ = served
+    path, variants, _ = served
     first = variants[name]
     stats_path = server_config.stats_path
 
@@ -176,10 +255,10 @@ def test_second_fetch_is_served_from_the_cache(site, server_config, served, name
         return site.get_statistics(stats_path=stats_path, disable_pagespeed=False)
 
     before = stats()
-    again = site.get(IMAGE_PATH, headers=CLIENTS[name])
+    again = site.get(path, headers=CLIENTS[name])
     after = stats()
 
-    require_status_ok(again, f"{HOST}{IMAGE_PATH} ({name})")
+    require_status_ok(again, f"{HOST}{path} ({name})")
     assert again.header("ETag") == first.header("ETag"), (name, dict(again.headers))
     assert again.body == first.body, name
     assert again.header("Age"), (name, dict(again.headers))

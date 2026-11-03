@@ -223,6 +223,8 @@ jobs:
         run: tools/ci/test_ensure_dev_image.sh
       - name: Build script supply-chain checks
         run: tools/ci/test_build_nginx_verify.sh
+      - name: nginx module filter order (builds from config)
+        run: tools/ci/test_nginx_config_filter_order.sh
       - name: Bisect driver
         run: tools/ci/test_bisect_job.sh
       - name: Release lane tooling
@@ -231,6 +233,7 @@ jobs:
           python3 -I tools/ci/release_manifest.py --self-test
           python3 -I tools/ci/release_signature_check.py --self-test
           tools/ci/release_nginx.sh --self-test
+          tools/ci/nginx_org_lane.sh --self-test
           tools/ci/release_sidecar.sh --self-test
           python3 -I tools/ci/sidecar_pair_manifest.py --self-test
           tools/ci/release_ea4_build.sh --self-test

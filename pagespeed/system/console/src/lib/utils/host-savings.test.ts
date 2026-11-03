@@ -50,9 +50,9 @@ describe("hostSavingsView", () => {
     expect(view?.other).toMatchObject({ hits: 2, original: 100, served: 40, saved: 60 });
   });
 
-  it("a saving never goes below zero or above the original", () => {
+  it("a host whose responses grew is negative, and only its percent is clamped", () => {
     const view = hostSavingsView({ hosts: [row("a.test", 1, 100, 150)] });
-    expect(view?.hosts[0]).toMatchObject({ saved: 0, percent: 0 });
+    expect(view?.hosts[0]).toMatchObject({ saved: -50, percent: 0 });
   });
 
   it("an other row with nothing in it is no row", () => {

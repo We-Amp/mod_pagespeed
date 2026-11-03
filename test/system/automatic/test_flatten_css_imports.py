@@ -79,6 +79,8 @@ class TestFlattenCssImportsDefault:
         assert_http_status(response, 200)
 
 
+@pytest.mark.not_envoy(reason="The Envoy test setup has no per-directory option configuration")
+@pytest.mark.not_iis(reason="IIS has no per-directory option configuration")
 class TestFlattenCssImportsTinyLimit:
     """Tests for flatten_css_imports with tiny byte limit.
 
@@ -86,7 +88,7 @@ class TestFlattenCssImportsTinyLimit:
 
         # Fetch with a tiny limit so no file can be inlined.
         test_filter flatten_css_imports,rewrite_css tiny limit
-        WGET_ARGS="${WGET_ARGS} --header=PageSpeedCssFlattenMaxBytes:5"
+        # (the limit of 5 is configured for the directory, not sent per request)
         WGET_ARGS="${WGET_ARGS} --header=X-PSA-Blocking-Rewrite:psatest"
         check run_wget_with_args $URL
         check grep -q @import.url $FETCHED
@@ -94,36 +96,29 @@ class TestFlattenCssImportsTinyLimit:
     """
 
     def test_tiny_limit_prevents_flattening(
-        self, client: PageSpeedClient, example_root: str
+        self, client: PageSpeedClient, test_root: str
     ):
         """With tiny limit, @import statements should not be flattened."""
-        url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
+        url = f"{test_root}/flatten_limit_tiny/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
         response = client.fetch_until_contains(
             url,
             pattern=r"@import",
             timeout=30.0,
-            headers={
-                "PageSpeedCssFlattenMaxBytes": "5",
-            },
         )
         assert_http_status(response, 200)
 
-    @pytest.mark.not_envoy(reason="Envoy does not apply CssFlattenMaxBytes header to resource requests")
     def test_tiny_limit_excludes_imported_content(
-        self, client: PageSpeedClient, example_root: str
+        self, client: PageSpeedClient, test_root: str
     ):
         """With tiny limit, imported CSS content should not be inlined."""
-        url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
+        url = f"{test_root}/flatten_limit_tiny/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
         # Wait for the page to be processed (we should see @import remain)
         response = client.fetch_until_contains(
             url,
             pattern=r"@import",
             timeout=30.0,
-            headers={
-                "PageSpeedCssFlattenMaxBytes": "5",
-            },
         )
         assert_http_status(response, 200)
 
@@ -135,6 +130,8 @@ class TestFlattenCssImportsTinyLimit:
         )
 
 
+@pytest.mark.not_envoy(reason="The Envoy test setup has no per-directory option configuration")
+@pytest.mark.not_iis(reason="IIS has no per-directory option configuration")
 class TestFlattenCssImportsMediumLimit:
     """Tests for flatten_css_imports with medium byte limit.
 
@@ -142,7 +139,7 @@ class TestFlattenCssImportsMediumLimit:
 
         # Fetch with a medium limit so any one file can be inlined but not all.
         test_filter flatten_css_imports,rewrite_css medium limit
-        WGET_ARGS="${WGET_ARGS} --header=PageSpeedCssFlattenMaxBytes:50"
+        # (the limit of 50 is configured for the directory)
         WGET_ARGS="${WGET_ARGS} --header=X-PSA-Blocking-Rewrite:psatest"
         check run_wget_with_args $URL
         check grep -q @import.url $FETCHED
@@ -150,18 +147,15 @@ class TestFlattenCssImportsMediumLimit:
     """
 
     def test_medium_limit_partial_flattening(
-        self, client: PageSpeedClient, example_root: str
+        self, client: PageSpeedClient, test_root: str
     ):
         """With medium limit, some @import statements may remain."""
-        url = f"{example_root}/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
+        url = f"{test_root}/flatten_limit_medium/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
         response = client.fetch_until_contains(
             url,
             pattern=r"@import",
             timeout=30.0,
-            headers={
-                "PageSpeedCssFlattenMaxBytes": "50",
-            },
         )
         assert_http_status(response, 200)
 

@@ -32,15 +32,21 @@
 
 #include "pagespeed/apache/instaweb_context.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "pagespeed/apache/html_flush_window.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -114,6 +120,334 @@ TEST_F(InstawebContextDeviceTypeTest, TheLookupAndTheReportUseTheSameEntry) {
               UserAgentMatcher::DeviceTypeSuffix(LookupDeviceType(user_agent)))
         << user_agent;
   }
+}
+
+// The body of a response is cut into windows of kHtmlFlushWindowBytes, with
+// a flush between two windows.
+
+// Records what the window does to a sink.
+class RecordingSink {
+ public:
+  RecordingSink() : can_flush_(true), num_flushes_(0), largest_piece_(0) {}
+
+  void Parse(const char* data, size_t size) {
+    total_ += size;
+    largest_piece_ = std::max(largest_piece_, size);
+    flush_points_.push_back(total_);
+  }
+  bool CanFlush() const { return can_flush_; }
+  void Flush() {
+    ++num_flushes_;
+    // The flush comes after everything parsed so far.
+    flush_marks_.push_back(total_);
+  }
+
+  bool can_flush_;
+  int num_flushes_;
+  size_t total_ = 0;
+  size_t largest_piece_;
+  std::vector<size_t> flush_points_;
+  std::vector<size_t> flush_marks_;
+};
+
+class HtmlFlushWindowTest : public testing::Test {
+ protected:
+  HtmlFlushWindowTest() : bytes_(3 * kHtmlFlushWindowBytes + 5, 'a') {}
+
+  GoogleString bytes_;
+  HtmlFlushWindow window_;
+  RecordingSink sink_;
+};
+
+TEST_F(HtmlFlushWindowTest, OneBigInputIsCutIntoWindows) {
+  window_.Add(&sink_, bytes_.data(), bytes_.size());
+  EXPECT_EQ(bytes_.size(), sink_.total_);
+  EXPECT_EQ(kHtmlFlushWindowBytes, sink_.largest_piece_);
+  ASSERT_EQ(3, sink_.num_flushes_);
+  EXPECT_EQ(kHtmlFlushWindowBytes, sink_.flush_marks_[0]);
+  EXPECT_EQ(2 * kHtmlFlushWindowBytes, sink_.flush_marks_[1]);
+  EXPECT_EQ(3 * kHtmlFlushWindowBytes, sink_.flush_marks_[2]);
+}
+
+TEST_F(HtmlFlushWindowTest, ManySmallInputsFlushAtTheSamePoints) {
+  for (size_t i = 0; i < bytes_.size(); i += 4000) {
+    window_.Add(&sink_, bytes_.data() + i,
+                std::min<size_t>(4000, bytes_.size() - i));
+  }
+  EXPECT_EQ(bytes_.size(), sink_.total_);
+  ASSERT_EQ(3, sink_.num_flushes_);
+  EXPECT_EQ(kHtmlFlushWindowBytes, sink_.flush_marks_[0]);
+  EXPECT_EQ(2 * kHtmlFlushWindowBytes, sink_.flush_marks_[1]);
+  EXPECT_EQ(3 * kHtmlFlushWindowBytes, sink_.flush_marks_[2]);
+}
+
+TEST_F(HtmlFlushWindowTest, AtTheLimitAndBelowThereIsNoFlush) {
+  window_.Add(&sink_, bytes_.data(), kHtmlFlushWindowBytes - 1);
+  EXPECT_EQ(0, sink_.num_flushes_);
+  window_.Add(&sink_, bytes_.data(), 1);
+  EXPECT_EQ(kHtmlFlushWindowBytes, sink_.total_);
+  EXPECT_EQ(0, sink_.num_flushes_);
+}
+
+TEST_F(HtmlFlushWindowTest, OneByteOverTheLimitFlushesOnce) {
+  window_.Add(&sink_, bytes_.data(), kHtmlFlushWindowBytes + 1);
+  EXPECT_EQ(kHtmlFlushWindowBytes + 1, sink_.total_);
+  ASSERT_EQ(1, sink_.num_flushes_);
+  EXPECT_EQ(kHtmlFlushWindowBytes, sink_.flush_marks_[0]);
+}
+
+TEST_F(HtmlFlushWindowTest, OneBigInputAtTheLimitIsNotCut) {
+  window_.Add(&sink_, bytes_.data(), kHtmlFlushWindowBytes);
+  EXPECT_EQ(1U, sink_.flush_points_.size());
+  EXPECT_EQ(0, sink_.num_flushes_);
+}
+
+TEST_F(HtmlFlushWindowTest, AFlushThatCannotBeDoneIsRetriedAtThePiece) {
+  sink_.can_flush_ = false;
+  window_.Add(&sink_, bytes_.data(), 2 * kHtmlFlushWindowBytes + 10);
+  EXPECT_EQ(0, sink_.num_flushes_);
+  EXPECT_EQ(kHtmlFlushWindowBytes, sink_.largest_piece_);
+  sink_.can_flush_ = true;
+  window_.Add(&sink_, bytes_.data(), 10);
+  ASSERT_EQ(1, sink_.num_flushes_);
+  EXPECT_EQ(2 * kHtmlFlushWindowBytes + 10, sink_.flush_marks_[0]);
+  // And a window starts again from there, with those 10 bytes in it.
+  window_.Add(&sink_, bytes_.data(), kHtmlFlushWindowBytes - 10);
+  EXPECT_EQ(1, sink_.num_flushes_);
+  window_.Add(&sink_, bytes_.data(), 1);
+  EXPECT_EQ(2, sink_.num_flushes_);
+}
+
+TEST_F(HtmlFlushWindowTest, AnOriginFlushStartsANewWindow) {
+  window_.Add(&sink_, bytes_.data(), kHtmlFlushWindowBytes - 10);
+  window_.Flushed();
+  window_.Add(&sink_, bytes_.data(), kHtmlFlushWindowBytes);
+  EXPECT_EQ(0, sink_.num_flushes_);
+}
+
+// The window driving a real driver, the way the output filter does.
+class HtmlFlushWindowDriverTest : public RewriteTestBase {
+ protected:
+  class DriverSink {
+   public:
+    explicit DriverSink(RewriteDriver* driver) : driver_(driver) {}
+    void Parse(const char* data, size_t size) {
+      driver_->ParseText(StringPiece(data, size));
+    }
+    bool CanFlush() const { return FlushWouldRelease(*driver_); }
+    void Flush() {
+      ++num_flushes_;
+      driver_->Flush();
+    }
+    int num_flushes_ = 0;
+
+   private:
+    RewriteDriver* driver_;
+  };
+
+  // Runs a page and returns what the driver wrote: through the window, or in
+  // one piece as the uncompressed branch used to, on a second driver with the
+  // same options. The response headers the filters leave are in headers_.
+  GoogleString Run(const GoogleString& page, bool through_window) {
+    RewriteDriver* driver =
+        through_window ? rewrite_driver() : other_rewrite_driver();
+    RewriteOptions* driver_options =
+        through_window ? options() : other_options();
+    driver_options->EnableFilter(RewriteOptions::kInlineImages);
+    driver->AddFilters();
+    GoogleString output;
+    StringWriter writer(&output);
+    driver->SetWriter(&writer);
+    headers_.Clear();
+    driver->set_response_headers_ptr(&headers_);
+    EXPECT_TRUE(driver->StartParse("http://example.com/index.html"));
+    HtmlFlushWindow window;
+    DriverSink sink(driver);
+    if (through_window) {
+      window.Add(&sink, page.data(), page.size());
+    } else {
+      sink.Parse(page.data(), page.size());
+    }
+    num_flushes_ = sink.num_flushes_;
+    driver->FinishParse();
+    return output;
+  }
+
+  // The page comes out of the window byte for byte as it comes out of one
+  // piece, with the same response headers.
+  void ExpectSameAsOnePiece(const GoogleString& page) {
+    const GoogleString whole = Run(page, false);
+    const GoogleString whole_headers = headers_.ToString();
+    EXPECT_EQ(whole, Run(page, true));
+    EXPECT_EQ(whole_headers, headers_.ToString());
+    EXPECT_TRUE(headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                                 HttpAttributes::kUserAgent));
+  }
+
+  // Adds the instrumentation beacon, which a browser gets.
+  void EnableBeacon() {
+    options()->set_beacon_url("http://example.com/beacon");
+    options()->EnableFilter(RewriteOptions::kAddInstrumentation);
+    SetCurrentUserAgent(kDesktopUserAgent);
+    SetDriverRequestHeaders();
+  }
+
+  static GoogleString Page(size_t size) {
+    GoogleString page = "<html><body><p>";
+    GoogleString tail = "</p></body></html>";
+    page.append(size - page.size() - tail.size(), 'x');
+    return page + tail;
+  }
+
+  HtmlFlushWindow window_;
+  ResponseHeaders headers_;
+  int num_flushes_ = 0;
+};
+
+TEST_F(HtmlFlushWindowDriverTest, ThePageIsTheSameOneByteBelowTheLimit) {
+  ExpectSameAsOnePiece(Page(kHtmlFlushWindowBytes - 1));
+  EXPECT_EQ(0, num_flushes_);
+}
+
+TEST_F(HtmlFlushWindowDriverTest, ThePageIsTheSameAtTheLimit) {
+  ExpectSameAsOnePiece(Page(kHtmlFlushWindowBytes));
+  EXPECT_EQ(0, num_flushes_);
+}
+
+TEST_F(HtmlFlushWindowDriverTest, ThePageIsTheSameOneByteOverTheLimit) {
+  ExpectSameAsOnePiece(Page(kHtmlFlushWindowBytes + 1));
+  EXPECT_EQ(1, num_flushes_);
+}
+
+// The instrumentation beacon is added when the document ends, after several
+// windows have gone out: once, inside the body.
+TEST_F(HtmlFlushWindowDriverTest, TheBeaconIsAddedOnceAtTheEndOfASplitPage) {
+  EnableBeacon();
+  GoogleString page = "<html><head></head><body><p>";
+  page.append(3 * kHtmlFlushWindowBytes, 'x');
+  page.append("</p></body></html>");
+  const GoogleString output = Run(page, true);
+  EXPECT_EQ(3, num_flushes_);
+  const size_t text_end = output.find("</p>");
+  ASSERT_NE(GoogleString::npos, text_end);
+  const size_t beacon = output.find("<script", text_end);
+  ASSERT_NE(GoogleString::npos, beacon);
+  EXPECT_LT(beacon, output.find("</body>"));
+  EXPECT_EQ(GoogleString::npos, output.find("<script", beacon + 1));
+}
+
+// When the body has already gone out with an earlier window, the beacon
+// still comes once, at the end of the document.
+TEST_F(HtmlFlushWindowDriverTest, TheBeaconFollowsABodyFlushedEarlier) {
+  EnableBeacon();
+  GoogleString page = "<html><head></head><body><p>";
+  const GoogleString body_end = "</p></body>";
+  page.append(kHtmlFlushWindowBytes - page.size() - body_end.size(), 'x');
+  page.append(body_end);
+  ASSERT_EQ(kHtmlFlushWindowBytes, page.size());
+  page.append("</html>");
+  const GoogleString output = Run(page, true);
+  EXPECT_EQ(1, num_flushes_);
+  const size_t beacon = output.find("<script", output.find("</p>"));
+  ASSERT_NE(GoogleString::npos, beacon);
+  EXPECT_LT(output.find("</body>"), beacon);
+  EXPECT_EQ(GoogleString::npos, output.find("<script", beacon + 1));
+}
+
+TEST_F(HtmlFlushWindowDriverTest, NothingIsFlushedBeforeTheTypeIsKnown) {
+  // More than a window of blank space before the first element, after a
+  // comment: the events are held back and a flush would release nothing.
+  GoogleString blank =
+      "<!-- a -->" + GoogleString(2 * kHtmlFlushWindowBytes, ' ');
+  GoogleString output;
+  StringWriter writer(&output);
+  RewriteDriver* driver = rewrite_driver();
+  options()->EnableFilter(RewriteOptions::kInlineImages);
+  driver->AddFilters();
+  driver->SetWriter(&writer);
+  driver->set_response_headers_ptr(&headers_);
+  ASSERT_TRUE(driver->StartParse("http://example.com/index.html"));
+  DriverSink sink(driver);
+  window_.Add(&sink, blank.data(), blank.size());
+  EXPECT_EQ(0, sink.num_flushes_);
+  EXPECT_NE(nullptr, driver->mutable_response_headers());
+  const GoogleString page = "<html><body>text</body></html>";
+  window_.Add(&sink, page.data(), page.size());
+  // The window was long full: it is flushed as soon as there is more.
+  window_.Add(&sink, "<p>", 3);
+  EXPECT_EQ(1, sink.num_flushes_);
+  driver->FinishParse();
+  EXPECT_TRUE(headers_.HasValueCaseInsensitive(HttpAttributes::kVary,
+                                               HttpAttributes::kUserAgent));
+}
+
+TEST(InstawebContextSourcePinTest, BothBodyBranchesGoThroughTheWindow) {
+  // An uncompressed body is cut into windows like an inflated one. The
+  // context needs a live httpd request to execute, so this is pinned by
+  // reading the source.
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  GoogleString source;
+  const GoogleString path =
+      StrCat(GTestSrcDir(), "/pagespeed/apache/instaweb_context.cc");
+  ASSERT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
+  const size_t start = source.find("void InstawebContext::Rewrite(");
+  ASSERT_NE(GoogleString::npos, start);
+  const size_t end = source.find("\n}\n", start);
+  ASSERT_NE(GoogleString::npos, end);
+  const GoogleString body = source.substr(start, end - start);
+  int windowed = 0;
+  for (size_t at = body.find("flush_window_.Add("); at != GoogleString::npos;
+       at = body.find("flush_window_.Add(", at + 1)) {
+    ++windowed;
+  }
+  EXPECT_EQ(2, windowed);
+  EXPECT_EQ(GoogleString::npos, body.find("ProcessBytes("))
+      << "a body branch bypasses the window";
+}
+
+TEST(InstawebContextSourcePinTest, TheVaryTokensAreAddedWhenTheParseStarts) {
+  // The context needs a live httpd request to execute, so this is pinned by
+  // reading the source. A flush can make the headers read-only before the
+  // Vary filter has run, so the tokens are named as the parse starts.
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  GoogleString source;
+  const GoogleString path =
+      StrCat(GTestSrcDir(), "/pagespeed/apache/instaweb_context.cc");
+  ASSERT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
+  const size_t start = source.find("->StartParseWithType(");
+  ASSERT_NE(GoogleString::npos, start);
+  const size_t add = source.find("HtmlVaryFilter::AddVaryTokens(", start);
+  ASSERT_NE(GoogleString::npos, add);
+  EXPECT_LT(add - start, 400U) << "the tokens are no longer added right after "
+                                  "the parse starts";
+  // And a flush that arrives before the body is held back, as it would send
+  // the headers without them.
+  const size_t held =
+      source.find("bool InstawebContext::FlushWouldSendEditableHeaders");
+  ASSERT_NE(GoogleString::npos, held);
+  const size_t held_end = source.find("\n}\n", held);
+  EXPECT_NE(GoogleString::npos,
+            source.substr(held, held_end - held).find("HtmlVaryTokens("));
+}
+
+TEST(InstawebContextSourcePinTest, AFlushWritesThePopulatedHeaders) {
+  // A FLUSH bucket makes Apache send the headers, so once they are populated
+  // they are written back at a flush even when there is no output yet.
+  StdioFileSystem file_system;
+  NullMessageHandler handler;
+  GoogleString source;
+  const GoogleString path =
+      StrCat(GTestSrcDir(), "/pagespeed/apache/mod_instaweb.cc");
+  ASSERT_TRUE(file_system.ReadFile(path.c_str(), &source, &handler)) << path;
+  const size_t flush = source.find("context->Flush();");
+  ASSERT_NE(GoogleString::npos, flush);
+  const size_t end = source.find("} else if (operation == FINISH)", flush);
+  ASSERT_NE(GoogleString::npos, end);
+  EXPECT_NE(GoogleString::npos,
+            source.substr(flush, end - flush).find("populated_headers()"))
+      << "a flush with no output returns before the headers are written";
 }
 
 TEST(InstawebContextSourcePinTest, TheLookupClassifiesFromTheRequestHeaders) {

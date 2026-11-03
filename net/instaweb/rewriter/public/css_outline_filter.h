@@ -53,6 +53,7 @@ class CssOutlineFilter : public CommonFilter {
   // HTML Events we expect to be in <style> elements.
   void CharactersImpl(HtmlCharactersNode* characters) override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "OutlineCss"; }
 
  private:

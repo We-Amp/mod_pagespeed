@@ -143,6 +143,12 @@ class HtmlFilter {
   // that is not page-critical.
   virtual ScriptUsage GetScriptUsage() const = 0;
 
+  // True when this filter must not see a document that a client-side framework
+  // will hydrate, from the flush window in which that is found on. Consulted
+  // by RewriteDriver before each flush window once the page is known to be
+  // hydrated; a filter that stays off for one window stays off for the rest.
+  virtual bool SkippedOnHydratedPages() const { return false; }
+
   // The name of this filter -- used for logging and debugging.
   virtual const char* Name() const = 0;
 

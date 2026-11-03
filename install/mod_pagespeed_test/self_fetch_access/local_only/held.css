@@ -1,0 +1,4 @@
+/* Self-fetch access test: held in a location open to local clients only. */
+.sfa-held-marker   {
+    color :   #ff0000 ;
+}

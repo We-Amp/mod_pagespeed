@@ -50,6 +50,14 @@ Routes (the path after /mod_pagespeed_test/flush_origin/):
   gzip.css                     pre-gzipped CSS (Content-Encoding: gzip)
   content_type_present/        200 text/plain "This file should be proxied"
   content_type_absent/         200 without a Content-Type header (proxying.sh)
+  abort_mid_body.css?key=K     cacheable text/css whose FIRST response for a
+                               given key stops partway: the head of the
+                               stylesheet is sent and flushed, then the
+                               connection is shut down before the closing
+                               rule (with Content-Length promising the whole
+                               body, or, with &mode=chunked, without the last
+                               chunk); every later request for that key gets
+                               the whole stylesheet
   health                       200 "ok" (setup_apache_test.sh readiness probe)
 
 Usage: flush_origin.py --port 8093 --image-dir <dir holding a.jpg>
@@ -59,6 +67,8 @@ import argparse
 import gzip
 import http.server
 import os
+import socket
+import threading
 import time
 from email.utils import formatdate
 from typing import List, Tuple
@@ -96,6 +106,15 @@ XHTML_HEAD = (
     "</head>\n"
     "<body>\n"
 )
+
+
+# abort_mid_body.css: forty complete rules, then the closing rule that only
+# a whole response carries. The cut falls on a rule boundary, so the cut-short
+# stylesheet is still valid CSS and nothing but completeness tells them apart.
+ABORT_CSS_HEAD = "".join(
+    ".abort-rule-%d { color: red; margin: %dpx; }\n" % (i, i) for i in range(40)
+).encode()
+ABORT_CSS_TAIL = b".tail-of-stylesheet { color: blue; }\n"
 
 
 LINK_HEADER_BODY = (
@@ -140,6 +159,42 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
         self._start(content_type, extra, length=len(body))
         self.wfile.write(body)
         self.wfile.flush()
+
+    def _abort_mid_body(self, query):
+        key = query.get("key", [""])[0]
+        if not key:
+            self.send_error(400)
+            return
+        chunked = query.get("mode", ["length"])[0] == "chunked"
+        with self.server.abort_lock:
+            first = key not in self.server.abort_keys_seen
+            self.server.abort_keys_seen.add(key)
+        extra = [("Cache-Control", "max-age=600")]
+        whole = ABORT_CSS_HEAD + ABORT_CSS_TAIL
+        if not first:
+            if chunked:
+                self._start("text/css", extra)
+                self._chunk(ABORT_CSS_HEAD, FLUSH_PAUSE_S)
+                self._chunk(ABORT_CSS_TAIL)
+                self._end_chunks()
+            else:
+                self._whole("text/css", whole, extra)
+            return
+        # Promise the whole stylesheet, deliver its head, then go away the way
+        # a backend that crashed or restarted mid-transfer does.
+        if chunked:
+            self._start("text/css", extra)
+            self._chunk(ABORT_CSS_HEAD, FLUSH_PAUSE_S)
+        else:
+            self._start("text/css", extra, length=len(whole))
+            self.wfile.write(ABORT_CSS_HEAD)
+            self.wfile.flush()
+            time.sleep(FLUSH_PAUSE_S)
+        self.close_connection = True
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
     # -- routes ---------------------------------------------------------------
 
@@ -285,6 +340,8 @@ class FlushOriginHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             self.wfile.flush()
+        elif route == "abort_mid_body.css":
+            self._abort_mid_body(parse_qs(parts.query))
         elif route == "health":
             self._whole("text/plain", b"ok", [])
         else:
@@ -296,6 +353,8 @@ def make_server(port: int, image_dir: str, host: str = "127.0.0.1"):
     server = http.server.ThreadingHTTPServer((host, port), FlushOriginHandler)
     server.daemon_threads = True
     server.image_dir = image_dir
+    server.abort_lock = threading.Lock()
+    server.abort_keys_seen = set()
     return server
 
 

@@ -29,7 +29,9 @@ public:
 	{
 	}
 
-	REQUEST_NOTIFICATION_STATUS OnBeginRequest(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider) override;
+	// Runs after IIS authentication and authorization (see RegisterModule):
+	// everything this module serves for a request is served from here.
+	REQUEST_NOTIFICATION_STATUS OnResolveRequestCache(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider) override;
 	REQUEST_NOTIFICATION_STATUS OnBeginRequestPageSpeed(IN IHttpContext * pHttpContext, IN IHttpEventProvider * pProvider);
 
 	
@@ -77,7 +79,7 @@ private:
 	// failed_pc (out): on NULL-return, populated with the IisProcessContext
 	// whose initialization failed if one exists (e.g. cache-path unwritable),
 	// or nullptr if no process context could even be constructed. The
-	// local-only diagnostic page in OnBeginRequest uses this to render a
+	// local-only diagnostic page in OnResolveRequestCache uses this to render a
 	// per-failure-mode error with the resolved cache path + worker identity
 	// instead of the legacy generic "missing configuration" message.
 	IisModuleRequestContext* CreateRequestContext(IHttpContext *pHttpContext,

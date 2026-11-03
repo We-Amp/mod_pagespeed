@@ -95,11 +95,23 @@ class CssFilter : public RewriteFilter {
   // Add this filters related options to the given vector.
   static void AddRelatedOptions(StringPieceVector* target);
 
+  // Whether a top-level stylesheet of `size` bytes is over
+  // options->css_parse_max_bytes() (a bound <= 0 means none), in which case
+  // the caller must not parse it. When it is over, `counter` is incremented
+  // and a message starting with `what` and naming `url` is logged at most
+  // once per URL per process, and stored in *message if that is non-null.
+  // Every filter that parses a stylesheet as a root checks this first.
+  static bool OverParseMaxBytes(const RewriteOptions* options, int64 size,
+                                StringPiece url, StringPiece what,
+                                Variable* counter, MessageHandler* handler,
+                                GoogleString* message);
+
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
   void CharactersImpl(HtmlCharactersNode* characters) override;
   void EndElementImpl(HtmlElement* element) override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "CssFilter"; }
   const char* id() const override { return RewriteOptions::kCssFilterId; }
   void EncodeUserAgentIntoResourceContext(
@@ -107,6 +119,7 @@ class CssFilter : public RewriteFilter {
 
   static const char kBlocksRewritten[];
   static const char kParseFailures[];
+  static const char kParseMaxBytesExceeded[];
   static const char kFallbackRewrites[];
   static const char kFallbackFailures[];
   static const char kRewritesDropped[];
@@ -202,6 +215,9 @@ class CssFilter : public RewriteFilter {
   Variable* num_blocks_rewritten_;
   // # of CSS blocks that rewriter failed to parse.
   Variable* num_parse_failures_;
+  // # of CSS blocks left unmodified because they are larger than
+  // CssParseMaxBytes.
+  Variable* num_parse_max_bytes_exceeded_;
   // # of CSS blocks that failed to be parsed, but were rewritten in the
   // fallback path.
   Variable* num_fallback_rewrites_;

@@ -275,7 +275,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `ci-release-gate` | hosted | requires a green full-tier `full=true` CI dispatch of the release commit (see "The CI gates") |
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
 | `linux-arm64-release-build` | hosted arm64 | the same for arm64 |
-| `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
+| `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, resolute, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
 | `nginx-arm64-plan`, `nginx-distro-build-arm64`, `nginx-arm64-join` | hosted arm64 | the same for arm64, one matrix job per distro (the plan job lists them from the leg table); the join job runs the gates over the combined set and hands over `asset-nginx-arm64` |
 | `nginx-distro-build-el10` | fleet-heavy, pair | the el10 nginx module rpm, with the gates and a load check into the stock nginx |
 | `vendor-sidecar` | hosted | the release tree of the sidecar pair, prepared on a hosted runner with the steps of `vendor` (hands over `tree-sidecar`) |
@@ -539,7 +539,7 @@ every file through the sums. `SHA256SUMS.asc` is the one release asset that
 | `component` | `module`, `optimizer`, `source`, `sbom` or `sidecar` |
 | `channel` | the routing hint for repository publication: `apt`, `rpm-el9`, `rpm-el10`, `rpm-ea4`, or `none` (a direct download only) |
 | `channel_also` | further channels the same file belongs to: the optimizer rpms are also in `rpm-el10` |
-| `distro` | a deb suite (`noble`, `bookworm`, `trixie`, `jammy`), an rpm family (`el8`, `el9`, `el10`) or `any` |
+| `distro` | a deb suite (`noble`, `resolute`, `bookworm`, `trixie`, `jammy`), an rpm family (`el8`, `el9`, `el10`) or `any` |
 | `arch` | `x64`, `arm64` or `any` |
 
 `channel` values: debs are `apt` and the suite is in `distro` (also in the
@@ -661,6 +661,85 @@ repository, which packs the pair into
   the spec: `%global mps_version` in `packaging/cpanel` must be bumped with the
   module version.
 
+## The nginx.org rebuild lane
+
+`nginx-org-rebuild.yml` builds `nginx-module-pagespeed-nginxorg`, the module
+for nginx.org's stable nginx (the nginx of the official nginx Docker image),
+for the cells of the `nginxorg` set in `tools/ci/release_nginx.sh` (Debian 13
+and Ubuntu 24.04 as debs, Enterprise Linux 9 as an rpm, x86_64). That nginx
+moves on its own schedule, and a dynamic module loads only into the exact
+nginx it was built against, so the lane rebuilds the current module release
+for each new nginx.org stable patch without a module release.
+
+**Dispatch.** By a person, on the tag of the current module release:
+
+```
+gh workflow run nginx-org-rebuild.yml --ref module-vX.Y.Z \
+  -f nginx_version=A.B.C -f nginx_sha256=<sha256 of nginx-A.B.C.tar.gz> -f dry_run=true
+```
+
+`lane_revision` (default 0) rebuilds the same module and nginx pair;
+`previous_nginx_version` and `previous_nginx_sha256` are needed only for a
+cell's first ship (below). `dry_run` defaults to true: build, test and
+validate, sign and release nothing.
+
+**What it checks before it builds** (`plan`): the input grammar; that the tag
+is the module release `/releases/latest` names, published and not a
+pre-release; that no tag or release exists yet for this pair and revision;
+the release's `SHA256SUMS` signature against `RELEASE-SIGNING-KEY.asc`, the
+manifest and source tarball rows, and that the tag's commit is the
+manifest's `source_sha`; the nginx tarball against the given sha256, and its
+signature against nginx.org's signing keys pinned in
+`tools/ci/nginx-org-source-signers.asc`; and, per cell, the newest published
+package, read from the repository's signed `InRelease` and `Packages` index
+(for Enterprise Linux 9: the yum tree's `repomd.xml`, its detached signature
+by the repository key, and the `primary` index it lists).
+An nginx on another stable line than the published package, or older than
+it, is refused: a new stable line is a change of the leg table, not a
+dispatch.
+
+**Build and tests.** The packages are built from the release's own source
+tarball (its commit stamp must be the release commit) with the build scripts
+of that tree, driven by `tools/ci/release_nginx.sh` from `master`, so the
+leg table, the gates and the tests can change without a module release. Then
+the exact-set check, the version and nginx pin of every package, the
+symbol-leak gate and the load check (nginx.org's nginx on each cell, and the
+`nginx:<version>` image for Debian 13). The upgrade tests
+(`test/package-test/check-nginx-org-upgrade.sh`) start from each cell's
+published package; a cell with none is on its first ship, and the lane then
+builds the previous nginx.org patch from the same tree to start from. With the
+same nginx on both sides (after a module release, or for a lane revision) the
+scenarios that need a newer nginx do not run.
+
+**Versions.** The package version names the module release, the nginx and a
+lane revision: `X.Y.Z-r0+ngxA.B.C~trixie`, then `X.Y.Z-r0+ngxA.B.C.1~trixie`
+for revision 1, which sorts above the first build of the pair and below
+`X.Y.Z-r0+ngxA.B.D~trixie`. The rpm carries the same in its release:
+`X.Y.Z-0.ngxA.B.C.el9`, then `X.Y.Z-0.ngxA.B.C.1.el9`. A new module release
+sorts above every build of the previous one, so a module release is followed
+by a lane run at the current nginx.
+
+**A real run** (`dry_run` false) signs `SHA256SUMS` and creates the release
+`nginxorg-vX.Y.Z-ngxA.B.C` (`-rN` for a revision) at the module release's
+commit, in the jobs of the `release` environment, as the module lane does. The
+release is made with the workflow token, so creating its tag starts no other
+workflow, and is never marked latest; `release.yml` passes only `module-v*`
+tags to the module lane. The asset set is checked by `release_manifest.py`
+with the profile `nginxorg`: one package per cell, nothing else, and the
+manifest also carries `nginx_version` and `nginx_sha256`.
+
+Every job runs on a GitHub-hosted runner.
+
+**Where each part comes from.** The workflow file runs from the release tag
+(the `release` environment admits only `module-v*` refs), so the lane exists
+from the first module release whose tree carries it, and a change to the
+workflow file takes effect with the next module release. Everything it runs
+comes from `master`: the tooling, the tests, the key files and the key
+fingerprints (`tools/ci/nginx_org_lane.sh pins`), so a new nginx.org signing
+key or a gate change needs no release. The build scripts of the packages are
+the release tree's; a tree that cannot build the lane's version shape fails
+the version check before anything is published.
+
 ## Tooling
 
 | File | Purpose |
@@ -668,6 +747,8 @@ repository, which packs the pair into
 | `tools/ci/release_version.sh` | tag grammar, derived versions, VERSION stamping (`--self-test`) |
 | `tools/ci/release_manifest.py` | asset set, `SHA256SUMS`, `manifest.json`, verification (`--self-test`) |
 | `tools/ci/release_nginx.sh` | the nginx distro legs and their gates (`--self-test`) |
+| `tools/ci/nginx_org_lane.sh` | the checks of the nginx.org rebuild lane: inputs, pinned-key signatures, the release set, the signed package index, the previous package, the stable line (`--self-test`) |
+| `tools/ci/nginx-org-source-signers.asc` | the nginx.org signing keys the lane checks nginx source releases against |
 | `tools/ci/release_sidecar.sh` | the sidecar native pair: build, gates, smoke, strip, tests, the release tarballs (`--self-test`) |
 | `tools/ci/sidecar_pair_manifest.py` | `sidecar-pair.json`, and its verification against the tarballs (`--self-test`) |
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |

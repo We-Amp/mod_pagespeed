@@ -40,7 +40,7 @@ message AssociatedImageInfo {
 // is a sequence of input URLs and a filter id. The input array
 // tells us which inputs are used to construct this output; it must be
 // interpreted using the URL-sequence that was used to form the key.
-// Next free tag: 29
+// Next free tag: 32
 message CachedResult {
   // Tags 1-7 are for internal use by output_resource.
 
@@ -169,6 +169,17 @@ message CachedResult {
   // field default (DEP_JAVASCRIPT) and emit rel=preload; as=script for a
   // module, which double-fetches (see dependencies.proto).
   repeated Dependency collected_module_dependency = 29;
+
+  // Bytes of images inlined into the stylesheet this result holds, its
+  // flattened imports included. Charged against the image inlining budget of
+  // the HTML the stylesheet is inlined into, each time it is rendered there.
+  optional int64 inlined_image_bytes = 30;
+
+  // The output's Cache-Control as decided from its inputs, before the
+  // serving-time 'public, immutable' stamp. A conditional request for the
+  // rewritten URL builds its 304 from this, without loading the output or its
+  // inputs. Absent on records from older versions; those get a bare 304.
+  optional string output_cache_control = 31;
 }
 
 // Contains the mapping of input URLs to output URLs.  In the general

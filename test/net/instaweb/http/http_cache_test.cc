@@ -392,6 +392,20 @@ TEST_F(HTTPCacheTest, StaticInflatingFetch) {
   http_cache_->SetCompressionLevel(0);  // Return cache to uncompressed.
 }
 
+// The size a cached gzipped body may be inflated to follows the cacheable body
+// size limit, and is bounded even when that limit is off.
+TEST_F(HTTPCacheTest, InflatedBodyLimitFollowsCacheableSize) {
+  EXPECT_EQ(InflatingFetch::kMaxInflatedBytes,
+            http_cache_->MaxInflatedBodyBytes());
+  http_cache_->set_max_cacheable_response_content_length(1000);
+  EXPECT_EQ(1000, http_cache_->MaxInflatedBodyBytes());
+  http_cache_->set_max_cacheable_response_content_length(
+      InflatingFetch::kMaxInflatedBytes * 4);
+  EXPECT_EQ(InflatingFetch::kMaxInflatedBytes,
+            http_cache_->MaxInflatedBodyBytes());
+  http_cache_->set_max_cacheable_response_content_length(-1);
+}
+
 TEST_F(HTTPCacheTest, PutGetCompressedJpg) {
   // Check to see that when compression is on, data put into the cache is
   // properly compressed, and can be retrieved if the callback accepts gzipped

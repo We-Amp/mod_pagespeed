@@ -51,6 +51,7 @@ class JsInlineFilter : public CommonFilter {
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
   void CharactersImpl(HtmlCharactersNode* characters) override;
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "InlineJs"; }
   // Inlining javascript from unauthorized domains into HTML is considered
   // safe because it does not cause any new content to be executed compared

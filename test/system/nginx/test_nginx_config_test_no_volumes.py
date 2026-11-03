@@ -19,12 +19,13 @@ def test_config_test_creates_no_cache_files(tmp_path):
     cache = tmp_path / "fresh_cache"
     cache.mkdir()
     text = open(conf).read()
+    occurrences = text.count("FileCachePath")
     text, n = re.subn(
         r"pagespeed\s+FileCachePath\s+[^;]+;", f"pagespeed FileCachePath {cache};", text
     )
     if n == 0:
         pytest.skip("the test config carries no FileCachePath (module not loaded)")
-    assert n == 1, "expected exactly one FileCachePath in the test config"
+    assert n == occurrences, f"redirected {n} of {occurrences} FileCachePath occurrences"
     test_conf = os.path.join(os.path.dirname(conf), "nginx_config_test_only.conf")
     with open(test_conf, "w") as f:
         f.write(text)

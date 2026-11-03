@@ -158,7 +158,12 @@ stage_install_common() {
   local BAZEL_SO="${SRCDIR}/bazel-bin/libmod_pagespeed.so"
 
   if [ -f "${BAZEL_SO}" ]; then
+    # Debug information does not go in the package: strip the staged copy here,
+    # the one place every deb and rpm passes through. The release keeps it as a
+    # separate asset for crash analysis.
     install -m 644 "${BAZEL_SO}" "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so"
+    command -v strip >/dev/null 2>&1 || { echo "ERROR: strip (binutils) is required" >&2; exit 1; }
+    strip --strip-debug "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so" || { echo "ERROR: could not strip the module" >&2; exit 1; }
   elif [ -f "${BUILDDIR}/libmod_pagespeed.so" ]; then
     # Legacy GYP path
     install -m 644 -s "${BUILDDIR}/libmod_pagespeed.so" "${STAGEDIR}${APACHE_MODULEDIR}/mod_pagespeed.so"

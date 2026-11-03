@@ -1,0 +1,1156 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 We-Amp B.V.
+
+# Secondary-port test servers for test/system/run_nginx_tests.sh: the nginx form
+# of the name-based VirtualHosts in test/system/setup_apache_test.sh (lane
+# fixtures secondary_vhosts and experiment_framework), same names and options.
+# @@PORT@@, @@DOC_ROOT@@, @@CACHE@@ and @@COMMON@@ are filled in by the runner;
+# @@COMMON@@ holds the settings an Apache vhost inherits. Left out: .htaccess
+# overrides and ProxyAuth, which nginx does not have, and
+# selfsigned.modpagespeed.com, which needs the external_origin fixture.
+
+pagespeed CreateSharedMemoryMetadataCache "@@CACHE@@_with_shm" 8192;
+
+server {
+    listen @@PORT@@;
+    server_name secondary.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "secondary.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed on;
+    pagespeed FileCachePath "@@CACHE@@_secondary";
+    pagespeed CompressMetadataCache false;
+    pagespeed MapProxyDomain secondary.example.com/gstatic_images http://www.gstatic.com/psa/static;
+
+    pagespeed CacheFlushFilename cache.flush;
+    # If you uncomment this, the test will fail, proving we can disable
+    # cache-flush polling.
+    # ModPagespeedCacheFlushPollIntervalSec 0
+
+    # Helps testing that the deprecated ReportUnloadTime option still parses
+    # and stays a no-op (the beacon always sends on page-hide).
+    pagespeed ReportUnloadTime on;
+
+    # Make a non-empty subdirectory config to make sure that
+    # cache.flush updates get transmitted to nested configurations.
+    location /cache_flush/ {
+        pagespeed RewriteLevel PassThrough;
+        pagespeed EnableFilters inline_css;
+        pagespeed DisableFilters add_instrumentation;
+    }
+}
+
+# Sets up a virtual host where we can specify forbidden filters without
+# affecting any other hosts.
+server {
+    listen @@PORT@@;
+    server_name forbidden.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "forbidden.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed BlockingRewriteKey psatest;
+    pagespeed FileCachePath "@@CACHE@@";
+    # Start with all core filters enabled ...
+    pagespeed RewriteLevel CoreFilters;
+    # ... then forbid these filters ...
+    pagespeed ForbidFilters remove_quotes,remove_comments,collapse_whitespace;
+    pagespeed ForbidFilters rewrite_css,resize_images;
+    # ... and disable but not forbid this one (to ensure we retain its URL).
+    pagespeed DisableFilters inline_css;
+}
+
+server {
+    listen @@PORT@@;
+    server_name unauthorizedresources.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "unauthorizedresources.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed InlineResourcesWithoutExplicitAuthorization Script,Stylesheet;
+    pagespeed CssInlineMaxBytes 1000000;
+}
+
+server {
+    listen @@PORT@@;
+    server_name pagespeed-off.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "pagespeed-off.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed off;
+    pagespeed EnableFilters collapse_whitespace;
+}
+
+server {
+    listen @@PORT@@;
+    server_name pagespeed-on.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "pagespeed-on.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed on;
+    pagespeed EnableFilters collapse_whitespace;
+}
+
+server {
+    listen @@PORT@@;
+    server_name pagespeed-unplugged.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "pagespeed-unplugged.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed unplugged;
+    pagespeed EnableFilters collapse_whitespace;
+}
+
+server {
+    listen @@PORT@@;
+    server_name pagespeed-standby.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "pagespeed-standby.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed standby;
+    pagespeed EnableFilters collapse_whitespace;
+}
+
+server {
+    listen @@PORT@@;
+    server_name url-attribute.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "url-attribute.example.com" always;
+
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    # Don't actually try to rewrite any resources; the ones in
+    # rewrite_domains.html don't actually exist.
+    pagespeed RewriteLevel PassThrough;
+
+    # This is used for testing dynamically defined url-valued
+    # attributes
+    pagespeed UrlValuedAttribute span src Hyperlink;
+    pagespeed UrlValuedAttribute hr imgsrc Image;
+    pagespeed DomainRewriteHyperlinks on;
+    pagespeed MapRewriteDomain http://dst.example.com http://src.example.com;
+    pagespeed EnableFilters rewrite_domains;
+    pagespeed UrlValuedAttribute custom a Image;
+    pagespeed UrlValuedAttribute custom b otherResource;
+    pagespeed UrlValuedAttribute custom c hyperlink;
+    pagespeed UrlValuedAttribute img alt-src Image;
+    pagespeed UrlValuedAttribute video alt-a Image;
+    pagespeed UrlValuedAttribute video alt-b Image;
+    pagespeed UrlValuedAttribute video alt-b Image;
+
+    pagespeed UrlValuedAttribute link data-stylesheet Stylesheet;
+    pagespeed UrlValuedAttribute span data-stylesheet-a Stylesheet;
+    pagespeed UrlValuedAttribute span data-stylesheet-b Stylesheet;
+    pagespeed UrlValuedAttribute span data-stylesheet-c Stylesheet;
+
+    # Also test that we can redefine spec-defined attributes.
+    pagespeed UrlValuedAttribute blockquote cite Image;
+}
+
+# The CDN in our example which simply forwards requests to the proxy.
+server {
+    listen @@PORT@@;
+    server_name cdn.pm.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "cdn.pm.example.com" always;
+
+    # Point the docroot somewhere useless so that we know we're not fetching
+    # from the CDN's filesystem. Note that in particular we are not attempting to
+    # run CGI scripts.
+    root @@DOC_ROOT@@/mod_pagespeed_example/cgi;
+
+    # Tell mod_proxy that we need to use a proxy to reach our VirtualHost servers.
+
+    # Unplugged so that it passes the .pagespeed. requests through to the proxy.
+    pagespeed unplugged;
+    location ^~ /external/ {
+        proxy_pass http://127.0.0.1:@@PORT@@/external/;
+        proxy_set_header Host proxy.pm.example.com;
+    }
+}
+
+# The proxy that runs MPS and can proxy data from origin. When the CDN
+# requests proxied data from the proxy the proxy knows to fetch it from the
+# origin server.
+server {
+    listen @@PORT@@;
+    server_name proxy.pm.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "proxy.pm.example.com" always;
+    root @@DOC_ROOT@@/mod_pagespeed_test;
+    # The usual cache location so that it gets cleared for on_cache_flush tests.
+    pagespeed FileCachePath "@@CACHE@@";
+
+    # We have to fetch through our localhost proxy to get to our other vhosts.
+    pagespeed FetchProxy "localhost:@@PORT@@";
+
+    # Origin resources should be optimized and hosted on proxy/external but
+    # rewritten to cdn/external.
+    pagespeed Domain proxy.pm.example.com;
+    pagespeed MapProxyDomain proxy.pm.example.com/external origin.pm.example.com cdn.pm.example.com/external;
+    pagespeed RewriteLevel CoreFilters;
+    pagespeed RewriteDeadlinePerFlushMs -1;
+}
+
+# The origin that serves the images to be proxied (Puzzle.jpg)
+server {
+    listen @@PORT@@;
+    server_name origin.pm.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "origin.pm.example.com" always;
+    root @@DOC_ROOT@@/mod_pagespeed_example/images;
+    pagespeed unplugged;
+}
+
+# For testing setting options by cookies.
+server {
+    listen @@PORT@@;
+    server_name options-by-cookies-enabled.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "options-by-cookies-enabled.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@_optionsbycookieson";
+    pagespeed AllowOptionsToBeSetByCookies true;
+    pagespeed StickyQueryParameters sticky_secret;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters collapse_whitespace;
+    pagespeed DisableFilters remove_comments,add_instrumentation;
+}
+
+server {
+    listen @@PORT@@;
+    server_name options-by-cookies-disabled.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "options-by-cookies-disabled.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@_optionsbycookiesoff";
+    pagespeed AllowOptionsToBeSetByCookies false;
+    pagespeed DisableFilters add_instrumentation;
+}
+
+# For testing request option overriding.
+server {
+    listen @@PORT@@;
+    server_name request-option-override.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "request-option-override.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RequestOptionOverride abc;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters collapse_whitespace;
+    pagespeed DisableFilters remove_comments,add_instrumentation;
+}
+
+# For testing signed urls.
+server {
+    listen @@PORT@@;
+    server_name signed-urls.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "signed-urls.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed UrlSigningKey helloworld;
+    pagespeed RewriteLevel PassThrough;
+}
+
+# For testing signed urls, ignoring signature validity.
+server {
+    listen @@PORT@@;
+    server_name signed-urls-transition.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "signed-urls-transition.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed UrlSigningKey helloworld;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed AcceptInvalidSignatures true;
+}
+
+server {
+    listen @@PORT@@;
+    server_name unsigned-urls-transition.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "unsigned-urls-transition.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    # This server will not sign URLs, but AcceptInvalidSignatures is on.
+    pagespeed RewriteLevel PassThrough;
+    pagespeed AcceptInvalidSignatures true;
+}
+
+server {
+    listen @@PORT@@;
+    server_name compressedcache.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "compressedcache.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed on;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css;
+    pagespeed HttpCacheCompressionLevel 9;
+}
+
+server {
+    listen @@PORT@@;
+    server_name uncompressedcache.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "uncompressedcache.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed on;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css;
+    pagespeed HttpCacheCompressionLevel 0;
+}
+
+server {
+    listen @@PORT@@;
+    server_name ipro-for-browser.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "ipro-for-browser.example.com" always;
+    pagespeed EnableFilters rewrite_images,rewrite_css;
+    pagespeed EnableFilters convert_to_webp_lossless;
+    pagespeed JpegRecompressionQuality 75;
+    pagespeed WebpRecompressionQuality 70;
+    pagespeed InPlaceResourceOptimization on;
+    root @@DOC_ROOT@@/mod_pagespeed_example;
+    pagespeed FileCachePath "@@CACHE@@_ipro_for_browser";
+}
+
+server {
+    listen @@PORT@@;
+    server_name ipro-for-browser-vary-on-auto.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "ipro-for-browser-vary-on-auto.example.com" always;
+    pagespeed EnableFilters rewrite_images,rewrite_css;
+    pagespeed EnableFilters convert_to_webp_lossless;
+    pagespeed EnableFilters convert_to_webp_animated;
+    pagespeed InPlaceResourceOptimization on;
+    pagespeed ImageRecompressionQuality 90;
+    pagespeed JpegRecompressionQuality 75;
+    pagespeed JpegRecompressionQualityForSmallScreens 55;
+    pagespeed JpegQualityForSaveData 35;
+    pagespeed WebpRecompressionQuality 70;
+    pagespeed WebpRecompressionQualityForSmallScreens 50;
+    pagespeed WebpQualityForSaveData 30;
+    pagespeed WebpAnimatedRecompressionQuality 60;
+    root @@DOC_ROOT@@/mod_pagespeed_example;
+    pagespeed FileCachePath "@@CACHE@@_ipro_for_browser";
+}
+
+server {
+    listen @@PORT@@;
+    server_name ipro-for-browser-vary-on-none.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "ipro-for-browser-vary-on-none.example.com" always;
+    pagespeed EnableFilters rewrite_images;
+    pagespeed InPlaceResourceOptimization on;
+    pagespeed ImageRecompressionQuality 75;
+    root @@DOC_ROOT@@/mod_pagespeed_example;
+    pagespeed FileCachePath "@@CACHE@@_ipro_for_browser";
+}
+
+# For testing Modpagespeed unplugged.
+server {
+    listen @@PORT@@;
+    server_name mpsunplugged.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "mpsunplugged.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed unplugged;
+}
+
+# For testing Modpagespeed off.
+server {
+    listen @@PORT@@;
+    server_name mpsoff.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "mpsoff.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@_mpsoff";
+    # nginx's off is unplugged by design (ngx_rewrite_options.cc), which
+    # system/test_pagespeed_modes.py's TestPageSpeedOff cases cover; its
+    # test_unplugged_and_off is about Apache's off and does not run on nginx.
+    pagespeed off;
+}
+
+# Set up a reverse proxy (rproxy.) and origin (origin.) as vhosts for
+# showing that we can configure PageSpeed via response headers.
+server {
+    listen @@PORT@@;
+    server_name rproxy.rmcomments.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "rproxy.rmcomments.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed DisableFilters add_instrumentation,remove_comments;
+    # Note that we don't enable remove_comments here; that setting comes from
+    # the response headers from origin.rmcomments.example.com
+    location ^~ / {
+        proxy_pass http://127.0.0.1:@@PORT@@/;
+        proxy_set_header Host origin.rmcomments.example.com;
+    }
+}
+
+server {
+    listen @@PORT@@;
+    server_name origin.rmcomments.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "origin.rmcomments.example.com" always;
+    pagespeed FileCachePath "@@CACHE@@";
+    root @@DOC_ROOT@@;
+    pagespeed unplugged;
+    add_header PageSpeedFilters remove_comments;
+}
+
+server {
+    listen @@PORT@@;
+    server_name purge.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "purge.example.com" always;
+
+    # Test purging individual URLs without flushing the entire metadata cache.
+    pagespeed EnableCachePurge on;
+
+    pagespeed PurgeMethod PURGE;
+    root @@DOC_ROOT@@/purge;
+    pagespeed FileCachePath "@@CACHE@@_purge";
+    pagespeed DisableFilters add_instrumentation;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css;
+}
+
+# For testing ModPagespeed off, but with a directory-scope turning it
+# back on.
+server {
+    listen @@PORT@@;
+    server_name psoff-dir-on.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "psoff-dir-on.example.com" always;
+    root @@DOC_ROOT@@/purge;
+    pagespeed FileCachePath "@@CACHE@@_mpsoff_dir_on";
+    # Apache's off is nginx's standby: .pagespeed. resources are still served
+    # and the location below turns rewriting on.
+    pagespeed standby;
+    pagespeed EnableCachePurge on;
+    pagespeed PurgeMethod PURGE;
+    pagespeed DisableFilters add_instrumentation;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css;
+    location / {
+        pagespeed on;
+    }
+}
+
+# For testing ModPagespeed off, but with an htaccess turning it
+# back on.
+server {
+    listen @@PORT@@;
+    server_name psoff-htaccess-on.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "psoff-htaccess-on.example.com" always;
+    root @@DOC_ROOT@@/purge;
+    pagespeed FileCachePath "@@CACHE@@_mpsoff_htaccess_on";
+    # Apache's off is nginx's standby (see psoff-dir-on.example.com). On nginx
+    # this server is the same as that one: there is no .htaccess, so its one
+    # directive becomes the same location block. It is kept so that the lane
+    # runs all four purge-off cases of test_cache_purge.py.
+    pagespeed standby;
+    pagespeed EnableCachePurge on;
+    pagespeed PurgeMethod PURGE;
+    pagespeed DisableFilters add_instrumentation;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css;
+    # install/mod_pagespeed_test/purge/.htaccess ("ModPagespeed on"), which
+    # Apache reads from this server's document root.
+    location / {
+        pagespeed on;
+    }
+}
+
+server {
+    listen @@PORT@@;
+    server_name messages-allowed.example.com messages-not-allowed.example.com more-messages-allowed.example.com anything-a-wildcard.example.com anything-b-wildcard.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "messages-allowed.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+}
+
+server {
+    listen @@PORT@@;
+    server_name messages-still-not-allowed.example.com but-this-message-allowed.example.com and-this-one.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "messages-still-not-allowed.example.com" always;
+    pagespeed MessagesDomains Allow but-this-message-allowed.example.com;
+    pagespeed MessagesDomains Allow and-this-one.example.com;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+}
+
+server {
+    listen @@PORT@@;
+    server_name cleared-inherited.example.com cleared-inherited-reallowed.example.com messages-allowed-at-vhost.example.com messages-not-allowed-at-vhost.example.com anything-c-wildcard.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "cleared-inherited.example.com" always;
+    pagespeed MessagesDomains Disallow *;
+    pagespeed MessagesDomains Allow cleared-inherited-reallowed.example.com;
+    pagespeed MessagesDomains Allow messages-allowed-at-vhost.example.com;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+}
+
+server {
+    listen @@PORT@@;
+    server_name cleared-inherited-unlisted.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "cleared-inherited-unlisted.example.com" always;
+
+    pagespeed MessagesDomains Allow *;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+}
+
+server {
+    listen @@PORT@@;
+    server_name nothing-allowed.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "nothing-allowed.example.com" always;
+    pagespeed MessagesDomains Disallow *;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+}
+
+server {
+    listen @@PORT@@;
+    server_name nothing-explicitly-allowed.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "nothing-explicitly-allowed.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+}
+
+server {
+    listen @@PORT@@;
+    server_name everything-explicitly-allowed.example.com everything-explicitly-allowed-but-aliased.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "everything-explicitly-allowed.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed StatisticsDomains Allow everything-explicitly-allowed.example.com;
+    pagespeed GlobalStatisticsDomains Allow everything-explicitly-allowed.example.com;
+    pagespeed MessagesDomains Allow everything-explicitly-allowed.example.com;
+    pagespeed ConsoleDomains Allow everything-explicitly-allowed.example.com;
+    pagespeed AdminDomains Allow everything-explicitly-allowed.example.com;
+    pagespeed GlobalAdminDomains Allow everything-explicitly-allowed.example.com;
+}
+
+server {
+    listen @@PORT@@;
+    server_name debug-filters.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "debug-filters.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters debug;
+}
+
+server {
+    listen @@PORT@@;
+    server_name flush.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "flush.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@_test";
+    pagespeed on;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed RewriteDeadlinePerFlushMs 1;
+    pagespeed DisableFilters add_instrumentation;
+}
+
+server {
+    listen @@PORT@@;
+    server_name broken-fetch.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "broken-fetch.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@/broken-fetch";
+
+    # Set up a fetch proxy that will 404 every request.
+    pagespeed FetchProxy "brokenfetch.example.com:1111";
+
+    # Prevent loopback fetch by explicitly authorizing the domain.  Loopback
+    # fetches would work, and for this test, we're trying to have fetches fail,
+    # so they are instead picked up by the ipro recorder.
+    pagespeed Domain http://broken-fetch.example.com;
+    pagespeed InPlaceResourceOptimization on;
+
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_javascript;
+    pagespeed DisableFilters add_instrumentation;
+    pagespeed CriticalImagesBeaconEnabled false;
+    pagespeed CriticalCssAboveTheFoldOnly off;
+}
+
+# Test image rewrites for parent,child nodes and flush.
+server {
+    listen @@PORT@@;
+    server_name image-rewrite-with-flush.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "image-rewrite-with-flush.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed UrlValuedAttribute li data-thumb image;
+    pagespeed EnableFilters core;
+}
+
+server {
+    listen @@PORT@@;
+    server_name respectvary.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "respectvary.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed RespectVary on;
+    add_header Vary User-Agent;
+}
+
+# For testing handling of redirected requests.
+server {
+    listen @@PORT@@;
+    server_name redirect.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "redirect.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters add_instrumentation,collapse_whitespace;
+    location /redirect/ {
+        rewrite ^/redirect/(.*)$ /$1 redirect;
+    }
+}
+
+# Test host for issue 809: losing extra headers with cache-control set early.
+server {
+    listen @@PORT@@;
+    server_name issue809.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "issue809.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    add_header Issue809 Issue809Value;
+    add_header Cache-Control max-age=60;
+
+    # The tests using this vhost scan for css-combine URLs and will not find
+    # them if the combined css file is then css-minified.  So we explicitly
+    # disable these and other distracting filters for easy output scanning.
+    pagespeed DisableFilters rewrite_css,add_instrumentation,flatten_css_imports;
+    pagespeed EnableFilters rewrite_images,combine_css;
+    pagespeed CriticalImagesBeaconEnabled false;
+    pagespeed ModifyCachingHeaders on;
+}
+
+# nginx does not read a SlurpDirectory, so the recorded response the Apache
+# vhost replays (install/mod_pagespeed_test/bogus_content_encoding/
+# content-encoding.example.com/, -- 200, text/html, Content-Length 0,
+# Content-Encoding nonsense) is served by an origin server on this port.
+server {
+    listen @@PORT@@;
+    server_name content-encoding.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "content-encoding.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters debug;
+    location = / {
+        proxy_pass http://127.0.0.1:@@PORT@@/bogus_content_encoding;
+        proxy_set_header Host content-encoding-origin.example.com;
+    }
+}
+
+server {
+    listen @@PORT@@;
+    server_name content-encoding-origin.example.com;
+    add_header X-Test-Vhost "content-encoding-origin.example.com" always;
+    pagespeed unplugged;
+    location = /bogus_content_encoding {
+        default_type text/html;
+        add_header Content-Encoding nonsense;
+        add_header X-Test-Vhost "content-encoding-origin.example.com" always;
+        return 200 "";
+    }
+}
+
+server {
+    listen @@PORT@@;
+    server_name absolute-urls.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "absolute-urls.example.com" always;
+
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    # This is used for testing that we don't load resources from
+    # absolute urls during resource reconstruction unless they're for
+    # our own hostname.  While ModPagespeedDomain should no longer
+    # have an effect on whether we load absolute urls, we need to
+    # include it to be sure we're failing because of the code under
+    # test and not because the domain lawyer is rejecting it.
+    pagespeed Domain http://example.com;
+}
+
+# Sets up a logical home-page server on
+# max-cacheable-content-length.example.com.  This server is only used to test
+# ModPagespeedMaxCacheableContentLength, i.e.,
+# max_cacheable_response_content_length.
+server {
+    listen @@PORT@@;
+    server_name max-cacheable-content-length.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "max-cacheable-content-length.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed BlockingRewriteKey psatest;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_javascript;
+    pagespeed MaxCacheableContentLength 85;
+}
+
+# Test how load from file handles maximum sizes.
+server {
+    listen @@PORT@@;
+    server_name lff-large-files.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "lff-large-files.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed MaxCacheableContentLength 4096;
+    pagespeed LoadFromFile "http://lff-large-files.example.com/" "@@DOC_ROOT@@/";
+}
+
+server {
+    listen @@PORT@@;
+    server_name lff-large-files-no-fallback.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "lff-large-files-no-fallback.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed MaxCacheableContentLength 4096;
+    # http://lff-large-files-no-fallback.example.com/foo.css won't load, because
+    # we've configured a LoadFromFile pattern that doesn't match the path the
+    # webserver would take.
+    pagespeed LoadFromFile "http://lff-large-files-no-fallback.example.com/" "@@DOC_ROOT@@/mod_pagespeed_example/styles/";
+}
+
+server {
+    listen @@PORT@@;
+    server_name domain-hyperlinks-on.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "domain-hyperlinks-on.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    # Don't actually try to rewrite any resources; the ones in
+    # rewrite_domains.html don't actually exist.
+    pagespeed RewriteLevel PassThrough;
+
+    pagespeed DomainRewriteHyperlinks on;
+    pagespeed MapRewriteDomain http://dst.example.com http://src.example.com;
+    pagespeed EnableFilters rewrite_domains;
+}
+
+server {
+    listen @@PORT@@;
+    server_name domain-hyperlinks-off.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "domain-hyperlinks-off.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    # Don't actually try to rewrite any resources; the ones in
+    # rewrite_domains.html don't actually exist.
+    pagespeed RewriteLevel PassThrough;
+
+    pagespeed DomainRewriteHyperlinks off;
+    pagespeed MapRewriteDomain http://dst.example.com http://src.example.com;
+    pagespeed EnableFilters rewrite_domains;
+}
+
+server {
+    listen @@PORT@@;
+    server_name client-domain-rewrite.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "client-domain-rewrite.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    # Don't actually try to rewrite any resources; the ones in
+    # rewrite_domains.html don't actually exist.
+    pagespeed RewriteLevel PassThrough;
+
+    pagespeed MapRewriteDomain http://client-domain-rewrite.example.com http://localhost;
+    pagespeed ClientDomainRewrite true;
+    pagespeed EnableFilters rewrite_domains;
+}
+
+server {
+    listen @@PORT@@;
+    server_name map-static-domain.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "map-static-domain.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed MapRewriteDomain http://static-cdn.example.com http://map-static-domain.example.com;
+
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters defer_javascript,rewrite_domains;
+}
+
+# The downstreamcacherebeacon vhost setup in the below section is used in
+# apache system tests to make sure that downstream caching and rebeaconing
+# interact correctly.
+server {
+    listen @@PORT@@;
+    server_name downstreamcacherebeacon.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "downstreamcacherebeacon.example.com" always;
+
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed CriticalImagesBeaconEnabled true;
+
+    # Enable the downstream caching feature and specify a rebeaconing key.
+    pagespeed DownstreamCachePurgeLocationPrefix "http://localhost:8020";
+    pagespeed DownstreamCachePurgeMethod "PURGE";
+    pagespeed DownstreamCacheRebeaconingKey random_rebeaconing_key;
+
+    # The origin marks its HTML privately cacheable: the case downstream caching
+    # is about, and what the tests assert on the page's response. Only the HTML.
+    # The page's stylesheet and image keep Apache's default headers so that
+    # PageSpeed may fetch and use them; a resource served with
+    # "Cache-Control: private" is never fetched for rewriting, and without the
+    # stylesheet's selectors there is nothing for the critical-CSS beacon to
+    # instrument (issue #1060).
+    location ~ "\.html$" {
+        add_header X-Test-Vhost "downstreamcacherebeacon.example.com" always;
+        add_header Cache-Control "private, max-age=3000";
+    }
+}
+
+server {
+    listen @@PORT@@;
+    server_name downstreamcacheresource.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "downstreamcacheresource.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_images;
+    pagespeed DownstreamCachePurgeLocationPrefix "http://localhost:@@PORT@@/purge";
+}
+
+server {
+    listen @@PORT@@;
+    server_name experiment.devicematch.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "experiment.devicematch.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed RewriteLevel PassThrough;
+
+    pagespeed RunExperiment on;
+    pagespeed UseAnalyticsJs false;
+    pagespeed ExperimentSpec "id=1;percent=100;matches_device_type=mobile;enable=recompress_images";
+}
+
+server {
+    listen @@PORT@@;
+    server_name experiment.ajax.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "experiment.ajax.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed RewriteLevel CoreFilters;
+    pagespeed DisableFilters add_instrumentation;
+    pagespeed RunExperiment on;
+    pagespeed UseAnalyticsJs false;
+    pagespeed JsInlineMaxBytes 1;
+    pagespeed ExperimentSpec "id=1;percent=100;level=CoreFilters;enable=collapse_whitespace;options=JsInlineMaxBytes=1";
+}
+
+# debug.conf.template:1863-1870 (#EXPERIMENT_GA block, made its own vhost
+# instead of a whole-server config -- see system/test_experiments.py's
+# TestExperimentFramework docstring for the fold with #EXPERIMENT_NO_GA).
+server {
+    listen @@PORT@@;
+    server_name experiment.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "experiment.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed RunExperiment on;
+    pagespeed AnalyticsID "123-45-6734";
+    pagespeed UseAnalyticsJs false;
+    pagespeed ExperimentVariable 2;
+    pagespeed ExperimentSpec "id=7;enable=recompress_images,rewrite_javascript;disable=convert_jpeg_to_progressive;percent=50;options=AvoidRenamingIntrospectiveJavascript=off,JsInlineMaxBytes=4";
+    pagespeed ExperimentSpec "id=2;enable=recompress_images,rewrite_javascript;percent=50;options=AvoidRenamingIntrospectiveJavascript=on";
+    pagespeed ExperimentSpec "id=3;default;percent=0";
+}
+
+server {
+    listen @@PORT@@;
+    server_name ajax.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "ajax.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed JsInlineMaxBytes 1;
+    pagespeed RewriteLevel CoreFilters;
+    pagespeed DisableFilters add_instrumentation;
+}
+
+# Support for embedded configurations, where image flags in the
+# VirtualHost serving HTML is not the same as the one serving resources,
+# and thus we must embed the image flags in the rewritten image URLs.
+server {
+    listen @@PORT@@;
+    server_name embed-config-html.example.org;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "embed-config-html.example.org" always;
+
+    root @@DOC_ROOT@@/mod_pagespeed_test;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed AddOptionsToUrls on;
+    pagespeed JpegRecompressionQuality 73;
+    pagespeed DisableFilters inline_css,extend_cache,inline_javascript;
+    pagespeed Domain embed-config-resources.example.com;
+
+    # Share a cache keyspace with embed-config-resources.example.com.
+    pagespeed CacheFragment "embed-config";
+    pagespeed RewriteDeadlinePerFlushMs 5000;
+    pagespeed LoadFromFile "http://embed-config-resources.example.com/" "@@DOC_ROOT@@/mod_pagespeed_example/";
+}
+
+server {
+    listen @@PORT@@;
+    server_name embed-config-resources.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "embed-config-resources.example.com" always;
+
+    root @@DOC_ROOT@@/mod_pagespeed_example;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed AddOptionsToUrls on;
+    # Note that we do not set the jpeg quality here, but take
+    # it from image URL query parameters that we synthesize in
+    # from embed-config-html.example.com.
+
+    # Share a cache keyspace with embed-config-html.example.org.
+    pagespeed CacheFragment "embed-config";
+
+    pagespeed LoadFromFile "http://embed-config-resources.example.com/" "@@DOC_ROOT@@/mod_pagespeed_example/";
+}
+
+# Sets up a logical home-page server on www.example.com
+server {
+    listen @@PORT@@;
+    server_name www.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "www.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed LoadFromFile http://cdn.example.com @@DOC_ROOT@@;
+    pagespeed MapRewriteDomain cdn.example.com origin.example.com;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css,rewrite_images;
+}
+
+# Sets up a logical origin for CDNs to fetch content from, on origin.example.com.
+server {
+    listen @@PORT@@;
+    server_name origin.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "origin.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed LoadFromFile http://cdn.example.com @@DOC_ROOT@@;
+    pagespeed MapRewriteDomain cdn.example.com origin.example.com;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css,rewrite_images;
+}
+
+# Sets up a logical cdn, which is where we tell browsers to fetch resources from.
+server {
+    listen @@PORT@@;
+    server_name cdn.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "cdn.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed LoadFromFile http://cdn.example.com @@DOC_ROOT@@;
+    pagespeed MapRewriteDomain cdn.example.com origin.example.com;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_css,rewrite_images;
+}
+
+# /mod_pagespeed_test is included in our DocumentRoot and thus does
+# not need to be in any resource URL paths.  This helps us verify that
+# we are looping back to the corect VirtualHost -- if we hit the wrong
+# one it will not work.  Also we don't have a VirtualHost for
+# sharedcdn.example.com, so the default Host header used for
+# origin-mapping won't work either.  Instead, we want origin-fetches
+# to go back to this VirtualHost so we rely on the new third optional
+# argument to MapOriginDomain.
+server {
+    listen @@PORT@@;
+    server_name customhostheader.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "customhostheader.example.com" always;
+    root @@DOC_ROOT@@/mod_pagespeed_test;
+    pagespeed FileCachePath "@@CACHE@@_test";
+    pagespeed on;
+    pagespeed RewriteLevel PassThrough;
+    pagespeed EnableFilters rewrite_images;
+    pagespeed MapOriginDomain localhost:@@PORT@@/customhostheader sharedcdn.example.com/test customhostheader.example.com;
+    pagespeed JpegRecompressionQuality 50;
+    pagespeed CriticalImagesBeaconEnabled false;
+}
+
+# Build a configuration hierarchy where at the root we have turned on
+# OptimizeForBandwidth, and in various subdirectories we override settings
+# to make them more aggressive.
+server {
+    listen @@PORT@@;
+    server_name optimizeforbandwidth.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "optimizeforbandwidth.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+
+    pagespeed RewriteLevel OptimizeForBandwidth;
+    pagespeed DisableFilters add_instrumentation;
+
+    pagespeed BlockingRewriteKey psatest;
+
+    location /mod_pagespeed_test/optimize_for_bandwidth/inline_css/ {
+        pagespeed EnableFilters inline_css;
+    }
+    location /mod_pagespeed_test/optimize_for_bandwidth/css_urls/ {
+        pagespeed CssPreserveURLs off;
+    }
+    location /mod_pagespeed_test/optimize_for_bandwidth/image_urls/ {
+        pagespeed ImagePreserveURLs off;
+    }
+    location /mod_pagespeed_test/optimize_for_bandwidth/core_filters/ {
+        pagespeed RewriteLevel CoreFilters;
+    }
+}
+
+server {
+    listen @@PORT@@;
+    server_name uses-sendfile.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "uses-sendfile.example.com" always;
+    pagespeed BlockingRewriteKey psatest;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed EnableFilters rewrite_javascript;
+    add_header X-Sendfile blablabla always;
+}
+
+server {
+    listen @@PORT@@;
+    server_name uses-xaccelredirect.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "uses-xaccelredirect.example.com" always;
+    pagespeed BlockingRewriteKey psatest;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed EnableFilters rewrite_javascript;
+    add_header X-Accel-Redirect blablabla always;
+}
+
+server {
+    listen @@PORT@@;
+    server_name doesnt-sendfile.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "doesnt-sendfile.example.com" always;
+    pagespeed BlockingRewriteKey psatest;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    pagespeed EnableFilters rewrite_javascript;
+}
+
+# Test host for explicit shared memory cache.
+server {
+    listen @@PORT@@;
+    server_name shmcache.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "shmcache.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@_with_shm";
+
+    pagespeed EnableFilters rewrite_images;
+    pagespeed CriticalImagesBeaconEnabled false;
+}
+
+# debug.conf.template:1093-1107, adapted: the template formerly proxied to a backend on a
+# third port (ipro-proxy-backend.example.com, debug.conf.template:1131-1139,
+# PageSpeed unplugged, mod_deflate on). The lane reaches an equivalent backend
+# -- the unplugged mpsunplugged.example.com vhost, whose CSS Debian's
+# deflate.conf compresses -- through the secondary port, as
+# rproxy.rmcomments.example.com does.
+server {
+    listen @@PORT@@;
+    server_name ipro-proxy.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "ipro-proxy.example.com" always;
+
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@_ipro_proxy";
+
+    pagespeed on;
+    pagespeed InPlaceResourceOptimization on;
+    pagespeed EnableFilters rewrite_domains;
+
+    location ^~ / {
+        proxy_pass http://127.0.0.1:@@PORT@@/mod_pagespeed_test/ipro/mod_deflate/;
+        proxy_set_header Host mpsunplugged.example.com;
+    }
+}
+
+# Derived from debug.conf.template:1199-1211: the statistics handler open to
+# loopback clients only, which statistics_are_local_only.sh probed through the
+# host's non-loopback address. The lane's own statistics Location stays open for
+# the test runner, so the restricted handler lives here; "Allow from localhost /
+# 127.0.0.1" becomes allow 127.0.0.1 / allow ::1 / deny all.
+server {
+    listen @@PORT@@;
+    server_name stats-local-only.example.com;
+    include @@COMMON@@;
+    add_header X-Test-Vhost "stats-local-only.example.com" always;
+    root @@DOC_ROOT@@;
+    pagespeed FileCachePath "@@CACHE@@";
+    location = /pagespeed_statistics { allow 127.0.0.1; allow ::1; deny all; }
+}

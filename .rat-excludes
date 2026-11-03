@@ -154,3 +154,5 @@ docker-compose.*\.yml
 pagespeed-envoy\.yaml
 github-actions-windows\.yml
 test/pagespeed/system/testdata/stats_json.global.golden
+# The nginx.org source-signing public key (tools/ci/): ASCII-armoured PGP key material, cannot carry a header.
+nginx-org-source-signers\.asc

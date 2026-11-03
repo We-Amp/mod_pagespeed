@@ -155,6 +155,46 @@ TEST_F(JsMinifyTest, ErrorTrailingBackslashInString) {
   CheckError("var x = 'abc\\");
 }
 
+TEST_F(JsMinifyTest, ErrorStringEndingInEscapedQuote) {
+  // The final quote is escaped, so the string is unterminated: the minifier
+  // declines, minifies the prefix, and passes the remainder through.
+  GoogleString output;
+  EXPECT_FALSE(pagespeed::js::MinifyUtf8Js(&patterns_, "var  x = 'abc\\'",
+                                           &output));
+  EXPECT_EQ("var x='abc\\'", output);
+  output.clear();
+  EXPECT_FALSE(pagespeed::js::MinifyUtf8Js(&patterns_, "x = \"a\\\"\n;",
+                                           &output));
+  EXPECT_EQ("x=\"a\\\"\n;", output);
+}
+
+TEST_F(JsMinifyTest, ErrorEscapedQuoteBeforeLineSeparatorIsIdempotent) {
+  // Issue #572 reproducer: the unterminated string contains a raw U+2028.
+  // The minifier declines, and minifying its own output declines the same
+  // way and yields the same bytes.
+  const GoogleString input = "'a\\'\xE2\x80\xA8" "b";
+  GoogleString once;
+  GoogleString twice;
+  EXPECT_FALSE(pagespeed::js::MinifyUtf8Js(&patterns_, input, &once));
+  EXPECT_EQ(input, once);
+  EXPECT_FALSE(pagespeed::js::MinifyUtf8Js(&patterns_, once, &twice));
+  EXPECT_EQ(once, twice);
+}
+
+TEST_F(JsMinifyTest, ErrorShiftJisTrailByteBackslashBeforeQuote) {
+  // Legacy multibyte input whose trail byte is 0x5C and that has no later
+  // quote is declined (fails safe: the original bytes are kept).
+  GoogleString output;
+  EXPECT_FALSE(pagespeed::js::MinifyUtf8Js(&patterns_, "var  s = '\x83\x5C';",
+                                           &output));
+  EXPECT_EQ("var s='\x83\x5C';", output);
+}
+
+TEST_F(JsMinifyTest, StringEndingInEscapedBackslashIsClosed) {
+  CheckMinification("var  x = 'abc\\\\' ;", "var x='abc\\\\';");
+  CheckMinification("var  x = 'a\\'b' ;", "var x='a\\'b';");
+}
+
 TEST_F(JsMinifyTest, ErrorTrailingBackslashInRegex) {
   // Likewise for a lone backslash ending a regex literal.
   CheckError("/abc\\");

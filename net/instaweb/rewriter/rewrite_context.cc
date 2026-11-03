@@ -992,6 +992,24 @@ class RewriteContext::FetchContext {
     rewrite_context_->FetchCallbackDone(ok);
   }
 
+  // Answers a conditional request. A null cached_result means a bare 304.
+  void NotModifiedDone(const CachedResult* cached_result) {
+    ResponseHeaders* headers = async_fetch_->response_headers();
+    headers->Clear();
+    bool has_caching_headers =
+        cached_result != nullptr &&
+        rewrite_context_->FindServerContext()
+            ->SetNotModifiedHeadersFromCachedResult(
+                cached_result->output_cache_control(), headers);
+    if (has_caching_headers) {
+      async_fetch_->FixCacheControlForGoogleCache();
+    } else {
+      headers->SetStatusAndReason(HttpStatus::kNotModified);
+    }
+    async_fetch_->HeadersComplete();
+    rewrite_context_->FetchCallbackDone(true);
+  }
+
   void set_requested_hash(const StringPiece& hash) {
     hash.CopyToString(&requested_hash_);
   }
@@ -1334,11 +1352,37 @@ void RewriteContext::Start() {
           new OutputCacheCallback(this, &RewriteContext::OutputCacheDone));
     }
   } else {
+    ContextSet visited;
+    if (IsWaitedOnBy(previous_handler, &visited)) {
+      // previous_handler cannot finish before we do, so waiting for it would
+      // never finish. Fail the way a recursive rewrite would.
+      RepeatedFailure();
+      return;
+    }
     if (previous_handler->slow()) {
       MarkSlow();
     }
     previous_handler->repeated_.push_back(this);
   }
+}
+
+bool RewriteContext::IsWaitedOnBy(const RewriteContext* context,
+                                  ContextSet* visited) {
+  if (this == context) {
+    return true;
+  }
+  if (!visited->insert(this).second) {
+    return false;
+  }
+  if ((parent_ != nullptr) && parent_->IsWaitedOnBy(context, visited)) {
+    return true;
+  }
+  for (auto repeated : repeated_) {
+    if (repeated->IsWaitedOnBy(context, visited)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace {
@@ -1709,6 +1753,12 @@ void RewriteContext::RepeatedSuccess(const RewriteContext* primary) {
 
   ok_to_write_output_partitions_ = false;
   Finalize();
+  if (!has_parent()) {
+    // Finalize() has rendered us, so our copy of the primary's partitions is
+    // no longer needed.  Nested contexts keep theirs: their parent still reads
+    // them when it harvests.
+    partitions_ = std::make_unique<OutputPartitions>();
+  }
 }
 
 void RewriteContext::RepeatedFailure() {
@@ -1768,7 +1818,19 @@ void RewriteContext::FetchInputs() {
       // resource object (e.g. if we got a metadata hit on the previous step).
       bool handled_internally = false;
       GoogleUrl resource_gurl(resource->url());
-      if (FindServerContext()->IsPagespeedResource(resource_gurl)) {
+      bool is_pagespeed_resource =
+          FindServerContext()->IsPagespeedResource(resource_gurl);
+      if (is_pagespeed_resource && has_parent() && Driver()->is_nested()) {
+        // A nested context inside a reconstruction does not start another
+        // one. As with a lock failure, this says nothing about the resource,
+        // so don't remember it.
+        handled_internally = true;
+        ok_to_write_output_partitions_ = false;
+        Driver()->message_handler()->Message(
+            kInfo, "Not reconstructing %s inside another reconstruction",
+            resource->UrlForDebug().c_str());
+        ResourceCallbackUtils(this, resource, i).Done(false);
+      } else if (is_pagespeed_resource) {
         RewriteDriver* nested_driver = Driver()->Clone();
         RewriteFilter* filter = nullptr;
         // We grab the filter now (and not just call DecodeOutputResource
@@ -2099,6 +2161,13 @@ void RewriteContext::CheckAndAddOtherDependency(const InputInfo& input_info) {
   if (input_info.has_url() && HasDuplicateOtherDependency(input_info)) {
     return;
   }
+  // An entry can have more than one expiry for the same url, so de-dup every
+  // entry on its contents.
+  InputInfo key = input_info;
+  key.clear_index();
+  if (!other_dependency_set_.insert(key.SerializeAsString()).second) {
+    return;
+  }
 
   CheckNotFrozen();
   InputInfo* dep = partitions_->add_other_dependency();
@@ -2114,6 +2183,25 @@ void RewriteContext::CheckAndAddOtherDependency(const InputInfo& input_info) {
   if (dep->has_url()) {
     int index = partitions_->other_dependency_size() - 1;
     other_dependency_map_[dep->url()] = index;
+  }
+}
+
+void RewriteContext::AddDebugMessages(
+    const protobuf::RepeatedPtrField<GoogleString>& messages) {
+  const int64 remaining = Driver()->DebugOutputBytesRemaining();
+  for (const GoogleString& message : messages) {
+    if (debug_message_set_.find(message) != debug_message_set_.end()) {
+      continue;
+    }
+    const int64 size = static_cast<int64>(message.size());
+    if (remaining >= 0 && size > remaining - debug_message_bytes_) {
+      // This context cannot emit more than the document's budget allows, so
+      // it does not hold on to messages past it.
+      return;
+    }
+    debug_message_set_.insert(message);
+    partitions_->add_debug_message(message);
+    debug_message_bytes_ += size;
   }
 }
 
@@ -2231,8 +2319,7 @@ void RewriteContext::Propagate(RenderOp render_op) {
     }
     CHECK_EQ(num_output_partitions(), num_outputs());
     if (has_parent()) {
-      parent()->partitions()->mutable_debug_message()->MergeFrom(
-          partitions_->debug_message());
+      parent()->AddDebugMessages(partitions_->debug_message());
     } else if (num_slots() >= 1) {
       if (render_slots) {
         Driver()->InsertDebugComments(partitions_->debug_message(),
@@ -2255,8 +2342,7 @@ void RewriteContext::Propagate(RenderOp render_op) {
       int n = partition->input_size();
       if (partition->debug_message_size() > 0) {
         if (has_parent()) {
-          parent()->partitions()->mutable_debug_message()->MergeFrom(
-              partition->debug_message());
+          parent()->AddDebugMessages(partition->debug_message());
         } else if (render_slots) {
           // If no input slots defined, then we created a partition just to hold
           // debug information.  Put that information in 0th slot of context.
@@ -2811,7 +2897,24 @@ bool RewriteContext::LookupMetadataForOutputResourceImpl(
   return true;
 }
 
+bool RewriteContext::FetchNotModified(const OutputResourcePtr& output_resource,
+                                      AsyncFetch* fetch,
+                                      MessageHandler* message_handler) {
+  fetch_not_modified_ = true;
+  Driver()->InitiateFetch(this);
+  if (!PrepareFetch(output_resource, fetch, message_handler)) {
+    return false;
+  }
+  Driver()->AddRewriteTask(MakeFunction(this, &RewriteContext::StartFetch,
+                                        &RewriteContext::CancelFetch));
+  return true;
+}
+
 void RewriteContext::CancelFetch() {
+  if (fetch_not_modified_) {
+    fetch_->NotModifiedDone(nullptr);
+    return;
+  }
   AsyncFetch* fetch = fetch_->async_fetch();
   fetch->response_headers()->SetStatusAndReason(
       HttpStatus::kInternalServerError /* 500 */);
@@ -2866,6 +2969,31 @@ void RewriteContext::FetchCacheDone(CacheLookupResult* cache_result) {
 
   // Didn't figure out anything clever; so just rewrite on demand.
   StartFetchReconstruction();
+}
+
+void RewriteContext::FetchNotModifiedCacheDone(
+    CacheLookupResult* cache_result) {
+  std::unique_ptr<CacheLookupResult> owned_cache_result(cache_result);
+  CheckNotFrozen();
+  partitions_.reset(owned_cache_result->partitions.release());
+  LogMetadataCacheInfo(owned_cache_result->cache_ok,
+                       owned_cache_result->can_revalidate);
+
+  // Only a current record for exactly the requested hash may speak for the
+  // response. Inputs past their lifetime could have changed their caching
+  // headers, so a stale record does not qualify.
+  const CachedResult* vouching_result = nullptr;
+  if (owned_cache_result->cache_ok && !stale_rewrite_ &&
+      num_output_partitions() == 1) {
+    const CachedResult* result = output_partition(0);
+    OutputResourcePtr output_resource;
+    if (result->optimizable() && result->has_output_cache_control() &&
+        CreateOutputResourceForCachedOutput(result, &output_resource) &&
+        output_resource->hash() == fetch_->requested_hash()) {
+      vouching_result = result;
+    }
+  }
+  fetch_->NotModifiedDone(vouching_result);
 }
 
 void RewriteContext::FetchTryFallback(const GoogleString& url,
@@ -2941,7 +3069,8 @@ bool RewriteContext::CanFetchFallbackToOriginal(
 void RewriteContext::StartFetch() {
   DCHECK_EQ(kind(), fetch_->output_resource()->kind());
 
-  if (!CreationLockBeforeStartFetch()) {
+  // A conditional request rebuilds nothing, so it has nothing to lock for.
+  if (fetch_not_modified_ || !CreationLockBeforeStartFetch()) {
     StartFetchImpl();
   } else {
     // Acquire the lock early, before checking the cache. This way, if another
@@ -2959,6 +3088,12 @@ void RewriteContext::CallStartFetchImpl() {
 }
 
 void RewriteContext::StartFetchImpl() {
+  if (fetch_not_modified_) {
+    FindServerContext()->metadata_cache()->Get(
+        partition_key_, new OutputCacheCallback(
+                            this, &RewriteContext::FetchNotModifiedCacheDone));
+    return;
+  }
   // If we have an on-the-fly resource, we almost always want to reconstruct it
   // --- there will be no shortcuts in the metadata cache unless the rewrite
   // fails, and it's ultra-cheap to reconstruct anyway.
@@ -3071,10 +3206,9 @@ bool RewriteContext::FetchContextDetached() {
   return fetch_->detached();
 }
 
-bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
-                                          StringPiece contents,
-                                          AsyncFetch* async_fetch,
-                                          MessageHandler* handler) {
+bool RewriteContext::IsFallbackContentTypeAllowed(StringPiece output_url_base,
+                                                  AsyncFetch* async_fetch,
+                                                  MessageHandler* handler) {
   const ContentType* content_type =
       async_fetch->response_headers()->DetermineContentType();
   if (content_type == nullptr ||
@@ -3090,6 +3224,16 @@ bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
         (content_type == nullptr ? "[missing or unrecognized]"
                                  : content_type->mime_type()));
 
+    return false;
+  }
+  return true;
+}
+
+bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
+                                          StringPiece contents,
+                                          AsyncFetch* async_fetch,
+                                          MessageHandler* handler) {
+  if (!IsFallbackContentTypeAllowed(output_url_base, async_fetch, handler)) {
     return false;
   }
 

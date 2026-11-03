@@ -1,0 +1,40 @@
+{
+  "react19-root": [
+    "inline_style_text"
+  ],
+  "react19-doc": [
+    "inline_style_text",
+    "stylesheet_href",
+    "stylesheet_inlined",
+    "async_script_src"
+  ],
+  "react18-root": [
+    "inline_style_text"
+  ],
+  "vue": [
+    "inline_style_text"
+  ],
+  "next": [
+    "inline_style_text",
+    "stylesheet_href",
+    "async_script_src"
+  ],
+  "nuxt": [
+    "inline_style_text"
+  ],
+  "react19-root-plain": [
+    "inline_style_text"
+  ],
+  "react18-root-plain": [
+    "inline_style_text"
+  ],
+  "react19-doc-plain": [
+    "inline_style_text",
+    "stylesheet_href",
+    "stylesheet_inlined",
+    "async_script_src"
+  ],
+  "vue-plain": [
+    "inline_style_text"
+  ]
+}

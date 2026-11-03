@@ -33,6 +33,9 @@ EnvoyVHostConfigManager::~EnvoyVHostConfigManager() = default;
 void EnvoyVHostConfigManager::AddVHost(
     StringPiece host_pattern, int32 priority,
     std::unique_ptr<EnvoyRewriteOptions> options) {
+  // The options are final once added: requests on every worker thread read
+  // them from here on, so they are frozen now, on the configuration thread.
+  options->Freeze();
   vhosts_.push_back(
       std::make_unique<VHostEntry>(host_pattern, priority, std::move(options)));
   sorted_ = false;

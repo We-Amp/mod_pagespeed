@@ -216,7 +216,7 @@ build:asan --define ENVOY_CONFIG_ASAN=1
 # pass, then re-added (UBSAN_OPTIONS below halts on any finding).               # unique
 build:asan --copt -fsanitize=address --copt -fsanitize=undefined                            # unique
 build:asan --linkopt -fsanitize=address --linkopt -fsanitize=undefined                      # unique
-# vptr and function sanitizer are enabled in clang-asan if it is set up via bazel/setup_clang.sh.
+# vptr and function sanitizers stay off in asan builds, clang-asan included.
 build:asan --copt -fno-sanitize=vptr,function
 build:asan --linkopt -fno-sanitize=vptr,function
 build:asan --copt -DADDRESS_SANITIZER=1

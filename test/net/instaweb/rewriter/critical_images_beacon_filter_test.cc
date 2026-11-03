@@ -285,6 +285,31 @@ TEST_F(CriticalImagesBeaconFilterTest, CspForbidsInlineScript) {
               Not(HasSubstr(CriticalImagesBeaconFilter::kImageOnloadCode)));
 }
 
+// A page a client-side framework hydrates gets no beacon: its script would land
+// inside the framework's markup. The filter still sees the end of that
+// document, so the next one on the same driver is instrumented as usual.
+TEST_F(CriticalImagesBeaconFilterTest, HydratedPageIsNotInstrumented) {
+  PrepareInjection();
+  GoogleString html = "<head></head><body><div id=\"__next\"></div>";
+  AddImageTags(&html);
+  StrAppend(&html, "</body>");
+  ParseUrl(GetTestUrl(), html);
+  EXPECT_TRUE(rewrite_driver()->is_hydrated_document());
+  VerifyNoInjection(0);
+  EXPECT_THAT(output_buffer_, Not(HasSubstr("data-pagespeed-url-hash")));
+
+  ResetDriver();
+  SetDriverRequestHeaders();
+  SetupAndProcessUrl();
+  // The hydrated page took the first nonce, so match the call, not the string.
+  EXPECT_EQ(1, statistics()
+                   ->GetVariable(CriticalImagesBeaconFilter::
+                                     kCriticalImagesBeaconAddedCount)
+                   ->Get());
+  EXPECT_THAT(output_buffer_, HasSubstr("pagespeed.CriticalImages.Run("));
+  EXPECT_THAT(output_buffer_, HasSubstr("data-pagespeed-url-hash"));
+}
+
 TEST_F(CriticalImagesBeaconFilterTest, CspAllowsInlineScript) {
   // With 'unsafe-inline' permitted the filter behaves as usual.
   PrepareInjection();

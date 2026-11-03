@@ -60,7 +60,8 @@ function add(a: Counters | null, b: Counters): Counters {
 
 function rowOf(c: Counters, host: string): HostSavingsRow {
   const { hits, original, served } = c;
-  const saved = Math.min(original, Math.max(0, original - served));
+  // Signed, like the class rows: a host whose responses grew shows negative.
+  const saved = original - served;
   const percent = original > 0 ? Math.min(100, Math.max(0, Math.round((saved / original) * 100))) : null;
   return { host, hits, original, served, saved, percent };
 }

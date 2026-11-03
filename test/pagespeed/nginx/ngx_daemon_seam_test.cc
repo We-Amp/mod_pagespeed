@@ -289,8 +289,8 @@ TEST_F(NgxDaemonSeamTest, ARequestNeverReadsNginxsOwnServerNamesArray) {
 
   // The copy is made in the per-server-block merge, from that block's own
   // core configuration, and nowhere else is the array walked.
-  const size_t merge = cc.find(
-      "char*ps_merge_srv_conf(ngx_conf_t*cf,void*parent,void*child){");
+  const size_t merge =
+      cc.find("char*ps_merge_srv_conf(ngx_conf_t*cf,void*parent,void*child){");
   ASSERT_NE(GoogleString::npos, merge)
       << "ps_merge_srv_conf was reshaped; this pin needs updating";
   const size_t merge_open = cc.find("{", merge);
@@ -304,14 +304,43 @@ TEST_F(NgxDaemonSeamTest, ARequestNeverReadsNginxsOwnServerNamesArray) {
                       "core_srv_conf_t*>(ngx_http_conf_get_module_srv_conf("
                       "cf,ngx_http_core_module))));"))
       << "the names are not copied while the configuration is merged";
-  size_t walks = 0;
+  // Two configuration-time collectors read the array: the host-name copy and
+  // the per-site cache identity. Every use must sit inside one of them, and
+  // each reads it exactly twice (its elts and its nelts).
+  const char* const kCollectors[] = {
+      "ConfiguredHostNamesNgxCollectConfiguredHostNames("
+      "constngx_http_core_srv_conf_t*cscf){",
+      "SiteIdentityNgxCollectSiteIdentity(ngx_conf_t*cf,"
+      "constngx_http_core_srv_conf_t*cscf){",
+  };
+  size_t begins[2];
+  size_t ends[2];
+  size_t inside[2] = {0, 0};
+  for (int c = 0; c < 2; ++c) {
+    begins[c] = cc.find(kCollectors[c]);
+    ASSERT_NE(GoogleString::npos, begins[c])
+        << kCollectors[c] << " was reshaped; this pin needs updating";
+    const size_t open = cc.find("{", begins[c]);
+    ASSERT_NE(GoogleString::npos, open);
+    ends[c] = MatchingBrace(cc, open);
+    ASSERT_NE(GoogleString::npos, ends[c]);
+  }
   for (size_t at = cc.find("->server_names."); at != GoogleString::npos;
        at = cc.find("->server_names.", at + 1)) {
-    ++walks;
+    bool found = false;
+    for (int c = 0; c < 2; ++c) {
+      if (at > begins[c] && at < ends[c]) {
+        ++inside[c];
+        found = true;
+      }
+    }
+    EXPECT_TRUE(found) << "nginx's server_names array is used outside the "
+                          "configuration-time collectors";
   }
-  EXPECT_EQ(2u, walks)
-      << "nginx's server_names array is used outside the configuration-time "
-         "collector (its elts and its nelts, once each)";
+  EXPECT_EQ(2u, inside[0]) << "the host-name collector reads the array "
+                              "other than through its elts and its nelts";
+  EXPECT_EQ(2u, inside[1]) << "the site identity collector reads the array "
+                              "other than through its elts and its nelts";
 }
 
 TEST_F(NgxDaemonSeamTest, TheAdminConsoleIsGivenItsOwnServeHost) {
@@ -1200,7 +1229,8 @@ TEST_F(NgxDaemonSeamTest, TheCapabilityHeadersAreReadJoinedNotSingle) {
       << "Accept-Encoding is not read joined in both arms";
   // The density hint feeds the selection on both arms and is named in Vary:
   // read joined in both builders, and handed to the serve request.
-  EXPECT_EQ(2, CountSubstring(cc, "request_headers.LookupJoined(\"Sec-CH-DPR\")"))
+  EXPECT_EQ(2,
+            CountSubstring(cc, "request_headers.LookupJoined(\"Sec-CH-DPR\")"))
       << "Sec-CH-DPR is not read in both arms";
   EXPECT_NE(GoogleString::npos, cc.find("record_request.sec_ch_dpr="))
       << "the record request no longer carries Sec-CH-DPR";
@@ -1607,6 +1637,58 @@ TEST_F(NgxDaemonSeamTest, TheServeBuilderHandsOverTheRawReloadHeaders) {
   EXPECT_NE(GoogleString::npos,
             body.find("out->cache_control=strings->cache_control;"));
   EXPECT_NE(GoogleString::npos, body.find("out->pragma=strings->pragma;"));
+}
+
+TEST_F(NgxDaemonSeamTest,
+       OnlyADeviceFallbackHasItsLifetimePutBackAfterExpires) {
+  const GoogleString cc = StripWhitespace(ReadSource(kNgxPagespeedCc));
+  // A non-fallback under `expires` stays as nginx's headers filter left it:
+  // the one call that marks a response is behind the arm's flag.
+  const char kMark[] =
+      "if(decision.device_fallback_lifetime&&ps_mark_daemon_fallback_cache_"
+      "control(r,decision.cache_control)!=NGX_OK)";
+  const size_t mark = cc.find(kMark);
+  ASSERT_NE(GoogleString::npos, mark);
+  EXPECT_EQ(GoogleString::npos,
+            cc.find("ps_mark_daemon_fallback_cache_control(r,",
+                    mark + sizeof(kMark) - 1));
+  // The field is put back by the module's own header filter.
+  const size_t filter = cc.find(
+      "ngx_int_tps_html_rewrite_fix_headers_filter(ngx_http_request_t*r){");
+  ASSERT_NE(GoogleString::npos, filter);
+  EXPECT_NE(
+      GoogleString::npos,
+      cc.find("ps_restore_daemon_fallback_cache_control(r)!=NGX_OK", filter));
+  // And it only ever shortens: the replacement is behind the check of what
+  // the operator's configuration left on the response (the cases are in
+  // ngx_daemon_serve_emit_test.cc), and nothing replaces before it.
+  const size_t restore = cc.find(
+      "ngx_int_tps_restore_daemon_fallback_cache_control(ngx_http_request_t*r)"
+      "{");
+  ASSERT_NE(GoogleString::npos, restore);
+  const size_t check = cc.find(
+      "constGoogleStringline=PsFallbackCacheControl(existing,expires!=nullptr,",
+      restore);
+  const size_t replace = cc.find("ps_set_cache_control(r,value)", restore);
+  EXPECT_NE(GoogleString::npos,
+            cc.find("char*value=string_piece_to_pool_string(r->pool,line);if("
+                    "value==nullptr){returnNGX_OK;",
+                    restore));
+  ASSERT_NE(GoogleString::npos, check);
+  ASSERT_NE(GoogleString::npos, replace);
+  EXPECT_LT(check, replace);
+  // That filter runs after the headers filter: filters run in reverse list
+  // order, so ngx_pagespeed must be listed before
+  // ngx_http_headers_filter_module.
+  const GoogleString order =
+      StripWhitespace(ReadSource("pagespeed/nginx/ngx_pagespeed_module.cc"));
+  const size_t list = order.find("ngx_module_order[]");
+  ASSERT_NE(GoogleString::npos, list);
+  const size_t self = order.find("\"ngx_pagespeed\"", list);
+  const size_t headers = order.find("\"ngx_http_headers_filter_module\"", list);
+  ASSERT_NE(GoogleString::npos, self);
+  ASSERT_NE(GoogleString::npos, headers);
+  EXPECT_LT(self, headers);
 }
 
 }  // namespace

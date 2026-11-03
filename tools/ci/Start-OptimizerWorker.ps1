@@ -24,12 +24,20 @@
     stop: stops the worker this script started (the process is checked to still
     be a factory_worker.exe from -Root before it is signalled) and removes the
     pagespeed.dll that setup_iis_full.ps1 placed beside the IIS module.
+
+.PARAMETER LocalRelease
+    Testing only: runs a locally built worker; refused under GitHub Actions.
+    A directory holding factory_worker.exe, pagespeed.dll and
+    optimizer-commit.txt (the one optimizer commit they were built from). The
+    two binaries are copied into the release directory under -Root in place of
+    the pinned release, which is then not fetched.
 #>
 param(
     [Parameter(Mandatory = $true)][ValidateSet('start', 'stop')][string]$Action,
     [string]$Root = "C:\pagespeed_optimizer",
     [int]$ApiPort = 18765,
-    [string]$Socket = "pagespeed-optimizer"
+    [string]$Socket = "pagespeed-optimizer",
+    [string]$LocalRelease
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,6 +82,30 @@ if ($Action -eq 'stop') {
     exit 0
 }
 
+# A locally built worker, for testing on a lab host only. Checked before
+# anything is stopped or started.
+$localCommit = $null
+if ($LocalRelease) {
+    if ($env:GITHUB_ACTIONS) {
+        Write-Host "::error::-LocalRelease is for testing only and is refused under GitHub Actions; no worker was started"
+        exit 1
+    }
+    foreach ($name in @('factory_worker.exe', 'pagespeed.dll', 'optimizer-commit.txt')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $LocalRelease $name) -PathType Leaf)) {
+            Write-Host "::error::-LocalRelease $LocalRelease has no $name; no worker was started"
+            exit 1
+        }
+    }
+    $lines = @(Get-Content -LiteralPath (Join-Path $LocalRelease 'optimizer-commit.txt') |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    if ($lines.Count -ne 1 -or $lines[0] -cnotmatch '^[0-9a-f]{40}$') {
+        Write-Host "::error::optimizer-commit.txt in $LocalRelease must hold exactly one 40-hex commit; no worker was started"
+        exit 1
+    }
+    $localCommit = $lines[0]
+    Write-Host "using the locally built optimizer worker from $LocalRelease (optimizer commit $localCommit)"
+}
+
 # --- start ---
 Stop-Worker
 if (Get-NetTCPConnection -State Listen -LocalPort $ApiPort -ErrorAction SilentlyContinue) {
@@ -98,17 +130,31 @@ if (Test-Path -LiteralPath $VolumeDir) {
     }
 }
 
-$fetch = Join-Path $RepoRoot "install\iis\fetch-optimizer-windows.ps1"
-$rc = 1
-try {
-    & $fetch -OutDir $WorkerDir
-    $rc = $LASTEXITCODE
-} catch {
-    Write-Host "fetch failed: $($_.Exception.Message)"
-}
-if ($rc -ne 0) {
-    Write-Host "::error::could not fetch the pinned optimizer release for Windows (fetch-optimizer-windows.ps1 exit $rc); the IIS system tests need the worker, so this is a failure, not a skip"
-    exit 1
+if ($localCommit) {
+    # The two binaries take the place of the fetched release; nothing is
+    # fetched.
+    try {
+        New-Item -ItemType Directory -Force -Path $WorkerDir | Out-Null
+        foreach ($name in @('factory_worker.exe', 'pagespeed.dll')) {
+            Copy-Item -LiteralPath (Join-Path $LocalRelease $name) -Destination (Join-Path $WorkerDir $name) -Force -ErrorAction Stop
+        }
+    } catch {
+        Write-Host "::error::could not copy the locally built worker into $WorkerDir`: $($_.Exception.Message)"
+        exit 1
+    }
+} else {
+    $fetch = Join-Path $RepoRoot "install\iis\fetch-optimizer-windows.ps1"
+    $rc = 1
+    try {
+        & $fetch -OutDir $WorkerDir
+        $rc = $LASTEXITCODE
+    } catch {
+        Write-Host "fetch failed: $($_.Exception.Message)"
+    }
+    if ($rc -ne 0) {
+        Write-Host "::error::could not fetch the pinned optimizer release for Windows (fetch-optimizer-windows.ps1 exit $rc); the IIS system tests need the worker, so this is a failure, not a skip"
+        exit 1
+    }
 }
 $worker = Join-Path $WorkerDir "factory_worker.exe"
 

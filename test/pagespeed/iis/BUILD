@@ -273,60 +273,6 @@ pagespeed_cc_test(
     ],
 )
 
-# ContentDecoder - gzip/deflate decompression
-# Platform-independent test (uses zlib)
-pagespeed_cc_test(
-    name = "iis_content_decoder_test",
-    tags = ["manual"],  # Excluded: old 1.1 iis_content_decoder target dropped in the IISpeed adoption
-    srcs = ["iis_content_decoder_test.cc"],
-    deps = [
-        "//pagespeed/iis:iis_content_decoder",
-    ],
-)
-
-# IisStreamingFetch - Streaming AsyncFetch with HTTP_DATA_CHUNK support
-# Platform-independent test (mock IIS types used on Linux)
-pagespeed_cc_test(
-    name = "iis_streaming_fetch_test",
-    tags = ["manual"],  # Excluded: old 1.1 iis_streaming_fetch target dropped in the IISpeed adoption
-    srcs = ["iis_streaming_fetch_test.cc"],
-    deps = [
-        ":mock_iis",
-        "//pagespeed/iis:iis_streaming_fetch",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/util:util",
-        "//pagespeed/opt/http:http",
-    ],
-)
-
-# FlushNotification - Custom IIS notification for flush events
-# Platform-independent test (uses mock notification class on Linux)
-pagespeed_cc_test(
-    name = "iis_flush_notification_test",
-    tags = ["manual"],  # Excluded: old 1.1 iis_flush_notification target dropped in the IISpeed adoption
-    srcs = ["iis_flush_notification_test.cc"],
-    deps = [
-        "//pagespeed/iis:iis_flush_notification",
-    ],
-)
-
-# HTML flushing end-to-end integration test
-# Combines IisStreamingFetch with mock IIS infrastructure to verify
-# the complete HTML flushing flow works correctly.
-# Platform-independent test (mock IIS types used on Linux)
-pagespeed_cc_test(
-    name = "iis_html_flushing_integration_test",
-    srcs = ["iis_html_flushing_integration_test.cc"],
-    tags = ["manual"],  # Excluded from wildcard builds: pre-existing build failure (missing TakePendingChunks)
-    deps = [
-        ":mock_iis",
-        "//pagespeed/iis:iis_streaming_fetch",
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/util:util",
-        "//pagespeed/opt/http:http",
-    ],
-)
-
 # IisServerContext - Server context lifecycle and configuration
 # Windows-only test (requires IisRewriteDriverFactory)
 pagespeed_cc_test(
@@ -394,6 +340,17 @@ pagespeed_cc_test(
     deps = [
         "//pagespeed/iis:iis_local_request",
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Self-fetch recognition and relabel unit tests. Windows-only (winsock2).
+pagespeed_cc_test(
+    name = "iis_self_fetch_test",
+    srcs = ["iis_self_fetch_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        "//pagespeed/iis:iis_ip_string",
+        "//pagespeed/iis:iis_self_fetch",
     ],
 )
 
@@ -546,6 +503,19 @@ pagespeed_cc_test(
     srcs = ["iis_request_cleanup_pin_test.cc"],
     data = ["//pagespeed/iis:iis_module_srcs"],
     shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The stage the module takes up a request at: after IIS authentication and
+# authorization, so nothing is served before IIS has admitted the request.
+# Reads the port source as data, so it builds and runs on every platform.
+pagespeed_cc_test(
+    name = "iis_request_stage_pin_test",
+    srcs = ["iis_request_stage_pin_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base_core",
         "//test/pagespeed/kernel/base:kernel_test_util",

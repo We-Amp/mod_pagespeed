@@ -45,3 +45,8 @@ node client_domain_rewriter_test.mjs
 node defer_iframe_test.mjs
 node deterministic_test.mjs
 node extended_instrumentation_test.mjs
+
+# Next and Nuxt need several hundred MB of packages: the plain run covers them
+# only where the fixtures are already built (see hydration/run_module_check.sh).
+hydration/build_all.sh --light
+node hydration_test.mjs

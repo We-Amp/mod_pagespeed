@@ -340,6 +340,11 @@ class HTTPCache {
 
   void set_max_cacheable_response_content_length(int64 value);
 
+  // The most a cached gzipped body may be inflated to when it is served or
+  // stored uncompressed: the cacheable body size limit if one is set, and
+  // never more than InflatingFetch::kMaxInflatedBytes.
+  int64 MaxInflatedBodyBytes() const;
+
   // Sets how many levels the cache has. Affects reporting of statistics ---
   // we don't want them for lower levels of multi-level setups.
   void set_cache_levels(int levels) { cache_levels_ = levels; }
