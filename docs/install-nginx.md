@@ -4,17 +4,24 @@
 
 - A supported Linux distribution running its **stock** nginx package
   (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/RHEL/Rocky 9/10; Debian 11
-  stays on the repository's final 1.15.0 packages).
-- `x86_64` or `arm64` (AlmaLinux/RHEL/Rocky 10: `x86_64` only).
+  stays on the repository's final 1.15.0 packages), or nginx.org's stable nginx
+  on the distributions listed
+  [below](#nginxorgs-nginx-and-the-nginx-docker-image).
+- `x86_64` or `arm64` (AlmaLinux/RHEL/Rocky 10 and nginx.org's nginx: `x86_64`
+  only).
 
 The prebuilt module is a dynamic nginx module, and nginx pins dynamic modules to
 the **exact** nginx version they were built against (down to the patch;
-`--with-compat` does not relax this). The published packages are therefore built
-against each distribution's **stock** nginx. If you run a *custom* nginx —
-including the **nginx.org** repository's `nginx` (e.g. the 1.30.x stable line) —
-no published package matches it; build the module from the public source tree
-against your nginx instead (see `DEVELOPER.md`). The simplest path is your
-distribution's stock nginx.
+`--with-compat` does not relax this). The `nginx-module-pagespeed` packages are
+therefore built against each distribution's **stock** nginx. For nginx.org's
+stable nginx (as in the official nginx Docker image), the
+`nginx-module-pagespeed-nginxorg` package is available for Debian 13, Ubuntu
+24.04 and Enterprise Linux 9 (AlmaLinux, Rocky Linux, RHEL), amd64 (x86_64)
+only, one build per nginx version; see
+[nginx.org's nginx and the nginx Docker image](#nginxorgs-nginx-and-the-nginx-docker-image)
+below. For any other nginx, including nginx.org's mainline, build the module
+from the public source tree against your nginx instead (see `DEVELOPER.md`).
+The simplest path is your distribution's stock nginx.
 
 ## Install
 

@@ -142,6 +142,9 @@ class ApacheFetchTest : public RewriteTestBase {
     http_cache()->Put(kJsUrl, kCacheFragment, req_properties,
                       ResponseHeaders::kIgnoreVaryOnResources,
                       &response_headers, kJsData, &message_handler_);
+    // The in-place optimization starts from the module's own fetch of the
+    // resource, which the origin answers as it served it.
+    SetFetchResponse(kJsUrl, response_headers, kJsData);
 
     GoogleUrl gurl(kJsUrl);
     InitFetch(kJsUrl, HttpStatus::kOK, buffered);

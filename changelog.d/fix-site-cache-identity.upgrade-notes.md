@@ -1,3 +1,5 @@
 - The optimization cache starts cold after this update; expect more load until it refills, and on a cluster update one node at a time. Adding or removing a server name or listen address later starts that block cold again.
   Nodes that share a cache and list their own names or addresses in `server_name`, `ServerName`, `listen` or `<VirtualHost>` derive different keyspaces; set the same `CacheFragment` for that block on every node to keep sharing.
-  After updating, flush the whole cache once (touch `cache.flush` in the `FileCachePath`, or, with `EnableCachePurge on` or a `CacheFlushFilename` set, purge the entire cache from the admin page) and leave that file in place, so that a later downgrade does not serve entries stored before the update.
+  No module cache purge is needed on upgrade: the update retires the cache entries stored by earlier versions.
+  Flush the module cache before any downgrade (touch `cache.flush` in the `FileCachePath`, or, with `EnableCachePurge on` or a `CacheFlushFilename` set, purge the entire cache from the admin page), so that the earlier version does not serve entries stored before the update.
+  Purge downstream caches such as a CDN if your site was affected by the issues in the security section, because copies they stored before the update remain until they expire.

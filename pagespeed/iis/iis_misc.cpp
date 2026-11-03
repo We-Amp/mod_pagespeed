@@ -24,6 +24,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/time_util.h"
@@ -87,6 +88,40 @@ namespace net_instaweb
 		std::wstring r(len - 1, L'\0');
 		MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, &r[0], len);
 		return r;
+	}
+
+	void DisarmResponseCaches(IHttpResponse* response)
+	{
+		if (response == nullptr) {
+			return;
+		}
+		response->DisableKernelCache();
+		IHttpCachePolicy* policy = response->GetCachePolicy();
+		if (policy == nullptr) {
+			return;
+		}
+		HTTP_CACHE_POLICY* kernel = policy->GetKernelCachePolicy();
+		if (kernel != nullptr) {
+			kernel->Policy = HttpCachePolicyNocache;
+			kernel->SecondsToLive = 0;
+		}
+		HTTP_CACHE_POLICY* user = policy->GetUserCachePolicy();
+		if (user != nullptr) {
+			user->Policy = HttpCachePolicyNocache;
+			user->SecondsToLive = 0;
+		}
+		policy->DisableUserCache();
+	}
+
+	bool IsInPlaceOptimizableType(const char* content_type, size_t length)
+	{
+		if (content_type == nullptr || length == 0) {
+			return false;
+		}
+		const ContentType* type =
+			MimeTypeToContentType(StringPiece(content_type, length));
+		return type != nullptr &&
+			(type->IsCss() || type->IsJsLike() || type->IsImage());
 	}
 
 	std::string ws2s(const std::wstring& s)

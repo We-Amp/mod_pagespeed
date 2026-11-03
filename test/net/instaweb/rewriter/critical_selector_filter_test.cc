@@ -1302,6 +1302,24 @@ TEST_F(CriticalSelectorWithRewriteCssFilterTest, ProperlyUsedOptimized) {
              "<body><div>Stuff</div></body>"));
 }
 
+// A fragment-only reference stays as written in critical rules inlined from
+// a stylesheet in another directory, with a rewrite domain set.
+TEST_F(CriticalSelectorFilterTest, FragmentReferenceKeptOnRewriteDomain) {
+  options()->ClearSignatureForTesting();
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  ASSERT_TRUE(lawyer->AddRewriteDomainMapping("http://cdn.com", kTestDomain,
+                                              message_handler()));
+  server_context()->ComputeSignature(options());
+  SetResponseWithDefaultHeaders("dir/f.css", kContentTypeCss,
+                                "div { mask: url(#m); }", 100);
+  GoogleString html = StrCat("<head>", CssLinkHref("dir/f.css"),
+                             "</head><body><div>Stuff</div></body>");
+  ValidateExpected("fragment", html,
+                   StrCat("<head><style>div{mask:url(#m)}</style>", JsLoader(),
+                          Deferred(CssLinkHref("dir/f.css")),
+                          "</head><body><div>Stuff</div></body>"));
+}
+
 class CriticalSelectorWithCombinerFilterTest
     : public CriticalSelectorFilterTest {
  protected:

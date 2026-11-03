@@ -38,8 +38,10 @@ CssTagScanner::Transformer::TransformStatus CssUrlCounter::Transform(
     GoogleString* str) {
   TransformStatus ret = kNoChange;
 
-  // Note: we do not mess with empty URLs at all.
-  if (!str->empty()) {
+  // Note: we do not mess with empty URLs at all, nor with fragment-only
+  // references such as url(#clip), which name an element of the document
+  // using the stylesheet rather than a resource.
+  if (!str->empty() && (*str)[0] != '#') {
     GoogleUrl url(*base_url_, *str);
     if (!url.IsWebOrDataValid()) {
       handler_->Message(kInfo, "Invalid URL in CSS %s expands to %s",

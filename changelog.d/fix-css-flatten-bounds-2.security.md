@@ -1,0 +1,1 @@
+- Hardened stylesheet import flattening so that its work stays proportional to the stylesheet and its cached results match each importing page. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

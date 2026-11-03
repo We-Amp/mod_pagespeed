@@ -24,7 +24,9 @@
 
 #include "net/instaweb/http/public/counting_url_async_fetcher.h"
 #include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/fake_filter.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
@@ -32,18 +34,24 @@
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/time_util.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
+#include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/image_types.pb.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
+#include "pagespeed/kernel/thread/scheduler.h"
+#include "pagespeed/kernel/thread/scheduler_sequence.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
 #include "test/net/instaweb/rewriter/notifying_fetch.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -417,13 +425,14 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     // First fetch misses initial metadata cache lookup, finds original in
     // cache; the resource gets rewritten and the rewritten
     // resource gets inserted into cache.
-    EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
-    EXPECT_EQ(1, http_cache()->cache_hits()->Get());
-    EXPECT_EQ(0, http_cache()->cache_misses()->Get());
-    EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-    EXPECT_EQ(1, lru_cache()->num_hits());
-    EXPECT_EQ(2, lru_cache()->num_misses());
-    EXPECT_EQ(3, lru_cache()->num_inserts());
+    // The module's own anonymous fetch before the optimization is built.
+    EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+    EXPECT_EQ(2, http_cache()->cache_hits()->Get());
+    EXPECT_EQ(1, http_cache()->cache_misses()->Get());
+    EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+    EXPECT_EQ(2, lru_cache()->num_hits());
+    EXPECT_EQ(3, lru_cache()->num_misses());
+    EXPECT_EQ(4, lru_cache()->num_inserts());
     EXPECT_EQ(1, img_filter_->num_rewrites());
     EXPECT_EQ(0, js_filter_->num_rewrites());
     EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -444,13 +453,14 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     // The metadata and cache entry is stale now. Fetch the content and serve
     // out the original. The background rewrite work then revalidates
     // the response and updates metadata.
-    EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-    EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-    EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-    EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-    EXPECT_EQ(3, lru_cache()->num_hits());  // (expired) orig., aj, ic metadata
-    EXPECT_EQ(0, lru_cache()->num_misses());
-    EXPECT_EQ(3, lru_cache()->num_inserts());
+    // Rebuilding after the input expired starts from the module's own fetch.
+    EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+    EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+    EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+    EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+    EXPECT_EQ(4, lru_cache()->num_hits());  // (expired) orig., aj, ic metadata
+    EXPECT_EQ(1, lru_cache()->num_misses());
+    EXPECT_EQ(4, lru_cache()->num_inserts());
     EXPECT_EQ(0, img_filter_->num_rewrites());
     EXPECT_EQ(0, js_filter_->num_rewrites());
     EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -464,13 +474,14 @@ class InPlaceRewriteContextTest : public RewriteTestBase {
     // s-maxage window.
     FetchAndCheckResponse(url, cache_body, true, kInjectedSMaxAgeMs, nullptr,
                           start_time_ms());
-    EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-    EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-    EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-    EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
-    EXPECT_EQ(0, lru_cache()->num_hits());
-    EXPECT_EQ(3, lru_cache()->num_misses());
-    EXPECT_EQ(4, lru_cache()->num_inserts());
+    // The module's own anonymous fetch before the optimization is built.
+    EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+    EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+    EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+    EXPECT_EQ(3, http_cache()->cache_inserts()->Get());
+    EXPECT_EQ(1, lru_cache()->num_hits());
+    EXPECT_EQ(4, lru_cache()->num_misses());
+    EXPECT_EQ(5, lru_cache()->num_inserts());
     EXPECT_EQ(0, img_filter_->num_rewrites());
     EXPECT_EQ(1, js_filter_->num_rewrites());
     EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -621,13 +632,14 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizedFirstRequest) {
   // result into cache. Also, the resource gets rewritten and the rewritten
   // resource gets inserted into cache. The optimized version should be
   // returned.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());  // rewritten + original
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());  // rewritten + original
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(1, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -660,13 +672,14 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeWithDisabledFilter) {
 
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Failure to rewrite means original should be returned.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());  // original only
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(3, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());  // original only
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(4, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -699,13 +712,14 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeNoTransform) {
                         nullptr, start_time_ms());
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(2, lru_cache()->num_inserts());  // original + ipro metadata
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(3, lru_cache()->num_inserts());  // original + ipro metadata
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -731,13 +745,14 @@ TEST_F(InPlaceRewriteContextTest, OptimizeOnNoTransformIfOptionFalse) {
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // into cache. Also the resource gets rewritten and the rewritten resource
   // gets inserted into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());  // rewritten + original
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());  // rewritten + original
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(1, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -764,13 +779,14 @@ TEST_F(InPlaceRewriteContextTest, WaitForOptimizeTimeout) {
                         start_time_ms());
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Rewrite succeeds but is slow so original returned.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());  // rewritten + original
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());  // rewritten + original
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(1, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -877,13 +893,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
   // resource gets inserted into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());  // rewritten + original
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());  // rewritten + original
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(1, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -942,10 +959,11 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   // identical reinserts - one for the image rewrite filter metadata and one for
   // the in-place metadata.
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  // Reconstruction loads the module's own entry from the cache.
+  EXPECT_EQ(2, http_cache()->cache_hits()->Get());
   EXPECT_EQ(1, http_cache()->cache_misses()->Get());
   EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(2, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_hits());
   EXPECT_EQ(1, lru_cache()->num_misses());
   EXPECT_EQ(1, lru_cache()->num_inserts());
   EXPECT_EQ(2, lru_cache()->num_identical_reinserts());
@@ -996,13 +1014,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableJpgUrlRewritingSucceeds) {
   // the original. We will however notice that the contents did not
   // actually change and update the metadata cache promptly, without
   // rewriting.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(3, lru_cache()->num_hits());
-  EXPECT_EQ(0, lru_cache()->num_misses());
-  EXPECT_EQ(3, lru_cache()->num_inserts());
+  // Rebuilding after the input expired starts from the module's own fetch.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(4, lru_cache()->num_hits());
+  EXPECT_EQ(1, lru_cache()->num_misses());
+  EXPECT_EQ(4, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1073,13 +1092,14 @@ TEST_F(InPlaceRewriteContextTest, CacheablePngUrlRewritingFails) {
   // First fetch misses initial metadata lookup, finds original in cache.
   // The rewrite fails and metadata is inserted into the
   // cache indicating that the rewriting didn't succeed.
-  EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(0, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(1, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(2, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(2, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(2, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(3, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1101,13 +1121,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingSucceeds) {
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
   // resource gets inserted into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(1, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1128,13 +1149,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingSucceeds) {
   // The metadata and cache entry is stale now. Fetch the content and serve it
   // out without rewriting. The background rewrite will then revalidate
   // a previous rewrite's result and reuse it.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(3, lru_cache()->num_hits());
-  EXPECT_EQ(0, lru_cache()->num_misses());
-  EXPECT_EQ(3, lru_cache()->num_inserts());
+  // Rebuilding after the input expired starts from the module's own fetch.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(4, lru_cache()->num_hits());
+  EXPECT_EQ(1, lru_cache()->num_misses());
+  EXPECT_EQ(4, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1153,13 +1175,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableJsUrlRewritingWithStaleServing) {
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
   // resource gets inserted into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(1, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1213,13 +1236,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlIfCssRewritingDisabled) {
   // First fetch succeeds at the fetcher, no rewriting happens since the css
   // filter is disabled, and metadata indicating a rewriting failure gets
   // inserted into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(2, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(3, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1246,13 +1270,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlRewritingSucceeds) {
   // First fetch misses initial cache lookup, succeeds at fetch and inserts
   // result into cache. Also, the resource gets rewritten and the rewritten
   // resource gets inserted into cache.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(3, lru_cache()->num_misses());
-  EXPECT_EQ(4, lru_cache()->num_inserts());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(1, lru_cache()->num_hits());
+  EXPECT_EQ(4, lru_cache()->num_misses());
+  EXPECT_EQ(5, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(1, css_filter_->num_rewrites());
@@ -1283,13 +1308,14 @@ TEST_F(InPlaceRewriteContextTest, CacheableCssUrlRewritingSucceeds) {
   // The metadata and cache entry is stale now. Fetch the content and serve it
   // out without rewriting. The background rewrite attempt will end up reusing
   // the old result due to revalidation, however.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(3, lru_cache()->num_hits());
-  EXPECT_EQ(0, lru_cache()->num_misses());
-  EXPECT_EQ(3, lru_cache()->num_inserts());
+  // Rebuilding after the input expired starts from the module's own fetch.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(4, lru_cache()->num_hits());
+  EXPECT_EQ(1, lru_cache()->num_misses());
+  EXPECT_EQ(4, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   EXPECT_EQ(0, js_filter_->num_rewrites());
   EXPECT_EQ(0, css_filter_->num_rewrites());
@@ -1356,6 +1382,250 @@ TEST_F(InPlaceRewriteContextTest, HeadRequestDoesNotRewriteEmptyInput) {
   EXPECT_EQ(1, css_filter_->num_rewrites());
 }
 
+// The in-place resource below was recorded from a response served to a
+// client, and the module's own fetch of it gets 'fetch_status'.
+class InPlaceRecordedInputTest : public InPlaceRewriteContextTest {
+ protected:
+  void RecordAndAnswerModuleFetch(HttpStatus::Code fetch_status,
+                                  const GoogleString& fetched_body) {
+    AddResponse(cache_css_url_, kContentTypeCss, cache_body_, start_time_ms(),
+                ttl_ms_, "", StringPiece(""), kWriteToCache, kTransform);
+    ResponseHeaders fetched;
+    SetDefaultHeaders(kContentTypeCss.mime_type(), &fetched);
+    fetched.SetStatusAndReason(fetch_status);
+    fetched.SetDateAndCaching(start_time_ms(), ttl_ms_);
+    mock_url_fetcher()->SetResponse(cache_css_url_, fetched, fetched_body);
+    ResetHeadersAndStats();
+  }
+
+  // Requests the in-place resource; returns the body served.
+  GoogleString FetchInPlace() {
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    NotifyingFetch fetch(request_context, options(), cache_css_url_, &sync,
+                         &response_headers_);
+    rewrite_driver()->FetchResource(cache_css_url_, &fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    EXPECT_TRUE(fetch.done());
+    EXPECT_TRUE(fetch.success());
+    GoogleString body = fetch.content().as_string();
+    ResetHeadersAndStats();
+    return body;
+  }
+};
+
+// The module's own fetch is refused: the recorded response keeps being
+// served as recorded, and is never optimized.
+TEST_F(InPlaceRecordedInputTest, RefusedToModuleIsNotOptimized) {
+  Init();
+  RecordAndAnswerModuleFetch(HttpStatus::kForbidden, "refused");
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_EQ(cache_body_, FetchInPlace()) << i;
+    EXPECT_EQ(0, css_filter_->num_rewrites()) << i;
+  }
+}
+
+// Records completion of a fetch in a flag a sequence can wait on.
+class DoneFlagFetch : public StringAsyncFetch {
+ public:
+  DoneFlagFetch(const RequestContextPtr& request_context, bool* done)
+      : StringAsyncFetch(request_context), done_flag_(done) {}
+
+ protected:
+  void HandleDone(bool success) override {
+    StringAsyncFetch::HandleDone(success);
+    *done_flag_ = true;
+  }
+
+ private:
+  bool* done_flag_;
+};
+
+// When the driver runs its tasks on the request thread, the outcome of the
+// module's own load is handled there, not on the thread that finished the
+// load: a response held back for the optimized version is written from the
+// request thread.
+TEST_F(InPlaceRecordedInputTest, RefusedLoadHandledOnDriverSequence) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  RecordAndAnswerModuleFetch(HttpStatus::kForbidden, "refused");
+  SetupWaitFetcher();
+  rewrite_driver()->RunTasksOnRequestThread();
+  Scheduler::Sequence* sequence = rewrite_driver()->scheduler_sequence();
+  Scheduler* scheduler = server_context()->scheduler();
+  bool done = false;
+  DoneFlagFetch fetch(rewrite_driver()->request_context(), &done);
+  rewrite_driver()->FetchResource(cache_css_url_, &fetch);
+  {
+    ScopedMutex lock(scheduler->mutex());
+    sequence->AssertSchedulerMutexHeld();
+    EXPECT_FALSE(sequence->RunTasksUntil(Timer::kSecondMs, &done));
+  }
+  // The module's fetch finishes on this (not the request's) sequence.
+  factory()->wait_url_async_fetcher()->CallCallbacks();
+  EXPECT_FALSE(done);
+  {
+    ScopedMutex lock(scheduler->mutex());
+    sequence->AssertSchedulerMutexHeld();
+    rewrite_driver()->AssertRewriteMutexHeld();
+    EXPECT_TRUE(sequence->RunTasksUntil(Timer::kSecondMs, &done));
+    rewrite_driver()->SwitchToQueuedWorkerPool();
+  }
+  EXPECT_EQ(cache_body_, fetch.buffer());
+  mock_scheduler()->AwaitQuiescence();
+}
+
+// The same while the response is held back for the optimized version.
+TEST_F(InPlaceRecordedInputTest, RefusedToModuleIsNotOptimizedWhenWaiting) {
+  options()->set_in_place_wait_for_optimized(true);
+  Init();
+  RecordAndAnswerModuleFetch(HttpStatus::kForbidden, "refused");
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_EQ(cache_body_, FetchInPlace()) << i;
+    EXPECT_EQ(0, css_filter_->num_rewrites()) << i;
+  }
+}
+
+// Proxying stores the client-facing response and the module then fetches
+// the resource itself; the entry that stays is the module's own.
+TEST_F(InPlaceRecordedInputTest, ModuleFetchedEntryIsTheOneStored) {
+  Init();
+  FetchInPlace();
+  class RawCallback : public CacheInterface::Callback {
+   public:
+    void Done(CacheInterface::KeyState state) override {
+      if (state == CacheInterface::kAvailable) {
+        raw = value().Value().as_string();
+      }
+    }
+    GoogleString raw;
+  } callback;
+  lru_cache()->Get(HttpCacheKey(cache_css_url_), &callback);
+  EXPECT_NE(GoogleString::npos, callback.raw.find("@Fetched-Input"));
+}
+
+// An entry the module stored from its own fetch, served in place before an
+// optimized version exists, is presented with the caching headers the server
+// sent: a lifetime derived for a response that stated none is not served.
+class InPlaceServedHeadersTest : public InPlaceRecordedInputTest {
+ protected:
+  // Keeps the response headers as they were when the response started,
+  // before anything after the serve recomputes them.
+  class HeadersAtStartFetch : public NotifyingFetch {
+   public:
+    HeadersAtStartFetch(const RequestContextPtr& request_context,
+                        RewriteOptions* options, const GoogleString& url,
+                        WorkerTestBase::SyncPoint* sync,
+                        ResponseHeaders* response_headers,
+                        ResponseHeaders* at_start)
+        : NotifyingFetch(request_context, options, url, sync, response_headers),
+          at_start_(at_start) {}
+
+   protected:
+    void HandleHeadersComplete() override {
+      at_start_->CopyFrom(*response_headers());
+      NotifyingFetch::HandleHeadersComplete();
+    }
+
+   private:
+    ResponseHeaders* at_start_;
+  };
+
+  // Stores cache_css_url_ with header 'name: value' added (none if 'name' is
+  // null), as the module's own fetch stores it, or as the in-place recorder
+  // stores a response (whose own Cache-Control, here none, replaces the
+  // computed one), and returns the headers of an in-place response.
+  void ServeStored(const char* name, const GoogleString& value,
+                   ResponseHeaders* served, bool recorded = false) {
+    Init();
+    lru_cache()->Clear();
+    ResponseHeaders stored;
+    SetDefaultHeaders(kContentTypeCss.mime_type(), &stored);
+    stored.SetDate(timer()->NowMs());
+    if (name != nullptr) {
+      stored.Add(name, value);
+    }
+    stored.ComputeCaching();
+    if (recorded) {
+      stored.RemoveAll(HttpAttributes::kCacheControl);
+    }
+    HTTPValue entry;
+    entry.SetHeaders(&stored);
+    entry.Write(cache_body_, message_handler());
+    if (recorded) {
+      http_cache()->Put(cache_css_url_, rewrite_driver()->CacheFragment(),
+                        RequestHeaders::Properties(),
+                        options()->ComputeHttpOptions(), &entry,
+                        message_handler());
+    } else {
+      http_cache()->PutFetchedInput(
+          cache_css_url_, rewrite_driver()->CacheFragment(),
+          RequestHeaders::Properties(), options()->ComputeHttpOptions(), &entry,
+          message_handler());
+    }
+    ResetHeadersAndStats();
+    css_filter_->set_exceed_deadline(false);
+    WorkerTestBase::SyncPoint sync(server_context()->thread_system());
+    RequestContextPtr request_context(RequestContext::NewTestRequestContext(
+        server_context()->thread_system()));
+    HeadersAtStartFetch fetch(request_context, options(), cache_css_url_, &sync,
+                              &response_headers_, served);
+    // Served at the origin, as the server modules serve in place.
+    rewrite_driver()->SetRequestHeaders(*fetch.request_headers());
+    GoogleUrl gurl(cache_css_url_);
+    rewrite_driver()->FetchInPlaceResource(gurl, false /* proxy_mode */,
+                                           &fetch);
+    sync.Wait();
+    rewrite_driver()->WaitForShutDown();
+    mock_scheduler()->AwaitQuiescence();
+    EXPECT_EQ(cache_body_, fetch.content());
+  }
+};
+
+// For a response that states no lifetime, an in-place response served from
+// the module's own entry looks like one served from a recorded entry.
+TEST_F(InPlaceServedHeadersTest, NoDerivedLifetime) {
+  ResponseHeaders from_recorded;
+  ServeStored(nullptr, "", &from_recorded, true /* recorded */);
+  ResponseHeaders from_fetched;
+  ServeStored(nullptr, "", &from_fetched);
+  EXPECT_EQ(from_recorded.LookupJoined(HttpAttributes::kCacheControl),
+            from_fetched.LookupJoined(HttpAttributes::kCacheControl))
+      << from_recorded.ToString() << from_fetched.ToString();
+  EXPECT_TRUE(
+      from_recorded.HasValue(HttpAttributes::kCacheControl, "s-maxage=10"));
+  EXPECT_TRUE(from_recorded.Has(HttpAttributes::kExpires));
+  EXPECT_TRUE(from_fetched.Has(HttpAttributes::kExpires));
+}
+
+TEST_F(InPlaceServedHeadersTest, OriginMaxAgeKept) {
+  ResponseHeaders served;
+  ServeStored(HttpAttributes::kCacheControl, "max-age=600", &served);
+  EXPECT_TRUE(served.HasValue(HttpAttributes::kCacheControl, "max-age=600"));
+  EXPECT_TRUE(served.HasValue(HttpAttributes::kCacheControl, "s-maxage=10"));
+}
+
+TEST_F(InPlaceServedHeadersTest, OriginExpiresKept) {
+  GoogleString expires;
+  ConvertTimeToString(timer()->NowMs() + 600 * Timer::kSecondMs, &expires);
+  ResponseHeaders served;
+  ServeStored(HttpAttributes::kExpires, expires, &served);
+  EXPECT_STREQ(expires.c_str(), served.Lookup1(HttpAttributes::kExpires));
+}
+
+// The optimized version is built from what the module fetched, not from
+// the recorded response.
+TEST_F(InPlaceRecordedInputTest, OptimizesWhatTheModuleFetched) {
+  Init();
+  RecordAndAnswerModuleFetch(HttpStatus::kOK, "fetched");
+  FetchInPlace();
+  SetTimeMs(start_time_ms() + ttl_ms_ / 2);
+  EXPECT_EQ("fetched:cf", FetchInPlace());
+}
+
 TEST_F(InPlaceRewriteContextTest, NonCacheableUrlNoRewriting) {
   Init();
   FetchAndCheckResponse(nocache_html_url_, nocache_body_, true, 0, nullptr,
@@ -1399,13 +1669,14 @@ TEST_F(InPlaceRewriteContextTest, NonCacheableUrlRewriting) {
   // First fetch misses initial cache lookup, succeeds at fetch and we don't
   // insert into cache because it's not cacheable. But since flags are set to
   // rewrite uncacheable resources, JS rewriting should occur.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
   EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(0, lru_cache()->num_inserts());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(1, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   // Should have been rewritten.
   EXPECT_EQ(1, js_filter_->num_rewrites());
@@ -1438,13 +1709,14 @@ TEST_F(InPlaceRewriteContextTest, PrivateCacheableUrlRewriting) {
   // First fetch misses initial cache lookup, succeeds at fetch and we don't
   // insert into cache because it's not cacheable. But since flags are set to
   // rewrite uncacheable resources, JS rewriting should occur.
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
-  EXPECT_EQ(0, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, http_cache()->cache_inserts()->Get());
   EXPECT_EQ(0, lru_cache()->num_hits());
-  EXPECT_EQ(2, lru_cache()->num_misses());
-  EXPECT_EQ(0, lru_cache()->num_inserts());
+  EXPECT_EQ(3, lru_cache()->num_misses());
+  EXPECT_EQ(1, lru_cache()->num_inserts());
   EXPECT_EQ(0, img_filter_->num_rewrites());
   // Should have been rewritten.
   EXPECT_EQ(1, js_filter_->num_rewrites());

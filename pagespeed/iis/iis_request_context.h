@@ -47,6 +47,7 @@ public:
 		, local_ip_address_(local_ip_address)
 		, local_scheme_(local_scheme)
 		, in_place_(false)
+		, in_place_candidate_(false)
 		, driver_(nullptr)
 		, recorder_(nullptr)
 		, rewrite_html_(false)
@@ -104,6 +105,10 @@ public:
 	GoogleString local_ip() { return local_ip_address_;}
 	int in_place() { return in_place_;}
 	void set_in_place(bool x) { in_place_ = x; }
+	// The request entered the in-place branch: whatever answers it, a
+	// response the module could optimize is kept out of IIS's caches.
+	bool in_place_candidate() const { return in_place_candidate_; }
+	void set_in_place_candidate(bool x) { in_place_candidate_ = x; }
 	RewriteDriver* driver() { return driver_; }
 	void set_driver(RewriteDriver* x) { driver_ = x; }
 	void set_recorder(IproRecorder* x) { recorder_ = x; }
@@ -139,6 +144,7 @@ private:
 	GoogleString local_ip_address_;
 	GoogleString local_scheme_;
 	bool in_place_;
+	bool in_place_candidate_;
 	RewriteDriver* driver_;
 	IproRecorder* recorder_;
 	IisExperimentAssignment experiment_assignment_;

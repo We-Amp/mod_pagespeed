@@ -1350,6 +1350,13 @@ TEST_F(JsCombineFilterTest, NoCombineDataNoDeferAttribute) {
              "<script src=", kJsUrl2, "></script>"));
 }
 
+// SVG script elements are not HTML scripts, so they are not combined.
+TEST_F(JsCombineFilterTest, NoCombineSvgScripts) {
+  ValidateNoChanges("svg_scripts",
+                    StrCat("<svg><script src=", kJsUrl1, "></script>",
+                           "<script src=", kJsUrl2, "></script></svg>"));
+}
+
 TEST_F(JsCombineFilterTest, PreserveUrlRelativity) {
   options()->ClearSignatureForTesting();
   options()->set_preserve_url_relativity(true);

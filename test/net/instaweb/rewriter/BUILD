@@ -29,6 +29,7 @@ pagespeed_cc_test_library(
         "mock_critical_images_finder.h",
         "mock_resource_callback.h",
         "notifying_fetch.h",
+        "older_result_cache.h",
         "oob_slot_index_cache.h",
         "option_context_worst_case.h",
         "rewrite_context_test_base.h",

@@ -1,1 +1,1 @@
-- Where ForbidAllDisabledFilters was on, a request or a lower configuration scope could still turn on a filter the configuration left off, and an experiment arm could turn on a filter the configuration forbade or disabled; such filters now stay off. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Hardened filter configuration so that filters the configuration forbids stay off. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

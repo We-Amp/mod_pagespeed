@@ -200,33 +200,59 @@ bool CssHierarchy::DetermineRulesetMedia(StringVector* ruleset_media) {
 }
 
 void CssHierarchy::AddFlatteningFailureReason(const GoogleString& reason) {
-  if (!reason.empty()) {
-    StringPiece trimmed_reason(reason);
-    if (trimmed_reason.starts_with(kFailureReasonPrefix)) {
-      trimmed_reason.remove_prefix(STATIC_STRLEN(kFailureReasonPrefix));
-    }
-    // Don't add the reason if we already have it.
-    StringPiece current_reasons(flattening_failure_reason_);
-    if (FindIgnoreCase(current_reasons, trimmed_reason) == StringPiece::npos) {
-      if (flattening_succeeded_) {
-        // This is an informational message only - no prefix required.
-        if (!flattening_failure_reason_.empty()) {
-          StrAppend(&flattening_failure_reason_, " AND ");
-        }
-      } else if (flattening_failure_reason_.empty()) {
-        flattening_failure_reason_ = kFailureReasonPrefix;
-      } else {
-        if (FindIgnoreCase(current_reasons, kFailureReasonPrefix) ==
-            StringPiece::npos) {
-          flattening_failure_reason_ =
-              StrCat(kFailureReasonPrefix, flattening_failure_reason_);
-        }
-        StrAppend(&flattening_failure_reason_, " AND ");
-      }
-      // Finally, add the new reason to whatever we have now.
-      StrAppend(&flattening_failure_reason_, trimmed_reason);
-    }
+  if (reason.empty() || failure_reasons_capped_) {
+    return;
   }
+  StringPiece trimmed_reason(reason);
+  if (trimmed_reason.starts_with(kFailureReasonPrefix)) {
+    trimmed_reason.remove_prefix(STATIC_STRLEN(kFailureReasonPrefix));
+  }
+  if (trimmed_reason.size() > static_cast<size_t>(kMaxFailureReasonBytes)) {
+    trimmed_reason = trimmed_reason.substr(0, kMaxFailureReasonBytes);
+  }
+  // Don't add the reason if we already have it.
+  GoogleString normalized(trimmed_reason.data(), trimmed_reason.size());
+  LowerString(&normalized);
+  if (seen_failure_reasons_.find(normalized) != seen_failure_reasons_.end()) {
+    return;
+  }
+  if (seen_failure_reasons_.size() >= kMaxRememberedFailureReasons) {
+    failure_reasons_capped_ = true;
+    StrAppend(&flattening_failure_reason_, " AND more");
+    return;
+  }
+  seen_failure_reasons_.insert(normalized);
+  // A reason that is part of the text already is not added again. The text
+  // is no longer than the cap, so this search is bounded.
+  failure_reason_scan_bytes_ += flattening_failure_reason_.size();
+  if (FindIgnoreCase(flattening_failure_reason_, trimmed_reason) !=
+      StringPiece::npos) {
+    return;
+  }
+  if (flattening_failure_reason_.size() + trimmed_reason.size() >
+      static_cast<size_t>(kMaxFailureReasonBytes)) {
+    failure_reasons_capped_ = true;
+    StrAppend(&flattening_failure_reason_, " AND more");
+    return;
+  }
+  if (flattening_succeeded_) {
+    // This is an informational message only - no prefix required.
+    if (!flattening_failure_reason_.empty()) {
+      StrAppend(&flattening_failure_reason_, " AND ");
+    }
+  } else if (flattening_failure_reason_.empty()) {
+    flattening_failure_reason_ = kFailureReasonPrefix;
+    failure_reason_has_prefix_ = true;
+  } else {
+    if (!failure_reason_has_prefix_) {
+      flattening_failure_reason_ =
+          StrCat(kFailureReasonPrefix, flattening_failure_reason_);
+      failure_reason_has_prefix_ = true;
+    }
+    StrAppend(&flattening_failure_reason_, " AND ");
+  }
+  // Finally, add the new reason to whatever we have now.
+  StrAppend(&flattening_failure_reason_, trimmed_reason);
 }
 
 bool CssHierarchy::CheckCharsetOk(const ResourcePtr& resource,
@@ -301,9 +327,12 @@ bool CssHierarchy::Parse() {
       // Reduce the media on the to-be merged rulesets to the minimum required,
       // deleting any rulesets that end up having no applicable media types.
       Css::Rulesets& rulesets = stylesheet->mutable_rulesets();
-      for (Css::Rulesets::iterator iter = rulesets.begin();
-           iter != rulesets.end();) {
-        Css::Ruleset* ruleset = *iter;
+      // One pass: the rulesets that stay are moved down over the ones that
+      // go, and each ruleset that goes is deleted once.
+      size_t kept = 0;
+      size_t index = 0;
+      for (; index < rulesets.size(); ++index) {
+        Css::Ruleset* ruleset = rulesets[index];
         StringVector ruleset_media;
         // We currently do not allow flattening of any CSS files with @media
         // that have complex CSS3-version media queries. Only plain media
@@ -313,9 +342,8 @@ bool CssHierarchy::Parse() {
           if (DetermineRulesetMedia(&ruleset_media)) {
             css_util::ConvertStringVectorToMediaQueries(
                 ruleset_media, &ruleset->mutable_media_queries());
-            ++iter;
+            rulesets[kept++] = ruleset;
           } else {
-            iter = rulesets.erase(iter);
             delete ruleset;
           }
         } else {
@@ -330,6 +358,11 @@ bool CssHierarchy::Parse() {
           break;
         }
       }
+      // Keep the rulesets not looked at (after a break) behind the kept ones.
+      for (; index < rulesets.size(); ++index) {
+        rulesets[kept++] = rulesets[index];
+      }
+      rulesets.resize(kept);
       stylesheet_.reset(stylesheet);
       // Refuse to flatten if an @import was preserved verbatim as an
       // unparsed ruleset. Nested CSS comes through here on both the cold

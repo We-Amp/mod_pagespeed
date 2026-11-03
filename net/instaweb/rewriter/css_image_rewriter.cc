@@ -91,6 +91,11 @@ bool CssImageRewriter::RewritesEnabled(int64 image_inline_max_bytes) const {
 bool CssImageRewriter::RewriteImport(RewriteContext* parent,
                                      CssHierarchy* hierarchy,
                                      bool* is_authorized) {
+  if (!parent->PageAllowsNestedContext()) {
+    // The document has no rewrite left, so the stylesheet is left undone.
+    *is_authorized = true;
+    return false;
+  }
   GoogleUrl import_url(hierarchy->url());
   ResourcePtr resource = driver()->CreateInputResource(
       import_url, RewriteDriver::InputRole::kStyle, is_authorized);
@@ -108,6 +113,12 @@ bool CssImageRewriter::RewriteImage(int64 image_inline_max_bytes,
                                     const GoogleUrl& original_url,
                                     RewriteContext* parent, Css::Values* values,
                                     size_t value_index, bool* is_authorized) {
+  if (!parent->PageAllowsNestedContext()) {
+    // The document has no rewrite left, so the stylesheet is left undone;
+    // nothing is created for the image.
+    *is_authorized = true;
+    return true;
+  }
   const RewriteOptions* options = driver()->options();
   ResourcePtr resource = driver()->CreateInputResource(
       original_url, RewriteDriver::InputRole::kImg, is_authorized);
@@ -132,14 +143,15 @@ void CssImageRewriter::RewriteSlot(const ResourceSlotPtr& slot,
   if (options->ImageOptimizationEnabled() || image_inline_max_bytes > 0) {
     // Do not rewrite external resource if preserve_urls is enabled unless
     // we allow preemptive rewriting.
-    if (!slot->preserve_urls() ||
-        options->in_place_preemptive_rewrite_css_images()) {
+    if ((!slot->preserve_urls() ||
+         options->in_place_preemptive_rewrite_css_images()) &&
+        parent->PageAllowsNestedContext()) {
       parent->AddNestedContext(image_rewriter_->MakeNestedRewriteContextForCss(
           image_inline_max_bytes, parent, slot));
     }
   }
 
-  if (driver()->MayCacheExtendImages()) {
+  if (driver()->MayCacheExtendImages() && parent->PageAllowsNestedContext()) {
     parent->AddNestedContext(cache_extender_->MakeNestedContext(parent, slot));
   }
 

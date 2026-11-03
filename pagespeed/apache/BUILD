@@ -167,6 +167,7 @@ cc_library(
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:curl_fetcher",
+        "//pagespeed/system:inplace_url_agreement",
         # apache_mpm_detection.cc and apache_rewrite_driver_factory.cc include
         # the thread-count policy header directly.
         "//pagespeed/system:optimization_thread_policy",

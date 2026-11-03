@@ -1,0 +1,1 @@
+- Responses an origin marks as private or not storable are no longer kept in the shared cache when a server directive rewrites their caching headers for browsers. Affected: 2.7.0 and earlier. Update recommended for nginx and Apache sites.

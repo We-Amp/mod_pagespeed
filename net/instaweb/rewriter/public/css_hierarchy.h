@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/resource.h"
@@ -165,7 +166,19 @@ class CssHierarchy {
   // otherwise append the given one to what we have now, separated by " AND ".
   // We also strip any leading "Flattening failed: " from the given reason,
   // which can happen when rolling up hierarchies.
+  // The text kept is bounded: once it holds kMaxFailureReasonBytes, further
+  // reasons are replaced by one "AND more" marker.
   void AddFlatteningFailureReason(const GoogleString& reason);
+
+  static constexpr int kMaxFailureReasonBytes = 1024;
+  // Reasons remembered for duplicate detection.
+  static constexpr int kMaxRememberedFailureReasons = 256;
+
+  // Bytes of reason text searched so far for containment of a new reason;
+  // for tests of how the duplicate check scales.
+  int64 failure_reason_scan_bytes_for_testing() const {
+    return failure_reason_scan_bytes_;
+  }
 
   bool unparseable_detected() const { return unparseable_detected_; }
   void set_unparseable_detected(bool ok) { unparseable_detected_ = ok; }
@@ -391,6 +404,12 @@ class CssHierarchy {
   // If flattening failed, a user-oriented description of why, for injection
   // into the HTML if the debug filter is enabled.
   GoogleString flattening_failure_reason_;
+  // Lower-cased reasons already added or found to be part of the text, so a
+  // repeat is recognised without searching the text.
+  std::set<GoogleString> seen_failure_reasons_;
+  bool failure_reason_has_prefix_ = false;
+  bool failure_reasons_capped_ = false;
+  int64 failure_reason_scan_bytes_ = 0;
 
   // An indication of whether anything unparseable was detected in this CSS.
   bool unparseable_detected_;

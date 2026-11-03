@@ -1230,6 +1230,12 @@ HtmlName HtmlParse::MakeName(const StringPiece& str_piece) {
   return HtmlName(keyword, str);
 }
 
+HtmlName HtmlParse::MakeKeywordlessName(const StringPiece& str_piece) {
+  // Reuse the storage of MakeName, which keeps the spelling alive for the
+  // life of the parse, and drop only the keyword.
+  return HtmlName(HtmlName::kNotAKeyword, MakeName(str_piece).str_);
+}
+
 void HtmlParse::add_event_listener(HtmlFilter* listener) {
   event_listeners_.emplace_back(listener);
 }

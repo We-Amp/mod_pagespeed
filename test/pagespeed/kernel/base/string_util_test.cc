@@ -789,6 +789,38 @@ TEST_F(TrimQuoteTest, TrimUrlQuoteTestAll) {
   EXPECT_STREQ("one two", RemoveUrlQuotes("%5C%27'one two'%5C%27"));
 }
 
+TEST_F(TrimQuoteTest, TrimUrlQuoteNestedTest) {
+  // Nested quotes on both ends.
+  EXPECT_STREQ("abc", RemoveUrlQuotes("\"abc''\""));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("''abc''"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("\"\"abc\"\""));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("'''abc'''"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("%27%27abc%27%27"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("%22%22abc%22%22"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("%5C%27%5C%27abc%5C%27%5C%27"));
+
+  // Quotes on one end only.
+  EXPECT_STREQ("abc", RemoveUrlQuotes("abc'"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("abc''"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("abc\"\""));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("abc%27%27"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("abc%5C%27%5C%27"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("'abc"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("''abc"));
+
+  // Mixed single and double quotes.
+  EXPECT_STREQ("abc", RemoveUrlQuotes("\"'abc'\""));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("'\"abc\"'"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("\"'abc\"'"));
+  EXPECT_STREQ("abc", RemoveUrlQuotes("%22%27abc%27%22"));
+
+  // The simple cases keep their results.
+  EXPECT_STREQ("one", RemoveUrlQuotes(" \'one\'"));
+  EXPECT_STREQ("one", RemoveUrlQuotes(" %27one%27"));
+  EXPECT_STREQ("one", RemoveUrlQuotes(" %5c%27one %5c%27"));
+  EXPECT_STREQ("one two", RemoveUrlQuotes("%5C%27'one two'%5C%27"));
+}
+
 TEST(SplitStringPieceToIntegerVectorTest, SplitStringPieceToIntegerVector) {
   std::vector<int> ints;
 
@@ -946,6 +978,110 @@ TEST(JsonEscapeTest, PassesThroughNearMissSequences) {
   EXPECT_EQ("\xE2", JsonEscape("\xE2"));
   // 0xE2 0x80 with no third byte is not a match either.
   EXPECT_EQ("\xE2\x80", JsonEscape("\xE2\x80"));
+}
+
+TEST(MemCaseEqualTest, EqualBuffers) {
+  EXPECT_TRUE(MemCaseEqual("foobar", 6, "foobar", 6));
+  EXPECT_TRUE(MemCaseEqual("123 !?", 6, "123 !?", 6));
+}
+
+TEST(MemCaseEqualTest, EmptyBuffers) {
+  EXPECT_TRUE(MemCaseEqual("", 0, "", 0));
+}
+
+TEST(MemCaseEqualTest, CaseDifferenceIsIgnored) {
+  EXPECT_TRUE(MemCaseEqual("foobar", 6, "FOOBAR", 6));
+  EXPECT_TRUE(MemCaseEqual("fOoBaR", 6, "FoObAr", 6));
+  // Case folding aside, differing bytes still compare unequal.
+  EXPECT_FALSE(MemCaseEqual("foobar", 6, "foobaz", 6));
+  EXPECT_FALSE(MemCaseEqual("foobar", 6, "FOOBAZ", 6));
+}
+
+TEST(MemCaseEqualTest, LengthMismatchIsUnequal) {
+  EXPECT_FALSE(MemCaseEqual("foo", 3, "foobar", 6));
+  EXPECT_FALSE(MemCaseEqual("foobar", 6, "foo", 3));
+  EXPECT_FALSE(MemCaseEqual("", 0, "f", 1));
+  EXPECT_FALSE(MemCaseEqual("f", 1, "", 0));
+}
+
+TEST(MemCaseEqualTest, SizesBoundTheComparison) {
+  // Only the leading size1 bytes are compared, so bytes past the stated
+  // sizes do not participate.  This is only expressible through the raw
+  // (pointer, size) entry point, not the StringPiece wrapper.
+  EXPECT_TRUE(MemCaseEqual("foobar", 3, "FOOBAR", 3));
+  EXPECT_TRUE(MemCaseEqual("foobar", 3, "FOOxyz", 3));
+  EXPECT_FALSE(MemCaseEqual("foobar", 4, "FOOxyz", 4));
+  // Embedded NULs are compared byte-wise like any other character.
+  EXPECT_TRUE(MemCaseEqual("a\0b", 3, "A\0B", 3));
+  EXPECT_FALSE(MemCaseEqual("a\0b", 3, "A\0C", 3));
+}
+
+TEST(CountCharacterMismatchesTest, IdenticalStrings) {
+  EXPECT_EQ(0, CountCharacterMismatches("foobar", "foobar"));
+}
+
+TEST(CountCharacterMismatchesTest, EmptyStrings) {
+  EXPECT_EQ(0, CountCharacterMismatches("", ""));
+  // An empty string vs a non-empty one counts every missing character.
+  EXPECT_EQ(3, CountCharacterMismatches("", "abc"));
+  EXPECT_EQ(3, CountCharacterMismatches("abc", ""));
+}
+
+TEST(CountCharacterMismatchesTest, CaseDifferenceCountsAsMismatch) {
+  // The comparison is byte-wise; it does not fold case.
+  EXPECT_EQ(3, CountCharacterMismatches("abc", "ABC"));
+  EXPECT_EQ(2, CountCharacterMismatches("aBc", "Abc"));
+}
+
+TEST(CountCharacterMismatchesTest, OrdinaryMismatches) {
+  EXPECT_EQ(1, CountCharacterMismatches("foobar", "foobaz"));
+  EXPECT_EQ(3, CountCharacterMismatches("abc", "xyz"));
+}
+
+TEST(CountCharacterMismatchesTest, LengthMismatchAddsToCount) {
+  // Matching prefix contributes nothing; the length gap counts per byte.
+  EXPECT_EQ(2, CountCharacterMismatches("abc", "abcde"));
+  EXPECT_EQ(2, CountCharacterMismatches("abcde", "abc"));
+  // In-bounds mismatches and the length gap both add up.
+  EXPECT_EQ(3, CountCharacterMismatches("axc", "abcde"));
+}
+
+TEST(BackslashEscapeTest, EscapesRequestedCharacters) {
+  GoogleString dest;
+  BackslashEscape("he said \"hi\"", "\"", &dest);
+  EXPECT_EQ("he said \\\"hi\\\"", dest);
+}
+
+TEST(BackslashEscapeTest, EscapesEveryEscapeCandidate) {
+  GoogleString dest;
+  // Each of backslash, single quote, and double quote gets a backslash.
+  BackslashEscape("a\\b'c\"d", "\\'\"", &dest);
+  EXPECT_EQ("a\\\\b\\'c\\\"d", dest);
+}
+
+TEST(BackslashEscapeTest, EmptySrcLeavesDestUnchanged) {
+  GoogleString dest = "kept";
+  BackslashEscape("", "\"", &dest);
+  EXPECT_EQ("kept", dest);
+  BackslashEscape("", "", &dest);
+  EXPECT_EQ("kept", dest);
+}
+
+TEST(BackslashEscapeTest, NoMatchingCharactersCopiesVerbatim) {
+  GoogleString dest;
+  BackslashEscape("plain text", "\"'", &dest);
+  EXPECT_EQ("plain text", dest);
+  GoogleString dest2;
+  // An empty escape set matches nothing at all.
+  BackslashEscape("any\\thing'", "", &dest2);
+  EXPECT_EQ("any\\thing'", dest2);
+}
+
+TEST(BackslashEscapeTest, AppendsToExistingContent) {
+  // BackslashEscape appends; it does not clear *dest first.
+  GoogleString dest = "prefix:";
+  BackslashEscape("a'b", "'", &dest);
+  EXPECT_EQ("prefix:a\\'b", dest);
 }
 
 }  // namespace

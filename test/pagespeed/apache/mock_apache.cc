@@ -335,6 +335,12 @@ char* ap_construct_url(apr_pool_t* p, const char* uri, request_rec* r) {
   return apr_pstrdup(p, uri);
 }
 
+// The name httpd puts in the URLs it builds for the request: the Host the
+// mock request carries, or "localhost" without one.
+const char* ap_get_server_name_for_url(request_rec* r) {
+  return r->hostname != nullptr ? r->hostname : "localhost";
+}
+
 // The hook the ap_http_scheme() macro expands to.  Linked in by tests that
 // call into the in-place handler; the mock request is always plain http.
 const char* ap_run_http_scheme(const request_rec* r) { return "http"; }

@@ -248,6 +248,18 @@ setup_test_content() {
         fi
     done
 
+    # system/test_ipro_request_reading.py: stylesheets whose file names hold
+    # a backslash, next to the reading/open/ and reading/members/
+    # directories.  Written here rather than kept in the tree, as not every
+    # checkout can hold such a name.
+    local reading=/var/www/html/mod_pagespeed_test/ipro/reading
+    if [ -d "$reading" ]; then
+        for name in 'open\site.css' 'members\site.css'; do
+            printf '.reading-other  {  color :  #993366 ;  }\n' | \
+                sudo tee "$reading/$name" > /dev/null
+        done
+    fi
+
     # Set permissions
     sudo chown -R www-data:www-data /var/www/html
 
@@ -349,6 +361,16 @@ configure_fixture_server_scope() {
 <Directory "/var/www/html/mod_pagespeed_test/ipro/cc200sma50sma51/" >
     Header set Cache-control "max-age=200, s-maxage=50, s-maxage=51"
 </Directory>
+
+# system/test_ipro_request_reading.py: cacheable stylesheets, one of them
+# behind an access rule on its location.
+SetEnvIf X-Reading-Pass "^granted$" reading_pass
+<Directory "/var/www/html/mod_pagespeed_test/ipro/reading/" >
+    Header set Cache-control "max-age=200"
+</Directory>
+<Location /mod_pagespeed_test/ipro/reading/members>
+    Require env reading_pass
+</Location>
 
 # debug.conf.template
 <Directory "/var/www/html/mod_pagespeed_test/ipro/wait/" >
@@ -1775,6 +1797,10 @@ configure_self_fetch_access_vhost() {
   <Location /mod_pagespeed_test/self_fetch_access/local_only>
     Require local
   </Location>
+  <Location /mod_pagespeed_test/self_fetch_access/local_only_wait>
+    Require local
+    ModPagespeedInPlaceWaitForOptimized on
+  </Location>
 EOF
         printf '%s\n' "$admin_blocks"
         echo "</VirtualHost>"
@@ -2613,6 +2639,8 @@ configure_site_identity_vhosts() {
         printf '.site-%s-only {\n  color: #ff0000;\n}\n' "$dir" \
             | sudo tee "$root/$dir/style.css" > /dev/null
     done
+    printf '<html><head><base href="http://base-b.example.test/"><link rel="stylesheet" href="style.css"></head><body><p>page</p></body></html>\n' \
+        | sudo tee "$root/a/base-page.html" > /dev/null
     local conf="$APACHE_CONF_DIR/sites-available/pagespeed-test-site-identity.conf"
     local name port fragment
     {
@@ -2632,6 +2660,32 @@ configure_site_identity_vhosts() {
 </VirtualHost>
 EOF
         done
+        # base-page.html on base-a names base-b in its <base>; base-a can load
+        # base-b's stylesheet from its own root, base-b serves its own.
+        cat << EOF
+<VirtualHost *:$APACHE_SITE_PORT_A>
+  ServerName base-a.example.test
+  DocumentRoot "$root/a"
+  Header always set Cache-Control "max-age=3600"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rewrite_css
+  ModPagespeedInPlaceResourceOptimization on
+  ModPagespeedDomain base-b.example.test
+  ModPagespeedLoadFromFile "http://base-b.example.test/" "$root/a/"
+</VirtualHost>
+<VirtualHost *:$APACHE_SITE_PORT_B>
+  ServerName base-b.example.test
+  DocumentRoot "$root/b"
+  Header always set Cache-Control "max-age=3600"
+  ModPagespeed on
+  ModPagespeedFileCachePath "/var/cache/mod_pagespeed"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rewrite_css
+  ModPagespeedInPlaceResourceOptimization on
+</VirtualHost>
+EOF
         for name in site.example.test shared.example.test; do
             for port in "$APACHE_SITE_PORT_A" "$APACHE_SITE_PORT_B"; do
                 dir=a

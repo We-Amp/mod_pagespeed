@@ -83,6 +83,19 @@ pagespeed_cc_test(
     ],
 )
 
+# size "small" so a rescue that is not one linear pass over the text fails
+# the BlockOfSubnormalsAtTheScanLimit case on every configuration.
+pagespeed_cc_test(
+    name = "json_util_subnormal_test",
+    size = "small",
+    srcs = ["json_util_subnormal_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/packs:json_util",
+        "//pagespeed/kernel/packs:pack",
+    ],
+)
+
 pagespeed_cc_test(
     name = "kind_registry_test",
     srcs = ["kind_registry_test.cc"],

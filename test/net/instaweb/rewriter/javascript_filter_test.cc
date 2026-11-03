@@ -223,6 +223,27 @@ TEST_F(JavascriptFilterTest, DoRewrite) {
                           "http://test.com/hello.js");
 }
 
+// A script reconstructed under a name that puts it in another directory is
+// served, while pages keep using the optimized script from the input's own
+// directory.
+TEST_F(JavascriptFilterTest, FetchFromOtherDirectoryKeepsPageUrl) {
+  InitFilters();
+  SetResponseWithDefaultHeaders("dir/hello.js", kContentTypeJavascript, kJsData,
+                                100);
+  // An optimized URL for the same input, named under another directory.
+  GoogleString root_named =
+      Encode(kTestDomain, kFilterId, "0", "hello.js", "js");
+  root_named.replace(root_named.find("hello.js"), STATIC_STRLEN("hello.js"),
+                     "dir,_hello.js");
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(root_named, &content));
+  EXPECT_EQ(kJsMinData, content);
+
+  const GoogleString page_js = Encode("dir/", kFilterId, "0", "hello.js", "js");
+  ValidateExpected("other_dir", GenerateHtml("dir/hello.js"),
+                   GenerateHtml(page_js.c_str()));
+}
+
 TEST_F(JavascriptFilterTest, DontRewriteUnauthorizedDomain) {
   InitFiltersAndTest(100);
   ValidateNoChanges("dont_rewrite", GenerateHtml(kUnauthorizedJs));
@@ -740,6 +761,20 @@ TEST_F(JavascriptFilterTest, NoMinificationInlineJS) {
   EXPECT_EQ(1, did_not_shrink_->Get());
   // No failures though.
   EXPECT_EQ(0, minification_failures_->Get());
+}
+
+// An SVG or MathML script element is not an HTML script, so its text is not
+// minified; an HTML script inside foreignObject is.
+TEST_F(JavascriptFilterTest, ForeignScriptIsNotMinified) {
+  InitFiltersAndTest(100);
+  ValidateNoChanges("svg_script", "<svg><script> var  a = 1 ; </script></svg>");
+  ValidateNoChanges("math_script",
+                    "<math><script> var  a = 1 ; </script></math>");
+  ValidateExpected(
+      "foreign_object_script",
+      "<svg><foreignObject><script> var  a = 1 ; </script>"
+      "</foreignObject></svg>",
+      "<svg><foreignObject><script>var a=1;</script></foreignObject></svg>");
 }
 
 // An inline script keeps its end tag where it was when minification would

@@ -1,0 +1,1 @@
+- Hardened HTML parsing so that inline SVG and MathML are read as browsers read them, and optimizations no longer treat their content as page styles or scripts. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

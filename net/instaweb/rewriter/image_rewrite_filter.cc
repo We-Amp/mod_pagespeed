@@ -43,6 +43,7 @@
 #include "net/instaweb/rewriter/public/critical_images_beacon_filter.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/csp.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/css_url_encoder.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
@@ -769,13 +770,11 @@ void ImageRewriteFilter::Context::Render() {
           Driver()->options()->Enabled(RewriteOptions::kInlineImages)) {
         const char* message = MessageForInlineResult(inline_result);
         if (message != nullptr) {
-          RewriteContext* context = parent();
-          if (context != nullptr) {
-            CachedResult* css_result = context->mutable_output_partition(0);
-            // We want to have the CSS context retain this, so we can
-            // annotate the HTML that references the CSS with the image.
-            // So we write the debug message into the CSS context.
-            filter_->SaveDebugMessageToCache(message, css_result);
+          // The stylesheet's context keeps the message, so the HTML that
+          // references the stylesheet can show it, within the document's
+          // debug budget.
+          if (has_parent() && message[0] != 0) {
+            AddDebugMessageToParent(message);
           }
         }
       }
@@ -836,6 +835,8 @@ ImageRewriteFilter::ImageRewriteFilter(RewriteDriver* driver)
     : RewriteFilter(driver), image_counter_(0), saw_end_document_(false) {
   Statistics* stats = server_context()->statistics();
   image_rewrites_ = stats->GetVariable(kImageRewrites);
+  parse_max_bytes_exceeded_ =
+      stats->GetVariable(CssFilter::kParseMaxBytesExceeded);
   image_resized_using_rendered_dimensions_ =
       stats->GetVariable(kImageResizedUsingRenderedDimensions);
   image_norewrites_high_resolution_ =
@@ -2109,6 +2110,22 @@ bool ImageRewriteFilter::StoreUrlInPropertyCache(const StringPiece& url) {
   return true;
 }
 
+int64 ImageRewriteFilter::StyleParseBound(HtmlElement* element,
+                                          bool count_over_bound) {
+  const RewriteOptions* options = driver()->options();
+  const HtmlElement::Attribute* style =
+      element->FindAttribute(HtmlName::kStyle);
+  if (count_over_bound && style != nullptr &&
+      style->DecodedValueOrNull() != nullptr) {
+    // A style attribute over CssParseMaxBytes is not parsed here either.
+    CssFilter::OverParseMaxBytes(
+        options, strlen(style->DecodedValueOrNull()),
+        driver()->google_url().Spec(), "Image style attribute not read",
+        parse_max_bytes_exceeded_, driver()->message_handler(), nullptr);
+  }
+  return options->css_parse_max_bytes();
+}
+
 bool ImageRewriteFilter::HasAnyDimensions(HtmlElement* element) {
   if (element->FindAttribute(HtmlName::kWidth)) {
     return true;
@@ -2116,7 +2133,7 @@ bool ImageRewriteFilter::HasAnyDimensions(HtmlElement* element) {
   if (element->FindAttribute(HtmlName::kHeight)) {
     return true;
   }
-  css_util::StyleExtractor extractor(element);
+  css_util::StyleExtractor extractor(element, StyleParseBound(element, false));
   return extractor.HasAnyDimensions();
 }
 
@@ -2184,7 +2201,7 @@ bool ImageRewriteFilter::ParseDimensionAttribute(const char* position,
 void ImageRewriteFilter::GetDimensions(
     HtmlElement* element, ImageDim* page_dim, const HtmlElement::Attribute* src,
     bool* is_resized_using_rendered_dimensions) {
-  css_util::StyleExtractor extractor(element);
+  css_util::StyleExtractor extractor(element, StyleParseBound(element, true));
   css_util::DimensionState state = extractor.state();
   int32 width = extractor.width();
   int32 height = extractor.height();

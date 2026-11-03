@@ -47,7 +47,9 @@ namespace {
 // Increment this value to flush HTTP cache.
 // Similar to RewriteOptions::kOptionVersion which can be used to flush the
 // metadata cache.
-const int kHttpCacheVersion = 3;
+// 4: in-place store decisions use the stricter of the origin's and the
+// server's caching headers.
+const int kHttpCacheVersion = 4;
 
 // Maximum size of response content in bytes. -1 indicates that there is no size
 // limit.
@@ -151,6 +153,20 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     return callback_->http_value()->Link(value().ToOwned(), headers, handler_);
   }
 
+  // Like HTTPValue::ExtractHeaders, but a marked value's headers keep the
+  // mark, for a value rebuilt from them.
+  bool ExtractHeadersKeepingMark(const HTTPValue& value,
+                                 ResponseHeaders* headers) {
+    if (!value.ExtractHeaders(headers, handler_)) {
+      return false;
+    }
+    if (value.IsFetchedInput()) {
+      headers->Replace(HTTPValue::kFetchedInputHeader, "1");
+      headers->ComputeCaching();
+    }
+    return true;
+  }
+
   bool ValidateCandidate(const GoogleString& key,
                          CacheInterface::KeyState backend_state) override {
     ++cache_level_;
@@ -233,7 +249,9 @@ class HTTPCacheCallback : public CacheInterface::Callback {
           if (headers->UpdateCacheHeadersIfForceCached()) {
             // If the cache headers were updated as a result of it being force
             // cached, we need to reconstruct the HTTPValue with the new
-            // headers.
+            // headers, keeping the fetched-input mark.
+            const bool fetched_input =
+                callback_->http_value()->IsFetchedInput();
             StringPiece content;
             callback_->http_value()->ExtractContents(&content);
             callback_->http_value()->Clear();
@@ -246,7 +264,11 @@ class HTTPCacheCallback : public CacheInterface::Callback {
             // until HTTPCacheCallback::Done -- that is the pin here, not the
             // HTTPValue keep-alive.  Write() then copies into owned storage.
             callback_->http_value()->Write(content, handler_);
-            callback_->http_value()->SetHeaders(headers);
+            if (fetched_input) {
+              callback_->http_value()->SetHeadersMarkingFetchedInput(*headers);
+            } else {
+              callback_->http_value()->SetHeaders(headers);
+            }
           }
         } else {
           if (http_cache_->force_caching_ ||
@@ -255,8 +277,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
                                         ResponseHeaders::kHasValidator)) {
             ResponseHeaders fallback_headers;
             if (callback_->request_context()->accepts_gzip() ||
-                !callback_->http_value()->ExtractHeaders(&fallback_headers,
-                                                         handler_) ||
+                !ExtractHeadersKeepingMark(*callback_->http_value(),
+                                           &fallback_headers) ||
                 !InflatingFetch::UnGzipValueIfCompressed(
                     *callback_->http_value(), &fallback_headers,
                     callback_->fallback_http_value(), handler_,
@@ -288,10 +310,17 @@ class HTTPCacheCallback : public CacheInterface::Callback {
     } else if (!callback_->request_context()->accepts_gzip() &&
                headers->IsGzipped()) {
       HTTPValue new_value;
-      if (InflatingFetch::UnGzipValueIfCompressed(
-              *callback_->http_value(), headers, &new_value, handler_,
+      // The inflated value keeps the fetched-input mark; 'headers' do not
+      // carry it.
+      ResponseHeaders inflated_headers;
+      if (ExtractHeadersKeepingMark(*callback_->http_value(),
+                                    &inflated_headers) &&
+          InflatingFetch::UnGzipValueIfCompressed(
+              *callback_->http_value(), &inflated_headers, &new_value, handler_,
               http_cache_->MaxInflatedBodyBytes())) {
         callback_->http_value()->Link(&new_value);
+        new_value.ExtractHeaders(headers, handler_);
+        headers->ComputeCaching();
       }
     }
     start_ms_ = now_ms;
@@ -378,11 +407,9 @@ void HTTPCache::RememberFailure(const GoogleString& key,
       ResponseHeaders::kRespectVaryOnResources, &headers, "", handler);
 }
 
-HTTPValue* HTTPCache::ApplyHeaderChangesForPut(int64 start_us,
-                                               const StringPiece* content,
-                                               ResponseHeaders* headers,
-                                               HTTPValue* value,
-                                               MessageHandler* handler) {
+HTTPValue* HTTPCache::ApplyHeaderChangesForPut(
+    int64 start_us, const StringPiece* content, ResponseHeaders* headers,
+    HTTPValue* value, bool fetched_input, MessageHandler* handler) {
   if ((headers->status_code() != HttpStatus::kOK) &&
       ignore_failure_puts_.value()) {
     return nullptr;
@@ -391,6 +418,19 @@ HTTPValue* HTTPCache::ApplyHeaderChangesForPut(int64 start_us,
 
   // Clear out Set-Cookie headers before storing the response into cache.
   bool headers_mutated = headers->Sanitize();
+
+  // Only PutFetchedInput stores the fetched-input mark.  'headers' never
+  // carries it when they came from HTTPValue::ExtractHeaders, but 'value' may.
+  if (fetched_input) {
+    headers->Replace(HTTPValue::kFetchedInputHeader, "1");
+    headers_mutated = true;
+  } else if (headers->RemoveAll(HTTPValue::kFetchedInputHeader) ||
+             (value != nullptr && value->IsFetchedInput())) {
+    headers_mutated = true;
+  }
+  if (headers_mutated) {
+    headers->ComputeCaching();
+  }
   // TODO(sriharis): Modify date headers.
   // TODO(nikhilmadan): Set etags from hash of content.
 
@@ -502,6 +542,23 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
                     RequestHeaders::Properties req_properties,
                     const HttpOptions& http_options, HTTPValue* value,
                     MessageHandler* handler) {
+  PutValue(key, fragment, req_properties, http_options, value,
+           false /* fetched_input */, handler);
+}
+
+void HTTPCache::PutFetchedInput(const GoogleString& key,
+                                const GoogleString& fragment,
+                                RequestHeaders::Properties req_properties,
+                                const HttpOptions& http_options,
+                                HTTPValue* value, MessageHandler* handler) {
+  PutValue(key, fragment, req_properties, http_options, value,
+           true /* fetched_input */, handler);
+}
+
+void HTTPCache::PutValue(const GoogleString& key, const GoogleString& fragment,
+                         RequestHeaders::Properties req_properties,
+                         const HttpOptions& http_options, HTTPValue* value,
+                         bool fetched_input, MessageHandler* handler) {
   int64 start_us = timer_->NowUs();
   int64 start_monotonic_us = timer_->NowMonotonicUs();
   // Extract headers and contents.
@@ -522,8 +579,8 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
     return;
   }
   // Apply header changes.
-  HTTPValue* new_value =
-      ApplyHeaderChangesForPut(start_us, nullptr, &headers, value, handler);
+  HTTPValue* new_value = ApplyHeaderChangesForPut(
+      start_us, nullptr, &headers, value, fetched_input, handler);
   // Put into underlying cache.
   if (new_value != nullptr) {
     PutInternal(false /* preserve_response_headers */, key, fragment,
@@ -561,7 +618,8 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
   // Takes ownership of the returned HTTPValue, which is guaranteed to have been
   // allocated by ApplyHeaderChangesForPut.
   std::unique_ptr<HTTPValue> value(
-      ApplyHeaderChangesForPut(start_us, &content, headers, nullptr, handler));
+      ApplyHeaderChangesForPut(start_us, &content, headers, nullptr,
+                               false /* fetched_input */, handler));
   // Put into underlying cache.
   if (value.get() != nullptr) {
     PutInternal(true /* preserve_response_headers */, key, fragment,

@@ -1,0 +1,1 @@
+- Hardened in-place optimization on Apache and IIS so that a response is stored and served only under the path the server itself routes the request to. Affected: 2.7.0 and earlier. Update recommended for Apache and IIS sites.

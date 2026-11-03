@@ -40,6 +40,7 @@
 #include "net/instaweb/rewriter/public/inline_resource_slot.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
+#include "net/instaweb/rewriter/public/page_work_budget.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
@@ -1103,6 +1104,9 @@ class RewriteDriver : public HtmlParse {
   // inlined only when this returns true. Safe to call from any thread.
   bool ReserveInlinedImageBytes(int64 num_bytes);
 
+  // The rewrite work this document may still cause; see PageWorkBudget.
+  PageWorkBudget* page_work_budget() { return &page_work_budget_; }
+
   // Increment reference count for misc. async ops that need the RewriteDriver
   // kept alive.
   void IncrementAsyncEventsCount();
@@ -1793,6 +1797,9 @@ class RewriteDriver : public HtmlParse {
   // Image bytes inlined into the document so far; see
   // ReserveInlinedImageBytes.
   std::atomic<int64> inlined_image_bytes_;
+
+  // Rewrite work done for the document so far; see page_work_budget().
+  PageWorkBudget page_work_budget_;
 
   // Bytes of debug comments written into the document so far, whether one
   // was refused for the budget, and whether the comment saying so is written;

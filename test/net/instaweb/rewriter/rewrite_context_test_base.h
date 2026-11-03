@@ -345,6 +345,12 @@ class CombiningFilter : public RewriteFilter {
     void DoRewrite(int partition_index, CachedResult* partition,
                    OutputResourcePtr output);
     bool PolicyPermitsRendering() const override { return true; }
+    // A fetch of a context with several inputs stores no result by default.
+    // This test combiner keeps storing it, so that the tests of what a
+    // stored result of several inputs does (cache control, conditional
+    // requests, seeding) go on running against one; the
+    // module's own combiners store none.
+    bool FetchWritesPartition() const override { return true; }
     void Render() override;
     void WillNotRender() override;
     void Cancel() override;

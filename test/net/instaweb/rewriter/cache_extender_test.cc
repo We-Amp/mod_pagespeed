@@ -676,6 +676,25 @@ TEST_F(CacheExtenderTest, ExtendIfSharded) {
                    kOutput));
 }
 
+// A fragment-only reference stays as written in a stylesheet that is
+// cache-extended onto a rewrite domain.
+TEST_F(CacheExtenderTest, FragmentReferenceKeptOnRewriteDomain) {
+  InitTest(kLongTtlSec);
+  EXPECT_TRUE(AddRewriteDomainMapping("cdn.com", kTestDomain));
+  const char kFragmentCss[] = ".m { mask: url(#m) } .n { mask: url('#n') }";
+  InitResource("sub/f.css", kContentTypeCss, kFragmentCss, kLongTtlSec);
+  const GoogleString out_css =
+      Encode("http://cdn.com/sub/", kFilterId, "0", "f.css", "css");
+  ValidateExpected("fragment", CssLinkHref("sub/f.css"), CssLinkHref(out_css));
+  // The extended stylesheet is built on request; ask for it on the origin
+  // host, where its input is.
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(
+      Encode(StrCat(kTestDomain, "sub/"), kFilterId, "0", "f.css", "css"),
+      &content));
+  EXPECT_EQ(kFragmentCss, content);
+}
+
 TEST_F(CacheExtenderTest, ExtendIfOriginMappedHttps) {
   InitTest(kShortTtlSec);
   EXPECT_TRUE(AddOriginDomainMapping(kTestDomain, "https://cdn.com"));

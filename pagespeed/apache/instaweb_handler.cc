@@ -507,6 +507,8 @@ void InstawebHandler::AttachInPlaceRecorder(IproRecorder* recorder,
                                             bool rewrite_caching_headers) {
   // See mod_instaweb.cc:mod_pagespeed_register_hooks for why the classic path
   // needs all three filters.
+  ap_add_output_filter(kModPagespeedInPlaceOriginCachingName, recorder,
+                       request_, request_->connection);
   ap_add_output_filter(kModPagespeedInPlaceFilterName, recorder, request_,
                        request_->connection);
   if (rewrite_caching_headers) {
@@ -963,6 +965,21 @@ bool InstawebHandler::HandleAsInPlace() {
     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request_,
                   "Request not in-place optimized because: "
                   "request->main != NULL");
+    return handled;
+  }
+
+  // In-place optimization keys its lookups and recordings on the URL the
+  // module parsed from the request line; httpd matched its <Location> and
+  // <Directory> sections, applied its access rules and chooses the response
+  // on its own reading of that line.  An entry is only right when both
+  // readings name the same resource, so a request they read differently is
+  // left to Apache as it is: no lookup, no daemon serve, no recording.
+  // Decided at translate_name time (SaveInPlaceUrlAgreement).
+  if (!InstawebContext::InPlaceUrlAgreed(request_)) {
+    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, APR_SUCCESS, request_,
+                  "Request not in-place optimized because: Apache and the "
+                  "module read the request differently: %s",
+                  request_->uri);
     return handled;
   }
 
@@ -1925,6 +1942,19 @@ apr_status_t InstawebHandler::save_url_in_note(
   const char* url = InstawebContext::MakeRequestUrl(
       *server_context->global_options(), request);
   GoogleUrl gurl(url);
+
+  // Saved beside the URL, while request->uri is still httpd's own normalized
+  // reading of the request (no module has rewritten it yet).  httpd merges
+  // runs of slashes unless MergeSlashes is off for this server.
+  const core_server_config* core_config =
+      static_cast<const core_server_config*>(
+          ap_get_core_module_config(request->server->module_config));
+  InstawebContext::SaveInPlaceUrlAgreement(
+      request, gurl,
+      InstawebContext::OriginFormScheme(*server_context->global_options(),
+                                        request),
+      ap_get_server_name_for_url(request),
+      core_config->merge_slashes != AP_CORE_CONFIG_OFF);
 
   bool bypass_mod_rewrite = false;
   if (gurl.IsWebValid()) {

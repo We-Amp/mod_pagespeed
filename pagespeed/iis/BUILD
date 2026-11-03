@@ -170,6 +170,7 @@ cc_library(
         ":iis_entity_chunk",
         ":iis_global_constants",
         ":iis_admin_path_match",
+        ":iis_inplace_url_agreement",
         ":iis_ip_string",
         ":iis_local_request",
         ":iis_proxy_fetch_completion",
@@ -301,6 +302,21 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# The IIS reading of the in-place URL agreement: the path IIS routes a
+# request on against the module's parse of its URL.  Free of the IIS headers
+# so it can be unit-tested on any platform.
+cc_library(
+    name = "iis_inplace_url_agreement",
+    srcs = ["iis_inplace_url_agreement.cc"],
+    hdrs = ["iis_inplace_url_agreement.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:inplace_url_agreement",
     ],
 )
 

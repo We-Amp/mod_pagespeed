@@ -333,6 +333,33 @@ pagespeed_cc_test(
     ],
 )
 
+# The IIS reading of the in-place URL agreement, plus source pins that the
+# module captures the path IIS routes on and consults the decision before
+# every in-place path.
+pagespeed_cc_test(
+    name = "iis_inplace_url_agreement_test",
+    srcs = ["iis_inplace_url_agreement_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//pagespeed/iis:iis_inplace_url_agreement",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# Which responses the port keeps out of IIS's own response caches: source
+# pins on the call sites (behind the IIS runtime headers).
+pagespeed_cc_test(
+    name = "iis_response_cache_pin_test",
+    srcs = ["iis_response_cache_pin_test.cc"],
+    data = ["//pagespeed/iis:iis_module_srcs"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base_core",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # Local-request decision unit tests.
 pagespeed_cc_test(
     name = "iis_local_request_test",

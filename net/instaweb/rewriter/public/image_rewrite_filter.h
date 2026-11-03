@@ -307,6 +307,11 @@ class ImageRewriteFilter : public RewriteFilter {
   // even if they're not parsable.
   bool HasAnyDimensions(HtmlElement* element);
 
+  // The size bound for parsing the style attribute of `element`. A style
+  // attribute over it is counted when `count_over_bound` is set, which is
+  // done once per element.
+  int64 StyleParseBound(HtmlElement* element, bool count_over_bound);
+
   // Resizes low quality image. It further reduces the size of inlined low
   // quality image for mobile.
   void ResizeLowQualityImage(Image* low_image,
@@ -330,6 +335,8 @@ class ImageRewriteFilter : public RewriteFilter {
   GoogleString UrlForDebugMessages(const Context* context) const;
 
   // Statistics
+
+  Variable* parse_max_bytes_exceeded_;
 
   // # of images rewritten successfully.
   Variable* image_rewrites_;

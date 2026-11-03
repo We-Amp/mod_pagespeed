@@ -184,6 +184,12 @@ struct ps_request_ctx_t {
   bool daemon_recorder;
   int64_t record_body_bytes;
 
+  // The caching headers as the origin sent them, for the recorder: taken by
+  // the origin-caching header filter, which runs ahead of every other header
+  // filter, and handed to the recorder by the in-place header filter.
+  // Owned; nullptr when not taken.
+  ResponseHeaders* origin_caching_headers = nullptr;
+
   // We need to remember the URL here as well since we may modify what NGX
   // gets by stripping our special query params and honoring X-Forwarded-Proto.
   GoogleString url_string;

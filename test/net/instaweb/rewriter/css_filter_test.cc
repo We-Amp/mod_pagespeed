@@ -19,10 +19,10 @@
 
 //     and sligocki@google.com (Shawn Ligocki)
 
+#include "net/instaweb/rewriter/public/css_filter.h"
+
 #include <iterator>
 #include <memory>
-
-#include "net/instaweb/rewriter/public/css_filter.h"
 
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/http_cache.h"
@@ -30,6 +30,7 @@
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
+#include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -45,6 +46,7 @@
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/opt/logging/log_record.h"
 #include "test/net/instaweb/rewriter/css_rewrite_test_base.h"
+#include "test/net/instaweb/rewriter/mock_resource_callback.h"
 #include "test/net/instaweb/rewriter/test_rewrite_driver_factory.h"
 #include "test/net/instaweb/rewriter/test_url_namer.h"
 #include "test/pagespeed/kernel/base/gtest.h"
@@ -338,6 +340,63 @@ TEST_F(CssFilterTestCustomOptions, CssPreserveUrls) {
   EXPECT_EQ(kOutputStyle, out_css);
 }
 
+namespace {
+
+const char kDirCss[] = ".a { background: url(b.png) }";
+const char kDirCssMinified[] = ".a{background:url(b.png)}";
+
+// An optimized URL for dir/a.css that is named under another directory.
+GoogleString RootNamedDirCssUrl(const GoogleString& root_encoded_url) {
+  GoogleString url = root_encoded_url;
+  url.replace(url.find("a.css"), STATIC_STRLEN("a.css"), "dir,_a.css");
+  return url;
+}
+
+}  // namespace
+
+// A stylesheet reconstructed under a name that puts it in another directory
+// is served, while pages keep using the optimized stylesheet from the input's
+// own directory, whose references resolve to the same absolute URLs as the
+// original's.
+TEST_F(CssFilterTest, FetchFromOtherDirectoryKeepsPageStylesheet) {
+  SetResponseWithDefaultHeaders("dir/a.css", kContentTypeCss, kDirCss, 100);
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(
+      RootNamedDirCssUrl(Encode(kTestDomain, "cf", "0", "a.css", "css")),
+      &content));
+
+  const GoogleString page_css = Encode("dir/", "cf", "0", "a.css", "css");
+  ValidateExpected("other_dir", CssLinkHref("dir/a.css"),
+                   CssLinkHref(page_css));
+  content.clear();
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, page_css), &content));
+  EXPECT_EQ(kDirCssMinified, content);
+}
+
+// The stylesheet served in place at its own URL is the one optimized for that
+// URL, also after its optimized URL was requested under a name that puts it
+// in another directory.
+TEST_F(CssFilterTestCustomOptions, InPlaceUnaffectedByFetchFromOtherDirectory) {
+  options()->set_in_place_rewriting_enabled(true);
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
+  CssFilterTest::SetUp();
+  SetResponseWithDefaultHeaders("dir/a.css", kContentTypeCss, kDirCss, 100);
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(
+      RootNamedDirCssUrl(Encode(kTestDomain, "cf", "0", "a.css", "css")),
+      &content));
+
+  // The first in-place request serves the original and optimizes it; the
+  // next one serves the optimized stylesheet.
+  const GoogleString in_place_url = StrCat(kTestDomain, "dir/a.css");
+  content.clear();
+  EXPECT_TRUE(FetchResourceUrl(in_place_url, &content));
+  EXPECT_EQ(kDirCss, content);
+  content.clear();
+  EXPECT_TRUE(FetchResourceUrl(in_place_url, &content));
+  EXPECT_EQ(kDirCssMinified, content);
+}
+
 TEST_F(CssFilterTestCustomOptions, CssPreserveUrlsOverridingExtend) {
   std::unique_ptr<RewriteOptions> global_options(options()->NewOptions());
   global_options->EnableFilter(RewriteOptions::kExtendCacheCss);
@@ -457,15 +516,22 @@ TEST_F(CssFilterTestCustomOptions, FallbackWithGzipData) {
   // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   CssFilterTest::SetUp();
 
-  // Store an already-gzipped version of the resource in the cace.
+  // Store a gzipped version of the resource in the cache, through the
+  // module's own fetch of it (only such entries are used as inputs).
   ResponseHeaders headers;
   DefaultResponseHeaders(kContentTypeCss, 5000, &headers);
-  HTTPValue value;
-  value.SetHeaders(&headers);
-  value.Write(kCss, message_handler());
-  http_cache()->Put("http://test.com/a.css", rewrite_driver()->CacheFragment(),
-                    RequestHeaders::Properties(), kDefaultHttpOptionsForTests,
-                    &value, message_handler());
+  SetFetchResponse("http://test.com/a.css", headers, kCss);
+  {
+    ResourcePtr input(
+        rewrite_driver()->CreateInputResourceAbsoluteUncheckedForTestsOnly(
+            "http://test.com/a.css"));
+    MockResourceCallback callback(input, server_context()->thread_system());
+    input->LoadAsync(Resource::kReportFailureIfNotCacheable,
+                     rewrite_driver()->request_context(), &callback);
+    ASSERT_TRUE(callback.done());
+    ASSERT_TRUE(callback.success());
+  }
+  ClearRewriteDriver();
 
   // Fetch with deadline exceeded. Should get uncompressed bits with proper
   // content-length. (Consistency of compression, Content-Encoding and
@@ -549,6 +615,36 @@ TEST_F(CssFilterParseMaxBytesTest, InlineAtBoundIsRewritten) {
   const GoogleString css = MakeCssOfSize(kParseMaxBytes, &minified);
   ValidateRewriteInlineCss("at_bound", css, minified, kExpectSuccess);
   EXPECT_EQ(0, num_parse_max_bytes_exceeded_->Get());
+}
+
+// A style attribute of `size` bytes: a declaration then spaces.
+static GoogleString MakeDeclarationsOfSize(int64 size) {
+  GoogleString decls = "color: red;";
+  decls.append(size - decls.size(), ' ');
+  return decls;
+}
+
+TEST_F(CssFilterParseMaxBytesTest, StyleAttributeOverBoundIsLeftAlone) {
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kRewriteStyleAttributes);
+  server_context()->ComputeSignature(options());
+  const GoogleString html =
+      StrCat("<div style='", MakeDeclarationsOfSize(kParseMaxBytes + 1), "'/>");
+  ValidateNoChanges("attribute_over_bound", html);
+  EXPECT_EQ(1, num_parse_max_bytes_exceeded_->Get());
+  EXPECT_EQ(0, num_blocks_rewritten_->Get());
+  EXPECT_EQ(0, num_parse_failures_->Get());
+}
+
+TEST_F(CssFilterParseMaxBytesTest, StyleAttributeAtBoundIsRewritten) {
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kRewriteStyleAttributes);
+  server_context()->ComputeSignature(options());
+  const GoogleString html =
+      StrCat("<div style='", MakeDeclarationsOfSize(kParseMaxBytes), "'/>");
+  ValidateExpected("attribute_at_bound", html, "<div style='color:red'/>");
+  EXPECT_EQ(0, num_parse_max_bytes_exceeded_->Get());
+  EXPECT_EQ(1, num_blocks_rewritten_->Get());
 }
 
 TEST_F(CssFilterParseMaxBytesTest, OverBoundSkipsFallbackRewriting) {
@@ -647,6 +743,19 @@ TEST_F(CssFilterTest, InlineStyleWithoutMarkupIsMinified) {
   ValidateExpected("plain",
                    "<style>\tp ,\n\nem\t{\tmargin :\t0 ;\n\n}\t</style>",
                    "<style>p,em{margin:0}</style>");
+}
+
+// An SVG or MathML style element is not an HTML style element, so its text is
+// not rewritten as CSS; an HTML style inside an integration point is.
+TEST_F(CssFilterTest, ForeignStyleIsNotRewrittenAsCss) {
+  static const char kCss[] = "\tp ,\n\nem\t{\tmargin :\t0 ;\n\n}\t";
+  ValidateNoChanges("svg", StrCat("<svg><style>", kCss, "</style></svg>"));
+  ValidateNoChanges("math", StrCat("<math><style>", kCss, "</style></math>"));
+  ValidateExpected("foreign_object",
+                   StrCat("<svg><foreignObject><style>", kCss,
+                          "</style></foreignObject></svg>"),
+                   "<svg><foreignObject><style>p,em{margin:0}</style></"
+                   "foreignObject></svg>");
 }
 
 // Make sure we allow rewriting to empty output (ex: input all commented out).
