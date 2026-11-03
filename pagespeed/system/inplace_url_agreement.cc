@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 We-Amp B.V.
 
-#include "pagespeed/nginx/ngx_inplace_url_agreement.h"
+#include "pagespeed/system/inplace_url_agreement.h"
 
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/google_url.h"
 
 namespace net_instaweb {
 
-bool NgxInPlaceUrlAgrees(StringPiece server_uri, StringPiece server_host,
-                         StringPiece module_path, StringPiece module_host,
-                         bool merge_slashes) {
+bool InPlaceUrlAgrees(StringPiece server_uri, StringPiece server_host,
+                      StringPiece module_path, StringPiece module_host,
+                      bool merge_slashes) {
   if (!StringCaseEqual(server_host, module_host)) {
     return false;
   }

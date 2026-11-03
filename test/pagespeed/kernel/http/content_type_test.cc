@@ -19,6 +19,8 @@
 
 #include "pagespeed/kernel/http/content_type.h"
 
+#include <cstring>
+
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace net_instaweb {
@@ -220,6 +222,181 @@ TEST(MimeTypeListToContentTypeSetTest, WhitespaceOnlyEntries) {
   EXPECT_EQ(2, out.size());
   EXPECT_EQ(1, out.count(&kContentTypeGif));
   EXPECT_EQ(1, out.count(&kContentTypeJpeg));
+}
+
+// A string with no parameters is all mime type; the charset output is
+// cleared rather than left untouched.
+TEST_F(ContentTypeTest, ParseContentTypeMimeOnly) {
+  GoogleString mime_type = "sentinel";
+  GoogleString charset = "sentinel";
+  EXPECT_TRUE(ParseContentType("text/html", &mime_type, &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("", charset);
+}
+
+TEST_F(ContentTypeTest, ParseContentTypeCharsetVariants) {
+  GoogleString mime_type;
+  GoogleString charset;
+  // Whitespace around the parameter name and value is trimmed; the value
+  // keeps its case.
+  EXPECT_TRUE(
+      ParseContentType("text/html; charset=UTF-8", &mime_type, &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("UTF-8", charset);
+
+  EXPECT_TRUE(ParseContentType("text/css;charset=utf-8", &mime_type, &charset));
+  EXPECT_EQ("text/css", mime_type);
+  EXPECT_EQ("utf-8", charset);
+
+  // The parameter name is matched case-insensitively.
+  EXPECT_TRUE(ParseContentType("text/html; CHARSET = iso-8859-1", &mime_type,
+                               &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("iso-8859-1", charset);
+
+  // Parameters other than charset are ignored.
+  EXPECT_TRUE(ParseContentType("text/html; foo=bar; charset=utf-8", &mime_type,
+                               &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("utf-8", charset);
+
+  // Only the first charset parameter is used.
+  EXPECT_TRUE(ParseContentType("text/html; charset=utf-8; charset=shift_jis",
+                               &mime_type, &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("utf-8", charset);
+
+  // A charset parameter with an empty value extracts an empty charset.
+  EXPECT_TRUE(ParseContentType("text/html; charset=", &mime_type, &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("", charset);
+}
+
+TEST_F(ContentTypeTest, ParseContentTypeMalformed) {
+  GoogleString mime_type = "sentinel";
+  GoogleString charset = "sentinel";
+  // Empty input fails and clears both outputs.
+  EXPECT_FALSE(ParseContentType("", &mime_type, &charset));
+  EXPECT_EQ("", mime_type);
+  EXPECT_EQ("", charset);
+
+  // A lone separator yields neither a mime type nor a charset.
+  EXPECT_FALSE(ParseContentType(";", &mime_type, &charset));
+  EXPECT_EQ("", mime_type);
+  EXPECT_EQ("", charset);
+
+  // A parameter without '=' cannot be a charset parameter.
+  EXPECT_TRUE(ParseContentType("text/html; charset", &mime_type, &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("", charset);
+
+  // A value containing '=' does not split into exactly two pieces, so no
+  // charset is extracted.
+  EXPECT_TRUE(
+      ParseContentType("text/html; charset=utf-8=extra", &mime_type, &charset));
+  EXPECT_EQ("text/html", mime_type);
+  EXPECT_EQ("", charset);
+}
+
+TEST_F(ContentTypeTest, IsCss) {
+  EXPECT_TRUE(kContentTypeCss.IsCss());
+  EXPECT_FALSE(kContentTypeHtml.IsCss());
+  EXPECT_FALSE(kContentTypeJavascript.IsCss());
+  EXPECT_FALSE(kContentTypePng.IsCss());
+}
+
+TEST_F(ContentTypeTest, IsJsLike) {
+  EXPECT_TRUE(kContentTypeJavascript.IsJsLike());
+  EXPECT_TRUE(kContentTypeJson.IsJsLike());
+  // Source maps use the application/javascript mime type but are a distinct
+  // type, so they do not count as JS-like.
+  EXPECT_FALSE(kContentTypeSourceMap.IsJsLike());
+  EXPECT_FALSE(kContentTypeCss.IsJsLike());
+  EXPECT_FALSE(kContentTypeHtml.IsJsLike());
+}
+
+TEST_F(ContentTypeTest, IsFlash) {
+  EXPECT_TRUE(kContentTypeSwf.IsFlash());
+  EXPECT_FALSE(kContentTypeHtml.IsFlash());
+  EXPECT_FALSE(kContentTypeJavascript.IsFlash());
+  EXPECT_FALSE(kContentTypePng.IsFlash());
+}
+
+// The bound must cover the longest extension filters can produce, excluding
+// the dot: "jpeg", "webp" and "avif" are all 4 characters.
+TEST_F(ContentTypeTest, MaxProducedExtensionLength) {
+  EXPECT_EQ(4, ContentType::MaxProducedExtensionLength());
+  EXPECT_LE(static_cast<int>(strlen(kContentTypeWebp.file_extension())) - 1,
+            ContentType::MaxProducedExtensionLength());
+  EXPECT_LE(static_cast<int>(strlen(kContentTypeAvif.file_extension())) - 1,
+            ContentType::MaxProducedExtensionLength());
+  const ContentType* jpeg = NameExtensionToContentType("a.jpeg");
+  ASSERT_TRUE(jpeg != nullptr);
+  EXPECT_LE(static_cast<int>(strlen(jpeg->file_extension())) - 1,
+            ContentType::MaxProducedExtensionLength());
+}
+
+TEST_F(ContentTypeTest, IsCompressible) {
+  // Text-ish types are compressible.
+  EXPECT_TRUE(kContentTypeHtml.IsCompressible());
+  EXPECT_TRUE(kContentTypeXhtml.IsCompressible());
+  EXPECT_TRUE(kContentTypeCeHtml.IsCompressible());
+  EXPECT_TRUE(kContentTypeXml.IsCompressible());
+  EXPECT_TRUE(kContentTypeJavascript.IsCompressible());
+  EXPECT_TRUE(kContentTypeJson.IsCompressible());
+  EXPECT_TRUE(kContentTypeCss.IsCompressible());
+  EXPECT_TRUE(kContentTypeText.IsCompressible());
+
+  // Images, flash, pdf, video, audio and opaque binaries are not.
+  EXPECT_FALSE(kContentTypePng.IsCompressible());
+  EXPECT_FALSE(kContentTypeGif.IsCompressible());
+  EXPECT_FALSE(kContentTypeJpeg.IsCompressible());
+  EXPECT_FALSE(kContentTypeWebp.IsCompressible());
+  EXPECT_FALSE(kContentTypeAvif.IsCompressible());
+  EXPECT_FALSE(kContentTypeIco.IsCompressible());
+  EXPECT_FALSE(kContentTypeSwf.IsCompressible());
+  EXPECT_FALSE(kContentTypePdf.IsCompressible());
+  EXPECT_FALSE(kContentTypeBinaryOctetStream.IsCompressible());
+  const ContentType* mp4 = MimeTypeToContentType("video/mp4");
+  ASSERT_TRUE(mp4 != nullptr);
+  EXPECT_FALSE(mp4->IsCompressible());
+  const ContentType* mp3 = MimeTypeToContentType("audio/mpeg");
+  ASSERT_TRUE(mp3 != nullptr);
+  EXPECT_FALSE(mp3->IsCompressible());
+}
+
+TEST_F(ContentTypeTest, IsLikelyStaticResource) {
+  // Styles, scripts, images, flash, pdf, video and audio are static.
+  EXPECT_TRUE(kContentTypeCss.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeJavascript.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypePng.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeGif.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeJpeg.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeWebp.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeAvif.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeIco.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypeSwf.IsLikelyStaticResource());
+  EXPECT_TRUE(kContentTypePdf.IsLikelyStaticResource());
+  const ContentType* mp4 = MimeTypeToContentType("video/mp4");
+  ASSERT_TRUE(mp4 != nullptr);
+  EXPECT_TRUE(mp4->IsLikelyStaticResource());
+  const ContentType* mp3 = MimeTypeToContentType("audio/mpeg");
+  ASSERT_TRUE(mp3 != nullptr);
+  EXPECT_TRUE(mp3->IsLikelyStaticResource());
+
+  // Markup, plain text, xml, json, source maps and unknown or opaque types
+  // are not.
+  EXPECT_FALSE(kContentTypeHtml.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeXhtml.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeCeHtml.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeText.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeXml.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeJson.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeSourceMap.IsLikelyStaticResource());
+  EXPECT_FALSE(kContentTypeBinaryOctetStream.IsLikelyStaticResource());
+  const ContentType kUnrecognized = {"application/x-unknown", ".unknown",
+                                     ContentType::kOther};
+  EXPECT_FALSE(kUnrecognized.IsLikelyStaticResource());
 }
 
 }  // namespace net_instaweb

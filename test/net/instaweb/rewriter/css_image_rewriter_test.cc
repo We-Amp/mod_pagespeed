@@ -80,6 +80,21 @@ class CssImageRewriterTest : public CssRewriteTestBase {
     CssRewriteTestBase::SetUp();
   }
 
+  // Bytes taken by the HTML comments in `html`.
+  static int64 DebugCommentBytes(const GoogleString& html) {
+    int64 bytes = 0;
+    for (size_t pos = html.find("<!--"); pos != GoogleString::npos;
+         pos = html.find("<!--", pos)) {
+      size_t end = html.find("-->", pos);
+      if (end == GoogleString::npos) {
+        break;
+      }
+      bytes += end + 3 - pos;
+      pos = end + 3;
+    }
+    return bytes;
+  }
+
   int RewriteCssImageCheckForQuality(const char* user_agent) {
     const char kCssFile[] = "a.css";
     const char kCssTemplate[] = "div{background-image:url(%s)}";
@@ -1104,6 +1119,46 @@ TEST_F(CssImageRewriterTest, FetchRewriteFailure) {
   EXPECT_STREQ(css_after, content);
 }
 
+// A fragment-only reference stays as written when a stylesheet that does
+// not parse has its references rewritten onto a rewrite domain, with and
+// without fallback URL rewriting.
+TEST_F(CssImageRewriterTest, FragmentReferenceKeptWhenParseFails) {
+  DisableGzip();
+  options()->ClearSignatureForTesting();
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  lawyer->AddRewriteDomainMapping("http://new_domain.com", kTestDomain,
+                                  &message_handler_);
+  options()->DisableFilter(RewriteOptions::kLeftTrimUrls);
+  server_context()->ComputeSignature(options());
+
+  // Note: Extra }s cause parse failure.
+  const char kCss[] = ".m { mask: url(#m); } .n { mask: url('#n'); }}}}";
+  SetResponseWithDefaultHeaders("frag.css", kContentTypeCss, kCss, 100);
+  GoogleString content;
+  FetchResource(kTestDomain, "cf", "frag.css", "css", &content);
+  EXPECT_STREQ(kCss, content);
+  EXPECT_EQ(1, num_fallback_rewrites_->Get());
+}
+
+TEST_F(CssImageRewriterTest, FragmentReferenceKeptWhenParseFailsNoFallback) {
+  DisableGzip();
+  options()->ClearSignatureForTesting();
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  lawyer->AddRewriteDomainMapping("http://new_domain.com", kTestDomain,
+                                  &message_handler_);
+  options()->DisableFilter(RewriteOptions::kLeftTrimUrls);
+  options()->DisableFilter(RewriteOptions::kFallbackRewriteCssUrls);
+  server_context()->ComputeSignature(options());
+
+  // Note: Extra }s cause parse failure.
+  const char kCss[] = ".m { mask: url(#m); } .n { mask: url('#n'); }}}}";
+  SetResponseWithDefaultHeaders("frag.css", kContentTypeCss, kCss, 100);
+  GoogleString content;
+  FetchResource(kTestDomain, "cf", "frag.css", "css", &content);
+  EXPECT_STREQ(kCss, content);
+  EXPECT_EQ(0, num_fallback_rewrites_->Get());
+}
+
 TEST_F(CssImageRewriterTest, DummyRuleset) {
   // Simplified version of CacheExtendsImages, which doesn't have many copies of
   // the same URL.
@@ -1320,6 +1375,64 @@ TEST_F(CssImageRewriterTest, DebugMessage) {
       "is not sensitive to compression noise, and has no animation.-->";
   ValidateRewriteInlineCss("recompress_css_images", kCss, kCssAfter,
                            kNoStatCheck | kExpectCached);
+}
+
+// The verdicts for the images a stylesheet references are kept with the
+// stylesheet within the document's debug budget, and each is kept once.
+TEST_F(CssImageRewriterTest, ImageDebugMessagesStayWithinBudget) {
+  const int64 kBudget = 600;
+  const int kImages = 40;
+  options()->ClearSignatureForTesting();
+  options()->set_image_inline_max_bytes(20000);
+  options()->SoftEnableFilterForTesting(RewriteOptions::kDebug);
+  options()->SoftEnableFilterForTesting(RewriteOptions::kInlineImages);
+  options()->SoftEnableFilterForTesting(RewriteOptions::kRecompressPng);
+  options()->set_debug_output_max_bytes(kBudget);
+  server_context()->ComputeSignature(options());
+  GoogleString css;
+  for (int i = 0; i < kImages; ++i) {
+    GoogleString name = StrCat("img", IntegerToString(i), ".png");
+    AddFileToMockFetcher(StrCat(kTestDomain, name), kBikePngFile,
+                         kContentTypePng, 100);
+    StrAppend(&css, "a", IntegerToString(i), "{background-image:url(", name,
+              ")}\n");
+  }
+  const GoogleString html = StrCat("<style>", css, "</style>");
+  const GoogleString inline_msg =
+      "The image was not inlined because it has too many bytes.";
+
+  ParseUrl(StrCat(kTestDomain, "budget.html"), html);
+  EXPECT_GE(kBudget + 100, DebugCommentBytes(output_buffer_));
+
+  // With no budget, the same verdict for many images is kept once.
+  options()->ClearSignatureForTesting();
+  options()->set_debug_output_max_bytes(0);
+  server_context()->ComputeSignature(options());
+  ParseUrl(StrCat(kTestDomain, "budget.html"), html);
+  EXPECT_EQ(1, CountSubstring(output_buffer_, inline_msg));
+}
+
+// With debug off, nothing about the images is kept with the stylesheet. This
+// guards behaviour that already holds; it does not fail without a change.
+TEST_F(CssImageRewriterTest, NoImageDebugMessagesStoredWithDebugOff) {
+  options()->ClearSignatureForTesting();
+  options()->set_image_inline_max_bytes(20000);
+  options()->SoftEnableFilterForTesting(RewriteOptions::kInlineImages);
+  options()->SoftEnableFilterForTesting(RewriteOptions::kRecompressPng);
+  server_context()->ComputeSignature(options());
+  AddFileToMockFetcher(StrCat(kTestDomain, "foo.png"), kBikePngFile,
+                       kContentTypePng, 100);
+  const GoogleString html =
+      "<style>body{background-image:url(foo.png)}</style>";
+  ParseUrl(StrCat(kTestDomain, "off.html"), html);
+  EXPECT_EQ(0, CountSubstring(output_buffer_, "<!--"));
+
+  options()->ClearSignatureForTesting();
+  options()->SoftEnableFilterForTesting(RewriteOptions::kDebug);
+  server_context()->ComputeSignature(options());
+  ParseUrl(StrCat(kTestDomain, "off.html"), html);
+  EXPECT_EQ(0, CountSubstring(output_buffer_, "not inlined"));
+  EXPECT_EQ(0, CountSubstring(output_buffer_, "does not appear to need"));
 }
 
 // This inherits off CssRewriteTestBase and not CssImageRewriterTest to

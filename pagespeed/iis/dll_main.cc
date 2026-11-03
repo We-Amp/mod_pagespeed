@@ -131,6 +131,16 @@ class MyGlobalModule : public CGlobalModule {
       auto url = rq->GetRawHttpRequest()->CookedUrl.pFullUrl;
       pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
           "X-PRISTINE-URL", url);
+      // Beside it, the decoded path IIS routes this request on, taken from
+      // the same request: in-place optimization compares the module's
+      // reading of the URL above with it (see IisInPlaceUrlAgrees).
+      const HTTP_COOKED_URL& cooked = rq->GetRawHttpRequest()->CookedUrl;
+      if (cooked.pAbsPath != nullptr) {
+        const std::wstring path(cooked.pAbsPath,
+                                cooked.AbsPathLength / sizeof(WCHAR));
+        pProvider->GetHttpContext()->GetRootContext()->SetServerVariable(
+            "X-PRISTINE-PATH", path.c_str());
+      }
     }
     return GL_NOTIFICATION_CONTINUE;
   }

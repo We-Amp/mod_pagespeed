@@ -347,6 +347,81 @@ TEST_F(CssUtilTest, EliminateElementsNotIn) {
   EXPECT_TRUE(input_vector == intersect_vector);
 }
 
+namespace {
+
+// An element that counts how often it is moved, to show how the work of
+// EliminateElementsNotIn grows.
+struct CountedInt {
+  CountedInt() = default;
+  explicit CountedInt(int v) : value(v) {}
+  CountedInt(const CountedInt&) = default;
+  CountedInt& operator=(const CountedInt&) = default;
+  CountedInt(CountedInt&& other) noexcept : value(other.value) { ++moves; }
+  CountedInt& operator=(CountedInt&& other) noexcept {
+    value = other.value;
+    ++moves;
+    return *this;
+  }
+  bool operator<(const CountedInt& o) const { return value < o.value; }
+  bool operator==(const CountedInt& o) const { return value == o.value; }
+
+  int value = 0;
+  static int64 moves;
+};
+
+int64 CountedInt::moves = 0;
+
+// The elements of `inner` that are in `outer`, by plain membership.
+std::vector<int> ExpectedIntersection(const std::vector<int>& inner,
+                                      const std::vector<int>& outer) {
+  std::vector<int> result;
+  size_t o = 0;
+  for (int v : inner) {
+    while (o < outer.size() && outer[o] < v) {
+      ++o;
+    }
+    if (o < outer.size() && outer[o] == v) {
+      result.push_back(v);
+      ++o;
+    }
+  }
+  return result;
+}
+
+}  // namespace
+
+TEST_F(CssUtilTest, EliminateElementsNotInMixedPatterns) {
+  const std::vector<std::vector<int>> inners = {
+      {1}, {1, 2, 3, 4, 5, 6}, {2, 4, 6, 8}, {0, 1, 2, 9, 10}, {5, 5, 7, 7}};
+  const std::vector<std::vector<int>> outers = {
+      {1}, {2, 3, 4}, {1, 3, 5, 7, 9}, {6, 7, 8}, {5, 7}, {0, 10}};
+  for (const auto& inner : inners) {
+    for (const auto& outer : outers) {
+      std::vector<int> actual = inner;
+      EliminateElementsNotIn(&actual, outer);
+      EXPECT_EQ(ExpectedIntersection(inner, outer), actual);
+    }
+  }
+}
+
+TEST_F(CssUtilTest, EliminateElementsNotInWorkIsLinear) {
+  for (int n : {1000, 4000}) {
+    std::vector<CountedInt> inner;
+    std::vector<CountedInt> outer;
+    for (int i = 0; i < n; ++i) {
+      inner.emplace_back(i);
+      if (i % 2 == 1) {
+        outer.emplace_back(i);
+      }
+    }
+    CountedInt::moves = 0;
+    EliminateElementsNotIn(&inner, outer);
+    ASSERT_EQ(static_cast<size_t>(n / 2), inner.size());
+    EXPECT_EQ(1, inner[0].value);
+    EXPECT_LE(CountedInt::moves, n) << "n=" << n;
+  }
+}
+
 TEST(CssUtilLicenseCommentsTest, IsLicenseComment) {
   EXPECT_TRUE(IsLicenseComment("/*! x */"));
   EXPECT_TRUE(IsLicenseComment("/*!*/"));

@@ -250,6 +250,23 @@ TEST_F(CssInlineFilterTest, ShardSubresources) {
                 "http://www.example.com/baz.css", "", css_in, true, css_out);
 }
 
+// Fragment-only references stay as written in a stylesheet inlined from
+// another directory, with shards set.
+TEST_F(CssInlineFilterTest, FragmentReferenceKeptWithShards) {
+  UseMd5Hasher();
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  lawyer->AddShard("www.example.com", "shard1.com,shard2.com",
+                   &message_handler_);
+
+  const GoogleString css_in =
+      ".p1 { mask: url(#m); }"
+      ".p2 { mask: url('#n'); }";
+  const GoogleString css_out = css_in;
+  TestInlineCss("http://www.example.com/index.html",
+                "http://www.example.com/foo/baz.css", "", css_in, true,
+                css_out);
+}
+
 TEST_F(CssInlineFilterTest, DoNotInlineCssWithMediaNotScreen) {
   const GoogleString css = "BODY { color: red; }\n";
   TestNoInlineCss("http://www.example.com/index.html",

@@ -33,6 +33,7 @@
 #include "net/instaweb/http/public/wait_url_async_fetcher.h"
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/dom_stats_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/image.h"
@@ -1012,6 +1013,27 @@ class ImageRewriteTest : public RewriteTestBase {
 
 TEST_F(ImageRewriteTest, ImgTag) { RewriteImage("img", kContentTypeJpeg); }
 
+// An image reconstructed under a name that puts it in another directory is
+// served, while pages keep using the optimized image from the input's own
+// directory.
+TEST_F(ImageRewriteTest, FetchFromOtherDirectoryKeepsPageUrl) {
+  options()->EnableFilter(RewriteOptions::kRecompressPng);
+  rewrite_driver()->AddFilters();
+  AddFileToMockFetcher(StrCat(kTestDomain, "dir/", kBikePngFile), kBikePngFile,
+                       kContentTypePng, 100);
+  // An optimized URL for the same input, named under another directory.
+  GoogleString root_named = Encode(kTestDomain, "ic", "0", kBikePngFile, "png");
+  root_named.replace(root_named.find(kBikePngFile), strlen(kBikePngFile),
+                     StrCat("dir,_", kBikePngFile));
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(root_named, &content));
+  EXPECT_FALSE(content.empty());
+
+  const GoogleString page_png = Encode("dir/", "ic", "0", kBikePngFile, "png");
+  ValidateExpected("other_dir", StrCat("<img src=\"dir/", kBikePngFile, "\">"),
+                   StrCat("<img src=\"", page_png, "\">"));
+}
+
 TEST_F(ImageRewriteTest, ImgSrcSet) {
   AddFileToMockFetcher("a.png", kBikePngFile, kContentTypePng, 100);
   AddFileToMockFetcher("b.png", kCuppaPngFile, kContentTypePng, 100);
@@ -1898,6 +1920,32 @@ TEST_F(ImageRewriteTest, ResizeStyleTest) {
   const char kNoDims[] = " style=\"width:256;height:192;\"";
   TestSingleRewrite(kPuzzleJpgFile, kContentTypeJpeg, kContentTypeJpeg, kNoDims,
                     kNoDims, false, false);
+}
+
+// The style attribute of an image is read for its dimensions only up to
+// CssParseMaxBytes; a longer one is not parsed and gives no dimensions.
+TEST_F(ImageRewriteTest, ResizeStyleOverParseBoundIsIgnored) {
+  const int64 kBound = 256;
+  options()->set_css_parse_max_bytes(kBound);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->EnableFilter(RewriteOptions::kInsertImageDimensions);
+  rewrite_driver()->AddFilters();
+  Variable* exceeded =
+      statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded);
+
+  GoogleString at_bound = "width:256px;height:192px;";
+  at_bound.append(kBound - at_bound.size(), ' ');
+  const GoogleString kAtBound = StrCat(" style=\"", at_bound, "\"");
+  TestSingleRewrite(kPuzzleJpgFile, kContentTypeJpeg, kContentTypeJpeg,
+                    kAtBound.c_str(), kAtBound.c_str(), true, false);
+  EXPECT_EQ(0, exceeded->Get());
+
+  // Over the bound the style value counts as one that cannot be processed:
+  // no resizing, and no dimensions are added to the tag. It is counted once.
+  const GoogleString kOver = StrCat(" style=\"", at_bound, " \"");
+  TestSingleRewrite(kPuzzleJpgFile, kContentTypeJpeg, kContentTypeJpeg,
+                    kOver.c_str(), kOver.c_str(), false, false);
+  EXPECT_EQ(1, exceeded->Get());
 }
 
 TEST_F(ImageRewriteTest, ResizeWithPxInHtml) {

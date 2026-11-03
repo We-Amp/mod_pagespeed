@@ -1,0 +1,1 @@
+- **On nginx, `ModifyCachingHeaders off` no longer changes the caching headers of `.pagespeed.` resources.** Optimized resources are sent with their normal caching headers (long-lived when the hash matches, short and private for the fallback), as with the setting on; HTML keeps the headers you set. The option no longer applies to `.pagespeed.` resources, as on Apache and IIS.

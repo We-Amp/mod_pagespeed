@@ -61,7 +61,6 @@
 #include "ngx_daemon_serve_notify.h"
 #include "ngx_etag_match.h"
 #include "ngx_gzip_setter.h"
-#include "ngx_inplace_url_agreement.h"
 #include "ngx_list_iterator.h"
 #include "ngx_message_handler.h"
 #include "ngx_request_body.h"
@@ -94,6 +93,7 @@
 #include "pagespeed/system/daemon_ipro_recorder.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/in_place_resource_recorder.h"  // the gate returns it
+#include "pagespeed/system/inplace_url_agreement.h"
 #include "pagespeed/system/ipro_record_gate.h"
 #include "pagespeed/system/ipro_recorder.h"
 #include "pagespeed/system/optimization_thread_policy.h"
@@ -1101,6 +1101,41 @@ void copy_response_headers_from_ngx(const ngx_http_request_t* r,
   // TODO(oschaaf): ComputeCaching should be called in setupforhtml()?
   headers->ComputeCaching();
 }
+
+namespace {
+
+void copy_origin_caching_headers_from_ngx(const ngx_http_request_t* r,
+                                          ResponseHeaders* headers) {
+  // A response from an upstream (proxy, FastCGI, uwsgi, SCGI, gRPC, or the
+  // proxy cache): the upstream's own header lines, as received.  These are
+  // what proxy_cache judges, and nothing in the header filter chain
+  // (expires, add_header) nor proxy_hide_header touches them.  Copied
+  // whether or not nginx unset a line on its way to the client.
+  if (r->upstream != nullptr &&
+      r->upstream->headers_in.headers.last != nullptr) {
+    const ngx_list_part_t* part = &r->upstream->headers_in.headers.part;
+    const ngx_table_elt_t* header = static_cast<ngx_table_elt_t*>(part->elts);
+    for (ngx_uint_t i = 0; /* void */; i++) {
+      if (i >= part->nelts) {
+        if (part->next == nullptr) {
+          break;
+        }
+        part = part->next;
+        header = static_cast<ngx_table_elt_t*>(part->elts);
+        i = 0;
+      }
+      headers->Add(str_to_string_piece(header[i].key),
+                   str_to_string_piece(header[i].value));
+    }
+    return;
+  }
+  // Any other content handler is the origin itself: its headers as it set
+  // them.  The caller runs ahead of every header filter, so no directive has
+  // acted on them yet.
+  copy_headers_from_table(r->headers_out.headers, headers);
+}
+
+}  // namespace
 
 void copy_request_headers_from_ngx(const ngx_http_request_t* r,
                                    RequestHeaders* headers) {
@@ -2133,16 +2168,16 @@ GoogleString ps_determine_url(ngx_http_request_t* r) {
 // applied its access rules and chooses the response on its own reading of
 // that line.  An entry is only right when both readings name the same
 // resource, so a request they read differently is left to the server as it
-// is: no lookup, no recording.  Decided in NgxInPlaceUrlAgrees (unit-tested)
+// is: no lookup, no recording.  Decided in InPlaceUrlAgrees (unit-tested)
 // from the server's normalized URI and the host the module built its URL
 // from, against the path and host of the URL it parsed, with the server
 // block's merge_slashes setting.
 bool ps_in_place_url_agrees(ngx_http_request_t* r, const GoogleUrl& url) {
   const ngx_http_core_srv_conf_t* cscf = static_cast<ngx_http_core_srv_conf_t*>(
       ngx_http_get_module_srv_conf(r, ngx_http_core_module));
-  if (NgxInPlaceUrlAgrees(str_to_string_piece(r->uri), ps_determine_host(r),
-                          url.PathSansQuery(), url.Host(),
-                          cscf->merge_slashes != 0)) {
+  if (InPlaceUrlAgrees(str_to_string_piece(r->uri), ps_determine_host(r),
+                       url.PathSansQuery(), url.Host(),
+                       cscf->merge_slashes != 0)) {
     return true;
   }
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -2612,6 +2647,9 @@ void ps_release_request_context(void* data) {
     ctx->recorder->DoneAndSetHeaders(nullptr, false /* incomplete response */);
     ctx->recorder = nullptr;
   }
+
+  delete ctx->origin_caching_headers;
+  ctx->origin_caching_headers = nullptr;
 
   ps_release_base_fetch(ctx);
   delete ctx;
@@ -4308,6 +4346,39 @@ namespace in_place {
 ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
+ngx_http_output_header_filter_pt ngx_http_next_origin_caching_header_filter;
+
+// Takes the origin's caching headers for a response that is about to be
+// recorded.  Installed by ps_install_origin_caching_filter as the FIRST
+// header filter of the chain, whatever the module's position in the filter
+// list (the Bazel-built module's ngx_module_order, the config build's, a
+// static build's), so the headers filter (expires, add_header) and any
+// third-party header filter have not run yet.  Only the main request of a
+// response one of the recorders will see.
+ngx_int_t ps_origin_caching_header_filter(ngx_http_request_t* r) {
+  if (r == r->main) {
+    ps_request_ctx_t* ctx = ps_get_request_context(r);
+    if (ctx != nullptr &&
+        (ctx->daemon_record_pending || ctx->recorder != nullptr)) {
+      ResponseHeaders* origin = new ResponseHeaders();
+      copy_origin_caching_headers_from_ngx(r, origin);
+      delete ctx->origin_caching_headers;
+      ctx->origin_caching_headers = origin;
+    }
+  }
+  return ngx_http_next_origin_caching_header_filter(r);
+}
+
+// Hands the headers ps_origin_caching_header_filter took to the recorder.
+void ps_give_origin_caching_headers(ps_request_ctx_t* ctx,
+                                    IproRecorder* recorder) {
+  if (ctx->origin_caching_headers != nullptr) {
+    recorder->SetOriginCachingHeaders(*ctx->origin_caching_headers);
+    delete ctx->origin_caching_headers;
+    ctx->origin_caching_headers = nullptr;
+  }
+}
+
 // Header filter to support IPRO.
 //
 // The control flow here is tricky, probably excessively so.
@@ -4409,6 +4480,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
         ctx->daemon_recorder = true;
         ctx->record_body_bytes = 0;
         r->filter_need_in_memory = 1;
+        ps_give_origin_caching_headers(ctx, recorder);
         ResponseHeaders response_headers;
         copy_response_headers_from_ngx(r, &response_headers);
         recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
@@ -4443,6 +4515,7 @@ ngx_int_t ps_in_place_check_header_filter(ngx_http_request_t* r) {
     // produce gzipped output.
     //
     // The recorder will do this checking, so pass it the headers.
+    ps_give_origin_caching_headers(ctx, ctx->recorder);
     ResponseHeaders response_headers;
     copy_response_headers_from_ngx(r, &response_headers);
     ctx->recorder->ConsiderResponseHeaders(IproRecorder::kPreliminaryHeaders,
@@ -4681,9 +4754,20 @@ void ps_in_place_filter_init() {
   ngx_http_top_body_filter = ps_in_place_body_filter;
 }
 
+// Puts ps_origin_caching_header_filter at the head of the header filter
+// chain.  Called from ps_init_module, which nginx runs once per cycle after
+// every module's postconfiguration has built that cycle's chain (the chain
+// is rebuilt from nginx's own header filter on every configuration load), so
+// nothing is installed ahead of it, and it is installed once per chain.
+void ps_install_origin_caching_filter() {
+  ngx_http_next_origin_caching_header_filter = ngx_http_top_header_filter;
+  ngx_http_top_header_filter = ps_origin_caching_header_filter;
+}
+
 }  // namespace in_place
 
 using in_place::ps_in_place_filter_init;
+using in_place::ps_install_origin_caching_filter;
 
 ngx_int_t send_out_headers_and_body(ngx_http_request_t* r,
                                     const ResponseHeaders& response_headers,
@@ -5543,6 +5627,8 @@ ngx_int_t ps_init_module(ngx_cycle_t* cycle) {
   if (cfg_m == nullptr) {
     return NGX_OK;
   }
+
+  ps_install_origin_caching_filter();
 
   const bool initial_cycle =
       (cycle->old_cycle == nullptr || cycle->old_cycle->conf_ctx == nullptr);

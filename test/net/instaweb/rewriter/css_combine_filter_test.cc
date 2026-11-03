@@ -1618,6 +1618,28 @@ TEST_F(CssCombineFilterTest, ShardSubresources) {
   EXPECT_EQ(expected_combination, actual_combination);
 }
 
+// Fragment-only references stay as written in a combination whose other
+// references are sharded.
+TEST_F(CssCombineFilterTest, FragmentReferenceKeptWithShards) {
+  UseMd5Hasher();
+  AddShard(kTestDomain, "shard1.com,shard2.com");
+
+  CssLink::Vector css_in, css_out;
+  css_in.Add("1.css", ".a {mask: url('#m'); background-image: url('1.png');}\n",
+             "", true);
+  css_in.Add("2.css", ".b {mask: url(#n);}\n", "", true);
+  BarrierTestHelper("combine_fragment", css_in, &css_out);
+  EXPECT_EQ(1, css_out.size());
+
+  GoogleString expected_combination =
+      ".a {mask: url('#m'); background-image: url('http://shard1.com/1.png');}"
+      "\n"
+      ".b {mask: url(#n);}\n";
+  GoogleString actual_combination;
+  EXPECT_TRUE(FetchResourceUrl(css_out[0]->url_, &actual_combination));
+  EXPECT_EQ(expected_combination, actual_combination);
+}
+
 // Verifies that we don't produce URLs that are too long in a corner case.
 TEST_F(CssCombineFilterTest, CrossAcrossPathsExceedingUrlSize) {
   CssLink::Vector css_in, css_out;

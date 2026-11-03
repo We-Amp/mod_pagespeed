@@ -23,6 +23,11 @@ optimized URL whose input lies in it. The optimized URL below is named from
 an open directory, so the request itself is outside the restricted location
 and only its input is inside.
 
+TestSelfFetchAccessPrimed has a local client read a restricted stylesheet
+first, so the server has served it (and the module may have stored that
+response) before a non-local client asks for optimized URLs and a page that
+name it.
+
 The non-local client, on one host:
 - nginx: connects to loopback from this host's non-loopback address, so its
   peer is not local while the request arrives on loopback, and the module's
@@ -36,9 +41,12 @@ The non-local client, on one host:
 
 import http.client
 import os
+import re
 import socket
 import subprocess
-from typing import Dict, Tuple
+import time
+import urllib.parse
+from typing import Dict, List, Tuple
 
 import pytest
 
@@ -58,6 +66,16 @@ HELD_OPTIMIZED = f"{BASE}/open/A...,_local_only,_held.css.pagespeed.cf.0.css"
 ADMIN_OPTIMIZED = f"{BASE}/open/..,_..,_..,_pagespeed_admin,_config.pagespeed.ce.0.css"
 # A documentation address (RFC 5737) standing for the remote client.
 REMOTE_CLIENT = "192.0.2.77"
+# Read by a local client before the non-local client asks for it.
+PRIMED_CSS = f"{BASE}/local_only/primed.css"
+PRIMED_MARKER = "sfa-primed-marker"
+# Held for local clients in a location that waits for optimized responses.
+WAIT_CSS = f"{BASE}/local_only_wait/wait.css"
+WAIT_MARKER = "sfa-wait-marker"
+# An open page linking plain.css and ../local_only/primed.css; the query
+# turns on the filters that combine and inline stylesheets into the page.
+PRIMED_PAGE = (f"{BASE}/open/primed.html"
+               "?PageSpeedFilters=combine_css,inline_css,rewrite_css")
 
 
 def _non_loopback_address() -> str:
@@ -105,6 +123,53 @@ def _remote_get(server_config, path: str) -> Tuple[int, str]:
         conn.close()
 
 
+def _local_get(path: str) -> Tuple[int, str]:
+    """GET path on the self-fetch-access vhost as a local client."""
+    conn = http.client.HTTPConnection("127.0.0.1", _port(), timeout=30,
+                                      source_address=("127.0.0.1", 0))
+    try:
+        conn.request("GET", path, headers={"Host": HOST})
+        response = conn.getresponse()
+        return response.status, response.read().decode("utf-8", "replace")
+    finally:
+        conn.close()
+
+
+def _url_segment(url: str) -> str:
+    """The module's encoding of one input URL into an optimized-URL name."""
+    out = []
+    i = 0
+    while i < len(url):
+        if url.startswith("http://", i):
+            out.append(",h")
+            i += len("http://")
+            continue
+        c = url[i]
+        i += 1
+        if c == "/":
+            out.append(",_")
+        elif c == ",":
+            out.append(",,")
+        elif c.isalnum() or c in "._=-":
+            out.append(c)
+        else:
+            out.append(f",{ord(c):02X}")
+    return "".join(out)
+
+
+def _primed_optimized_urls() -> List[str]:
+    """Optimized URLs, named from the open directory, whose input is
+    primed.css: relative, absolute on the site's own origin (with and
+    without the port), and combined with an open stylesheet."""
+    absolute = [f"http://{HOST}{PRIMED_CSS}",
+                f"http://{HOST}:{_port()}{PRIMED_CSS}"]
+    names = ["..,_local_only,_primed.css"] + [_url_segment(a) for a in absolute]
+    urls = [f"{BASE}/open/A.{name}.pagespeed.cf.0.css" for name in names]
+    urls.append(f"{BASE}/open/plain.css+..,_local_only,_primed.css"
+                ".pagespeed.cc.0.css")
+    return urls
+
+
 def _describe(status: int, body: str) -> str:
     return f"HTTP {status}: {body[:300]!r}"
 
@@ -142,6 +207,83 @@ class TestSelfFetchAccess:
             "the packaged admin location was read by a non-local client "
             f"through an optimized URL: {_describe(status, body)}")
         assert status != 200, _describe(status, body)
+
+
+
+@pytest.mark.requires_fixture("self_fetch_access")
+class TestSelfFetchAccessPrimed:
+    """After a local client read a restricted stylesheet, a non-local client
+    still gets none of it through the module."""
+
+    def test_local_client_reads_restricted_stylesheet(self, server_config):
+        # Several reads, so the in-place path has seen and stored it.
+        for _ in range(3):
+            status, body = _local_get(PRIMED_CSS)
+            assert status == 200, _describe(status, body)
+            assert PRIMED_MARKER in body, _describe(status, body)
+            time.sleep(0.5)
+
+    def test_non_local_client_is_refused_directly(self, server_config):
+        status, body = _remote_get(server_config, PRIMED_CSS)
+        assert status == 403, _describe(status, body)
+        assert PRIMED_MARKER not in body
+
+    def test_restricted_stylesheet_is_not_served_through_optimized_urls(
+            self, server_config):
+        for attempt in range(3):
+            for url in _primed_optimized_urls():
+                status, body = _remote_get(server_config, url)
+                assert PRIMED_MARKER not in body, (
+                    "a stylesheet restricted to local clients was read by a "
+                    f"non-local client through {url} (attempt {attempt}): "
+                    f"{_describe(status, body)}")
+            time.sleep(0.5)
+
+    def test_restricted_stylesheet_is_not_in_an_open_page(self, server_config):
+        seen_optimized = set()
+        for attempt in range(8):
+            status, body = _remote_get(server_config, PRIMED_PAGE)
+            assert status == 200, _describe(status, body)
+            assert PRIMED_MARKER not in body, (
+                "a stylesheet restricted to local clients was inlined into a "
+                f"page served to a non-local client (attempt {attempt}): "
+                f"{_describe(status, body)}")
+            seen_optimized.update(
+                re.findall(r'href="([^"]*\.pagespeed\.[^"]*)"', body))
+            time.sleep(0.5)
+        for href in sorted(seen_optimized):
+            parts = urllib.parse.urlsplit(
+                urllib.parse.urljoin(f"http://{HOST}{BASE}/open/", href))
+            path = parts.path + (f"?{parts.query}" if parts.query else "")
+            status, body = _remote_get(server_config, path)
+            assert PRIMED_MARKER not in body, (
+                "a stylesheet restricted to local clients was read by a "
+                f"non-local client through {href} named by an open page: "
+                f"{_describe(status, body)}")
+
+    def test_unrestricted_stylesheet_is_still_optimized(self, server_config):
+        status, body = _remote_get(server_config, OPEN_OPTIMIZED)
+        assert status == 200, _describe(status, body)
+        assert OPEN_MARKER in body and "/*" not in body, _describe(status, body)
+
+    def test_local_client_still_reads_restricted_stylesheet(self, server_config):
+        status, body = _local_get(PRIMED_CSS)
+        assert status == 200, _describe(status, body)
+        assert PRIMED_MARKER in body, _describe(status, body)
+
+
+@pytest.mark.requires_fixture("self_fetch_access")
+@pytest.mark.apache_only  # the vhost's local_only_wait location
+class TestSelfFetchAccessWaitForOptimized:
+    """A location that holds responses back for the optimized version and
+    refuses the module's own fetch keeps serving its local clients."""
+
+    def test_local_client_reads_restricted_stylesheet(self, server_config):
+        for attempt in range(6):
+            status, body = _local_get(WAIT_CSS)
+            assert status == 200, f"attempt {attempt}: {_describe(status, body)}"
+            assert WAIT_MARKER in body, f"attempt {attempt}: {_describe(status, body)}"
+            time.sleep(0.5)
 
 
 if __name__ == "__main__":

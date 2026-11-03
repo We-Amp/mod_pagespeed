@@ -45,10 +45,18 @@ bool ResourceSlot::DirectSetUrl(const StringPiece& url) {
 }
 
 void ResourceSlot::ReportInput(const InputInfo& input) {
+  if (inputs_incomplete_) {
+    return;
+  }
   if (inputs_ == nullptr) {
     inputs_ = std::make_unique<std::vector<InputInfo>>();
   }
   inputs_->push_back(input);
+}
+
+void ResourceSlot::DropReportedInputs() {
+  inputs_incomplete_ = true;
+  inputs_.reset();
 }
 
 RewriteContext* ResourceSlot::LastContext() const {

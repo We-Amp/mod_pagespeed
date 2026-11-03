@@ -350,6 +350,12 @@ class HtmlParse {
   // Print the HtmlEvent queue_ to stdout for debugging.
   void DebugPrintQueue();
 
+  // Makes a name with the given spelling that is not a keyword, even when the
+  // spelling matches one.  The lexer uses this for elements in the SVG and
+  // MathML namespaces, which share some names with HTML elements (style,
+  // script, title, a, ...) but are not those HTML elements.
+  HtmlName MakeKeywordlessName(const StringPiece& str);
+
   // Implementation helper with detailed knowledge of html parsing libraries
   friend class HtmlLexer;
 

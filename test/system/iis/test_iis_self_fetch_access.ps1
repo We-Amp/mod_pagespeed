@@ -20,7 +20,8 @@
 #
 # In the guest the test provisions its own site on $Port with
 #   open/plain.css, open/page.html (links plain.css and ../local_only/held.css)
-#   local_only/held.css, local_only/held.txt
+#   open/primed.html (links plain.css and ../local_only/primed.css)
+#   local_only/held.css, local_only/held.txt, local_only/primed.css
 # and a location rule on local_only/: unlisted addresses denied, 127.0.0.1,
 # ::1 and the guest's own address admitted. The host is the refused client.
 # Checks:
@@ -31,6 +32,11 @@
 #                 URL /open/A...,_local_only,_held.css.pagespeed.cf.0.css,
 #                 asked past the count after which IIS may cache a response
 #   page          the open page never links an optimized URL carrying it
+#   primed        after a loopback client in the guest read primed.css, the
+#                 host still never gets its content through the optimized URLs
+#                 naming it relatively, absolutely and combined, nor through
+#                 open/primed.html with stylesheet combining and inlining on;
+#                 the loopback client still reads it
 #   copier        the host sending the module's User-Agent is refused
 #   admin         the module's admin page: 200 to loopback in the guest, not
 #                 200 to the host
@@ -62,6 +68,7 @@ $script:Failures = 0
 $script:Ran = 0
 $OpenMarker = "sfa-open-marker"
 $HeldMarker = "sfa-held-marker"
+$PrimedMarker = "sfa-primed-marker"
 # ",_" is an escaped "/"; "A." is the stylesheet filter's name prefix; the
 # hash is not checked when the module serves an optimized URL.
 $OpenOptimized = "/open/A.plain.css.pagespeed.cf.0.css"
@@ -132,8 +139,8 @@ try {
     Invoke-Command -Session $session -ScriptBlock { param($t) Set-Item function:global:Invoke-Raw ([scriptblock]::Create($t + "`nInvoke-Raw @args")) } -ArgumentList $RawText
 
     # Guest setup: site, files, firewall opening for the host.
-    $setup = Invoke-Command -Session $session -ArgumentList $SiteName, $Port, $OpenMarker, $HeldMarker -ScriptBlock {
-        param($SiteName, $Port, $OpenMarker, $HeldMarker)
+    $setup = Invoke-Command -Session $session -ArgumentList $SiteName, $Port, $OpenMarker, $HeldMarker, $PrimedMarker -ScriptBlock {
+        param($SiteName, $Port, $OpenMarker, $HeldMarker, $PrimedMarker)
         $ErrorActionPreference = "Stop"
         Import-Module WebAdministration
         if (-not (Test-Path "C:\Program Files\We-Amp\PageSpeed\pagespeed_iis.dll")) { return "module not installed" }
@@ -148,6 +155,9 @@ try {
             "<html><head><link rel=`"stylesheet`" href=`"plain.css`"><link rel=`"stylesheet`" href=`"../local_only/held.css`"></head><body>open page</body></html>`r`n")
         [IO.File]::WriteAllText("$root\local_only\held.css", "/* held stylesheet */`r`n.$HeldMarker   {   margin :  0 ;   }`r`n")
         [IO.File]::WriteAllText("$root\local_only\held.txt", "$HeldMarker`r`n")
+        [IO.File]::WriteAllText("$root\local_only\primed.css", "/* primed stylesheet */`r`n.$PrimedMarker   {   margin :  0 ;   }`r`n")
+        [IO.File]::WriteAllText("$root\open\primed.html",
+            "<html><head><link rel=`"stylesheet`" href=`"plain.css`"><link rel=`"stylesheet`" href=`"../local_only/primed.css`"></head><body>open page</body></html>`r`n")
         [IO.File]::WriteAllText("$root\open\ready.txt", "ready`r`n")
         [IO.File]::WriteAllText("$root\pagespeed.config", (@(
             "pagespeed on",
@@ -218,6 +228,43 @@ try {
         }
     }
     Check "page" ($page.Status -eq 200 -and -not $hrefLeak) ("host, page.html -> {0}, held hrefs [{1}], leak {2}" -f $page.Status, ($hrefs -join " "), $hrefLeak)
+
+    # Priming: a client the rule admits reads primed.css first, so the server
+    # has served it (and the module may have stored that response) before the
+    # host asks for anything naming it.
+    $p1 = $null
+    for ($i = 0; $i -lt 3; $i++) {
+        $p1 = Invoke-Command -Session $session -ArgumentList $Port -ScriptBlock { param($Port) Invoke-Raw "127.0.0.1" $Port "/local_only/primed.css" }
+        Start-Sleep -Milliseconds 750
+    }
+    Check "primed control" ($p1.Status -eq 200 -and $p1.Body.Contains($PrimedMarker)) ("loopback client in the guest, primed.css -> {0}" -f $p1.Status)
+    $primedUrls = @(
+        "/open/A...,_local_only,_primed.css.pagespeed.cf.0.css",
+        "/open/A.,hlocalhost,3A$Port,_local_only,_primed.css.pagespeed.cf.0.css",
+        "/open/plain.css+..,_local_only,_primed.css.pagespeed.cc.0.css")
+    $pLeaks = @()
+    for ($i = 0; $i -lt 4; $i++) {
+        foreach ($u in $primedUrls) {
+            $x = Invoke-Raw $GuestIp $Port $u
+            if ($x.Body.Contains($PrimedMarker)) { $pLeaks += ("{0} -> {1}" -f $u, $x.Status) }
+        }
+        Start-Sleep -Milliseconds 750
+    }
+    Check "primed urls" ($pLeaks.Count -eq 0) ("host, optimized URLs naming primed.css; responses with the marker: {0}" -f ($pLeaks -join "; "))
+    $pPageLeak = $false; $pHrefs = @()
+    for ($i = 0; $i -lt 8; $i++) {
+        $pp = Invoke-Raw $GuestIp $Port "/open/primed.html?PageSpeedFilters=combine_css,inline_css,rewrite_css"
+        if ($pp.Body.Contains($PrimedMarker)) { $pPageLeak = $true }
+        foreach ($m in [regex]::Matches($pp.Body, 'href="([^"]*\.pagespeed\.[^"]*)"')) { $pHrefs += $m.Groups[1].Value }
+        Start-Sleep -Milliseconds 750
+    }
+    foreach ($href in ($pHrefs | Select-Object -Unique)) {
+        $target = if ($href -match '^https?://[^/]+(/.*)$') { $Matches[1] } elseif ($href.StartsWith("/")) { $href } else { "/open/" + $href }
+        if ((Invoke-Raw $GuestIp $Port $target).Body.Contains($PrimedMarker)) { $pPageLeak = $true }
+    }
+    Check "primed page" (-not $pPageLeak) ("host, primed.html and its optimized hrefs [{0}], marker seen {1}" -f (($pHrefs | Select-Object -Unique) -join " "), $pPageLeak)
+    $p2 = Invoke-Command -Session $session -ArgumentList $Port -ScriptBlock { param($Port) Invoke-Raw "127.0.0.1" $Port "/local_only/primed.css" }
+    Check "primed after" ($p2.Status -eq 200 -and $p2.Body.Contains($PrimedMarker)) ("loopback client in the guest, primed.css after -> {0}" -f $p2.Status)
 
     $cp = Invoke-Raw $GuestIp $Port "/local_only/held.css" @{ "User-Agent" = $FetchUa }
     Check "copier" ($cp.Status -eq 403 -and -not $cp.Body.Contains($HeldMarker)) ("host with the module's User-Agent, held.css -> {0}" -f $cp.Status)

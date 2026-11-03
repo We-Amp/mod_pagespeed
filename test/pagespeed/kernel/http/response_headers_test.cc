@@ -154,6 +154,21 @@ class ResponseHeadersTest : public testing::Test {
     return response_headers_.cache_fields_dirty_;
   }
 
+  // CombineContentTypes is private, with ResponseHeadersTest as its friend;
+  // friendship does not extend to the TEST_F subclasses, so calls route
+  // through the fixture.
+  static bool CombineContentTypesOn(ResponseHeaders* headers,
+                                    const StringPiece& orig,
+                                    const StringPiece& fresh) {
+    return headers->CombineContentTypes(orig, fresh);
+  }
+
+  // Wrapper method to expose CombineContentTypes, which is private but
+  // befriended to this fixture.
+  bool CombineContentTypes(const StringPiece& orig, const StringPiece& fresh) {
+    return response_headers_.CombineContentTypes(orig, fresh);
+  }
+
   bool IsProxyCacheable(const RequestHeaders& request_headers,
                         ResponseHeaders::VaryOption respect_vary) {
     return response_headers_.IsProxyCacheable(request_headers.GetProperties(),
@@ -2507,6 +2522,250 @@ TEST_F(ResponseHeadersTest, DroppedOverlongLineMakesResponseUncacheable) {
   // this implicitly cacheable.
   EXPECT_FALSE(response_headers_.IsBrowserCacheable());
   EXPECT_FALSE(response_headers_.IsProxyCacheable());
+}
+
+// IsImminentlyExpiring decides whether a cached resource should be
+// re-fetched before its TTL runs out. All inputs are absolute times.
+TEST_F(ResponseHeadersTest, IsImminentlyExpiring) {
+  // kDefaultHttpOptionsForTests carries a 5-minute implicit TTL.
+  const HttpOptions& options = kDefaultHttpOptionsForTests;
+  const int64 start = MockTimer::kApr_5_2010_ms;
+
+  // A TTL below the implicit 5 minutes is never refreshed, even when the
+  // resource has already expired.
+  EXPECT_FALSE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 4 * Timer::kMinuteMs, start + 4 * Timer::kMinuteMs,
+      options));
+  EXPECT_FALSE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 4 * Timer::kMinuteMs, start + 10 * Timer::kMinuteMs,
+      options));
+
+  // A 5-minute TTL is refreshed once less than a fifth of it (one minute)
+  // remains; with exactly the threshold left it is not.
+  EXPECT_FALSE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 5 * Timer::kMinuteMs, start + 4 * Timer::kMinuteMs,
+      options));
+  EXPECT_TRUE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 5 * Timer::kMinuteMs,
+      start + 4 * Timer::kMinuteMs + Timer::kSecondMs, options));
+  // An already-expired resource with a sufficient TTL is refreshed.
+  EXPECT_TRUE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 5 * Timer::kMinuteMs, start + 6 * Timer::kMinuteMs,
+      options));
+
+  // For a TTL longer than 25 minutes the threshold is capped at the implicit
+  // TTL itself (5 minutes), not a fifth of the TTL.
+  EXPECT_FALSE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 60 * Timer::kMinuteMs, start + 55 * Timer::kMinuteMs,
+      options));
+  EXPECT_TRUE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 60 * Timer::kMinuteMs,
+      start + 55 * Timer::kMinuteMs + Timer::kSecondMs, options));
+
+  // The threshold follows the options' implicit TTL when it differs.
+  HttpOptions short_options = kDefaultHttpOptionsForTests;
+  short_options.implicit_cache_ttl_ms = Timer::kMinuteMs;
+  // A 2-minute TTL with 20 seconds left: the lowered implicit TTL admits the
+  // TTL and gives a threshold of min(1 minute, 24 seconds), so it is
+  // imminent; the default 5-minute implicit TTL rejects the TTL outright.
+  EXPECT_TRUE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 2 * Timer::kMinuteMs,
+      start + 2 * Timer::kMinuteMs - 20 * Timer::kSecondMs, short_options));
+  EXPECT_FALSE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 2 * Timer::kMinuteMs,
+      start + 2 * Timer::kMinuteMs - 20 * Timer::kSecondMs, options));
+  // A 60-minute TTL with 2 minutes left: the threshold is capped at the
+  // implicit TTL, 1 minute for the lowered options (not imminent) and 5
+  // minutes for the defaults (imminent).
+  EXPECT_FALSE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 60 * Timer::kMinuteMs, start + 58 * Timer::kMinuteMs,
+      short_options));
+  EXPECT_TRUE(ResponseHeaders::IsImminentlyExpiring(
+      start, start + 60 * Timer::kMinuteMs, start + 58 * Timer::kMinuteMs,
+      options));
+}
+
+// ApplySMaxAge lowers the shared-cache TTL of a Cache-Control value without
+// ever making a response more cacheable than it already is. A null expected
+// value below means nothing should be written at all.
+TEST_F(ResponseHeadersTest, ApplySMaxAge) {
+  struct Case {
+    int s_maxage_sec;
+    const char* existing_cache_control;
+    bool expected_return;
+    const char* expected_cache_control;
+  };
+  static const Case kCases[] = {
+      // No existing directives: s-maxage is the whole value.
+      {300, "", true, "s-maxage=300"},
+      // Unrelated directives are kept and s-maxage appended.
+      {300, "public", true, "public, s-maxage=300"},
+      // Surrounding whitespace is trimmed first.
+      {300, "  max-age=600 ", true, "max-age=600, s-maxage=300"},
+      // Appended only when lower than every existing max-age.
+      {300, "max-age=600", true, "max-age=600, s-maxage=300"},
+      {300, "max-age=300", false, nullptr},
+      {300, "max-age=100", false, nullptr},
+      {300, "max-age=100, max-age=600", false, nullptr},
+      // An existing s-maxage is lowered in place when above the target...
+      {300, "s-maxage=600", true, "s-maxage=300"},
+      // ...leaving other directives alone...
+      {300, "s-maxage=600, public", true, "s-maxage=300, public"},
+      // ...matched case-insensitively...
+      {300, "S-Maxage=600", true, "s-maxage=300"},
+      // ...and each too-large value individually.
+      {300, "s-maxage=600, s-maxage=900", true, "s-maxage=300, s-maxage=300"},
+      // An existing s-maxage at or below the target is left alone.
+      {300, "s-maxage=300", false, nullptr},
+      {300, "s-maxage=100", false, nullptr},
+      // An unparseable existing s-maxage value is left alone, too.
+      {300, "s-maxage=lots", false, nullptr},
+      // Directives that forbid shared caching or transformation stop the
+      // merge, matched case-insensitively.
+      {300, "no-transform", false, nullptr},
+      {300, "No-Transform, max-age=600", false, nullptr},
+      {300, "no-cache", false, nullptr},
+      {300, "no-store", false, nullptr},
+      {300, "private", false, nullptr},
+  };
+  for (const Case& test_case : kCases) {
+    GoogleString updated = "untouched";
+    bool changed = ResponseHeaders::ApplySMaxAge(
+        test_case.s_maxage_sec, test_case.existing_cache_control, &updated);
+    EXPECT_EQ(test_case.expected_return, changed)
+        << test_case.existing_cache_control;
+    if (test_case.expected_cache_control == nullptr) {
+      EXPECT_EQ(GoogleString("untouched"), updated)
+          << test_case.existing_cache_control;
+    } else {
+      EXPECT_EQ(GoogleString(test_case.expected_cache_control), updated)
+          << test_case.existing_cache_control;
+    }
+  }
+}
+
+TEST_F(ResponseHeadersTest, CombineContentTypes) {
+  // No usable original value: the fresh one is stored as-is.
+  ResponseHeaders empty_headers;
+  EXPECT_TRUE(
+      CombineContentTypesOn(&empty_headers, "", "text/html; charset=utf-8"));
+  EXPECT_STREQ("text/html; charset=utf-8",
+               empty_headers.Lookup1(HttpAttributes::kContentType));
+
+  // The original mime type is kept, the fresh value fills in the charset.
+  ResponseHeaders mime_headers;
+  EXPECT_TRUE(CombineContentTypesOn(&mime_headers, "text/html",
+                                    "text/html; charset=UTF-8"));
+  EXPECT_STREQ("text/html; charset=UTF-8",
+               mime_headers.Lookup1(HttpAttributes::kContentType));
+
+  // The original charset is kept, the fresh value fills in the mime type.
+  ResponseHeaders charset_headers;
+  EXPECT_TRUE(CombineContentTypesOn(&charset_headers, "; charset=utf-8",
+                                    "text/html; charset=iso-8859-1"));
+  EXPECT_STREQ("text/html; charset=utf-8",
+               charset_headers.Lookup1(HttpAttributes::kContentType));
+
+  // A fresh value that parses to nothing changes nothing.
+  ResponseHeaders unchanged_headers;
+  EXPECT_FALSE(CombineContentTypesOn(&unchanged_headers, "text/html", ""));
+  EXPECT_EQ(nullptr, unchanged_headers.Lookup1(HttpAttributes::kContentType));
+}
+
+TEST_F(ResponseHeadersTest, MergeContentType) {
+  // With no Content-Type header the merged value is simply stored.
+  ResponseHeaders empty_headers;
+  EXPECT_TRUE(empty_headers.MergeContentType("text/html; charset=utf-8"));
+  EXPECT_STREQ("text/html; charset=utf-8",
+               empty_headers.Lookup1(HttpAttributes::kContentType));
+
+  // A bare mime type gains the charset from the merged value.
+  ResponseHeaders mime_headers;
+  mime_headers.Add(HttpAttributes::kContentType, "text/html");
+  EXPECT_TRUE(mime_headers.MergeContentType("text/html; charset=UTF-8"));
+  EXPECT_STREQ("text/html; charset=UTF-8",
+               mime_headers.Lookup1(HttpAttributes::kContentType));
+
+  // A merged value with a control character is rejected outright.
+  ResponseHeaders control_headers;
+  control_headers.Add(HttpAttributes::kContentType, "text/html");
+  EXPECT_FALSE(control_headers.MergeContentType("text/html;\tcharset=utf-8"));
+  EXPECT_STREQ("text/html",
+               control_headers.Lookup1(HttpAttributes::kContentType));
+
+  // A merged value that parses to nothing is ignored.
+  ResponseHeaders blank_headers;
+  EXPECT_FALSE(blank_headers.MergeContentType(""));
+  EXPECT_EQ(nullptr, blank_headers.Lookup1(HttpAttributes::kContentType));
+
+  // With more than one Content-Type already present, merging gives up.
+  ResponseHeaders multi_headers;
+  multi_headers.Add(HttpAttributes::kContentType, "text/html");
+  multi_headers.Add(HttpAttributes::kContentType, "text/plain");
+  EXPECT_FALSE(multi_headers.MergeContentType("text/css"));
+  ConstStringStarVector values;
+  ASSERT_TRUE(multi_headers.Lookup(HttpAttributes::kContentType, &values));
+  ASSERT_EQ(2, values.size());
+  EXPECT_STREQ("text/html", *values[0]);
+  EXPECT_STREQ("text/plain", *values[1]);
+}
+
+TEST_F(ResponseHeadersTest, CombineContentTypesCompleteValueUnchanged) {
+  response_headers_.Clear();
+  response_headers_.Replace(HttpAttributes::kContentType,
+                            "text/html; charset=UTF-8");
+  response_headers_.ComputeCaching();
+  ASSERT_FALSE(ResponseCachingDirty());
+  // The original already has a mime type and a charset, so the merge must
+  // leave the header alone and report no change.
+  EXPECT_FALSE(CombineContentTypes("text/html; charset=UTF-8",
+                                   "text/html; charset=ISO-8859-1"));
+  EXPECT_STREQ("text/html; charset=UTF-8",
+               response_headers_.Lookup1(HttpAttributes::kContentType));
+  EXPECT_FALSE(ResponseCachingDirty());
+}
+
+TEST_F(ResponseHeadersTest, CombineContentTypesWithoutCharset) {
+  response_headers_.Clear();
+  response_headers_.Replace(HttpAttributes::kContentType, "text/html");
+  response_headers_.ComputeCaching();
+  // Neither side has a charset, so the merged value is the mime type alone,
+  // with no dangling semicolon.
+  EXPECT_TRUE(CombineContentTypes("text/html", "text/html"));
+  EXPECT_STREQ("text/html",
+               response_headers_.Lookup1(HttpAttributes::kContentType));
+  EXPECT_TRUE(ResponseCachingDirty());
+}
+
+TEST_F(ResponseHeadersTest, CombineContentTypesFillsMissingCharset) {
+  response_headers_.Clear();
+  response_headers_.Replace(HttpAttributes::kContentType, "text/html");
+  response_headers_.ComputeCaching();
+  // The charset missing from the original is taken from the fresh value.
+  EXPECT_TRUE(CombineContentTypes("text/html", "; charset=UTF-8"));
+  EXPECT_STREQ("text/html; charset=UTF-8",
+               response_headers_.Lookup1(HttpAttributes::kContentType));
+  EXPECT_TRUE(ResponseCachingDirty());
+}
+
+TEST_F(ResponseHeadersTest, MergeContentTypeCompleteValueUnchanged) {
+  response_headers_.Clear();
+  response_headers_.Replace(HttpAttributes::kContentType,
+                            "text/html; charset=UTF-8");
+  response_headers_.ComputeCaching();
+  ASSERT_FALSE(ResponseCachingDirty());
+  EXPECT_FALSE(response_headers_.MergeContentType("; charset=UTF-8"));
+  EXPECT_FALSE(response_headers_.MergeContentType("text/html; charset=UTF-8"));
+  EXPECT_STREQ("text/html; charset=UTF-8",
+               response_headers_.Lookup1(HttpAttributes::kContentType));
+  EXPECT_FALSE(ResponseCachingDirty());
+}
+
+TEST_F(ResponseHeadersTest, ReasonPhraseMatchesStatus) {
+  response_headers_.Clear();
+  response_headers_.SetStatusAndReason(HttpStatus::kTemporaryRedirect);
+  EXPECT_EQ(307, response_headers_.status_code());
+  EXPECT_STREQ("Temporary Redirect", response_headers_.reason_phrase());
 }
 
 }  // namespace net_instaweb

@@ -40,13 +40,14 @@
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
+#include "net/instaweb/rewriter/public/page_work_budget.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
-#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "net/instaweb/rewriter/rendered_image.pb.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
@@ -707,6 +708,60 @@ TEST_F(ServerContextTest, CookieCannotChangeDebugOutputBudget) {
         << requested;
     EXPECT_FALSE(was_set) << requested;
     EXPECT_EQ("1048576", value) << requested;
+  }
+}
+
+// The work one page may cause is bounded by fixed limits. Options a request
+// sets, from a query parameter, a request header or a cookie, do not change
+// them.
+TEST_F(ServerContextTest, RequestCannotChangePageWorkBudget) {
+  RewriteOptions* global_options = server_context()->global_options();
+  global_options->ClearSignatureForTesting();
+  global_options->set_allow_options_to_be_set_by_cookies(true);
+  global_options->ComputeSignature();
+  const PageWorkBudget::Limits defaults;
+  const char kSettings[] =
+      "PageSpeedFilters=debug"
+      "&PageSpeedMaxCacheableContentLength=1000000000"
+      "&PageSpeedMaxCombinedCssBytes=1000000000"
+      "&PageSpeedRewriteDeadlinePerFlushMs=100000";
+  for (int source = 0; source < 3; ++source) {
+    RequestHeaders request_headers;
+    GoogleString url = "http://example.com/";
+    if (source == 0) {
+      StrAppend(&url, "?", kSettings);
+    } else {
+      StringPieceVector settings;
+      SplitStringPieceToVector(kSettings, "&", &settings, true);
+      GoogleString cookie;
+      for (StringPiece setting : settings) {
+        StringPiece::size_type eq = setting.find('=');
+        if (source == 1) {
+          request_headers.Add(setting.substr(0, eq), setting.substr(eq + 1));
+        } else {
+          StrAppend(&cookie, cookie.empty() ? "" : ";", setting);
+        }
+      }
+      if (source == 2) {
+        request_headers.Add(HttpAttributes::kCookie, cookie);
+      }
+    }
+    RewriteOptions* options = GetCustomOptions(url, &request_headers, nullptr);
+    ASSERT_TRUE(options != nullptr) << source;
+    EXPECT_TRUE(options->Enabled(RewriteOptions::kDebug)) << source;
+    RewriteDriver* driver = server_context()->NewCustomRewriteDriver(
+        options, CreateRequestContext());
+    const PageWorkBudget::Limits& limits = driver->page_work_budget()->limits();
+    EXPECT_EQ(defaults.input_bytes, limits.input_bytes) << source;
+    EXPECT_EQ(defaults.input_loads_in_flight, limits.input_loads_in_flight)
+        << source;
+    EXPECT_EQ(defaults.contexts, limits.contexts) << source;
+    EXPECT_EQ(defaults.partition_entries, limits.partition_entries) << source;
+    EXPECT_EQ(128 * 1024 * 1024, limits.input_bytes);
+    EXPECT_EQ(4, limits.input_loads_in_flight);
+    EXPECT_EQ(32768, limits.contexts);
+    EXPECT_EQ(256 * 1024, limits.partition_entries);
+    driver->Cleanup();
   }
 }
 

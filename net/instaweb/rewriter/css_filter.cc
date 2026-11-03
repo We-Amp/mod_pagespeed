@@ -610,6 +610,11 @@ bool CssFilter::Context::FallbackRewriteUrls(const GoogleUrl& css_base_gurl,
 
     const StringIntMap& url_counts = url_counter.url_counts();
     for (const auto& url_count : url_counts) {
+      if (!PageAllowsNestedContext()) {
+        // The document has no rewrite left, so the stylesheet is left
+        // undone; nothing more is created for its URLs.
+        break;
+      }
       const GoogleUrl url(url_count.first);
       // TODO(sligocki): Use count of occurrences to decide which URLs to
       // inline. it->second has the count of how many occurrences of this

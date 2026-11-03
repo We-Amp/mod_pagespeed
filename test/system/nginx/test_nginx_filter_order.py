@@ -282,6 +282,7 @@ class TestCacheControlLimitsKept:
             ("both", {"max-age=0", "no-cache", "private", "no-store"}),
             ("lines", {"max-age=0", "no-cache", "private", "no-store"}),
             ("public", {"max-age=0", "no-cache"}),
+            ("no_store_long_html_cache", {"max-age=0", "no-cache", "no-store"}),
         ],
     )
     def test_one_line_keeps_private_and_no_store(

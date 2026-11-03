@@ -1008,6 +1008,42 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
   return ap_pass_brigade(filter->next, bb);
 }
 
+int AddOriginCachingHeaderCallback(void* rec, const char* key,
+                                   const char* value) {
+  static_cast<ResponseHeaders*>(rec)->Add(key, value);
+  return 1;
+}
+
+// Runs at AP_FTYPE_CONTENT_SET - 3, ahead of mod_expires (CONTENT_SET - 2)
+// and mod_headers (CONTENT_SET), and hands the recorder the caching headers
+// as the handler set them -- for a proxied response, as the origin sent them.
+// Whether the response may be stored, and for how long, is decided from
+// these rather than from what those directives write for browsers.  Both
+// tables, since a handler may put its headers in either.  Once per response.
+apr_status_t instaweb_in_place_origin_caching_filter(ap_filter_t* filter,
+                                                     apr_bucket_brigade* bb) {
+  if (APR_BRIGADE_EMPTY(bb)) {
+    return APR_SUCCESS;
+  }
+  request_rec* request = filter->r;
+  IproRecorder* recorder = static_cast<IproRecorder*>(filter->ctx);
+  if (recorder != nullptr) {
+    ResponseHeaders origin;
+    for (int i = 0; i < IproRecorder::kNumOriginCachingHeaderNames; ++i) {
+      const char* name = IproRecorder::kOriginCachingHeaderNames[i];
+      apr_table_do(AddOriginCachingHeaderCallback, &origin,
+                   request->headers_out, name, nullptr);
+      if (request->err_headers_out != nullptr) {
+        apr_table_do(AddOriginCachingHeaderCallback, &origin,
+                     request->err_headers_out, name, nullptr);
+      }
+    }
+    recorder->SetOriginCachingHeaders(origin);
+  }
+  ap_remove_output_filter(filter);
+  return ap_pass_brigade(filter->next, bb);
+}
+
 // Runs immediately after mod_headers and other filters which muck with the
 // headers, but before headers are finalized.
 //
@@ -1457,6 +1493,14 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
   ap_register_output_filter(
       kModPagespeedInPlaceFilterName, instaweb_in_place_filter, nullptr,
       static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 1));
+
+  // Ahead of mod_expires (AP_FTYPE_CONTENT_SET - 2) and mod_headers
+  // (AP_FTYPE_CONTENT_SET): the caching headers as the handler set them, for
+  // the recorder's storage decision.
+  ap_register_output_filter(
+      kModPagespeedInPlaceOriginCachingName,
+      instaweb_in_place_origin_caching_filter, nullptr,
+      static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 3));
 
   // DaemonHtmlCache report-only reads the late headers here: mod_expires,
   // mod_headers and mod_deflate have run, instaweb_fix_headers_filter has not.

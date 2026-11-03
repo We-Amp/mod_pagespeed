@@ -66,8 +66,22 @@ class HTTPValue : public Writer {
   bool Write(const StringPiece& str, MessageHandler* handler) override;
   bool Flush(MessageHandler* handler) override;
 
-  // Retrieves the headers, returning false if empty.
+  // Retrieves the headers, returning false if empty.  The fetched-input
+  // mark (see kFetchedInputHeader) is never among them.
   bool ExtractHeaders(ResponseHeaders* headers, MessageHandler* handler) const;
+
+  // The response-header name that marks an entry stored from the module's
+  // own fetch of a resource (HTTPCache::PutFetchedInput).  It is not a valid
+  // HTTP field name, so no response can carry it, and ExtractHeaders drops
+  // it, so it never reaches a client.
+  static const char kFetchedInputHeader[];
+
+  // True when this value was stored from the module's own fetch of the
+  // resource, i.e. it carries the kFetchedInputHeader mark.
+  bool IsFetchedInput() const;
+
+  // Like SetHeaders, but also stores the fetched-input mark.
+  void SetHeadersMarkingFetchedInput(const ResponseHeaders& headers);
 
   // Retrieves the contents, returning false if empty.  Note that the
   // contents are only guaranteed valid as long as the HTTPValue
@@ -185,6 +199,9 @@ class HTTPValue : public Writer {
   char type_identifier() const { return *raw_data(); }
 
   unsigned int SizeOfFirstChunk() const;
+  // ExtractHeaders without dropping the fetched-input mark.
+  bool ExtractRawHeaders(ResponseHeaders* headers,
+                         MessageHandler* handler) const;
   void SetSizeOfFirstChunk(unsigned int size);
   int64 ComputeContentsSize() const;
 

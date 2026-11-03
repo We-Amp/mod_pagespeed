@@ -1,0 +1,1 @@
+- Bounded the memory and work a single page can cause while it is optimized. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

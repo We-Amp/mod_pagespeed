@@ -66,6 +66,7 @@
 #include "pagespeed/iis/iis_request_context.h"
 #include "pagespeed/iis/iis_ip_string.h"
 #include "pagespeed/iis/iis_admin_path_match.h"
+#include "pagespeed/iis/iis_inplace_url_agreement.h"
 #include "pagespeed/iis/iis_local_request.h"
 #include <atomic>
 
@@ -461,6 +462,54 @@ namespace net_instaweb
 
 
 
+// The decoded path IIS routes the request on, as UTF-8 without query: the
+// one kept beside X-PRISTINE-URL before any module could change the request,
+// else the request's own.
+static GoogleString IisRoutedPath(IHttpContext* http_context) {
+  PCWSTR wide = nullptr;
+  DWORD wide_len = 0;
+  std::wstring path;
+  if (SUCCEEDED(http_context->GetRootContext()->GetServerVariable(
+          "X-PRISTINE-PATH", &wide, &wide_len)) &&
+      wide != nullptr) {
+    path.assign(wide);
+  } else {
+    const HTTP_REQUEST* raw =
+        http_context->GetRootContext()->GetRequest()->GetRawHttpRequest();
+    if (raw == nullptr || raw->CookedUrl.pAbsPath == nullptr) {
+      return GoogleString();
+    }
+    path.assign(raw->CookedUrl.pAbsPath,
+                raw->CookedUrl.AbsPathLength / sizeof(WCHAR));
+  }
+  if (path.empty()) {
+    return GoogleString();
+  }
+  const int len = WideCharToMultiByte(CP_UTF8, 0, path.data(),
+                                      static_cast<int>(path.size()), nullptr,
+                                      0, nullptr, nullptr);
+  if (len <= 0) {
+    return GoogleString();
+  }
+  GoogleString utf8(len, '\0');
+  WideCharToMultiByte(CP_UTF8, 0, path.data(), static_cast<int>(path.size()),
+                      &utf8[0], len, nullptr, nullptr);
+  return utf8;
+}
+
+// In-place optimization keys its lookups and recordings on the URL the
+// module parsed; IIS routed the request, matched its <location> sections
+// and applied request filtering on its own decoded reading of the path.  An
+// entry is only right when both name the same path.  `iis_path` receives
+// IIS's reading.
+static bool IisInPlaceUrlAgreesForRequest(IHttpContext* http_context,
+                                          const GoogleUrl& url,
+                                          GoogleString* iis_path) {
+  *iis_path = IisRoutedPath(http_context);
+  return !iis_path->empty() &&
+         IisInPlaceUrlAgrees(*iis_path, url.PathSansQuery());
+}
+
 // The IIS site id of the site that admitted the request; 0 without one.
 static uint32_t RequestIisSiteId(IHttpContext* http_context) {
   IHttpSite* site = http_context->GetSite();
@@ -609,9 +658,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
   request_context->set_leave(true);
 
   IHttpResponse* iis_response = http_context->GetResponse();
-  // A body this module produced must never be cached by the kernel: it would
-  // be handed to every client for its lifetime with no way to invalidate it.
-  iis_response->DisableKernelCache();
+  // A body this module produced must never be cached by IIS: it would be
+  // handed to every client for its lifetime with no way to invalidate it.
+  DisarmResponseCaches(iis_response);
   iis_response->SetStatus(
       static_cast<USHORT>(response.status),
       response.status == 304 ? "Not Modified" : "OK");
@@ -844,6 +893,9 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		// html when served
 		if (ua.find("mod_pagespeed") != ua.npos)
 		{
+			// The module's own fetch of an input: its answer must never be
+			// kept by IIS's response caches under the public URL.
+			DisarmResponseCaches(pHttpContext->GetResponse());
 			log(pHttpContext, "Pagespeed user agent detected, bailing out");
 			delete gurl;
 			return RQ_NOTIFICATION_CONTINUE;
@@ -1340,6 +1392,19 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 			options->IsAllowed(innerContext->gurl()->Spec()) &&
 			(StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "GET") || StringCaseEqual(pHttpContext->GetRequest()->GetHttpMethod(), "HEAD"))
 			) {
+			// Whatever answers an in-place request -- the module's optimized
+			// copy, the original it serves while optimizing, the recorder's
+			// pass-through, or IIS alone when the module leaves the request --
+			// is kept out of IIS's response caches when it is a type the
+			// module could optimize (decided at send time, by content type).
+			innerContext->set_in_place_candidate(true);
+			// A request IIS and the module read differently is left to IIS
+			// as it is: no lookup, no daemon serve, no recording.
+			GoogleString iis_path;
+			if (!IisInPlaceUrlAgreesForRequest(pHttpContext, *innerContext->gurl(), &iis_path)) {
+				log(pHttpContext, "in-place left to IIS: IIS and the module read the request differently [%s]", iis_path.c_str());
+				return RQ_NOTIFICATION_CONTINUE;
+			}
 			// A daemon CONFIGURED site never enters the classic machinery
 			// below -- not the cache lookup, not the base fetch, not the
 			// pending completion.  Nothing may be served from or recorded
@@ -1483,6 +1548,19 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 
 		log(pHttpContext, "OnSendResponse: [%s]", innerContext->url());
 		innerContext->set_send_response_seen(true);
+
+		// An in-place request's response, whoever produced it, stays out of
+		// IIS's response caches when the module could optimize its type:
+		// those caches would answer later requests for the URL without the
+		// module.  Other types (documents, fonts, media, archives) keep IIS's
+		// caching.  Decided here, before the response goes out.
+		if (innerContext->in_place_candidate()) {
+			USHORT ct_len = 0;
+			PCSTR ct = pHttpContext->GetResponse()->GetHeader(HttpHeaderContentType, &ct_len);
+			if (IsInPlaceOptimizableType(ct, ct_len)) {
+				DisarmResponseCaches(pHttpContext->GetResponse());
+			}
+		}
 
 
 		//if we get here, we can only be rewriting html

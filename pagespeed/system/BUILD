@@ -67,6 +67,22 @@ cc_library(
     ],
 )
 
+# The in-place URL agreement: the server's reading of the request and the
+# module's must name the same path on the same host before a response is
+# looked up or recorded in place.  A pure function over StringPiece, shared by
+# the nginx and Apache ports and unit tested standalone
+# (//test/pagespeed/system:inplace_url_agreement_test).
+cc_library(
+    name = "inplace_url_agreement",
+    srcs = ["inplace_url_agreement.cc"],
+    hdrs = ["inplace_url_agreement.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
 cc_library(
     name = "serve_host_names",
     srcs = ["serve_host_names.cc"],

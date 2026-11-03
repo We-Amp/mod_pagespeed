@@ -1234,6 +1234,11 @@ bool ImageCombineFilter::AddCssBackgroundContext(
     Css::Declarations* decls, bool* is_authorized, MessageHandler* handler) {
   CHECK(context_ != nullptr);
   *is_authorized = true;  // Only false if original_url isn't authorized.
+  if (!parent->PageAllowsNestedContext()) {
+    // The document has no rewrite left, so the stylesheet is left undone;
+    // nothing is created for this image.
+    return false;
+  }
   int width, height;
   if (!GetDeclarationDimensions(decls, &width, &height)) {
     return false;

@@ -172,6 +172,77 @@ TEST_F(CssAbsolutifyTest, PreludeUntouchedWhenUnparseableSectionsDisabled) {
   ExpectBodyBackgroundImage(group, "http://cdn1.com/sub/c.png");
 }
 
+// A url() passed to a CSS function in a parsed declaration is resolved like
+// one that stands on its own.
+TEST_F(CssAbsolutifyTest, UrlInsideFunctionAbsolutified) {
+  std::unique_ptr<Css::Stylesheet> stylesheet =
+      Absolutify("body { background-image: image-set(url(a.png) 1x) }",
+                 true /* handle_parseable_sections */,
+                 true /* handle_unparseable_sections */);
+  ASSERT_EQ(1, stylesheet->rulesets().size());
+  const Css::Ruleset* ruleset = stylesheet->rulesets()[0];
+  ASSERT_EQ(Css::Ruleset::RULESET, ruleset->type());
+  ASSERT_EQ(1, ruleset->declarations().size());
+  const Css::Values* values = ruleset->declaration(0).values();
+  ASSERT_EQ(1, values->size());
+  const Css::Value* function = values->at(0);
+  ASSERT_EQ(Css::Value::FUNCTION, function->GetLexicalUnitType());
+  EXPECT_EQ("image-set", UnicodeTextToUTF8(function->GetFunctionName()));
+  const Css::FunctionParameters* params =
+      function->GetParametersWithSeparators();
+  ASSERT_EQ(2, params->size());
+  ASSERT_EQ(Css::Value::URI, params->value(0)->GetLexicalUnitType());
+  EXPECT_EQ("http://cdn2.com/a.png",
+            UnicodeTextToUTF8(params->value(0)->GetStringValue()));
+  // The other parameter and the separator before it are kept.
+  EXPECT_EQ(Css::FunctionParameters::SPACE_SEPARATED, params->separator(1));
+  EXPECT_EQ(Css::Value::NUMBER, params->value(1)->GetLexicalUnitType());
+}
+
+// The same holds for a url() in a function nested in another function.
+TEST_F(CssAbsolutifyTest, UrlInsideNestedFunctionAbsolutified) {
+  std::unique_ptr<Css::Stylesheet> stylesheet =
+      Absolutify("body { background-image: image-set(image(url(a.png)) 1x) }",
+                 true /* handle_parseable_sections */,
+                 true /* handle_unparseable_sections */);
+  ASSERT_EQ(1, stylesheet->rulesets().size());
+  const Css::Values* values =
+      stylesheet->rulesets()[0]->declaration(0).values();
+  ASSERT_EQ(1, values->size());
+  const Css::Value* outer = values->at(0);
+  ASSERT_EQ(Css::Value::FUNCTION, outer->GetLexicalUnitType());
+  const Css::Value* inner = outer->GetParametersWithSeparators()->value(0);
+  ASSERT_EQ(Css::Value::FUNCTION, inner->GetLexicalUnitType());
+  const Css::Value* uri = inner->GetParametersWithSeparators()->value(0);
+  ASSERT_EQ(Css::Value::URI, uri->GetLexicalUnitType());
+  EXPECT_EQ("http://cdn2.com/a.png", UnicodeTextToUTF8(uri->GetStringValue()));
+}
+
+// A fragment-only reference names an element of the document that uses the
+// stylesheet, so it stays as written, in parsed declarations and in
+// sections kept as text alike.
+TEST_F(CssAbsolutifyTest, FragmentReferenceUnchanged) {
+  std::unique_ptr<Css::Stylesheet> stylesheet = Absolutify(
+      "@supports (mask: url(#m)) {"
+      " body { background-image: url(#g) } }"
+      " div { background-image: image-set(url(#h) 1x) }",
+      true /* handle_parseable_sections */,
+      true /* handle_unparseable_sections */);
+  ASSERT_EQ(2, stylesheet->rulesets().size());
+  const Css::Ruleset* group = stylesheet->rulesets()[0];
+  ASSERT_EQ(Css::Ruleset::GROUP_RULE, group->type());
+  EXPECT_EQ("@supports (mask: url(#m))", group->group_prelude());
+  ExpectBodyBackgroundImage(group, "#g");
+  const Css::Values* values =
+      stylesheet->rulesets()[1]->declaration(0).values();
+  ASSERT_EQ(1, values->size());
+  ASSERT_EQ(Css::Value::FUNCTION, values->at(0)->GetLexicalUnitType());
+  const Css::Value* uri =
+      values->at(0)->GetParametersWithSeparators()->value(0);
+  ASSERT_EQ(Css::Value::URI, uri->GetLexicalUnitType());
+  EXPECT_EQ("#h", UnicodeTextToUTF8(uri->GetStringValue()));
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

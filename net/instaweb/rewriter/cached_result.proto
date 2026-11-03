@@ -40,7 +40,7 @@ message AssociatedImageInfo {
 // is a sequence of input URLs and a filter id. The input array
 // tells us which inputs are used to construct this output; it must be
 // interpreted using the URL-sequence that was used to form the key.
-// Next free tag: 32
+// Next free tag: 33
 message CachedResult {
   // Tags 1-7 are for internal use by output_resource.
 
@@ -180,6 +180,10 @@ message CachedResult {
   // rewritten URL builds its 304 from this, without loading the output or its
   // inputs. Absent on records from older versions; those get a bare 304.
   optional string output_cache_control = 31;
+
+  // Set on every result stored by a version that builds optimizations only
+  // from inputs the module fetched itself; a result without it is rebuilt.
+  optional bool built_from_fetched_inputs = 32;
 }
 
 // Contains the mapping of input URLs to output URLs.  In the general

@@ -178,6 +178,48 @@ class HtmlLexer {
   HtmlElement* PopElement();
   void CloseElement(HtmlElement* element, HtmlElement::Style style);
 
+  // Pops the elements above close_index off the stack, closing each as
+  // UNCLOSED, then pops and returns the element at close_index (which the
+  // caller closes).
+  HtmlElement* PopElementsDownTo(int close_index);
+
+  // Namespace bookkeeping for inline SVG and MathML ("foreign content" in
+  // the HTML Standard, section 13.2.6).  Every entry of element_stack_ has a
+  // matching entry in open_element_info_.
+  enum class ElementNamespace : std::uint8_t { kHtml, kSvg, kMathMl };
+  struct OpenElementInfo {
+    ElementNamespace ns = ElementNamespace::kHtml;
+    // SVG foreignObject, desc and title; MathML annotation-xml whose encoding
+    // is text/html or application/xhtml+xml.
+    bool html_integration_point = false;
+    // MathML mi, mo, mn, ms and mtext.
+    bool mathml_text_integration_point = false;
+    // MathML annotation-xml.
+    bool annotation_xml = false;
+    // A foreign element in the parser's 'special' category: the integration
+    // points above plus every MathML annotation-xml.  HTML end tags never
+    // close past one of these.
+    bool special = false;
+  };
+
+  // Pushes element onto the stack, with its namespace information.
+  void PushElement(HtmlElement* element, const OpenElementInfo& info);
+  // Shrinks the stack to size entries.
+  void TruncateStack(size_t size);
+  // Information for the current node (the top of the stack).
+  const OpenElementInfo& CurrentInfo() const;
+  // Whether the current node is an SVG or MathML element.
+  bool InForeignContent() const;
+  // Whether a start tag for element is handled by the HTML rules (rather than
+  // the foreign content rules), given the current node.
+  bool StartTagUsesHtmlRules(const HtmlElement& element) const;
+  // Pops foreign elements until the current node is an HTML element or an
+  // integration point, closing each as UNCLOSED.
+  void PopForeignElementsForBreakout();
+  // Computes the namespace information for a new element in namespace ns.
+  static OpenElementInfo MakeOpenElementInfo(const HtmlElement& element,
+                                             ElementNamespace ns);
+
   // Minimal i18n analysis.  With utf-8 and gb2312 we can do this
   // context-free, and thus the method can be static.  If we add
   // more encodings we may need to turn this into a non-static method.
@@ -266,6 +308,7 @@ class HtmlLexer {
   DocType doctype_;
 
   std::vector<HtmlElement*> element_stack_;
+  std::vector<OpenElementInfo> open_element_info_;  // parallel to the above
 
   // Indicates that we have exceeded the enforced size limit on the maximum
   // number of input HTML that we can parse.

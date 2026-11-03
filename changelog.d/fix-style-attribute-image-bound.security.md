@@ -1,0 +1,1 @@
+- Hardened image resizing so that the work spent reading image dimensions from a page is bounded like stylesheet parsing. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

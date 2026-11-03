@@ -74,6 +74,15 @@ class CssFlattenImportsContext : public SingleRewriteContext {
         StrAppend(&suffix, IntegerToString(medium.size()), ":", medium);
       }
     }
+    // When URLs are trimmed, the flattened text depends on the origin and
+    // directory they are trimmed relative to, so importers elsewhere must
+    // not share it.
+    if (TrimsUrls()) {
+      const GoogleString trim_base =
+          hierarchy_->css_trim_url().AllExceptLeaf().as_string();
+      StrAppend(&suffix, "|trim", IntegerToString(trim_base.size()), ":",
+                trim_base);
+    }
     return suffix;
   }
 
@@ -105,10 +114,7 @@ class CssFlattenImportsContext : public SingleRewriteContext {
     StringWriter writer(hierarchy_->input_contents_backing_store());
     // See RewriteDriver::ResolveCssUrls about why we disable trimming in
     // proxy mode. We also disable it if trimming is not enabled.
-    if (driver->server_context()->url_namer()->ProxyMode() ==
-            UrlNamer::ProxyExtent::kFull ||
-        !driver->options()->trim_urls_in_css() ||
-        !driver->options()->Enabled(RewriteOptions::kLeftTrimUrls)) {
+    if (!TrimsUrls()) {
       transformer.set_trim_urls(false);
     }
     if (CssTagScanner::TransformUrls(
@@ -237,6 +243,16 @@ class CssFlattenImportsContext : public SingleRewriteContext {
   OutputResourceKind kind() const override { return kRewrittenResource; }
 
  private:
+  // See RewriteDriver::ResolveCssUrls about why trimming is disabled in
+  // proxy mode. It is also disabled if trimming is not enabled.
+  bool TrimsUrls() const {
+    RewriteDriver* driver = Driver();
+    return driver->server_context()->url_namer()->ProxyMode() !=
+               UrlNamer::ProxyExtent::kFull &&
+           driver->options()->trim_urls_in_css() &&
+           driver->options()->Enabled(RewriteOptions::kLeftTrimUrls);
+  }
+
   CssFilter* filter_;
   CssFilter::Context* rewriter_;
   CssHierarchy* hierarchy_;

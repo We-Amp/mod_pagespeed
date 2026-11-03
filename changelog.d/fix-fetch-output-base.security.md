@@ -1,0 +1,1 @@
+- Hardened optimized stylesheets and resources so that requests for optimized URLs can no longer change how other pages reference them. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

@@ -44,4 +44,28 @@ TEST_F(SemanticTypeTest, TestParseCategory) {
   EXPECT_FALSE(semantic_type::ParseCategory("Undefined", &category));
 }
 
+TEST_F(SemanticTypeTest, TestGetCategoryString) {
+  EXPECT_STREQ(
+      "Script",
+      semantic_type::GetCategoryString(semantic_type::kScript).c_str());
+  EXPECT_STREQ("Image",
+               semantic_type::GetCategoryString(semantic_type::kImage).c_str());
+  EXPECT_STREQ(
+      "Stylesheet",
+      semantic_type::GetCategoryString(semantic_type::kStylesheet).c_str());
+  EXPECT_STREQ(
+      "OtherResource",
+      semantic_type::GetCategoryString(semantic_type::kOtherResource).c_str());
+  EXPECT_STREQ(
+      "Hyperlink",
+      semantic_type::GetCategoryString(semantic_type::kHyperlink).c_str());
+  EXPECT_STREQ(
+      "Prefetch",
+      semantic_type::GetCategoryString(semantic_type::kPrefetch).c_str());
+  // kUndefined has no case of its own, so it falls through to the default.
+  EXPECT_STREQ(
+      "Unknown",
+      semantic_type::GetCategoryString(semantic_type::kUndefined).c_str());
+}
+
 }  // namespace net_instaweb

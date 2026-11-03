@@ -37,6 +37,7 @@
 #include "pagespeed/kernel/cache/write_through_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/http_options.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -252,6 +253,60 @@ class HTTPCacheTest : public testing::Test {
 };
 
 // Simple flow of putting in an item, getting it.
+// Only PutFetchedInput marks an entry; the mark is never among the headers
+// a lookup returns, and storing a marked value with Put drops the mark.
+TEST_F(HTTPCacheTest, FetchedInputMark) {
+  ResponseHeaders headers_in, headers_out;
+  InitHeaders(&headers_in, "max-age=300");
+  HTTPValue in;
+  in.SetHeaders(&headers_in);
+  in.Write("content", &message_handler_);
+  http_cache_->PutFetchedInput(kUrl, kFragment, RequestHeaders::Properties(),
+                               kDefaultHttpOptionsForTests, &in,
+                               &message_handler_);
+  HTTPValue marked;
+  ASSERT_EQ(kFoundResult, Find(kUrl, kFragment, &marked, &headers_out));
+  EXPECT_TRUE(marked.IsFetchedInput());
+  EXPECT_FALSE(headers_out.Has(HTTPValue::kFetchedInputHeader));
+  ResponseHeaders extracted;
+  ASSERT_TRUE(marked.ExtractHeaders(&extracted, &message_handler_));
+  EXPECT_FALSE(extracted.Has(HTTPValue::kFetchedInputHeader));
+  EXPECT_TRUE(extracted.Has("name"));
+
+  http_cache_->Put(kUrl, kFragment, RequestHeaders::Properties(),
+                   kDefaultHttpOptionsForTests, &marked, &message_handler_);
+  HTTPValue unmarked;
+  ASSERT_EQ(kFoundResult, Find(kUrl, kFragment, &unmarked, &headers_out));
+  EXPECT_FALSE(unmarked.IsFetchedInput());
+
+  // Headers handed to Put cannot carry the mark into the cache either.
+  headers_in.Add(HTTPValue::kFetchedInputHeader, "1");
+  headers_in.ComputeCaching();
+  Put(kUrl, kFragment, &headers_in, "content");
+  ASSERT_EQ(kFoundResult, Find(kUrl, kFragment, &unmarked, &headers_out));
+  EXPECT_FALSE(unmarked.IsFetchedInput());
+}
+
+// A marked entry's headers are ready for caching checks once the mark has
+// been dropped from them.
+TEST_F(HTTPCacheTest, FetchedInputHeadersComputed) {
+  ResponseHeaders headers_in, headers_out;
+  InitHeaders(&headers_in, "max-age=300");
+  HTTPValue in;
+  in.SetHeadersMarkingFetchedInput(headers_in);
+  in.Write("content", &message_handler_);
+  ResponseHeaders extracted;
+  ASSERT_TRUE(in.ExtractHeaders(&extracted, &message_handler_));
+  EXPECT_TRUE(extracted.IsProxyCacheable(
+      RequestHeaders::Properties(), ResponseHeaders::kRespectVaryOnResources,
+      ResponseHeaders::kHasValidator));
+  http_cache_->PutFetchedInput(kUrl, kFragment, RequestHeaders::Properties(),
+                               kDefaultHttpOptionsForTests, &in,
+                               &message_handler_);
+  HTTPValue found;
+  EXPECT_EQ(kFoundResult, Find(kUrl, kFragment, &found, &headers_out));
+}
+
 TEST_F(HTTPCacheTest, PutGet) {
   simple_stats_.Clear();
 
