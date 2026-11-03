@@ -18,6 +18,10 @@ deletes them.
 - At most one fragment per category. If a change needs two (a security fix
   that also changes a default), use the same slug with two categories.
 - A name that already exists on `master` is rejected; pick another slug.
+- Landing a release is the one exception to "one slug": a pull request from a
+  `landing/<name>` branch whose description says
+  `Release-Note: landing -- <why>` carries the fragments of every topic it
+  lands. Both are needed; names are still checked.
 
 ## Content
 

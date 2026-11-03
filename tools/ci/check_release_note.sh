@@ -37,8 +37,10 @@
 # In CI the inputs come from the GitHub API instead of git, so the check works
 # on the shallow checkout the rest of the job already uses:
 #   bash tools/ci/check_release_note.sh --files-from FILE --haystack-from FILE \
-#        [--added-from FILE]
-# where --added-from lists the files the change ADDS (status "added").
+#        [--added-from FILE] [--head-ref BRANCH]
+# where --added-from lists the files the change ADDS (status "added"), and
+# --head-ref names the pull request's branch (default: $GITHUB_HEAD_REF, which
+# GitHub Actions sets on pull_request runs).
 
 set -euo pipefail
 
@@ -99,6 +101,16 @@ EXEMPT_RE='(^|/)(test|tests|testdata)/|(^|/)[^/]*_tests?/|(^|/)[^/]*_test\.(cc|c
 WAIVER_RE='^[[:space:]]*Release-Note:[[:space:]]*none[[:space:]]*[-:–—]+[[:space:]]*'
 WAIVER_MIN_REASON=12
 
+# Landing a release. A release's integration branch lands on master as a few
+# large squashed pull requests, each carrying the fragments of many topics, so
+# the one-slug rule cannot hold for them. Both of these lift it: a line
+# `Release-Note: landing -- <why>` (same separators and minimum reason as the
+# waiver) in the description or a commit message, AND a head branch named
+# landing/<anything>. Either alone changes nothing. Fragment names are still
+# checked in full; only the one-slug and one-per-category rules are lifted.
+LANDING_RE='^[[:space:]]*Release-Note:[[:space:]]*landing[[:space:]]*[-:–—]+[[:space:]]*'
+LANDING_BRANCH_RE='^landing/'
+
 # ---------------------------------------------------------------------------
 # Core decision, kept pure so the self-test can drive every branch
 # ---------------------------------------------------------------------------
@@ -106,14 +118,16 @@ WAIVER_MIN_REASON=12
 # $1 -- newline-separated changed-file list
 # $2 -- waiver haystack (commit messages and/or PR body)
 # $3 -- newline-separated list of files the change ADDS (optional)
+# $4 -- the pull request's head branch (optional)
 #
 # 0 = pass, 1 = block.
 evaluate_release_note() {
   local changed="$1"
   local haystack="$2"
   local added="${3:-}"
+  local head_ref="${4:-}"
   local triggering note_touched waiver_line reason
-  local bad_frag added_frags slugs dup_cat existing_frag
+  local bad_frag added_frags slugs dup_cat existing_frag landing="" landing_reason
 
   # Fragment hygiene applies to every change, user-facing or not: a stray or
   # misnamed file under changelog.d/ would be skipped, or break, the assembler.
@@ -132,8 +146,21 @@ evaluate_release_note() {
     return 1
   fi
 
+  # Landing mode needs the marker line with a real reason AND a landing/ branch.
+  if printf '%s\n' "$head_ref" | grep -qE "$LANDING_BRANCH_RE"; then
+    landing_reason="$(printf '%s\n' "$haystack" | grep -iE "$LANDING_RE" | head -n 1 \
+      | sed -E "s/$LANDING_RE//I; s/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+\$//" || true)"
+    if [ "${#landing_reason}" -ge "$WAIVER_MIN_REASON" ]; then
+      landing=yes
+    fi
+  fi
+
   added_frags="$(printf '%s\n' "$added" | grep -E "$FRAGMENT_RE" || true)"
-  if [ -n "$added_frags" ]; then
+  if [ -n "$added_frags" ] && [ -n "$landing" ]; then
+    slugs="$(printf '%s\n' "$added_frags" \
+      | sed -E "s#^${FRAGMENT_DIR}/##; s#\\.(${FRAGMENT_CATEGORIES})\\.md\$##" | sort -u)"
+    echo "OK: release landing on ${head_ref} -- $(printf '%s\n' "$slugs" | wc -l | tr -d ' ') fragment slug(s) allowed: $landing_reason"
+  elif [ -n "$added_frags" ]; then
     slugs="$(printf '%s\n' "$added_frags" \
       | sed -E "s#^${FRAGMENT_DIR}/##; s#\\.(${FRAGMENT_CATEGORIES})\\.md\$##" | sort -u)"
     if [ "$(printf '%s\n' "$slugs" | wc -l | tr -d ' ')" -gt 1 ]; then
@@ -452,6 +479,39 @@ self_test() {
   fchk "CHANGELOG.md still passes (window)   -> pass" 0 \
     "$(printf 'pagespeed/a.cc\nCHANGELOG.md\n')" ""
 
+  # --- landing a release: marker line AND landing/ branch, neither alone ---
+
+  lchk() {
+    local name="$1" want="$2" changed="$3" haystack="$4" added="$5" ref="$6"
+    local got=0
+    n=$((n + 1))
+    evaluate_release_note "$changed" "$haystack" "$added" "$ref" >/dev/null 2>&1 || got=$?
+    if [ "$got" -ne "$want" ]; then
+      echo "  FAIL  $name (wanted exit $want, got $got)" >&2
+      failures=$((failures + 1))
+    else
+      echo "  ok    $name"
+    fi
+  }
+  local LA=changelog.d/one-slug.fixed.md LB=changelog.d/two-slug.fixed.md
+  local LCH LAD LM="Release-Note: landing -- the 2.8.0 integration branch, part 1 of 2"
+  LCH="$(printf 'pagespeed/a.cc\n%s\n%s\n' "$LA" "$LB")"
+  LAD="$(printf '%s\n%s\n' "$LA" "$LB")"
+
+  lchk "landing: marker + landing/ branch    -> pass" 0 "$LCH" "$LM" "$LAD" "landing/2.8.0-m1"
+  lchk "landing: two of one category         -> pass" 0 "$LCH" "$LM" "$LAD" "landing/x"
+  lchk "landing: marker, other branch        -> BLOCK" 1 "$LCH" "$LM" "$LAD" "fix/some-topic"
+  lchk "landing: marker, no branch known     -> BLOCK" 1 "$LCH" "$LM" "$LAD" ""
+  lchk "landing: landing/ branch, no marker  -> BLOCK" 1 "$LCH" "" "$LAD" "landing/2.8.0-m1"
+  lchk "landing: branch named not-landing/   -> BLOCK" 1 "$LCH" "$LM" "$LAD" "x/landing/2.8.0"
+  lchk "landing: marker with a token reason  -> BLOCK" 1 "$LCH" "Release-Note: landing -- m1" "$LAD" "landing/2.8.0-m1"
+  lchk "landing: marker only as a mention    -> BLOCK" 1 "$LCH" \
+    "we could write Release-Note: landing -- the 2.8.0 integration branch" "$LAD" "landing/2.8.0-m1"
+  lchk "landing: misnamed fragment still     -> BLOCK" 1 \
+    "$(printf 'pagespeed/a.cc\nchangelog.d/Bad_Name.md\n%s\n' "$LA")" "$LM" \
+    "$(printf 'changelog.d/Bad_Name.md\n%s\n' "$LA")" "landing/2.8.0-m1"
+  lchk "landing: code, no fragment, no note  -> BLOCK" 1 "pagespeed/a.cc" "$LM" "" "landing/2.8.0-m1"
+
   # End-to-end through the entry point, because the CI path and the fail-closed
   # branches live there rather than in the pure function above. A gate that
   # cannot see its input must go red, not quietly green.
@@ -478,6 +538,9 @@ self_test() {
   printf 'Release-Note: none - build plumbing only, nothing user visible\n' > "$tmp/waiver.txt"
   printf 'net/instaweb/rewriter/css_filter.cc\nchangelog.d/my-branch.fixed.md\n' > "$tmp/files-frag.txt"
   printf 'changelog.d/my-branch.fixed.md\n' > "$tmp/added-frag.txt"
+  printf 'pagespeed/a.cc\nchangelog.d/one-slug.fixed.md\nchangelog.d/two-slug.added.md\n' > "$tmp/files-2slug.txt"
+  printf 'changelog.d/one-slug.fixed.md\nchangelog.d/two-slug.added.md\n' > "$tmp/added-2slug.txt"
+  printf 'Release-Note: landing -- the 2.8.0 integration branch, part 1 of 2\n' > "$tmp/landing.txt"
   : > "$tmp/added-none.txt"
 
   e2e "--files-from missing               -> BLOCK" 1 --files-from "$tmp/nope.txt"
@@ -494,6 +557,24 @@ self_test() {
     --files-from "$tmp/files-frag.txt" --added-from "$tmp/added-none.txt"
   e2e "--added-from missing               -> BLOCK" 1 \
     --files-from "$tmp/files-frag.txt" --added-from "$tmp/nope.txt"
+  e2e "--head-ref landing/, marker       -> pass " 0 --files-from "$tmp/files-2slug.txt" \
+    --haystack-from "$tmp/landing.txt" --added-from "$tmp/added-2slug.txt" --head-ref landing/2.8.0-m1
+  e2e "--head-ref other branch, marker    -> BLOCK" 1 --files-from "$tmp/files-2slug.txt" \
+    --haystack-from "$tmp/landing.txt" --added-from "$tmp/added-2slug.txt" --head-ref topic/x
+  n=$((n + 1))
+  if GITHUB_HEAD_REF=landing/2.8.0-m1 bash "$self" --files-from "$tmp/files-2slug.txt" \
+      --haystack-from "$tmp/landing.txt" --added-from "$tmp/added-2slug.txt" >/dev/null 2>&1; then
+    echo "  ok    GITHUB_HEAD_REF=landing/, marker  -> pass"
+  else
+    echo "  FAIL  GITHUB_HEAD_REF=landing/, marker  -> pass" >&2; failures=$((failures + 1))
+  fi
+  n=$((n + 1))
+  if GITHUB_HEAD_REF=topic/x bash "$self" --files-from "$tmp/files-2slug.txt" \
+      --haystack-from "$tmp/landing.txt" --added-from "$tmp/added-2slug.txt" >/dev/null 2>&1; then
+    echo "  FAIL  GITHUB_HEAD_REF=topic/x, marker   -> BLOCK" >&2; failures=$((failures + 1))
+  else
+    echo "  ok    GITHUB_HEAD_REF=topic/x, marker   -> BLOCK"
+  fi
   e2e "no arguments at all                -> BLOCK" 1
   e2e "unresolvable base                  -> BLOCK" 1 \
     --base 0000000000000000000000000000000000000000
@@ -516,6 +597,7 @@ HEAD="HEAD"
 FILES_FROM=""
 HAYSTACK_FROM=""
 ADDED_FROM=""
+HEAD_REF="${GITHUB_HEAD_REF:-}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -525,8 +607,9 @@ while [ $# -gt 0 ]; do
     --files-from) FILES_FROM="${2:-}"; shift 2 ;;
     --haystack-from) HAYSTACK_FROM="${2:-}"; shift 2 ;;
     --added-from) ADDED_FROM="${2:-}"; shift 2 ;;
+    --head-ref) HEAD_REF="${2:-}"; shift 2 ;;
     -h|--help)
-      sed -n '6,41p' "${BASH_SOURCE[0]}"
+      sed -n '6,43p' "${BASH_SOURCE[0]}"
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -560,7 +643,7 @@ if [ -n "$FILES_FROM" ]; then
     fi
     ADDED="$(cat "$ADDED_FROM")"
   fi
-  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$ADDED"
+  evaluate_release_note "$(cat "$FILES_FROM")" "$HAYSTACK" "$ADDED" "$HEAD_REF"
   exit $?
 fi
 
@@ -585,4 +668,4 @@ COMMIT_MESSAGES="$(git log --format='%B' "$MERGE_BASE..$HEAD")"
 HAYSTACK="$(printf '%s\n%s\n' "$COMMIT_MESSAGES" "${PR_BODY:-}")"
 ADDED="$(git diff --no-renames --diff-filter=A --name-only "$MERGE_BASE" "$HEAD")"
 
-evaluate_release_note "$CHANGED" "$HAYSTACK" "$ADDED"
+evaluate_release_note "$CHANGED" "$HAYSTACK" "$ADDED" "$HEAD_REF"
