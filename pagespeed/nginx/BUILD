@@ -73,6 +73,34 @@ cc_library(
     ],
 )
 
+# The Cache-Control the module writes on rewritten HTML keeps the operator's
+# and the origin's private and no-store. Deliberately nginx-free so it can be
+# unit tested standalone (//test/pagespeed/nginx:ngx_cache_control_merge_test).
+# The module targets below compile ngx_cache_control_merge.cc directly in
+# their srcs for the same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_cache_control_merge",
+    srcs = ["ngx_cache_control_merge.cc"],
+    hdrs = ["ngx_cache_control_merge.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Which caching headers of the server's response the module keeps for a
+# request (ModifyCachingHeaders, downstream cache integration) -- a pure
+# function, unit tested standalone
+# (//test/pagespeed/nginx:ngx_caching_header_policy_test). The module
+# targets below compile ngx_caching_header_policy.cc directly in their srcs
+# for the same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_caching_header_policy",
+    srcs = ["ngx_caching_header_policy.cc"],
+    hdrs = ["ngx_caching_header_policy.h"],
+    visibility = ["//visibility:public"],
+)
+
 # The admin-style handler path lookup (exact / subtree, case-sensitive like
 # nginx `location` blocks) -- a pure function over StringPiece, unit tested
 # standalone (//test/pagespeed/nginx:ngx_admin_path_match_test). The module
@@ -85,6 +113,21 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Whether a connection's peer is this server, and the relabel/restore of a
+# connection's client address that the POST_READ handler applies to the
+# module's own fetches -- nginx-free (templates over the connection type),
+# unit tested standalone (//test/pagespeed/nginx:ngx_self_fetch_label_test).
+# The module targets below compile ngx_self_fetch_label.cc directly.
+cc_library(
+    name = "ngx_self_fetch_label",
+    srcs = ["ngx_self_fetch_label.cc"],
+    hdrs = ["ngx_self_fetch_label.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/system",
     ],
 )
 
@@ -265,6 +308,8 @@ cc_library(
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
+        "ngx_cache_control_merge.cc",
+        "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
@@ -286,6 +331,7 @@ cc_library(
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_segment_buffer.cc",
+        "ngx_self_fetch_label.cc",
         "ngx_server_context.cc",
         "ngx_static_asset_path.cc",
         "ngx_url_async_fetcher.cc",
@@ -294,6 +340,8 @@ cc_library(
     hdrs = [
         "log_message_handler.h",
         "ngx_base_fetch.h",
+        "ngx_cache_control_merge.h",
+        "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
@@ -315,6 +363,7 @@ cc_library(
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
         "ngx_segment_buffer.h",
+        "ngx_self_fetch_label.h",
         "ngx_server_context.h",
         "ngx_static_asset_path.h",
         "ngx_url_async_fetcher.h",
@@ -335,9 +384,11 @@ cc_library(
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:ipro_recorder",
         "//pagespeed/system:optimization_thread_policy",
+        "//pagespeed/system:site_cache_fragment",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",
         "//pagespeed/kernel/webbotauth:webbotauth_warmer",
@@ -409,6 +460,8 @@ cc_library(
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
+        "ngx_cache_control_merge.cc",
+        "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
@@ -430,6 +483,7 @@ cc_library(
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_segment_buffer.cc",
+        "ngx_self_fetch_label.cc",
         "ngx_server_context.cc",
         "ngx_static_asset_path.cc",
         "ngx_url_async_fetcher.cc",
@@ -438,6 +492,8 @@ cc_library(
     hdrs = [
         "log_message_handler.h",
         "ngx_base_fetch.h",
+        "ngx_cache_control_merge.h",
+        "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
@@ -459,6 +515,7 @@ cc_library(
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
         "ngx_segment_buffer.h",
+        "ngx_self_fetch_label.h",
         "ngx_server_context.h",
         "ngx_static_asset_path.h",
         "ngx_url_async_fetcher.h",
@@ -481,6 +538,7 @@ cc_library(
         "//pagespeed/system:system_envoy",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/system:ipro_recorder",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
@@ -548,6 +606,8 @@ cc_library(
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
+        "ngx_cache_control_merge.cc",
+        "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
@@ -568,6 +628,7 @@ cc_library(
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_segment_buffer.cc",
+        "ngx_self_fetch_label.cc",
         "ngx_server_context.cc",
         "ngx_static_asset_path.cc",
         "ngx_url_async_fetcher.cc",
@@ -576,6 +637,8 @@ cc_library(
     hdrs = [
         "log_message_handler.h",
         "ngx_base_fetch.h",
+        "ngx_cache_control_merge.h",
+        "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
@@ -597,6 +660,7 @@ cc_library(
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
         "ngx_segment_buffer.h",
+        "ngx_self_fetch_label.h",
         "ngx_server_context.h",
         "ngx_static_asset_path.h",
         "ngx_url_async_fetcher.h",
@@ -621,6 +685,7 @@ cc_library(
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",

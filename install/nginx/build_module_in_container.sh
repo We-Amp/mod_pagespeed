@@ -16,6 +16,8 @@
 # its libc/libstdc++ floor matches the target:
 #   el9   -> almalinux:9      (glibc 2.34, gcc-toolset-13)
 #   noble -> ubuntu:24.04     (glibc 2.39, g++-13 + clang)
+#   resolute -> ubuntu:26.04  (glibc 2.43, clang + libstdc++-13 objects,
+#                              nginx glue built by the default gcc-15)
 #
 # It reproduces the proven Phase A/B recipe (journal "Phase A CLOSED" + "Phase B
 # CLOSED"): bazel build of the .so target to force the full PSOL object graph,
@@ -57,7 +59,7 @@
 set -euo pipefail
 if [ "${VERBOSE:-}" ]; then set -x; fi
 
-DISTRO="${1:?usage: $0 <noble|el9|el10|bullseye|bookworm|trixie|jammy> [-o out.so]}"
+DISTRO="${1:?usage: $0 <noble|resolute|el9|el10|bullseye|bookworm|trixie|jammy> [-o out.so]}"
 shift || true
 
 SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
@@ -108,7 +110,10 @@ case "${DISTRO}" in
             DEF_NGINX_SHA256="69ee2b237744036e61d24b836668aad3040dda461fe6f570f1787eab570c75aa" ;;
   jammy)    DEF_NGINX_VER="1.18.0"
             DEF_NGINX_SHA256="4c373e7ab5bf91d34a4f11a0c9496561061ba5eee6020db272a17a7228d35f99" ;;
-  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|focal|el9|el10|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
+  # sha256 captured from nginx.org/download/nginx-1.28.3.tar.gz 2026-11-01.
+  resolute) DEF_NGINX_VER="1.28.3"
+            DEF_NGINX_SHA256="2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918" ;;
+  *) echo "ERROR: unknown distro '${DISTRO}' (want noble|resolute|focal|el9|el10|bullseye|bookworm|trixie|jammy)" >&2; exit 1 ;;
 esac
 NGINX_SRC_VERSION="${NGINX_SRC_VERSION:-${DEF_NGINX_VER}}"
 # Resolve the sha256 to verify against. If the caller pinned NGINX_SRC_SHA256
@@ -214,7 +219,7 @@ esac
 # runtime), but it detects the drift on the first request and degrades the module
 # to pass-through + one ALERT log instead of silently hanging the worker.
 case "${DISTRO}" in
-  noble|jammy|el9|el10) NGX_SRC_MODE="distro" ;;
+  noble|resolute|jammy|el9|el10) NGX_SRC_MODE="distro" ;;
   *)                    NGX_SRC_MODE="vanilla" ;;
 esac
 NGX_SRC_MODE="${NGX_SRC_MODE_OVERRIDE:-${NGX_SRC_MODE}}"
@@ -300,6 +305,24 @@ install_deps_noble() {
     python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
+  install_bazelisk
+}
+
+install_deps_resolute() {
+  # ubuntu:26.04: the noble recipe. Bazel objects: apt clang against libstdc++-13,
+  # the paths --config=clang-libstdcxx13 hardcodes, so g++-13 is installed by name
+  # because the default g++ is 15. Unlike noble, the nginx glue is compiled by the
+  # default gcc-15, and the release load and runtime gates are what prove that mix.
+  # libpcre3 is gone; nginx uses PCRE2.
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y --no-install-recommends \
+    ca-certificates curl wget gnupg lsb-release \
+    build-essential g++-13 gcc-13 \
+    clang lld llvm \
+    zlib1g-dev libpcre2-dev libssl-dev \
+    python3 unzip zip gperf bison flex nasm \
+    dpkg-dev fakeroot >/dev/null
   install_bazelisk
 }
 
@@ -742,6 +765,7 @@ if [ "${SKIP_DEPS:-}" != "1" ]; then
   echo "==> installing build deps (${DISTRO})"
   case "${DISTRO}" in
     noble)    install_deps_noble ;;
+    resolute) install_deps_resolute ;;
     focal)    install_deps_focal ;;
     el9)      install_deps_el9 ;;
     el10)     install_deps_el10 ;;
@@ -763,6 +787,26 @@ fi
 #           +include dirs and the libstdc++ -L must be redirected to the toolset.
 # ---------------------------------------------------------------------------
 cd "${SRCDIR}"
+
+# libaom's configure test greps `nasm -hf` for "-Ox", and nasm 3 (ubuntu:26.04)
+# no longer prints it there. So on this leg assemble a real file with -Ox instead:
+# if nasm refuses, the build stops here; if it works, libaom's help-text gate is
+# switched off in this leg's own vendored copy only.
+if [ "${DISTRO}" = "resolute" ] && [ "$(uname -m)" = "x86_64" ] && [ -f vendor/aom/build/cmake/aom_optimization.cmake ]; then
+  NASM_PROBE="$(mktemp -d)"
+  printf 'bits 64\nglobal probe\nsection .text\nprobe:\n  mov eax, 0\n  ret\n' > "${NASM_PROBE}/probe.asm"
+  if ! nasm -Ox -f elf64 -o "${NASM_PROBE}/probe.o" "${NASM_PROBE}/probe.asm" || [ ! -s "${NASM_PROBE}/probe.o" ]; then
+    echo "ERROR: nasm cannot assemble with -Ox, which libaom requires" >&2
+    exit 1
+  fi
+  rm -rf "${NASM_PROBE}"
+  grep -q 'MATCHES "-Ox"' vendor/aom/build/cmake/aom_optimization.cmake || {
+    echo "ERROR: libaom's nasm test has changed; review this workaround" >&2
+    exit 1
+  }
+  chmod u+w vendor/aom/build/cmake/aom_optimization.cmake
+  sed -i 's/MATCHES "-Ox"/MATCHES ".*"/' vendor/aom/build/cmake/aom_optimization.cmake
+fi
 
 # Base flags. This mirrors the proven `--config=ci` recipe the rest of the
 # release build uses (pagespeed.bazelrc: ci = vendored + clang-libstdcxx13 +

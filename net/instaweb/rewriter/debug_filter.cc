@@ -177,7 +177,7 @@ GoogleString DebugFilter::ListActiveFiltersAndOptions() const {
 
 void DebugFilter::EndElement(HtmlElement* element) {
   if (!flush_messages_.empty()) {
-    driver_->InsertComment(flush_messages_);
+    driver_->InsertDebugCommentHere(flush_messages_);
     flush_messages_.clear();
   }
 
@@ -222,7 +222,7 @@ void DebugFilter::Flush() {
     // will return false, since we can't insert safely into a literal block.
     // Instead, buffer the messages, and then print when we reach the closing
     // tag (in EndElement).
-    if (!driver_->InsertComment(flush_message)) {
+    if (!driver_->InsertDebugCommentHere(flush_message)) {
       StrAppend(&flush_messages_, flush_message);
     }
   }
@@ -234,7 +234,7 @@ void DebugFilter::Flush() {
   idle_.AddToTotal();
 
   if (end_document_seen_) {
-    driver_->InsertComment(
+    driver_->InsertDebugCommentHere(
         StrCat(ListActiveFiltersAndOptions(),
                FormatEndDocumentMessage(
                    time_since_init_parse_us, parse_.total_us(),

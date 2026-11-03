@@ -15,8 +15,6 @@
 # Option 3: nginx_repository rule (auto-detects location)
 #   Checks NGINX_PATH env var, then common locations.
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
 # Informational constant — the actually-shipped nginx version comes from
 # docker/Dockerfile (SHA-pinned) and scripts/build_nginx_with_pagespeed.sh.
 # This constant has no consumers in the Bazel rules below (nginx_repository

@@ -54,6 +54,7 @@
 #include "net/instaweb/rewriter/public/option_context.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
+#include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
@@ -62,7 +63,9 @@
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_record_arm.h"
 #include "pagespeed/system/siphash.h"
+#include "test/pagespeed/system/recording_daemon_abi.h"
 #include "test/pagespeed/kernel/base/gtest.h"
+#include "test/pagespeed/kernel/base/mock_timer.h"
 
 namespace net_instaweb {
 
@@ -71,6 +74,10 @@ namespace {
 const char kUrl[] = "/a/photo.png";
 const char kHost[] = "example.com";
 const char kScheme[] = "http";
+// The site of the block that admitted the request: the digest of its
+// server-scope fragment, here sha256("site-test").
+const char kSite[] =
+    "2007f4b98af3e43f6c81272c8606ea77a35978dd7a5c0ee623f15036edac5831";
 
 // The two requests every selection case is written against.  Both are
 // desktop / 1x / identity; only the advertised image format differs, which
@@ -179,6 +186,7 @@ class DaemonServeArmTest : public testing::Test {
     request.url = kUrl;
     request.hostname = kHost;
     request.scheme = kScheme;
+    request.site = kSite;
     request.accept = accept;
     request.user_agent = kUaDesktop;
     request.accept_encoding = "identity";
@@ -194,6 +202,7 @@ class DaemonServeArmTest : public testing::Test {
     request.url = kCssUrl;
     request.hostname = kHost;
     request.scheme = kScheme;
+    request.site = kSite;
     request.accept = "text/css,*/*;q=0.1";
     request.user_agent = kUaDesktop;
     request.accept_encoding = accept_encoding;
@@ -1052,6 +1061,28 @@ TEST_F(DaemonServeArmTest, ADurableHtmlOriginalIsAlwaysDeclined) {
   EXPECT_TRUE(decision.body.empty());
 }
 
+// The daemon arms send the worker nothing for HTML: an HTML entry, even one
+// whose age has run out, is declined, and none of the three serve-side
+// notifications goes out for that decision.
+TEST_F(DaemonServeArmTest, AnHtmlEntrySendsNoNotification) {
+  setenv("PS_STUB_READ_CONTENT_TYPE", "0", 1);  // kPsContentHtml
+  setenv("PS_STUB_ORIGIN_CT", "text/html", 1);
+  setenv("PS_STUB_INSERTED_AT", "1", 1);
+  SetAlternates("09:00:1,0c:00:0");
+  const DaemonServeRequest request = Request("text/html,*/*");
+  const DaemonServeDecision decision = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict);
+  ASSERT_STREQ(daemon_serve_reason::kHtmlClassicChain, decision.reason);
+
+  const int before = NotifyCount();
+  EXPECT_FALSE(Renotify(request, decision));
+  EXPECT_FALSE(RefreshNotifyCounted(request, decision, nullptr, nullptr));
+  EXPECT_FALSE(DaemonServeLostCopyNotify(*abi_, "/tmp/ps-worker.sock", request,
+                                         decision, default_context_,
+                                         default_signature_, nullptr, nullptr));
+  EXPECT_EQ(before, NotifyCount()) << CallLog();
+}
+
 TEST_F(DaemonServeArmTest, AStylesheetIsStillServed) {
   UseStylesheetFamily();
   DaemonServeRequest request = CssRequest("identity");
@@ -1300,7 +1331,8 @@ TEST_F(DaemonServeArmTest, ANegotiatedImageServeOwesTheDeviceAxes) {
   EXPECT_FALSE(css.vary_image_selection);
 }
 
-TEST_F(DaemonServeArmTest, AnImageOriginalWithAnEmptyFamilyCarriesTheImageVary) {
+TEST_F(DaemonServeArmTest,
+       AnImageOriginalWithAnEmptyFamilyCarriesTheImageVary) {
   // Nothing but the durable original: no variant exists yet.  An AVIF-
   // advertising request answered with the original states the same Vary as
   // one answered with a variant, so a shared cache cannot pin the original.
@@ -1666,6 +1698,65 @@ TEST_F(DaemonServeArmTest, CacheControlComesFromTheStoredOriginState) {
   // this arm asks for no other mode.
   EXPECT_TRUE(decision.cache_control.find("stale-while-revalidate") ==
               GoogleString::npos);
+}
+
+TEST_F(DaemonServeArmTest, AnImageForAnotherDeviceGetsAShortLifetime) {
+  // 0x29 carries Save-Data, this client sends none: the bytes were made for
+  // another client, and a shared cache must not keep them for the full 600.
+  // The origin's tag gives the entry an identity, so a validator is minted.
+  setenv("PS_STUB_ORIGIN_ETAG", "\"v1\"", 1);
+  SetAlternates("29:00:1,0c:00:0");
+  DaemonServeRequest request = Request("image/webp");
+  const DaemonServeDecision decision = Serve(request);
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  ASSERT_TRUE(decision.fallback_hit);
+  EXPECT_EQ("must-revalidate, max-age=60", decision.cache_control);
+  EXPECT_TRUE(decision.device_fallback_lifetime);
+  // The age is reported as it is, not reset for the shorter lifetime.
+  EXPECT_EQ(100u, decision.age_seconds);
+
+  // A revalidation is told the same lifetime, or a cache would refresh its
+  // stored copy to the long one (RFC 9111 4.3.4).
+  const GoogleString etag = decision.etag;
+  ASSERT_FALSE(etag.empty());
+  request.if_none_match = etag;
+  const DaemonServeDecision revalidated = Serve(request);
+  EXPECT_TRUE(revalidated.not_modified);
+  EXPECT_EQ("must-revalidate, max-age=60", revalidated.cache_control);
+}
+
+TEST_F(DaemonServeArmTest, AnImagesOwnVariantKeepsItsLifetime) {
+  // Pins the other side of the cap.  Once the client's own variant is the one
+  // selected the full lifetime returns, so the shortening ends by itself.
+  SetAlternates("29:00:1,09:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(0x09, decision.alternate_id);
+  EXPECT_FALSE(decision.fallback_hit);
+  EXPECT_EQ("must-revalidate, max-age=600", decision.cache_control);
+  // Not marked, so a port leaves whatever its server made of the field alone.
+  EXPECT_FALSE(decision.device_fallback_lifetime);
+}
+
+TEST_F(DaemonServeArmTest, AFallbackOnTheFormatAxisKeepsItsLifetime) {
+  // Same device, other format: the same picture, and a format that is never
+  // produced would otherwise shorten the lifetime for good.
+  SetAlternates("08:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(0x08, decision.alternate_id);
+  ASSERT_TRUE(decision.fallback_hit);
+  EXPECT_EQ("must-revalidate, max-age=600", decision.cache_control);
+  EXPECT_FALSE(decision.device_fallback_lifetime);
+}
+
+TEST_F(DaemonServeArmTest, AStylesheetForAnotherDeviceKeepsItsLifetime) {
+  // A stylesheet is not resolution-bound; the cap is for images.
+  setenv("PS_STUB_READ_CONTENT_TYPE", "1", 1);  // kPsContentCss
+  SetAlternates("28:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("image/webp"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_TRUE(decision.fallback_hit);
+  EXPECT_EQ("must-revalidate, max-age=600", decision.cache_control);
+  EXPECT_FALSE(decision.device_fallback_lifetime);
 }
 
 TEST_F(DaemonServeArmTest, OriginNoCacheIsRelayedRatherThanDropped) {
@@ -2233,6 +2324,61 @@ TEST_F(DaemonServeArmTest, AServeHitCarriesItsHostWhenTheOptimizerTakesOne) {
                      "mask=9 host=www.example.test"));
   // One record per serve: the host-less recorder is not called as well.
   EXPECT_EQ(GoogleString::npos, log.find("serve_hit type=3"));
+}
+
+TEST_F(DaemonServeArmTest,
+       AServeHitCarriesTheEncodedOriginSizeWhenTheEntryHasOne) {
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4096", 1);
+  setenv("PS_STUB_ENCODED_ORIGIN_LENGTH", "1500", 1);
+  SetAlternates("08:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("text/css"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_TRUE(decision.encoded_origin_known);
+  EXPECT_EQ(1500u, decision.encoded_origin_length);
+
+  DaemonServeStats stats(abi_.get(), "/run/parity/cache");
+  stats.RecordHitSplit(kPsContentCss, decision.origin_content_length,
+                       decision.encoded_origin_length, 1200, 0x08,
+                       "www.example.test");
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos,
+            log.find("serve_hit_split type=1 original=4096 encoded=1500 "
+                     "optimized=1200 mask=8 host=www.example.test"));
+  // One record per serve.
+  EXPECT_EQ(GoogleString::npos, log.find("serve_hit_host"));
+  EXPECT_EQ(GoogleString::npos, log.find("serve_hit type="));
+  unsetenv("PS_STUB_ENCODED_ORIGIN_LENGTH");
+}
+
+TEST_F(DaemonServeArmTest, AnEntryWithoutAnEncodedOriginSizeIsNotMarkedKnown) {
+  setenv("PS_STUB_ORIGIN_CONTENT_LENGTH", "4096", 1);
+  unsetenv("PS_STUB_ENCODED_ORIGIN_LENGTH");
+  SetAlternates("08:00:1,0c:00:0");
+  const DaemonServeDecision decision = Serve(Request("text/css"));
+  ASSERT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  EXPECT_FALSE(decision.encoded_origin_known);
+  EXPECT_EQ(0u, decision.encoded_origin_length);
+}
+
+TEST_F(DaemonServeArmTest,
+       AnOptimizerWithoutTheSplitRecorderStillRecordsTheHit) {
+  GoogleString error;
+  std::unique_ptr<DaemonAbi> older(LoadDaemonAbi(
+      StrCat(GTestSrcDir(),
+             "/test/pagespeed/system/libdaemon_stub_no_generation.so"),
+      &error));
+  ASSERT_TRUE(older != nullptr) << error;
+  setenv("PS_STUB_ENCODED_ORIGIN_LENGTH", "1500", 1);
+  uint64_t encoded = 0;
+  EXPECT_FALSE(older->ReadEncodedOriginLength(nullptr, &encoded));
+  DaemonServeStats stats(older.get(), "/run/parity/cache");
+  stats.RecordHitSplit(kPsContentCss, 4096, 1500, 1200, 0x08,
+                       "www.example.test");
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos,
+            log.find("serve_hit type=1 original=4096 optimized=1200 mask=8"));
+  EXPECT_EQ(GoogleString::npos, log.find("serve_hit_split"));
+  unsetenv("PS_STUB_ENCODED_ORIGIN_LENGTH");
 }
 
 TEST_F(DaemonServeArmTest, AServeHitWithoutAHostUsesTheHostlessRecorder) {
@@ -3598,11 +3744,11 @@ TEST_F(DaemonServeArmTest, TheReNotificationIsSentAndCounted) {
                                         decision, default_context_,
                                         default_signature_, notified, failed));
   EXPECT_EQ(before + 1, NotifyCount());
-  EXPECT_NE(GoogleString::npos,
-            CallLog().find(StrCat("url=", kUrl, " host=", kHost,
-                                  " scheme=", kScheme, " content_type=3 mask=",
-                                  static_cast<uint64>(decision.client_mask),
-                                  " ")));
+  EXPECT_NE(
+      GoogleString::npos,
+      CallLog().find(StrCat("url=", kUrl, " host=", kHost, " scheme=", kScheme,
+                            " content_type=3 mask=",
+                            static_cast<uint64>(decision.client_mask), " ")));
   EXPECT_EQ(1, notified->Get());
   EXPECT_EQ(0, failed->Get());
 
@@ -3701,7 +3847,8 @@ TEST_F(DaemonServeArmTest, AnAlreadyMinimalStylesheetIsNotOriginalOnly) {
   UseStylesheetWithoutAnIdentityCopy("4307", "4307");
   DaemonHealNotifyLimiter limiter(1);
   const int before = NotifyCount();
-  for (int64 now = 1100; now < 1100 + 5 * DaemonHealNotifyLimiter::kIntervalSeconds;
+  for (int64 now = 1100;
+       now < 1100 + 5 * DaemonHealNotifyLimiter::kIntervalSeconds;
        now += DaemonHealNotifyLimiter::kIntervalSeconds) {
     const DaemonServeDecision decision =
         ServeWithLimiter(CssRequest("identity"), &limiter, now);
@@ -3994,8 +4141,8 @@ TEST(DaemonHealNotifyLimiterTest, UrlsBuiltToCollideWithoutTheKeyDoNot) {
     // The limiter keeps them apart, under a key whose low byte is the one
     // the pair was built for.
     DaemonHealNotifyLimiter limiter(static_cast<uint64>(seed_low));
-    EXPECT_NE(limiter.UrlKey("http", "a.test", StrCat("/", a, ".css")),
-              limiter.UrlKey("http", "a.test", StrCat("/", b, ".css")))
+    EXPECT_NE(limiter.UrlKey(kSite, "http", "a.test", StrCat("/", a, ".css")),
+              limiter.UrlKey(kSite, "http", "a.test", StrCat("/", b, ".css")))
         << url_a << " " << url_b;
     EXPECT_TRUE(limiter.ShouldLook(url_a, 100));
     EXPECT_TRUE(limiter.ShouldLook(url_b, 100))
@@ -4012,24 +4159,25 @@ TEST(DaemonHealNotifyLimiterTest, TheUrlKeyIsTheCacheEntrysNotTheSpellings) {
   // The limiter must count those spellings as one URL, or each of them buys
   // another look and another ask.
   DaemonHealNotifyLimiter limiter(1);
-  const uint64 key = limiter.UrlKey("http", "a.test", "/x.css");
-  EXPECT_EQ(key, limiter.UrlKey("http", "a.test.", "/x.css"));
-  EXPECT_EQ(key, limiter.UrlKey("http", "A.Test", "/x.css"));
-  EXPECT_EQ(key, limiter.UrlKey("http", "a.test:80", "/x.css"));
-  EXPECT_EQ(key, limiter.UrlKey("http", "A.TEST.:443", "/x.css"));
+  const uint64 key = limiter.UrlKey(kSite, "http", "a.test", "/x.css");
+  EXPECT_EQ(key, limiter.UrlKey(kSite, "http", "a.test.", "/x.css"));
+  EXPECT_EQ(key, limiter.UrlKey(kSite, "http", "A.Test", "/x.css"));
+  EXPECT_EQ(key, limiter.UrlKey(kSite, "http", "a.test:80", "/x.css"));
+  EXPECT_EQ(key, limiter.UrlKey(kSite, "http", "A.TEST.:443", "/x.css"));
   // What IS another entry stays another URL.
-  EXPECT_NE(key, limiter.UrlKey("https", "a.test", "/x.css"));
-  EXPECT_NE(key, limiter.UrlKey("http", "a.test:8080", "/x.css"));
-  EXPECT_NE(key, limiter.UrlKey("http", "a.test", "/X.css"));
-  EXPECT_NE(limiter.UrlKey("http", "[::1]:8080", "/x.css"),
-            limiter.UrlKey("http", "[::1]", "/x.css"));
-  EXPECT_EQ(limiter.UrlKey("http", "[::1]:80", "/x.css"),
-            limiter.UrlKey("http", "[::1]", "/x.css"));
+  EXPECT_NE(key, limiter.UrlKey(kSite, "https", "a.test", "/x.css"));
+  EXPECT_NE(key, limiter.UrlKey(kSite, "http", "a.test:8080", "/x.css"));
+  EXPECT_NE(key, limiter.UrlKey(kSite, "http", "a.test", "/X.css"));
+  EXPECT_NE(limiter.UrlKey(kSite, "http", "[::1]:8080", "/x.css"),
+            limiter.UrlKey(kSite, "http", "[::1]", "/x.css"));
+  EXPECT_EQ(limiter.UrlKey(kSite, "http", "[::1]:80", "/x.css"),
+            limiter.UrlKey(kSite, "http", "[::1]", "/x.css"));
   // The text form and the pieces name the same URL.
-  EXPECT_TRUE(limiter.ShouldLook("http://a.test/x.css", 100));
+  const GoogleString text = StrCat(kSite, "\nhttp://a.test/x.css");
+  EXPECT_TRUE(limiter.ShouldLook(text, 100));
   EXPECT_FALSE(limiter.ShouldLookKey(key, 101));
   EXPECT_TRUE(limiter.AdmitAskKey(key, 100));
-  EXPECT_FALSE(limiter.AdmitAsk("http://a.test/x.css", 101));
+  EXPECT_FALSE(limiter.AdmitAsk(text, 101));
 }
 
 TEST(DaemonHealNotifyLimiterTest, TwoUrlsThatMeetDoNotEvictEachOther) {
@@ -4135,6 +4283,149 @@ TEST_F(DaemonServeArmTest, TheNotifyItselfRefusesAnAcceptNegotiatingOrigin) {
 TEST(DaemonHealNotifyLimiterTest, TheProcessLimiterIsOneObject) {
   EXPECT_TRUE(ProcessDaemonHealNotifyLimiter() != nullptr);
   EXPECT_EQ(ProcessDaemonHealNotifyLimiter(), ProcessDaemonHealNotifyLimiter());
+}
+
+// ---------------------------------------------------------------------------
+// The site: every read is in the keyspace of the block that admitted the
+// request, and a request without one reads nothing.
+// ---------------------------------------------------------------------------
+
+// Another site's id, sha256("other-site").
+const char kOtherSite[] =
+    "aa0942729434a062e91650377ed9ccf92bd3d92dc590bbb9b3ee5210ddcd4542";
+
+TEST_F(DaemonServeArmTest, ARequestWithoutASiteMakesNoCallAtAll) {
+  UseStylesheetFamily();
+  for (const char* site :
+       {"", "abc", "2007F4B98AF3E43F6C81272C8606EA77A35978DD7A5C0EE623F15036EDAC5831",
+        "2007f4b98af3e43f6c81272c8606ea77a35978dd7a5c0ee623f15036edac583",
+        "site:896d7b6145f1c83a9a4528fb99321bf8"}) {
+    RecordingDaemonAbi recording(abi_.get());
+    DaemonHealNotifyLimiter limiter(1);
+    DaemonServeReader reader(&recording, cache_);
+    reader.set_heal_notify_limiter(&limiter);
+    DaemonServeRequest request = CssRequest("identity");
+    request.site = site;
+    const DaemonServeDecision decision = reader.Serve(request, 1100);
+    EXPECT_EQ(DaemonServeVerdict::kFallThrough, decision.verdict) << site;
+    EXPECT_STREQ(daemon_serve_reason::kNoSiteId, decision.reason) << site;
+    EXPECT_EQ(0, recording.calls()) << site;
+    EXPECT_EQ(GoogleString(), CallLog()) << site;
+  }
+}
+
+TEST_F(DaemonServeArmTest, ADeclinedRequestMovesItsOwnCounter) {
+  SimpleStats stats(thread_system_.get());
+  RewriteStats::InitStats(&stats);
+  MockTimer timer(new NullMutex, 0);
+  RewriteStats rewrite_stats(false, &stats, thread_system_.get(), &timer);
+  UseStylesheetFamily();
+  DaemonServeRequest request = CssRequest("identity");
+  request.site = "";
+  RecordDaemonServeCounters(&rewrite_stats, Serve(request));
+  EXPECT_EQ(1, rewrite_stats.daemon_serve_declined_no_site()->Get());
+  request.site = kSite;
+  RecordDaemonServeCounters(&rewrite_stats, Serve(request));
+  EXPECT_EQ(1, rewrite_stats.daemon_serve_declined_no_site()->Get());
+}
+
+TEST_F(DaemonServeArmTest, EveryReadIsMadeInTheRequestsSite) {
+  UseStylesheetFamily();
+  RecordingDaemonAbi recording(abi_.get());
+  DaemonHealNotifyLimiter limiter(1);
+  DaemonServeReader reader(&recording, cache_);
+  reader.set_heal_notify_limiter(&limiter);
+  const DaemonServeDecision decision =
+      reader.Serve(CssRequest("identity"), 1100);
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, decision.verdict);
+  ASSERT_FALSE(recording.sites().empty());
+  for (const GoogleString& site : recording.sites()) {
+    EXPECT_EQ(kSite, site);
+  }
+}
+
+TEST_F(DaemonServeArmTest, AnotherSitesEntriesAreNotServed) {
+  // The stand-in's entries belong to one site; a request admitted by
+  // another block reads its own keyspace and finds nothing there.
+  UseStylesheetFamily();
+  setenv("PS_STUB_SITE", kOtherSite, 1);
+  const DaemonServeDecision other = Serve(CssRequest("identity"));
+  EXPECT_EQ(DaemonServeVerdict::kFallThrough, other.verdict);
+  EXPECT_STREQ(daemon_serve_reason::kNoEntry, other.reason);
+  setenv("PS_STUB_SITE", kSite, 1);
+  const DaemonServeDecision own = Serve(CssRequest("identity"));
+  unsetenv("PS_STUB_SITE");
+  EXPECT_EQ(DaemonServeVerdict::kServeOptimized, own.verdict);
+}
+
+TEST_F(DaemonServeArmTest, TheThreeNotificationsNameTheSiteAndNothingElse) {
+  DaemonServeRequest request = CssRequest("identity");
+  DaemonServeDecision decision;
+  decision.ps_content_type = kPsContentCss;
+  decision.client_mask = 0x09;
+  RecordingDaemonAbi recording(abi_.get());
+
+  decision.verdict = DaemonServeVerdict::kServeOptimized;
+  decision.fallback_hit = true;
+  EXPECT_TRUE(DaemonServeFallbackRenotify(
+      recording, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, nullptr, nullptr));
+  decision = DaemonServeDecision();
+  decision.ps_content_type = kPsContentCss;
+  decision.verdict = DaemonServeVerdict::kFallThrough;
+  decision.stale_variant_expired_by_age = true;
+  EXPECT_TRUE(DaemonServeOriginRefreshedNotify(
+      recording, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, nullptr, nullptr));
+  decision = DaemonServeDecision();
+  decision.ps_content_type = kPsContentCss;
+  decision.verdict = DaemonServeVerdict::kServeOriginal;
+  decision.lost_optimized_copy = true;
+  EXPECT_TRUE(DaemonServeLostCopyNotify(recording, "/tmp/ps-worker.sock",
+                                        request, decision, default_context_,
+                                        default_signature_, nullptr, nullptr));
+
+  ASSERT_EQ(3u, recording.notifies().size());
+  for (const RecordedNotify& n : recording.notifies()) {
+    EXPECT_EQ(kSite, n.site);
+    EXPECT_EQ(kPsNotifyFlagFromModule, n.notify_flags);
+    EXPECT_EQ(0, n.agent_request);
+    EXPECT_EQ(sizeof(PsNotifyParams), n.struct_size);
+  }
+
+  // Without a site, none of the three is sent.
+  request.site = "";
+  recording.Reset();
+  decision = DaemonServeDecision();
+  decision.ps_content_type = kPsContentCss;
+  decision.verdict = DaemonServeVerdict::kServeOptimized;
+  decision.fallback_hit = true;
+  EXPECT_FALSE(DaemonServeFallbackRenotify(
+      recording, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, nullptr, nullptr));
+  decision = DaemonServeDecision();
+  decision.ps_content_type = kPsContentCss;
+  decision.verdict = DaemonServeVerdict::kFallThrough;
+  decision.stale_variant_expired_by_age = true;
+  EXPECT_FALSE(DaemonServeOriginRefreshedNotify(
+      recording, "/tmp/ps-worker.sock", request, decision, default_context_,
+      default_signature_, nullptr, nullptr));
+  decision = DaemonServeDecision();
+  decision.ps_content_type = kPsContentCss;
+  decision.verdict = DaemonServeVerdict::kServeOriginal;
+  decision.lost_optimized_copy = true;
+  EXPECT_FALSE(DaemonServeLostCopyNotify(recording, "/tmp/ps-worker.sock",
+                                         request, decision, default_context_,
+                                         default_signature_, nullptr, nullptr));
+  EXPECT_TRUE(recording.notifies().empty());
+}
+
+TEST(DaemonHealNotifyLimiterTest, TheSameUrlInTwoSitesIsTwoKeys) {
+  DaemonHealNotifyLimiter limiter(1);
+  EXPECT_NE(limiter.UrlKey(kSite, "http", "a.test", "/x.css"),
+            limiter.UrlKey(kOtherSite, "http", "a.test", "/x.css"));
+  EXPECT_EQ(limiter.UrlKey(kSite, "http", "a.test", "/x.css"),
+            limiter.UrlKey(kSite, "http", "A.test:80", "/x.css"));
 }
 
 }  // namespace net_instaweb

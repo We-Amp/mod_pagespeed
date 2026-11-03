@@ -123,21 +123,21 @@ setup_test_content() {
     # Copy test content
     if [ -d "$PROJECT_ROOT/install/mod_pagespeed_example" ]; then
         rm -rf "$DOC_ROOT/mod_pagespeed_example"
-        cp -r "$PROJECT_ROOT/install/mod_pagespeed_example" "$DOC_ROOT/"
+        cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_example" "$DOC_ROOT/"
     else
         log_warn "mod_pagespeed_example not found in install/"
     fi
 
     if [ -d "$PROJECT_ROOT/install/mod_pagespeed_test" ]; then
         rm -rf "$DOC_ROOT/mod_pagespeed_test"
-        cp -r "$PROJECT_ROOT/install/mod_pagespeed_test" "$DOC_ROOT/"
+        cp -r --preserve=timestamps "$PROJECT_ROOT/install/mod_pagespeed_test" "$DOC_ROOT/"
     else
         log_warn "mod_pagespeed_test not found in install/"
     fi
 
     if [ -d "$PROJECT_ROOT/install/do_not_modify" ]; then
         rm -rf "$DOC_ROOT/do_not_modify"
-        cp -r "$PROJECT_ROOT/install/do_not_modify" "$DOC_ROOT/"
+        cp -r --preserve=timestamps "$PROJECT_ROOT/install/do_not_modify" "$DOC_ROOT/"
     fi
 
     # Create a simple index.html if nothing exists
@@ -225,6 +225,15 @@ static_resources:
                       # Format: "size_bytes md5_hash canonical_url"
                       libraries:
                         - "43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js"
+                      # A PageSpeed virtual host for this server's address
+                      # form, repeating the server's settings
+                      # (envoy/test_envoy_cache_flush.py). Both listeners carry
+                      # the same filter configuration.
+                      virtual_hosts:
+                        - host_pattern: "127.0.0.1"
+                          priority: 10
+                          options:
+                            rewrite_level: "CoreFilters"
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -296,6 +305,15 @@ static_resources:
                       fetch_https_options: "enable,allow_self_signed"
                       libraries:
                         - "43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js"
+                      # A PageSpeed virtual host for this server's address
+                      # form, repeating the server's settings
+                      # (envoy/test_envoy_cache_flush.py). Both listeners carry
+                      # the same filter configuration.
+                      virtual_hosts:
+                        - host_pattern: "127.0.0.1"
+                          priority: 10
+                          options:
+                            rewrite_level: "CoreFilters"
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -475,8 +493,10 @@ start_envoy() {
     log_info "Or run all tests (including HTTPS):"
     log_info "  ./test/system/run_envoy_tests.sh -v"
     log_info ""
-    log_info "The default Envoy lane (automatic/ system/ envoy/) has no"
-    log_info "cache-flush tests, so PAGESPEED_CACHE_DIR is not needed for it."
+    log_info "The default Envoy lane (automatic/ system/ envoy/) runs no"
+    log_info "shared cache-flush suite, so PAGESPEED_CACHE_DIR is not needed for"
+    log_info "it (envoy/test_envoy_cache_flush.py reads the paths run_envoy_tests.sh"
+    log_info "exports)."
     log_info "Only if you point a cache-flush suite at this server, export the"
     log_info "cache dir -- it has no default and those tests now fail rather"
     log_info "than skip when it is unset:"

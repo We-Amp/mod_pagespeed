@@ -131,6 +131,16 @@ KNOWN_LANE_FIXTURES = frozenset({
     # daemon serving is on); the worker's socket is PAGESPEED_DAEMON_SOCKET
     # and is probed before the fixture is believed
     "daemon_arm",
+    # daemon-html-off.example.com and daemon-html-report.example.com: the two
+    # differ only in DaemonHtmlCache; the decision log is under
+    # PAGESPEED_RULE_PACK_LOG_DIR
+    "daemon_html_report",
+    # the self-fetch-access.example.com virtual host on
+    # PAGESPEED_SELF_FETCH_ACCESS_PORT: a location under
+    # install/mod_pagespeed_test/self_fetch_access/ open to local clients only
+    # (and, on Apache, the packaged configuration's admin blocks), plus a way
+    # for the test to reach it as a non-local client
+    "self_fetch_access",
 })
 
 

@@ -29,6 +29,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/clang-20 /opt/llvm/bin/clang-20 \
     && ln -sf /usr/bin/clang++-20 /opt/llvm/bin/clang++-20 \
     && ln -sf /usr/bin/lld-20 /opt/llvm/bin/lld \
+    # The clang configs link with -fuse-ld=lld, and the clang driver then looks
+    # for `ld.lld` next to clang itself: Bazel compiles with
+    # -no-canonical-prefixes, so a symlinked clang resolves tools in the
+    # symlink's directory, not its real install dir. /usr/bin carries only the
+    # versioned name (ld.lld-20), so link ld.lld here explicitly; the base
+    # image's own `ld.lld -> lld` relative symlink is not something to rely on.
+    && ln -sf /usr/bin/ld.lld-20 /opt/llvm/bin/ld.lld \
     && ln -sf /usr/bin/clang-format-20 /opt/llvm/bin/clang-format \
     && ln -sf /usr/bin/clang-tidy-20 /opt/llvm/bin/clang-tidy \
     && ln -sf /usr/bin/run-clang-tidy-20 /opt/llvm/bin/run-clang-tidy \

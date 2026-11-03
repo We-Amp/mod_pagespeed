@@ -218,7 +218,7 @@ public class InverseModeIntegrationTests
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
         resp.Headers.Contains("X-Page-Speed").Should().BeTrue("the optimized top-level HTML must carry X-Page-Speed");
-        // mod_pagespeed 2.1 has no licensing: no optimized response carries the old
+        // mod_pagespeed has no licensing: no optimized response carries the old
         // evaluation-mode warning header. (Requires a bundled module without licensing.)
         resp.Headers.Contains("X-PageSpeed-Warn").Should().BeFalse(
             "no X-PageSpeed-Warn header may appear on any optimized response");

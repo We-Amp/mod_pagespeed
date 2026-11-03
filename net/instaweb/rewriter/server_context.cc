@@ -512,6 +512,40 @@ void ServerContext::ApplyRewrittenUrlCacheControl(ResponseHeaders* headers) {
   headers->SetCacheControlImmutable();
 }
 
+bool ServerContext::SetNotModifiedHeadersFromCachedResult(
+    StringPiece cache_control, ResponseHeaders* headers) {
+  int64 max_age_s = -1;
+  bool may_have_etag = true;
+  StringPieceVector directives;
+  SplitStringPieceToVector(cache_control, ",", &directives, true);
+  for (StringPiece directive : directives) {
+    TrimWhitespace(&directive);
+    static const char kMaxAge[] = "max-age=";
+    if (StringCaseStartsWith(directive, kMaxAge)) {
+      directive.remove_prefix(STATIC_STRLEN(kMaxAge));
+      if (!StringToInt64(directive, &max_age_s)) {
+        max_age_s = -1;
+      }
+    } else if (StringCaseEqual(directive, "private") ||
+               StringCaseEqual(directive, "no-cache")) {
+      may_have_etag = false;
+    }
+  }
+  if (max_age_s < 0 || max_age_s > kGeneratedMaxAgeMs / Timer::kSecondMs) {
+    return false;
+  }
+  headers->set_major_version(1);
+  headers->set_minor_version(1);
+  headers->SetStatusAndReason(HttpStatus::kNotModified);
+  headers->SetDateAndCaching(timer()->NowMs(), max_age_s * Timer::kSecondMs);
+  headers->Replace(HttpAttributes::kCacheControl, cache_control);
+  if (may_have_etag) {
+    headers->Replace(HttpAttributes::kEtag, kResourceEtagValue);
+  }
+  ApplyRewrittenUrlCacheControl(headers);
+  return true;
+}
+
 void ServerContext::AddOriginalContentLengthHeader(const ResourceVector& inputs,
                                                    ResponseHeaders* headers) {
   // Determine the total original content length for input resource, and
@@ -1009,11 +1043,15 @@ bool ServerContext::GetQueryOptions(const RequestContextPtr& request_context,
   }
   // Note: success==false is treated as an error (we return 405 in
   // proxy_interface.cc).
-  return RewriteQuery::IsOK(rewrite_query->Scan(
+  const bool ok = RewriteQuery::IsOK(rewrite_query->Scan(
       domain_options->add_options_to_urls(),
       domain_options->allow_options_to_be_set_by_cookies(),
       domain_options->request_option_override(), request_context, factory(),
       this, request_url, request_headers, response_headers, message_handler_));
+  // A request may lower the size thresholds but not raise them above the
+  // configured ones.
+  rewrite_query->LimitSizeThresholdsTo(*domain_options);
+  return ok;
 }
 
 // TODO(gee): Seems like this should all be in RewriteOptionsManager.

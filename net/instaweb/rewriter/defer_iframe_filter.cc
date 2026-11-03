@@ -51,6 +51,10 @@ void DeferIframeFilter::DetermineEnabled(GoogleString* disabled_reason) {
       driver()->options()->enable_aggressive_rewriters_for_mobile()));
 }
 
+bool DeferIframeFilter::SkippedOnHydratedPages() const {
+  return driver()->SkipJsDeferralOnHydratedPage();
+}
+
 void DeferIframeFilter::StartDocumentImpl() { script_inserted_ = false; }
 
 void DeferIframeFilter::StartElementImpl(HtmlElement* element) {
@@ -80,6 +84,7 @@ void DeferIframeFilter::StartElementImpl(HtmlElement* element) {
       script_inserted_ = true;
     }
     element->set_name(driver()->MakeName(HtmlName::kPagespeedIframe));
+    driver()->set_js_deferral_started();
   }
 }
 

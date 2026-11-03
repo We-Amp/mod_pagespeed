@@ -21,6 +21,7 @@
 #include "pagespeed/kernel/base/stdio_file_system.h"
 
 #include "pagespeed/system/system_caches.h"
+#include "pagespeed/system/site_cache_fragment.h"
 #include "pagespeed/system/system_thread_system.h"
 
 #include "pagespeed/iis/iis_misc.h"
@@ -181,7 +182,8 @@ IisProcessContext::IisProcessContext(
 }
 
 IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_app_id, const char * hostname,
-	unsigned int port, const char * config_path)
+	unsigned int port, const char * config_path, uint32_t site_id,
+	const GoogleString& site_name_utf8)
 {
 	// Serialize the whole one-time init. Before this lock, two
 	// request threads hitting a fresh worker could BOTH see driver_factory_
@@ -259,6 +261,13 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 
 		// oschaaf: beware: do not remove the line below - global_options() needs to be called!
 		server_context->global_options();
+		// A site without a CacheFragment of its own gets its own keyspace,
+		// named by its IIS site id and name, before the caches are set up.
+		site_id_ = site_id;
+		if (server_context->global_options()->cache_fragment().empty()) {
+			server_context->global_options()->set_cache_fragment(
+				DeriveIisSiteCacheFragment(site_id, site_name_utf8));
+		}
 		std::vector<SystemServerContext*> server_contexts;
 		server_contexts.push_back(server_context);
 		GoogleString error_message;
@@ -333,8 +342,8 @@ IisServerContext* IisProcessContext::GetServerContext(const GoogleString& site_a
 		// landed, since LogDir
 		// failures now use the same member) so the
 		// local-only error page in
-		// IisHttpModule::OnBeginRequest can render an actionable diagnostic
-		// (which path, which identity, which OS error) and a stable
+		// IisHttpModule::OnResolveRequestCache can render an actionable
+		// diagnostic (which path, which identity, which OS error) and a stable
 		// X-Pagespeed-Init-Status response header for CI / test fixtures
 		// to match on without scraping the page body.
 		auto cache_path = server_context->global_system_rewrite_options()->file_cache_path();

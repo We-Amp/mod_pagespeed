@@ -965,6 +965,23 @@ TEST_F(PngOptimizerTest, ScopedPngStruct) {
 #endif
 }
 
+// Text chunks are not used, so they are not kept.
+TEST(PngReaderTest, TextChunksAreNotKept) {
+  MockMessageHandler message_handler(new NullMutex);
+  PngReader reader(&message_handler);
+  ScopedPngStruct read(ScopedPngStruct::READ, &message_handler);
+  for (const char* name : {"ct1n0g04", "ctzn0g04"}) {
+    GoogleString in;
+    ReadTestFile(kPngSuiteTestDir, name, "png", &in);
+    ASSERT_TRUE(reader.ReadPng(in, read.png_ptr(), read.info_ptr(),
+                               PNG_TRANSFORM_IDENTITY, false));
+    EXPECT_EQ(0,
+              png_get_text(read.png_ptr(), read.info_ptr(), nullptr, nullptr));
+    // reset() creates a new read struct, which needs the limit as well.
+    ASSERT_TRUE(read.reset());
+  }
+}
+
 TEST(PngReaderTest, ReadTransparentPng) {
   MockMessageHandler message_handler(new NullMutex);
   PngReader reader(&message_handler);

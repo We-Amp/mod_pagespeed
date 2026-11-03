@@ -36,6 +36,7 @@
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "third_party/css_parser/src/util/utf8/public/unicodetext.h"
+#include "third_party/css_parser/src/webutil/css/media.h"
 #include "third_party/css_parser/src/webutil/css/parser.h"
 
 namespace net_instaweb {
@@ -58,6 +59,18 @@ bool HasGroupRules(const Css::Stylesheet& stylesheet) {
   return false;
 }
 
+// Flattening gives a copy of the applicable media to every @import and to
+// every ruleset that has no media of its own. Returns whether num_copies copies of media are within
+// what the parser allows a stylesheet of css_bytes bytes for its own copies of
+// @media queries.
+bool MediaCopiesFit(const StringVector& media, int64 num_copies,
+                    int64 css_bytes) {
+  Css::MediaQueries media_queries;
+  css_util::ConvertStringVectorToMediaQueries(media, &media_queries);
+  return media_queries.ApproximateBytes() * num_copies <=
+         Css::Parser::MaxMediaQueriesBytes(css_bytes);
+}
+
 }  // namespace
 
 // Representation of a CSS with all the information required for import
@@ -72,7 +85,11 @@ CssHierarchy::CssHierarchy(CssFilter* filter)
       unparseable_detected_(false),
       group_rules_seen_(false),
       flattened_result_limit_(0),
-      message_handler_(nullptr) {}
+      message_handler_(nullptr),
+      root_(this),
+      imports_in_tree_(0),
+      flattened_bytes_in_tree_(0),
+      input_bytes_in_tree_(0) {}
 
 CssHierarchy::~CssHierarchy() { STLDeleteElements(&children_); }
 
@@ -107,6 +124,7 @@ void CssHierarchy::InitializeNested(const CssHierarchy& parent,
   css_trim_url_.Reset(parent.css_trim_url());
   flattened_result_limit_ = parent.flattened_result_limit_;
   message_handler_ = parent.message_handler_;
+  root_ = parent.root_;
 }
 
 void CssHierarchy::set_stylesheet(Css::Stylesheet* stylesheet) {
@@ -261,7 +279,10 @@ bool CssHierarchy::Parse() {
     // when such an unparsed @import is present (see
     // RefuseFlatteningOnUnparseableImport, called below and from
     // ExpandChildren).
-    if (parser.errors_seen_mask() != Css::Parser::kNoError) {
+    // Just as bad is too much media to copy onto the rulesets below.
+    if (parser.errors_seen_mask() != Css::Parser::kNoError ||
+        !MediaCopiesFit(media_, stylesheet->rulesets().size(),
+                        input_contents_.size())) {
       delete stylesheet;
       stylesheet = nullptr;
     }
@@ -357,6 +378,31 @@ bool CssHierarchy::ExpandChildren() {
   }
   bool result = false;
   Css::Imports& imports = stylesheet_->mutable_imports();
+  if (!MediaCopiesFit(media_, imports.size(), input_contents_.size())) {
+    if (filter_ != nullptr) {
+      filter_->num_flatten_imports_limit_exceeded_->Add(1);
+    }
+    set_flattening_succeeded(false);
+    AddFlatteningFailureReason(
+        StrCat("Too much media for the @imports in ", url_for_humans()));
+    return false;
+  }
+  // Every @import becomes a nested rewrite holding its own copy of the
+  // imported CSS, so bound their number over the whole tree, not just along
+  // one path as IsRecursive() does. The count is kept in the top-level CSS.
+  const int num_imports = imports.size();
+  if (num_imports > 0 &&
+      root_->imports_in_tree_.fetch_add(num_imports) + num_imports >
+          kMaxImportsPerRoot) {
+    if (filter_ != nullptr) {
+      filter_->num_flatten_imports_limit_exceeded_->Add(1);
+    }
+    set_flattening_succeeded(false);
+    AddFlatteningFailureReason(
+        StrCat("More than ", IntegerToString(kMaxImportsPerRoot),
+               " @imports in total, reached in ", url_for_humans()));
+    return false;
+  }
   ResizeChildren(imports.size());
   for (int i = 0, n = imports.size(); i < n; ++i) {
     const Css::Import* import = imports[i];
@@ -404,6 +450,45 @@ bool CssHierarchy::ExpandChildren() {
     }
   }
   return result;
+}
+
+bool CssHierarchy::ReserveFlattenedBytes(int64 bytes) {
+  if (flattened_result_limit_ <= 0) {
+    return true;
+  }
+  const int64 total = root_->flattened_bytes_in_tree_.fetch_add(bytes) + bytes;
+  if (total < flattened_result_limit_) {
+    return true;
+  }
+  // A result that is over the limit by itself was counted when it was made.
+  if (filter_ != nullptr && bytes < flattened_result_limit_) {
+    filter_->num_flatten_imports_limit_exceeded_->Add(1);
+  }
+  set_flattening_succeeded(false);
+  AddFlatteningFailureReason(
+      StrCat("Flattening limit (", IntegerToString(flattened_result_limit_),
+             ") exceeded (", IntegerToString(total), ")"));
+  return false;
+}
+
+bool CssHierarchy::ReserveInputBytes(int64 bytes) {
+  if (flattened_result_limit_ <= 0) {
+    return true;
+  }
+  const int64 budget =
+      std::max(2 * flattened_result_limit_, kMinInputBytesPerRoot);
+  const int64 total = root_->input_bytes_in_tree_.fetch_add(bytes) + bytes;
+  if (total < budget) {
+    return true;
+  }
+  if (filter_ != nullptr) {
+    filter_->num_flatten_imports_limit_exceeded_->Add(1);
+  }
+  set_flattening_succeeded(false);
+  AddFlatteningFailureReason(
+      StrCat("Flattening limit (", IntegerToString(flattened_result_limit_),
+             ") exceeded (", IntegerToString(total), ")"));
+  return false;
 }
 
 void CssHierarchy::RollUpContents() {

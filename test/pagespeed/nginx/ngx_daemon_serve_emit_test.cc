@@ -316,5 +316,71 @@ TEST_F(NgxDaemonServeEmitTest, ACodedImageStillVariesOnTheEncoding) {
   EXPECT_EQ("Accept, Accept-Encoding", coded_emit.vary);
 }
 
+// The fallback lifetime only ever shortens what nginx's configuration left,
+// and goes out as one line.
+TEST_F(NgxDaemonServeEmitTest, AFallbackLifetimeOnlyShortensAndIsOneLine) {
+  static constexpr int64 now = 1000000;
+  auto cc = [](StringPiece existing) {
+    return PsFallbackCacheControl(existing, false, -1, now);
+  };
+  // `expires 1h` replaced the module's line: clamped.
+  EXPECT_EQ("max-age=60", cc("max-age=3600"));
+  EXPECT_EQ("max-age=60",
+            PsFallbackCacheControl("max-age=3600", true, now + 3600, now));
+  // The module's own line, nothing configured: unchanged.
+  EXPECT_EQ("must-revalidate, max-age=60", cc("must-revalidate, max-age=60"));
+  // `add_header` appended after the module's line, and the reverse order.
+  EXPECT_EQ("must-revalidate, max-age=60, public, immutable",
+            cc("must-revalidate, max-age=60, public, max-age=31536000, "
+               "immutable"));
+  EXPECT_EQ("public, max-age=60, immutable, must-revalidate",
+            cc("public, max-age=31536000, immutable, must-revalidate, "
+               "max-age=60"));
+  EXPECT_EQ("must-revalidate, max-age=60, s-maxage=60",
+            cc("must-revalidate, max-age=60, s-maxage=3600"));
+  // Each lifetime keeps the shortest value stated, never raised.
+  EXPECT_EQ("s-maxage=30, max-age=60", cc("s-maxage=30, max-age=3600"));
+  EXPECT_EQ("max-age=0", cc("max-age=0"));
+  EXPECT_EQ("max-age=10", cc("max-age=100, MAX-AGE=10"));
+  EXPECT_EQ("max-age=60", cc("max-age=61"));
+  // No lifetime stated: the cap's own max-age is the one directive added.
+  EXPECT_EQ("public, max-age=60", cc("public"));
+  // Duplicates go out once.
+  EXPECT_EQ("public, max-age=30",
+            cc("public, PUBLIC, max-age=100, max-age=30"));
+  // A quoted value is one directive, whatever it contains.
+  EXPECT_EQ("x-ext=\"a, max-age=999\", max-age=60",
+            cc("x-ext=\"a, max-age=999\""));
+  EXPECT_EQ("x-ext=\"a \\\" , max-age=999\", max-age=60",
+            cc("x-ext=\"a \\\" , max-age=999\""));
+  // Refused, so the response stays exactly as configured: an operator's
+  // private, no-store or no-cache, bare, qualified or in any case, on any line.
+  EXPECT_EQ("", cc("private"));
+  EXPECT_EQ("", cc("must-revalidate, max-age=60, private"));
+  EXPECT_EQ("", cc("max-age=3600, Private=\"Set-Cookie, Foo\""));
+  EXPECT_EQ("", cc("no-store"));
+  EXPECT_EQ("", cc("max-age=3600, NO-STORE"));
+  EXPECT_EQ("", cc("no-cache"));
+  EXPECT_EQ("", cc("no-cache=\"Set-Cookie\""));
+  // `expires -1`, `epoch`, `0`: an Expires at or before now, or unreadable.
+  EXPECT_EQ("", PsFallbackCacheControl("no-cache", true, now - 1, now));
+  EXPECT_EQ("", PsFallbackCacheControl("max-age=3600", true, 0, now));
+  EXPECT_EQ("", PsFallbackCacheControl("max-age=0", true, now, now));
+  EXPECT_EQ("", PsFallbackCacheControl("max-age=3600", true, -1, now));
+  // What cannot be read, or nothing at all.
+  EXPECT_EQ("", cc("max-age=soon"));
+  EXPECT_EQ("", cc("max-age=-5"));
+  // Only ASCII digits are delta-seconds.
+  EXPECT_EQ("", cc("max-age=+3600"));
+  EXPECT_EQ("", cc("max-age= 3600"));
+  EXPECT_EQ("", cc("max-age=3600 "));
+  EXPECT_EQ("", cc("max-age=-1"));
+  EXPECT_EQ("", cc("max-age="));
+  EXPECT_EQ("", cc("public, s-maxage=+30"));
+  EXPECT_EQ("", cc("max-age=99999999999999999999"));
+  EXPECT_EQ("", cc(""));
+  EXPECT_EQ("", cc(" , "));
+}
+
 }  // namespace
 }  // namespace net_instaweb

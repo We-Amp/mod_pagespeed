@@ -67,6 +67,7 @@ pagespeed_py_test_suite(
         "test_inline_unauth.py",
         "test_instant_ipro.py",
         "test_ipro.py",
+        "test_ipro_aborted_origin.py",
         "test_ipro_for_browser.py",
         "test_ipro_proxy.py",
         "test_ipro_vary_cookie.py",

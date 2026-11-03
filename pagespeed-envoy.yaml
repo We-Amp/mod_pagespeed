@@ -1,6 +1,13 @@
-# PageSpeed Envoy Filter - Production Configuration Example
+# EXPERIMENTAL. NOT FOR PRODUCTION.
+# The Envoy port is built from source only, has no packaged release, and is
+# not covered by the release security statements. Its administrative paths
+# answer every client unless admin_auth is enabled (see below). Run it only
+# on a trusted network, behind authentication, and expect no support or
+# security commitment.
 #
-# This configuration demonstrates production-ready settings including:
+# PageSpeed Envoy Filter - Hardened Configuration Example
+#
+# This configuration demonstrates hardened settings including:
 # - Admin authentication for PageSpeed endpoints
 # - Redis cache backend
 # - Prometheus metrics exposure
@@ -48,7 +55,7 @@ static_resources:
               # =================================================================
 
               # Redis cache backend for distributed caching
-              # Uncomment and configure for production deployments
+              # Uncomment and configure for multi-instance deployments
               # redis:
               #   server:
               #     host: "redis.internal"
@@ -71,10 +78,10 @@ static_resources:
               file_cache_size_kb: 10240000
 
               # =================================================================
-              # ADMIN AUTHENTICATION (Production Security)
+              # ADMIN AUTHENTICATION
               # =================================================================
 
-              # Secure admin endpoints in production
+              # Secure the admin endpoints (required on any shared network)
               admin_auth:
                 # Enable authentication for /pagespeed_admin and /pagespeed_statistics
                 enabled: true

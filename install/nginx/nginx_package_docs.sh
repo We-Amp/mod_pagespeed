@@ -25,6 +25,12 @@ VERSION="$2"
 PKGFMT="$3"             # deb | rpm
 NGINX_VER="$4"          # exact stock nginx version this module is pinned to
 DISTRO_MAJOR="${5:-9}"  # RHEL-family major (9|10) for the rpm README wording; deb ignores it
+# The package the README is for: the distribution package, or the package for
+# nginx.org's nginx (NGINX_PKG_NAME, set by the nginx.org legs).
+PKG="${NGINX_PKG_NAME:-nginx-module-pagespeed}"
+NGINXORG=0
+[ "${PKG}" = "nginx-module-pagespeed-nginxorg" ] && NGINXORG=1
+UPDATENOTE=""
 
 mkdir -p "${DOCDIR}"
 
@@ -142,6 +148,14 @@ the top of \`/etc/nginx/nginx.conf\` yourself."
   INSTALLCMD="sudo apt install nginx-module-pagespeed"
   WORKERCMD="sudo apt install pagespeed-optimizer"
   WEBUSER="www-data"
+  if [ "${NGINXORG}" = 1 ]; then
+    LOADNOTE="nginx.org's \`nginx.conf\` does not read \`/etc/nginx/modules-enabled/\`: add
+\`include /etc/nginx/modules-enabled/*.conf;\` at the top of \`/etc/nginx/nginx.conf\`.
+This package ships its \`load_module\` line there and takes it away when it is
+removed, so removing the package leaves nginx able to start."
+    INSTALLCMD="sudo apt install ${PKG}"
+    WEBUSER="nginx"
+  fi
 else
   MODPATH="/usr/lib64/nginx/modules/"
   LOADNOTE="On stock AlmaLinux/RHEL/Rocky ${DISTRO_MAJOR} nginx, this package drops a
@@ -149,13 +163,84 @@ else
 auto-includes from the main context — no manual edit. If you run nginx from the
 nginx.org repo, ensure your \`nginx.conf\` includes
 \`/usr/share/nginx/modules/*.conf\` (or add the \`load_module\` line manually)."
-  INSTALLCMD="sudo dnf install nginx-module-pagespeed"
+  INSTALLCMD="sudo dnf install ${PKG}"
   WORKERCMD="sudo dnf install pagespeed-optimizer"
   WEBUSER="nginx"
+  if [ "${NGINXORG}" = 1 ]; then
+    LOADNOTE="nginx.org's \`nginx.conf\` does not read \`/usr/share/nginx/modules/\`: add
+\`include /usr/share/nginx/modules/*.conf;\` at the top of \`/etc/nginx/nginx.conf\`.
+Updates: see \"Updates and the nginx hold\" below."
+    UPDATENOTE="
+## Updates and the nginx hold
+
+This package is built for one nginx.org nginx version and works only with that
+version. When nginx.org publishes a newer nginx before the matching build of this
+package is available, a plain \`dnf update\` would otherwise fail as a whole and
+install nothing. To prevent that, this package installs a dnf plugin,
+\`pagespeed_nginx_pin\`
+(\`/usr/lib/python3.9/site-packages/dnf-plugins/pagespeed_nginx_pin.py\`, settings in
+\`/etc/dnf/plugins/pagespeed_nginx_pin.conf\`).
+
+While this package is installed, the plugin holds nginx, and nginx.org module
+packages that need the same nginx (such as \`nginx-module-njs\`), at a version this
+package has a build for:
+
+- \`sudo dnf update\` and dnf-automatic install every other update and keep nginx.
+  Once the build for the newer nginx is in the repository, the same \`dnf update\`
+  moves nginx, this package and nginx.org's module packages together.
+- \`dnf check-update\` and \`dnf list updates\` still show the newer nginx, so
+  monitoring sees a pending nginx update.
+- A command that names nginx is left to dnf. To move nginx and this package
+  together by hand:
+  \`sudo dnf install nginx-<version> ${PKG}-<matching build>\`.
+  \`sudo dnf upgrade nginx\` on its own fails with dnf's explanation while no
+  matching build exists.
+- To take an nginx update before the matching build exists, for example a security
+  fix: \`sudo dnf upgrade nginx --allowerasing\`. This removes this package (nginx
+  keeps starting: the package's load line goes with it) and installs the newer
+  nginx. Install this package again once its build for that nginx is available.
+- The plugin acts only on this host's nginx.org nginx and only while this package
+  is installed. It is removed together with the package
+  (\`sudo dnf remove ${PKG}\`), after which dnf behaves as before.
+
+Not tested: updates through PackageKit or Cockpit, which are likely to bypass dnf
+plugins, so a plain update there may still fail while nginx.org is ahead of the
+matching build (use \`dnf update\` instead); dnf5 (Enterprise Linux 10, for which
+this package is not built); and Rocky Linux 9 and RHEL 9, which are expected to
+behave as AlmaLinux 9, where all of the above was tested.
+"
+  fi
+fi
+
+# The compatibility paragraph names the nginx the package is pinned to.
+if [ "${NGINXORG}" = 1 ]; then
+  PINNOTE="This package is built
+against and **pinned to nginx.org's stable nginx ${NGINX_VER}**, and will only load
+into that nginx. It cannot be installed alongside \`nginx-module-pagespeed\`, the
+package for the distribution's own nginx. Each nginx.org stable release gets a
+matching build, which the package version names (\`+ngx<nginx version>\`); upgrade
+nginx and this package together. Until the build for a newer nginx is available,
+a plain upgrade holds nginx back, and a full upgrade removes this package."
+  if [ "${PKGFMT}" = rpm ]; then
+    PINNOTE="This package is built
+against and **pinned to nginx.org's stable nginx ${NGINX_VER}**, and will only load
+into that nginx. It cannot be installed alongside \`nginx-module-pagespeed\`, the
+package for the distribution's own nginx. Each nginx.org stable release gets a
+matching build, which the package release names (\`.ngx<nginx version>\`); a plain
+\`dnf update\` moves nginx and this package together once that build is available,
+and holds nginx until then (see \"Updates and the nginx hold\")."
+  fi
+else
+  PINNOTE="This package is built
+against and **pinned to stock nginx ${NGINX_VER}** for this distribution, and
+will only load into that nginx. A routine security update that keeps the same
+nginx upstream version is fine; a distro nginx **minor rebase** requires a new
+package build. For an nginx version we do not yet package, request a pinned
+build (contact us); otherwise use your distro's stock nginx."
 fi
 
 cat > "${DOCDIR}/README.md" << EOF
-# nginx-module-pagespeed ${VERSION}
+# ${PKG} ${VERSION}
 
 nginx dynamic module for PageSpeed web optimization (We-Amp mod_pagespeed ${VERSION}).
 
@@ -241,8 +326,8 @@ needs \`-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold\`
 to keep yours), and AlmaLinux/RHEL/Rocky keep yours and write the new one next
 to it as \`.rpmnew\`.
 
-Removal: before \`apt-get purge nginx-module-pagespeed\` (Debian/Ubuntu) or
-\`dnf remove nginx-module-pagespeed\` (AlmaLinux/RHEL/Rocky), delete the
+Removal: before \`apt-get purge ${PKG}\` (Debian/Ubuntu) or
+\`dnf remove ${PKG}\` (AlmaLinux/RHEL/Rocky), delete the
 \`include /etc/nginx/snippets/pagespeed_admin_localhost.conf;\` lines from your
 \`server {}\` blocks: purge and erase remove the file (an edited copy is kept on
 EL as \`.rpmsave\`), and an \`include\` of a missing file fails \`nginx -t\`.
@@ -251,13 +336,8 @@ EL as \`.rpmsave\`), and an \`include\` of a missing file fails \`nginx -t\`.
 
 nginx dynamic modules are pinned to the **exact** nginx version they were built
 against (down to the patch); nginx refuses to load a module built for any other
-version, and \`--with-compat\` does **not** relax this. This package is built
-against and **pinned to stock nginx ${NGINX_VER}** for this distribution, and
-will only load into that nginx. A routine security update that keeps the same
-nginx upstream version is fine; a distro nginx **minor rebase** requires a new
-package build. For an nginx version we do not yet package, request a pinned
-build (contact us); otherwise use your distro's stock nginx.
-
+version, and \`--with-compat\` does **not** relax this. ${PINNOTE}
+${UPDATENOTE}
 ## More Information
 
 - https://modpagespeed.com/

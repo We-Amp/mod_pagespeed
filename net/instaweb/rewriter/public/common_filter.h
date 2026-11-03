@@ -80,6 +80,12 @@ class CommonFilter : public EmptyHtmlFilter {
   // sealed), so overriding CharactersImpl() cannot break this.
   void InsertNodeAtBodyEnd(HtmlNode* data);
 
+  // Inserts a debug comment holding `unescaped` where InsertNodeAtBodyEnd
+  // would, within the document's debug output budget (see
+  // RewriteDriver::NewBudgetedDebugCommentNode). The caller checks
+  // DebugMode().
+  void InsertDebugCommentAtBodyEnd(StringPiece unescaped);
+
   // Note: Don't overload these methods, overload the implementers instead!
   void StartDocument() override;
   void StartElement(HtmlElement* element) override;

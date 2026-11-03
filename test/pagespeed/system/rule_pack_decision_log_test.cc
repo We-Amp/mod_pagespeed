@@ -120,6 +120,24 @@ TEST_F(RulePackDecisionLogTest, AFullKeySetIsClearedNotDropped) {
             ReadLines(Day(kNoon)).size());
 }
 
+TEST_F(RulePackDecisionLogTest, RateLimitDropsWithoutRememberingTheKey) {
+  RulePackDecisionLog log(dir_.string(), "another log");
+  log.set_max_lines_per_second(2);
+  EXPECT_EQ(RulePackDecisionLog::Result::kWritten,
+            log.Write("a", "a", kNoon, &handler_));
+  EXPECT_EQ(RulePackDecisionLog::Result::kWritten,
+            log.Write("b", "b", kNoon + 1, &handler_));
+  EXPECT_EQ(RulePackDecisionLog::Result::kDropped,
+            log.Write("c", "c", kNoon + 2, &handler_));
+  // A duplicate is not a line, so it costs nothing and reports as itself.
+  EXPECT_EQ(RulePackDecisionLog::Result::kDuplicate,
+            log.Write("a", "a", kNoon + 3, &handler_));
+  // The next second has room, and the dropped key was not remembered.
+  EXPECT_EQ(RulePackDecisionLog::Result::kWritten,
+            log.Write("c", "c", kNoon + 1000, &handler_));
+  EXPECT_EQ(3u, ReadLines(Day(kNoon)).size());
+}
+
 TEST_F(RulePackDecisionLogTest, StopsAtTheDailyCap) {
   RulePackDecisionLog log(dir_.string());
   log.set_max_bytes_per_day_for_testing(1000);

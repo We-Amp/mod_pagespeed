@@ -28,6 +28,8 @@
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/time_util.h"
+#include "pagespeed/system/daemon_notify_params.h"
+#include "pagespeed/system/site_cache_fragment.h"
 
 namespace net_instaweb {
 
@@ -295,6 +297,15 @@ DaemonRecordDecision EvaluateDaemonRecordGate(const DaemonAbi& abi,
                                               int64 now_seconds) {
   DaemonRecordDecision decision;
 
+  // ---- the site ----------------------------------------------------------
+  // Before anything else, and before any call to the peer: a request that
+  // does not name the site that admitted it has no keyspace to be written in.
+  if (!IsSiteId(input.site)) {
+    decision.verdict = DaemonRecordVerdict::kRefuse;
+    decision.reason = daemon_record_reason::kNoSiteId;
+    return decision;
+  }
+
   // ---- the transition guard ------------------------------------------
   // First, and before anything is derived from the response: this URL is
   // decided by its shape alone, and a gate that computed a full decision and
@@ -560,13 +571,15 @@ DaemonRecordWriter::~DaemonRecordWriter() { Abandon(); }
 
 int DaemonRecordWriter::Begin(const DaemonRecordInput& input,
                               const DaemonRecordDecision& decision) {
-  if (decision.verdict == DaemonRecordVerdict::kRefuse || cache_ == nullptr) {
+  if (decision.verdict == DaemonRecordVerdict::kRefuse || cache_ == nullptr ||
+      !IsSiteId(input.site)) {
     return kPsErrInvalidArg;
   }
-  GoogleString url, hostname, scheme, origin_ct, origin_etag;
+  GoogleString url, hostname, scheme, site, origin_ct, origin_etag;
   input.url.CopyToString(&url);
   input.hostname.CopyToString(&hostname);
   input.scheme.CopyToString(&scheme);
+  input.site.CopyToString(&site);
 
   // The parameters are re-pointed at storage this frame owns.  The gate's
   // copy points into ITS caller's input, which is a different object with a
@@ -575,8 +588,9 @@ int DaemonRecordWriter::Begin(const DaemonRecordInput& input,
   params.origin_ct = CStrOrNull(input.content_type, &origin_ct);
   params.origin_etag = CStrOrNull(input.etag, &origin_etag);
 
-  last_error_ = abi_->CacheWriteOriginal(cache_, url.c_str(), hostname.c_str(),
-                                         scheme.c_str(), &params, &handle_);
+  last_error_ = abi_->CacheWriteOriginalSite(cache_, url.c_str(),
+                                             hostname.c_str(), scheme.c_str(),
+                                             site.c_str(), &params, &handle_);
   if (last_error_ != kPsOk) {
     // The peer does not hand back a handle it did not open; make sure of it
     // rather than inherit the assumption.
@@ -627,24 +641,22 @@ int NotifyDaemon(const DaemonAbi& abi, StringPiece socket_path,
   if (decision.verdict != DaemonRecordVerdict::kStoreAndNotify) {
     return kPsErrInvalidArg;
   }
-  GoogleString socket, url, hostname, scheme, context, signature;
+  ModuleNotifyInput notify;
+  notify.url = input.url;
+  notify.hostname = input.hostname;
+  notify.scheme = input.scheme;
+  notify.site = input.site;
+  notify.content_type = decision.content_type;
+  notify.mask = decision.notify_mask;
+  notify.option_context = input.option_context;
+  notify.option_signature = input.option_signature;
+  ModuleNotifyParams built;
+  if (!BuildModuleNotifyParams(abi, notify, &built)) {
+    return kPsErrInvalidArg;
+  }
+  GoogleString socket;
   socket_path.CopyToString(&socket);
-  input.url.CopyToString(&url);
-  input.hostname.CopyToString(&hostname);
-  input.scheme.CopyToString(&scheme);
-
-  PsNotifyParams params;
-  abi.NotifyParamsInit(&params);
-  params.url = url.c_str();
-  params.hostname = hostname.c_str();
-  params.scheme = scheme.c_str();
-  params.content_type = decision.content_type;
-  params.mask = decision.notify_mask;
-  params.agent_request = 0;
-  params.option_context = CStrOrNull(input.option_context, &context);
-  params.option_context_length = input.option_context.size();
-  params.option_signature = CStrOrNull(input.option_signature, &signature);
-  return abi.NotifyWorker(socket.c_str(), &params);
+  return abi.NotifyWorker(socket.c_str(), &built.params());
 }
 
 void RecordDaemonFallthroughClass(RewriteStats* stats, int ps_content_type) {

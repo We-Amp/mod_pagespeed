@@ -583,10 +583,14 @@ class HtmlParse {
   // called, and so during event-buffering mode, filters should not
   // be accessed.
   void set_buffer_events(bool x) { buffer_events_ = x; }
+  bool buffer_events() const { return buffer_events_; }
 
   // Disables any filter in this->filters_ whose GetScriptUsage() is
   // HtmlFilter::kWillInjectScripts.
   void DisableFiltersInjectingScripts();
+  // Disables the post-render filters that must not see a hydrated page, for
+  // the flush window about to render.
+  void DisableFiltersSkippedOnHydratedPages();
 
   // Same, but over a passed-in list of filters.
   void DisableFiltersInjectingScripts(const FilterList& filters);

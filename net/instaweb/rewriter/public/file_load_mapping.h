@@ -64,7 +64,8 @@ class FileLoadMappingLiteral : public FileLoadMapping {
 // FileLoadMappingLiteral, you can use a regexp mapper.  For example, if we had:
 //   FileLoadMappingRegexp("http://example.com/([^/*])/bar/", "/var/bar/\\1/")
 // that would mean http://example.com/foo/bar/baz would be found on the
-// filesystem at /var/bar/foo/baz.
+// filesystem at /var/bar/foo/baz.  A url whose filesystem path would contain a
+// "." or ".." segment is not mapped.
 class FileLoadMappingRegexp : public FileLoadMapping {
  public:
   FileLoadMappingRegexp(const GoogleString& url_regexp,

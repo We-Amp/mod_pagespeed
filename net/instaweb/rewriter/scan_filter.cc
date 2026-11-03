@@ -24,6 +24,7 @@
 #include "net/instaweb/rewriter/public/common_filter.h"
 #include "net/instaweb/rewriter/public/csp.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
+#include "net/instaweb/rewriter/public/hydration_signals.h"
 #include "net/instaweb/rewriter/public/resource_tag_scanner.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -59,6 +60,12 @@ void ScanFilter::StartDocument() {
   driver_->set_containing_charset(
       headers == nullptr ? "" : headers->DetermineCharset());
 
+  detect_hydration_ = driver_->options()->detect_hydrated_pages();
+  if (detect_hydration_ && headers != nullptr &&
+      HydrationSignalInHeaders(*headers)) {
+    LatchHydratedDocument();
+  }
+
   driver_->ClearCspPolicies();
   if (driver_->options()->honor_csp() && headers != nullptr) {
     ConstStringStarVector values;
@@ -68,6 +75,12 @@ void ScanFilter::StartDocument() {
       }
     }
   }
+}
+
+void ScanFilter::LatchHydratedDocument() {
+  driver_->set_is_hydrated_document();
+  // The latch is one way, so the rest of the document needs no more checks.
+  detect_hydration_ = false;
 }
 
 void ScanFilter::AddCspPolicies(StringPiece value) {
@@ -85,7 +98,12 @@ void ScanFilter::AddCspPolicies(StringPiece value) {
 
 void ScanFilter::Cdata(HtmlCdataNode* cdata) { seen_any_nodes_ = true; }
 
-void ScanFilter::Comment(HtmlCommentNode* comment) { seen_any_nodes_ = true; }
+void ScanFilter::Comment(HtmlCommentNode* comment) {
+  seen_any_nodes_ = true;
+  if (detect_hydration_ && HydrationSignalInComment(comment->contents())) {
+    LatchHydratedDocument();
+  }
+}
 
 void ScanFilter::IEDirective(HtmlIEDirectiveNode* directive) {
   seen_any_nodes_ = true;
@@ -106,10 +124,18 @@ void ScanFilter::Characters(HtmlCharactersNode* characters) {
     }
   }
   seen_any_nodes_ = true;  // ignore any subsequent BOMs.
+  if (detect_hydration_ && characters->parent() != nullptr &&
+      characters->parent()->keyword() == HtmlName::kScript &&
+      HydrationSignalInInlineScript(characters->contents())) {
+    LatchHydratedDocument();
+  }
 }
 
 void ScanFilter::StartElement(HtmlElement* element) {
   seen_any_nodes_ = true;
+  if (detect_hydration_ && HydrationSignalInElement(*element)) {
+    LatchHydratedDocument();
+  }
   // <base>
   if (element->keyword() == HtmlName::kBase) {
     HtmlElement::Attribute* href = element->FindAttribute(HtmlName::kHref);
@@ -145,6 +171,15 @@ void ScanFilter::StartElement(HtmlElement* element) {
             "Unable to check safety of a base with CSP base-uri, "
             "proceeding conservatively.",
             element);
+        driver_->set_other_base_problem();
+        return;
+      }
+
+      // Don't adopt a base longer than any URL we would produce ourselves.
+      if (static_cast<int>(StringPiece(href->DecodedValueOrNull()).size()) >
+          driver_->options()->max_url_size()) {
+        driver_->InsertDebugComment(
+            "The base URL is too long, proceeding conservatively.", element);
         driver_->set_other_base_problem();
         return;
       }

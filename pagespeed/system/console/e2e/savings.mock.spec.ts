@@ -115,7 +115,7 @@ test("empty statistics read as 'no traffic yet', not zeros", async ({ page }) =>
   await expect(page.getByTestId("savings-module-table")).toBeHidden();
 });
 
-test("a net regression shows as no net savings, never a negative byte count", async ({ page }) => {
+test("a net regression shows as a signed negative saving, with the percent held at zero", async ({ page }) => {
   const errors: Error[] = [];
   page.on("pageerror", (e) => errors.push(e));
   await mockAdmin(page, "pagespeed_global_admin", {
@@ -125,8 +125,10 @@ test("a net regression shows as no net savings, never a negative byte count", as
   });
   await openConsole(page, "pagespeed_global_admin", "#/savings");
   await expect(page.getByTestId("savings-optimizer-regression")).toBeVisible();
-  await expect(page.getByTestId("savings-optimizer-total")).toContainText("0 B");
-  await expect(page.getByTestId("savings-optimizer-total")).not.toContainText("-");
+  // The fixture serves 12,000 bytes for 10,000: the total counts the growth as -2,000 B
+  // (shown with a true minus sign), and only the percentage is clamped, to 0%.
+  await expect(page.getByTestId("savings-optimizer-total")).toContainText("−1.95 KB");
+  await expect(page.getByTestId("savings-optimizer-total")).toContainText("0% of 9.77 KB");
   expect(errors).toEqual([]);
 });
 

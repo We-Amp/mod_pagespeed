@@ -60,6 +60,8 @@ enum InlineResult {
   // not permit data: images.
   INLINE_DISALLOWED_BY_CSP,
   INLINE_INTERNAL_ERROR,
+  // Image not inlined because the document's image inlining budget is spent.
+  INLINE_DOCUMENT_BUDGET_SPENT,
 };
 
 // Identify img tags in html and optimize them.
@@ -179,10 +181,13 @@ class ImageRewriteFilter : public RewriteFilter {
 
   // Can we inline resource?  If so, encode its contents into the data_url,
   // otherwise leave data_url alone.
+  // css_result is the result of the stylesheet the image would be inlined
+  // into, which counts the image bytes inlined into it; nullptr for HTML,
+  // where the driver counts them.
   InlineResult TryInline(bool is_html, bool is_critical,
                          int64 image_inline_max_bytes,
                          const CachedResult* cached_result, ResourceSlot* slot,
-                         GoogleString* data_url);
+                         CachedResult* css_result, GoogleString* data_url);
 
   // The valid contents of a dimension attribute on an image element have one of
   // the following forms: "45%" "45%px" "+45.0%" [45% of browser width; we can't
@@ -276,6 +281,7 @@ class ImageRewriteFilter : public RewriteFilter {
   // Returns true if it rewrote (ie inlined) the URL.
   bool FinishRewriteCssImageUrl(int64 css_image_inline_max_bytes,
                                 const CachedResult* cached, ResourceSlot* slot,
+                                CachedResult* css_result,
                                 InlineResult* inline_result);
 
   // Returns true if it rewrote the URL.

@@ -19,6 +19,9 @@
 
 #include "pagespeed/envoy/envoy_admin_fetch.h"
 
+#include <memory>
+
+#include "envoy/event/dispatcher.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/envoy/envoy_server_context.h"
 #include "pagespeed/envoy/http_filter.h"
@@ -29,11 +32,20 @@ namespace net_instaweb {
 EnvoyAdminFetch::EnvoyAdminFetch(
     EnvoyServerContext* server_context,
     Envoy::Http::HttpPageSpeedDecoderFilter* decoder)
-    : AsyncFetch(RequestContextPtr(server_context->NewRequestContext())),
-      decoder_(decoder) {
+    : AsyncFetch(RequestContextPtr(server_context->NewRequestContext())) {
   // Set HTTP options on request context - required before accessing options()
   request_context()->set_options(
       server_context->global_options()->ComputeHttpOptions());
+  decoder_.store(decoder, std::memory_order_release);
+  if (decoder != nullptr) {
+    // Constructed on the request's dispatcher thread, so this is the
+    // dispatcher every reply must be sent on.
+    dispatcher_ = &decoder->decoderCallbacks()->dispatcher();
+    decoder->AttachAdminFetch(this);
+  } else {
+    // No filter will release its reference.
+    references_.store(1, std::memory_order_release);
+  }
 }
 
 EnvoyAdminFetch::~EnvoyAdminFetch() {}
@@ -51,9 +63,32 @@ void EnvoyAdminFetch::HandleHeadersComplete() {
   // as we'll send everything in HandleDone
 }
 
+void EnvoyAdminFetch::DecrementRefCount() {
+  if (references_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+    delete this;
+  }
+}
+
 void EnvoyAdminFetch::HandleDone(bool success) {
-  // Send the buffered response via Envoy
-  if (decoder_ != nullptr) {
+  if (dispatcher_ != nullptr && !dispatcher_->isThreadSafe()) {
+    // Completed off the request's worker thread (fetcher, cache or scheduler
+    // thread). Envoy's connection may only be written from its own
+    // dispatcher, so post the reply there. The completion's reference is
+    // released when the posted callback runs, or when it is destroyed
+    // unrun.
+    std::shared_ptr<EnvoyAdminFetch> self(
+        this, [](EnvoyAdminFetch* fetch) { fetch->DecrementRefCount(); });
+    dispatcher_->post([self]() { self->SendReplyOnDispatcher(); });
+    return;
+  }
+  SendReplyOnDispatcher();
+  DecrementRefCount();
+}
+
+void EnvoyAdminFetch::SendReplyOnDispatcher() {
+  // Send the buffered response via Envoy, unless the filter is gone.
+  auto* decoder = decoder_.load(std::memory_order_acquire);
+  if (decoder != nullptr) {
     // Add security headers for admin endpoints before sending reply.
     // This is an admin endpoint so it should have restrictive security headers.
     response_headers()->Add("X-Frame-Options", "SAMEORIGIN");
@@ -66,10 +101,8 @@ void EnvoyAdminFetch::HandleDone(bool success) {
     response_headers()->Replace(HttpAttributes::kCacheControl,
                                 "private, no-store, no-cache, must-revalidate");
 
-    decoder_->sendReply(response_headers(), std::move(buffer_));
+    decoder->sendReply(response_headers(), std::move(buffer_));
   }
-  // Self-delete after done
-  delete this;
 }
 
 }  // namespace net_instaweb

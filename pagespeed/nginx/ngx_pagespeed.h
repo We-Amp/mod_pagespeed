@@ -35,6 +35,8 @@ extern "C" {
 }
 
 #include "base/logging.h"
+#include "ngx_cache_control_merge.h"
+#include "ngx_caching_header_policy.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
@@ -145,11 +147,7 @@ StringPiece str_to_string_piece(ngx_str_t s);
 // over.  Returns NULL if we can't get memory.
 char* string_piece_to_pool_string(ngx_pool_t* pool, StringPiece sp);
 
-enum PreserveCachingHeaders {
-  kPreserveAllCachingHeaders,  // Cache-Control, ETag, Last-Modified, etc
-  kPreserveOnlyCacheControl,   // Only Cache-Control.
-  kDontPreserveHeaders,
-};
+class DaemonHtmlCapture;
 
 struct ps_request_ctx_t {
   NgxBaseFetch* base_fetch;
@@ -177,6 +175,11 @@ struct ps_request_ctx_t {
   // handed to the low-priority pool rather than run inline, and the s-maxage
   // rewrite stays off.  record_body_bytes accumulates the streamed body size
   // of either record arm for the completion queue's byte cap.
+  // DaemonHtmlCache report-only: the capture of this HTML response, or nullptr
+  // in any other mode.  Finished at the end of the body, or at the latest when
+  // this context is released (a response with no body filter pass).
+  DaemonHtmlCapture* daemon_html_capture = nullptr;
+
   bool daemon_record_pending;
   bool daemon_recorder;
   int64_t record_body_bytes;
@@ -189,6 +192,9 @@ struct ps_request_ctx_t {
   // we should mirror that when we write it back. nginx may absolutify
   // Location: headers that start with '/' without regarding X-Forwarded-Proto.
   bool location_field_set;
+  // The private and no-store directives on the Cache-Control lines of an
+  // HTML response as the module received it, kept on the rewritten page.
+  NgxCacheControlLimits html_cache_control_limits;
   // The module's own Vary lists the Accept-Encoding token (alone or among
   // others): the etag filter withdraws the compressor's own Vary stamp so the
   // token is stated once.

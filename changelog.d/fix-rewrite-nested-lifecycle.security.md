@@ -1,0 +1,1 @@
+- Fixed several cases where crafted site content could stop a server worker or exhaust its memory. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

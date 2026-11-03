@@ -25,6 +25,7 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_writer_filter.h"
@@ -155,6 +156,7 @@ TEST_F(SrcSetSlotTest, BasicOperation) {
   slot0->set_disable_rendering(true);
   slot0->Render();
   slot1->Render();
+  collection->Commit();
 
   // Empty descriptor output a bit silly... not expected in real life, though.
   EXPECT_EQ("srcset_slot_test:42-43 srcset entry for ",
@@ -166,6 +168,65 @@ TEST_F(SrcSetSlotTest, BasicOperation) {
 
   EXPECT_EQ("<img srcset=\"a.jpg, b.pagespeed.webp 100w, c.png 1000w\"/>",
             GetHtmlDomAsString());
+  collection->Detach();
+}
+
+// Rendering a slot must only record its URL: the attribute is written back
+// by Commit(), once for the whole collection, and only if something rendered.
+TEST_F(SrcSetSlotTest, CommitOnce) {
+  SetupWriter();
+  RefCountedPtr<SrcSetSlotCollection> collection(
+      new SrcSetSlotCollection(rewrite_driver(), element_, attribute_));
+  collection->Initialize(rewrite_driver()->FindFilter("ic"));
+  ASSERT_EQ(3, collection->num_image_candidates());
+
+  // Nothing rendered: Commit() leaves the attribute byte-for-byte alone
+  // rather than re-serializing it.
+  collection->Commit();
+  EXPECT_EQ("<img srcset=\"a.jpg, b.jpg 100w, c.png 1000w\"/>",
+            GetHtmlDomAsString());
+
+  bool unused;
+  GoogleUrl optimized_a("http://www.example.com/dir/a.pagespeed.webp");
+  ResourceSlotPtr slot0(collection->slot(0));
+  slot0->SetResource(rewrite_driver()->CreateInputResource(
+      optimized_a, RewriteDriver::InputRole::kImg, &unused));
+  GoogleUrl optimized_c("http://www.example.com/dir/c.pagespeed.png");
+  ResourceSlotPtr slot2(collection->slot(2));
+  slot2->SetResource(rewrite_driver()->CreateInputResource(
+      optimized_c, RewriteDriver::InputRole::kImg, &unused));
+
+  // Render() records the new URLs but does not touch the attribute...
+  slot0->Render();
+  slot2->Render();
+  EXPECT_EQ("a.pagespeed.webp", collection->url(0));
+  EXPECT_EQ("c.pagespeed.png", collection->url(2));
+  EXPECT_EQ("<img srcset=\"a.jpg, b.jpg 100w, c.png 1000w\"/>",
+            GetHtmlDomAsString());
+
+  // ... Commit() does, with every rendered slot's URL.
+  collection->Commit();
+  EXPECT_EQ(
+      "<img srcset=\"a.pagespeed.webp, b.jpg 100w, c.pagespeed.png 1000w\"/>",
+      GetHtmlDomAsString());
+  collection->Detach();
+}
+
+TEST_F(SrcSetSlotTest, ManyCandidates) {
+  // Only the first kMaxSlots candidates of a srcset get a slot; all of them
+  // are kept as candidates.
+  const int kTotal = SrcSetSlotCollection::kMaxSlots + 44;
+  GoogleString value;
+  for (int i = 0; i < kTotal; ++i) {
+    StrAppend(&value, i == 0 ? "" : ", ", "i", IntegerToString(i), ".jpg");
+  }
+  attribute_->SetValue(value);
+  RefCountedPtr<SrcSetSlotCollection> collection(
+      new SrcSetSlotCollection(rewrite_driver(), element_, attribute_));
+  collection->Initialize(rewrite_driver()->FindFilter("ic"));
+  ASSERT_EQ(kTotal, collection->num_image_candidates());
+  EXPECT_NE(nullptr, collection->slot(SrcSetSlotCollection::kMaxSlots - 1));
+  EXPECT_EQ(nullptr, collection->slot(SrcSetSlotCollection::kMaxSlots));
   collection->Detach();
 }
 

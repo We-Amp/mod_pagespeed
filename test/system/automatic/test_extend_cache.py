@@ -20,6 +20,8 @@ Ported from: pagespeed/automatic/system_tests/extend_cache.sh
 These tests verify that the extend_cache filter works correctly.
 """
 
+import base64
+import hashlib
 import re
 from datetime import datetime, timezone
 
@@ -31,6 +33,27 @@ from pagespeed_test_framework import (
     assert_http_status,
     require_match,
 )
+
+
+IF_MODIFIED_SINCE = {"If-Modified-Since": "Fri, 01 Jan 2016 00:00:00 GMT"}
+
+
+def cache_control_tokens(response) -> set:
+    """The directives of a response's Cache-Control, however they are spelled."""
+    value = response.header("Cache-Control")
+    return {token.strip().lower() for token in value.split(",") if token.strip()}
+
+
+def revalidate_until_cache_control(client: PageSpeedClient, url: str):
+    """Revalidates url until its metadata record speaks for the 304."""
+    response = client.fetch_until(
+        url,
+        condition=lambda r: r.status == 304 and r.header("Cache-Control") != "",
+        headers=IF_MODIFIED_SINCE,
+        timeout=30.0,
+    )
+    assert response.text == "", "A 304 has no body"
+    return response
 
 
 class TestExtendCacheImages:
@@ -128,6 +151,52 @@ class TestIfModifiedSince:
         )
 
         assert_http_status(response, 304, "Should return 304 Not Modified")
+
+        # The 304 carries what the full response says about caching.
+        full = client.get(image_url)
+        assert_http_status(full, 200)
+        assert "immutable" in cache_control_tokens(full)
+        response = revalidate_until_cache_control(client, image_url)
+        assert cache_control_tokens(response) == cache_control_tokens(full)
+        assert response.header("ETag") == full.header("ETag")
+        assert response.header("Expires") != ""
+
+    def _ce_url_of_input(self, client: PageSpeedClient, input_url: str) -> str:
+        original = client.get(f"{input_url}?PageSpeed=off")
+        assert_http_status(original, 200)
+        content_hash = base64.urlsafe_b64encode(
+            hashlib.md5(original.text.encode()).digest()
+        ).decode()[:10]
+        return f"{input_url}.pagespeed.ce.{content_hash}.css"
+
+    @pytest.mark.parametrize(
+        "directory, directive",
+        [
+            pytest.param("cc200p", "private", id="private"),
+            pytest.param("cc200ns", "no-store", id="no-store"),
+        ],
+    )
+    def test_304_of_restrictive_input_is_not_public(
+        self, client: PageSpeedClient, test_root: str, directory: str, directive: str
+    ):
+        """A restrictive input's output never becomes public or immutable.
+
+        Cache extension does not record such an output as optimized, so its 304
+        stays bare; what must hold for every filter is that it never says more
+        than the full response did.
+        """
+        url = self._ce_url_of_input(client, f"{test_root}/ipro/{directory}/example.css")
+
+        full = client.get(url)
+        assert_http_status(full, 200)
+        assert directive in cache_control_tokens(full)
+
+        for _ in range(3):
+            response = client.get(url, headers=IF_MODIFIED_SINCE)
+            assert_http_status(response, 304)
+            tokens = cache_control_tokens(response)
+            assert "public" not in tokens
+            assert "immutable" not in tokens
 
 
 class TestLastModifiedMatch:

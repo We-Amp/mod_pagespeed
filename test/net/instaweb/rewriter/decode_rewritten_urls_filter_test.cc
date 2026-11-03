@@ -47,6 +47,18 @@ class DecodeRewrittenUrlsFilterTest : public RewriteTestBase {
   }
 };
 
+// A name that leaves the origin is left as it was.
+TEST_F(DecodeRewrittenUrlsFilterTest, ReferencesLeavingTheOriginAreKept) {
+  ValidateNoChanges("other_origin",
+                    "<a href=\"http://test.com/"
+                    "A.ftp,3A,_,_x.example,_a.pagespeed.cf.0.css\">a</a>"
+                    "<script src=\"http://test.com/"
+                    ",hother.example,_x.js.pagespeed.jm.0.js\"></script>");
+  EXPECT_EQ(
+      0,
+      rewrite_driver()->log_record()->logging_info()->rewriter_info().size());
+}
+
 TEST_F(DecodeRewrittenUrlsFilterTest, TestAll) {
   GoogleString input_html =
       "<html><head>"

@@ -16,7 +16,8 @@
 """Caching-header handling for rewritten HTML.
 
 ModifyCachingHeaders off keeps the origin's headers; caching headers that
-arrive in err_headers_out are replaced like any other.
+arrive in err_headers_out are replaced like any other, and a private or
+no-store on any Cache-Control line stays on the module's.
 
 Ported from: pagespeed/system/system_tests/modify_caching_headers.sh
 """
@@ -75,6 +76,45 @@ class TestAlwaysSetCachingHeaders:
             f"expected a single no-cache Cache-Control: {lines}"
         )
         assert not response.header_values("Expires"), f"Expires present: {lines}"
+
+
+def _cache_control_tokens(value: str):
+    """The directives of one Cache-Control line, lowercased, as a set."""
+    return {token.strip().lower() for token in value.split(",") if token.strip()}
+
+
+@pytest.mark.apache_only
+class TestCacheControlLimitsKept:
+    """Rewritten HTML is never more storable than the operator said.
+
+    The module writes ONE Cache-Control line on rewritten HTML.  A private or
+    no-store on any of the page's Cache-Control lines, in headers_out or
+    err_headers_out ("Header always"), stays on it; other values do not.
+    """
+
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("private", {"max-age=0", "no-cache", "private"}),
+            ("no_store", {"max-age=0", "no-cache", "no-store"}),
+            ("both", {"max-age=0", "no-cache", "private", "no-store"}),
+            ("lines", {"max-age=0", "no-cache", "private", "no-store"}),
+            ("public", {"max-age=0", "no-cache"}),
+        ],
+    )
+    def test_one_line_keeps_private_and_no_store(
+        self, client: PageSpeedClient, test_root: str, name: str, expected: set
+    ):
+        response = client.get(f"{test_root}/cache_control_limits/{name}.html")
+        require_status_ok(response, f"cache_control_limits/{name}.html")
+        cache_control = response.header_values("Cache-Control")
+        assert len(cache_control) == 1, (
+            f"rewritten HTML must carry ONE Cache-Control line, got: "
+            f"{_lines(response)}"
+        )
+        assert _cache_control_tokens(cache_control[0]) == expected, (
+            f"expected the directives {sorted(expected)}, got: {cache_control}"
+        )
 
 
 if __name__ == "__main__":

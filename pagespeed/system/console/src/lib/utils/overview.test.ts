@@ -213,7 +213,7 @@ describe("daemonServeSavings", () => {
         js: { hits: 0, optimized_bytes: 0, original_bytes: 0 },
       },
     });
-    expect(s).toEqual({ saved: 688697, original: 22394624, percent: 3 });
+    expect(s).toMatchObject({ saved: 688697, original: 22394624, percent: 3 });
   });
   it("null when nothing was served, the block is missing or malformed", () => {
     expect(daemonServeSavings({ serve_savings: { css: { original_bytes: 0, optimized_bytes: 0 } } })).toBeNull();
@@ -221,11 +221,11 @@ describe("daemonServeSavings", () => {
     expect(daemonServeSavings(null)).toBeNull();
     expect(daemonServeSavings({ serve_savings: { css: "x" } })).toBeNull();
   });
-  it("never negative", () => {
-    expect(daemonServeSavings({ serve_savings: { css: { original_bytes: 10, optimized_bytes: 30 } } })).toEqual({ saved: 0, original: 10, percent: 0 });
+  it("a grown class reads negative, with the percent at zero", () => {
+    expect(daemonServeSavings({ serve_savings: { css: { original_bytes: 10, optimized_bytes: 30 } } })).toMatchObject({ saved: -20, original: 10, percent: 0 });
   });
   it("saved stays within the original even if the daemon reports a negative optimized_bytes", () => {
-    expect(daemonServeSavings({ serve_savings: { css: { original_bytes: 10, optimized_bytes: -1000 } } })).toEqual({
+    expect(daemonServeSavings({ serve_savings: { css: { original_bytes: 10, optimized_bytes: -1000 } } })).toMatchObject({
       saved: 10,
       original: 10,
       percent: 100,

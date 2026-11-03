@@ -73,7 +73,7 @@ class CurlUrlAsyncFetcher : public UrlAsyncFetcher {
 
   void ShutDown() override;
 
-  bool SupportsHttps() const override { return https_options_ != 0; }
+  bool SupportsHttps() const override { return allow_https(); }
 
   void Fetch(const GoogleString& url, MessageHandler* message_handler,
              AsyncFetch* callback) override;

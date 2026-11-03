@@ -85,7 +85,14 @@ BUILDDIR="${SRCDIR}"
 source "${SRCDIR}/install/common/installer.include"
 get_version_info
 
-PACKAGE="nginx-module-pagespeed"   # D2: SEO-parity name
+# D2: SEO-parity name. A build for nginx.org's nginx ships under its own name,
+# so nobody on the distribution's nginx moves to it by accident.
+PACKAGE="${NGINX_PKG_NAME:-nginx-module-pagespeed}"
+if [ "${PACKAGE}" != "nginx-module-pagespeed" ]; then
+  PKG_RELATIONS_SED="s#^@@PKG_RELATIONS@@\$#Conflicts       : nginx-module-pagespeed#"
+else
+  PKG_RELATIONS_SED="/^@@PKG_RELATIONS@@\$/d"
+fi
 COMPANY_FULLNAME="We-Amp"
 MAINTNAME="mod_pagespeed developers"
 MAINTMAIL="info@we-amp.com"
@@ -157,6 +164,30 @@ chmod 644 "${STAGEDIR}${NGINX_LOADDIR}/mod-pagespeed.conf"
 
 "${SCRIPTDIR}/nginx_package_docs.sh" "${STAGEDIR}${NGINX_DOCDIR}" "${VERSION}" "rpm" \
   "${NGINX_UPSTREAM_VERSION}" "${DISTRO_MAJOR}"
+
+# The package for nginx.org's nginx ships a dnf plugin (pagespeed_nginx_pin.py)
+# that holds nginx while no build of this package exists for a newer nginx.org
+# nginx: the exact pin stays, and a plain `dnf update` takes every other update
+# instead of failing as a whole. It lives in the system python's dnf-plugins
+# directory, so the build container must be the target distribution. It is a
+# dnf 4 plugin: Enterprise Linux 9 only (the only cell of this package that
+# builds an rpm). The %files lines below rely on GNU sed reading \n in a
+# replacement as a newline (the build container's sed).
+EXTRA_FILES_SED="/^@@EXTRA_FILES@@\$/d"
+if [ "${PACKAGE}" = "nginx-module-pagespeed-nginxorg" ]; then
+  PYSITE="$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))' 2>/dev/null || true)"
+  case "${PYSITE}" in
+    /usr/lib/python3.*/site-packages) ;;
+    *) echo "ERROR: cannot find the system python's site-packages for the dnf plugin (got '${PYSITE}')" >&2; exit 1 ;;
+  esac
+  [ -d "${PYSITE}/dnf-plugins" ] || { echo "ERROR: ${PYSITE}/dnf-plugins does not exist; is this the target distribution?" >&2; exit 1; }
+  install -m 755 -d "${STAGEDIR}${PYSITE}/dnf-plugins" "${STAGEDIR}/etc/dnf/plugins"
+  install -m 644 "${SCRIPTDIR}/pagespeed_nginx_pin.py" "${STAGEDIR}${PYSITE}/dnf-plugins/pagespeed_nginx_pin.py"
+  printf '[main]\nenabled=1\n' > "${STAGEDIR}/etc/dnf/plugins/pagespeed_nginx_pin.conf"
+  chmod 644 "${STAGEDIR}/etc/dnf/plugins/pagespeed_nginx_pin.conf"
+  # rpmbuild byte-compiles the plugin into __pycache__; the package owns those too.
+  EXTRA_FILES_SED="s#^@@EXTRA_FILES@@\$#${PYSITE}/dnf-plugins/pagespeed_nginx_pin.py\\n${PYSITE}/dnf-plugins/__pycache__/pagespeed_nginx_pin.*.pyc\\n%config(noreplace) /etc/dnf/plugins/pagespeed_nginx_pin.conf#"
+fi
 
 # The admin-restrict snippet, a conffile at
 # /etc/nginx/snippets/pagespeed_admin_localhost.conf. Shipped as config (not
@@ -233,6 +264,8 @@ sed \
   -e "s#@@SHORTDESC@@#${SHORTDESC}#g" \
   -e "s#@@FULLDESC@@#${FULLDESC}#g" \
   -e "s#@@NGINX_DEP@@#${NGINX_DEP}#g" \
+  -e "${PKG_RELATIONS_SED}" \
+  -e "${EXTRA_FILES_SED}" \
   -e "s#@@NGINX_MODULEDIR@@#${NGINX_MODULEDIR}#g" \
   -e "s#@@NGINX_LOADDIR@@#${NGINX_LOADDIR}#g" \
   -e "s#@@NGINX_DOCDIR@@#${NGINX_DOCDIR}#g" \

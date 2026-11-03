@@ -1,0 +1,1 @@
+- **Apache: an optimized HTML page now carries the `Vary` names it depends on when the origin flushes the response early.** Before, such a page could go out without them, and a shared cache could then serve one visitor's version of it to another.

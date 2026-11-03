@@ -21,6 +21,7 @@
 
 #include <vector>
 
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -34,6 +35,7 @@
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_health.h"
+#include "pagespeed/system/site_cache_fragment.h"
 
 namespace net_instaweb {
 
@@ -156,6 +158,7 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
   input->url = request_.url;
   input->hostname = request_.hostname;
   input->scheme = request_.scheme;
+  input->site = request_.site;
 
   const char* content_type =
       response_headers.Lookup1(HttpAttributes::kContentType);
@@ -282,6 +285,17 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
   // one buffered response body per request.
   do {
     if (abi_ == nullptr || cache_ == nullptr || response_headers == nullptr) {
+      break;
+    }
+    // ---- the site -----------------------------------------------------
+    // First, before any call to the peer: an entry may be written, and a
+    // notification sent, only under the site that admitted the request.
+    if (!IsSiteId(request_.site)) {
+      outcome.verdict = DaemonRecordVerdict::kRefuse;
+      outcome.reason = daemon_record_reason::kNoSiteId;
+      if (stats_ != nullptr) {
+        stats_->daemon_record_declined_no_site()->Add(1);
+      }
       break;
     }
     if (failure_ || over_cap_ || !entire_response_received) {

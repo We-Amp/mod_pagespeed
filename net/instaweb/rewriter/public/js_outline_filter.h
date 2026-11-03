@@ -53,6 +53,7 @@ class JsOutlineFilter : public CommonFilter {
   // HTML Events we expect to be in <script> elements.
   void CharactersImpl(HtmlCharactersNode* characters) override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "OutlineJs"; }
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 

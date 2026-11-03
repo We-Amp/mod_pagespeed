@@ -223,10 +223,8 @@ TEST_F(MappedSharedStringTest, MoveConstructorOwned) {
 
   EXPECT_EQ("hello", mss2.Value());
   EXPECT_FALSE(mss2.is_mapped());
-
-  // mss1 should be in valid empty state
-  // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
-  EXPECT_TRUE(mss1.empty());
+  // The moved-from owned string is valid but unspecified (it may still share
+  // the data), so only the destination is checked.
 }
 
 TEST_F(MappedSharedStringTest, MoveConstructorMapped) {
@@ -251,8 +249,6 @@ TEST_F(MappedSharedStringTest, MoveAssignmentOwned) {
   mss2 = std::move(mss1);
 
   EXPECT_EQ("hello", mss2.Value());
-  // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
-  EXPECT_TRUE(mss1.empty());
 }
 
 TEST_F(MappedSharedStringTest, MoveAssignmentMapped) {
@@ -267,6 +263,35 @@ TEST_F(MappedSharedStringTest, MoveAssignmentMapped) {
   // NOLINTNEXTLINE(bugprone-use-after-move): asserting the moved-from state
   EXPECT_TRUE(mss1.empty());
   EXPECT_EQ(0, release_count_.load());
+}
+
+// A moved-from mapped string is empty and every accessor is safe on it; the
+// view's release callback runs once, when the destination goes away.
+TEST_F(MappedSharedStringTest, MovedFromMappedIsEmptyAndSafe) {
+  {
+    MappedSharedString mss1 = MappedSharedString::FromMappedView(
+        kTestData, kTestDataSize, ReleaseCallback, &release_count_);
+    MappedSharedString mss2(std::move(mss1));
+    MappedSharedString mss3;
+    mss3 = std::move(mss2);
+
+    // NOLINTBEGIN(bugprone-use-after-move): asserting the moved-from state
+    for (const MappedSharedString* moved_from : {&mss1, &mss2}) {
+      EXPECT_TRUE(moved_from->empty());
+      EXPECT_EQ(0u, moved_from->size());
+      EXPECT_TRUE(moved_from->Value().empty());
+      EXPECT_EQ(nullptr, moved_from->data());
+      EXPECT_TRUE(moved_from->ToOwned().Value().empty());
+      EXPECT_FALSE(moved_from->unique());
+      EXPECT_FALSE(moved_from->RenewLease());
+      EXPECT_EQ(LeaseRenewal::kLeasesOff, moved_from->RenewLeaseStrict());
+      EXPECT_EQ(UINT64_MAX, moved_from->NsUntilForcedWrap());
+    }
+    // NOLINTEND(bugprone-use-after-move)
+    EXPECT_EQ("Hello, World!", mss3.Value());
+    EXPECT_EQ(0, release_count_.load());
+  }
+  EXPECT_EQ(1, release_count_.load());
 }
 
 // ============================================================================

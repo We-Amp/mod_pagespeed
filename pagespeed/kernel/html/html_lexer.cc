@@ -534,47 +534,54 @@ void HtmlLexer::EvalCdataEnd2(char c) {
   }
 }
 
+// This returns true if 'c' following a </script, </style, etc. ends the tag
+// name: for script it gets us out of either script parsing or an escaping
+// level, for the other literal tags out of the literal.
+static bool CanEndTag(char c) {
+  return (c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == ' ' ||
+          c == '/' || c == '>');
+}
+
 // Handle the case where a literal tag (style, iframe) was started.
 // This is of lexical significance because we ignore all the special
-// characters until we see "</style>" or "</iframe>", or similar for
-// other tags.
+// characters until we see "</style" or "</iframe", or similar for
+// other tags, followed by a character that ends the tag name.
 void HtmlLexer::EvalLiteralTag(char c) {
-  // Look explicitly for </style, etc.> in the literal buffer.
-  // TODO(jmarantz): check for whitespace in unexpected places.
-  if (c == '>') {
-    // expecting "</x>" for tag x.
+  // Look explicitly for </style, etc. in the literal buffer.  As in the HTML5
+  // RAWTEXT and RCDATA end tag name states, white space or '/' after the name
+  // ends the tag just like '>' does, so "</style >" and "</style/>" close the
+  // element too.
+  if (CanEndTag(c) && !literal_.empty()) {
+    // expecting "</x" for tag x, followed by c.
     // Chromium source lacks CHECK_GT
     html_parse_->message_handler()->Check(
         literal_close_.size() > 3,
         "literal_close_.size() <= 3");  // NOLINT
-    if (literal_.size() < literal_close_.size()) {
-      // Not enough bytes accumulated to contain the close tag yet.  Bail
-      // out before the subtraction below can underflow (size_t wraparound
-      // followed by implementation-defined conversion to int).
-      return;
-    }
-    int literal_minus_close_size =
-        static_cast<int>(literal_.size() - literal_close_.size());
-    if ((literal_minus_close_size >= 0) &&
-        StringCaseEqual(literal_.c_str() + literal_minus_close_size,
-                        literal_close_)) {
+    // 'c' stands in for the '>' of literal_close_, so match just the "</x".
+    StringPiece prev_fragment(literal_);
+    prev_fragment.remove_suffix(1);
+    StringPiece close_tag_name(literal_close_);
+    close_tag_name.remove_suffix(1);
+    if (StringCaseEndsWith(prev_fragment, close_tag_name)) {
       // The literal actually starts after the "<style>", and we will
       // also let it finish before, so chop it off.
-      literal_.resize(literal_minus_close_size);
+      literal_.resize(prev_fragment.size() - close_tag_name.size());
       EmitLiteral();
       token_.clear();
       // Transform "</style>" into "style" to form close tag.
       token_.append(literal_close_.c_str() + 2, literal_close_.size() - 3);
       EmitTagClose(HtmlElement::EXPLICIT_CLOSE);
+      // As for </script, anything between the tag name and the '>' is
+      // parsed like attributes and thrown away.
+      if (c == '/') {
+        discard_until_start_state_for_error_recovery_ = true;
+        state_ = TAG_BRIEF_CLOSE;
+      } else if (c != '>') {
+        discard_until_start_state_for_error_recovery_ = true;
+        state_ = TAG_ATTRIBUTE;
+      }
     }
   }
-}
-
-// This returns true if 'c' following a </script should get us out of either
-// script parsing or escaping level.
-static bool CanEndTag(char c) {
-  return (c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == ' ' ||
-          c == '/' || c == '>');
 }
 
 bool HtmlLexer::IsScriptHtmlCommentClosing(char c) const {

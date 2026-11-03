@@ -24,11 +24,12 @@
   import type { StatsResponse } from "$lib/api/types";
   import { healthSummary, num, type ActiveAlert, type AlertSnapshot } from "$lib/alerts";
   import EmptyState from "$lib/EmptyState.svelte";
+  import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import FindingsPanel from "$lib/FindingsPanel.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import ScopeChip from "$lib/ScopeChip.svelte";
-  import { formatBytes, formatCount, formatDuration, formatPercent } from "$lib/utils/format";
+  import { formatBytes, formatCount, formatDuration, formatPercent, formatSignedBytes } from "$lib/utils/format";
   import { optimizedCopyHitRate } from "$lib/utils/savings";
   import { hostSavingsView } from "$lib/utils/host-savings";
   import { sinceLabel } from "$lib/utils/since";
@@ -286,7 +287,7 @@
               <div class="figure">
                 <dt class="metric-label">Saved on served responses</dt>
                 <dd class="metric-value num" data-testid="optimizer-savings">
-                  {formatBytes(serveSavings.saved)}
+                  {formatSignedBytes(serveSavings.saved)}
                   <span class="detail metric-context"
                     >{optimizerSince?.warming ? "—" : formatPercent(serveSavings.percent, serveSavings.saved)} of {formatBytes(
                       serveSavings.original,
@@ -298,6 +299,7 @@
           </dl>
           {#if serveSavings}
             <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
+            <SavingsSplitLine split={serveSavings.split} />
           {/if}
           <p class="since" data-testid="since-optimizer" title={optimizerSince?.iso ?? undefined}>
             {optimizerSince?.text ?? "since restart"} (optimizer restart)

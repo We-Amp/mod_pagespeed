@@ -26,9 +26,10 @@
 //
 // CRITICAL FOR THE LIFETIME TESTS: the bytes handed to the callback live in
 // their own page-aligned mmap region, and the release callback (invoked when
-// the last MappedSharedString reference drops) calls mprotect(PROT_NONE) on
-// that region.  Any read of the borrowed bytes AFTER release therefore
-// faults (SIGSEGV).  This is what makes the keep-alive/collapse tests bite:
+// the last MappedSharedString reference drops) makes that region inaccessible
+// (mprotect(PROT_NONE), or VirtualProtect(PAGE_NOACCESS) on Windows).  Any read
+// of the borrowed bytes AFTER release therefore faults (SIGSEGV, or an access
+// violation on Windows).  This is what makes the keep-alive/collapse tests bite:
 // if HTTPValue dropped a borrow too early, the subsequent ExtractContents
 // read would crash rather than silently pass.  (A plain owned buffer that
 // lived for the whole test would make every lifetime scenario pass
@@ -37,9 +38,7 @@
 #ifndef TEST_NET_INSTAWEB_HTTP_MAPPED_BACKEND_CACHE_H_
 #define TEST_NET_INSTAWEB_HTTP_MAPPED_BACKEND_CACHE_H_
 
-#include <sys/mman.h>
-#include <unistd.h>
-
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <list>
@@ -85,7 +84,7 @@ class MappedBackendCache : public CacheInterface {
     shared_->strict_verdict = static_cast<int>(verdict);
   }
   // Number of mapped views whose last reference has been released (and whose
-  // backing page has been mprotect(PROT_NONE)'d).
+  // backing page has been made inaccessible).
   int release_count() const { return shared_->release_count; }
   // True if p points into a region this wrapper handed out as a mapped view.
   // (Pointer comparison only -- never dereferences, so this is safe even
@@ -101,8 +100,8 @@ class MappedBackendCache : public CacheInterface {
 
  private:
   struct Region {
-    char* base;        // Page-aligned mmap base.
-    size_t map_len;    // Total mmapped length (page multiple).
+    char* base;        // Page-aligned mapping base.
+    size_t map_len;    // Total mapped length (page multiple).
     const char* data;  // == base; the bytes handed to the callback.
     size_t data_len;   // Logical length of the borrowed value.
     bool released;
@@ -114,10 +113,7 @@ class MappedBackendCache : public CacheInterface {
   struct Shared {
     ~Shared() {
       for (Region* r : regions) {
-        // Restore RW so munmap on a PROT_NONE region is unambiguous, then
-        // release the mapping.
-        mprotect(r->base, r->map_len, PROT_READ | PROT_WRITE);
-        munmap(r->base, r->map_len);
+        UnmapPages(r->base, r->map_len);
         delete r;
       }
     }
@@ -133,6 +129,16 @@ class MappedBackendCache : public CacheInterface {
     std::shared_ptr<Shared> shared;
     Region* region;
   };
+
+  // The platform page primitives, in mapped_backend_cache.cc so this header
+  // does not pull windows.h and its macros into every test that includes it.
+  // Returns zeroed read-write pages covering at least 'min_len' bytes and sets
+  // '*map_len' to the mapped length; aborts on failure.
+  static char* MapPages(size_t min_len, size_t* map_len);
+  // Makes the pages fault on any access.
+  static void PoisonPages(char* base, size_t map_len);
+  // Releases the pages, poisoned or not.
+  static void UnmapPages(char* base, size_t map_len);
 
   // Lease hooks for the views: renew always succeeds, the strict
   // verdict is scripted (see set_strict_verdict), and no forced wrap is
@@ -151,7 +157,7 @@ class MappedBackendCache : public CacheInterface {
     // Poison the region so any read of the borrowed bytes past this point
     // faults.  A too-early keep-alive drop is now a hard fault, not a silent
     // pass.
-    mprotect(r->base, r->map_len, PROT_NONE);
+    PoisonPages(r->base, r->map_len);
     r->released = true;
     ++token->shared->release_count;
     delete token;
@@ -159,14 +165,10 @@ class MappedBackendCache : public CacheInterface {
 
   // Copies 'bytes' into a fresh page-aligned mmap region and records it.
   static Region* MapBytes(Shared* shared, StringPiece bytes) {
-    static const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
-    size_t map_len = (bytes.size() / page + 1) * page;
-    void* base = mmap(nullptr, map_len, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    CHECK(base != MAP_FAILED) << "MappedBackendCache mmap failed";
+    size_t map_len = 0;
+    char* base = MapPages(bytes.size(), &map_len);
     memcpy(base, bytes.data(), bytes.size());
-    Region* r = new Region{static_cast<char*>(base), map_len,
-                           static_cast<char*>(base), bytes.size(), false};
+    Region* r = new Region{base, map_len, base, bytes.size(), false};
     shared->regions.push_back(r);
     return r;
   }

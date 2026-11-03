@@ -48,6 +48,8 @@ class JsDisableFilter : public CommonFilter {
 
   void DetermineEnabled(GoogleString* disabled_reason) override;
 
+  // See RewriteDriver::SkipJsDeferralOnHydratedPage().
+  bool SkippedOnHydratedPages() const override;
   const char* Name() const override { return "JsDisableFilter"; }
 
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }

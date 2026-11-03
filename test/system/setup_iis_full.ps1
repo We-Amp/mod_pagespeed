@@ -891,6 +891,16 @@ pagespeed RulePackFile "$rulePackDir\multi\a.json"
 pagespeed RulePackFile "$rulePackDir\multi\b.json"
 "@
 
+        # automatic/test_rewrite_css.py::test_rewrite_css_images inlines a
+        # small image into CSS; a request can only lower the threshold, so the
+        # page gets it from a path match block (after every site-scope line:
+        # the lines below a match line belong to it).
+        $pagespeedConfig += @"
+
+path:/mod_pagespeed_example/rewrite_css_images\.html
+pagespeed CssImageInlineMaxBytes 2048
+"@
+
         # Kept for New-DaemonSite, which derives the dedicated daemon site's
         # configuration from it. The main site and the server-level config
         # never carry the daemon directives: they keep classic in-place

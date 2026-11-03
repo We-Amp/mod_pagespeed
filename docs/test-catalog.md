@@ -15,7 +15,7 @@ bazel test --config=clang-libstdcxx13 \
   //test/pagespeed/... //test/net/...
 ```
 
-`iis_html_flushing_integration_test` is tagged `manual` and excluded from wildcard builds (it does not build: `TakePendingChunks` is missing). The IIS unit tests need Windows. Everything else in the two wildcards is expected to pass.
+The IIS unit tests need Windows. Everything else in the two wildcards is expected to pass.
 
 ### Apache System Tests
 
@@ -48,7 +48,7 @@ to use `fetch_until_contains`/`fetch_until_count` polling instead of blocking re
 |----------|-------|--------|--------|
 | Combine CSS (test_example.py) | ~3 | `not_envoy` | CSS combination times out |
 | Blocking Rewrite Stats | 1 | `not_envoy` | Tests blocking rewrite concept itself |
-| CssFlattenMaxBytes header | 1 | `not_envoy` | Header handling differs |
+| CssFlattenMaxBytes limit (test_flatten_css_imports.py) | 3 | `not_envoy`, `not_iis` | The limit is configuration only; the Envoy and IIS test setups have no per-directory option configuration |
 | Query Params Header Disable | 1 | `not_envoy` | `PageSpeedFilters` header not respected for IPRO |
 | IPRO Short Cache Lifetime | 1 | `not_envoy` | Different cache timing behavior |
 | Resource 404 Count | 1 | `not_envoy` | Envoy doesn't track `resource_404_count` statistic |

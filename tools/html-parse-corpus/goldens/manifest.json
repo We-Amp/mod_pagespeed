@@ -325,6 +325,12 @@
    "output_sha256": "602e973bfea421fd4b55b6c48ec404d50c4e33199c8b38aaf74ef9389a13097f"
   },
   {
+   "input": "seeds/end-tag-syntax.html",
+   "input_sha256": "d86221c613663f4371c85341f3832972796a917ff1b77c35be438c6bfd05e656",
+   "status": "ok",
+   "output_sha256": "938e24c9423d3f6f0461756301ff9904077a9cab711157567ef457f0615c4306"
+  },
+  {
    "input": "seeds/entity-attr-8bit.html",
    "input_sha256": "271cef945fa62ad7a73239ab50f657c3b551f970f81965bfa3895b111cf000ec",
    "status": "ok",

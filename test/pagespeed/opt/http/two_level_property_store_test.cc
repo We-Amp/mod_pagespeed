@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 #include "base/logging.h"
 #include "pagespeed/kernel/base/cache_interface.h"
@@ -33,6 +34,7 @@
 #include "pagespeed/opt/http/abstract_property_store_get_callback.h"
 #include "pagespeed/opt/http/cache_property_store.h"
 #include "pagespeed/opt/http/property_cache.pb.h"
+#include "pagespeed/opt/http/property_store.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 #include "test/pagespeed/kernel/base/mock_timer.h"
 #include "test/pagespeed/opt/http/mock_property_page.h"
@@ -358,6 +360,155 @@ TEST_F(TwoLevelPropertyStoreTest, TestInsertValueIntoPrimaryFromSecondary) {
   pv = page_->GetProperty(cohort_, kPropName1);
   EXPECT_TRUE(pv->has_value());
   EXPECT_EQ(kValueName1, pv->value());
+}
+
+namespace {
+
+// A store whose Put completion is controlled by the test: either inline with a
+// fixed result, or held until Release().
+class FakePutStore : public PropertyStore {
+ public:
+  FakePutStore(bool inline_result, bool hold)
+      : inline_result_(inline_result), hold_(hold), num_puts_(0) {}
+
+  void Get(const GoogleString&, const GoogleString&, const GoogleString&,
+           const PropertyCache::CohortVector&, PropertyPage*,
+           BoolCallback* done,
+           AbstractPropertyStoreGetCallback** callback) override {
+    *callback = nullptr;
+    done->Run(false);
+  }
+
+  void Put(const GoogleString&, const GoogleString&, const GoogleString&,
+           const PropertyCache::Cohort*, const PropertyCacheValues*,
+           BoolCallback* done) override {
+    ++num_puts_;
+    if (done == nullptr) {
+      return;
+    }
+    if (hold_) {
+      held_.push_back(done);
+    } else {
+      done->Run(inline_result_);
+    }
+  }
+
+  void Release(bool result) {
+    for (BoolCallback* done : held_) {
+      done->Run(result);
+    }
+    held_.clear();
+  }
+
+  GoogleString Name() const override { return "fake"; }
+  int num_puts() const { return num_puts_; }
+
+ private:
+  bool inline_result_;
+  bool hold_;
+  int num_puts_;
+  std::vector<BoolCallback*> held_;
+};
+
+}  // namespace
+
+class TwoLevelPropertyStorePutTest : public testing::Test {
+ protected:
+  TwoLevelPropertyStorePutTest()
+      : thread_system_(Platform::CreateThreadSystem()),
+        true_calls_(0),
+        false_calls_(0) {}
+
+  void Done(bool result) { ++(result ? true_calls_ : false_calls_); }
+
+  void DoPut(PropertyStore* store) {
+    PropertyCacheValues values;
+    store->Put(kUrl, kOptionsSignatureHash, kCacheKeySuffix, nullptr, &values,
+               NewCallback(this, &TwoLevelPropertyStorePutTest::Done));
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system_;
+  int true_calls_;
+  int false_calls_;
+};
+
+TEST_F(TwoLevelPropertyStorePutTest, BothLevelsSucceed) {
+  FakePutStore a(true, false), b(true, false);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(1, a.num_puts());
+  EXPECT_EQ(1, b.num_puts());
+  EXPECT_EQ(1, true_calls_);
+  EXPECT_EQ(0, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, PrimaryFails) {
+  FakePutStore a(false, false), b(true, false);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(0, true_calls_);
+  EXPECT_EQ(1, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, SecondaryFails) {
+  FakePutStore a(true, false), b(false, false);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(0, true_calls_);
+  EXPECT_EQ(1, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, WaitsForSlowLevelAndRunsOnce) {
+  FakePutStore a(true, false), b(true, true);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(0, true_calls_);
+  EXPECT_EQ(0, false_calls_);
+  b.Release(true);
+  EXPECT_EQ(1, true_calls_);
+  EXPECT_EQ(0, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, SlowLevelFailureReported) {
+  FakePutStore a(true, true), b(true, true);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(0, true_calls_ + false_calls_);
+  a.Release(true);
+  EXPECT_EQ(0, true_calls_ + false_calls_);
+  b.Release(false);
+  EXPECT_EQ(0, true_calls_);
+  EXPECT_EQ(1, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, PrimaryHeldWhileSecondaryCompletesInline) {
+  FakePutStore a(true, true), b(true, false);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(0, true_calls_ + false_calls_);
+  a.Release(true);
+  EXPECT_EQ(1, true_calls_);
+  EXPECT_EQ(0, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, SlowPrimaryFailsAfterSecondarySucceeds) {
+  FakePutStore a(true, true), b(true, false);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  DoPut(&store);
+  EXPECT_EQ(0, true_calls_ + false_calls_);
+  a.Release(false);
+  EXPECT_EQ(0, true_calls_);
+  EXPECT_EQ(1, false_calls_);
+}
+
+TEST_F(TwoLevelPropertyStorePutTest, NullDoneStillWritesBothLevels) {
+  FakePutStore a(true, false), b(true, false);
+  TwoLevelPropertyStore store(&a, &b, thread_system_.get());
+  PropertyCacheValues values;
+  store.Put(kUrl, kOptionsSignatureHash, kCacheKeySuffix, nullptr, &values,
+            nullptr);
+  EXPECT_EQ(1, a.num_puts());
+  EXPECT_EQ(1, b.num_puts());
 }
 
 }  // namespace net_instaweb

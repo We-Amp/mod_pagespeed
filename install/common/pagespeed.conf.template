@@ -353,6 +353,12 @@
     # file, to allow any client that can reach your server to access
     # and change server state, such as statistics, caches, and
     # messages.  This might be appropriate in an experimental setup.
+    #
+    # The requests mod_pagespeed makes to this server for its own use, to
+    # fetch the resources it optimizes, never count as local: these pages
+    # cannot be read through an optimized-resource URL, and resources in a
+    # location restricted to local clients are not optimized through the
+    # module's fetches.
     <Location /pagespeed_admin>
         Require local
         # see https://httpd.apache.org/docs/current/en/mod/mod_authz_host.html - Require all granted,

@@ -264,7 +264,11 @@ class Image {
 
   // Draws the given image on top of this one at the given offset.  Returns true
   // if successful.  Offsets must be non-negative and the image must fit
-  // entirely within this image; returns false otherwise.
+  // entirely within this image; returns false otherwise.  The drawing is done
+  // on one decoded raster that is kept until the output is next needed, so
+  // drawing a series of images costs each image's own pixels once, plus the
+  // canvas once.  If drawing fails part way, the canvas is unusable: later
+  // draws fail and it has no output.
   virtual bool DrawImage(Image* image, int x, int y) = 0;
 
   // Attempts to decode this image and load its raster into memory.  If this
@@ -306,6 +310,9 @@ class Image {
   GoogleString output_contents_;  // Lazily filled.
   bool output_valid_;             // Indicates output_contents_ now correct.
   bool rewrite_attempted_;        // Indicates if we tried rewriting for this.
+  // Canvas pixels DrawImage() has filled, copied or encoded on this image.
+  // Read by tests through ImageTestingPeer.
+  int64 canvas_pixel_work_ = 0;
 
  private:
   friend class ImageTestingPeer;

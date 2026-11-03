@@ -1,0 +1,1 @@
+- Detected hydrated pages keep stylesheet and script URLs and inline styles unchanged; images are still optimized, so CSS and script savings may drop. Detection can miss pages: disable the listed filters there. Purge CDN HTML.

@@ -48,6 +48,13 @@ class TestMappedDomains:
         require_status_ok(page, page_path)
         mapped_css = require_match(re.escape(MAPPED_PREFIX) + r"..*?\.css", page,
                                    "mapped CSS path").group(0)
+        # The page's virtual host optimized the stylesheet; the origin's
+        # virtual host answers for it.  Each virtual host has its own cache
+        # keyspace, so without one shared CacheFragment the origin's lookup
+        # misses and it rebuilds the resource itself, which here ends in the
+        # resource-not-found 404, since the lane cannot fetch the origin's
+        # input.  The three virtual hosts are one site and share a
+        # CacheFragment, as such a site is expected to (setup_apache_test.sh).
         css = vhost_client("origin.example.com").get(f"/{mapped_css}")
         require_status_ok(css, mapped_css)
         assert "max-age=31536000" in css.header("Cache-Control"), css.raw_headers

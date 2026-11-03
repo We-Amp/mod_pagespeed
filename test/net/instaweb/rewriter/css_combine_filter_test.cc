@@ -28,6 +28,7 @@
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/debug_filter.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
@@ -901,6 +902,85 @@ TEST_F(CssCombineFilterTest, IntegrityLinkSplitsCombination) {
   EXPECT_EQ("d.css", css_urls[1]);
   EXPECT_NE(StringPiece::npos, css_urls[2].find("c.css+e.css"));
   EXPECT_HAS_SUBSTR(kIntegrity, output_buffer_);
+}
+
+// Builds a stylesheet of exactly `size` bytes out of numbered rulesets and
+// trailing whitespace.
+GoogleString MakeCombineCssOfSize(int64 size) {
+  GoogleString css;
+  for (int i = 0;; ++i) {
+    const GoogleString rule = StrCat(".c", IntegerToString(i), "{color:red}\n");
+    if (static_cast<int64>(css.size() + rule.size()) > size) {
+      break;
+    }
+    StrAppend(&css, rule);
+  }
+  css.append(size - css.size(), ' ');
+  CHECK_EQ(size, static_cast<int64>(css.size()));
+  return css;
+}
+
+class CssCombineFilterParseMaxBytesTest : public CssCombineFilterTest {
+ protected:
+  static constexpr int64 kParseMaxBytes = 4096;
+
+  void SetUp() override {
+    CssCombineFilterTest::SetUp();
+    options()->ClearSignatureForTesting();
+    options()->set_css_parse_max_bytes(kParseMaxBytes);
+    server_context()->ComputeSignature(options());
+  }
+
+  // Links small.css and big.css (of `big_size` bytes) and returns the
+  // stylesheet URLs in the rewritten page.
+  StringVector CombineWithBig(StringPiece id, int64 big_size) {
+    SetHtmlMimetype();
+    SetResponseWithDefaultHeaders(StrCat(kDomain, "small.css"), kContentTypeCss,
+                                  ".s{color:blue}", 100);
+    SetResponseWithDefaultHeaders(StrCat(kDomain, "big.css"), kContentTypeCss,
+                                  MakeCombineCssOfSize(big_size), 100);
+    ParseUrl(StrCat(kDomain, id, ".html"),
+             StrCat("<link rel='stylesheet' type='text/css' href='small.css'>",
+                    "<link rel='stylesheet' type='text/css' href='big.css'>"));
+    StringVector css_urls;
+    CollectCssLinks(id, output_buffer_, &css_urls);
+    return css_urls;
+  }
+
+  int64 Exceeded() {
+    return statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get();
+  }
+};
+
+TEST_F(CssCombineFilterParseMaxBytesTest, OverBoundIsNotCombined) {
+  const StringVector css_urls = CombineWithBig("over", kParseMaxBytes + 1);
+  ASSERT_EQ(2, css_urls.size());
+  EXPECT_EQ("small.css", css_urls[0]);
+  EXPECT_EQ("big.css", css_urls[1]);
+  EXPECT_LT(0, Exceeded());
+}
+
+TEST_F(CssCombineFilterParseMaxBytesTest, AtBoundIsCombined) {
+  const StringVector css_urls = CombineWithBig("at", kParseMaxBytes);
+  ASSERT_EQ(1, css_urls.size());
+  EXPECT_NE(StringPiece::npos, css_urls[0].find("small.css+big.css"));
+  EXPECT_EQ(0, Exceeded());
+}
+
+// A stylesheet the origin does not label as CSS is never combined.
+TEST_F(CssCombineFilterTest, OriginTypeNotCssIsCombinationBarrier) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='note.txt'>";
+  SetResponseWithDefaultHeaders(StrCat(kDomain, "note.txt"), kContentTypeText,
+                                kYellow, 100);
+  UseMd5Hasher();
+  CombineCss("origin_type_barrier", kBarrier, "", true);
+
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(Encode(kDomain, RewriteOptions::kCssCombinerId,
+                                       "0", MultiUrl(kCssA, "note.txt"), "css"),
+                                &content));
 }
 
 TEST_F(CssCombineFilterTest, AlternateStylesheetBarrier) {
@@ -2030,8 +2110,8 @@ class CssCombineAndCacheExtendTest : public CssCombineFilterTest {
 
 TEST_F(CssCombineAndCacheExtendTest, CombineCssNoExtraCacheExtension) {
   SetHtmlMimetype();
-  SetResponseWithDefaultHeaders(kCssA, kContentTypeJavascript, kYellow, 100);
-  SetResponseWithDefaultHeaders(kCssB, kContentTypeJavascript, kBlue, 100);
+  SetResponseWithDefaultHeaders(kCssA, kContentTypeCss, kYellow, 100);
+  SetResponseWithDefaultHeaders(kCssB, kContentTypeCss, kBlue, 100);
   GoogleString combined_url = Encode("", RewriteOptions::kCssCombinerId, "0",
                                      MultiUrl(kCssA, kCssB), "css");
 

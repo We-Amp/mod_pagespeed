@@ -414,6 +414,13 @@ void DomainRewriteFilter::StartElementImpl(HtmlElement* element) {
                           attribute.category == semantic_type::kStylesheet)) {
       continue;
     }
+    // A hydrating framework looks stylesheets and async scripts up by the URL
+    // it rendered.
+    if ((attribute.category == semantic_type::kStylesheet ||
+         attribute.category == semantic_type::kScript) &&
+        driver()->is_hydrated_document()) {
+      continue;
+    }
     // Only rewrite attributes that are resource-tags.  If hyperlinks
     // is on that's fine too.
     bool is_resource = (attribute.category == semantic_type::kImage ||

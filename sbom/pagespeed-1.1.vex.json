@@ -3,8 +3,8 @@
   "@id": "https://we-amp.com/vex/pagespeed-1.1",
   "author": "We-Amp B.V.",
   "role": "vendor",
-  "timestamp": "2026-10-23T12:00:00Z",
-  "version": 6,
+  "timestamp": "2026-11-03T12:00:00Z",
+  "version": 7,
   "statements": [
     {
       "vulnerability": {
@@ -160,6 +160,28 @@
       "products": [ { "@id": "pkg:github/envoyproxy/envoy@v1.40.1" } ],
       "status": "fixed",
       "impact_statement": "Fixed in Envoy 1.37.6. This source tree pins Envoy 1.40.1 for the experimental Envoy filter, which includes the fix. No binary artefact of mod_pagespeed 1.1 contains Envoy (Apache module, nginx module and tarball, IIS installer, deb/rpm packages). Listed as fixed because the scan gate matches on the dependency package and cannot compare the commit-pinned version."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-xfq5-w38q-pc2x",
+        "aliases": ["CVE-2026-114133"]
+      },
+      "timestamp": "2026-11-03T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/nuxt@3.21.11" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2027-02-01. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server runs at any point. The advisory needs server islands (a .server.vue component or page, or <NuxtIsland> with experimental.componentIslands) that call useHeadSafe with user-controlled input; the fixture (app.vue, nuxt.config.ts) has no server component, no NuxtIsland, does not enable componentIslands and never calls useHeadSafe. The fix is only in nuxt 4.6.2, a major update of the fixture. Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-vjh5-4x84-xrqp",
+        "aliases": ["CVE-2026-114132"]
+      },
+      "timestamp": "2026-11-03T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/nuxt@3.21.11" }, { "@id": "pkg:npm/%40nuxt/nitro-server@3.21.11" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2027-02-01. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server runs at any point. The advisory is about server-side route rules (redirect, headers, proxy, ssr, noScripts) skipped for case-variant paths by the Nitro server; the fixture's nuxt.config.ts defines no routeRules, and with no server at runtime no route rule is resolved. No fix exists on the 3.x line (fixed in nuxt and @nuxt/nitro-server 4.6.2). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
     }
   ]
 }

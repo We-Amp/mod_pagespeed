@@ -18,6 +18,7 @@
   import { useConsole } from "$lib/api/context";
   import { router } from "$lib/router.svelte";
   import LoadError from "$lib/LoadError.svelte";
+  import HtmlCachePanel from "$lib/HtmlCachePanel.svelte";
   import PageHeader from "$lib/PageHeader.svelte";
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import {
@@ -29,9 +30,11 @@
     normalizeCooldowns,
     objectEntries,
   } from "$lib/utils/daemon";
-  import { formatBytes, formatCount, formatDuration, formatPercent } from "$lib/utils/format";
+  import { formatBytes, formatCount, formatDuration, formatPercent, formatSignedBytes } from "$lib/utils/format";
   import { foldStatus, optimizerSection, sampleStatus, statusView, type StatusSample } from "$lib/utils/optimizer-status";
-  import { SAVINGS_QUALIFIER, serveSavingsView } from "$lib/utils/serve-savings";
+  import { SAVINGS_QUALIFIER, serveSavingsView, splitCells } from "$lib/utils/serve-savings";
+  import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
+  import { SPLIT_TEXT } from "$lib/data/split-text";
   import { hostSavingsView } from "$lib/utils/host-savings";
 
   const { api, lens } = useConsole();
@@ -346,6 +349,13 @@
                   <th scope="col" class="num">Original</th>
                   <th scope="col" class="num">Served</th>
                   <th scope="col" class="num">Saved</th>
+                  {#if savings.total?.split?.available}
+                    <th scope="col" class="num">{SPLIT_TEXT.encodingLabel}</th>
+                    <th scope="col" class="num">{SPLIT_TEXT.rewriteLabel}</th>
+                    {#if savings.total.split.coverage < 1}
+                      <th scope="col" class="num">{SPLIT_TEXT.unsplitLabel}</th>
+                    {/if}
+                  {/if}
                 </tr>
               </thead>
               <tbody>
@@ -355,7 +365,15 @@
                     <td class="value-cell">{formatCount(row.hits)}</td>
                     <td class="value-cell">{formatBytes(row.original)}</td>
                     <td class="value-cell">{formatBytes(row.served)}</td>
-                    <td class="value-cell">{formatBytes(row.saved)}{row.percent !== null ? ` (${formatPercent(row.percent)})` : ""}</td>
+                    <td class="value-cell">{formatSignedBytes(row.saved)}{row.percent !== null ? ` (${formatPercent(row.percent)})` : ""}</td>
+                    {#if savings.total?.split?.available}
+                      {@const cells = splitCells(row.split)}
+                      <td class="value-cell">{cells.encoding}</td>
+                      <td class="value-cell">{cells.rewrite}</td>
+                      {#if savings.total.split.coverage < 1}
+                        <td class="value-cell">{cells.unsplit}</td>
+                      {/if}
+                    {/if}
                   </tr>
                 {/each}
               </tbody>
@@ -368,12 +386,23 @@
                     <td class="value-cell">{formatCount(totalHits)}</td>
                     <td class="value-cell">{formatBytes(savings.total.original)}</td>
                     <td class="value-cell">{formatBytes(totalServed)}</td>
-                    <td class="value-cell">{formatBytes(savings.total.saved)} ({formatPercent(savings.total.percent)})</td>
+                    <td class="value-cell">{formatSignedBytes(savings.total.saved)} ({formatPercent(savings.total.percent)})</td>
+                    {#if savings.total.split?.available}
+                      {@const cells = splitCells(savings.total.split)}
+                      <td class="value-cell">{cells.encoding}</td>
+                      <td class="value-cell">{cells.rewrite}</td>
+                      {#if savings.total.split.coverage < 1}
+                        <td class="value-cell">{cells.unsplit}</td>
+                      {/if}
+                    {/if}
                   </tr>
                 </tfoot>
               {/if}
             </table>
           </div>
+          {#if savings.total}
+            <SavingsSplitLine split={savings.total.split} />
+          {/if}
         {:else}
           <p class="empty" data-testid="serve-savings-none">
             No optimized responses have been served from the optimizer's cache yet.
@@ -400,6 +429,7 @@
       <p class="empty" data-testid="cache-unavailable">The optimizer's statistics are not available; see Load above.</p>
     {/if}
   </section>
+  <HtmlCachePanel />
   </div>
 </div>
 

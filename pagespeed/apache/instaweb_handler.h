@@ -213,6 +213,12 @@ class InstawebHandler {
   // Gathers what the daemon-side SERVE arm needs about the request.
   void BuildDaemonServeRequest(DaemonServeRequest* request);
 
+  // The site of this request's server record, for both daemon arms: the
+  // digest of the record's derived fragment when it has one, else of its
+  // server context's global configuration.  Never of options_, which also
+  // hold per-directory settings that do not choose the site.
+  GoogleString DaemonSiteId() const;
+
   // Records one serve class against the peer's serve-stats mmap.
   void RecordDaemonServeClass(int serve_class);
 
@@ -324,6 +330,7 @@ class InstawebHandler {
   GoogleString daemon_serve_url_;
   GoogleString daemon_serve_host_;
   GoogleString daemon_serve_scheme_;
+  GoogleString daemon_serve_site_;
 
   ApacheServerContext* server_context_;
   std::unique_ptr<RequestHeaders> request_headers_;

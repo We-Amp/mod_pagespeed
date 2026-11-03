@@ -245,8 +245,18 @@ int GzipInflater::InflateBytes(char* buf, size_t buf_size) {
     return -1;
   }
 
+  // With a limit, ask for no more than one byte past it, which is enough to
+  // tell that the input inflates past the limit.
+  size_t out_size = buf_size;
+  if (max_inflated_bytes_ >= 0) {
+    const uint64 remaining = max_inflated_bytes_ - inflated_bytes_;
+    if (remaining + 1 < out_size) {
+      out_size = remaining + 1;
+    }
+  }
+
   zlib_->next_out = reinterpret_cast<Bytef*>(buf);
-  zlib_->avail_out = static_cast<uInt>(buf_size);
+  zlib_->avail_out = static_cast<uInt>(out_size);
 
   // Take a snapshot of the zlib state before we attempt to inflate,
   // as we may need to recall the previous state if the inflate fails.
@@ -268,16 +278,24 @@ int GzipInflater::InflateBytes(char* buf, size_t buf_size) {
     zlib_->next_in = zlib_snapshot.next_in;
     zlib_->avail_in = zlib_snapshot.avail_in;
     zlib_->next_out = reinterpret_cast<Bytef*>(buf);
-    zlib_->avail_out = static_cast<uInt>(buf_size);
+    zlib_->avail_out = static_cast<uInt>(out_size);
     err = inflate(zlib_, Z_SYNC_FLUSH);
   }
 
   const size_t inflated_bytes = zlib_->total_out - zlib_snapshot.total_out;
+  if (max_inflated_bytes_ >= 0 &&
+      inflated_bytes_ + static_cast<int64>(inflated_bytes) >
+          max_inflated_bytes_) {
+    error_ = true;
+    limit_exceeded_ = true;
+    return -1;
+  }
+  inflated_bytes_ += inflated_bytes;
 
   if (err == Z_STREAM_END) {
     finished_ = true;
   } else if (err == Z_OK) {
-    if (inflated_bytes < buf_size) {
+    if (inflated_bytes < out_size) {
       // Sanity check that if we didn't fill the output buffer, it's
       // because we consumed all of the input.
       DCHECK(!HasUnconsumedInput());

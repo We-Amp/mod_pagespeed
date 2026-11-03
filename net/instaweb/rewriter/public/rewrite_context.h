@@ -37,6 +37,7 @@
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
+#include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/google_url.h"
@@ -257,6 +258,14 @@ class RewriteContext {
   bool Fetch(const OutputResourcePtr& output_resource, AsyncFetch* fetch,
              MessageHandler* message_handler);
 
+  // Answers a conditional request for output_resource with a 304, built from
+  // the metadata cache. If the metadata does not vouch for the requested hash,
+  // the 304 is bare. Never fetches inputs, rewrites or loads the output.
+  // Returns false if it could not start, without having answered the fetch;
+  // the caller answers it.
+  bool FetchNotModified(const OutputResourcePtr& output_resource,
+                        AsyncFetch* fetch, MessageHandler* message_handler);
+
   // If true, we have determined that this job can't be rendered just
   // from metadata cache (including all prerequisites).
   bool slow() const { return slow_; }
@@ -411,6 +420,14 @@ class RewriteContext {
   // than the input resource.
   virtual bool SendFallbackResponse(StringPiece output_url_base,
                                     StringPiece contents,
+                                    AsyncFetch* async_fetch,
+                                    MessageHandler* handler);
+
+  // Returns false, logging why, if the content type in async_fetch's response
+  // headers is not one we would generate a pagespeed resource for. Every
+  // SendFallbackResponse implementation must check this before writing the
+  // input out.
+  bool IsFallbackContentTypeAllowed(StringPiece output_url_base,
                                     AsyncFetch* async_fetch,
                                     MessageHandler* handler);
 
@@ -710,6 +727,12 @@ class RewriteContext {
   void RepeatedSuccess(const RewriteContext* primary);
   void RepeatedFailure();
 
+  // Returns true if 'context' is this one or cannot finish before this one
+  // does: it is a parent or repeated rewrite of this or of another context
+  // that waits for this one.  Everything reached that way has not finished
+  // either, so this is safe to call on any context that has not finished.
+  bool IsWaitedOnBy(const RewriteContext* context, ContextSet* visited);
+
   // After a Rewrite is complete, writes the metadata for the rewrite
   // operation to the cache, and runs any further rewites that are
   // dependent on this one.
@@ -876,6 +899,9 @@ class RewriteContext {
   // Callback for metadata lookup on fetch path.
   void FetchCacheDone(CacheLookupResult* cache_result);
 
+  // Called on the metadata lookup for FetchNotModified.
+  void FetchNotModifiedCacheDone(CacheLookupResult* cache_result);
+
   // Callback for HTTP lookup on fetch path where the metadata cache suggests
   // we should try either serving a different path or the original.
   void FetchFallbackCacheDone(HTTPCache::FindResult result,
@@ -895,6 +921,12 @@ class RewriteContext {
   // dependencies. Updates the internal other_dependency map that is used to
   // de-dup the contents.
   void CheckAndAddOtherDependency(const InputInfo& input);
+
+  // Adds to the partitions' debug messages the ones they do not hold yet, as
+  // long as what was merged stays within what the document can still emit
+  // (RewriteDriver::DebugOutputBytesRemaining()); the rest is dropped.
+  void AddDebugMessages(
+      const protobuf::RepeatedPtrField<GoogleString>& messages);
 
   // Perform checks and freshen the input resource. Also updates metadata if
   // required.
@@ -1043,6 +1075,9 @@ class RewriteContext {
   // is stale.
   bool stale_rewrite_;
 
+  // Set by FetchNotModified: this fetch is a conditional request.
+  bool fetch_not_modified_ = false;
+
   // Indicates whether we have a metadata miss (or an unsuccessful revalidation
   // attempt) on the html path.
   bool is_metadata_cache_miss_;
@@ -1057,6 +1092,15 @@ class RewriteContext {
 
   // Map to dedup partitions other dependency field.
   StringIntMap other_dependency_map_;
+
+  // Set of serialized other dependency entries, to dedup them on contents.
+  StringSet other_dependency_set_;
+
+  // Set to dedup partitions debug_message field.
+  StringSet debug_message_set_;
+
+  // Bytes of debug messages merged in by AddDebugMessages.
+  int64 debug_message_bytes_ = 0;
 
   // Transaction context from the rewrite scheduler, if
   // ScheduleViaNamedLockController() returned true. Communicates back to

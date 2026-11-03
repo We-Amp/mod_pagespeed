@@ -39,6 +39,11 @@ class ImageTestingPeer {
     return image->ShouldConvertToProgressive(quality);
   }
 
+  // Canvas pixels DrawImage() and the canvas encode have touched so far.
+  static int64 CanvasPixelWork(const Image* image) {
+    return image->canvas_pixel_work_;
+  }
+
  private:
   ImageTestingPeer(const ImageTestingPeer&) = delete;
   ImageTestingPeer& operator=(const ImageTestingPeer&) = delete;

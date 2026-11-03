@@ -60,6 +60,13 @@ void CommonFilter::InsertNodeAtBodyEnd(HtmlNode* data) {
   }
 }
 
+void CommonFilter::InsertDebugCommentAtBodyEnd(StringPiece unescaped) {
+  HtmlNode* comment = driver_->NewBudgetedDebugCommentNode(unescaped);
+  if (comment != nullptr) {
+    InsertNodeAtBodyEnd(comment);
+  }
+}
+
 void CommonFilter::StartDocument() {
   // Base URL starts as document URL.
   noscript_element_ = nullptr;

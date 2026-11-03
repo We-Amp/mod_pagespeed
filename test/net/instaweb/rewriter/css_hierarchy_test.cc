@@ -600,6 +600,40 @@ TEST_F(CssHierarchyTest, FailOnIndirectRecursion) {
   EXPECT_FALSE(greatgrandchild2->flattening_succeeded());  // ... should fail.
 }
 
+TEST_F(CssHierarchyTest, FailOnTooManyImports) {
+  InitializeCss("", "");  // to initialize top_url().
+
+  // The @imports are counted over the whole tree: the top-level CSS has as
+  // many as are allowed in total, all of distinct URLs so that none of them
+  // is recursive, and a child with one more @import must not be expanded.
+  GoogleString many_imports;
+  for (int i = 0; i < CssHierarchy::kMaxImportsPerRoot; ++i) {
+    StrAppend(&many_imports,
+              MakeAtImport(StrCat("child", IntegerToString(i), ".css"), ""));
+  }
+  CssHierarchy top(nullptr);
+  top.InitializeRoot(top_url(), top_url(), many_imports,
+                     false /* has_unparseables */,
+                     0 /* flattened_result_limit */, nullptr /* stylesheet */,
+                     message_handler());
+  EXPECT_TRUE(top.Parse());
+  EXPECT_TRUE(top.ExpandChildren());
+  EXPECT_TRUE(top.flattening_succeeded());
+  EXPECT_EQ(CssHierarchy::kMaxImportsPerRoot, top.children().size());
+
+  CssHierarchy* child = top.children()[0];
+  child->set_input_contents(nested_child1_css());
+  EXPECT_TRUE(child->NeedsRewriting());
+  EXPECT_TRUE(child->Parse());
+  EXPECT_FALSE(child->ExpandChildren());
+  EXPECT_FALSE(child->flattening_succeeded());
+  EXPECT_EQ(0, child->children().size());
+  EXPECT_EQ(StrCat("Flattening failed: More than ",
+                   IntegerToString(CssHierarchy::kMaxImportsPerRoot),
+                   " @imports in total, reached in ", child->url()),
+            child->flattening_failure_reason());
+}
+
 TEST_F(CssHierarchyTest, UnparseableSection) {
   InitializeCss("", "");  // to initialize top_url().
 

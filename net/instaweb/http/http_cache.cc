@@ -259,7 +259,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
                                                          handler_) ||
                 !InflatingFetch::UnGzipValueIfCompressed(
                     *callback_->http_value(), &fallback_headers,
-                    callback_->fallback_http_value(), handler_)) {
+                    callback_->fallback_http_value(), handler_,
+                    http_cache_->MaxInflatedBodyBytes())) {
               // If we don't need to unzip, or can't unzip, then just
               // link the value and fallback together.
               callback_->fallback_http_value()->Link(callback_->http_value());
@@ -288,7 +289,8 @@ class HTTPCacheCallback : public CacheInterface::Callback {
                headers->IsGzipped()) {
       HTTPValue new_value;
       if (InflatingFetch::UnGzipValueIfCompressed(
-              *callback_->http_value(), headers, &new_value, handler_)) {
+              *callback_->http_value(), headers, &new_value, handler_,
+              http_cache_->MaxInflatedBodyBytes())) {
         callback_->http_value()->Link(&new_value);
       }
     }
@@ -476,7 +478,8 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
     }
 
     if (InflatingFetch::UnGzipValueIfCompressed(*value, headers_to_unzip,
-                                                &working_value, handler)) {
+                                                &working_value, handler,
+                                                MaxInflatedBodyBytes())) {
       value = &working_value;
     }
   }
@@ -567,6 +570,15 @@ void HTTPCache::Put(const GoogleString& key, const GoogleString& fragment,
       cache_inserts_->Add(1);
     }
   }
+}
+
+int64 HTTPCache::MaxInflatedBodyBytes() const {
+  if (max_cacheable_response_content_length_ >= 0 &&
+      max_cacheable_response_content_length_ <
+          InflatingFetch::kMaxInflatedBytes) {
+    return max_cacheable_response_content_length_;
+  }
+  return InflatingFetch::kMaxInflatedBytes;
 }
 
 bool HTTPCache::IsCacheableContentLength(ResponseHeaders* headers) const {

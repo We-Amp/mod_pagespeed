@@ -46,6 +46,10 @@ class MessageHandler;
 // by calling EnableGzipFromBackend.
 class InflatingFetch : public SharedAsyncFetch {
  public:
+  // Largest size a body may inflate to.  A body that would inflate past it
+  // fails like a corrupt one, with no more than this many bytes written.
+  static const int64 kMaxInflatedBytes = 256 << 20;
+
   explicit InflatingFetch(AsyncFetch* fetch);
   ~InflatingFetch() override;
 
@@ -56,13 +60,19 @@ class InflatingFetch : public SharedAsyncFetch {
 
   // Inflate a GZipped HTTPValue if it has been gzipped-compressed,
   // updating the headers to reflect the new state.  Returns false if
-  // the data was not compressed, leaving dest unmodified.
+  // the data was not compressed, or inflates past max_inflated_bytes,
+  // leaving dest unmodified.
   //
   // Notes: dest and src should not be the same object.  If the
   // unzip fails, you may need to link src into dest.
-  static bool UnGzipValueIfCompressed(const HTTPValue& src,
-                                      ResponseHeaders* headers, HTTPValue* dest,
-                                      MessageHandler* handler);
+  static bool UnGzipValueIfCompressed(
+      const HTTPValue& src, ResponseHeaders* headers, HTTPValue* dest,
+      MessageHandler* handler, int64 max_inflated_bytes = kMaxInflatedBytes);
+
+  // Lowers (or restores) the size a streamed body may inflate to.
+  void set_max_inflated_bytes(int64 max_inflated_bytes) {
+    max_inflated_bytes_ = max_inflated_bytes;
+  }
   // GZip compress HTTPValue, updating the headers reflect the new
   // state, output to compressed_value. Returns true if the value is
   // successfully compressed.
@@ -124,6 +134,12 @@ class InflatingFetch : public SharedAsyncFetch {
   // Whether any kind of error happened to the inflater. Once set to true, never
   // gets reset.
   bool inflate_failure_;
+
+  // Largest size this fetch lets a body inflate to.
+  int64 max_inflated_bytes_;
+
+  // Number of bytes inflated and passed on to the linked fetch so far.
+  int64 inflated_bytes_;
 
   InflatingFetch(const InflatingFetch&) = delete;
   InflatingFetch& operator=(const InflatingFetch&) = delete;

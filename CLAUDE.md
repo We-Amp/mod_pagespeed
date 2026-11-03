@@ -316,7 +316,7 @@ Run `./test/system/run_envoy_tests.sh`; see `docs/test-catalog.md` for current p
 The Envoy skips are documented limitations (marked `@pytest.mark.not_envoy`):
 - **Statistics** - `resource_404_count` not tracked
 - **IPRO cache headers** - Different cache header behavior
-- **CssFlattenMaxBytes header** - Header handling differs
+- **CssFlattenMaxBytes limit** - Configuration only; Envoy test setup has no per-directory option configuration
 - **Query params header** - PageSpeedFilters header not respected for IPRO
 - **Other** - Content-Length, HTTPS combination
 
@@ -488,8 +488,8 @@ Tests in `test/iis/` (26 Python files):
 C++ unit tests in `test/pagespeed/iis/` (`*_test.cc`, e.g.):
 - Core: `iis_config_test.cc`, `iis_server_context_test.cc`
 - HTTP: `iis_http_module_test.cc`, `iis_header_util_test.cc`, `iis_base_fetch_test.cc`
-- Streaming: `iis_streaming_fetch_test.cc`, `iis_dechunker_feed_test.cc`, `iis_content_decoder_test.cc`
-- Integration: `iis_rewrite_integration_test.cc`, `iis_html_flushing_integration_test.cc`
+- Streaming: `iis_dechunker_feed_test.cc`
+- Integration: `iis_rewrite_integration_test.cc`
 
 ### Platform Differences
 

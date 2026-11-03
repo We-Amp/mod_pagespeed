@@ -166,6 +166,35 @@ TEST_F(CssOutlineFilterTest, DoNotOutlineIntegrityStyle) {
                     "<style INTEGRITY=\"sha384-y\">b { color: blue; }</style>");
 }
 
+// A policy that governs styles keeps the style inline; one that does not
+// leaves outlining alone.
+TEST_F(CssOutlineFilterTest, StyleStaysInlineUnderStylePolicy) {
+  SetupOutliner();
+  ValidateNoChanges("style_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"style-src 'self'\">"
+                    "<style>.a { color: red; }</style>");
+  ValidateNoChanges("default_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"default-src 'self'\">"
+                    "<style>.a { color: red; }</style>");
+  ValidateNoChanges("nonce_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"style-src 'nonce-abc'\">"
+                    "<style nonce=\"abc\">.a { color: red; }</style>");
+}
+
+TEST_F(CssOutlineFilterTest, StyleIsOutlinedUnderUnrelatedPolicy) {
+  SetupOutliner();
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src 'self'\">";
+  ValidateExpected("irrelevant_csp",
+                   StrCat(kCsp, "<style>.a { color: red; }</style>"),
+                   StrCat(kCsp, "<link rel=\"stylesheet\" href=\"",
+                          Encode(kTestDomain, "co", "0", "_", "css"), "\">"));
+}
+
 TEST_F(CssOutlineFilterTest, OutlineStyleMD5) {
   SetupOutliner();
   UseMd5Hasher();

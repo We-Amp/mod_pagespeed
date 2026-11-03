@@ -121,8 +121,6 @@ enforced on IIS as on the other ports.
 - Incremental flushing of rewritten HTML is compiled out (`IISPEEDHASFLUSH`
   is not defined in `pagespeed/iis/BUILD`); rewritten HTML output is
   buffered rather than flushed in windows
-- `iis_html_flushing_integration_test` is excluded from the build for the
-  same reason (see `docs/test-catalog.md`)
 
 ### Forbidden Filters
 - `convert_meta_tags` is forbidden (`iis_rewrite_driver_factory.cpp`): the
@@ -223,6 +221,4 @@ The IIS suite lives in `test/iis/` (Python integration, now ~30 test files)
 and `test/pagespeed/iis/` (C++ unit tests); see `docs/test-catalog.md` for
 the current catalog. The pass counts previously listed here (19/19 C++,
 350/356 Python with a per-file table) were a 1.1.0-beta.1 snapshot of a much
-smaller suite and have been removed rather than left to rot. Known standing
-exclusion: `iis_html_flushing_integration_test` (flushing compiled out, see
-above).
+smaller suite and have been removed rather than left to rot.

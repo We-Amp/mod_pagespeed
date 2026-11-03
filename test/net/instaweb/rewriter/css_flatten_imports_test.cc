@@ -20,6 +20,9 @@
 #include <cstddef>
 
 #include "base/logging.h"
+#include "net/instaweb/http/public/counting_url_async_fetcher.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
+#include "net/instaweb/rewriter/public/css_hierarchy.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -404,6 +407,25 @@ TEST_F(CssFlattenImportsTest, FlattenInlineCss) {
   EXPECT_EQ(expected_savings, total_bytes_saved_->Get());
 }
 
+TEST_F(CssFlattenImportsTest, FlattenInlineCssWithOptionsInUrls) {
+  // Flattening an inline style while options are added to URLs names the
+  // nested import context with an ID that has no registered filter; that
+  // must not stop the rewrite.
+  options()->ClearSignatureForTesting();
+  options()->set_add_options_to_urls(true);
+  server_context()->ComputeSignature(options());
+
+  const char kOwnCssUrl[] = "http://test.com/own-flat.css";
+  const char kOwnCss[] = ".own-box{margin:3px}";
+  SetResponseWithDefaultHeaders(kOwnCssUrl, kContentTypeCss, kOwnCss, 100);
+  const GoogleString css_in =
+      StrCat("@import url(", kOwnCssUrl, ");", "/*", GoogleString(3000, 'w'),
+             "*/.own-tail{color:#123456}");
+  ValidateRewriteInlineCss("flatten_with_options_in_urls", css_in,
+                           StrCat(kOwnCss, ".own-tail{color:#123456}"),
+                           kExpectSuccess);
+}
+
 TEST_F(CssFlattenImportsTest, FlattenKeepsLicenseComments) {
   SetResponseWithDefaultHeaders(
       kSimpleCssFile, kContentTypeCss,
@@ -493,6 +515,69 @@ TEST_F(CssFlattenImportsTest, Flatten404) {
 
   ValidateRewriteExternalCss("flatten_404", css_in, css_in,
                              kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssFlattenImportsTest, FlattenDebugMessageReportedOnce) {
+  // A message handed up by two nested rewrites is reported once.
+  DebugWithMessage(
+      "<!--4xx status code, preventing rewriting of"
+      " http://test.com/404.css-->");
+  SetResponseWithDefaultHeaders("twice.css", kContentTypeCss,
+                                "@import url(http://test.com/404.css);", 100);
+  const char css_in[] = "@import url(twice.css);@import url(twice.css);";
+
+  ValidateRewriteExternalCss("flatten_404_imported_twice", css_in, css_in,
+                             kExpectSuccess | kNoClearFetcher);
+}
+
+TEST_F(CssFlattenImportsTest, StoredDependenciesStayBounded) {
+  // What is stored for the top file stays within a fixed size.
+  const int kLevels = 14;
+  SetFetchResponse404("http://test.com/lvl14.css");
+  for (int i = 0; i < kLevels; ++i) {
+    const GoogleString next = StrCat("lvl", IntegerToString(i + 1), ".css");
+    SetResponseWithDefaultHeaders(
+        StrCat("lvl", IntegerToString(i), ".css"), kContentTypeCss,
+        StrCat("@import url(", next, ");@import url(", next, ");"), 100);
+  }
+  const char css_in[] = "@import url(lvl0.css);";
+  ValidateRewriteExternalCss("repeated_imports", css_in, css_in,
+                             kExpectSuccess | kNoClearFetcher);
+  EXPECT_GT(30000U, lru_cache()->size_bytes());
+}
+
+TEST_F(CssFlattenImportsTest, StoredDependenciesStayBoundedWithTwoExpiries) {
+  // With cache purge on, records carry the input's URL. One URL held with two
+  // expiry times stays within a fixed size.
+  options()->ClearSignatureForTesting();
+  options()->set_enable_cache_purge(true);
+  server_context()->ComputeSignature(options());
+  const char kX[] = ".x{color:red}";
+  SetResponseWithDefaultHeaders("x.css", kContentTypeCss, kX, 1000);
+  ValidateRewriteExternalCss("first_expiry", "@import url(x.css);", kX,
+                             kExpectSuccess | kNoClearFetcher);
+  AdvanceTimeMs(100 * Timer::kSecondMs);
+  lru_cache()->Delete(HttpCacheKey("http://test.com/x.css"));
+  SetResponseWithDefaultHeaders("x.css", kContentTypeCss, kX, 1000);
+
+  const int kLevels = 12;
+  for (int i = 0; i < kLevels; ++i) {
+    const GoogleString next = StrCat("lvl", IntegerToString(i + 1), ".css");
+    SetResponseWithDefaultHeaders(
+        StrCat("lvl", IntegerToString(i), ".css"), kContentTypeCss,
+        StrCat("@import url(", next, ");@import url(", next, ");"), 100);
+  }
+  SetResponseWithDefaultHeaders(StrCat("lvl", IntegerToString(kLevels), ".css"),
+                                kContentTypeCss,
+                                "@import url(x.css);@import url(x.css) screen;",
+                                100);
+  GoogleString expected;
+  for (int i = 0; i < (1 << kLevels); ++i) {
+    StrAppend(&expected, kX, "@media screen{", kX, "}");
+  }
+  ValidateRewriteExternalCss("two_expiries", "@import url(lvl0.css);", expected,
+                             kExpectSuccess | kNoClearFetcher);
+  EXPECT_GT(1000000U, lru_cache()->size_bytes());
 }
 
 TEST_F(CssFlattenImportsTest, DontFlattenWithUnauthorizedCSS) {
@@ -651,6 +736,149 @@ TEST_F(CssFlattenImportsTest, DontFlattenOverTinyLimit) {
 
   TestLimit("dont_flatten_over_tiny_limit", true /* limit_exceeded */,
             10 /* flattening_limit */, 67 /* actual_amount */, css_in, css_out);
+}
+
+TEST_F(CssFlattenImportsTest, RootOverParseBoundIsNotFlattened) {
+  // The top-level CSS is over CssParseMaxBytes, so it is not parsed: nothing
+  // is flattened and its @import is never fetched.
+  const int64 kParseMaxBytes = 1000;
+  options()->ClearSignatureForTesting();
+  options()->set_css_parse_max_bytes(kParseMaxBytes);
+  server_context()->ComputeSignature(options());
+  SetResponseWithDefaultHeaders(kSimpleCssFile, kContentTypeCss, kSimpleCss,
+                                100);
+  GoogleString css_in = StrCat("@import url(", kSimpleCssFile, ");");
+  for (int i = 0; static_cast<int64>(css_in.size()) <= kParseMaxBytes; ++i) {
+    StrAppend(&css_in, ".r", IntegerToString(i), "{color:red}");
+  }
+  ValidateRewriteExternalCss("root_over_parse_bound", css_in, css_in,
+                             kExpectNoChange | kNoClearFetcher);
+  // Only the top-level CSS was fetched.
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(
+      1, statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get());
+}
+
+TEST_F(CssFlattenImportsTest, ParseBoundAppliesToTheRootOnly) {
+  // The top-level CSS is under CssParseMaxBytes and its imports are each over
+  // it: nested CSS is governed by the flattening limits, not by this bound,
+  // so the tree is flattened as before.
+  const int64 kParseMaxBytes = 200;
+  options()->ClearSignatureForTesting();
+  options()->set_css_parse_max_bytes(kParseMaxBytes);
+  server_context()->ComputeSignature(options());
+  GoogleString css_in, css_out;
+  for (int f = 0; f < 3; ++f) {
+    const GoogleString name = StrCat("big", IntegerToString(f), ".css");
+    GoogleString body;
+    for (int i = 0; static_cast<int64>(body.size()) <= kParseMaxBytes; ++i) {
+      StrAppend(&body, ".f", IntegerToString(f), "r", IntegerToString(i),
+                "{color:red}");
+    }
+    SetResponseWithDefaultHeaders(name, kContentTypeCss, body, 100);
+    StrAppend(&css_in, "@import url(", name, ");");
+    StrAppend(&css_out, body);
+  }
+  ASSERT_GE(kParseMaxBytes, static_cast<int64>(css_in.size()));
+  ValidateRewriteExternalCss("root_under_parse_bound", css_in, css_out,
+                             kExpectSuccess | kNoClearFetcher);
+  EXPECT_EQ(
+      0, statistics()->GetVariable(CssFilter::kParseMaxBytesExceeded)->Get());
+}
+
+TEST_F(CssFlattenImportsTest, DontLoadRepeatedImportsOverLimit) {
+  // simple.css is fetched and flattened once; the other three @imports of it
+  // are handed that result. The limit has room for two of those, so the third
+  // is refused before it is copied and parsed.
+  const char css_in[] =
+      "@import url(http://test.com/simple.css);\n"
+      "@import url(http://test.com/simple.css);\n"
+      "@import url(http://test.com/simple.css);\n"
+      "@import url(http://test.com/simple.css);\n";
+  const char css_out[] =
+      "@import url(http://test.com/simple.css);"
+      "@import url(http://test.com/simple.css);"
+      "@import url(http://test.com/simple.css);"
+      "@import url(http://test.com/simple.css);";
+  const int simple_css_size = STATIC_STRLEN(kSimpleCss);
+
+  TestLimit("dont_load_repeats_over_limit", true /* limit_exceeded */,
+            3 * simple_css_size /* flattening_limit */,
+            3 * simple_css_size /* actual_amount */, css_in, css_out);
+}
+
+TEST_F(CssFlattenImportsTest, DontFlattenTooManyImports) {
+  // The @imports are counted over the whole tree: the outer CSS has one and
+  // many.css has as many as are allowed in total, so many.css is not expanded
+  // (none of its @imports is fetched) and nothing is flattened.
+  const char kFilename[] = "many.css";
+  DebugWithMessage(StrCat("<!--Flattening failed: More than ",
+                          IntegerToString(CssHierarchy::kMaxImportsPerRoot),
+                          " @imports in total, reached in ", kTestDomain,
+                          kFilename, "-->"));
+
+  GoogleString many_css;
+  for (int i = 0; i < CssHierarchy::kMaxImportsPerRoot; ++i) {
+    StrAppend(&many_css, "@import url(http://test.com/simple.css);");
+  }
+  SetResponseWithDefaultHeaders(kFilename, kContentTypeCss, many_css, 100);
+  SetResponseWithDefaultHeaders(kSimpleCssFile, kContentTypeCss, kSimpleCss,
+                                100);
+
+  const GoogleString css_in =
+      StrCat("@import url(http://test.com/", kFilename, ");");
+  ValidateRewriteExternalCss(
+      "too_many_imports", css_in, css_in,
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsLimitExceeded);
+  // Only the outer CSS and many.css were fetched, none of the 100 @imports.
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
+}
+
+TEST_F(CssFlattenImportsTest, DontFlattenWhenImportedInputsAreTooLarge) {
+  // Each file is large but minifies to almost nothing, so the flattened result
+  // stays small; it is the amount of input that is over the budget.
+  const int kNumFiles = 30;
+  const GoogleString padding(100000, 'x');
+  GoogleString css_in;
+  for (int i = 0; i < kNumFiles; ++i) {
+    const GoogleString name = StrCat("input", IntegerToString(i), ".css");
+    SetResponseWithDefaultHeaders(name, kContentTypeCss,
+                                  StrCat("/*", padding, "*/a{}"), 100);
+    StrAppend(&css_in, "@import url(", name, ");");
+  }
+  ValidateRewriteExternalCss("inputs_too_large", css_in, css_in,
+                             kNoStatCheck | kExpectCached | kNoClearFetcher);
+  EXPECT_LT(0, num_flatten_imports_limit_exceeded_->Get());
+}
+
+TEST_F(CssFlattenImportsTest, DontFlattenCachedFailedNestedImport) {
+  // child.css does not fit the limit on its own, so its cached result is its
+  // unflattened text, @imports included. A second CSS that imports child.css
+  // gets that result from the cache and must not flatten it either: doing so
+  // would merge child.css's rulesets (none) and drop its @imports.
+  options()->ClearSignatureForTesting();
+  options()->set_css_flatten_max_bytes(100);
+  server_context()->ComputeSignature(options());
+  const char kChildCssFile[] = "child.css";
+  const char kChildCss[] =
+      "@import url(simple.css);"
+      "@import url(simple.css);";
+  SetResponseWithDefaultHeaders(kChildCssFile, kContentTypeCss, kChildCss, 100);
+  SetResponseWithDefaultHeaders(kSimpleCssFile, kContentTypeCss, kSimpleCss,
+                                100);
+
+  DebugWithMessage(
+      "<!--Flattening failed: Flattening limit (100) exceeded (134)-->");
+  const char css_in[] = "@import url(http://test.com/child.css);";
+  ValidateRewriteExternalCss(
+      "cached_failed_nested", css_in, css_in,
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsLimitExceeded);
+
+  // The earlier failure was counted and reported then, not again now.
+  DebugWithMessage("");
+  const GoogleString css_in2 = StrCat(css_in, ".x{color:red}");
+  ValidateRewriteExternalCss("cached_failed_nested_other", css_in2, css_in2,
+                             kExpectSuccess | kNoClearFetcher);
 }
 
 TEST_F(CssFlattenImportsTest, FlattenEmpty) {
@@ -886,6 +1114,19 @@ TEST_F(CssFlattenImportsTest, FlattenRecursion) {
       kExpectSuccess | kNoClearFetcher | kFlattenImportsRecursion);
 }
 
+// The rewrite finishes and flattening fails when a duplicate could not
+// complete.
+TEST_F(CssFlattenImportsTest, FlattenFailsWhenDuplicateCannotFinish) {
+  SetResponseWithDefaultHeaders("a.css", kContentTypeCss,
+                                "@import url(b.css);.a{color:red}", 100);
+  SetResponseWithDefaultHeaders("b.css", kContentTypeCss,
+                                "@import url(a.css);.b{color:#00f}", 100);
+
+  const char kCss[] = "@import url(a.css);@import url(b.css);";
+  ValidateRewriteExternalCss("siblings_importing_each_other", kCss, kCss,
+                             kExpectSuccess | kNoClearFetcher);
+}
+
 TEST_F(CssFlattenImportsTest, FlattenSimpleMedia) {
   const GoogleString css_in =
       StrCat("@import url(http://test.com/", kSimpleCssFile, ") screen;");
@@ -1090,6 +1331,24 @@ TEST_F(CssFlattenImportsTest, FlattenCacheDependsOnMedia) {
   EXPECT_EQ(1, lru_cache()->num_deletes());
   EXPECT_EQ(11, lru_cache()->num_misses());
   EXPECT_EQ(7, lru_cache()->num_hits());
+}
+
+TEST_F(CssFlattenImportsTest, FlattenCacheKeepsMediaListsApart) {
+  // Different media lists have separate cache entries.
+  SetResponseWithDefaultHeaders(kSimpleCssFile, kContentTypeCss, kSimpleCss,
+                                100);
+
+  const GoogleString one_medium_in =
+      StrCat("@import url(http://test.com/", kSimpleCssFile, ") a_b;");
+  ValidateRewriteExternalCss("flatten_one_medium", one_medium_in,
+                             StrCat("@media a_b{", kSimpleCss, "}"),
+                             kExpectSuccess | kNoClearFetcher);
+
+  const GoogleString two_media_in = StrCat("@import url(http://test.com/",
+                                           kSimpleCssFile, ") a, b;");
+  ValidateRewriteExternalCss("flatten_two_media", two_media_in,
+                             StrCat("@media a,b{", kSimpleCss, "}"),
+                             kExpectSuccess | kNoClearFetcher);
 }
 
 TEST_F(CssFlattenImportsTest, FlattenNestedCharsetsOk) {
@@ -1315,6 +1574,39 @@ TEST_F(CssFlattenImportsTest, NoFlattenUnparseableLayerImportChildWarmCache) {
       kExpectSuccess | kNoClearFetcher | kFlattenImportsUnparseableImport);
 }
 
+// Flattening copies the media of the @import onto every ruleset and @import of
+// the child. A very long media list on a small stylesheet is refused.
+TEST_F(CssFlattenImportsTest, NoFlattenTooMuchMedia) {
+  GoogleString media = "a0", rules, imports;
+  for (int i = 1; i <= 1000; ++i) {
+    StrAppend(&media, ",a", IntegerToString(i));
+    StrAppend(&rules, "b{c:d}");
+    StrAppend(&imports, "@import url(grandchild.css);");
+  }
+  SetResponseWithDefaultHeaders("child.css", kContentTypeCss, rules, 100);
+  const GoogleString css = StrCat("@import url(child.css) ", media, ";");
+
+  ValidateRewriteExternalCss(
+      "no_flatten_too_much_media", css, css,
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsMinifyFailed);
+
+  // Nor when the child's failure is served from the cache.
+  ValidateRewriteExternalCss("no_flatten_too_much_media_repeat", css, css,
+                             kExpectSuccess | kNoClearFetcher);
+
+  // The same rulesets with ordinary media do get flattened.
+  ValidateRewriteExternalCss("flatten_ordinary_media",
+                             "@import url(child.css) screen,print;",
+                             StrCat("@media print,screen{", rules, "}"),
+                             kExpectSuccess | kNoClearFetcher);
+
+  SetResponseWithDefaultHeaders("imports.css", kContentTypeCss, imports, 100);
+  const GoogleString css2 = StrCat("@import url(imports.css) ", media, ";");
+  ValidateRewriteExternalCss(
+      "no_flatten_too_much_media_imports", css2, css2,
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsLimitExceeded);
+}
+
 // See https://github.com/apache/incubator-pagespeed-mod/issues/1092
 TEST_F(CssFlattenImportsTest, FlattenTooComplexNested) {
   GoogleString css_in =
@@ -1330,6 +1622,51 @@ TEST_F(CssFlattenImportsTest, FlattenTooComplexNested) {
   ValidateRewriteExternalCss(
       "flatten_too_complex_nested_repeat", css_in, css_in,
       kExpectSuccess | kFlattenImportsComplexQueries | kNoClearFetcher);
+}
+
+// A cached import holds only its own image URLs.
+TEST_F(CssFlattenImportsTest, CachedImportKeepsItsOwnImageUrls) {
+  const int kNumRules = 300;
+  const int kChainLength = 10;
+  const char kImageData[] = "Invalid PNG but does not matter for this test";
+  SetResponseWithDefaultHeaders("first.png", kContentTypePng, kImageData,
+                                100);
+  SetResponseWithDefaultHeaders("later.png", kContentTypePng, kImageData, 100);
+
+  GoogleString first_css, later_css, later_css_out;
+  for (int i = 0; i < kNumRules; ++i) {
+    StrAppend(&first_css, ".a", IntegerToString(i),
+              "{background:url(first.png)}");
+    StrAppend(&later_css, ".b", IntegerToString(i),
+              "{background:url(later.png)}");
+    StrAppend(&later_css_out, ".b", IntegerToString(i), "{background:url(",
+              Encode(kTestDomain, "ce", "0", "later.png", "png"), ")}");
+  }
+  SetResponseWithDefaultHeaders("first.css", kContentTypeCss, first_css,
+                                100);
+  SetResponseWithDefaultHeaders("later.css", kContentTypeCss, later_css, 100);
+
+  // outer1.css cannot be flattened because of the media query.
+  SetResponseWithDefaultHeaders("outer1.css", kContentTypeCss,
+                                "@import url(first.css);"
+                                "@import url(g.css) screen and (color);",
+                                100);
+  for (int i = 0; i < kChainLength; ++i) {
+    SetResponseWithDefaultHeaders(
+        StrCat("level", IntegerToString(i), ".css"), kContentTypeCss,
+        (i + 1 < kChainLength
+             ? StrCat("@import url(level", IntegerToString(i + 1), ".css);")
+             : "@import url(later.css);"),
+        100);
+  }
+
+  const char kCssIn[] = "@import url(outer1.css);@import url(level0.css);";
+  ValidateRewriteExternalCss(
+      "first_import", kCssIn, kCssIn,
+      kExpectSuccess | kNoClearFetcher | kFlattenImportsComplexQueries);
+
+  ValidateRewriteExternalCss("later_import", "@import url(later.css);",
+                             later_css_out, kExpectSuccess | kNoClearFetcher);
 }
 
 // Test that we correctly deal with @import media types with possibly complex

@@ -105,6 +105,27 @@ class JpegOptimizerTest : public testing::Test {
     ASSERT_EQ(expected_v_sampling_factor, v_sampling_factor);
   }
 
+  // Encodes a valid grayscale strip one pixel wider than the per-side decode
+  // cap; the bytes are a real JPEG, only the dimensions are unusual.
+  void WriteStripWiderThanCap(GoogleString* src_data) {
+    const size_t width = static_cast<size_t>(kScanlineMaxDimension) + 1;
+    jmp_buf env;
+    JpegScanlineWriter writer(&message_handler_);
+    if (setjmp(env)) {
+      writer.AbortWrite();
+      FAIL() << "writing the test image failed";
+    }
+    writer.SetJmpBufEnv(&env);
+    ASSERT_TRUE(writer.InitWithStatus(width, 1, GRAY_8).Success());
+    JpegCompressionOptions options;
+    options.lossy = true;
+    ASSERT_TRUE(writer.InitializeWriteWithStatus(&options, src_data).Success());
+    const std::vector<unsigned char> row(width, 0);
+    ASSERT_TRUE(writer.WriteNextScanlineWithStatus(row.data()).Success());
+    ASSERT_TRUE(writer.FinalizeWriteWithStatus().Success());
+    ASSERT_LT(static_cast<size_t>(0), src_data->size());
+  }
+
   void AssertJpegOptimizeWithSampling(const GoogleString& src_data,
                                       GoogleString* dest_data,
                                       ColorSampling color_sampling,
@@ -151,31 +172,27 @@ TEST_F(JpegOptimizerTest, OversizedDimensionsRejectedByLosslessPath) {
   message_handler_.AddPatternToSkipPrinting("*dimensions*");
   message_handler_.AddPatternToSkipPrinting("*exceed*");
 
-  // Encode a valid grayscale strip wider than the decode cap; the bytes
-  // are a real JPEG, only the dimensions are unusual.
-  const size_t width = static_cast<size_t>(kScanlineMaxDimension) + 1;
   GoogleString src_data;
-  {
-    jmp_buf env;
-    JpegScanlineWriter writer(&message_handler_);
-    if (setjmp(env)) {
-      writer.AbortWrite();
-      FAIL() << "writing the test image failed";
-    }
-    writer.SetJmpBufEnv(&env);
-    ASSERT_TRUE(writer.InitWithStatus(width, 1, GRAY_8).Success());
-    JpegCompressionOptions options;
-    options.lossy = true;
-    ASSERT_TRUE(
-        writer.InitializeWriteWithStatus(&options, &src_data).Success());
-    const std::vector<unsigned char> row(width, 0);
-    ASSERT_TRUE(writer.WriteNextScanlineWithStatus(row.data()).Success());
-    ASSERT_TRUE(writer.FinalizeWriteWithStatus().Success());
-  }
-  ASSERT_LT(static_cast<size_t>(0), src_data.size());
+  ASSERT_NO_FATAL_FAILURE(WriteStripWiderThanCap(&src_data));
 
   GoogleString dest_data;
   EXPECT_FALSE(OptimizeJpeg(src_data, &dest_data, &message_handler_));
+  EXPECT_TRUE(dest_data.empty());
+}
+
+// The lossy path refuses the same image.
+TEST_F(JpegOptimizerTest, OversizedDimensionsRejectedByLossyPath) {
+  message_handler_.AddPatternToSkipPrinting("*dimensions*");
+  message_handler_.AddPatternToSkipPrinting("*exceed*");
+
+  GoogleString src_data;
+  ASSERT_NO_FATAL_FAILURE(WriteStripWiderThanCap(&src_data));
+
+  JpegCompressionOptions options;
+  options.lossy = true;
+  GoogleString dest_data;
+  EXPECT_FALSE(OptimizeJpegWithOptions(src_data, &dest_data, options,
+                                       &message_handler_));
   EXPECT_TRUE(dest_data.empty());
 }
 
@@ -472,6 +489,45 @@ TEST_F(JpegOptimizerTest, InvalidJpegsLossy) {
     ASSERT_FALSE(OptimizeJpegWithOptions(src_data, &dest_data, options,
                                          &message_handler_));
   }
+}
+
+// Returns the offset of the first byte after the header of the first
+// start-of-scan segment, walking the marker segments that follow SOI, or 0 if
+// the stream has no such segment.
+size_t ScanDataOffset(const GoogleString& jpeg) {
+  auto byte_at = [&jpeg](size_t i) {
+    return static_cast<size_t>(static_cast<unsigned char>(jpeg[i]));
+  };
+  size_t pos = 2;  // Past SOI.
+  while (pos + 4 <= jpeg.size() && byte_at(pos) == 0xff) {
+    const size_t marker = byte_at(pos + 1);
+    // The segment length counts its own two bytes but not the marker.
+    pos += 2 + ((byte_at(pos + 2) << 8) | byte_at(pos + 3));
+    if (marker == 0xda) {
+      return pos <= jpeg.size() ? pos : 0;
+    }
+  }
+  return 0;
+}
+
+// test444.jpg is a baseline (single-scan) JPEG, so jpeg_start_decompress()
+// reads only its headers and the decode of the pixel data happens row by row
+// inside the lossy scanline loop. Cut a third of the way into that data, the
+// source runs dry there and libjpeg's error exit leaves the loop. The call
+// must fail, and under LeakSanitizer the row buffer must not leak.
+TEST_F(JpegOptimizerTest, LossyRecompressionStopsInsideScanData) {
+  GoogleString jpeg;
+  ASSERT_TRUE(ReadTestFileWithExt(kJpegTestDir, "test444.jpg", &jpeg));
+  const size_t scan_data = ScanDataOffset(jpeg);
+  ASSERT_GT(scan_data, 0u);
+  ASSERT_LT(scan_data, jpeg.size());
+  jpeg.resize(scan_data + (jpeg.size() - scan_data) / 3);
+
+  JpegCompressionOptions options;
+  options.lossy = true;
+  GoogleString output;
+  EXPECT_FALSE(
+      OptimizeJpegWithOptions(jpeg, &output, options, &message_handler_));
 }
 
 TEST_F(JpegOptimizerTest, InvalidJpegsProgressive) {

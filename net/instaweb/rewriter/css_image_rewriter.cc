@@ -189,6 +189,23 @@ void CssImageRewriter::InheritChildImageInfo(RewriteContext* context) {
   }
 }
 
+void CssImageRewriter::InheritChildInlinedImageBytes(RewriteContext* context) {
+  if (context->num_output_partitions() != 1) {
+    return;
+  }
+  CachedResult* result = context->mutable_output_partition(0);
+  int64 total = result->inlined_image_bytes();
+  for (int i = 0; i < context->num_nested(); ++i) {
+    const RewriteContext* nested_context = context->nested(i);
+    for (int j = 0; j < nested_context->num_output_partitions(); ++j) {
+      total += nested_context->output_partition(j)->inlined_image_bytes();
+    }
+  }
+  if (total > 0) {
+    result->set_inlined_image_bytes(total);
+  }
+}
+
 void CssImageRewriter::RewriteRulesets(Css::Rulesets* rulesets,
                                        int64 image_inline_max_bytes,
                                        RewriteContext* parent,
@@ -337,6 +354,10 @@ bool CssImageRewriter::RewriteCss(int64 image_inline_max_bytes,
                     handler);
 
     image_combiner_->RegisterOrReleaseContext();
+
+    // The slot factory only unifies the slots created during the walk above,
+    // so do not let it keep entries once that walk is done.
+    root_context_->slot_factory()->Clear();
   } else {
     handler->Message(kInfo,
                      "Image rewriting and cache extension not enabled, "

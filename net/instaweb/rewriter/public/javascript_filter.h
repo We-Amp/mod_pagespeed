@@ -70,6 +70,7 @@ class JavascriptFilter : public RewriteFilter {
   void EndElementImpl(HtmlElement* element) override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "JavascriptFilter"; }
   const char* id() const override { return RewriteOptions::kJavascriptMinId; }
   RewriteContext* MakeRewriteContext() override;

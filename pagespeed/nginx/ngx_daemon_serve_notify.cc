@@ -26,7 +26,7 @@ namespace net_instaweb {
 
 DaemonServeNotify::DaemonServeNotify(
     DaemonServeNotifyKind kind, const DaemonAbi* abi, StringPiece socket_path,
-    StringPiece url, StringPiece hostname, StringPiece scheme,
+    StringPiece url, StringPiece hostname, StringPiece scheme, StringPiece site,
     const DaemonServeDecision& decision, StringPiece option_context,
     StringPiece option_signature, Variable* notified, Variable* notify_failed)
     : kind_(kind),
@@ -45,6 +45,7 @@ DaemonServeNotify::DaemonServeNotify(
   url.CopyToString(&url_);
   hostname.CopyToString(&hostname_);
   scheme.CopyToString(&scheme_);
+  site.CopyToString(&site_);
   option_context.CopyToString(&option_context_);
   option_signature.CopyToString(&option_signature_);
 }
@@ -65,6 +66,7 @@ void DaemonServeNotify::Run() {
   request.url = url_;
   request.hostname = hostname_;
   request.scheme = scheme_;
+  request.site = site_;
   DaemonServeDecision decision;
   decision.verdict = verdict_;
   decision.fallback_hit = fallback_hit_;
@@ -120,7 +122,8 @@ void PostDaemonServeNotify(QueuedWorkerPool::Sequence* sequence,
   }
   sequence->Add(new DaemonServeNotify(
       kind, abi, socket_path, request.url, request.hostname, request.scheme,
-      decision, option_context, option_signature, notified, notify_failed));
+      request.site, decision, option_context, option_signature, notified,
+      notify_failed));
 }
 
 }  // namespace net_instaweb

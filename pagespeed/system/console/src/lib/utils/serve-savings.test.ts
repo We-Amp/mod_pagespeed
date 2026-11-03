@@ -18,11 +18,11 @@ describe("serveSavingsView", () => {
     const v = serveSavingsView(LIVE)!;
     expect(v.served.map((r) => r.label)).toEqual(["CSS", "Images"]);
     expect(v.notServed).toEqual(["HTML", "JavaScript"]);
-    expect(v.served[0]).toEqual({
+    expect(v.served[0]).toMatchObject({
       key: "css", label: "CSS", hits: 197, original: 21472396, served: 21447548, saved: 24848, percent: 0,
     });
     expect(v.served[1].percent).toBe(72);
-    expect(v.total).toEqual({ saved: 688697, original: 22394624, percent: 3 });
+    expect(v.total).toMatchObject({ saved: 688697, original: 22394624, percent: 3 });
   });
 
   it("nothing served yet: every class is 'not served' and there is no total", () => {
@@ -37,12 +37,13 @@ describe("serveSavingsView", () => {
     expect(v.served.map((r) => r.label)).toEqual(["CSS", "font"]);
   });
 
-  it("saved stays within [0, original] and the percent within [0, 100]", () => {
+  it("a class that grew is negative; only the percent is clamped to [0, 100]", () => {
     const grew = serveSavingsView({ css: { hits: 1, original_bytes: 10, optimized_bytes: 30 } })!;
-    expect(grew.served[0]).toMatchObject({ saved: 0, percent: 0 });
+    expect(grew.served[0]).toMatchObject({ saved: -20, percent: 0 });
+    expect(grew.total).toMatchObject({ saved: -20, percent: 0 });
     const negative = serveSavingsView({ css: { hits: 1, original_bytes: 10, optimized_bytes: -1000 } })!;
     expect(negative.served[0]).toMatchObject({ served: 0, saved: 10, percent: 100 });
-    expect(negative.total).toEqual({ saved: 10, original: 10, percent: 100 });
+    expect(negative.total).toMatchObject({ saved: 10, original: 10, percent: 100 });
   });
 
   it("junk is no data: malformed classes and malformed counters are skipped, not counted as zero", () => {

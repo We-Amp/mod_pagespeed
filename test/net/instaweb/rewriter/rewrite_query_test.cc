@@ -23,7 +23,12 @@
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/rewriter/public/resource_namer.h"
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
+#include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
+#include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -42,6 +47,12 @@ const char kHtmlUrl[] = "http://www.test.com/index.jsp";
 
 class RewriteQueryTest : public RewriteTestBase {
  protected:
+  // Parses an options segment the way a fetch of an optimized URL does.
+  static RewriteQuery::Status ParseResourceOptionForTest(
+      StringPiece value, RewriteOptions* options, const RewriteFilter* filter) {
+    return RewriteQuery::ParseResourceOption(value, options, filter);
+  }
+
   void SetUp() override {
     RewriteTestBase::SetUp();
     allow_related_options_ = false;
@@ -428,7 +439,7 @@ TEST_F(RewriteQueryTest, QueryAndRequestAndResponseAndCookies) {
   in_query = ("ModPagespeedFilters=-div_structure,+extend_cache_css");
 
   in_cookies =
-      (" PageSpeedCssFlattenMaxBytes   =  12345  "
+      (" PageSpeedCssImageInlineMaxBytes   =  12345  "
        ";ModPagespeedFilters=%2binline_images"  // Needed for:
        ";ModPagespeedImageInlineMaxBytes=67890"
        ";SessionId=1234567890"  // Not ours.
@@ -458,7 +469,7 @@ TEST_F(RewriteQueryTest, QueryAndRequestAndResponseAndCookies) {
   EXPECT_TRUE(options->enabled());
 
   EXPECT_TRUE(options->Enabled(RewriteOptions::kInlineImages));
-  EXPECT_EQ(12345, options->css_flatten_max_bytes());
+  EXPECT_EQ(12345, options->CssImageInlineMaxBytes());
   EXPECT_EQ(67890, options->ImageInlineMaxBytes());
   EXPECT_EQ(77, options->image_recompress_quality());
   EXPECT_EQ(RewriteOptions::kDefaultImageLimitOptimizedPercent,
@@ -486,7 +497,7 @@ TEST_F(RewriteQueryTest, QueryAndRequestAndResponseAndCookies) {
       "ModPagespeedCssInlineMaxBytes=19"  // Conflicts but still saved.
       "&ModPagespeedFilters=+inline_images"
       "&ModPagespeedImageInlineMaxBytes=67890"
-      "&PageSpeedCssFlattenMaxBytes=12345"
+      "&PageSpeedCssImageInlineMaxBytes=12345"
       "&PageSpeedEnrollExperiment=1"  // The bad chars are removed.
       "&PageSpeedImageRecompressionQuality=77",
       rewrite_query_.pagespeed_option_cookies().ToEscapedString());
@@ -501,7 +512,7 @@ TEST_F(RewriteQueryTest, CannotSetOptionsByCookiesWhenDisabled) {
   in_query = ("ModPagespeedFilters=-div_structure,+extend_cache_css");
 
   in_cookies =
-      (" PageSpeedCssFlattenMaxBytes   =  12345  "
+      (" PageSpeedCssImageInlineMaxBytes   =  12345  "
        ";ModPagespeedFilters=+inline_images"  // Needed for:
        ";ModPagespeedImageInlineMaxBytes=67890"
        ";PageSpeedImageRecompressionQuality=77"
@@ -516,8 +527,8 @@ TEST_F(RewriteQueryTest, CannotSetOptionsByCookiesWhenDisabled) {
   EXPECT_TRUE(options->enabled());
 
   // Everything should be default value.
-  EXPECT_EQ(RewriteOptions::kDefaultCssFlattenMaxBytes,
-            options->css_flatten_max_bytes());
+  EXPECT_EQ(RewriteOptions::kDefaultCssImageInlineMaxBytes,
+            options->CssImageInlineMaxBytes());
   EXPECT_EQ(RewriteOptions::kDefaultImageInlineMaxBytes,
             options->ImageInlineMaxBytes());
   EXPECT_EQ(RewriteOptions::kDefaultImageRecompressQuality,
@@ -604,6 +615,43 @@ TEST_F(RewriteQueryTest, MultipleInt64Params) {
   EXPECT_EQ(2, options->domain_shard_count());
 }
 
+TEST_F(RewriteQueryTest, CssParseBoundIsNotSetPerRequest) {
+  // Query parameter, request header, response header and cookie all name the
+  // option; none of them may change it.
+  RequestHeaders request_headers;
+  ResponseHeaders response_headers;
+  GoogleString out_query, out_req_string, out_resp_string;
+  request_headers.Add("PageSpeedCssParseMaxBytes", "0");
+  response_headers.Add("PageSpeedCssParseMaxBytes", "0");
+  allow_options_to_be_set_by_cookies_ = true;
+  const RewriteOptions* options = ParseAndScan(
+      kHtmlUrl, "PageSpeedFilters=+rewrite_css&PageSpeedCssParseMaxBytes=0",
+      "PageSpeedCssParseMaxBytes=0", &request_headers, &response_headers,
+      &out_query, &out_req_string, &out_resp_string);
+  ASSERT_TRUE(options != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultCssParseMaxBytes,
+            options->css_parse_max_bytes());
+  // It stays an ordinary query parameter.
+  EXPECT_EQ("PageSpeedCssParseMaxBytes=0", out_query);
+
+  // Nor can it be set through the scope a request is limited to.
+  RewriteOptions scoped(factory()->thread_system());
+  EXPECT_NE(RewriteOptions::kOptionOk,
+            scoped.SetOptionFromQuery(RewriteOptions::kCssParseMaxBytes, "0"));
+  EXPECT_EQ(RewriteOptions::kDefaultCssParseMaxBytes,
+            scoped.css_parse_max_bytes());
+
+  // Nor through the options segment of an optimized CSS URL.
+  allow_related_options_ = true;
+  const RewriteOptions* segment_options = ParseAndScan(
+      AddOptionsToEncodedUrl(Encode(kTestDomain, "cf", "0", "a.css", "css"),
+                             "cpmb=0"),
+      "", "");
+  EXPECT_TRUE(segment_options == nullptr ||
+              segment_options->css_parse_max_bytes() ==
+                  RewriteOptions::kDefaultCssParseMaxBytes);
+}
+
 TEST_F(RewriteQueryTest, OptionsNotArbitrary) {
   // Security sanity check: trying to set beacon URL
   // externally should not succeed.
@@ -611,6 +659,21 @@ TEST_F(RewriteQueryTest, OptionsNotArbitrary) {
       kHtmlUrl,
       StrCat("PageSpeed", RewriteOptions::kBeaconUrl, "=", "evil.com"), "");
   EXPECT_TRUE(options == nullptr);
+}
+
+TEST_F(RewriteQueryTest, FlattenLimitIsNotSetPerRequest) {
+  GoogleString output_query, output_headers;
+  const RewriteOptions* options = ParseAndScan(
+      kHtmlUrl,
+      "PageSpeedFilters=+flatten_css_imports&PageSpeedCssFlattenMaxBytes=0",
+      "PageSpeedCssFlattenMaxBytes:0", &output_query, &output_headers);
+  ASSERT_TRUE(options != nullptr);
+  EXPECT_EQ(RewriteOptions::kDefaultCssFlattenMaxBytes,
+            options->css_flatten_max_bytes());
+  // The parameter is an ordinary query parameter now: it is not removed from
+  // the URL, and it is not recorded as a PageSpeed option.
+  EXPECT_EQ("PageSpeedCssFlattenMaxBytes=0", output_query);
+  EXPECT_EQ(1, rewrite_query_.pagespeed_query_params().size());
 }
 
 TEST_F(RewriteQueryTest, OutputQueryandHeaders) {
@@ -621,7 +684,6 @@ TEST_F(RewriteQueryTest, OutputQueryandHeaders) {
                "&ModPagespeedCssImageInlineMaxBytes=7"
                "&ModPagespeedJsInlineMaxBytes=11"
                "&ModPagespeedDomainShardCount=100"
-               "&ModPagespeedCssFlattenMaxBytes=13"
                "&abc=1"
                "&def",
                "ModPagespeedFilters:inline_css;"
@@ -643,7 +705,6 @@ TEST_F(RewriteQueryTest, OutputQueryandHeadersPageSpeed) {
                "&PageSpeedCssImageInlineMaxBytes=7"
                "&PageSpeedJsInlineMaxBytes=11"
                "&PageSpeedDomainShardCount=100"
-               "&PageSpeedCssFlattenMaxBytes=13"
                "&abc=1"
                "&def",
                "PageSpeedFilters:inline_css;"
@@ -905,6 +966,29 @@ TEST_F(RewriteQueryTest, GenerateResourceOptionRecompressImages) {
   // TODO(jmarantz): test all relevant filter/option combinations.
 }
 
+TEST_F(RewriteQueryTest, GenerateResourceOptionForUnregisteredIdIsEmpty) {
+  // An ID with no registered RewriteFilter yields no options segment, even
+  // with options in URLs on and settings that differ from the defaults.
+  options()->set_add_options_to_urls(true);
+  options()->EnableFilter(RewriteOptions::kFlattenCssImports);
+  options()->set_css_flatten_max_bytes(4321);
+  EXPECT_EQ("", RewriteQuery::GenerateResourceOption(
+                    RewriteOptions::kCssImportFlattenerId, rewrite_driver()));
+  EXPECT_EQ("", RewriteQuery::GenerateResourceOption("qz", rewrite_driver()));
+}
+
+TEST_F(RewriteQueryTest, ResourceNamerForUnregisteredIdHasNoOptions) {
+  options()->set_add_options_to_urls(true);
+  options()->EnableFilter(RewriteOptions::kFlattenCssImports);
+  ResourceNamer namer;
+  namer.set_options("stale");
+  rewrite_driver()->PopulateResourceNamer(RewriteOptions::kCssImportFlattenerId,
+                                          "own-sheet.css", &namer);
+  EXPECT_EQ(RewriteOptions::kCssImportFlattenerId, namer.id());
+  EXPECT_EQ("own-sheet.css", namer.name());
+  EXPECT_EQ("", namer.options());
+}
+
 TEST_F(RewriteQueryTest, DontAllowArbitraryOptionsForNonPagespeedResources) {
   allow_related_options_ = true;
   // The kHtmlUrl is a .jsp, which is not .pagespeed.
@@ -969,6 +1053,75 @@ TEST_F(RewriteQueryTest, OnlyAllowWhitelistedResources) {
   EXPECT_TRUE(ParseAndScan(image_url_, "", "") == nullptr);
   image = AddOptionsToEncodedUrl(image_url_, "rdm=10");
   EXPECT_TRUE(ParseAndScan(image_url_, "", "") == nullptr);
+}
+
+// The stylesheet flatten limit is not settable per request: an options
+// segment that names it is refused as a whole, whether its value would lower
+// or raise the configured limit, and the request keeps the configured value.
+TEST_F(RewriteQueryTest, OptionSegmentNamingFlattenLimitIsRefused) {
+  const RewriteFilter* css_filter =
+      server_context()->FindFilterForDecoding(RewriteOptions::kCssFilterId);
+  ASSERT_TRUE(css_filter != nullptr);
+  const GoogleString lower = StrCat(
+      "cf=", Integer64ToString(RewriteOptions::kDefaultCssFlattenMaxBytes / 4));
+  const GoogleString higher = StrCat(
+      "cf=", Integer64ToString(RewriteOptions::kDefaultCssFlattenMaxBytes + 7));
+  std::unique_ptr<RewriteOptions> parsed(
+      server_context()->factory()->NewRewriteOptionsForQuery());
+  EXPECT_EQ(RewriteQuery::kInvalid,
+            ParseResourceOptionForTest(lower, parsed.get(), css_filter));
+  parsed.reset(server_context()->factory()->NewRewriteOptionsForQuery());
+  EXPECT_EQ(RewriteQuery::kInvalid,
+            ParseResourceOptionForTest(StrCat("cii=900+", higher), parsed.get(),
+                                       css_filter));
+
+  allow_related_options_ = true;
+  const GoogleString stylesheet =
+      Encode(kTestDomain, "cf", "0", "own-sheet.css", "css");
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(stylesheet, lower), "", "") ==
+              nullptr);
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(stylesheet, higher), "",
+                           "") == nullptr);
+  // An option the stylesheet filter still lists stays accepted.
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(stylesheet, "cii=900"), "",
+                           "") != nullptr);
+}
+
+// An options segment that names a server-side work limit is refused as a
+// whole: one value past each default, so that a value that would loosen the
+// limit is what the URL tries to carry. The options the filters do list stay
+// accepted with their value.
+TEST_F(RewriteQueryTest, OptionSegmentNamingWorkLimitIsRefused) {
+  allow_related_options_ = true;
+  const GoogleString resolution = StrCat(
+      "irlb=",
+      Integer64ToString(RewriteOptions::kDefaultImageResolutionLimitBytes + 1));
+  const GoogleString concurrency = StrCat(
+      "im=",
+      IntegerToString(RewriteOptions::kDefaultImageMaxRewritesAtOnce + 1));
+  EXPECT_TRUE(ParseAndScanImageOptions(resolution, "", "") == nullptr);
+  EXPECT_TRUE(ParseAndScanImageOptions(StrCat("rj+", concurrency), "", "") ==
+              nullptr);
+  const RewriteOptions* image_options = ParseAndScanImageOptions("rj", "", "");
+  ASSERT_TRUE(image_options != nullptr);
+  EXPECT_TRUE(image_options->Enabled(RewriteOptions::kRecompressJpeg));
+
+  const GoogleString stylesheet =
+      Encode(kTestDomain, "cf", "0", "style.css", "css");
+  const GoogleString segment_size = StrCat(
+      "uss=", IntegerToString(RewriteOptions::kDefaultMaxUrlSegmentSize + 1));
+  const GoogleString url_size =
+      StrCat("us=", IntegerToString(RewriteOptions::kDefaultMaxUrlSize + 1));
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(stylesheet, segment_size), "",
+                           "") == nullptr);
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(stylesheet, url_size), "",
+                           "") == nullptr);
+  // CssImageInlineMaxBytes is one the stylesheet filter lists.
+  const GoogleString css_image_bytes = StrCat(
+      "cii=",
+      Integer64ToString(RewriteOptions::kDefaultImageInlineMaxBytes / 2));
+  EXPECT_TRUE(ParseAndScan(AddOptionsToEncodedUrl(stylesheet, css_image_bytes),
+                           "", "") != nullptr);
 }
 
 TEST_F(RewriteQueryTest, ClientOptionsEmptyHeader) {
@@ -1136,7 +1289,7 @@ TEST_F(RewriteQueryTest, PageSpeedQueryParamsAreExtracted) {
       "http://test.com/?a=b&"
       "ModPagespeedFilters=debug&"
       "x=y&"
-      "ModPagespeedCssFlattenMaxBytes=123");
+      "ModPagespeedCssInlineMaxBytes=123");
   RequestContextPtr null_request_context;
   EXPECT_EQ(RewriteQuery::kSuccess,
             rewrite_query_.Scan(
@@ -1147,7 +1300,7 @@ TEST_F(RewriteQueryTest, PageSpeedQueryParamsAreExtracted) {
   EXPECT_EQ(2, rewrite_query_.pagespeed_query_params().size());
   EXPECT_STREQ(
       "ModPagespeedFilters=debug&"
-      "ModPagespeedCssFlattenMaxBytes=123",
+      "ModPagespeedCssInlineMaxBytes=123",
       rewrite_query_.pagespeed_query_params().ToEscapedString());
 }
 

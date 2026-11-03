@@ -27,6 +27,7 @@
 #include "http_core.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
+#include "net/instaweb/rewriter/public/html_vary_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rule_pack_provider.h"
@@ -167,6 +168,7 @@ InstawebContext::InstawebContext(
       inflater_ = std::make_unique<GzipInflater>(GzipInflater::kDeflate);
     }
     inflater_->Init();
+    inflater_->set_max_inflated_bytes(GzipInflater::kMaxInflatedHtmlBytes);
   }
 
   // Make the entire request headers available to filters.
@@ -182,28 +184,62 @@ InstawebContext::InstawebContext(
 
 InstawebContext::~InstawebContext() {}
 
+// Hands the window's pieces to the parser.
+class InstawebContext::WindowSink {
+ public:
+  explicit WindowSink(InstawebContext* context) : context_(context) {}
+  void Parse(const char* data, size_t size) {
+    context_->ProcessBytes(data, static_cast<int>(size));
+  }
+  // Only a parse that has started, and has got past the events held back
+  // until the document type is known, has anything a flush could release.
+  bool CanFlush() const {
+    return context_->started_parse_ &&
+           context_->html_detector_.already_decided() &&
+           FlushWouldRelease(*context_->rewrite_driver_);
+  }
+  void Flush() { context_->Flush(); }
+
+ private:
+  InstawebContext* context_;
+};
+
 void InstawebContext::Rewrite(const char* input, int size) {
+  WindowSink sink(this);
   if (inflater_.get() != nullptr) {
     char buf[kStackBufferSize];
     inflater_->SetInput(input, size);
     while (inflater_->HasUnconsumedInput()) {
       int num_inflated_bytes = inflater_->InflateBytes(buf, kStackBufferSize);
+      if (num_inflated_bytes < 0 && inflater_->limit_exceeded()) {
+        // The rest of the response is dropped, as it is for a corrupt one.
+        rewrite_driver_->message_handler()->Message(
+            kWarning, "Compressed HTML inflates to more than %d bytes",
+            static_cast<int>(GzipInflater::kMaxInflatedHtmlBytes));
+        break;
+      }
       DCHECK_LE(0, num_inflated_bytes) << "Corrupted zip inflation";
       if (num_inflated_bytes > 0) {
-        ProcessBytes(buf, num_inflated_bytes);
+        flush_window_.Add(&sink, buf, num_inflated_bytes);
       }
     }
   } else {
     DCHECK_LE(0, size) << "negatively sized buffer passed from apache";
     if (size > 0) {
-      ProcessBytes(input, size);
+      flush_window_.Add(&sink, input, size);
     }
   }
 }
 
 void InstawebContext::Flush() {
   if (html_detector_.already_decided() && started_parse_) {
+    // A flush while events are held back releases nothing, so it does not
+    // start a new window.
+    const bool releases = FlushWouldRelease(*rewrite_driver_);
     rewrite_driver_->Flush();
+    if (releases) {
+      flush_window_.Flushed();
+    }
   }
 }
 
@@ -215,6 +251,11 @@ bool InstawebContext::FlushWouldSendEditableHeaders() const {
     return false;
   }
   const RewriteOptions* options = rewrite_driver_->options();
+  StringVector vary_tokens;
+  HtmlVaryFilter::HtmlVaryTokens(*options, &vary_tokens);
+  if (!vary_tokens.empty()) {
+    return true;
+  }
   if (!options->Enabled(RewriteOptions::kRulePacks) ||
       options->rule_pack_files().empty()) {
     return false;
@@ -261,6 +302,12 @@ void InstawebContext::ProcessBytes(const char* input, int size) {
         // in all other spots as an error fallback.
         started_parse_ =
             rewrite_driver_->StartParseWithType(absolute_url_, content_type_);
+        if (started_parse_) {
+          // The Vary tokens depend on the options alone. Name them now, as
+          // the proxy fetch does, rather than leaving it to the filter: a
+          // flush can make the headers read-only before the filter runs.
+          HtmlVaryFilter::AddVaryTokens(rewrite_driver_);
+        }
       }
 
       // If we buffered up any bytes in previous calls, make sure to

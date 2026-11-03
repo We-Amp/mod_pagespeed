@@ -43,6 +43,7 @@ class CssMoveToHeadFilter : public CommonFilter {
   void StartElementImpl(HtmlElement* element) override {}
   void EndElementImpl(HtmlElement* element) override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "CssMoveToHead"; }
 
  private:

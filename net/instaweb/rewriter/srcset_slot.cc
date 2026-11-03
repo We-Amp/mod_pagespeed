@@ -22,6 +22,7 @@
 
 #include "net/instaweb/rewriter/public/srcset_slot.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "net/instaweb/rewriter/public/common_filter.h"
@@ -43,6 +44,7 @@ SrcSetSlotCollection::SrcSetSlotCollection(RewriteDriver* driver,
       element_(element),
       attribute_(attribute),
       filter_(nullptr),
+      dirty_(false),
       // Note: these need to be deep-copied in case we run as a detached
       // rewrite, in which case element_ may be dead.
       begin_line_number_(element->begin_line_number()),
@@ -54,7 +56,8 @@ void SrcSetSlotCollection::Initialize(CommonFilter* filter) {
   StringPiece input(attribute_->DecodedValueOrNull());
   ParseSrcSet(input, &candidates_);
 
-  for (int i = 0, n = candidates_.size(); i < n; ++i) {
+  for (int i = 0, n = std::min<int>(candidates_.size(), kMaxSlots); i < n;
+       ++i) {
     GoogleString url = candidates_[i].url;
     if (!url.empty()) {
       // TODO(morlovich): Different filters may different policy wrt to
@@ -147,8 +150,12 @@ GoogleString SrcSetSlotCollection::Serialize(
 
 void SrcSetSlotCollection::Commit() {
   // Note that if slots don't want to render, they simply end up not changing
-  // things in candidates_
-  attribute_->SetValue(Serialize(candidates_));
+  // things in candidates_, and if none of them did we leave the attribute
+  // alone.
+  if (dirty_) {
+    attribute_->SetValue(Serialize(candidates_));
+    dirty_ = false;
+  }
 }
 
 SrcSetSlot::SrcSetSlot(const ResourcePtr& resource,
@@ -165,10 +172,11 @@ void SrcSetSlot::Render() {
     return;
   }
 
+  // Just record the new URL; the attribute is written back once for the
+  // whole collection by SrcSetSlotCollection::Commit().
   parent_->set_url(index_, RelativizeOrPassthrough(
                                parent_->driver()->options(), resource()->url(),
                                url_relativity_, parent_->driver()->base_url()));
-  parent_->Commit();
 }
 
 GoogleString SrcSetSlot::LocationString() const {

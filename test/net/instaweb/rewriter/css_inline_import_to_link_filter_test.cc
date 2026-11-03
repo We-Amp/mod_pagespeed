@@ -295,6 +295,25 @@ TEST_F(CssInlineImportToLinkFilterTest, OnlyConvertPrefix) {
       "@import url(c.css);</style>");
 }
 
+// A style whose leading text and remainder both hold a less-than sign is left
+// as it was.
+TEST_F(CssInlineImportToLinkFilterTest, KeepGuardedStyleWithMarkup) {
+  AddFilter(RewriteOptions::kInlineImportToLink);
+  ValidateNoChanges("guarded",
+                    "<style>/*<![CDATA[*/@import url(a.css);\n"
+                    "a:after { content: \"<b>\" }\n"
+                    "/*]]>*/</style>");
+  // Without markup in the remainder the leading part may go.
+  ValidateStyleToLink(
+      "<style>/*<![CDATA[*/ @import url(a.css);\n"
+      "a { color: red; }\n"
+      "/*]]>*/</style>",
+
+      "<link rel=\"stylesheet\" href=\"a.css\">"
+      "<style>a { color: red; }\n"
+      "/*]]>*/</style>");
+}
+
 TEST_F(CssInlineImportToLinkFilterTest, ConvertStyleWithAttributes) {
   AddFilter(RewriteOptions::kInlineImportToLink);
   ValidateStyleToLink(

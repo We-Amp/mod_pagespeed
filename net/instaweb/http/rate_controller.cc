@@ -20,6 +20,7 @@
 #include "net/instaweb/http/public/rate_controller.h"
 
 #include <cstddef>
+#include <deque>
 #include <memory>
 #include <queue>
 #include <utility>
@@ -58,6 +59,33 @@ struct DeferredFetch {
   DeferredFetch(const DeferredFetch&) = delete;
   DeferredFetch& operator=(const DeferredFetch&) = delete;
 };
+
+// A dequeued fetch that has been charged against its host (the outbound count
+// is already incremented and the global queue size already decremented) but
+// whose base-fetcher call has not been made yet.
+struct StartableFetch {
+  StartableFetch(UrlAsyncFetcher* in_fetcher, const GoogleString& in_url,
+                 MessageHandler* in_handler, AsyncFetch* in_fetch)
+      : fetcher(in_fetcher),
+        url(in_url),
+        handler(in_handler),
+        fetch(in_fetch) {}
+
+  UrlAsyncFetcher* fetcher;
+  GoogleString url;
+  MessageHandler* handler;
+  AsyncFetch* fetch;
+};
+
+// Non-null while this thread is inside the drain loop in
+// CustomFetch::HandleDone. A HandleDone that runs on the same thread while
+// that loop is calling a base fetcher (because the base fetcher completed
+// synchronously) appends its next fetch here and returns, instead of starting
+// it one stack frame deeper.
+// Consequence: a fetch freed by a nested completion starts only once the
+// stack unwinds to that loop, so a done callback must not block waiting on
+// another fetch.
+thread_local std::deque<StartableFetch>* g_pending_starts = nullptr;
 
 }  // namespace
 
@@ -189,17 +217,34 @@ class RateController::CustomFetch : public SharedAsyncFetch {
     }
 
     if (!controller_->is_shut_down()) {
-      // Normal path: trigger the single dequeued fetch through the base
-      // fetcher. Its eventual completion drives the next dequeue, so the queue
-      // drains one fetch per completion rather than recursively from here.
+      // Normal path: the single dequeued fetch is handed to the base fetcher.
+      // A base fetcher that completes synchronously, inside Fetch(), re-enters
+      // HandleDone on this thread, so starting the next fetch right here would
+      // nest one stack frame per queued fetch. Instead the outermost
+      // HandleDone on the thread runs a loop and nested calls only queue
+      // their fetch for it. Fetches start in the same order, with the same
+      // accounting, as before.
       DCHECK_GT(controller_->current_global_fetch_queue_size_->Get(), 0);
       controller_->current_global_fetch_queue_size_->Add(-1);
-      CustomFetch* wrapper_fetch =
-          new CustomFetch(fetch_info_, deferred_fetch->fetch, controller_);
-      deferred_fetch->fetcher->Fetch(deferred_fetch->url,
-                                     deferred_fetch->handler, wrapper_fetch);
+      StartableFetch next(
+          deferred_fetch->fetcher, deferred_fetch->url, deferred_fetch->handler,
+          new CustomFetch(fetch_info_, deferred_fetch->fetch, controller_));
       delete deferred_fetch;
+      if (g_pending_starts != nullptr) {
+        g_pending_starts->push_back(next);
+        delete this;
+        return;
+      }
+      std::deque<StartableFetch> pending;
+      pending.push_back(next);
+      g_pending_starts = &pending;
       delete this;
+      while (!pending.empty()) {
+        StartableFetch start = pending.front();
+        pending.pop_front();
+        start.fetcher->Fetch(start.url, start.handler, start.fetch);
+      }
+      g_pending_starts = nullptr;
       return;
     }
 

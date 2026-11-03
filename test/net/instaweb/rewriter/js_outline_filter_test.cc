@@ -138,6 +138,35 @@ TEST_F(JsOutlineFilterTest, OutlineScript) {
   OutlineScript("outline_scripts_no_hash", true);
 }
 
+// A policy that governs scripts keeps the script inline; one that does not
+// leaves outlining alone.
+TEST_F(JsOutlineFilterTest, ScriptStaysInlineUnderScriptPolicy) {
+  SetupOutliner();
+  ValidateNoChanges("script_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src 'self'\">"
+                    "<script>alert('foo');</script>");
+  ValidateNoChanges("default_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"default-src 'self'\">"
+                    "<script>alert('foo');</script>");
+  ValidateNoChanges("nonce_csp",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"script-src 'nonce-abc'\">"
+                    "<script nonce=\"abc\">alert('foo');</script>");
+}
+
+TEST_F(JsOutlineFilterTest, ScriptIsOutlinedUnderUnrelatedPolicy) {
+  SetupOutliner();
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src 'self'\">";
+  ValidateExpected(
+      "irrelevant_csp", StrCat(kCsp, "<script>alert('foo');</script>"),
+      StrCat(kCsp, "<script src=\"", Encode(kTestDomain, "jo", "0", "_", "js"),
+             "\"></script>"));
+}
+
 TEST_F(JsOutlineFilterTest, OutlineScriptMd5) {
   UseMd5Hasher();
   SetupOutliner();

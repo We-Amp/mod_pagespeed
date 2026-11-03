@@ -19,7 +19,7 @@
 
 The zero-copy submit loop (IisModuleBaseFetch::DriveZeroCopyServe) carries an
 in-code MERGE GATE (M1): the aliased chunk's async Flush is initiated from a
-PSOL thread while the request is parked in RQ_BEGIN_REQUEST, relying on IIS
+PSOL thread while the request is parked in RQ_RESOLVE_REQUEST_CACHE, relying on IIS
 routing its completion to the module's OnAsyncCompletion, and the comment
 requires -- before any merge -- that this be
 

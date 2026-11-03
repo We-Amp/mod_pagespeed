@@ -1,0 +1,839 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# nginx-org-rebuild.yml: the nginx.org rebuild lane (docs/ci/release.md, "The
+# nginx.org rebuild lane"). It builds nginx-module-pagespeed-nginxorg, the
+# module for nginx.org's stable nginx, for the cells of the leg table's
+# `nginxorg` set (tools/ci/release_nginx.sh), from the source of the CURRENT
+# module release, for one nginx.org stable version, and publishes the packages
+# as a GitHub release of their own:
+#   nginxorg-v<module version>-ngx<nginx version>[-r<lane revision>]
+# at the module release's commit. The package repository takes them from
+# there, as it takes a module release. The cells are deb suites (Debian 13,
+# Ubuntu 24.04) and the Enterprise Linux 9 yum tree (an rpm).
+#
+# Runs: workflow_dispatch only, by a person, on the tag of the current module
+# release (`gh workflow run nginx-org-rebuild.yml --ref module-vX.Y.Z -f ...`).
+# The dispatch ref is the module release: the run builds that release and no
+# other, and the jobs of the protected `release` environment accept it.
+#
+# Trust. The source is the release's own source tarball, checked against the
+# release's SHA256SUMS, whose signature is checked against
+# RELEASE-SIGNING-KEY.asc from master; the commit stamp in the tarball must be
+# the manifest's source_sha and the commit of the tag. The nginx source is
+# checked against the sha256 given at dispatch and its signature against the
+# nginx.org signing keys pinned on master (tools/ci/nginx-org-source-signers.asc).
+# The tooling (tools/ci, test/package-test) comes from master, so the leg table,
+# the gates and the tests can change without a module release; the packages are
+# built by the build scripts of the release's tree, as for the release itself.
+#
+# Every job runs on a GitHub-hosted runner. Only sign-checksums and
+# create-release, in the protected `release` environment and only when dry_run
+# is false, hold a secret or a write token. The release is created with
+# GITHUB_TOKEN, so creating its tag starts no other workflow, and it is never
+# marked latest: /releases/latest keeps naming the module release.
+#
+# What the lane never does: build a cell of another set, build a new nginx
+# stable line (a person changes the leg table for that), promote to a package
+# repository, build from a tree other than the current release, or reuse a tag.
+
+name: nginx-org-rebuild
+
+on:
+  workflow_dispatch:
+    inputs:
+      nginx_version:
+        description: "nginx.org stable version to build for (X.Y.Z)"
+        required: true
+        type: string
+      nginx_sha256:
+        description: "sha256 of nginx-X.Y.Z.tar.gz (64 hex digits)"
+        required: true
+        type: string
+      lane_revision:
+        description: "0 for the first build of this module and nginx pair; N > 0 for a rebuild of the same pair"
+        required: false
+        type: string
+        default: "0"
+      previous_nginx_version:
+        description: "First ship of a cell only: the nginx.org version the upgrade tests start from"
+        required: false
+        type: string
+        default: ""
+      previous_nginx_sha256:
+        description: "First ship of a cell only: sha256 of that version's tarball"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Build, test and validate only. Default: true."
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nginx-org-rebuild
+  cancel-in-progress: false
+
+env:
+  PACKAGES_URL: https://packages.modpagespeed.com
+# The key fingerprints the lane checks against (the release key, the package
+# repository's key, nginx.org's source signers) come from master with the key
+# files (`nginx_org_lane.sh pins`), not from this file: the workflow runs from
+# the release tag, and a key change on master must not wait for a release.
+
+jobs:
+  event-guard:
+    name: Event guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: A person's dispatch on a module release tag
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          [ "$EVENT" = workflow_dispatch ] || { echo "::error::only a dispatch runs this lane"; exit 1; }
+          for a in "$ACTOR" "$TRIGGERING_ACTOR"; do
+            case "$a" in *"[bot]") echo "::error::a dispatch or re-run by an app or bot account ($a) is not allowed"; exit 1 ;; esac
+          done
+          [[ "$REF" =~ ^refs/tags/module-v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::dispatch this lane on the tag of the current module release (--ref module-vX.Y.Z), not '$REF'"; exit 1; }
+          echo "dispatch on ${REF} by ${ACTOR} accepted"
+
+  # ---------------------------------------------------------------------
+  # Plan, hosted: inputs, the current release and its signature, the nginx
+  # sources, the previous package of each cell.
+  # ---------------------------------------------------------------------
+  plan:
+    name: Plan
+    needs: event-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.inputs.outputs.version }}
+      lane_tag: ${{ steps.inputs.outputs.lane_tag }}
+      lane_revision: ${{ steps.inputs.outputs.lane_revision }}
+      revision_fragment: ${{ steps.inputs.outputs.revision_fragment }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+      source_asset: ${{ steps.release.outputs.source_asset }}
+      source_sha256: ${{ steps.release.outputs.source_sha256 }}
+      optimizer_tag: ${{ steps.release.outputs.optimizer_tag }}
+      cells: ${{ steps.cells.outputs.cells }}
+      previous: ${{ steps.previous.outputs.previous }}
+      build_previous: ${{ steps.previous.outputs.build_previous }}
+      dry_run: ${{ steps.inputs.outputs.dry_run }}
+    steps:
+      - name: Checkout master (lane tooling and the published keys)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: |
+            tools/ci
+            RELEASE-SIGNING-KEY.asc
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: The pinned key fingerprints (from master)
+        run: bash lane-tools/tools/ci/nginx_org_lane.sh pins | tee -a "$GITHUB_ENV"
+
+      # Inputs reach the scripts through the environment only.
+      - name: Check the inputs
+        id: inputs
+        env:
+          MODULE_TAG: ${{ github.ref_name }}
+          NGINX_VERSION: ${{ inputs.nginx_version }}
+          NGINX_SHA256: ${{ inputs.nginx_sha256 }}
+          LANE_REVISION: ${{ inputs.lane_revision }}
+          PREVIOUS_NGINX_VERSION: ${{ inputs.previous_nginx_version }}
+          PREVIOUS_NGINX_SHA256: ${{ inputs.previous_nginx_sha256 }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          {
+            bash lane-tools/tools/ci/nginx_org_lane.sh inputs
+            if [ "$DRY_RUN" = false ]; then echo "dry_run=false"; else echo "dry_run=true"; fi
+          } | tee -a "$GITHUB_OUTPUT"
+
+      # The lane builds the current module release only. The
+      # lane's own releases are never marked latest, so /releases/latest names
+      # the module release.
+      - name: The tag is the current, published module release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE_TAG: ${{ github.ref_name }}
+          LANE_TAG: ${{ steps.inputs.outputs.lane_tag }}
+        run: |
+          set -euo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          [ "$latest" = "$MODULE_TAG" ] || { echo "::error::${MODULE_TAG} is not the current module release (latest is ${latest})"; exit 1; }
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${MODULE_TAG}" --jq '"\(.draft) \(.prerelease)"')"
+          [ "$state" = "false false" ] || { echo "::error::${MODULE_TAG} is a draft or a pre-release (${state})"; exit 1; }
+          # Refuse an existing tag or release for this pair and revision: a
+          # rebuild of the same pair needs the next lane_revision.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${LANE_TAG}" >/dev/null 2>&1; then
+            echo "::error::the tag ${LANE_TAG} exists; a rebuild of the same pair takes the next lane_revision"; exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${LANE_TAG}" >/dev/null 2>&1; then
+            echo "::error::a release ${LANE_TAG} exists"; exit 1
+          fi
+          echo "${MODULE_TAG} is the current module release; ${LANE_TAG} is new"
+
+      - name: Download the module release's manifest, checksums and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE_TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.inputs.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rel"
+          gh release download "$MODULE_TAG" --repo "$GITHUB_REPOSITORY" --dir "${RUNNER_TEMP}/rel" \
+            --pattern manifest.json --pattern SHA256SUMS --pattern SHA256SUMS.asc \
+            --pattern "mod_pagespeed-${VERSION}.tar.gz"
+          ls -l "${RUNNER_TEMP}/rel"
+
+      - name: Verify the release signature and the set
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          L=lane-tools/tools/ci/nginx_org_lane.sh
+          R="${RUNNER_TEMP}/rel"
+          signer="$(bash "$L" verify-sig lane-tools/RELEASE-SIGNING-KEY.asc "$RELEASE_KEY_FPR" "$R/SHA256SUMS.asc" "$R/SHA256SUMS")"
+          echo "SHA256SUMS signed by ${signer}"
+          out="$(bash "$L" verify-release "$R" "$MODULE_TAG")"
+          printf '%s\n' "$out"
+          sha="$(printf '%s\n' "$out" | sed -n 's/^source_sha=//p')"
+          src="$(printf '%s\n' "$out" | sed -n 's/^source_asset=//p')"
+          # The tag's commit (an annotated tag dereferenced) is the manifest's.
+          obj="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MODULE_TAG}" --jq '"\(.object.type) \(.object.sha)"')"
+          case "$obj" in
+            "tag "*) commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${obj#tag }" --jq '"\(.object.type) \(.object.sha)"')" ;;
+            *) commit="$obj" ;;
+          esac
+          [ "$commit" = "commit ${sha}" ] || { echo "::error::${MODULE_TAG} points at '${commit}', the manifest's source_sha is ${sha}"; exit 1; }
+          {
+            printf '%s\n' "$out" | grep -E '^(source_sha|source_asset|optimizer_tag)='
+            echo "source_sha256=$(sha256sum "$R/$src" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the nginx sources
+        env:
+          NGINX_VERSION: ${{ inputs.nginx_version }}
+          NGINX_SHA256: ${{ inputs.nginx_sha256 }}
+          PREVIOUS_NGINX_VERSION: ${{ inputs.previous_nginx_version }}
+          PREVIOUS_NGINX_SHA256: ${{ inputs.previous_nginx_sha256 }}
+        run: |
+          set -euo pipefail
+          L=lane-tools/tools/ci/nginx_org_lane.sh
+          check() { # version sha256
+            local f="${RUNNER_TEMP}/nginx-$1.tar.gz"
+            curl -fsSL --retry 3 -o "$f" "https://nginx.org/download/nginx-$1.tar.gz"
+            curl -fsSL --retry 3 -o "$f.asc" "https://nginx.org/download/nginx-$1.tar.gz.asc"
+            [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$2" ] || { echo "::error::nginx-$1.tar.gz does not match the given sha256"; exit 1; }
+            # An assignment, so that a failed check stops the step (set -e
+            # does not see a failure inside an echo argument).
+            local signer
+            signer="$(bash "$L" verify-sig lane-tools/tools/ci/nginx-org-source-signers.asc "$NGINX_SIGNERS" "$f.asc" "$f")"
+            echo "nginx $1: sha256 ok, signed by ${signer}"
+          }
+          check "$NGINX_VERSION" "$NGINX_SHA256"
+          if [ -n "$PREVIOUS_NGINX_VERSION" ]; then check "$PREVIOUS_NGINX_VERSION" "$PREVIOUS_NGINX_SHA256"; fi
+
+      - name: List the cells
+        id: cells
+        run: |
+          set -euo pipefail
+          # The x64 legs of the nginxorg set; a cell is the suite without the set prefix.
+          legs="$(bash lane-tools/tools/ci/release_nginx.sh legs --arch x64 --set nginxorg)"
+          cells="$(printf '%s\n' "$legs" | sed 's/^nginxorg-//' | jq -R . | jq -sc .)"
+          for c in $(printf '%s\n' "$cells" | jq -r '.[]'); do
+            case "$c" in trixie|noble|el9) ;; *) echo "::error::cell '$c' is not a deb suite or yum tree this lane publishes"; exit 1 ;; esac
+          done
+          echo "cells: ${cells}"
+          echo "cells=${cells}" >> "$GITHUB_OUTPUT"
+
+      # The upgrade tests start from the real previous package
+      # of each cell, read from the signed index of the public repository. A
+      # cell without one is on its first ship: the lane then builds the
+      # previous nginx.org patch itself (previous_nginx_* inputs).
+      - name: The previous package of each cell
+        id: previous
+        env:
+          CELLS: ${{ steps.cells.outputs.cells }}
+          NGINX_VERSION: ${{ inputs.nginx_version }}
+          PREVIOUS_NGINX_VERSION: ${{ inputs.previous_nginx_version }}
+        run: |
+          set -euo pipefail
+          L=lane-tools/tools/ci/nginx_org_lane.sh
+          D="${RUNNER_TEMP}/repo"
+          mkdir -p "$D"
+          curl -fsSL --retry 3 -o "$D/pubkey.gpg" "${PACKAGES_URL}/pubkey.gpg"
+          prev="{}"
+          need_build=false
+          for c in $(printf '%s\n' "$CELLS" | jq -r '.[]'); do
+            if [ "$c" = el9 ]; then
+              # The yum tree: repomd.xml signed (detached) by the repository
+              # key, the primary index checked against it.
+              base="${PACKAGES_URL}/yum/el9/x86_64"
+              curl -fsSL --retry 3 -o "$D/repomd.$c.xml" "$base/repodata/repomd.xml"
+              curl -fsSL --retry 3 -o "$D/repomd.$c.xml.asc" "$base/repodata/repomd.xml.asc"
+              signer="$(bash "$L" verify-sig "$D/pubkey.gpg" "$REPO_KEY_FPR" "$D/repomd.$c.xml.asc" "$D/repomd.$c.xml")"
+              echo "$c: repomd.xml signed by ${signer}"
+              prim="$(bash "$L" repomd-primary "$D/repomd.$c.xml")"
+              want="${prim%% *}"; href="${prim#* }"
+              curl -fsSL --retry 3 -o "$D/primary.$c.xml.gz" "$base/$href"
+              [ "$(sha256sum "$D/primary.$c.xml.gz" | cut -d' ' -f1)" = "$want" ] || { echo "::error::the $c primary index does not match its signed repomd.xml"; exit 1; }
+              out="$(bash "$L" previous-rpm "$D/primary.$c.xml.gz")"
+            else
+              base="${PACKAGES_URL}/apt"
+              curl -fsSL --retry 3 -o "$D/InRelease.$c" "${PACKAGES_URL}/apt/dists/$c/InRelease"
+              bash "$L" verify-clear "$D/pubkey.gpg" "$REPO_KEY_FPR" "$D/InRelease.$c" "$D/InRelease.$c.txt"
+              want="$(bash "$L" index-sha "$D/InRelease.$c.txt" main/binary-amd64/Packages)"
+              curl -fsSL --retry 3 -o "$D/Packages.$c" "${PACKAGES_URL}/apt/dists/$c/main/binary-amd64/Packages"
+              [ "$(sha256sum "$D/Packages.$c" | cut -d' ' -f1)" = "$want" ] || { echo "::error::the $c Packages index does not match its signed InRelease"; exit 1; }
+              out="$(bash "$L" previous "$D/Packages.$c")"
+            fi
+            if [ -z "$out" ]; then
+              echo "$c: no published package (first ship)"
+              need_build=true
+              [ -n "$PREVIOUS_NGINX_VERSION" ] || { echo "::error::$c has no published package: give previous_nginx_version and previous_nginx_sha256 for its first ship"; exit 1; }
+              bash "$L" new-line "$PREVIOUS_NGINX_VERSION" "$NGINX_VERSION"
+              [ "$PREVIOUS_NGINX_VERSION" != "$NGINX_VERSION" ] || { echo "::error::the previous nginx of a first ship must be an earlier patch"; exit 1; }
+              entry="$(jq -nc --arg n "$PREVIOUS_NGINX_VERSION" '{source: "build", nginx: $n}')"
+            else
+              printf '%s: published %s\n' "$c" "$(printf '%s\n' "$out" | tr '\n' ' ')"
+              pn="$(printf '%s\n' "$out" | sed -n 's/^nginx=//p')"
+              bash "$L" new-line "$pn" "$NGINX_VERSION"
+              entry="$(printf '%s\n' "$out" | jq -Rn --arg base "$base" \
+                '[inputs | capture("^(?<k>[a-z0-9_]+)=(?<v>.*)$")] | from_entries
+                 | {source: "repo", version, nginx, sha256, url: ($base + "/" + .filename)}')"
+            fi
+            prev="$(jq -c --arg c "$c" --argjson e "$entry" '. + {($c): $e}' <<<"$prev")"
+          done
+          echo "previous: ${prev}"
+          {
+            echo "previous=${prev}"
+            echo "build_previous=${need_build}"
+          } >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # Build, hosted: the cells from the release's source, then the gates.
+  # The previous nginx's build of a first ship runs beside it.
+  # ---------------------------------------------------------------------
+  build:
+    name: Build the nginx.org packages (x64${{ matrix.which == 'previous' && ', previous nginx' || '' }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: true
+      matrix:
+        which: ${{ fromJSON(needs.plan.outputs.build_previous == 'true' && '["new","previous"]' || '["new"]') }}
+    env:
+      ARCH: x64
+      WHICH: ${{ matrix.which }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+      SOURCE_ASSET: ${{ needs.plan.outputs.source_asset }}
+      SOURCE_SHA256: ${{ needs.plan.outputs.source_sha256 }}
+    steps:
+      - name: Checkout master (lane tooling and tests)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: |
+            tools/ci
+            test/package-test
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download and extract the release's source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          D="${RUNNER_TEMP}/dl"
+          mkdir -p "$D" "${RUNNER_TEMP}/src"
+          gh release download "$MODULE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$D" --pattern "$SOURCE_ASSET"
+          [ "$(sha256sum "$D/$SOURCE_ASSET" | cut -d' ' -f1)" = "$SOURCE_SHA256" ] \
+            || { echo "::error::the source tarball differs from the one the plan verified"; exit 1; }
+          tar -xzf "$D/$SOURCE_ASSET" -C "${RUNNER_TEMP}/src"
+          rm -f "$D/$SOURCE_ASSET"
+          W="${RUNNER_TEMP}/src/mod_pagespeed-${VERSION}"
+          [ "$(tr -d '[:space:]' < "$W/GIT_COMMIT")" = "$SOURCE_SHA" ] \
+            || { echo "::error::the tarball's commit stamp is not the release commit ${SOURCE_SHA}"; exit 1; }
+          echo "WS=$W" >> "$GITHUB_ENV"
+          cat "$W/net/instaweb/public/VERSION"
+
+      - name: Choose the nginx and the revision
+        env:
+          NGINX_VERSION: ${{ inputs.nginx_version }}
+          NGINX_SHA256: ${{ inputs.nginx_sha256 }}
+          LANE_REVISION: ${{ needs.plan.outputs.lane_revision }}
+          PREVIOUS_NGINX_VERSION: ${{ inputs.previous_nginx_version }}
+          PREVIOUS_NGINX_SHA256: ${{ inputs.previous_nginx_sha256 }}
+        run: |
+          set -euo pipefail
+          if [ "$WHICH" = previous ]; then
+            {
+              echo "NGINXORG_VERSION=${PREVIOUS_NGINX_VERSION}"
+              echo "NGINXORG_SHA256=${PREVIOUS_NGINX_SHA256}"
+              echo "NGINXORG_LANE_REVISION=0"
+            } >> "$GITHUB_ENV"
+          else
+            {
+              echo "NGINXORG_VERSION=${NGINX_VERSION}"
+              echo "NGINXORG_SHA256=${NGINX_SHA256}"
+              echo "NGINXORG_LANE_REVISION=${LANE_REVISION}"
+            } >> "$GITHUB_ENV"
+          fi
+
+      # The build driver and the leg table come from master; the build
+      # scripts it runs in each leg's container are the release's.
+      - name: Build the cells
+        run: |
+          set -euo pipefail
+          T="${RUNNER_TEMP}/lane-ci"
+          mkdir -p "$T"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh "$T/"
+          s=$(date +%s)
+          CACHE_DIR="${RUNNER_TEMP}/nginx-cache" bash "$T/release_nginx.sh" build \
+            --arch "$ARCH" --set nginxorg --workspace "$WS" --out "${RUNNER_TEMP}/nginx-out"
+          echo "### Build (${WHICH}): $(( $(date +%s) - s )) s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: The set is exactly one package per cell
+        run: bash lane-tools/tools/ci/release_nginx.sh check-set --arch "$ARCH" --set nginxorg --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: The names carry the nginx and the revision
+        env:
+          FRAGMENT: ${{ needs.plan.outputs.revision_fragment }}
+        run: |
+          set -euo pipefail
+          want="$FRAGMENT"
+          [ "$WHICH" = new ] || want="+ngx${NGINXORG_VERSION}~"
+          esc() { printf '%s' "$1" | sed 's/[.+]/\\&/g'; }
+          re="^$(esc "$VERSION")-r[0-9]+$(esc "$want")(trixie|noble)\$"
+          shopt -s nullglob
+          for f in "${RUNNER_TEMP}"/nginx-out/*.deb; do
+            v="$(dpkg-deb -f "$f" Version)"
+            [[ "$v" =~ $re ]] || { echo "::error::$(basename "$f") has version $v, wanted ${VERSION}-rN${want}<cell>"; exit 1; }
+            # The pin: this nginx version, any Debian revision of it.
+            dep="$(dpkg-deb -f "$f" Depends)"
+            next="${NGINXORG_VERSION%.*}.$(( ${NGINXORG_VERSION##*.} + 1 ))"
+            case "$dep" in *"nginx (>= ${NGINXORG_VERSION})"*"nginx (<< ${next})"*) ;; *) echo "::error::$(basename "$f") does not pin nginx ${NGINXORG_VERSION}: $dep"; exit 1 ;; esac
+            echo "$(basename "$f"): $v"
+          done
+          # The el9 rpm: release <n>.ngx<nginx>[.<revision>].el9 and the exact
+          # pin on nginx.org's nginx (epoch 2). Read in the cell's own image.
+          frag="${want#+}"; frag="${frag%\~}"
+          rre="^$(esc "$VERSION")-[0-9]+\.$(esc "$frag")\.el9\$"
+          for f in "${RUNNER_TEMP}"/nginx-out/*.rpm; do
+            q="$(docker run --rm -v "$(dirname "$f")":/p:ro almalinux:9 \
+              rpm -qp --nosignature --qf '%{VERSION}-%{RELEASE}\n[%{REQUIRENAME} %{REQUIREFLAGS:depflags} %{REQUIREVERSION}\n]' "/p/$(basename "$f")")"
+            v="$(printf '%s\n' "$q" | head -n 1)"
+            [[ "$v" =~ $rre ]] || { echo "::error::$(basename "$f") has version-release $v, wanted ${VERSION}-N.${frag}.el9"; exit 1; }
+            printf '%s\n' "$q" | grep -qxF "nginx = 2:${NGINXORG_VERSION}" \
+              || { echo "::error::$(basename "$f") does not pin nginx 2:${NGINXORG_VERSION}"; printf '%s\n' "$q" | grep '^nginx' || true; exit 1; }
+            echo "$(basename "$f"): $v"
+          done
+
+      - name: Symbol-leak gate
+        run: bash lane-tools/tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" --src lane-tools --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Load check (nginx.org's nginx, and the nginx image for trixie)
+        run: bash lane-tools/tools/ci/release_nginx.sh load-check --arch "$ARCH" --set nginxorg --src lane-tools --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      # Only the new build is a release file; the previous one feeds the tests.
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ matrix.which == 'new' && 'asset-nginxorg-x64' || 'previous-nginxorg-x64' }}
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # Upgrade tests, hosted, one job per cell: from the previous package to
+  # the new one, with nginx.org's repository (test/package-test/
+  # check-nginx-org-upgrade.sh).
+  # ---------------------------------------------------------------------
+  upgrade-tests:
+    name: Upgrade tests (${{ matrix.cell }})
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.plan.outputs.cells) }}
+    env:
+      CELL: ${{ matrix.cell }}
+      PREVIOUS: ${{ needs.plan.outputs.previous }}
+      NGINX_VERSION: ${{ inputs.nginx_version }}
+    steps:
+      - name: Checkout master (lane tooling and tests)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: |
+            tools/ci
+            test/package-test
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Download the new packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-nginxorg-x64
+          path: ${{ runner.temp }}/new
+
+      - name: Download the previous nginx's build (first ship)
+        if: ${{ needs.plan.outputs.build_previous == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: previous-nginxorg-x64
+          path: ${{ runner.temp }}/built-previous
+
+      - name: Put the previous and the new package side by side
+        run: |
+          set -euo pipefail
+          P="${RUNNER_TEMP}/pkgs"
+          mkdir -p "$P"
+          shopt -s nullglob
+          # The deb cells and the el9 rpm cell; versions compare in their own tools.
+          if [ "$CELL" = el9 ]; then
+            ext=rpm
+            new=("${RUNNER_TEMP}"/new/nginx-module-pagespeed-nginxorg-*.el9.x86_64.rpm)
+            pq() { docker run --rm -v "$(dirname "$1")":/p:ro almalinux:9 rpm -qp --nosignature --qf '%{VERSION}-%{RELEASE}' "/p/$(basename "$1")"; }
+            newer() {
+              local r
+              r="$(docker run --rm -e NV="$1" -e OV="$2" almalinux:9 rpm --eval '%{lua:print(rpm.vercmp(os.getenv("NV"), os.getenv("OV")))}')" \
+                || { echo "::error::could not compare rpm versions $1 and $2"; exit 1; }
+              [ "$r" = 1 ]
+            }
+          else
+            ext=deb
+            new=("${RUNNER_TEMP}"/new/nginx-module-pagespeed-nginxorg_*~"${CELL}"_amd64.deb)
+            pq() { dpkg-deb -f "$1" Version; }
+            newer() { dpkg --compare-versions "$1" gt "$2"; }
+          fi
+          [ "${#new[@]}" = 1 ] || { echo "::error::expected one new package for ${CELL}, found ${#new[@]}"; exit 1; }
+          cp "${new[0]}" "$P/"
+          src="$(jq -r --arg c "$CELL" '.[$c].source' <<<"$PREVIOUS")"
+          pn="$(jq -r --arg c "$CELL" '.[$c].nginx' <<<"$PREVIOUS")"
+          if [ "$src" = repo ]; then
+            url="$(jq -r --arg c "$CELL" '.[$c].url' <<<"$PREVIOUS")"
+            sha="$(jq -r --arg c "$CELL" '.[$c].sha256' <<<"$PREVIOUS")"
+            old="$P/previous_${CELL}.${ext}"
+            curl -fsSL --retry 3 -o "$old" "$url"
+            [ "$(sha256sum "$old" | cut -d' ' -f1)" = "$sha" ] || { echo "::error::the published package differs from its signed index entry"; exit 1; }
+          else
+            if [ "$CELL" = el9 ]; then
+              b=("${RUNNER_TEMP}"/built-previous/nginx-module-pagespeed-nginxorg-*.el9.x86_64.rpm)
+            else
+              b=("${RUNNER_TEMP}"/built-previous/nginx-module-pagespeed-nginxorg_*~"${CELL}"_amd64.deb)
+            fi
+            [ "${#b[@]}" = 1 ] || { echo "::error::expected one previous build for ${CELL}, found ${#b[@]}"; exit 1; }
+            old="$P/$(basename "${b[0]}")"
+            cp "${b[0]}" "$old"
+          fi
+          ov="$(pq "$old")"; nv="$(pq "${new[0]}")"
+          newer "$nv" "$ov" || { echo "::error::the new package ${nv} does not sort above the previous ${ov}"; exit 1; }
+          echo "previous ${ov} (nginx ${pn}) -> new ${nv} (nginx ${NGINX_VERSION})"
+          {
+            echo "OLD_PKG=$old"
+            echo "NEW_PKG=$P/$(basename "${new[0]}")"
+            echo "OLD_NGINX=$pn"
+          } >> "$GITHUB_ENV"
+
+      - name: Upgrade tests
+        run: |
+          set -euo pipefail
+          image="$(bash lane-tools/tools/ci/release_nginx.sh leg-row --arch x64 --set nginxorg --distro "nginxorg-${CELL}" | cut -d'|' -f2)"
+          # With the same nginx on both sides (a module release, or a lane
+          # revision) there is no newer nginx to hold back or to remove the
+          # module for, so the scenarios that need one do not apply.
+          if [ "$OLD_NGINX" = "$NGINX_VERSION" ]; then
+            export SCENARIOS="together plain_upgrade side_by_side distro_host two_versions"
+          fi
+          echo "image ${image}, scenarios: ${SCENARIOS:-all}"
+          bash lane-tools/test/package-test/check-nginx-org-upgrade.sh "$image" "$OLD_NGINX" "$OLD_PKG" "$NGINX_VERSION" "$NEW_PKG"
+
+  # ---------------------------------------------------------------------
+  # Validate, hosted: the asset set (release_manifest.py, profile nginxorg).
+  # ---------------------------------------------------------------------
+  validate:
+    name: Validate the asset set, SHA256SUMS and manifest
+    needs: [plan, build, upgrade-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      LANE_TAG: ${{ needs.plan.outputs.lane_tag }}
+      LANE_REVISION: ${{ needs.plan.outputs.lane_revision }}
+      SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+      OPTIMIZER_TAG: ${{ needs.plan.outputs.optimizer_tag }}
+      CELLS: ${{ needs.plan.outputs.cells }}
+      NGINX_VERSION: ${{ inputs.nginx_version }}
+      NGINX_SHA256: ${{ inputs.nginx_sha256 }}
+    steps:
+      - name: Checkout master (tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-nginxorg-x64
+          path: ${{ runner.temp }}/stage/asset-nginxorg-x64
+
+      - name: Assemble the asset set
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_manifest.py build \
+            --stage "${RUNNER_TEMP}/stage" --out "${RUNNER_TEMP}/release-assets" \
+            --tag "$LANE_TAG" --version "$VERSION" --pkg-version "$VERSION" --prerelease false \
+            --source-sha "$SOURCE_SHA" --run-id "$GITHUB_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY" --optimizer-tag "$OPTIMIZER_TAG" \
+            --profile nginxorg --nginx-version "$NGINX_VERSION" --nginx-sha256 "$NGINX_SHA256" \
+            --cells "$(jq -r 'join(",")' <<<"$CELLS")" --lane-revision "$LANE_REVISION"
+          cd "${RUNNER_TEMP}/release-assets"
+          sha256sum -c SHA256SUMS
+          python3 -I "${GITHUB_WORKSPACE}/tools/ci/release_manifest.py" verify .
+          {
+            echo "### Release assets of ${LANE_TAG}"
+            echo ""
+            echo "Module ${VERSION} (source commit ${SOURCE_SHA}) for nginx.org's nginx ${NGINX_VERSION}."
+            echo ""
+            echo '```'
+            ls -l
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the validated asset set
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets/*
+          retention-days: 30
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # Real runs only (dry_run false), hosted, in the protected `release`
+  # environment. The signing key lives in sign-checksums alone; the release
+  # job holds only GITHUB_TOKEN.
+  # ---------------------------------------------------------------------
+  sign-checksums:
+    name: Sign SHA256SUMS
+    needs: [plan, validate]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.plan.outputs.dry_run == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - name: Download the validated asset set
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: assets
+
+      - name: Checkout master (published release key)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: trust
+          sparse-checkout: |
+            RELEASE-SIGNING-KEY.asc
+            tools/ci/nginx_org_lane.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Verify the set across the job boundary
+        run: |
+          set -euo pipefail
+          cd assets
+          sha256sum -c SHA256SUMS
+
+      - name: The pinned key fingerprints (from master)
+        run: bash trust/tools/ci/nginx_org_lane.sh pins | tee -a "$GITHUB_ENV"
+
+      - name: Sign SHA256SUMS (detached, armored)
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          PACKAGE_SIGNING_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PACKAGE_SIGNING_KEY" ] || [ -z "$PACKAGE_SIGNING_PASSPHRASE" ]; then
+            echo "::error::the package signing key or its passphrase is not set in the release environment (docs/ci/release.md)"
+            exit 1
+          fi
+          GNUPGHOME="$(mktemp -d "${RUNNER_TEMP}/gnupg.XXXXXX")"
+          export GNUPGHOME
+          chmod 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s' "$PACKAGE_SIGNING_KEY" | base64 -d | gpg --batch --quiet --import
+          [ "$(gpg --batch --list-secret-keys --with-colons | grep -c '^sec:')" = 1 ] \
+            || { echo "::error::the signing secret must hold exactly one secret key"; exit 1; }
+          FPR="$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10; exit}')"
+          if [ "$FPR" != "$RELEASE_KEY_FPR" ]; then
+            echo "::error::the signing secret holds key ${FPR:-<none>}, not the release signing key ${RELEASE_KEY_FPR}; nothing was signed"
+            exit 1
+          fi
+          mkdir -p signature
+          printf '%s' "$PACKAGE_SIGNING_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --local-user "$FPR" --armor --detach-sign --output signature/SHA256SUMS.asc assets/SHA256SUMS
+          echo "Signed SHA256SUMS with key ${FPR}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # In a fresh keyring that holds only the published key.
+      - name: Verify SHA256SUMS.asc against the published release key
+        run: |
+          set -euo pipefail
+          signer="$(bash trust/tools/ci/nginx_org_lane.sh verify-sig trust/RELEASE-SIGNING-KEY.asc "$RELEASE_KEY_FPR" signature/SHA256SUMS.asc assets/SHA256SUMS)"
+          echo "Verified SHA256SUMS.asc against RELEASE-SIGNING-KEY.asc (${signer})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the temporary keyrings
+        if: always()
+        run: |
+          for h in "${RUNNER_TEMP}"/gnupg.*; do
+            [ -d "$h" ] || continue
+            GNUPGHOME="$h" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "$h"
+          done
+
+      - name: Upload the signature
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-signature
+          path: signature/SHA256SUMS.asc
+          retention-days: 30
+          if-no-files-found: error
+
+  # The release is created as a draft with GITHUB_TOKEN (so its tag starts no
+  # other workflow), checked against the set, published, never marked latest,
+  # and its tag is checked to name the module release's commit.
+  create-release:
+    name: Create the GitHub release
+    needs: [plan, validate, sign-checksums]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.plan.outputs.dry_run == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+    env:
+      LANE_TAG: ${{ needs.plan.outputs.lane_tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+      NGINX_VERSION: ${{ inputs.nginx_version }}
+      NGINX_SHA256: ${{ inputs.nginx_sha256 }}
+      MODULE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout master (tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: tooling
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Download the validated asset set
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Download the signature
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-signature
+          path: signature
+
+      - name: Re-verify the set across the job boundary
+        run: |
+          set -euo pipefail
+          python3 -I tooling/tools/ci/release_manifest.py verify dist
+          (cd dist && sha256sum -c SHA256SUMS)
+          [ "$(jq -r .tag dist/manifest.json)" = "$LANE_TAG" ] || { echo "::error::the manifest names another tag"; exit 1; }
+          [ "$(jq -r .source_sha dist/manifest.json)" = "$SOURCE_SHA" ] || { echo "::error::the manifest names another commit"; exit 1; }
+          [ "$(jq -r .nginx_version dist/manifest.json)" = "$NGINX_VERSION" ] || { echo "::error::the manifest names another nginx"; exit 1; }
+          [ -s signature/SHA256SUMS.asc ] || { echo "::error::no signature"; exit 1; }
+          cp signature/SHA256SUMS.asc dist/SHA256SUMS.asc
+          ls -l dist
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The tag must still be new; a draft of an earlier failed run of
+          # this lane tag (which has no tag yet) is deleted and made again.
+          # The module release is still the current one (another may have
+          # been published while this run waited for its approvals).
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          [ "$latest" = "$MODULE_TAG" ] || { echo "::error::${MODULE_TAG} is no longer the current module release (latest is ${latest}); nothing was released"; exit 1; }
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${LANE_TAG}" >/dev/null 2>&1; then
+            echo "::error::the tag ${LANE_TAG} exists; a published lane release is never replaced"; exit 1
+          fi
+          if state="$(gh release view "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            [ "$state" = true ] || { echo "::error::${LANE_TAG} is already published"; exit 1; }
+            echo "::notice::deleting the draft of an earlier run of ${LANE_TAG}"
+            gh release delete "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          {
+            printf '## nginx.org module packages: mod_pagespeed %s for nginx %s\n\n' "$VERSION" "$NGINX_VERSION"
+            printf "The nginx module package \`%s\` for nginx.org's stable nginx %s, built from the source of %s (commit %s). Install it together with the nginx it is pinned to; see docs/install-nginx.md.\n\n" \
+              nginx-module-pagespeed-nginxorg "$NGINX_VERSION" "$MODULE_TAG" "$SOURCE_SHA"
+            printf 'nginx source: nginx-%s.tar.gz, sha256 %s, signature verified against the pinned nginx.org signing keys.\n\n' "$NGINX_VERSION" "$NGINX_SHA256"
+            cat <<'NOTES'
+          ### Verify a download
+
+          Download the files and run `sha256sum -c SHA256SUMS`. `SHA256SUMS.asc` is a
+          detached signature of `SHA256SUMS` by the release signing key. `manifest.json`
+          lists every file and is covered by `SHA256SUMS`.
+          NOTES
+          } > notes.md
+          gh release create "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$SOURCE_SHA" --latest=false \
+            --title "nginx.org module packages: ${VERSION} for nginx ${NGINX_VERSION}" --notes-file notes.md dist/*
+
+      - name: Check the draft against the set
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir check
+          gh release download "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --dir check
+          [ "$(find check -type f -printf '%f\n' | LC_ALL=C sort)" = "$(find dist -type f -printf '%f\n' | LC_ALL=C sort)" ] \
+            || { echo "::error::the draft's assets differ from the set"; find check -type f -printf '%f\n'; exit 1; }
+          (cd check && sha256sum -c SHA256SUMS)
+          [ "$(gh release view "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true ] || { echo "::error::the release is not a draft"; exit 1; }
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest=false
+          # Publishing created the tag: it must name the module release's commit,
+          # and /releases/latest must still name the module release.
+          got="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${LANE_TAG}" --jq '"\(.object.type) \(.object.sha)"')"
+          [ "$got" = "commit ${SOURCE_SHA}" ] || { echo "::error::the tag ${LANE_TAG} names '${got}', not commit ${SOURCE_SHA}"; exit 1; }
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          [ "$latest" = "$MODULE_TAG" ] || { echo "::error::/releases/latest names ${latest}, not ${MODULE_TAG}"; exit 1; }
+          URL="$(gh release view "$LANE_TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          echo "Published ${URL}" | tee -a "$GITHUB_STEP_SUMMARY"

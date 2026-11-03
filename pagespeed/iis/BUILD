@@ -173,6 +173,7 @@ cc_library(
         ":iis_ip_string",
         ":iis_local_request",
         ":iis_proxy_fetch_completion",
+        ":iis_self_fetch",
         ":iis_unclaimed_ref",
         ":iis_zerocopy_serve",
         "//net/instaweb:net_instaweb_lib",
@@ -191,6 +192,7 @@ cc_library(
         "//pagespeed/system:daemon_adapter",
         "//pagespeed/system:daemon_record_arm",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:site_cache_fragment",
         "//pagespeed/system:system_windows",
         "@re2//:re2",
         "@zlib_ng//:zlib-ng",
@@ -311,6 +313,23 @@ cc_library(
     hdrs = ["iis_local_request.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Recognises the module's own fetches (fetch marker in the User-Agent and a
+# peer that is this server) and relabels their client address, so IIS address
+# restrictions never treat them as local. Split out so it is unit-tested
+# without IIS. Windows-only (winsock2 types).
+cc_library(
+    name = "iis_self_fetch",
+    srcs = ["iis_self_fetch.cc"],
+    hdrs = ["iis_self_fetch.h"],
+    defines = ["_WINSOCKAPI_"],
+    target_compatible_with = ["@platforms//os:windows"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net/instaweb:net_instaweb_lib",
         "//pagespeed/kernel/base:pagespeed_base",
     ],
 )

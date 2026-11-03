@@ -24,7 +24,7 @@
 # its own throwaway site.
 #
 # One loader detail shapes the setup: a site ENGAGES only when it has its own
-# per-site config file, of either name (OnBeginRequest bails with 'no
+# per-site config file, of either name (OnResolveRequestCache bails with 'no
 # configuration' when SiteConfigExists() is false). A site with no file at all
 # is never touched by the module, so nothing from the base tier is observable
 # there. The realizable form of a site with no per-site configuration is

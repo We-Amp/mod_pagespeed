@@ -169,7 +169,9 @@ describe("serveSavingsView on the real serve_savings block", () => {
   it("the total is the sum of the class rows and agrees with the overview and the raw saved sum", () => {
     const original = sum(view.served.map((r) => r.original));
     const saved = sum(view.served.map((r) => r.saved));
-    expect(view.total).toEqual({ saved, original, percent: Math.round((saved / original) * 100) });
+    expect(view.total).toMatchObject({ saved, original, percent: Math.round((saved / original) * 100) });
+    // No class in these captures grew, so the signed headline equals the old clamped one.
+    expect(view.total!.saved).toBe(sum(view.served.map((r) => Math.max(0, r.original - r.served))));
     expect(daemonServeSavings(daemonGlobal)).toEqual(view.total);
     expect(daemonSavedRaw(daemonGlobal.serve_savings)).toBe(saved);
   });

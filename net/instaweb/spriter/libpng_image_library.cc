@@ -207,6 +207,8 @@ ImageLibraryInterface::Image* LibpngImageLibrary::ReadFromFile(
   }
   png_structp png_struct =
       png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  // We do not use these chunks, so have libpng skip them.
+  png_set_chunk_cache_max(png_struct, 1);
   png_infop png_info = png_create_info_struct(png_struct);
   if (!png_info) {
     png_destroy_read_struct(&png_struct, nullptr, nullptr);

@@ -42,6 +42,7 @@ pagespeed_cc_test(
         "apache_host_names_test.cc",
         "apache_mmap_bucket_test.cc",
         "apache_mpm_detection_test.cc",
+        "apache_self_fetch_test.cc",
         "apache_writer_test.cc",
         "apr_timer_test.cc",
         "daemon_seam_test.cc",

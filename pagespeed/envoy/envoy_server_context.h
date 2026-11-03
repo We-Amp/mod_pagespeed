@@ -82,6 +82,13 @@ class EnvoyServerContext : public SystemServerContext {
   // The returned pointer is valid for the lifetime of this server context.
   const RewriteOptions* GetOptionsForHost(StringPiece hostname);
 
+  // Returns a copy of `base` (global_options() or a GetOptionsForHost()
+  // result) for one request; the caller owns it.  Per-host options are cached
+  // from the first request for the host, so the copy of per-host options
+  // takes the server's current cache invalidation state (the flush timestamp
+  // and the purged URLs): flushes and purges recorded since then apply to it.
+  RewriteOptions* NewRequestOptions(const RewriteOptions& base);
+
  private:
   EnvoyRewriteDriverFactory* envoy_factory_;
   EnvoyVHostConfigManager vhost_config_manager_;

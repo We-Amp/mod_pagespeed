@@ -25,6 +25,7 @@
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/dependencies.pb.h"
 #include "net/instaweb/rewriter/input_info.pb.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/dependency_tracker.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
@@ -61,6 +62,11 @@ namespace {
 // renders, so we skip it rather than risk preloading unused bytes.
 const uint32 kBasicCoverageBegin = 0x20;
 const uint32 kBasicCoverageEnd = 0x7E;
+
+// Every child dependency (an @import or a font) carries its own copy of the
+// parent stylesheet's validity_info. The children of one stylesheet share this
+// budget of copied entries; the ones that no longer fit are not collected.
+const int64 kMaxChildValidityInfoEntries = 10000;
 
 // Parses one unicode-range token --- U+XXXX, U+XXXX-YYYY, U+XX??, or U+??
 // --- into an inclusive [begin, end] codepoint range. Returns false for
@@ -420,6 +426,18 @@ class CollectDependenciesFilter::Context : public RewriteContext {
   }
 
  protected:
+  // True if one more child of parent_dep fits kMaxChildValidityInfoEntries.
+  // A child is charged one entry more than it copies, which also bounds the
+  // number of children of a parent that has no validity_info at all.
+  static bool HasRoomForChild(const Dependency* parent_dep,
+                              const CachedResult* partition) {
+    // collected_dependency(0) is parent_dep itself.
+    int64 num_children = partition->collected_dependency_size() - 1 +
+                         partition->collected_font_dependency_size();
+    return (num_children + 1) * (parent_dep->validity_info_size() + 1) <=
+           kMaxChildValidityInfoEntries;
+  }
+
   void ExtractNestedCssDependencies(const Dependency* parent_dep,
                                     const ResourcePtr& resource,
                                     CachedResult* partition) {
@@ -445,7 +463,8 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     while (true) {
       std::unique_ptr<Css::Import> import(parser.ParseNextImport());
       if (import == nullptr ||
-          parser.errors_seen_mask() != Css::Parser::kNoError) {
+          parser.errors_seen_mask() != Css::Parser::kNoError ||
+          !HasRoomForChild(parent_dep, partition)) {
         break;
       }
 
@@ -480,6 +499,15 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     // un-terminated body in the backing buffer (e.g. serialized headers),
     // poisoning the error mask and vetoing the harvest below.
     StringPiece css = resource->ExtractUncompressedContents();
+    // A stylesheet over CssParseMaxBytes is not parsed, so none of its fonts
+    // are collected; the @import preamble scan above does not parse.
+    if (CssFilter::OverParseMaxBytes(
+            Options(), css.size(), resource->url(), "CSS fonts not collected",
+            FindServerContext()->statistics()->GetVariable(
+                CssFilter::kParseMaxBytesExceeded),
+            Driver()->message_handler(), nullptr)) {
+      return;
+    }
     Css::Parser parser(css.data(), css.data() + css.size());
     parser.set_preservation_mode(true);
     // We avoid quirks-mode so that we do not "fix" something we shouldn't
@@ -498,6 +526,9 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     }
     GoogleUrl base_url(resource->url());
     for (const Css::FontFace* face : stylesheet->font_faces()) {
+      if (!HasRoomForChild(parent_dep, partition)) {
+        break;
+      }
       // Same conservative media rule as for imports: anything we can't
       // evaluate is treated as potentially unneeded.
       StringVector media_types;
@@ -700,7 +731,7 @@ class CollectDependenciesFilter::Context : public RewriteContext {
 CollectDependenciesFilter::CollectDependenciesFilter(RewriteDriver* driver)
     : CommonFilter(driver) {}
 
-void CollectDependenciesFilter::StartDocumentImpl() {}
+void CollectDependenciesFilter::StartDocumentImpl() { urls_seen_.clear(); }
 
 void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
   // We generally don't want noscript path stuff, since it's not usually
@@ -772,6 +803,11 @@ void CollectDependenciesFilter::StartElementImpl(HtmlElement* element) {
       if (resource.get() == nullptr) {
         // TODO(morlovich): This may mean a valid 3rd party resource;
         // we also probably don't want a warning in that case.
+        continue;
+      }
+      if (!urls_seen_.insert(resource->url()).second) {
+        // PushPreloadFilter hints each URL once, so a later element naming
+        // the same URL has nothing to add.
         continue;
       }
       ResourceSlotPtr slot(driver()->GetSlot(resource, element, attr));

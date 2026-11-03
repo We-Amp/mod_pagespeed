@@ -55,6 +55,10 @@ namespace net_instaweb {
 // }
 class HtmlDetector {
  public:
+  // The most leading whitespace we hold while undecided. Content that starts
+  // with more than this is treated as not being HTML.
+  static constexpr size_t kMaxBufferedBytes = 64 * 1024;
+
   HtmlDetector();
   ~HtmlDetector();
 
@@ -64,7 +68,8 @@ class HtmlDetector {
   // If true is returned, already_decided() will be true as well, and hence
   // probable_html() will be accessible. buffered() will not be changed.
   //
-  // If false is returned, data will be accumulated inside buffered().
+  // If false is returned, data will be accumulated inside buffered(), which
+  // never grows past kMaxBufferedBytes.
   //
   // Precondition: !already_decided()
   bool ConsiderInput(const StringPiece& data);

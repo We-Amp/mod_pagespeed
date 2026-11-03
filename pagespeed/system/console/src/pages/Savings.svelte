@@ -26,7 +26,7 @@
   import RefreshNotice from "$lib/RefreshNotice.svelte";
   import TimeSeriesChart, { SERIES_PALETTE } from "$lib/TimeSeriesChart.svelte";
   import { bytesRateTicks, chartWindowLabel } from "$lib/utils/chart-summary";
-  import { formatBytes, formatBytesRate, formatCount, formatPercent } from "$lib/utils/format";
+  import { formatBytes, formatBytesRate, formatCount, formatPercent, formatSignedBytes } from "$lib/utils/format";
   import { useConsole } from "$lib/api/context";
   import {
     availabilityText,
@@ -48,6 +48,7 @@
     splitSummaryText,
   } from "$lib/utils/savings";
   import { SAVINGS_QUALIFIER, serveSavingsView } from "$lib/utils/serve-savings";
+  import SavingsSplitLine from "$lib/SavingsSplitLine.svelte";
   import { activeLensHost } from "$lib/host-lens.svelte";
   import { consoleHostName, hostRow, hostSavingsView, siteRow } from "$lib/utils/host-savings";
   import { sinceLabel } from "$lib/utils/since";
@@ -325,7 +326,7 @@
               <div class="figure">
                 <dt class="metric-label">Saved on served responses</dt>
                 <dd class="metric-value num" data-testid="savings-optimizer-total">
-                  {formatBytes(serveView.total.saved)}
+                  {formatSignedBytes(serveView.total.saved)}
                   <span class="detail metric-context"
                     >{optimizerSince?.warming ? "—" : formatPercent(serveView.total.percent, serveView.total.saved)} of {formatBytes(
                       serveView.total.original,
@@ -335,6 +336,7 @@
               </div>
             </dl>
             <p class="note" data-testid="savings-qualifier">{SAVINGS_QUALIFIER}</p>
+            <SavingsSplitLine split={serveView.total.split} />
             <p class="since" data-testid="since-optimizer" title={optimizerSince?.iso ?? undefined}>
               {optimizerSince?.text ?? "since restart"} (optimizer restart)
               {#if optimizerSince?.warming}<span class="warming" data-testid="warming-pill">warming up</span>{/if}
@@ -382,8 +384,7 @@
             {/if}
             {#if optimizerRegressed}
               <p class="note" data-testid="savings-optimizer-regression">
-                The optimizer served more bytes than the originals on some responses;
-                those bytes count as no net savings above.
+                The optimizer served more bytes than the originals on some responses; those count as negative savings above.
               </p>
             {/if}
             <table class="breakdown reads-across" data-testid="savings-optimizer-table">
@@ -394,7 +395,7 @@
                 {#each serveView.served as row (row.key)}
                   <tr>
                     <td>{row.label}</td>
-                    <td class="num">{formatBytes(row.saved)}</td>
+                    <td class="num">{formatSignedBytes(row.saved)}</td>
                     <td class="num">{formatBytes(row.original)}</td>
                     <td class="num">{formatPercent(row.percent, row.saved)}</td>
                   </tr>
@@ -415,7 +416,7 @@
                       <tr>
                         <td class="host-cell">{row.host}</td>
                         <td class="num">{formatCount(row.hits)}</td>
-                        <td class="num">{formatBytes(row.saved)}</td>
+                        <td class="num">{formatSignedBytes(row.saved)}</td>
                         <td class="num">{formatBytes(row.original)}</td>
                         <td class="num">{formatPercent(row.percent, row.saved)}</td>
                       </tr>
@@ -424,7 +425,7 @@
                       <tr data-testid="savings-by-host-other">
                         <td class="host-cell">Other hosts and serves without a host</td>
                         <td class="num">{formatCount(byHost.other.hits)}</td>
-                        <td class="num">{formatBytes(byHost.other.saved)}</td>
+                        <td class="num">{formatSignedBytes(byHost.other.saved)}</td>
                         <td class="num">{formatBytes(byHost.other.original)}</td>
                         <td class="num">{formatPercent(byHost.other.percent, byHost.other.saved)}</td>
                       </tr>

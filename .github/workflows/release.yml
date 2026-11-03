@@ -4,6 +4,8 @@
 # Release caller: triggers, concurrency and the secrets by name. The module
 # release lane is a reusable workflow pinned to master (docs/ci/release.md):
 #   * module-v* tags -> pipeline-release-module.yml (the module packages)
+# The nginx.org lane's releases (nginxorg-v*) are made by nginx-org-rebuild.yml
+# and never run this workflow.
 #
 # Triggers:
 #   * push of a tag                                -> dry_run is false
@@ -44,6 +46,9 @@ concurrency:
 
 jobs:
   module:
+    # Only a module tag reaches the module lane, whatever the triggers above
+    # say: the nginx.org lane's tags (nginxorg-v*) and any other tag stop here.
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/module-v')) || (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'module-v')) }}
     # The called workflow keeps every job read-only except the release job of
     # the `release` environment, which raises its own permission to this.
     permissions:

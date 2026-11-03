@@ -384,6 +384,9 @@ const char* const kRegexLiteralRegex =
 // only the quote characters and the CR/LF linebreaks -- U+2028/U+2029 are
 // matched by the \C body like any other character and never trigger
 // linebreak logic inside a string.
+// The \C body can also read a backslash as an ordinary byte, so the match may
+// end on a quote that is really escaped; ConsumeString rejects such a match
+// (an odd run of backslashes before the closing quote) as unterminated.
 const char* const kStringLiteralRegex =
     // Single-quoted string literals can contain any characters that aren't
     // single quotes, backslashes, or linebreaks.  They can also contain escape
@@ -2232,6 +2235,21 @@ JsKeywords::Type JsTokenizer::ConsumeString(StringPiece* token_out) {
       input_[input_.size() - unconsumed.size() - 1] != input_[0]) {
     // EOF or an unescaped linebreak in the string will cause an error.
     return Error(token_out);
+  }
+  // The pattern can fall back to reading a backslash as an ordinary byte, and
+  // so close the literal on a quote that is in fact escaped (for example an
+  // input ending in `'abc\'`).  The closing quote is escaped iff an odd
+  // number of backslashes directly precede it; the literal is then
+  // unterminated.  Only the body is scanned, never the opening quote.
+  {
+    const size_t close = input_.size() - unconsumed.size() - 1;
+    size_t backslashes = 0;
+    while (backslashes + 1 < close && input_[close - 1 - backslashes] == '\\') {
+      ++backslashes;
+    }
+    if (backslashes % 2 == 1) {
+      return Error(token_out);
+    }
   }
   // A string literal directly over the module marker is the module specifier
   // of a bare import (`import 'x'`): move the declaration to the from-clause

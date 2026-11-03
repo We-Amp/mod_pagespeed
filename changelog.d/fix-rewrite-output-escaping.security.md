@@ -1,0 +1,5 @@
+- Reduced the cases in which inline script minification could change how a browser reads the page around a script. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Hardened stylesheet handling so that inline styles, inlined stylesheets and critical-CSS summaries are no longer written into a page when they contain characters that a browser could read as markup. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Hardened the outline filters so that they respect a page's Content-Security-Policy for scripts and styles. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Hardened the decoding of rewritten resource URLs so that only names on the URL's own origin are decoded. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
+- Reduced differences between the HTML parser and browsers in where some elements end. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

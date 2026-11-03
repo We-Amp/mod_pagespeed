@@ -40,6 +40,7 @@
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
+#include "pagespeed/apache/apache_self_fetch.h"
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/apr_timer.h"
 #include "pagespeed/apache/header_util.h"
@@ -47,6 +48,9 @@
 #include "pagespeed/apache/instaweb_handler.h"
 // clang-format off
 #include "pagespeed/apache/mod_instaweb.h"
+#include "pagespeed/system/daemon_abi.h"
+#include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_html_report.h"
 // clang-format on
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -59,7 +63,6 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/system/ipro_recorder.h"
-#include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_caches.h"
 #include "pagespeed/system/system_server_context.h"
 #include "util_filter.h"  // NOLINT
@@ -225,6 +228,8 @@ bool check_pagespeed_applicable(request_rec* request,
   return true;
 }
 
+DaemonHtmlCapture::HeaderLines apache_header_lines(const request_rec* request);
+
 // Create a new bucket from buf using HtmlRewriter.
 // TODO(lsong): the content is copied multiple times. The buf is
 // copied/processed to string output, then output is copied to new bucket.
@@ -244,8 +249,10 @@ apr_bucket* rewrite_html(InstawebContext* context, request_rec* request,
     context->Flush();
     // If the flush happens before any rewriting, don't fallthrough and
     // replace the headers with those in the context, because they haven't
-    // been populated yet so we end up with NO headers. See issue 385.
-    if (context->output().empty()) {
+    // been populated yet so we end up with NO headers. See issue 385. Once
+    // they are populated, the flush sends them, so they are written even if
+    // there is no output yet, or they would go out without the Vary names.
+    if (context->output().empty() && !context->populated_headers()) {
       return nullptr;
     }
   } else if (operation == FINISH) {
@@ -266,6 +273,12 @@ apr_bucket* rewrite_html(InstawebContext* context, request_rec* request,
     ResponseHeadersToApacheRequest(*headers, request);
     headers->Clear();
     context->set_sent_headers(true);
+    // The rewriter's own headers, its Vary tokens among them, are now in
+    // place; what changes after this is the server's.
+    DaemonHtmlCapture* capture = context->daemon_html_capture();
+    if (capture != nullptr && capture->needs_late_headers()) {
+      capture->SetBaselineHeaders(apache_header_lines(request));
+    }
   }
 
   const GoogleString& output = context->output();
@@ -377,6 +390,136 @@ class ScopedTimer {
   AprTimer timer_;
   int64 start_time_us_;
 };
+
+bool is_html_like(const request_rec* request) {
+  const ContentType* type = MimeTypeToContentType(request->content_type);
+  return type != nullptr && type->IsHtmlLike();
+}
+
+// DaemonHtmlCache report-only.  These functions read the response and never
+// write it: the body through the bytes process_bucket has already read for the
+// rewriter, the headers through copies of the tables.  In any other mode the
+// only thing that runs is the mode check in instaweb_out_filter.
+apr_status_t delete_daemon_html_capture(void* data) {
+  delete static_cast<DaemonHtmlCapture*>(data);
+  return APR_SUCCESS;
+}
+
+void add_table_to_capture(const apr_table_t* table,
+                          DaemonHtmlCapture* capture) {
+  const apr_array_header_t* header = apr_table_elts(table);
+  const apr_table_entry_t* entries =
+      reinterpret_cast<const apr_table_entry_t*>(header->elts);
+  for (int i = 0; i < header->nelts; ++i) {
+    if (entries[i].key != nullptr && entries[i].val != nullptr) {
+      capture->AddHeader(entries[i].key, entries[i].val);
+    }
+  }
+}
+
+// Both header tables, in order, as copies.
+DaemonHtmlCapture::HeaderLines apache_header_lines(const request_rec* request) {
+  DaemonHtmlCapture::HeaderLines lines;
+  for (const apr_table_t* table :
+       {request->headers_out, request->err_headers_out}) {
+    const apr_array_header_t* header = apr_table_elts(table);
+    const apr_table_entry_t* entries =
+        reinterpret_cast<const apr_table_entry_t*>(header->elts);
+    for (int i = 0; i < header->nelts; ++i) {
+      if (entries[i].key != nullptr && entries[i].val != nullptr) {
+        lines.emplace_back(entries[i].key, entries[i].val);
+      }
+    }
+  }
+  return lines;
+}
+
+// The origin's headers as they arrive at the rewriter's input: before
+// build_context_for_request removes Content-Encoding and Content-Length, and
+// before the module adds its signature and its Vary tokens.  mod_expires and
+// mod_headers have not run yet at this position;
+// instaweb_daemon_html_report_filter brings their changes in.
+DaemonHtmlCapture* start_daemon_html_capture(request_rec* request,
+                                             ApacheServerContext* context) {
+  DaemonAdapter* adapter = context->daemon_adapter();
+  const DaemonAbi* abi = adapter == nullptr ? nullptr : adapter->abi();
+  if (abi == nullptr || !abi->PublishesHtmlStorePolicy()) return nullptr;
+  DaemonHtmlCapture* capture =
+      new DaemonHtmlCapture(context->daemon_html_reporter(), abi,
+                            context->global_config()->daemon_html_max_bytes());
+  apr_pool_cleanup_register(request->pool, capture, delete_daemon_html_capture,
+                            apr_pool_cleanup_null);
+  // Not unparsed_uri: a request in absolute form carries the scheme and host
+  // there, and the policy reads a path.
+  GoogleString target =
+      request->parsed_uri.path == nullptr ? "" : request->parsed_uri.path;
+  if (request->parsed_uri.query != nullptr) {
+    StrAppend(&target, "?", request->parsed_uri.query);
+  }
+  capture->SetRequest(request->method == nullptr ? "" : request->method, target,
+                      request->hostname == nullptr ? "" : request->hostname);
+  const apr_table_t* in = request->headers_in;
+  if (apr_table_get(in, HttpAttributes::kAuthorization) != nullptr ||
+      apr_table_get(in, "Proxy-Authorization") != nullptr) {
+    capture->set_has_authorization();
+  }
+  if (request->user != nullptr) capture->set_authenticated_user();
+  if (apr_table_get(in, HttpAttributes::kCookie) != nullptr ||
+      apr_table_get(in, HttpAttributes::kCookie2) != nullptr) {
+    capture->set_has_cookie();
+  }
+  const char* request_cc = apr_table_get(in, HttpAttributes::kCacheControl);
+  if (request_cc != nullptr) capture->AddRequestCacheControl(request_cc);
+
+  capture->set_status(request->status);
+  add_table_to_capture(request->headers_out, capture);
+  add_table_to_capture(request->err_headers_out, capture);
+  // Apache keeps these two in the request until its header filter.
+  if (request->content_type != nullptr &&
+      apr_table_get(request->headers_out, HttpAttributes::kContentType) ==
+          nullptr) {
+    capture->AddHeader(HttpAttributes::kContentType, request->content_type);
+  }
+  if (request->content_encoding != nullptr &&
+      apr_table_get(request->headers_out, HttpAttributes::kContentEncoding) ==
+          nullptr) {
+    capture->AddHeader(HttpAttributes::kContentEncoding,
+                       request->content_encoding);
+  }
+  return capture;
+}
+
+// Runs at AP_FTYPE_CONTENT_SET + 1, added only for a response being captured,
+// before build_context_for_request adds instaweb_fix_headers_filter at the same
+// type, so it runs first of the two: after mod_expires, mod_headers and
+// mod_deflate, before the module rewrites the caching headers.  What those
+// stages changed since the module's own changes reaches the capture, apart
+// from what compression and the module itself change: Vary is compared without
+// Accept-Encoding and an ETag without a -gzip suffix, so a Vary or ETag line
+// from mod_headers counts.  It passes every brigade on untouched.
+//
+// Design limit: a header that a filter sets after this one is not seen, so a
+// filter added at AP_FTYPE_CONTENT_SET + 1 after this one, or one at
+// AP_FTYPE_PROTOCOL or later, does not reach the report.
+apr_status_t instaweb_daemon_html_report_filter(ap_filter_t* filter,
+                                                apr_bucket_brigade* bb) {
+  DaemonHtmlCapture* capture = static_cast<DaemonHtmlCapture*>(filter->ctx);
+  request_rec* request = filter->r;
+  if (capture->needs_late_headers()) {
+    capture->ApplyLateHeaders(
+        apache_header_lines(request),
+        {HttpAttributes::kContentEncoding, HttpAttributes::kContentLength,
+         "Content-MD5", kModPagespeedHeader, kPageSpeedHeader});
+  }
+  bool saw_eos = false;
+  for (apr_bucket* bucket = APR_BRIGADE_FIRST(bb);
+       bucket != APR_BRIGADE_SENTINEL(bb); bucket = APR_BUCKET_NEXT(bucket)) {
+    if (APR_BUCKET_IS_EOS(bucket)) saw_eos = true;
+  }
+  const apr_status_t status = ap_pass_brigade(filter->next, bb);
+  if (saw_eos) capture->Finish(request->connection->aborted != 0);
+  return status;
+}
 
 // Builds a new context for an HTML request, returning NULL if we decide
 // that we should not handle the request for various reasons.
@@ -566,6 +709,9 @@ bool process_bucket(ap_filter_t* filter, request_rec* request,
     size_t bytes = 0;
     *return_code = apr_bucket_read(bucket, &buf, &bytes, APR_BLOCK_READ);
     if (*return_code == APR_SUCCESS) {
+      if (context->daemon_html_capture() != nullptr) {
+        context->daemon_html_capture()->AddBody(buf, bytes);
+      }
       new_bucket = rewrite_html(context, request, REWRITE, buf, bytes);
     } else {
       ap_log_rerror(APLOG_MARK, APLOG_ERR, *return_code, request,
@@ -579,6 +725,9 @@ bool process_bucket(ap_filter_t* filter, request_rec* request,
       APR_BRIGADE_INSERT_TAIL(context_bucket_brigade, new_bucket);
     }
   } else if (APR_BUCKET_IS_EOS(bucket)) {
+    if (context->daemon_html_capture() != nullptr) {
+      context->daemon_html_capture()->set_body_ended();
+    }
     new_bucket = rewrite_html(context, request, FINISH, nullptr, 0);
     if (new_bucket != nullptr) {
       APR_BRIGADE_INSERT_TAIL(context_bucket_brigade, new_bucket);
@@ -631,12 +780,38 @@ apr_status_t instaweb_out_filter(ap_filter_t* filter, apr_bucket_brigade* bb) {
   // may get called multiple times per HTTP request, and this occurs only
   // on the first call.
   if (context == nullptr) {
+    ApacheServerContext* report_context =
+        InstawebContext::ServerContextFromServerRec(request->server);
+    // As on nginx, the report covers a 200 of an HTML type that carries a
+    // body: a capture of anything else, a HEAD included, is not started.
+    const bool report_only =
+        report_context->global_config()->daemon_html_cache() ==
+            RewriteOptions::kDaemonHtmlCacheReportOnly &&
+        request->main == nullptr && request->status == HTTP_OK &&
+        !request->header_only && is_html_like(request);
+    DaemonHtmlCapture* capture =
+        report_only ? start_daemon_html_capture(request, report_context)
+                    : nullptr;
+    // Added before build_context_for_request adds the fix-headers filter.
+    ap_filter_t* report_filter =
+        capture == nullptr
+            ? nullptr
+            : ap_add_output_filter(kModPagespeedDaemonHtmlReportName, capture,
+                                   request, request->connection);
     context = build_context_for_request(request);
     if (context == nullptr) {
+      // The pool frees a capture that was never finished.
+      if (report_filter != nullptr) ap_remove_output_filter(report_filter);
       ap_remove_output_filter(filter);
       return ap_pass_brigade(filter->next, bb);
     }
     filter->ctx = context;
+    if (capture != nullptr) {
+      context->set_daemon_html_capture(capture);
+      capture->SetBaselineHeaders(apache_header_lines(request));
+    } else if (report_only) {
+      report_context->daemon_html_reporter()->CountUnavailable();
+    }
   }
 
   ApacheServerContext* server_context = context->apache_server_context();
@@ -821,6 +996,11 @@ apr_status_t instaweb_in_place_filter(ap_filter_t* filter,
       recorder->Write(contents, recorder->handler());
     } else if (APR_BUCKET_IS_FLUSH(bucket)) {
       recorder->Flush(recorder->handler());
+    } else if (AP_BUCKET_IS_ERROR(bucket)) {
+      // The handler or an earlier filter ended the response abnormally (for
+      // example a proxied backend that failed mid-transfer).  What has been
+      // buffered is not the whole response and must never be recorded.
+      recorder->Fail();
     }
   }
 
@@ -898,7 +1078,11 @@ apr_status_t instaweb_in_place_check_headers_filter(ap_filter_t* filter,
   for (apr_bucket* bucket = APR_BRIGADE_FIRST(bb);
        (recorder != nullptr) && (bucket != APR_BRIGADE_SENTINEL(bb));
        bucket = APR_BUCKET_NEXT(bucket)) {
-    if (APR_BUCKET_IS_EOS(bucket)) {
+    if (AP_BUCKET_IS_ERROR(bucket)) {
+      // Also seen here when a filter between the two in-place filters ended
+      // the response abnormally: the body is incomplete, so record nothing.
+      recorder->Fail();
+    } else if (APR_BUCKET_IS_EOS(bucket)) {
       ResponseHeaders response_headers(recorder->http_options());
 
       // Note: Since we're post-AP_FTYPE_PROTOCOL the error headers and regular
@@ -1052,6 +1236,59 @@ int pagespeed_post_config(apr_pool_t* pool, apr_pool_t* plog, apr_pool_t* ptemp,
                                       factory->num_rewrite_threads() +
                                       factory->num_expensive_rewrite_threads());
 
+  // A server record whose configuration sets no CacheFragment gets a keyspace
+  // of its own, derived from its own names and addresses.  Records can share
+  // a server context (a virtual host with no ModPagespeed directive uses the
+  // main server's), so each context takes the value of the record it was
+  // made for, and a request served for another record applies that record's
+  // value to its own options (InstawebHandler::ComputeCustomOptions).  The
+  // value is withheld from the options payload, so the log is where it can
+  // be read.
+  {
+    const GoogleString main_fragment =
+        InstawebContext::ServerContextFromServerRec(server_list)
+            ->global_config()
+            ->cache_fragment();
+    std::map<const server_rec*, GoogleString> site_fragments;
+    for (server_rec* server = server_list; server != nullptr;
+         server = server->next) {
+      ApacheServerContext* context =
+          InstawebContext::ServerContextFromServerRec(server);
+      const GoogleString& fragment = context->global_config()->cache_fragment();
+      if (!fragment.empty()) {
+        if (server != server_list && fragment == main_fragment) {
+          factory->message_handler()->Message(
+              kWarning,
+              "virtual host %s uses the server-wide CacheFragment and shares "
+              "cache entries with every host that does; set one in its "
+              "<VirtualHost> block to separate them.",
+              server->server_hostname != nullptr ? server->server_hostname
+                                                 : "?");
+        }
+        continue;
+      }
+      SiteIdentity identity;
+      AppendApacheSiteIdentity(server, server_list,
+                               factory->stated_server_names(), &identity);
+      site_fragments[server] = DeriveSiteCacheFragment(identity);
+      ap_log_error(
+          APLOG_MARK, APLOG_NOTICE, APR_SUCCESS, server,
+          "mod_pagespeed: server %s uses cache fragment %s",
+          server->server_hostname != nullptr ? server->server_hostname : "?",
+          site_fragments[server].c_str());
+    }
+    for (server_rec* server = server_list; server != nullptr;
+         server = server->next) {
+      ApacheServerContext* context =
+          InstawebContext::ServerContextFromServerRec(server);
+      auto found = site_fragments.find(server);
+      if (found != site_fragments.end() && context->server() == server) {
+        context->global_config()->set_cache_fragment(found->second);
+      }
+    }
+    factory->set_site_cache_fragments(std::move(site_fragments));
+  }
+
   std::vector<SystemServerContext*> server_contexts;
   std::set<ApacheServerContext*> server_contexts_covered;
   ApacheServerContext* base_context =
@@ -1156,8 +1393,11 @@ apr_status_t pagespeed_log_transaction(request_rec* request) {
   return DECLINED;
 }
 
-// Make sure that local requests from ourselves don't get marked as coming from
-// localhost, as we don't want them matching 'allow from localhost'.
+// Make sure that requests from ourselves don't get marked as coming from
+// this server, as we don't want them matching 'Require local' or any other
+// rule that admits the server's own addresses: the module fetches its own
+// resources from the address the original request arrived on, whoever the
+// original client was.
 int pagespeed_modify_request(request_rec* r) {
   // Escape ASAP if we're in unplugged mode.
   ApacheServerContext* server_context =
@@ -1165,55 +1405,7 @@ int pagespeed_modify_request(request_rec* r) {
   if (server_context->global_config()->unplugged()) {
     return APACHE_OK;
   }
-
-  // This method is based in part on mod_remoteip.
-  conn_rec* c = r->connection;
-
-  // Detect local requests from us. The curl fetcher produces user-agent
-  // strings like "CurlPagespeed (mod_pagespeed/1.1.0-beta.1-hash)", so
-  // we match on the kModPagespeedSubrequestUserAgent substring.
-  const char* ua = apr_table_get(r->headers_in, HttpAttributes::kUserAgent);
-  if (ua != nullptr &&
-      strstr(ua, kModPagespeedSubrequestUserAgent) != nullptr) {
-#ifdef MPS_APACHE_24
-    apr_sockaddr_t* client_addr = c->client_addr;
-#else
-    apr_sockaddr_t* client_addr = c->remote_addr;
-#endif
-
-    if (LoopbackRouteFetcher::IsLoopbackAddr(
-            reinterpret_cast<const struct sockaddr*>(&client_addr->sa))) {
-      // Rewrite the client IP in Apache's records to 224.0.0.0, which is a
-      // multicast address that should hence not be used by anyone, and at the
-      // very least is clearly not 127.0.0.1.
-      apr_sockaddr_t* untrusted_sockaddr = nullptr;
-
-      // The rewrite is per request, so it is allocated from the request
-      // pool: the connection pool (client_addr->pool) lives as long as the
-      // keep-alive connection, and every loopback request on one grew it.
-      // This builds a sockaddr object corresponding to 224.0.0.0
-      CHECK_EQ(APR_SUCCESS,
-               apr_sockaddr_info_get(&untrusted_sockaddr, "224.0.0.0", APR_INET,
-                                     80, 0, r->pool));
-
-      char* untrusted_ip_str = apr_pstrdup(r->pool, "224.0.0.0");
-#ifdef MPS_APACHE_24
-      r->useragent_ip = untrusted_ip_str;
-      r->useragent_addr = untrusted_sockaddr;
-#else
-      c->remote_ip = untrusted_ip_str;
-      c->remote_addr = untrusted_sockaddr;
-#endif
-
-      // We set the remote host header to be an empty string --- Apache uses
-      // that if there is an error, so it shouldn't pass through any ACLs.
-      // remote_host is a conn_rec field that outlives this request (httpd
-      // reads it between keep-alive requests, e.g. from the scoreboard), so
-      // it must not point into r->pool: use a static string, as httpd's
-      // core does.
-      c->remote_host = const_cast<char*>("");
-    }
-  }
+  ApacheTreatSelfFetchAsRemote(r);
   return APACHE_OK;
 }
 
@@ -1231,8 +1423,11 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
                   APR_HOOK_FIRST - 1);
 
   // Try to provide more accurate IP information for requests we create.
-  ap_hook_post_read_request(pagespeed_modify_request, nullptr, nullptr,
-                            APR_HOOK_FIRST);
+  // After mod_remoteip, which would otherwise replace the address given to
+  // a self-fetch with one taken from a forwarding header.
+  static const char* const kRunAfterRemoteIp[] = {"mod_remoteip.c", nullptr};
+  ap_hook_post_read_request(pagespeed_modify_request, kRunAfterRemoteIp,
+                            nullptr, APR_HOOK_FIRST);
 
   // We register our output filter at (AP_FTYPE_RESOURCE + 1) so that
   // mod_pagespeed runs after mod_include.  See Issue
@@ -1262,6 +1457,15 @@ void mod_pagespeed_register_hooks(apr_pool_t* pool) {
   ap_register_output_filter(
       kModPagespeedInPlaceFilterName, instaweb_in_place_filter, nullptr,
       static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET - 1));
+
+  // DaemonHtmlCache report-only reads the late headers here: mod_expires,
+  // mod_headers and mod_deflate have run, instaweb_fix_headers_filter has not.
+  // Added per response, only in that mode.  Headers set by a filter that runs
+  // after it (one added later at this type, or at AP_FTYPE_PROTOCOL) are not
+  // seen.
+  ap_register_output_filter(
+      kModPagespeedDaemonHtmlReportName, instaweb_daemon_html_report_filter,
+      nullptr, static_cast<ap_filter_type>(AP_FTYPE_CONTENT_SET + 1));
   // Run after headers are set by mod_headers, mod_expires, etc. and
   // after Content-Type has been set (which appears to be at
   // AP_FTYPE_PROTOCOL).  We cannot simply collect the bytes at

@@ -108,6 +108,7 @@ class JsCombineFilter : public RewriteFilter {
   void CharactersImpl(HtmlCharactersNode* characters) override;
   void Flush() override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "JsCombine"; }
   RewriteContext* MakeRewriteContext() override;
   const UrlSegmentEncoder* encoder() const override { return &encoder_; }

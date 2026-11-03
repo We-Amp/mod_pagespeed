@@ -655,6 +655,19 @@ TEST_F(CurlUrlAsyncFetcherTest, TestHttpsFailsByDefault) {
   ValidateMonitoringStats(0, 1);
 }
 
+TEST_F(CurlUrlAsyncFetcherTest, SupportsHttpsFollowsEnable) {
+  // SupportsHttps() must agree with what Fetch() enforces: https is fetched
+  // only when it is enabled, whatever other keywords are set.
+  EXPECT_FALSE(curl_fetcher_->SupportsHttps());
+  EXPECT_TRUE(curl_fetcher_->SetHttpsOptions("allow_self_signed"));
+  EXPECT_FALSE(curl_fetcher_->allow_https());
+  EXPECT_FALSE(curl_fetcher_->SupportsHttps());
+  EXPECT_TRUE(curl_fetcher_->SetHttpsOptions("disable,allow_self_signed"));
+  EXPECT_FALSE(curl_fetcher_->SupportsHttps());
+  EXPECT_TRUE(curl_fetcher_->SetHttpsOptions("enable,allow_self_signed"));
+  EXPECT_TRUE(curl_fetcher_->SupportsHttps());
+}
+
 TEST_F(CurlUrlAsyncFetcherTest, TestHttpsFailsForSelfSignedCert) {
   curl_fetcher_->SetHttpsOptions("enable");
   EXPECT_TRUE(curl_fetcher_->SupportsHttps());

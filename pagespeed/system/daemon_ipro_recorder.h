@@ -51,6 +51,11 @@ struct DaemonRecordRequest {
   GoogleString url;  // Path and query; see UrlIsKeySafe.
   GoogleString hostname;
   GoogleString scheme;
+  // The site of the server block, virtual host or IIS site that admitted the
+  // request: SiteIdFromServerFragment of its SERVER-scope fragment, never of
+  // a fragment from per-directory or per-request options.  A request without
+  // a site id is recorded nowhere (daemon_record_reason::kNoSiteId).
+  GoogleString site;
 
   GoogleString accept;
   GoogleString user_agent;

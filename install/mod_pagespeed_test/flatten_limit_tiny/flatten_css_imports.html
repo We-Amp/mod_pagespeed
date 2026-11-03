@@ -1,0 +1,15 @@
+<html>
+  <head>
+    <title>flatten_css_imports with a configured size limit</title>
+    <style>
+      @import url(/mod_pagespeed_example/styles/all_using_imports.css);
+    </style>
+  </head>
+  <body>
+    <div class="blue yellow bold">
+      The imported CSS must stay behind its <code>@import</code> when the
+      flatten size limit configured for this directory is too small to inline
+      it.
+    </div>
+  </body>
+</html>

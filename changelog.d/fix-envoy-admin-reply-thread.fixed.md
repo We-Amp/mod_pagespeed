@@ -1,0 +1,1 @@
+- Envoy (experimental): replies to the administrative pages are now sent from the request's own thread, so an administrative request no longer stops the proxy.

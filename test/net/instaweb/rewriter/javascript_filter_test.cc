@@ -677,15 +677,16 @@ TEST_F(JavascriptFilterTest, IdentifyAjaxLibrary) {
 
 TEST_F(JavascriptFilterTest, InvalidInputMimetype) {
   InitFilters();
-  // Make sure we can rewrite properly even when input has corrupt mimetype.
+  // A script whose origin content type we do not recognize is left alone,
+  // like any other input the origin did not label as script (see
+  // NotRewrittenWhenOriginTypeIsNotScript).
   ContentType not_java_script = kContentTypeJavascript;
   not_java_script.mime_type_ = "text/semicolon-inserted";
   const char* kNotJsFile = "script.notjs";
 
   SetResponseWithDefaultHeaders(kNotJsFile, not_java_script, kJsData, 100);
-  ValidateExpected(
-      "wrong_mime", GenerateHtml(kNotJsFile),
-      GenerateHtml(Encode("", kFilterId, "0", kNotJsFile, "js").c_str()));
+  ValidateNoChanges("wrong_mime", GenerateHtml(kNotJsFile));
+  EXPECT_EQ(0, blocks_minified_->Get());
 }
 
 TEST_F(JavascriptFilterTest, RewriteJs404) {
@@ -739,6 +740,47 @@ TEST_F(JavascriptFilterTest, NoMinificationInlineJS) {
   EXPECT_EQ(1, did_not_shrink_->Get());
   // No failures though.
   EXPECT_EQ(0, minification_failures_->Get());
+}
+
+// An inline script keeps its end tag where it was when minification would
+// change where an HTML parser ends the element.
+TEST_F(JavascriptFilterTest, InlineScriptKeepsElementEnd) {
+  InitFiltersAndTest(100);
+  const GoogleString wrapped =
+      absl::StrFormat(kInlineJs,
+                      "<!--\n"
+                      "document.write(\"<script src='a.js'></SCRIPT>\");\n"
+                      "var a = \"b\";\n"
+                      "//-->");
+  ValidateExpected("wrapped", wrapped, wrapped);
+  const GoogleString joined =
+      absl::StrFormat(kInlineJs, "var n = 1 < /script>/.test(a);");
+  ValidateExpected("joined", joined, joined);
+  const GoogleString commented = absl::StrFormat(kInlineJs,
+                                                 "<!--\n"
+                                                 "var a = \"<!--<script>\";\n"
+                                                 "// -->");
+  ValidateExpected("commented", commented, commented);
+}
+
+// Scripts that mention these sequences without changing where the element
+// ends are still minified.
+TEST_F(JavascriptFilterTest, InlineScriptWithHarmlessMarkupStillMinified) {
+  InitFiltersAndTest(100);
+  ValidateExpected(
+      "html comment",
+      absl::StrFormat(kInlineJs, "<!--\nvar a = \"<!-- b -->\";\n//-->"),
+      absl::StrFormat(kInlineJs, "var a=\"<!-- b -->\";"));
+  ValidateExpected(
+      "script tag",
+      absl::StrFormat(kInlineJs, "<!--\nvar a = \"<script>\";\n//-->"),
+      absl::StrFormat(kInlineJs, "var a=\"<script>\";"));
+  ValidateExpected(
+      "escaped end tag",
+      absl::StrFormat(kInlineJs, "<!--\nvar a = \"<\\/script>\";\n//-->"),
+      absl::StrFormat(kInlineJs, "var a=\"<\\/script>\";"));
+  ValidateExpected("plain", absl::StrFormat(kInlineJs, kJsData),
+                   absl::StrFormat(kInlineJs, kJsMinData));
 }
 
 TEST_F(JavascriptFilterTest, StripInlineWhitespace) {
@@ -1742,6 +1784,17 @@ TEST_F(JavascriptFilterTest, ExternalAndNotInline) {
 
 TEST_F(JavascriptFilterTest, ContentTypeValidation) {
   ValidateFallbackHeaderSanitization(kFilterId);
+}
+
+// A file the origin labels text/plain is not minified.
+TEST_F(JavascriptFilterTest, NotRewrittenWhenOriginTypeIsNotScript) {
+  InitFilters();
+  SetResponseWithDefaultHeaders("note.txt", kContentTypeText, kJsData, 100);
+  ValidateNoChanges("origin_type_not_script", GenerateHtml("note.txt"));
+  GoogleString content;
+  EXPECT_FALSE(
+      FetchResource(kTestDomain, kFilterId, "note.txt", "js", &content));
+  EXPECT_EQ(0, blocks_minified_->Get());
 }
 
 TEST_F(JavascriptFilterTest, BasicCsp) {

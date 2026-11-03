@@ -30,6 +30,7 @@ Packager        : @@MAINTNAME@@ <@@MAINTMAIL@@>
 # revisions but breaking — by design, with a build-time load-check alarm — on a
 # distro nginx-minor rebase.
 Requires        : @@NGINX_DEP@@
+@@PKG_RELATIONS@@
 
 # PSOL / Cyclone / BoringSSL / curl are statically linked inside the .so and
 # every internal symbol is hidden by the version script (D4), so there is NO
@@ -78,6 +79,7 @@ rm -rf "$RPM_BUILD_ROOT"
 @@NGINX_DOCDIR@@/README.md
 @@NGINX_DOCDIR@@/pagespeed.conf.sample
 @@NGINX_DOCDIR@@/pagespeed_admin_restrict.conf.sample
+@@EXTRA_FILES@@
 
 %pre
 exit 0

@@ -145,7 +145,7 @@ class CssInlineFilterTest : public RewriteTestBase {
                      "<link rel='stylesheet' href='foo.css'>",
                      "<link rel='stylesheet' href='foo.css'>"
                      "<!--CSS not inlined since it contains "
-                     "style closing tag-->");
+                     "a less-than sign-->");
   }
 
   void TurnOnDebug() {
@@ -755,6 +755,19 @@ TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagWithCapitalization) {
 
 TEST_F(CssInlineFilterTest, NoInliningOfCloseStyleTagWithSpaces) {
   VerifyNoInliningForClosingStyleTag("</style abc>");
+}
+
+// A stylesheet with a tag in it stays external.
+TEST_F(CssInlineFilterTest, NoInliningOfAnyTag) {
+  VerifyNoInliningForClosingStyleTag("td[headers=\"<x\"]{padding:3px}");
+}
+
+TEST_F(CssInlineFilterTest, StylesheetWithoutMarkupIsInlined) {
+  AddFilter(RewriteOptions::kInlineCss);
+  SetResponseWithDefaultHeaders("foo.css", kContentTypeCss, "a>b{margin:0}",
+                                100);
+  ValidateExpected("inlined", "<link rel='stylesheet' href='foo.css'>",
+                   "<style>a>b{margin:0}</style>");
 }
 
 TEST_F(CssInlineFilterTest, DisabledForAmp) {
