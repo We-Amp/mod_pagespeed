@@ -3,8 +3,8 @@
   "@id": "https://we-amp.com/vex/pagespeed-1.1",
   "author": "We-Amp B.V.",
   "role": "vendor",
-  "timestamp": "2026-11-03T12:00:00Z",
-  "version": 7,
+  "timestamp": "2026-11-04T12:00:00Z",
+  "version": 8,
   "statements": [
     {
       "vulnerability": {
@@ -182,6 +182,39 @@
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
       "impact_statement": "Expires: 2027-02-01. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server runs at any point. The advisory is about server-side route rules (redirect, headers, proxy, ssr, noScripts) skipped for case-variant paths by the Nitro server; the fixture's nuxt.config.ts defines no routeRules, and with no server at runtime no route rule is resolved. No fix exists on the 3.x line (fixed in nuxt and @nuxt/nitro-server 4.6.2). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-3g3m-2fjr-6pw4",
+        "aliases": ["CVE-2026-118773"]
+      },
+      "timestamp": "2026-11-04T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/glob@10.5.0" }, { "@id": "pkg:npm/glob@13.0.6" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Expires: 2027-02-01. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh, also called by run_module_check.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server, and no Nuxt dev server, runs at any point. glob is pulled in only by Nuxt's build dependencies (@vercel/nft and archiver-utils) and runs inside the fixture build on paths and patterns fixed by those tools and the fixture's own project; it never sees a request or a request-supplied path or pattern, so the advisory's post-timeout traversal has nothing untrusted to reach. The fix (14.0.2) is outside the ranges these Nuxt 3 dependencies accept (glob ^13.0.0 and ^10.0.0). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-g3hv-75wg-m249",
+        "aliases": ["CVE-2026-118764"]
+      },
+      "timestamp": "2026-11-04T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/minimatch@5.1.9" }, { "@id": "pkg:npm/minimatch@9.0.9" }, { "@id": "pkg:npm/minimatch@10.2.6" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "Expires: 2027-02-01. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh, also called by run_module_check.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server, and no Nuxt dev server, runs at any point. minimatch is pulled in only through glob and readdir-glob in Nuxt's build dependencies and runs inside the fixture build on paths and patterns fixed by those tools and the fixture's own project; it never sees a request or a request-supplied pattern, so the advisory's pattern amplification cannot be triggered. The fix (11.0.1) is outside the ranges these Nuxt 3 dependencies accept (minimatch ^10.2.2, ^9.0.4 and ^5.1.0). Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-648h-gw55-m2g7",
+        "aliases": ["CVE-2026-119199"]
+      },
+      "timestamp": "2026-11-04T12:00:00Z",
+      "products": [ { "@id": "pkg:npm/%40nuxt/vite-builder@3.21.11" } ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Expires: 2027-02-01. Surface: test/browser/hydration/nuxt-app/package-lock.json only, a test fixture that ships in no package or image. The fixture is built with `nuxt generate` (test/browser/hydration/build_all.sh, also called by run_module_check.sh) and only its static output (.output/public) is served, by Apache or nginx in the hydration browser check; no Nuxt or Nitro server, and no Nuxt dev server, runs at any point. The advisory needs the Vite dev server started by `nuxt dev`, which serves the Nitro development bundle and the private runtime config inlined in it; production builds are not affected. The fixture is only ever built with `nuxt generate`, never started with `nuxt dev`, and its nuxt.config.ts defines no runtimeConfig. The fix is only in @nuxt/vite-builder 4.6.3, a major update of the fixture. Re-evaluate on expiry or when the fixture moves to Nuxt 4, whichever comes first; at that update take the fixed version instead of extending this statement."
     }
   ]
 }
