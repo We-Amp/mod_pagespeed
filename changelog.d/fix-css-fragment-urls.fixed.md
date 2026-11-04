@@ -1,1 +1,0 @@
-- A fragment-only reference in CSS, such as url(#id) naming an SVG mask, now stays a fragment reference when a stylesheet is cache-extended, combined, inlined, outlined, reduced to its critical rules or rewritten without being parsed, and when stylesheet references are made absolute, also with rewrite domains or shards set.

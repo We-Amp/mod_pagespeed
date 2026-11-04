@@ -1,1 +1,0 @@
-- Hardened image inlining so that the image bytes inlined into one page or stylesheet are bounded by a configurable budget, which reduces how much memory a single response can use. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

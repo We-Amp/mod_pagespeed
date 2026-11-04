@@ -1,4 +1,0 @@
-- Stylesheets with very long media lists relative to their size are now served unmodified.
-- Stylesheets with more than 100 imports in total, or with more imported CSS than the flattening limit allows for, are no longer flattened.
-- CssFlattenMaxBytes can no longer be set per request through query parameters, request or response headers, or cookies; set it in the server or directory configuration.
-- Preload hints may be omitted for stylesheets with very many imports, fonts or image references.

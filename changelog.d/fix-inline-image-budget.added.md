@@ -1,1 +1,0 @@
-- **New directive `DocumentImageInlineMaxBytes`, default 4194304 (4 MiB).** It bounds the image bytes inlined into one page or one stylesheet, images inlined into CSS included. Once the budget is spent, further images keep their URL, with no error and no partial inlining. A request may lower it, never raise it.

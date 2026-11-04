@@ -1,1 +1,0 @@
-- Optimized resources and pages are now built only from content the server serves to any client, so content restricted to some clients can no longer appear in optimized output for others. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

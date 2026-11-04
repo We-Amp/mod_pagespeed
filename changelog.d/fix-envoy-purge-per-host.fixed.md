@@ -1,1 +1,0 @@
-- Envoy (experimental): **Touching `cache.flush` in the cache directory flushes the cache, for hosts with `virtual_hosts` options too.** The filter never checked the file, so a flush had no effect on a running Envoy; and options for a virtual host were kept from its first request, so they would not have seen a later flush either.

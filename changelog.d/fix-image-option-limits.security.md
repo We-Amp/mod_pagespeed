@@ -1,4 +1,0 @@
-- Hardened optimized image and stylesheet URLs so that the options in a URL can no longer change the image resolution limit, the rewrite concurrency limit or the URL length limits the server applies. Affected: 2.7.0 and earlier. Update recommended for sites that set `AddOptionsToUrls on`.
-- Hardened JPEG recompression so that a JPEG that cannot be recompressed no longer leaks worker memory. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Hardened JPEG decoding so that the work spent on a single image is bounded. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Hardened request-supplied options so that a request can no longer raise the inline and flatten size thresholds above the configured values, which reduces how much a single response can inline. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

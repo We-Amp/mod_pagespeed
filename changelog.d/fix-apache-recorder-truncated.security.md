@@ -1,1 +1,0 @@
-- Hardened Apache in-place optimization so that an incomplete response is no longer stored or served as a complete resource. Affected: 2.7.0 and earlier. Update recommended for Apache sites.
