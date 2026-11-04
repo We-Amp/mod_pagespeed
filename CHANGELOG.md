@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+Discovered by Anthropic's OSS Scanner, as vulnerabilities ANT-2026-0S05PU3F, ANT-2026-14RH9A6G, ANT-2026-1KNB25NP, ANT-2026-1UEL65XQ, ANT-2026-2ENVI6Y8, ANT-2026-2UMXI0CU, ANT-2026-3V8TBV0M, ANT-2026-4DHCDTO1, ANT-2026-63KEF12V, ANT-2026-7WDBOHQE, ANT-2026-8TUUI9SP, ANT-2026-ADRH50SF, ANT-2026-ANJU0AJJ, ANT-2026-AXLAULVI, ANT-2026-CXXZERMM, ANT-2026-E0YS05DA, ANT-2026-F9XA9QZT, ANT-2026-GBL6KS5Z, ANT-2026-GHH8ZRZQ, ANT-2026-GT69ZXBA, ANT-2026-GYB0WEBP, ANT-2026-I04H8ECV, ANT-2026-I99F82VL, ANT-2026-J9104QFK, ANT-2026-JS5S4FY8, ANT-2026-K4FEBWLL, ANT-2026-LUNJX7VG, ANT-2026-MOQVERBF, ANT-2026-N3ZEFVHQ, ANT-2026-NUYS6G5X, ANT-2026-O4L9FD3Y, ANT-2026-O9ZNTSJO, ANT-2026-OF3Q0VK8, ANT-2026-PAJ6XTED, ANT-2026-PQ4KEW95, ANT-2026-Q62IVSHN, ANT-2026-R5383I2X, ANT-2026-RIRYHATG, ANT-2026-SG3VWBO8, ANT-2026-SQJKH8Z4, ANT-2026-UWLNI6WG, ANT-2026-VIQSI8GY, ANT-2026-WOVG5M0P, ANT-2026-WT6VHC24, ANT-2026-XICYWB0G, ANT-2026-XSFSLU2S, ANT-2026-XTE7D2BW, ANT-2026-Y5L4AS94, ANT-2026-ZAY791Q4, and ANT-2026-ZUI2KO6Y. We thank the scanner team for the reports.
+
 - Reduced the memory that Apache takes to optimize a single large uncompressed HTML page. Affected: 2.7.0 and earlier. Update recommended for Apache sites.
 - Hardened Apache in-place optimization so that an incomplete response is no longer stored or served as a complete resource. Affected: 2.7.0 and earlier. Update recommended for Apache sites.
 - Corrected the caching of flattened stylesheet imports so that imports with different media lists no longer share a result. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
