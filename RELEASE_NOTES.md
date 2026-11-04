@@ -1,6 +1,6 @@
 # mod_pagespeed 2.8.0 Release Notes
 
-**Release date:** [GAP: release date]
+**Release date:** 2026-11-05
 **Status:** Stable
 **Packages:** native nginx module packages for Ubuntu 26.04 (with its stock
 nginx). The nginx.org module package `nginx-module-pagespeed-nginxorg`, built for nginx.org's stable nginx (as in the official nginx Docker image), is available for Debian 13, Ubuntu 24.04 and Enterprise Linux 9 (AlmaLinux, Rocky Linux, RHEL), amd64 (x86_64) only, one build per nginx version. Upgrade nginx and the module together: when both are in the repositories, a plain upgrade moves both. If nginx.org publishes a newer nginx first, the upgrade holds nginx back and the module keeps working; to take an nginx security fix before the module build exists, remove the module, upgrade nginx, and reinstall the module when its package is available. In Docker, move the image tag only once the package for that version exists. On Enterprise Linux 9 the package installs a small dnf plugin that holds nginx (and nginx.org's module packages for it) at the version the module is built for until the matching build is available, so a plain `dnf update` takes every other update and `dnf check-update` still lists the pending nginx; to take an nginx security fix first, run `dnf upgrade nginx --allowerasing`, which removes the module package (reinstall it once its build is available). The [nginx install steps](https://modpagespeed.com/docs/installation-module/#native-nginx-module) have the details. The stock packages, including the
@@ -8,7 +8,7 @@ new Ubuntu 26.04 one, ship for amd64 and arm64 on Debian 12 and 13 and Ubuntu
 22.04, 24.04 and 26.04, and for x86_64 and aarch64 on AlmaLinux, RHEL and
 Rocky 9; AlmaLinux, RHEL and Rocky 10 is x86_64 only.
 
-mod_pagespeed 2.8.0 is the current release: the module and the optimizer worker, released together on [GAP: release date] and installed as a matching pair. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version.
+mod_pagespeed 2.8.0 is the current release: the module and the optimizer worker, released together on 2026-11-05 and installed as a matching pair. The packages in the signed apt and yum repositories, the container images, the NuGet packages (including the ASP.NET Core sidecar packages) and the Helm chart's application version all carry the product version.
 
 ## Highlights
 
