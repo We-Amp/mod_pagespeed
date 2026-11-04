@@ -437,9 +437,19 @@ class TestNginxIproMessageHistory:
         history_url = f"{server_config.admin_path}/message_history"
 
         # Warm: wait until the optimized copy is served, so the loop below
-        # is all in-place hits.
-        client.fetch_until(
-            url, condition=lambda r: len(r.body) < 43, timeout=60.0
+        # is all in-place hits.  An optimized response names the original
+        # length in X-Original-Content-Length and is shorter than it; the
+        # original response carries no such header, so it never satisfies
+        # this.
+        def optimized(r) -> bool:
+            original = r.header("X-Original-Content-Length")
+            return original.isdigit() and len(r.body) < int(original)
+
+        warm = client.fetch_until(url, condition=optimized, timeout=60.0)
+        assert optimized(warm), (
+            f"warm-up ended without an optimized response: "
+            f"{len(warm.body)} bytes, X-Original-Content-Length="
+            f"{warm.header('X-Original-Content-Length')!r}"
         )
 
         # The buffer may already be full, so count only what was written
