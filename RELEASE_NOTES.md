@@ -412,6 +412,8 @@ _Optimizer worker and its nginx module_
   markup is served without the inline critical CSS**, and its stylesheets
   stay render-blocking. Range media queries are not affected when a space
   follows each `<`.
+- **XHTML pages (served as application/xhtml+xml) are served without the
+  inline critical CSS block, and their stylesheets stay render-blocking.**
 - **Lazy-loaded images now also get `decoding="async"`, unless the page
   already sets a decoding attribute; the LCP candidate image and the first
   iframe are left as they are.**
