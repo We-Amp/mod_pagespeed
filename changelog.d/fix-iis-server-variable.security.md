@@ -1,1 +1,0 @@
-- Hardened request handling on IIS so that a server variable that IIS fails to look up can no longer stop the worker process; the request is handled as if the variable were not set. Affected: 2.7.0 and earlier. Update recommended for IIS sites.

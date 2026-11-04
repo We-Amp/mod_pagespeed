@@ -1,1 +1,0 @@
-- **Scripts and stylesheets need a matching origin type to be optimized.** Scripts and stylesheets are now minified, rewritten and combined only when the origin labels them with a script or stylesheet Content-Type; resources with a missing, unrecognized or different type are left as they are.

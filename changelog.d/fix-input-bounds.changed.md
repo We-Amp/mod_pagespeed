@@ -1,5 +1,0 @@
-- **Compressed HTML that inflates past 64 MiB is cut off.** nginx, Apache and IIS stop at that point, log a warning and end the response normally, as they do for a corrupt compressed page, so a downstream cache allowed to store the page can keep the shortened copy. Uncompressed pages are unaffected.
-- **Apache: a compressed HTML page is flushed through the rewriter every 1 MiB**, so optimizations such as combining work per window on pages larger than that, and markup after the first window no longer changes response headers.
-- **A response that begins with more than 64 KiB of whitespace is no longer rewritten.** It is still served, without optimization.
-- **JPEGs over 16384 pixels a side or 100 megapixels are no longer recompressed or converted to WebP**, whatever the configured resolution limit. They are served as they are.
-- **A cached compressed body that inflates past `MaxCacheableContentLength`, or 256 MiB at most, stays compressed** for a client that does not accept compression, and a fetched body that inflates past 256 MiB fails like a corrupt one.

@@ -1,5 +1,0 @@
-- Corrected the caching of flattened stylesheet imports so that imports with different media lists no longer share a result. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Corrected the rewriting of imported stylesheets so that one stylesheet's optimized result no longer picks up another's image URLs. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Bounded the memory used for media lists on stylesheet rules and imports; stylesheets over the bound are served unmodified. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Bounded the work and memory of stylesheet import flattening; stylesheets over the bounds are left unflattened. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.
-- Bounded the memory used to collect preload hints for a stylesheet's imports and fonts; hints beyond the bound are no longer collected. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

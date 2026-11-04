@@ -1,1 +1,0 @@
-- Reduced the memory a single view of a crafted page can take from a server worker, which could stop the worker. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

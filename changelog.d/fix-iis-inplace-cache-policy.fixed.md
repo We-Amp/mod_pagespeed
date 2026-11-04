@@ -1,1 +1,0 @@
-- IIS: a stylesheet, script or image that the module optimizes in place is no longer kept in IIS's own response caches (the HTTP.sys kernel cache and the output cache), which could keep handing out the unoptimized copy. Other files, and paths excluded from optimization with Disallow, keep IIS's caching.

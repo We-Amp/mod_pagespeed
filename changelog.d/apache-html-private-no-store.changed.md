@@ -1,1 +1,0 @@
-- **On Apache, rewritten HTML keeps `private` and `no-store`.** mod_pagespeed now keeps `private` and `no-store` from any Cache-Control header on the HTML it rewrites, so rewritten pages keep the origin's and the server configuration's private and no-store.

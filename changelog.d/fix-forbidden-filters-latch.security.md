@@ -1,1 +1,0 @@
-- Hardened filter configuration so that filters the configuration forbids stay off. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

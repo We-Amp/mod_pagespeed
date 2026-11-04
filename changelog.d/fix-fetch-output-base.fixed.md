@@ -1,1 +1,0 @@
-- url() references inside CSS functions are now resolved like other references.

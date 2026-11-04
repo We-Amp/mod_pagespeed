@@ -1,1 +1,0 @@
-- Hardened the access rules for files loaded directly from disk, and the handling of user-supplied files. Affected: 2.7.0 and earlier. Update recommended for sites that use LoadFromFile settings or serve user-supplied files.

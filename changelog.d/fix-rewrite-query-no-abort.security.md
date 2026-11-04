@@ -1,1 +1,0 @@
-- Fixed a case in which a page could stop a server worker. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

@@ -1,4 +1,0 @@
-- **A page is recognized as AMP only if its `<html>` element comes within about the first 64 KiB.** A later one is optimized as an ordinary page, which can fail AMP validation.
-- **A page with more than 32 Content-Security-Policy policies no longer has its resources optimized.** It is still served.
-- **A `<base href>` longer than `MaxUrlSize` is not used,** and relative URLs on that page are left as they are.
-- **Resource URLs on an element with more than 256 attributes, and `srcset` candidates past the first 256, are left as they are.**

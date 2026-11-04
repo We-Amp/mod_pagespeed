@@ -1,3 +1,0 @@
-- Inline `<style>` blocks, style attributes, and stylesheets selected for inlining, that contain a `<` (for example range media queries) are now left as they were instead of being minified or inlined.
-- After this update, each stylesheet, script and image is optimized again the first time it is requested, because optimization records cached by earlier versions are no longer used. Expect extra CPU use, and some responses go out without optimization until this completes; the upgrade notes cover the caches.
-- `outline_javascript` and `outline_css` leave inline scripts and styles in place on pages that carry a Content-Security-Policy governing scripts or styles respectively.
