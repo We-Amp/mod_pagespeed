@@ -39,6 +39,7 @@ if [ "$DISTRO_FAMILY" = "rhel" ]; then
     DOC_ROOT=/var/www/html
     MODULE_SO="$APACHE_MODULES_DIR/mod_pagespeed.so"
     CONF_FILE="$APACHE_CONF_DIR/conf.d/pagespeed.conf"
+    APACHE_ERROR_LOG=/var/log/httpd/error_log
 else
     APACHE_USER=www-data
     APACHE_GROUP=www-data
@@ -49,6 +50,7 @@ else
     DOC_ROOT=/var/www/html
     MODULE_SO="$APACHE_MODULES_DIR/mod_pagespeed.so"
     CONF_FILE="$APACHE_CONF_DIR/mods-available/pagespeed.conf"
+    APACHE_ERROR_LOG=/var/log/apache2/error.log
 fi
 
 CACHE_DIR=/var/cache/mod_pagespeed
@@ -71,6 +73,14 @@ log_info "Setting up directories..."
 mkdir -p "$CACHE_DIR" "$LOG_DIR"
 chown "$APACHE_USER:$APACHE_GROUP" "$CACHE_DIR" "$LOG_DIR"
 chmod 755 "$CACHE_DIR" "$LOG_DIR"
+
+# Stage a stale pagespeed.license in the parent of the FileCachePath, where an
+# earlier install layout kept it (same fixture as test/system/setup_apache_test.sh):
+# test_no_license_apparatus.py asserts the module logs one INFO line about it
+# and otherwise ignores it.
+STALE_LICENSE_FILE="$(dirname "$CACHE_DIR")/pagespeed.license"
+echo "stale-token-from-a-previous-release" > "$STALE_LICENSE_FILE"
+chown "$APACHE_USER:$APACHE_GROUP" "$STALE_LICENSE_FILE"
 
 # ── Step 3: Copy test content from source tree ──────────────────────────────
 log_info "Copying test content from /src/install/ ..."
@@ -107,6 +117,23 @@ EOF
     ModPagespeedStatistics on
     ModPagespeedStatisticsLogging on
     ModPagespeedFetchHttps enable
+
+    # Resources are optimized in place, under their original URL
+    # (test_ipro.py, test_rel_canonical.py wait for that to happen).
+    ModPagespeedInPlaceResourceOptimization on
+
+    # The container image's mime table has no webp entry, and the module
+    # refuses a typeless input (test_image_resize.py,
+    # test_resource_content_type.py).
+    AddType image/webp .webp
+
+    # Keeps the module's INFO lines in the server error log;
+    # test_no_license_apparatus.py reads its stale-license notice there.
+    LogLevel warn pagespeed:info
+
+    # test_zerocopy_serve.py asserts the aliased serve fires on this chain.
+    ModPagespeedCycloneZeroCopy on
+    ModPagespeedCycloneZeroCopyServe on
 
     ModPagespeedBlockingRewriteKey psatest
     ModPagespeedCriticalImagesBeaconEnabled false
@@ -166,6 +193,21 @@ CONFEOF
     a2enmod pagespeed 2>/dev/null || true
     a2enconf servername 2>/dev/null || true
 
+    # Pin a fixed prefork pool, as the harness does: test_mpm_thread_resolution.py
+    # asserts the module reads exactly this pool shape (16 children) from the MPM.
+    a2dismod mpm_event mpm_worker 2>/dev/null || true
+    a2enmod mpm_prefork 2>/dev/null || true
+    cat > "$APACHE_CONF_DIR/mods-available/mpm_prefork.conf" << 'EOF'
+<IfModule mpm_prefork_module>
+    StartServers            16
+    MinSpareServers         16
+    MaxSpareServers         16
+    ServerLimit             32
+    MaxRequestWorkers       16
+    MaxConnectionsPerChild  0
+</IfModule>
+EOF
+
 else
     # RHEL: The RPM postinst already placed config in /etc/httpd/conf.d/.
     # Overwrite with test-specific configuration.
@@ -182,6 +224,23 @@ LoadModule pagespeed_module $APACHE_MODULES_DIR/mod_pagespeed.so
     ModPagespeedStatistics on
     ModPagespeedStatisticsLogging on
     ModPagespeedFetchHttps enable
+
+    # Resources are optimized in place, under their original URL
+    # (test_ipro.py, test_rel_canonical.py wait for that to happen).
+    ModPagespeedInPlaceResourceOptimization on
+
+    # The container image's mime table has no webp entry, and the module
+    # refuses a typeless input (test_image_resize.py,
+    # test_resource_content_type.py).
+    AddType image/webp .webp
+
+    # Keeps the module's INFO lines in the server error log;
+    # test_no_license_apparatus.py reads its stale-license notice there.
+    LogLevel warn pagespeed:info
+
+    # test_zerocopy_serve.py asserts the aliased serve fires on this chain.
+    ModPagespeedCycloneZeroCopy on
+    ModPagespeedCycloneZeroCopyServe on
 
     ModPagespeedBlockingRewriteKey psatest
     ModPagespeedCriticalImagesBeaconEnabled false
@@ -233,6 +292,11 @@ LoadModule pagespeed_module $APACHE_MODULES_DIR/mod_pagespeed.so
 <Directory "/var/www/html/mod_pagespeed_test/no_cache/">
     Header set Cache-control "no-cache"
 </Directory>
+
+# CSS must reach the module compressed on this lane; the Debian lane gets
+# that from its distro deflate.conf (test_ipro.py: TestIPROVaryParity,
+# TestIproWithModDeflate).
+AddOutputFilterByType DEFLATE text/css
 CONFEOF
 
     # Ensure required modules are loaded (most are defaults on RHEL)
@@ -244,6 +308,28 @@ CONFEOF
                 > "$APACHE_CONF_DIR/conf.modules.d/99-pagespeed-${mod}.conf"
         fi
     done
+
+    # Pin the same fixed prefork pool as the Debian branch above
+    # (test_mpm_thread_resolution.py): pick prefork in the MPM module config,
+    # then pin the pool shape in a drop-in.
+    MPM_MODULE_CONF="$APACHE_CONF_DIR/conf.modules.d/00-mpm.conf"
+    if [ -f "$MPM_MODULE_CONF" ]; then
+        sed -i \
+            -e 's|^#\{0,1\}[[:space:]]*LoadModule mpm_prefork_module|LoadModule mpm_prefork_module|' \
+            -e 's|^#\{0,1\}[[:space:]]*LoadModule mpm_worker_module|#LoadModule mpm_worker_module|' \
+            -e 's|^#\{0,1\}[[:space:]]*LoadModule mpm_event_module|#LoadModule mpm_event_module|' \
+            "$MPM_MODULE_CONF"
+    fi
+    cat > "$APACHE_CONF_DIR/conf.d/99-pagespeed-mpm.conf" << 'EOF'
+<IfModule mpm_prefork_module>
+    StartServers            16
+    MinSpareServers         16
+    MaxSpareServers         16
+    ServerLimit             32
+    MaxRequestWorkers       16
+    MaxConnectionsPerChild  0
+</IfModule>
+EOF
 
     echo "ServerName localhost" >> "$APACHE_CONF_DIR/conf/httpd.conf"
 fi
@@ -305,6 +391,9 @@ export PAGESPEED_CACHE_DIR="$CACHE_DIR"
 export PAGESPEED_STATS_ENABLED=1
 export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
 export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
+# Tests read Apache's error log from this path (test_no_license_apparatus.py,
+# test_mpm_thread_resolution.py); the per-distro default only matches Debian.
+export PAGESPEED_APACHE_ERROR_LOG="$APACHE_ERROR_LOG"
 export PYTHONDONTWRITEBYTECODE=1
 
 cd /src/test/system
