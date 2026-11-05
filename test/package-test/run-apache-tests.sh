@@ -118,6 +118,27 @@ EOF
         Header append 'X-Extra-Header' '1'
     </Location>
 
+    # Fixtures some automatic/ tests need (same as test/system/setup_apache_test.sh).
+    # Inputs a rewritten resource must not grow more cacheable than.
+    <Directory "/var/www/html/mod_pagespeed_test/ipro/cc200p/">
+        Header set Cache-control "private, max-age=200"
+    </Directory>
+    <Directory "/var/www/html/mod_pagespeed_test/ipro/cc200ns/">
+        Header set Cache-control "no-store, max-age=200"
+    </Directory>
+    # A request can only lower the image inline threshold, so the page gets
+    # it from the configuration (test_rewrite_css.py::test_rewrite_css_images).
+    <Location /mod_pagespeed_example/rewrite_css_images.html>
+        ModPagespeedCssImageInlineMaxBytes 2048
+    </Location>
+    # The flatten size limit is configuration only (not settable per request).
+    <Directory "/var/www/html/mod_pagespeed_test/flatten_limit_tiny">
+        ModPagespeedCssFlattenMaxBytes 5
+    </Directory>
+    <Directory "/var/www/html/mod_pagespeed_test/flatten_limit_medium">
+        ModPagespeedCssFlattenMaxBytes 50
+    </Directory>
+
     <Location /mod_pagespeed_statistics>
         Require all granted
         SetHandler mod_pagespeed_statistics
@@ -171,6 +192,27 @@ LoadModule pagespeed_module $APACHE_MODULES_DIR/mod_pagespeed.so
     <Location /mod_pagespeed_example>
         Header append 'X-Extra-Header' '1'
     </Location>
+
+    # Fixtures some automatic/ tests need (same as test/system/setup_apache_test.sh).
+    # Inputs a rewritten resource must not grow more cacheable than.
+    <Directory "/var/www/html/mod_pagespeed_test/ipro/cc200p/">
+        Header set Cache-control "private, max-age=200"
+    </Directory>
+    <Directory "/var/www/html/mod_pagespeed_test/ipro/cc200ns/">
+        Header set Cache-control "no-store, max-age=200"
+    </Directory>
+    # A request can only lower the image inline threshold, so the page gets
+    # it from the configuration (test_rewrite_css.py::test_rewrite_css_images).
+    <Location /mod_pagespeed_example/rewrite_css_images.html>
+        ModPagespeedCssImageInlineMaxBytes 2048
+    </Location>
+    # The flatten size limit is configuration only (not settable per request).
+    <Directory "/var/www/html/mod_pagespeed_test/flatten_limit_tiny">
+        ModPagespeedCssFlattenMaxBytes 5
+    </Directory>
+    <Directory "/var/www/html/mod_pagespeed_test/flatten_limit_medium">
+        ModPagespeedCssFlattenMaxBytes 50
+    </Directory>
 
     <Location /mod_pagespeed_statistics>
         Require all granted
