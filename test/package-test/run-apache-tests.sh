@@ -447,10 +447,29 @@ fi
 log_info "Running system tests..."
 
 # Diagnostic: the worker the in-place tests depend on, and its sockets, so a
-# host run can confirm the tests have a worker to talk to.
+# host run can confirm the tests have a worker to talk to. The RHEL image
+# installs no ps, so scan /proc when it is missing; /proc/<pid>/comm holds
+# only the first 15 characters, so match the command line's executable.
 log_info "Optimizer worker process:"
-ps -o pid,user,args -C pagespeed-optimizer \
-    || log_warn "no pagespeed-optimizer process is running"
+if command -v ps >/dev/null 2>&1; then
+    ps -o pid,user,args -C pagespeed-optimizer \
+        || log_warn "no pagespeed-optimizer process is running"
+else
+    WORKER_FOUND=0
+    for pid_dir in /proc/[0-9]*; do
+        WORKER_ARGS=$(tr '\000' ' ' 2>/dev/null < "$pid_dir/cmdline") || continue
+        WORKER_EXE=${WORKER_ARGS%% *}
+        if [ "${WORKER_EXE##*/}" = "pagespeed-optimizer" ]; then
+            WORKER_PID=${pid_dir#/proc/}
+            WORKER_USER=$(stat -c %U "$pid_dir" 2>/dev/null || echo '?')
+            echo "$WORKER_PID $WORKER_USER $WORKER_ARGS"
+            WORKER_FOUND=1
+        fi
+    done
+    if [ "$WORKER_FOUND" -eq 0 ]; then
+        log_warn "no pagespeed-optimizer process is running"
+    fi
+fi
 log_info "Optimizer socket directory $OPTIMIZER_RUN_DIR:"
 ls -l "$OPTIMIZER_RUN_DIR"
 
