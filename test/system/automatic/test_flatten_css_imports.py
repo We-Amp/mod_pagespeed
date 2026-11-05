@@ -101,12 +101,21 @@ class TestFlattenCssImportsTinyLimit:
         """With tiny limit, @import statements should not be flattened."""
         url = f"{test_root}/flatten_limit_tiny/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
+        # A bare "@import" also matches the unrewritten page and the page's
+        # own body text. Wait for the minified <style> instead: it shows the
+        # stylesheet was rewritten and the @import was kept. Without the
+        # limit the import is flattened and this pattern never appears.
         response = client.fetch_until_contains(
             url,
-            pattern=r"@import",
+            pattern=r"<style>@import url\(",
             timeout=30.0,
         )
         assert_http_status(response, 200)
+        assert_not_contains(
+            response,
+            r"yellow.*background-color:",
+            "Imported CSS content should not be inlined with tiny limit",
+        )
 
     def test_tiny_limit_excludes_imported_content(
         self, client: PageSpeedClient, test_root: str
