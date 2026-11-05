@@ -284,6 +284,32 @@ function Wait-Ssh {
     throw "SSH never came up at root@$Ip within ${TimeoutSec}s"
 }
 
+# Seed ISOs moved from the old seeds directory to the new one. Checkpoints
+# taken before the move still record the old DVD path, so a restored VM would
+# boot with a DVD drive pointing at a file that no longer exists.
+$script:OldSeedDir = 'E:\hv\seeds\'
+$script:NewSeedDir = 'D:\hv\media\seeds\'
+
+function Repair-VmSeedIsoPath {
+    # Call after Restore-VMSnapshot and before Start-VM. Re-points a DVD drive
+    # whose path starts with the old seeds directory at the same file name in
+    # the new one. Throws if the file is missing there; paths that do not start
+    # with the old directory are left alone.
+    param([Parameter(Mandatory)] [string]$VMName)
+    $drives = @(Get-VMDvdDrive -VMName $VMName -ErrorAction Stop)
+    foreach ($dvd in $drives) {
+        $cur = [string]$dvd.Path
+        if ([string]::IsNullOrEmpty($cur)) { continue }
+        if (-not $cur.StartsWith($script:OldSeedDir, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $new = $script:NewSeedDir + $cur.Substring($script:OldSeedDir.Length)
+        if (-not (Test-Path -LiteralPath $new)) {
+            throw "Seed ISO '$new' not found (checkpoint of $VMName points at '$cur')"
+        }
+        Write-Host "Re-pointing DVD drive of '$VMName': $cur -> $new"
+        Set-VMDvdDrive -VMName $VMName -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $new -ErrorAction Stop
+    }
+}
+
 # Main body wrapped in try/finally so we always clean up the null-stdin
 # tempfile and any orphaned tempfiles even if a throw bubbles past the
 # trap. (trap + exit 1 is for hard failures; the finally below runs even
@@ -293,6 +319,7 @@ try {
     # --- Step 1: Revert + start ---
     Write-Host "=== Revert to '$Snapshot' ==="
     Restore-VMSnapshot -VMName $VMName -Name $Snapshot -Confirm:$false -ErrorAction Stop
+    Repair-VmSeedIsoPath -VMName $VMName
     Start-VM -Name $VMName -ErrorAction Stop
 
     $mac = (Get-VMNetworkAdapter -VMName $VMName -ErrorAction Stop | Select-Object -First 1).MacAddress
