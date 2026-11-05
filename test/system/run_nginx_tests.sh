@@ -661,6 +661,7 @@ EOF
         }
 
         # Inputs a rewritten resource must not grow more cacheable than.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
         location ~ /ipro/cc200p/ {
             add_header Cache-Control "private, max-age=200" always;
         }
@@ -687,6 +688,7 @@ EOF
         # automatic/test_rewrite_css.py::test_rewrite_css_images inlines a
         # small image into CSS; a request can only lower the threshold, so
         # the page gets it from the configuration.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
         location = /mod_pagespeed_example/rewrite_css_images.html {
             pagespeed CssImageInlineMaxBytes 2048;
         }
@@ -833,6 +835,7 @@ EOF
         # The flatten size limit is configuration only (not settable per
         # request); these locations give the flatten_css_imports tests a
         # small limit.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
         location ^~ /mod_pagespeed_test/flatten_limit_tiny/ {
             pagespeed CssFlattenMaxBytes 5;
         }
