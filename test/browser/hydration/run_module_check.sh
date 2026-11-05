@@ -18,6 +18,12 @@
 # are removed on exit.
 set -u
 SERVER=${1:?usage: run_module_check.sh apache|nginx module.so}
+# A job that means local packages (LOCAL_PACKAGES=true) must have staged them:
+# an empty PACKAGE_DIR would otherwise run the published mode under a local name.
+if [ "${LOCAL_PACKAGES:-}" = true ] && [ -z "${PACKAGE_DIR:-}" ]; then
+  echo "run_module_check.sh: LOCAL_PACKAGES=true but PACKAGE_DIR is empty" >&2
+  exit 2
+fi
 SO=${2:-}
 if [ -n "${PACKAGE_DIR:-}" ]; then
   if [ -n "$SO" ]; then
@@ -87,6 +93,13 @@ start_server() { # name alias switch
 }
 start_server "$PREFIX-on" origin-on on
 start_server "$PREFIX-off" origin-off off
+# Local packages mean nothing came from the package repository: the image
+# must carry no source of it (the published install adds one, a package
+# built here must not).
+if [ "$PACKAGES" = local ] && docker exec "$PREFIX-on" grep -rqsi modpagespeed /etc/apt; then
+  echo "FAIL: PACKAGE_DIR mode, but the image has a modpagespeed package source under /etc/apt"
+  exit 1
+fi
 
 run_browser() { # alias expect
   docker run --rm --name "$PREFIX-browser-$1" --network "$NET" --init \
