@@ -193,6 +193,14 @@ CONFEOF
     a2enmod pagespeed 2>/dev/null || true
     a2enconf servername 2>/dev/null || true
 
+    # The module package enables the optimizer-daemon in-place path server-wide
+    # (a2enconf pagespeed_daemon). The tests expect the module's classic
+    # in-place path on the main server, like the CI harness; the daemon path
+    # runs on its own vhost instead (Step 4b, checked in Step 6b). The package
+    # file itself stays in conf-available, where Step 4b reads it.
+    a2disconf pagespeed_daemon 2>/dev/null || true
+    DAEMON_INSTALLED_CONF="$APACHE_CONF_DIR/conf-available/pagespeed_daemon.conf"
+
     # Pin a fixed prefork pool, as the harness does: test_mpm_thread_resolution.py
     # asserts the module reads exactly this pool shape (16 children) from the MPM.
     a2dismod mpm_event mpm_worker 2>/dev/null || true
@@ -299,6 +307,16 @@ LoadModule pagespeed_module $APACHE_MODULES_DIR/mod_pagespeed.so
 AddOutputFilterByType DEFLATE text/css
 CONFEOF
 
+    # Same as the Debian branch above: the tests want the classic in-place
+    # path on the main server. httpd reads conf.d/*.conf directly, so move the
+    # package's daemon drop-in to a name that glob skips; Step 4b reads the
+    # directives from the moved file.
+    if [ -f "$APACHE_CONF_DIR/conf.d/pagespeed_daemon.conf" ]; then
+        mv "$APACHE_CONF_DIR/conf.d/pagespeed_daemon.conf" \
+            "$APACHE_CONF_DIR/conf.d/pagespeed_daemon.conf.disabled"
+    fi
+    DAEMON_INSTALLED_CONF="$APACHE_CONF_DIR/conf.d/pagespeed_daemon.conf.disabled"
+
     # Ensure required modules are loaded (most are defaults on RHEL)
     # mod_headers and mod_expires may not be auto-loaded
     for mod in headers expires deflate; do
@@ -332,6 +350,48 @@ CONFEOF
 EOF
 
     echo "ServerName localhost" >> "$APACHE_CONF_DIR/conf/httpd.conf"
+fi
+
+# ── Step 4b: vhost for the stock daemon path ───────────────────────────────
+# The package's daemon directives are off for the main server now, so one
+# vhost keeps the stock customer path under test: the two directives are read
+# verbatim from the installed package file (never retyped), on a port of its
+# own over the same document root, as the package ships them. Step 6b fetches
+# a query-free image copy through this vhost.
+
+DAEMON_VHOST_PORT=8081
+DAEMON_DIRECTIVES="$(grep -hE \
+    '^[[:space:]]*ModPagespeedDaemon(SocketPath|VolumePath)[[:space:]]' \
+    "$DAEMON_INSTALLED_CONF" 2>/dev/null || true)"
+
+if [ "$(printf '%s\n' "$DAEMON_DIRECTIVES" | grep -c .)" -ne 2 ]; then
+    log_error "expected the two daemon directives in $DAEMON_INSTALLED_CONF, found:"
+    printf '%s\n' "$DAEMON_DIRECTIVES"
+    exit 1
+fi
+
+if [ "$DISTRO_FAMILY" = "rhel" ]; then
+    DAEMON_VHOST_FILE="$APACHE_CONF_DIR/conf.d/pagespeed-daemon-smoke.conf"
+else
+    DAEMON_VHOST_FILE="$APACHE_CONF_DIR/sites-available/pagespeed-daemon-smoke.conf"
+fi
+
+{
+    cat <<EOF
+Listen $DAEMON_VHOST_PORT
+<VirtualHost *:$DAEMON_VHOST_PORT>
+    ServerName localhost
+    DocumentRoot "$DOC_ROOT"
+    ModPagespeedInPlaceResourceOptimization on
+EOF
+    printf '%s\n' "$DAEMON_DIRECTIVES"
+    cat << 'EOF'
+</VirtualHost>
+EOF
+} > "$DAEMON_VHOST_FILE"
+
+if [ "$DISTRO_FAMILY" != "rhel" ]; then
+    a2ensite pagespeed-daemon-smoke 2>/dev/null || true
 fi
 
 # ── Step 5: Test configuration ──────────────────────────────────────────────
@@ -442,6 +502,90 @@ if curl -sI http://localhost/mod_pagespeed_example/ 2>/dev/null | grep -qi "X-Mo
 else
     log_warn "mod_pagespeed header not found (may need warm-up)"
 fi
+
+# ── Step 6b: smoke the stock daemon path ───────────────────────────────────
+# Prove the vhost from Step 4b answers the way the package's own
+# pagespeed_daemon.conf arranges: fetch 1 stores the resource, a later fetch
+# is served from the shared cache (an Age header, a Vary naming Accept), and
+# an image/avif or image/webp variant smaller than the original appears
+# within a bounded wait. The daemon path serves query-free URLs only, so the
+# test image is copied under a fresh query-free name. On failure the worker
+# log is printed and the run stops before pytest.
+
+DAEMON_SMOKE_SRC="$DOC_ROOT/mod_pagespeed_test/ipro/test_image_dont_reuse.png"
+if [ ! -f "$DAEMON_SMOKE_SRC" ]; then
+    log_error "daemon-path smoke: $DAEMON_SMOKE_SRC not found"
+    exit 1
+fi
+
+DAEMON_SMOKE_REL="mod_pagespeed_test/daemon-path-smoke-$$.png"
+cp "$DAEMON_SMOKE_SRC" "$DOC_ROOT/$DAEMON_SMOKE_REL"
+DAEMON_SMOKE_URL="http://localhost:$DAEMON_VHOST_PORT/$DAEMON_SMOKE_REL"
+DAEMON_SMOKE_SIZE=$(stat -c %s "$DOC_ROOT/$DAEMON_SMOKE_REL")
+DAEMON_SMOKE_BODY="$(mktemp)"
+log_info "Daemon-path smoke: $DAEMON_SMOKE_URL ($DAEMON_SMOKE_SIZE bytes); fetch 1 stores it"
+curl -s -o /dev/null "$DAEMON_SMOKE_URL" || true
+
+# (a) A later fetch served from the shared cache.
+DAEMON_CACHE_TRIES=0
+DAEMON_CACHE_OK=0
+DAEMON_CACHE_HEADERS=""
+while [ "$DAEMON_CACHE_TRIES" -lt 30 ]; do
+    DAEMON_CACHE_HEADERS="$(curl -s -o /dev/null -D - "$DAEMON_SMOKE_URL" 2>/dev/null || true)"
+    if printf '%s\n' "$DAEMON_CACHE_HEADERS" | tr -d '\r' | grep -qi '^age:' && \
+       printf '%s\n' "$DAEMON_CACHE_HEADERS" | tr -d '\r' | \
+           grep -qiE '^vary:([^,]*,)*[[:space:]]*accept([,[:space:]]|$)'; then
+        DAEMON_CACHE_OK=1
+        break
+    fi
+    sleep 1
+    DAEMON_CACHE_TRIES=$((DAEMON_CACHE_TRIES + 1))
+done
+
+if [ "$DAEMON_CACHE_OK" -ne 1 ]; then
+    log_error "daemon-path smoke: no shared-cache serve (Age header, Vary with Accept) within ${DAEMON_CACHE_TRIES}s; last response headers:"
+    printf '%s\n' "$DAEMON_CACHE_HEADERS"
+    log_error "optimizer worker log:"
+    cat "$WORKER_LOG" 2>/dev/null || true
+    rm -f "$DAEMON_SMOKE_BODY"
+    exit 1
+fi
+log_info "Daemon-path smoke: shared-cache serve (fetch $((DAEMON_CACHE_TRIES + 2))):"
+printf '%s\n' "$DAEMON_CACHE_HEADERS"
+
+# (b) An avif or webp variant, smaller than the original, within about 60s.
+DAEMON_VARIANT_TRIES=0
+DAEMON_VARIANT_OK=0
+DAEMON_VARIANT_HEADERS=""
+while [ "$DAEMON_VARIANT_TRIES" -lt 60 ]; do
+    DAEMON_VARIANT_HEADERS="$(curl -s -o "$DAEMON_SMOKE_BODY" -D - \
+        -H 'Accept: image/avif,image/webp' "$DAEMON_SMOKE_URL" 2>/dev/null || true)"
+    DAEMON_CT="$(printf '%s\n' "$DAEMON_VARIANT_HEADERS" | tr -d '\r' | \
+        grep -i '^content-type:' | head -1 | cut -d' ' -f2)"
+    DAEMON_LEN=$(stat -c %s "$DAEMON_SMOKE_BODY" 2>/dev/null || echo 0)
+    case "${DAEMON_CT,,}" in
+        image/avif*|image/webp*)
+            if [ "$DAEMON_LEN" -lt "$DAEMON_SMOKE_SIZE" ]; then
+                DAEMON_VARIANT_OK=1
+                break
+            fi
+            ;;
+    esac
+    sleep 1
+    DAEMON_VARIANT_TRIES=$((DAEMON_VARIANT_TRIES + 1))
+done
+
+if [ "$DAEMON_VARIANT_OK" -ne 1 ]; then
+    log_error "daemon-path smoke: no image/avif or image/webp variant smaller than the original ($DAEMON_SMOKE_SIZE bytes) within ${DAEMON_VARIANT_TRIES}s; last response headers:"
+    printf '%s\n' "$DAEMON_VARIANT_HEADERS"
+    log_error "optimizer worker log:"
+    cat "$WORKER_LOG" 2>/dev/null || true
+    rm -f "$DAEMON_SMOKE_BODY"
+    exit 1
+fi
+log_info "Daemon-path smoke: variant $DAEMON_CT, $DAEMON_LEN bytes (original $DAEMON_SMOKE_SIZE bytes), fetch $((DAEMON_VARIANT_TRIES + 2)):"
+printf '%s\n' "$DAEMON_VARIANT_HEADERS"
+rm -f "$DAEMON_SMOKE_BODY"
 
 # ── Step 7: Run tests ──────────────────────────────────────────────────────
 log_info "Running system tests..."
