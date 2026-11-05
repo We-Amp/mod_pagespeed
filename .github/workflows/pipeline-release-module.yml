@@ -715,10 +715,10 @@ jobs:
 
   # ---------------------------------------------------------------------
   # The release is gated on the system-test lanes of the CI run of the same
-  # commit: the package smokes below run the suite against a stock install,
-  # whose configuration lacks the lane fixtures, so their pytest step is
-  # informational. A completed run of the main workflow for the release
-  # commit must have passed both lanes. While that run is still queued or in
+  # commit: the package smokes below run the suite in the package-test
+  # harness, whose configuration lacks some lane fixtures, so the Apache
+  # smokes' pytest step is informational. A completed run of the main
+  # workflow for the release commit must have passed both lanes. While that run is still queued or in
   # progress the gate waits for it (the candidate full=true dispatch may
   # still be running when the gate starts), and transient API failures are
   # retried. On a dry run the verdict
@@ -1773,26 +1773,25 @@ jobs:
 
       # A minimal Ubuntu and Apache container WITHOUT the package installed,
       # so the test exercises the whole install, upgrade and uninstall life
-      # cycle.
+      # cycle with the package's own pagespeed.conf. The test suite runs in
+      # the package-test harness below.
       - name: Build the base test container
         run: |
           docker build -t mps-smoke-deb-base - <<'DOCKERFILE'
           FROM ubuntu:22.04
           ENV DEBIAN_FRONTEND=noninteractive
           RUN apt-get update && apt-get install -y --no-install-recommends \
-              apache2 ca-certificates curl python3 python3-pip \
+              apache2 ca-certificates curl \
               && rm -rf /var/lib/apt/lists/*
-          RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
           DOCKERFILE
 
-      - name: Run upgrade, test and uninstall
+      - name: Run upgrade and uninstall
         run: |
           docker run --rm --init \
             -e RELEASE_TAG -e EXPECTED_VERSION_STRING \
             -v "${RUNNER_TEMP}/packages-old:/packages-old:ro" \
             -v "${RUNNER_TEMP}/packages:/packages:ro" \
             -v "${RUNNER_TEMP}/optimizer:/optimizer:ro" \
-            -v "${GITHUB_WORKSPACE}:/src:ro" \
             mps-smoke-deb-base bash -c '
               set -ex
 
@@ -1891,40 +1890,6 @@ jobs:
 
               grep -q "user customization marker" /etc/apache2/mods-available/pagespeed.conf
 
-              for dir in mod_pagespeed_example mod_pagespeed_test do_not_modify; do
-                [ -d "/src/install/$dir" ] && cp -r "/src/install/$dir" /var/www/html/
-              done
-              chown -R www-data:www-data /var/www/html
-              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
-              chown www-data:www-data /var/cache/mod_pagespeed /var/log/pagespeed
-
-              cd /src/test/system
-              export PAGESPEED_HOST=localhost
-              export PAGESPEED_PORT=80
-              export PAGESPEED_SERVER_TYPE=apache
-              export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed
-              export PAGESPEED_STATS_ENABLED=1
-              export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
-              export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
-              export PYTHONDONTWRITEBYTECODE=1
-              python3 -c "import pytest"
-              PYTEST_RC=0
-              python3 -m pytest -p no:cacheprovider automatic/ -v --tb=short \
-                > /tmp/pytest-smoke.out 2>&1 || PYTEST_RC=$?
-              cat /tmp/pytest-smoke.out
-              echo "pytest exit status: ${PYTEST_RC}"
-              if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
-                echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
-                exit "${PYTEST_RC}"
-              fi
-              if ! grep -Eq "[0-9]+ passed" /tmp/pytest-smoke.out; then
-                echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
-                exit 1
-              fi
-              if [ "${PYTEST_RC}" -eq 1 ]; then
-                echo "::warning title=Package smoke pytest (informational)::some pytest tests failed against the stock package config; the release gate is systest-gate"
-              fi
-
               apt-get remove -y mod-pagespeed
               apache2ctl configtest
               force_restart_apache
@@ -1932,6 +1897,50 @@ jobs:
               ! curl -sI http://localhost/ | grep -qi "X-Mod-Pagespeed\|X-Page-Speed"
               echo "=== Debian smoke test PASSED ==="
             '
+
+      # The package-test harness (test/package-test/), as the nginx smoke
+      # uses: the Dockerfile installs every packages/*.deb, the module and the
+      # optimizer it depends on, and the entrypoint configures Apache with the
+      # test fixtures and runs the pytest suite.
+      - name: Build the package-test container
+        run: |
+          set -euo pipefail
+          rm -rf test/package-test/packages
+          mkdir -p test/package-test/packages
+          for g in "${RUNNER_TEMP}"/packages/mod-pagespeed_*_amd64.deb "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer_*_amd64.deb; do
+            [ -f "$g" ] || { echo "::error::no package matches $g"; exit 1; }
+          done
+          cp -f "${RUNNER_TEMP}"/packages/mod-pagespeed_*_amd64.deb \
+            "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer_*_amd64.deb \
+            test/package-test/packages/
+          ls -l test/package-test/packages/
+          docker build -t mps-smoke-apache-deb -f test/package-test/Dockerfile.ubuntu-apache test/package-test/
+
+      # Informational, as before: the release gate is systest-gate. Exit 1 is
+      # a test failure and becomes a warning; any other non-zero exit, or a
+      # summary with no passed test, means the suite did not run.
+      - name: Run the test suite
+        run: &smoke-apache-suite |
+          PYTEST_RC=0
+          docker run --rm --init \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            "${SMOKE_IMAGE}" automatic/ -v --tb=short \
+            > "${RUNNER_TEMP}/pytest-smoke.out" 2>&1 || PYTEST_RC=$?
+          cat "${RUNNER_TEMP}/pytest-smoke.out"
+          echo "pytest exit status: ${PYTEST_RC}"
+          if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
+            echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
+            exit "${PYTEST_RC}"
+          fi
+          if ! grep -Eq "[0-9]+ passed" "${RUNNER_TEMP}/pytest-smoke.out"; then
+            echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
+            exit 1
+          fi
+          if [ "${PYTEST_RC}" -eq 1 ]; then
+            echo "::warning title=Package smoke pytest (informational)::some pytest tests failed in the package-test harness; the release gate is systest-gate"
+          fi
+        env:
+          SMOKE_IMAGE: mps-smoke-apache-deb
 
   package-smoke-deb-hosted:
     name: Smoke Test (Debian, hosted)
@@ -1972,24 +1981,24 @@ jobs:
           name: asset-optimizer
           path: ${{ runner.temp }}/optimizer
 
+      # As the Debian smoke: the life cycle with the package's own
+      # pagespeed.conf here, the test suite in the package-test harness below.
       - name: Build the base test container
         run: |
           docker build -t mps-smoke-rpm-base - <<'DOCKERFILE'
           FROM rockylinux:9
           RUN dnf install -y --allowerasing \
-              httpd curl python3 python3-pip \
+              httpd curl \
               && dnf clean all
-          RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
           DOCKERFILE
 
-      - name: Run upgrade, test and uninstall
+      - name: Run upgrade and uninstall
         run: |
           docker run --rm --init \
             -e RELEASE_TAG -e EXPECTED_VERSION_STRING \
             -v "${RUNNER_TEMP}/packages-old:/packages-old:ro" \
             -v "${RUNNER_TEMP}/packages:/packages:ro" \
             -v "${RUNNER_TEMP}/optimizer:/optimizer:ro" \
-            -v "${GITHUB_WORKSPACE}:/src:ro" \
             mps-smoke-rpm-base bash -c '
               set -ex
 
@@ -2088,40 +2097,6 @@ jobs:
 
               grep -q "user customization marker" /etc/httpd/conf.d/pagespeed.conf
 
-              for dir in mod_pagespeed_example mod_pagespeed_test do_not_modify; do
-                [ -d "/src/install/$dir" ] && cp -r "/src/install/$dir" /var/www/html/
-              done
-              chown -R apache:apache /var/www/html
-              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
-              chown apache:apache /var/cache/mod_pagespeed /var/log/pagespeed
-
-              cd /src/test/system
-              export PAGESPEED_HOST=localhost
-              export PAGESPEED_PORT=80
-              export PAGESPEED_SERVER_TYPE=apache
-              export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed
-              export PAGESPEED_STATS_ENABLED=1
-              export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
-              export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
-              export PYTHONDONTWRITEBYTECODE=1
-              python3 -c "import pytest"
-              PYTEST_RC=0
-              python3 -m pytest -p no:cacheprovider automatic/ -v --tb=short \
-                > /tmp/pytest-smoke.out 2>&1 || PYTEST_RC=$?
-              cat /tmp/pytest-smoke.out
-              echo "pytest exit status: ${PYTEST_RC}"
-              if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
-                echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
-                exit "${PYTEST_RC}"
-              fi
-              if ! grep -Eq "[0-9]+ passed" /tmp/pytest-smoke.out; then
-                echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
-                exit 1
-              fi
-              if [ "${PYTEST_RC}" -eq 1 ]; then
-                echo "::warning title=Package smoke pytest (informational)::some pytest tests failed against the stock package config; the release gate is systest-gate"
-              fi
-
               dnf remove -y mod-pagespeed
               httpd -t
               force_restart_httpd
@@ -2129,6 +2104,28 @@ jobs:
               ! curl -sI http://localhost/ | grep -qi "X-Mod-Pagespeed\|X-Page-Speed"
               echo "=== RPM smoke test PASSED ==="
             '
+
+      # The package-test harness, as in the Debian smoke: the Dockerfile
+      # installs every packages/*.rpm.
+      - name: Build the package-test container
+        run: |
+          set -euo pipefail
+          rm -rf test/package-test/packages
+          mkdir -p test/package-test/packages
+          for g in "${RUNNER_TEMP}"/packages/mod-pagespeed-*.x86_64.rpm "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer-*.x86_64.rpm; do
+            [ -f "$g" ] || { echo "::error::no package matches $g"; exit 1; }
+          done
+          cp -f "${RUNNER_TEMP}"/packages/mod-pagespeed-*.x86_64.rpm \
+            "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer-*.x86_64.rpm \
+            test/package-test/packages/
+          ls -l test/package-test/packages/
+          docker build -t mps-smoke-apache-rpm -f test/package-test/Dockerfile.rocky-apache test/package-test/
+
+      # Informational, as in the Debian smoke.
+      - name: Run the test suite
+        run: *smoke-apache-suite
+        env:
+          SMOKE_IMAGE: mps-smoke-apache-rpm
 
   package-smoke-rpm-hosted:
     name: Smoke Test (RPM, hosted)
