@@ -342,6 +342,68 @@ if ! $APACHE_CTL configtest 2>&1; then
 fi
 log_info "Configuration OK"
 
+# ── Step 5b: Start the pagespeed-optimizer worker ───────────────────────────
+# In-place optimization is served by the pagespeed-optimizer worker. On a
+# host the worker package starts it from its systemd unit; this container has
+# no systemd, so start it here the way that unit would: user/group pagespeed,
+# /run/pagespeed-optimizer 0750, the cache dir 3770 pagespeed:pagespeed,
+# umask 0007, and the unit's ExecStart arguments (--log-format json included;
+# the CI shared-cache harness starts the worker without it). The module
+# resolves the daemon once, at Apache's start, and serves in-place resources
+# unoptimized for that server process when the socket is not there, so the
+# worker must come up before Apache.
+
+OPTIMIZER_BIN=/usr/bin/pagespeed-optimizer
+OPTIMIZER_RUN_DIR=/run/pagespeed-optimizer
+OPTIMIZER_SOCKET="$OPTIMIZER_RUN_DIR/notify.sock"
+OPTIMIZER_CACHE_DIR=/var/cache/pagespeed-optimizer/v3
+
+if [ ! -x "$OPTIMIZER_BIN" ]; then
+    log_error "pagespeed-optimizer not found at $OPTIMIZER_BIN"
+    exit 1
+fi
+
+log_info "Starting the pagespeed-optimizer worker..."
+
+# The identity the worker package's sysusers drop-in creates on a host; the
+# web-server user joins the group (as the module package's postinst does) so
+# Apache can reach the worker's socket and cache volume.
+getent group pagespeed >/dev/null || groupadd -r pagespeed
+id pagespeed >/dev/null 2>&1 || \
+    useradd -r -g pagespeed -d /var/cache/pagespeed-optimizer \
+        -s /usr/sbin/nologin pagespeed
+usermod -a -G pagespeed "$APACHE_USER"
+
+mkdir -p "$OPTIMIZER_RUN_DIR" "$OPTIMIZER_CACHE_DIR"
+chown pagespeed:pagespeed "$OPTIMIZER_RUN_DIR" "$OPTIMIZER_CACHE_DIR"
+chmod 0750 "$OPTIMIZER_RUN_DIR"
+chmod 3770 "$OPTIMIZER_CACHE_DIR"
+
+# The unit's UMask=0007; the log goes to a file (the unit sends it to the
+# journal) so a failed start can be printed below. Uniquely named per run.
+WORKER_LOG="/tmp/pagespeed-optimizer-smoke.$$.log"
+su -s /bin/sh pagespeed -c "umask 0007; $OPTIMIZER_BIN \
+--cache-dir $OPTIMIZER_CACHE_DIR \
+--socket $OPTIMIZER_SOCKET \
+--cache-size 536870912 \
+--log-format json \
+--log-level info > $WORKER_LOG 2>&1 &"
+
+# Bounded wait for the notify socket, as the unit's own start hook does
+# (300 x 0.1s). Without the socket the smoke would run every in-place test
+# against a server that cannot optimize, so fail instead.
+WORKER_WAITED=0
+while [ ! -S "$OPTIMIZER_SOCKET" ]; do
+    if [ "$WORKER_WAITED" -ge 300 ]; then
+        log_error "$OPTIMIZER_SOCKET not present after 30s; worker log:"
+        cat "$WORKER_LOG" 2>/dev/null || true
+        exit 1
+    fi
+    sleep 0.1
+    WORKER_WAITED=$((WORKER_WAITED + 1))
+done
+log_info "Optimizer worker is up at $OPTIMIZER_SOCKET"
+
 # ── Step 6: Start Apache ────────────────────────────────────────────────────
 log_info "Starting Apache..."
 if [ "$DISTRO_FAMILY" = "rhel" ]; then
@@ -383,6 +445,14 @@ fi
 
 # ── Step 7: Run tests ──────────────────────────────────────────────────────
 log_info "Running system tests..."
+
+# Diagnostic: the worker the in-place tests depend on, and its sockets, so a
+# host run can confirm the tests have a worker to talk to.
+log_info "Optimizer worker process:"
+ps -o pid,user,args -C pagespeed-optimizer \
+    || log_warn "no pagespeed-optimizer process is running"
+log_info "Optimizer socket directory $OPTIMIZER_RUN_DIR:"
+ls -l "$OPTIMIZER_RUN_DIR"
 
 export PAGESPEED_HOST=localhost
 export PAGESPEED_PORT=80
