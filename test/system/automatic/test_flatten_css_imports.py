@@ -123,10 +123,12 @@ class TestFlattenCssImportsTinyLimit:
         """With tiny limit, imported CSS content should not be inlined."""
         url = f"{test_root}/flatten_limit_tiny/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
-        # Wait for the page to be processed (we should see @import remain)
+        # Wait for the page to be processed: the minified <style> still holds
+        # the @import. A bare "@import" also matches the unrewritten page, on
+        # which the check below would pass without the limit.
         response = client.fetch_until_contains(
             url,
-            pattern=r"@import",
+            pattern=r"<style>@import url\(",
             timeout=30.0,
         )
         assert_http_status(response, 200)
@@ -161,15 +163,20 @@ class TestFlattenCssImportsMediumLimit:
         """With medium limit, some @import statements may remain."""
         url = f"{test_root}/flatten_limit_medium/flatten_css_imports.html?PageSpeedFilters=flatten_css_imports,rewrite_css"
 
+        # Each imported file fits in the limit but their sum does not, so the
+        # rewritten stylesheet keeps its @import and inlines none of it. A bare
+        # "@import" would also match the unrewritten page.
         response = client.fetch_until_contains(
             url,
-            pattern=r"@import",
+            pattern=r"<style>@import url\(",
             timeout=30.0,
         )
         assert_http_status(response, 200)
-
-        # With medium limit, some @import statements may remain
-        # depending on file sizes
+        assert_not_contains(
+            response,
+            r"yellow.*background-color:",
+            "Imported CSS content should not be inlined with medium limit",
+        )
 
 
 if __name__ == "__main__":
