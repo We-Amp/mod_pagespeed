@@ -203,7 +203,7 @@ jobs:
       - name: Nightly red report
         run: tools/ci/test_nightly_red_report.sh
       - name: Rehearsal full-tier gate
-        run: tools/ci/rehearsal_fulltier_gate.sh --self-test
+        run: tools/ci/test_rehearsal_fulltier_gate.sh
       - name: Post-merge tests never reuse cached results
         run: tools/ci/test_post_merge_nocache.sh --selftest && tools/ci/test_post_merge_nocache.sh
       - name: Artifact staging and bundle validation
