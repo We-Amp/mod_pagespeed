@@ -2077,6 +2077,31 @@ TEST_F(ResponseHeadersTest, RecomputeCachingResetsForceCachedState) {
   EXPECT_FALSE(response_headers_.UpdateCacheHeadersIfForceCached());
 }
 
+TEST_F(ResponseHeadersTest,
+       RecomputeCachingKeepsPrivateAfterContentTypeChange) {
+  response_headers_.SetStatusAndReason(HttpStatus::kOK);
+  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
+  response_headers_.Add(HttpAttributes::kContentType, "text/css");
+  response_headers_.Add(HttpAttributes::kCacheControl, "private, max-age=600");
+  response_headers_.ForceCaching(360 * 1000);
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsProxyCacheable());
+
+  // The recompute must not carry over the earlier forced state.
+  response_headers_.Replace(HttpAttributes::kContentType, "text/html");
+  response_headers_.ComputeCaching();
+  EXPECT_TRUE(response_headers_.IsBrowserCacheable());
+  EXPECT_FALSE(response_headers_.IsProxyCacheable());
+  EXPECT_FALSE(response_headers_.UpdateCacheHeadersIfForceCached());
+  ConstStringStarVector values;
+  response_headers_.Lookup(HttpAttributes::kCacheControl, &values);
+  bool has_private = false;
+  for (const GoogleString* v : values) {
+    if (v->find("private") != GoogleString::npos) has_private = true;
+  }
+  EXPECT_TRUE(has_private);
+}
+
 TEST_F(ResponseHeadersTest, ForceCachingForPrivate) {
   response_headers_.SetStatusAndReason(HttpStatus::kOK);
   response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
