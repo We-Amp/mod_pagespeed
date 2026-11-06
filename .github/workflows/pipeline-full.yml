@@ -1832,7 +1832,8 @@ jobs:
     permissions:
       contents: read
     name: Linux arm64 Unit Tests
-    needs: linux-arm64-build
+    # No needs: this job uses nothing the build job produces (no artifact, no
+    # output) and builds its own test tree, so it runs beside the build.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
@@ -1846,8 +1847,8 @@ jobs:
       - name: Stamp GIT_COMMIT
         run: echo -n "$GITHUB_SHA" > GIT_COMMIT
 
-      # The build job saved this key, but the cache quota can evict it before
-      # this job starts: vendor again on a miss rather than fail.
+      # The build job, running beside this one, vendors into the same key, and
+      # the cache quota can evict it: vendor again on a miss rather than fail.
       - name: Restore vendored dependencies
         id: vendor-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1997,9 +1998,9 @@ jobs:
 
       # Bazel never collects this cache (its container exits right after the
       # last command), so cap it before actions/cache saves a new entry. It
-      # never fails the job. This job normally hits the build's entry and
-      # skips this; it runs only when the week turned between the two jobs
-      # or the build's save did not land.
+      # never fails the job. This job normally hits the week's entry and
+      # skips this; it runs only in the first run of a week (then this job and
+      # the build both miss, and whichever saves first holds the entry).
       - name: Cap the Bazel disk cache
         if: steps.disk-cache.outputs.cache-hit != 'true'
         run: bash tools/ci/prune-bazel-disk-cache.sh "${HOME}/.cache/mod-pagespeed-bazel-disk-arm64" 7d 3G || true
