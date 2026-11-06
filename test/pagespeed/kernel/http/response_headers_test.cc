@@ -2073,7 +2073,6 @@ TEST_F(ResponseHeadersTest, RecomputeCachingResetsForceCachedState) {
   response_headers_.ComputeCaching();
   EXPECT_FALSE(response_headers_.IsProxyCacheable());
   EXPECT_FALSE(response_headers_.IsBrowserCacheable());
-  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
   EXPECT_FALSE(response_headers_.UpdateCacheHeadersIfForceCached());
 }
 

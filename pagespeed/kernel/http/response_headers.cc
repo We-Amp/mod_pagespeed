@@ -845,7 +845,6 @@ void ResponseHeaders::ComputeCaching() {
   } else {
     proto->set_expiration_time_ms(0);
     proto->set_proxy_cacheable(false);
-    proto->set_cache_ttl_ms(0);
   }
   cache_fields_dirty_ = false;
 }
