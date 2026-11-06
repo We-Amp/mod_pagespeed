@@ -25,11 +25,14 @@ inputs:
     description: Candidate mode only. The 40-hex master tip the dispatch names; must equal the commit the run is at.
     default: ''
   dry-run:
-    description: Candidate mode only. The workflow's dry_run input; a candidate requires true.
+    description: Candidate and rehearsal mode only. The workflow's dry_run input; both require true.
     default: ''
+  rehearsal:
+    description: 'Rehearsal mode: "true" lets a schedule or a dispatch on master run with no tag (see tools/ci/ref_guard.sh).'
+    default: 'false'
 outputs:
   ref:
-    description: Ref the release jobs must check out (refs/tags/<tag> on dispatch, the pushed ref otherwise, the commit itself for a candidate).
+    description: Ref the release jobs must check out (refs/tags/<tag> on dispatch, the pushed ref otherwise, the commit itself for a candidate or a rehearsal).
     value: ${{ steps.guard.outputs.ref }}
   sha:
     description: Commit that ref resolves to.
@@ -46,6 +49,7 @@ runs:
         CANDIDATE: ${{ inputs.candidate }}
         CANDIDATE_SHA: ${{ inputs.candidate-sha }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        REHEARSAL: ${{ inputs.rehearsal }}
       run: |
         set -euo pipefail
         if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$ALLOWED_TAG_GLOB" ]; then

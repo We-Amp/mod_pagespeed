@@ -161,5 +161,30 @@ candouts() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_di
 expect_out "ref=$main_sha sha=$main_sha " "outputs: candidate -> the commit itself" candouts
 expect no "outputs: candidate commit differs from the run" bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG=module-v1.2.0 CANDIDATE=true CANDIDATE_SHA="$2" GITHUB_SHA="$3"; ref_guard_outputs' _ "$HERE/ref_guard.sh" "$main_sha" "$side"
 
+# Rehearsal mode: a schedule or a dispatch on master runs with no tag at all.
+reh() { # reh REF EVENT TAG DRY_RUN [CANDIDATE] [GITHUB_SHA] [EVENTS]
+  ( export GITHUB_REF="$1" GITHUB_EVENT_NAME="$2" INPUT_TAG="$3" INPUT_DRY_RUN="$4" REHEARSAL=true \
+      CANDIDATE="${5:-false}" GITHUB_SHA="${6:-$main_sha}" ALLOWED_TAG_GLOB='module-v*' \
+      ALLOWED_EVENTS="${7:-push workflow_dispatch schedule}"
+    ref_guard_check ); }
+expect ok "rehearsal: schedule on master"                    reh refs/heads/master schedule "" true
+expect ok "rehearsal: dispatch on master"                    reh refs/heads/master workflow_dispatch "" true
+expect no "rehearsal: on a tag ref"                          reh refs/tags/module-v1.0.0 workflow_dispatch "" true
+expect no "rehearsal: on another branch"                     reh refs/heads/ci-dev workflow_dispatch "" true
+expect no "rehearsal: tag push"                              reh refs/heads/master push "" true
+expect no "rehearsal: with candidate=true"                   reh refs/heads/master workflow_dispatch "" true true
+expect no "rehearsal: with a tag"                            reh refs/heads/master workflow_dispatch module-v1.2.0 true
+expect no "rehearsal: dry_run false"                         reh refs/heads/master workflow_dispatch "" false
+expect no "rehearsal: dry_run empty"                         reh refs/heads/master schedule "" ""
+expect no "rehearsal: commit off master"                     reh refs/heads/master schedule "" true false "$side"
+expect no "rehearsal: schedule not in the allowed events"    reh refs/heads/master schedule "" true false "$main_sha" 'push workflow_dispatch'
+# A schedule is a rehearsal and nothing else.
+expect no "schedule without rehearsal"                       bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule GITHUB_SHA="$2" ALLOWED_TAG_GLOB="module-v*" ALLOWED_EVENTS="push workflow_dispatch schedule"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+expect no "schedule with rehearsal=false"                    bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule GITHUB_SHA="$2" REHEARSAL=false ALLOWED_TAG_GLOB="module-v*" ALLOWED_EVENTS="push workflow_dispatch schedule"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+# A rehearsal flag that is not exactly "true" leaves the ordinary rules in force.
+expect no "rehearsal off: master dispatch with no tag"       bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG= GITHUB_SHA="$2" REHEARSAL=false ALLOWED_TAG_GLOB="module-v*"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
+rehouts() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule INPUT_TAG= REHEARSAL=true GITHUB_SHA="${1:-$main_sha}"; ref_guard_outputs ); }
+expect_out "ref=$main_sha sha=$main_sha " "outputs: rehearsal -> the commit itself" rehouts
+
 [ "$fail" = 0 ] && echo "ref_guard self-test: all passed"
 exit "$fail"
