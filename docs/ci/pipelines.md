@@ -65,7 +65,7 @@ tier.
 | `lock-push` | hosted | `lock-check` | commits a stale lock to the branch of a same-repository pull request (or a branch dispatch). Holds the only write token of the pipeline, never runs for a merge group or a fork, and runs none of the tree's code |
 | `vendor` | `fleet-heavy` | `changes` | vendors the dependencies and asserts that every registry file `MODULE.bazel.lock` pins is in the repository cache; publishes the tarball (hub channel) or caches `vendor/` (cache channel). Runs only when the fleet scope is on (`needs.changes.outputs.fleet`), so a push the merge queue already proved can skip every build runner leg |
 | `linux-build` | `fleet-heavy` | `changes`, `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
-| `linux-unit-tests` | `fleet-heavy` | `changes`, `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
+| `linux-unit-tests` | `fleet-heavy` | `changes`, `vendor` | unit tests against throw-away Redis and memcached containers. Starts beside `linux-build`, not after it: it uses none of that job's outputs and builds its own test tree |
 | `lint` | `fleet-heavy` | `changes`, `vendor` | clang-tidy (scoped to the pull request) and clang-format |
 | `js-minify-corpus` | `fleet-heavy` | `changes`, `vendor` | JS minifier oracles and goldens freshness gate |
 | `html-parse-corpus` | `fleet-heavy` | `changes`, `vendor` | HTML parse goldens freshness gate |
