@@ -87,6 +87,11 @@ expect_bad bad-secret-index 'rule g'
 expect_bad bad-secret-tojson 'rule g'
 expect_bad bad-secret-inherit 'rule g'
 expect_bad bad-secret-uses-job 'rule g'
+# release-env: a job of the release environment refuses a dry run and a candidate.
+expect_good good-release-env
+expect_bad bad-release-env-no-candidate 'rule release-env'
+expect_bad bad-release-env-no-dry-run 'rule release-env'
+expect_bad bad-release-env-no-if 'rule release-env'
 expect_good good-queue-guard
 expect_bad bad-queue-guard-from-tree 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-extra-command 'queue-guard-reads-default-branch'
