@@ -64,6 +64,22 @@ describe("a leaf the server has turned off", () => {
     expect(unavailable.has("/v1/daemon/cache/alternates")).toBe(false);
   });
 
+  it("a keyed lookup sends the entry's site when it has one, and nothing when it has not", async () => {
+    const api = new AdminApiClient("");
+    const site = "0123456789abcdef".repeat(4);
+    const key = { url: "/a.png", host: "h", scheme: "https" } as const;
+    fetchMock.mockImplementation(async () => new Response("{}", { status: 200 }));
+    await api.daemonCacheAlternates({ ...key, site });
+    await api.daemonCacheAlternates(key);
+    const [sited, unsited] = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(new URL(sited, "http://x").searchParams.get("site")).toBe(site);
+    expect(new URL(unsited, "http://x").searchParams.has("site")).toBe(false);
+    const content = new URL(api.daemonCacheContentUrl({ ...key, site }, 3), "http://x");
+    expect(content.searchParams.get("site")).toBe(site);
+    expect(content.searchParams.get("alternate_id")).toBe("3");
+    expect(new URL(api.daemonCacheContentUrl(key, 3), "http://x").searchParams.has("site")).toBe(false);
+  });
+
   it("the optimizer's own object-shaped error is a coded refusal, not 'off'", async () => {
     fetchMock.mockImplementation(async () =>
       reply(403, JSON.stringify({ error: { code: "FORBIDDEN", message: "no" } })),

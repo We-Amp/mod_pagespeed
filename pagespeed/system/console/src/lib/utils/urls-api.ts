@@ -49,13 +49,27 @@ export function isValidEntryPath(url: string): boolean {
   return true;
 }
 
+const SITE_RE = /^[0-9a-f]{64}$/;
+
+/** The optimizer's per-site namespace: exactly 64 lowercase hex characters. */
+export function isValidSite(site: unknown): site is string {
+  return typeof site === "string" && SITE_RE.test(site);
+}
+
 const HOST_RE = /^[A-Za-z0-9._:[\]-]{1,253}$/;
 
 /** A CacheEntryKey from untrusted parts, or null when any part is unusable. */
-export function entryKey(url: unknown, host: unknown, scheme: unknown): CacheEntryKey | null {
+export function entryKey(
+  url: unknown,
+  host: unknown,
+  scheme: unknown,
+  site?: unknown,
+): CacheEntryKey | null {
   if (typeof url !== "string" || !isValidEntryPath(url)) return null;
   if (typeof host !== "string" || !HOST_RE.test(host)) return null;
   if (scheme !== "http" && scheme !== "https") return null;
+  // An unusable site is dropped, not fatal: the key then behaves as unsited.
+  if (isValidSite(site)) return { url, host, scheme, site };
   return { url, host, scheme };
 }
 
@@ -64,15 +78,16 @@ export function displayUrl(key: CacheEntryKey): string {
   return `${key.scheme}://${key.host}${key.url}`;
 }
 
-/** The detail route for an entry: path + query, host and scheme as three hash parameters. */
+/** The detail route for an entry: path + query, host and scheme (and the site, when known) as hash parameters. */
 export function detailHref(key: CacheEntryKey): string {
   const params = new URLSearchParams({ url: key.url, host: key.host, scheme: key.scheme });
+  if (key.site !== undefined) params.set("site", key.site);
   return `#/urls/detail?${params.toString()}`;
 }
 
 /** The detail route's entry, or null when any of the three is missing or invalid. */
 export function parseDetailKey(params: URLSearchParams): CacheEntryKey | null {
-  return entryKey(params.get("url"), params.get("host"), params.get("scheme"));
+  return entryKey(params.get("url"), params.get("host"), params.get("scheme"), params.get("site"));
 }
 
 /**
@@ -147,7 +162,7 @@ export function buildUrlRows(
     const scheme = entry.scheme === "http" || entry.scheme === "https" ? entry.scheme : "";
     const display = `${scheme}://${host}${entry.url}`;
     rows.push({
-      key: entryKey(entry.url, host, scheme),
+      key: entryKey(entry.url, host, scheme, entry.site),
       rowKey: `${rows.length}:${display}`,
       display,
       host,
