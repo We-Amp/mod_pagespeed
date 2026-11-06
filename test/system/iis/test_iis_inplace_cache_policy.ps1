@@ -88,7 +88,9 @@ function Check([string]$Case, [bool]$Ok, [string]$Detail) {
 # One HTTP/1.1 request over a fresh connection; the body is kept as bytes.
 $RawText = @'
 function Invoke-Raw([string]$Ip, [int]$Port, [string]$Target, [string]$Method = "GET", [hashtable]$Headers = @{}, [string]$HostHeader = "") {
-    $client = New-Object System.Net.Sockets.TcpClient
+    $family = [System.Net.Sockets.AddressFamily]::InterNetwork
+    if ($Ip.Contains(":")) { $family = [System.Net.Sockets.AddressFamily]::InterNetworkV6 }
+    $client = New-Object System.Net.Sockets.TcpClient($family)
     $client.ReceiveTimeout = 20000
     $client.SendTimeout = 20000
     $client.Connect($Ip, $Port)
