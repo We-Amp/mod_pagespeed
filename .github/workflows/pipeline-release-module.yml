@@ -3582,6 +3582,59 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
+  # Candidate seal: only a candidate run, after `validate`. Hosted, no
+  # environment, no secret. It lists the artifacts of its own run through the
+  # Actions API, keeps the ones on the allowlist of tools/ci/release_adopt.py,
+  # downloads each by id, checks it against the API digest and records the
+  # hash of every file in `candidate-seal`. Names, ids and digests come from
+  # the API, never from job outputs (matrix jobs do not aggregate them), and
+  # the run's own title and commit must agree with the version job. The
+  # script is master's, not the tree being released.
+  # ---------------------------------------------------------------------
+  candidate-seal:
+    name: Seal the candidate artifacts
+    needs: [version, validate]
+    if: ${{ !cancelled() && needs.version.outputs.candidate == 'true' && needs.validate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+    steps:
+      - name: Checkout master (seal tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Write the seal
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/seal"
+          args=()
+          [ "$IS_PRERELEASE" != true ] || args+=(--prerelease)
+          python3 -I tools/ci/release_adopt.py seal \
+            --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+            --tag "$TAG" --version "$VERSION" --sha "$RELEASE_SHA" \
+            "${args[@]}" --out "${RUNNER_TEMP}/seal/candidate-seal.json"
+          cat "${RUNNER_TEMP}/seal/candidate-seal.json"
+
+      - name: Upload the seal
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: candidate-seal
+          path: ${{ runner.temp }}/seal/candidate-seal.json
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
   # Signing of the checksums and the release. Real runs only (dry_run
   # false), hosted, in the protected `release` environment, after `validate`
   # succeeded. The package signing key lives in this one job; the release job
