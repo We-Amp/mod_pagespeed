@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+
 # Review ownership for the release and supply-chain surface.
 # These paths request the owner's review. The repository does not require code
 # owner review, so GitHub does not block a merge on it: reviewers treat a diff
