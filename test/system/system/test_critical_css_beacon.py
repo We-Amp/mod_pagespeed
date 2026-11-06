@@ -259,15 +259,6 @@ class TestPrioritizeCriticalCss:
         assert_contains(response, r"pagespeed\.CriticalCssLoader\.Run\(\);")
         assert_not_contains(response, r"psa_add_styles")
 
-    @pytest.mark.xfail(
-        reason=(
-            "known issue (see #636), fix planned for the next release: after a cache "
-            "flush, a lightly loaded server child can keep serving from "
-            "entries made before the flush, so the page can return to "
-            "deferred stylesheets"
-        ),
-        strict=False,
-    )
     def test_truncated_report_returns_the_page_to_blocking_stylesheets(
         self, client: PageSpeedClient, example_root: str
     ):
