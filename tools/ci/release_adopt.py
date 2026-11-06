@@ -1368,6 +1368,94 @@ def _verify_cases():
     return out
 
 
+def _upload_cases():
+    out = []
+
+    def case(desc, mutate=None, refused=None, names=(), after=None):
+        w = _world()
+        binding, _ = _verify_world(w)
+        fx = w["fx"]
+        mine, zips = [], {}
+        for i, a in enumerate(binding["artifacts"]):
+            if not a["reupload"]:
+                continue
+            files = {f["path"]: ("payload of %s\n" % a["name"]).encode() for f in a["files"]}
+            buf = __import__("io").BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for n, d in sorted(files.items()):
+                    zf.writestr(n, d)
+            z = buf.getvalue()
+            zips[2000 + i] = z
+            mine.append({"id": 2000 + i, "name": a["name"], "expired": False,
+                         "digest": "sha256:" + hashlib.sha256(z).hexdigest(),
+                         "workflow_run": {"id": 777, "head_sha": fx["sha"]}})
+        ctx = {"arts": mine, "zips": zips, "binding": binding}
+        if mutate:
+            mutate(ctx)
+        api = FakeApi(fx["run"], [], ctx["zips"], arts_by_run={777: ctx["arts"]})
+        with tempfile.TemporaryDirectory() as wd:
+            try:
+                upload_check(api, "o/r", 777, ctx["binding"], list(names), wd)
+                ok, msg = True, ""
+            except VerifyError as e:
+                ok, msg = False, str(e)
+        if refused is None:
+            good, why = ok, msg
+            if good and after:
+                good, why = after(ctx)
+        else:
+            good, why = (not ok) and refused in msg, "ok=%s, error=%r" % (ok, msg)
+        out.append((desc, good, why))
+
+    def recorded(ctx):
+        re_up = [a for a in ctx["binding"]["artifacts"] if a["reupload"]]
+        by = {a["name"]: a for a in ctx["arts"]}
+        ok = (re_up and all(a["new_id"] == by[a["name"]]["id"] and a["new_digest"] == by[a["name"]]["digest"]
+                            and a["new_digest"] != a["digest"] for a in re_up)
+              and all(a["new_id"] is None for a in ctx["binding"]["artifacts"] if not a["reupload"]))
+        return bool(ok), "new digests not recorded"
+
+    def find(ctx, name):
+        return [a for a in ctx["arts"] if a["name"] == name][0]
+
+    case("accept: every re-uploaded artifact is read back and its new id and digest recorded", after=recorded)
+    case("accept: one named artifact is read back, the others are left alone", names=("asset-source",),
+         after=lambda c: ([a["name"] for a in c["binding"]["artifacts"] if a["new_id"]] == ["asset-source"], "only asset-source"))
+    case("refuse: a re-uploaded artifact is missing from this run", lambda c: c["arts"].remove(find(c, "asset-sbom")),
+         refused="'asset-sbom' is listed 0 times")
+    case("refuse: an artifact of the binding is listed twice",
+         lambda c: c["arts"].append(dict(find(c, "asset-sbom"), id=3000)), refused="listed 2 times")
+    case("refuse: a re-uploaded artifact expired", lambda c: find(c, "asset-sbom").update(expired=True), refused="has expired")
+    case("refuse: a re-uploaded artifact belongs to another run",
+         lambda c: find(c, "asset-sbom").update(workflow_run={"id": 5}), refused="not this run")
+    case("refuse: the re-zipped digest in the API record is wrong",
+         lambda c: find(c, "asset-sbom").update(digest="sha256:" + "0" * 64), refused="the API digest says")
+
+    def tamper(c):
+        a = find(c, "asset-sbom")
+        buf = __import__("io").BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for f in c["binding"]["artifacts"][1]["files"]:
+                zf.writestr(f["path"], b"tampered\n")
+        c["zips"][a["id"]] = buf.getvalue()
+        a["digest"] = "sha256:" + hashlib.sha256(buf.getvalue()).hexdigest()
+    case("refuse: a file differs from the candidate's although the new digest agrees", tamper,
+         refused="differs from the candidate's files")
+
+    def extra(c):
+        a = find(c, "asset-sbom")
+        buf = __import__("io").BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for f in c["binding"]["artifacts"][1]["files"]:
+                zf.writestr(f["path"], ("payload of %s\n" % a["name"]).encode())
+            zf.writestr("extra.bin", b"x")
+        c["zips"][a["id"]] = buf.getvalue()
+        a["digest"] = "sha256:" + hashlib.sha256(buf.getvalue()).hexdigest()
+    case("refuse: a file was added to the re-uploaded artifact", extra, refused="extra.bin")
+    case("refuse: a name that is not re-uploaded", names=("release-assets",), refused="not a re-uploaded artifact")
+    return out
+
+
 def _drop_row(w):
     fx = w["fx"]
     ra = [a for a in fx["arts"] if a["name"] == "release-assets"][0]
@@ -1500,6 +1588,25 @@ def self_test():
     # ---- verify
     for desc, good, why in _verify_cases():
         check(desc, good, why)
+
+    # ---- upload-check
+    for desc, good, why in _upload_cases():
+        check(desc, good, why)
+
+    # ---- binding-hash
+    with tempfile.TemporaryDirectory() as wd:
+        bp = os.path.join(wd, "adopt-binding.json")
+        with open(bp, "wb") as fh:
+            fh.write(b'{"schema": 1}\n')
+        want = hashlib.sha256(b'{"schema": 1}\n').hexdigest()
+        import contextlib
+        import io
+        import types
+        with contextlib.redirect_stdout(io.StringIO()):
+            r_ok = cmd_binding_hash(types.SimpleNamespace(file=bp, expect=want))
+            r_bad = cmd_binding_hash(types.SimpleNamespace(file=bp, expect="0" * 64))
+    check("accept: adopt-binding hash matches the job output", r_ok == 0)
+    check("refuse: adopt-binding hash mismatch", r_bad == 1)
 
     # ---- the adoption schema and the pipeline reader
     pipeline_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", PIPELINE_FILE)
