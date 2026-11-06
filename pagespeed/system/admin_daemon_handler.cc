@@ -84,6 +84,7 @@ enum ParamBit : uint8_t {
   kParamScheme = 1u << 4,
   kParamAlternateId = 1u << 5,
   kParamSince = 1u << 6,
+  kParamSite = 1u << 7,
 };
 
 struct ParamName {
@@ -94,7 +95,7 @@ constexpr ParamName kParamNames[] = {
     {"url", kParamUrl},       {"offset", kParamOffset},
     {"limit", kParamLimit},   {"hostname", kParamHostname},
     {"scheme", kParamScheme}, {"alternate_id", kParamAlternateId},
-    {"since", kParamSince},
+    {"since", kParamSince},   {"site", kParamSite},
 };
 
 constexpr DaemonEndpoint kDaemonEndpoints[] = {
@@ -109,17 +110,17 @@ constexpr DaemonEndpoint kDaemonEndpoints[] = {
     {"cooldowns", "/v1/cache/cooldowns", 0, 0, 1, false, false, false, false,
      kCooldownsSiteFilter},
     {"cache/urls", "/v1/cache/urls",
-     kParamOffset | kParamLimit | kParamHostname, 0 /* required */,
+     kParamOffset | kParamLimit | kParamHostname | kParamSite, 0 /* required */,
      1 /* max_in_flight */, true /* whole_server_only */,
      false /* not_found_is_answer */, false /* serves_content */,
      false /* distinct_too_large */, kNoSiteFilter},
     {"cache/alternates", "/v1/cache/alternates",
-     kParamUrl | kParamHostname | kParamScheme,
+     kParamUrl | kParamHostname | kParamScheme | kParamSite,
      kParamUrl | kParamHostname | kParamScheme, 1 /* max_in_flight */,
      true /* whole_server_only */, true /* not_found_is_answer */,
      false /* serves_content */, false /* distinct_too_large */, kNoSiteFilter},
     {"cache/content", "/v1/cache/content",
-     kParamUrl | kParamHostname | kParamScheme | kParamAlternateId,
+     kParamUrl | kParamHostname | kParamScheme | kParamAlternateId | kParamSite,
      kParamUrl | kParamHostname | kParamScheme | kParamAlternateId,
      2 /* max_in_flight: parallel image loads */, true /* whole_server_only */,
      true /* not_found_is_answer */, true /* serves_content */,
@@ -244,6 +245,20 @@ bool IsValidUrlParam(StringPiece value) {
 // scheme: the daemon's own vocabulary, exactly "http" or "https".
 bool IsValidSchemeParam(StringPiece value) {
   return value == "http" || value == "https";
+}
+
+// site: the optimizer's per-site cache namespace, exactly 64 lowercase
+// hex characters.
+bool IsValidSiteParam(StringPiece value) {
+  if (value.size() != 64) {
+    return false;
+  }
+  for (char c : value) {
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Extracts the bare media type from a Content-Type value: the token
@@ -644,6 +659,8 @@ bool AdminDaemonHandler::HandleRequest(StringPiece leaf,
   bool has_url = false;
   GoogleString scheme_value;
   bool has_scheme = false;
+  GoogleString site_value;
+  bool has_site = false;
   int64 alternate_id_value = 0;
   bool has_alternate_id = false;
   int64 since_value = 0;
@@ -702,6 +719,14 @@ bool AdminDaemonHandler::HandleRequest(StringPiece leaf,
       }
       scheme_value = value;
       has_scheme = true;
+    } else if (name == "site") {
+      if (!IsValidSiteParam(value)) {
+        WriteParamError(fetch, "invalid_parameter", name,
+                        endpoint.serves_content);
+        return true;
+      }
+      site_value = value;
+      has_site = true;
     } else if (name == "alternate_id") {
       if (!ParseDecimalParam(value, 0, 255, &alternate_id_value)) {
         WriteParamError(fetch, "invalid_parameter", name,
@@ -727,6 +752,10 @@ bool AdminDaemonHandler::HandleRequest(StringPiece leaf,
   }
   if (has_scheme) {
     StrAppend(&upstream_path, sep, "scheme=", scheme_value);
+    sep = "&";
+  }
+  if (has_site) {
+    StrAppend(&upstream_path, sep, "site=", site_value);
     sep = "&";
   }
   if (has_offset) {

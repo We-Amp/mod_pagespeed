@@ -188,6 +188,8 @@ else bad "fetch: refusal for a list without the package must say so: $(cat "${T}
 
 # 6. Workflow wiring: the scheduled night and a plain dispatch stay on the
 # published packages; only an explicit local dispatch switches, and says so.
+# The shared-cache and hydration jobs each carry the local-packages wiring,
+# so the job-level lines below appear once per job.
 NIGHTLY="${WF}/nightly.yml"; PIPE="${WF}/pipeline-nightly.yml"
 count() { grep -cF -- "$1" "$2" || true; }
 [ "$(count "      shared_cache_packages: \${{ inputs.shared_cache_packages || 'published' }}" "${NIGHTLY}")" = 1 ] \
@@ -197,10 +199,10 @@ nd="$(awk '/^      shared_cache_packages:/{f=1;next} f&&/default:/{print $2;exit
 [ "${nd}" = published ] && ok "nightly.yml dispatch input defaults to published" || bad "nightly.yml dispatch input must default to published (got '${nd}')"
 pd="$(awk '/^      shared_cache_packages:/{f=1;next} f&&/default:/{print $2;exit} f&&/^      [a-z_]+:/{exit}' "${PIPE}")"
 [ "${pd}" = '"published"' ] && ok "pipeline-nightly.yml input defaults to published" || bad "pipeline-nightly.yml input must default to \"published\" (got '${pd}')"
-[ "$(count "      LOCAL_PACKAGES: \${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}" "${PIPE}")" = 1 ] \
-  && ok "LOCAL_PACKAGES is true only for an explicit local input" \
-  || bad "pipeline-nightly.yml must set LOCAL_PACKAGES: \${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}"
-[ "$(grep -c "LOCAL_PACKAGES:" "${PIPE}")" = 1 ] && ok "LOCAL_PACKAGES is set in one place" || bad "LOCAL_PACKAGES must be set in exactly one place"
+[ "$(count "      LOCAL_PACKAGES: \${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}" "${PIPE}")" = 2 ] \
+  && ok "LOCAL_PACKAGES is true only for an explicit local input, in both jobs" \
+  || bad "pipeline-nightly.yml must set LOCAL_PACKAGES: \${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }} in the shared-cache and hydration jobs"
+[ "$(grep -c "LOCAL_PACKAGES:" "${PIPE}")" = 2 ] && ok "LOCAL_PACKAGES is set once per job" || bad "LOCAL_PACKAGES must be set exactly once in each of the two jobs"
 [ "$(grep -c "'local'" "${NIGHTLY}")" = 1 ] && ok "nightly.yml names local only in the run name" || bad "nightly.yml may name 'local' only in the run name"
 RUN_NAME="run-name: \${{ github.event_name == 'workflow_dispatch' && inputs.shared_cache_packages == 'local' && 'Nightly (local packages)' || github.event_name == 'workflow_dispatch' && inputs.full_tier && 'Nightly (full)' || 'Nightly' }}"
 grep -qFx -- "${RUN_NAME}" "${NIGHTLY}" \
@@ -211,8 +213,8 @@ grep -qFx -- "${RUN_NAME}" "${NIGHTLY}" \
   && ok "the Apache check exports PACKAGE_DIR" || bad "the Apache check step must export PACKAGE_DIR=\${RUNNER_TEMP}/shared-cache/pkgs-apache"
 [ "$(count '            export PACKAGE_DIR="${RUNNER_TEMP}/shared-cache/pkgs-nginx"' "${PIPE}")" = 1 ] \
   && ok "the nginx check exports PACKAGE_DIR" || bad "the nginx check step must export PACKAGE_DIR=\${RUNNER_TEMP}/shared-cache/pkgs-nginx"
-[ "$(count 'install/debian/build.sh -a x64 -b . -o /out/pkgs-apache -d "${PAIR_PKG_VERSION}"' "${PIPE}")" = 1 ] \
-  && ok "the Apache package is built with the dependency on the pinned pair (-d)" || bad "the Apache package must be built with -d \"\${PAIR_PKG_VERSION}\""
+[ "$(count 'install/debian/build.sh -a x64 -b . -o /out/pkgs-apache -d "${PAIR_PKG_VERSION}"' "${PIPE}")" = 2 ] \
+  && ok "the Apache package is built with the dependency on the pinned pair (-d) in both jobs" || bad "the Apache package must be built with -d \"\${PAIR_PKG_VERSION}\" in both jobs"
 grep -A2 'name: Fetch the pinned optimizer package (local packages)' "${PIPE}" | grep -qF "if: env.LOCAL_PACKAGES == 'true'" \
   && ok "the optimizer fetch runs only in local mode" || bad "the optimizer fetch step must carry if: env.LOCAL_PACKAGES == 'true'"
 [ "$(grep -cF 'if [ "${LOCAL_PACKAGES}" = true ]; then' "${PIPE}")" -ge 4 ] \

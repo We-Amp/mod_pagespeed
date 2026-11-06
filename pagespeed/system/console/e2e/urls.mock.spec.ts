@@ -9,7 +9,7 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import * as F from "./support/fixtures";
-import { mockAdmin, openConsole } from "./support/mock-admin";
+import { mockAdmin, openConsole, type Reply, type Responder } from "./support/mock-admin";
 
 test.use({ locale: "en-US", timezoneId: "UTC" });
 
@@ -206,15 +206,28 @@ test("a row that is not in cooldown says so instead of showing nothing", async (
   await expect(firstRow.locator("[data-label='Cooldown']")).toHaveText("—");
 });
 
-test("a row opens the entry's detail view", async ({ page }) => {
+test("a row opens the entry's detail view, carrying its site to the lookups", async ({ page }) => {
+  // The optimizer stores entries per site: a lookup without the list entry's
+  // site is "not in index". Answer only when the request carries it.
+  const sites: Array<string | null> = [];
+  const needsSite =
+    (reply: Reply): Responder =>
+    (_call, request) => {
+      const site = request.url.searchParams.get("site");
+      sites.push(site);
+      return site === F.HERO_SITE ? reply : { status: 404, body: { error: "not_in_index" } };
+    };
   await mockAdmin(page, "pagespeed_global_admin", {
     ...globalReplies(F.URLS_TWO_PAGES),
-    "v1/daemon/cache/alternates": F.ALTERNATES_HERO,
-    "v1/daemon/cache/content": F.CONTENT_HERO,
+    "v1/daemon/cache/alternates": needsSite(F.ALTERNATES_HERO),
+    "v1/daemon/cache/content": needsSite(F.CONTENT_HERO),
   });
   await openConsole(page, "pagespeed_global_admin", "#/urls");
   await ready(page);
   await page.getByRole("link", { name: "https://www.example.test/hero.png" }).click();
-  await expect(page).toHaveURL(/#\/urls\/detail\?url=%2Fhero\.png&host=www\.example\.test&scheme=https$/);
+  expect(page.url()).toContain(`#/urls/detail?url=%2Fhero.png&host=www.example.test&scheme=https&site=${F.HERO_SITE}`);
   await expect(page.getByTestId("url-detail-url")).toHaveText("https://www.example.test/hero.png");
+  await expect(page.getByTestId("variants-table")).toBeVisible();
+  expect(sites.length).toBeGreaterThan(0);
+  expect(sites.every((s) => s === F.HERO_SITE)).toBe(true);
 });

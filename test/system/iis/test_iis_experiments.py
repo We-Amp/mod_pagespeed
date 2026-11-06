@@ -105,8 +105,8 @@ def test_experiment_arm_applies_to_rewritten_html(client: PageSpeedClient, examp
 def test_experiment_arm_survives_remote_configuration(client: PageSpeedClient, example_root: str):
     # A remote configuration URL on a closed local port: the module still
     # merges the remote options into each request's options, which is where
-    # the arm used to be dropped. The bare form of the directive is used: the
-    # "pagespeed" form of RemoteConfigurationUrl is not read on IIS.
+    # the arm used to be dropped. Both forms of the directive work; the bare
+    # form is used here.
     lines = (
         "RemoteConfigurationUrl http://127.0.0.1:9/remote.cfg\n"
         "pagespeed RemoteConfigurationTimeoutMs 200\n"

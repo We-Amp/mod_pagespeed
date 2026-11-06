@@ -745,6 +745,10 @@ void ResponseHeaders::ComputeCaching() {
 
   HttpResponseHeaders* proto = mutable_proto();
 
+  // Forced caching is decided afresh on every recompute; do not carry it over
+  // from an earlier computation on the same headers.
+  force_cached_ = false;
+
   ConstStringStarVector values;
   int64 date_ms, last_modified_ms;
   bool has_date = ParseDateHeader(HttpAttributes::kDate, &date_ms);

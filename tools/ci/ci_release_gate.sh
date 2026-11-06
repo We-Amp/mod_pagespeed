@@ -25,9 +25,18 @@
 #     unavailable, the release waits or is waived explicitly.
 #   * With FLEET_ENABLED=false the IIS jobs are skipped too; with
 #     FLEET_IIS_ENABLED=true the gate then refuses (fail closed).
-#   * No job of the two tiers is continue-on-error today. Such a job would be
-#     advisory: reported, not in REQUIRED. Making one required is a separate
-#     change.
+#   * full / Windows AppVerif is report-only in CI while it is quarantined
+#     (job-level continue-on-error, tools/ci/quarantine.txt): its failure
+#     does not fail the run or the CI gate, but it stays in REQUIRED, so the
+#     release still needs it green. No other job of the two tiers is
+#     continue-on-error.
+#   * pr / IIS System Tests (retry 1|2) run only after an infrastructure
+#     failure of pr / IIS System Tests (which then concludes success). They
+#     are not in REQUIRED. When that job's step "Classify the failure"
+#     concluded success (the host failed and the job ended green), at least
+#     one retry leg must be success and every retry leg listed must be
+#     success; otherwise skipped is accepted, and a failure or cancellation
+#     refuses like that of any other job.
 #   * full / Windows ASan concludes success even when the ASan runtime is
 #     missing (its test step is then skipped), so the gate also requires that
 #     job's step "Run the unit tests under ASan" to be success.
@@ -103,6 +112,13 @@ IIS_JOBS=('pr / IIS System Tests' 'full / Windows AppVerif')
 # The runtime check: this step of this job must be success.
 ASAN_JOB='full / Windows ASan'
 ASAN_STEP='Run the unit tests under ASan'
+# The IIS retry check: this step of the first IIS attempt concludes success
+# only when that attempt failed for a reason of the host and ended green
+# (it is skipped when the tests passed, and fails on a test failure). Then at
+# least one retry leg must be success and none may be anything else.
+IIS_JOB='pr / IIS System Tests'
+IIS_CLASSIFY_STEP='Classify the failure'
+IIS_RETRY_RE='^pr / IIS System Tests \(retry [12]\)='
 
 if [ "${CI_RELEASE_GATE_PRINT_REQUIRED:-}" = 1 ]; then
   printf '%s\n' "${REQUIRED[@]}"
@@ -167,8 +183,9 @@ gh_api() {
 # request limit of github.token.
 RUNS_URL="repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&per_page=50&event=workflow_dispatch&branch=master"
 # One "<job name>=<conclusion>" line per job, plus
-# "STEP <job>/<step>=<conclusion>" for the runtime check step.
-JOBS_JQ='.jobs[] | ("\(.name)=\(.conclusion)"), (select(.name == "'"${ASAN_JOB}"'") | .steps[]? | select(.name == "'"${ASAN_STEP}"'") | "STEP '"${ASAN_JOB}"'/\(.name)=\(.conclusion)")'
+# "STEP <job>/<step>=<conclusion>" for the ASan runtime step and the IIS
+# classify step.
+JOBS_JQ='.jobs[] | ("\(.name)=\(.conclusion)"), (select(.name == "'"${ASAN_JOB}"'") | .steps[]? | select(.name == "'"${ASAN_STEP}"'") | "STEP '"${ASAN_JOB}"'/\(.name)=\(.conclusion)"), (select(.name == "'"${IIS_JOB}"'") | .steps[]? | select(.name == "'"${IIS_CLASSIFY_STEP}"'") | "STEP '"${IIS_JOB}"'/\(.name)=\(.conclusion)")'
 
 # Consecutive checks that found completed runs, none passing, nothing in flight.
 REFUSE_STREAK=0
@@ -184,7 +201,7 @@ iis_allowed() {
 
 # check: 0 = passed, 1 = refuse, 2 = API failure (refuse), 3 = wait.
 check() {
-  local ids="" inflight="" completed=0 runs rid st concl entry run jobs req bad warn line
+  local ids="" inflight="" completed=0 runs rid st concl entry run jobs req bad warn line legs_ok legs_other
   runs="$(gh_api "$RUNS_URL" '.workflow_runs[] | "\(.id) \(.status) \(.conclusion)"')" || { REASON="the GitHub API failed"; return 2; }
   while read -r rid st concl; do
     [ -n "$rid" ] || continue
@@ -210,6 +227,13 @@ check() {
     done
     printf '%s\n' "$jobs" | grep -Fxq -- "STEP ${ASAN_JOB}/${ASAN_STEP}=success" \
       || bad="${bad}${bad:+; }${ASAN_JOB} step ${ASAN_STEP} is not success"
+    if printf '%s\n' "$jobs" | grep -Fxq -- "STEP ${IIS_JOB}/${IIS_CLASSIFY_STEP}=success"; then
+      legs_ok="$(printf '%s\n' "$jobs" | grep -E -- "${IIS_RETRY_RE}" | grep -c '=success$')"
+      legs_other="$(printf '%s\n' "$jobs" | grep -E -- "${IIS_RETRY_RE}" | grep -vc '=success$')"
+      if [ "$legs_ok" -lt 1 ] || [ "$legs_other" -gt 0 ]; then
+        bad="${bad}${bad:+; }${IIS_JOB} failed for a reason of the host and no retry passed"
+      fi
+    fi
     while IFS= read -r line; do
       case "$line" in
         "STEP "*) continue ;;

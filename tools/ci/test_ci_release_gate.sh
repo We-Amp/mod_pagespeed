@@ -42,10 +42,13 @@ tier_jobs() {
 }
 
 # The release-relevant jobs of the two tiers, as the gate must require them:
-# every PR-tier job that runs on a fleet- class, every full-tier job but the
-# bookkeeping ones.
+# every PR-tier job that runs on a fleet- class but the IIS retry, every
+# full-tier job but the bookkeeping ones.
 {
   tier_jobs "${WF}/pipeline-pr.yml" | while IFS='|' read -r id name ro; do
+    # The IIS retry runs only after an infrastructure failure; skipped is
+    # its normal conclusion (the gate refuses its failure as any other's).
+    case "$id" in iis-sys-tests-retry) continue ;; esac
     case "$ro" in *fleet-*) echo "pr / ${name}" ;; esac
   done
   tier_jobs "${WF}/pipeline-full.yml" | while IFS='|' read -r id name ro; do
@@ -74,11 +77,17 @@ cat > "${TMP}/bin/gh" <<'GH'
 #   flaky-empty-then-green    first query empty, then run 21
 #   inflight-then-green       run 21 in_progress twice, then completed
 #   api-500                   every call fails with HTTP 500
+#   iis-infra-retried         run 21, IIS classify step success, retry legs success
+#   iis-infra-retry-skipped   run 21, IIS classify step success, retry legs skipped
+#   iis-infra-retry-missing   run 21, IIS classify step success, no retry leg listed
+#   iis-infra-one-leg-red     run 21, IIS classify step success, one leg failure
+#   iis-retry-skipped-clean   run 21, IIS classify step skipped, retry legs skipped
 set -uo pipefail
 path="$2"
 echo "$path" >> "${FAKE_LOG}"
 bump() { local n; n=$(cat "${FAKE_STATE}/$1" 2>/dev/null || echo 0); echo $((n + 1)) > "${FAKE_STATE}/$1"; echo "$n"; }
 asan_step='STEP full / Windows ASan/Run the unit tests under ASan'
+iis_step='STEP pr / IIS System Tests/Classify the failure'
 jobs_of() { # jobs_of <jobs filter sed> <step conclusion>
   { cat "${WF_REQUIRED}"; echo 'pr / Guards (security gates, console drift, placement, pytest exit, bazelrc, git_repository, PR policy)'; echo 'CI gate'; } |
     sed 's/$/=success/' | sed "$1"
@@ -109,6 +118,15 @@ case "$path" in
       iis-skipped) jobs_of 's#^pr / IIS System Tests=success#pr / IIS System Tests=skipped#;s#^full / Windows AppVerif=success#full / Windows AppVerif=skipped#' success ;;
       asan-runtime-missing) jobs_of 's/^$//' skipped ;;
       other-red) jobs_of 's#^\(pr / Guards [^=]*\)=success#\1=failure#' success ;;
+      iis-infra-retried) jobs_of 's/^$//' success; echo "${iis_step}=success"
+        echo 'pr / IIS System Tests (retry 1)=success'; echo 'pr / IIS System Tests (retry 2)=success' ;;
+      iis-infra-retry-skipped) jobs_of 's/^$//' success; echo "${iis_step}=success"
+        echo 'pr / IIS System Tests (retry ${{ matrix.leg }})=skipped' ;;
+      iis-infra-retry-missing) jobs_of 's/^$//' success; echo "${iis_step}=success" ;;
+      iis-infra-one-leg-red) jobs_of 's/^$//' success; echo "${iis_step}=success"
+        echo 'pr / IIS System Tests (retry 1)=success'; echo 'pr / IIS System Tests (retry 2)=failure' ;;
+      iis-retry-skipped-clean) jobs_of 's/^$//' success; echo "${iis_step}=skipped"
+        echo 'pr / IIS System Tests (retry ${{ matrix.leg }})=skipped' ;;
       *) jobs_of 's/^$//' success ;;
     esac ;;
   */actions/runs/22/jobs*) jobs_of 's/^$//' success ;;
@@ -178,6 +196,29 @@ run_gate arm64-skipped FLEET_IIS_ENABLED=false
 if [ "$RC" -eq 1 ] && grep -q 'ci gate refuses this release: ci.yml run 21: full / Linux arm64 Build is not success' <<<"$OUT"; then
   pass "arm64-skipped-refuses"
 else fail "arm64-skipped-refuses (rc=$RC)"; echo "$OUT"; fi
+
+run_gate iis-infra-retried
+if [ "$RC" -eq 0 ] && grep -q 'ci gate passed in ci.yml run 21' <<<"$OUT"; then
+  pass "iis-host-failure-with-green-retry-passes"
+else fail "iis-host-failure-with-green-retry-passes (rc=$RC)"; echo "$OUT"; fi
+
+for sc in iis-infra-retry-skipped iis-infra-retry-missing iis-infra-one-leg-red; do
+  run_gate "$sc"
+  if [ "$RC" -eq 1 ] && grep -q 'pr / IIS System Tests failed for a reason of the host and no retry passed' <<<"$OUT"; then
+    pass "${sc}-refuses"
+  else fail "${sc}-refuses (rc=$RC)"; echo "$OUT"; fi
+done
+
+run_gate iis-retry-skipped-clean
+if [ "$RC" -eq 0 ] && grep -q 'ci gate passed in ci.yml run 21' <<<"$OUT"; then
+  pass "iis-green-first-attempt-with-skipped-retry-passes"
+else fail "iis-green-first-attempt-with-skipped-retry-passes (rc=$RC)"; echo "$OUT"; fi
+
+# The gate reads the classify step by name: it must exist in the IIS job.
+if grep -q '^      - name: Classify the failure$' "${WF}/pipeline-pr.yml" \
+   && grep -q "^IIS_CLASSIFY_STEP='Classify the failure'$" "${GATE}"; then
+  pass "iis-classify-step-name-matches-workflow"
+else fail "iis-classify-step-name-matches-workflow"; fi
 
 run_gate iis-skipped FLEET_IIS_ENABLED=false
 if [ "$RC" -eq 0 ] && grep -q 'ci gate passed in ci.yml run 21 (workflow_dispatch)' <<<"$OUT" \

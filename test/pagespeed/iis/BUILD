@@ -360,6 +360,17 @@ pagespeed_cc_test(
     ],
 )
 
+# Request URL port removal unit tests (IPv6 literal hosts).
+pagespeed_cc_test(
+    name = "iis_url_port_test",
+    srcs = ["iis_url_port_test.cc"],
+    deps = [
+        "//pagespeed/iis:iis_url_port",
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/kernel/http",
+    ],
+)
+
 # Local-request decision unit tests.
 pagespeed_cc_test(
     name = "iis_local_request_test",

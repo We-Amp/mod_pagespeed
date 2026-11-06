@@ -275,7 +275,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `ci-release-gate` | hosted | requires a green full-tier `full=true` CI dispatch of the release commit (see "The CI gates") |
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
 | `linux-arm64-release-build` | hosted arm64 | the same for arm64 |
-| `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, resolute, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
+| `nginx-x64-plan`, `nginx-distro-build`, `nginx-ready` | fleet-heavy, pair (plan and join hosted) | x64 nginx module packages for noble, resolute, bookworm, trixie, jammy (deb) and el9 (rpm), one matrix job per distro (the plan job lists them from the leg table; at most three at a time on the fleet); the join job `nginx-ready` takes the leg that ran of the pair, runs the symbol-leak and rpm routing gates over the combined set and hands over `asset-nginx-x64` |
 | `nginx-arm64-plan`, `nginx-distro-build-arm64`, `nginx-arm64-join` | hosted arm64 | the same for arm64, one matrix job per distro (the plan job lists them from the leg table); the join job runs the gates over the combined set and hands over `asset-nginx-arm64` |
 | `nginx-distro-build-el10` | fleet-heavy, pair | the el10 nginx module rpm, with the gates and a load check into the stock nginx |
 | `vendor-sidecar` | hosted | the release tree of the sidecar pair, prepared on a hosted runner with the steps of `vendor` (hands over `tree-sidecar`) |
@@ -297,7 +297,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `package-load-check-nginx-arm64` | hosted arm64 | the same for arm64 |
 | `package-smoke-nginx-packaged` | fleet-heavy, pair | installs each x64 package into its stock nginx and runs the nginx test suite |
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
-| `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
+| `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair (`nginx-ready` also gates and hands over the x64 nginx set, see above) |
 | `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
@@ -418,9 +418,11 @@ without them otherwise. A hosted twin has no remote cache and a small machine
 that are the longest on a build runner (the Apache modules and the distro
 legs, which are cold builds) are not measured there yet. Their timeouts are
 set to the hosted maximum for that reason. Measure with `FLEET_ENABLED` unset
-before relying on a hosted release. The nginx distro legs of a small runner
-run one after the other (`tools/ci/release_nginx.sh` derives the concurrency
-from the cores and memory it finds).
+before relying on a hosted release. The x64 and arm64 nginx distro legs run
+as one job per distro; a job that builds more than one leg (the nginx.org
+set) runs them one after the other on a small runner
+(`tools/ci/release_nginx.sh` derives the concurrency from the cores and memory
+it finds).
 
 The queued-run sweep skips runs of the `Release` workflow (a real run may wait
 for an approval), so a release run whose runner class is not served waits until

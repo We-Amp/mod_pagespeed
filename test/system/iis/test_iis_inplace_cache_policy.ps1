@@ -20,6 +20,7 @@
 #   assets/site.css, assets/head.css   stylesheets
 #   assets/x (served as text/css) beside assets/x#y.css
 #   assets/pic.png                     the IIS start page image
+#   pages/ajax.html, pages/v6.html     HTML pages
 # Checks (PASS/FAIL; INFO rows report without judging):
 #   defaults   kernel caching is on for the server (precondition)
 #   plain      assets/site.css without a query, polled: optimized in place
@@ -35,6 +36,13 @@
 #              served an in-place answer for it, the host (refused) is still
 #              refused and never gets the file's content
 #   script     assets/app.js polled: optimized in place
+#   ajax       pages/ajax.html requested as an AJAX request (left plain by the
+#              module) four times within a few seconds, then by a browser:
+#              every browser answer went through the module, and HTTP.sys does
+#              not hold the page
+#   ipv6       pages/v6.html requested in the guest over IPv6 loopback with a
+#              bracketed IPv6 host (and X-Forwarded-Proto, so the module drops
+#              the port from the URL it builds): the module rewrites the page
 #   keep       assets/doc.pdf and assets/font.woff, types the module does not
 #              optimize, requested often: HTTP.sys keeps both (IIS caching
 #              stays on for them)
@@ -79,14 +87,17 @@ function Check([string]$Case, [bool]$Ok, [string]$Detail) {
 
 # One HTTP/1.1 request over a fresh connection; the body is kept as bytes.
 $RawText = @'
-function Invoke-Raw([string]$Ip, [int]$Port, [string]$Target, [string]$Method = "GET", [hashtable]$Headers = @{}) {
-    $client = New-Object System.Net.Sockets.TcpClient
+function Invoke-Raw([string]$Ip, [int]$Port, [string]$Target, [string]$Method = "GET", [hashtable]$Headers = @{}, [string]$HostHeader = "") {
+    $family = [System.Net.Sockets.AddressFamily]::InterNetwork
+    if ($Ip.Contains(":")) { $family = [System.Net.Sockets.AddressFamily]::InterNetworkV6 }
+    $client = New-Object System.Net.Sockets.TcpClient($family)
     $client.ReceiveTimeout = 20000
     $client.SendTimeout = 20000
     $client.Connect($Ip, $Port)
     try {
         $stream = $client.GetStream()
-        $req = "$Method $Target HTTP/1.1`r`nHost: localhost:$Port`r`nConnection: close`r`n"
+        if (-not $HostHeader) { $HostHeader = "localhost:$Port" }
+        $req = "$Method $Target HTTP/1.1`r`nHost: $HostHeader`r`nConnection: close`r`n"
         foreach ($k in $Headers.Keys) { $req += "${k}: $($Headers[$k])`r`n" }
         $req += "`r`n"
         $bytes = [Text.Encoding]::ASCII.GetBytes($req)
@@ -132,7 +143,10 @@ try {
         if (Test-Path "IIS:\Sites\$SiteName") { Remove-Website -Name $SiteName }
         if (Test-Path "IIS:\AppPools\$SiteName") { Remove-WebAppPool -Name $SiteName }
         Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Force "$root\assets", "$root\secure" | Out-Null
+        New-Item -ItemType Directory -Force "$root\assets", "$root\secure", "$root\pages" | Out-Null
+        foreach ($f in "ajax.html", "v6.html") {
+            [IO.File]::WriteAllText("$root\pages\$f", "<html><head><title>cpt</title></head><body>`r`n<p>cpt-page</p>`r`n</body></html>`r`n")
+        }
         $css = "/* stylesheet */`r`n.cpt-marker   {   color :  #ff0000 ;   margin :  0px  0px ;   }`r`n"
         foreach ($f in "site.css", "head.css", "x") { [IO.File]::WriteAllText("$root\assets\$f", $css) }
         [IO.File]::WriteAllText("$root\assets\x#y.css", "/* the other file */`r`n.cpt-other   {   color :  #00ff00 ;   }`r`n")
@@ -153,11 +167,14 @@ try {
         New-WebAppPool -Name $SiteName | Out-Null
         New-Website -Name $SiteName -Port $Port -PhysicalPath $root -ApplicationPool $SiteName | Out-Null
         Add-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/assets" -Filter "system.webServer/staticContent" -Name "." -Value @{ fileExtension = "."; mimeType = "text/css" }
-        $ipf = "system.webServer/security/ipSecurity"
-        foreach ($f in "ip-a.css", "ip-b.css") {
-            Set-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "allowUnlisted" -Value $false
-            foreach ($a in "127.0.0.1", "::1") {
-                Add-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "." -Value @{ ipAddress = $a; allowed = "true" }
+        $ipOk = [bool](Get-WindowsFeature Web-IP-Security).Installed
+        if ($ipOk) {
+            $ipf = "system.webServer/security/ipSecurity"
+            foreach ($f in "ip-a.css", "ip-b.css") {
+                Set-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "allowUnlisted" -Value $false
+                foreach ($a in "127.0.0.1", "::1") {
+                    Add-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "." -Value @{ ipAddress = $a; allowed = "true" }
+                }
             }
         }
         $auth = [bool]((Get-WindowsFeature Web-Url-Auth).Installed -and (Get-WindowsFeature Web-Basic-Auth).Installed)
@@ -186,12 +203,13 @@ try {
             Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
             Select-Object -First 1).IPAddress
         if (-not $ip) { return "the guest has no non-loopback IPv4 address" }
-        "ok $ip $($ca.enabled) $($ca.enableKernelCache) $auth"
+        "ok $ip $($ca.enabled) $($ca.enableKernelCache) $auth $ipOk"
     }
     if (-not ("$setup" -like "ok *")) { throw "PRECONDITION: $setup" }
     $parts = "$setup" -split " "
     $GuestIp = $parts[1]
     $AuthOk = ($parts[4] -eq "True")
+    $IpOk = ($parts[5] -eq "True")
     Invoke-Command -Session $session -ScriptBlock { param($t) Set-Item function:global:Invoke-Raw ([scriptblock]::Create($t + "`nInvoke-Raw @args")) } -ArgumentList $RawText
     Check "defaults" ($parts[2] -eq "True" -and $parts[3] -eq "True") ("server caching enabled {0}, kernel cache {1}" -f $parts[2], $parts[3])
     $deadline = (Get-Date).AddSeconds($PollSeconds)
@@ -258,6 +276,33 @@ try {
     }
     Check "script" ($js -ne $null) ("/assets/app.js optimized in place: {0}" -f ($js -ne $null))
 
+    # --- ajax: a page the module leaves plain for one request -----------------
+    # The module answers an HTML page with X-Page-Speed; a copy IIS kept from
+    # the plain AJAX answer has none.
+    $Ajax = @{ "User-Agent" = $BrowserUa; "X-Requested-With" = "XMLHttpRequest" }
+    $Page = @{ "User-Agent" = $BrowserUa; "Accept" = "text/html" }
+    for ($i = 0; $i -lt 4; $i++) { $null = Invoke-Raw $GuestIp $Port "/pages/ajax.html" "GET" $Ajax; Start-Sleep -Milliseconds 300 }
+    $plainPages = 0
+    for ($i = 0; $i -lt 6; $i++) {
+        $x = Invoke-Raw $GuestIp $Port "/pages/ajax.html" "GET" $Page
+        if ($x.Status -ne 200 -or $x.Head -notmatch '(?im)^X-Page-Speed:') { $plainPages++ }
+        Start-Sleep -Milliseconds 300
+    }
+    Check "ajax" ($plainPages -eq 0) ("/pages/ajax.html after 4 AJAX requests, 6 browser requests, answers without the module: {0}" -f $plainPages)
+    $pagesHeld = @(Invoke-Command -Session $session -ScriptBlock {
+        (& netsh http show cachestate) | Where-Object { $_ -match "URL:" } | ForEach-Object { ($_ -replace '^\s*URL:\s*', '').Trim() }
+    }) | Where-Object { $_ -like ("*:{0}/pages/ajax.html" -f $Port) }
+    Check "ajax" (@($pagesHeld).Count -eq 0) ("/pages/ajax.html held by HTTP.sys: {0}" -f (@($pagesHeld).Count -gt 0))
+
+    # --- ipv6: a request over IPv6 with a bracketed IPv6 host -------------------
+    $v6 = Invoke-Command -Session $session -ArgumentList $Port -ScriptBlock {
+        param($Port)
+        $hdr = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"; "X-Forwarded-Proto" = "http" }
+        $r = Invoke-Raw "::1" $Port "/pages/v6.html" "GET" $hdr ("[::1]:{0}" -f $Port)
+        "{0} {1}" -f $r.Status, ($r.Head -match '(?im)^X-Page-Speed:')
+    }
+    Check "ipv6" ("$v6" -eq "200 True") ("/pages/v6.html over [::1]: status and X-Page-Speed [{0}]" -f $v6)
+
     # --- keep: types the module does not optimize keep IIS's caching ------------
     foreach ($t in "/assets/doc.pdf", "/assets/font.woff") {
         for ($i = 0; $i -lt 5; $i++) { $null = Invoke-Raw $GuestIp $Port $t "GET" $Browser; Start-Sleep -Milliseconds 300 }
@@ -313,7 +358,8 @@ try {
             "{0} {1}" -f $r.Status, $r.Body.Contains("cpt-held")
         }
     }
-    $families = @(,@("ip", $false))
+    $families = @()
+    if ($IpOk) { $families += ,@("ip", $false) } else { Say "rules ip | Web-IP-Security (IP and Domain Restrictions) not installed | SKIP" }
     if ($AuthOk) { $families += ,@("auth", $true) } else { Say "rules auth | Web-Url-Auth or Web-Basic-Auth not installed | SKIP" }
     foreach ($fam in $families) {
         $kind = $fam[0]; $basic = $fam[1]

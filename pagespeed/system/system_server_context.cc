@@ -76,6 +76,7 @@ SystemServerContext::SystemServerContext(RewriteDriverFactory* factory,
       use_per_vhost_statistics_(false),
       cache_flush_mutex_(thread_system()->NewMutex()),
       last_cache_flush_check_sec_(0),
+      last_seen_cache_flush_timestamp_ms_(0),
       cache_flush_count_(nullptr),         // Lazy-initialized under mutex.
       cache_flush_timestamp_ms_(nullptr),  // Lazy-initialized under mutex.
       html_rewrite_time_us_histogram_(nullptr),
@@ -133,17 +134,30 @@ void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
     bool check_cache_file = false;
     {
       ScopedMutex lock(cache_flush_mutex_.get());
-      if (now_sec >=
-          (last_cache_flush_check_sec_ + cache_flush_poll_interval_sec)) {
-        last_cache_flush_check_sec_ = now_sec;
-        check_cache_file = true;
-      }
       if (cache_flush_count_ == nullptr) {
         cache_flush_count_ = statistics()->GetVariable(kCacheFlushCount);
       }
       if (cache_flush_timestamp_ms_ == nullptr) {
         cache_flush_timestamp_ms_ =
             statistics()->GetUpDownCounter(kCacheFlushTimestampMs);
+      }
+      // The statistic holds the last flush timestamp any server context
+      // sharing these statistics applied: this site's other processes, but
+      // also, when statistics are not kept per virtual host (the Apache
+      // default), hosts that watch a different cache.flush. So a change is
+      // only a hint that a flush happened: read this context's own file now
+      // instead of waiting for the poll interval. Adopting the statistic's
+      // value itself would apply another host's flush, and only in the
+      // processes that served a request while it was there, so the
+      // processes of one site would end up with different options
+      // signatures (and property-cache keys) for good.
+      int64 shared_timestamp_ms = cache_flush_timestamp_ms_->Get();
+      if ((now_sec >=
+           (last_cache_flush_check_sec_ + cache_flush_poll_interval_sec)) ||
+          (shared_timestamp_ms != last_seen_cache_flush_timestamp_ms_)) {
+        last_cache_flush_check_sec_ = now_sec;
+        last_seen_cache_flush_timestamp_ms_ = shared_timestamp_ms;
+        check_cache_file = true;
       }
     }
 
@@ -203,19 +217,6 @@ void SystemServerContext::CheckLegacyGlobalCacheFlushFile() {
           int count = cache_flush_count_->Add(1);
           message_handler()->Message(kWarning, "Cache Flush %d", count);
         }
-      }
-    } else {
-      // Check on every request whether another child process has updated the
-      // statistic.
-      int64 timestamp_ms = cache_flush_timestamp_ms_->Get();
-
-      // Do the difference-check first because that involves only a
-      // reader-lock, so we have zero contention risk when the cache is not
-      // being flushed.
-      if ((timestamp_ms > 0) &&
-          global_options()->has_cache_invalidation_timestamp_ms() &&
-          (global_options()->cache_invalidation_timestamp() < timestamp_ms)) {
-        UpdateCacheFlushTimestampMs(timestamp_ms);
       }
     }
   }

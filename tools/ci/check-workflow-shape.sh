@@ -33,7 +33,9 @@
 #       docs/ci/pipelines.md (the FLEET_ENABLED kill switch in its general,
 #       fleet-only or dispatch-only form, or the fleet-iis form that adds
 #       FLEET_IIS_ENABLED; a job routed to fleet-iis or fleet-hyperv must carry the last) verbatim as its if:, the general form optionally
-#       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
+#       narrowed by `&& needs.changes.outputs.<name> == 'true'` (and the
+#       job iis-sys-tests-retry of pipeline-pr.yml, alone, by exactly
+#       `&& needs.iis-sys-tests.outputs.failure_class == 'infra'`), or
 #       prefixed by `!cancelled() && needs.<job>.result == 'success' && `.
 #       The fleet-only and fleet-iis guards also have a switch form that
 #       tests `!= 'false'` (unset means on). A job routed by the switch
@@ -355,9 +357,11 @@ is_fleet_guard() {
 }
 
 # A fleet-iis guard (either form) in parentheses, narrowed by a path filter:
-# `&& needs.changes.outputs.<name> == 'true'`.
-is_iis_narrowed() {
-  local v="$1" g name guards
+# `&& needs.changes.outputs.<name> == 'true'`; in pipeline-pr.yml the job
+# iis-sys-tests-retry alone may instead be narrowed by exactly
+# `&& needs.iis-sys-tests.outputs.failure_class == 'infra'`.
+is_iis_narrowed() { # <if value> <job id>
+  local v="$1" job_name="${2:-}" g name guards
   if [ "${PR_WF}" = 1 ]; then guards=( "${FLEET_IIS_QUEUE_GUARD}" ); else guards=( "${FLEET_IIS_GUARD}" "${FLEET_IIS_SWITCH_GUARD}" ); fi
   for g in "${guards[@]}"; do
     g="${g#\$\{\{ }"; g="${g% \}\}}"
@@ -365,6 +369,10 @@ is_iis_narrowed() {
       "\${{ (${g}) && needs.changes.outputs."*" == 'true' }}")
         name="${v#"\${{ (${g}) && needs.changes.outputs."}"; name="${name% == \'true\' \}\}}"
         printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+        ;;
+      "\${{ (${g}) && needs.iis-sys-tests.outputs.failure_class == 'infra' }}")
+        # The one retry job, narrowed by the class of the attempt it retries.
+        [ "${PR_WF}" = 1 ] && [ "${job_name}" = "iis-sys-tests-retry" ] && return 0
         ;;
     esac
   done
@@ -496,10 +504,10 @@ EOT
         if is_fleet_iis_route "${val}"; then
           route_class="${val%\' \}\}}"; route_class="${route_class##*\'}"
           if [ "${PR_WF}" = 1 ]; then
-            if [ "${if_val}" != "${FLEET_IIS_QUEUE_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
+            if [ "${if_val}" != "${FLEET_IIS_QUEUE_GUARD}" ] && ! is_iis_narrowed "${if_val}" "${job}"; then
               err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis queue guard (FLEET_IIS_ENABLED and the fleet route) verbatim as its if: (rule d)"
             fi
-          elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
+          elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}" "${job}"; then
             err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
           fi
         elif [ "${PR_WF}" = 1 ]; then
@@ -791,18 +799,22 @@ done
 # The fleet scope of the PR tier (docs/ci/pipelines.md, "CI_SCOPE") decides
 # whether `vendor`, and with it every fleet job, runs. Its decision script must
 # be read from the default branch, never from the tree under test, and
-# merge_group and workflow_dispatch must never reach it. In pipeline-pr.yml (and
-# any workflow that names the script):
+# workflow_dispatch must never reach it. The docs lane classifier
+# (tools/ci/docs_only.sh) is read by that script, from the default branch
+# too, so no workflow names it. In pipeline-pr.yml (and any workflow that
+# names either script):
 #   - the `changes` job holds exactly one step named FS_STEP, in exactly the
 #     spec form of fs_expected (comment and blank lines aside): no other key,
-#     env key or command, and the inline merge_group|workflow_dispatch branch;
+#     env key or command, and the inline workflow_dispatch branch;
 #   - the step comes right after the merge-queue guard step (so after the
 #     three pinned steps and before the path-filter diff step);
 #   - the `changes` job publishes `fleet` and `heavy` from that step;
 #   - outside that step, no non-comment line names `pr_tier_scope.sh` (the
-#     test script excepted).
+#     test script excepted), and no non-comment line anywhere names
+#     `docs_only.sh` (its test script excepted).
 FS_STEP="Decide the fleet scope"
 FS_PAT='(^|[^_A-Za-z0-9])pr_tier_scope\.sh'
+DO_PAT='docs_only\.sh'
 fs_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${...}
   printf '%s\n' \
@@ -811,16 +823,18 @@ fs_expected() {
     '        env:' \
     '          GH_TOKEN: ${{ github.token }}' \
     '          CI_SCOPE: ${{ vars.CI_SCOPE }}' \
+    '          DOCS_LANE: ${{ vars.DOCS_LANE }}' \
     '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' \
     '          SHA: ${{ github.sha }}' \
     '          BEFORE_SHA: ${{ github.event.before }}' \
+    '          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}' \
     "          FORK_OR_BOT: \${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}" \
     "          PR_FULL: \${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}" \
     '        run: |' \
     '          set -euo pipefail' \
     '          out="${RUNNER_TEMP}/fleet-scope.txt"' \
     '          case "${GITHUB_EVENT_NAME}" in' \
-    "            merge_group|workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
+    "            workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
     '            *)' \
     '              if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&' \
     '                bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&' \
@@ -837,6 +851,11 @@ fs_err() { err "${wf}: $1 (fleet-scope)"; }
 
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue
+  # The docs lane classifier is read by pr_tier_scope.sh alone; any workflow
+  # that names it (its test script aside) could run the tree's copy.
+  if sed 's/test_docs_only\.sh//g' "${wf}" | grep -vE '^[[:space:]]*#' | grep -qE "${DO_PAT}"; then
+    err "${wf}: docs_only.sh is named in a workflow; only pr_tier_scope.sh reads it, from the default branch (docs-lane)"
+  fi
   fs_mentions="$(grep -E "${FS_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   qg_mentions="$(grep -E "${QG_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   if [ "$(basename "${wf}")" != "pipeline-pr.yml" ] && [ "${fs_mentions}" = "0" ] && [ "${qg_mentions}" = "0" ]; then
@@ -849,7 +868,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   else
     sblk="$(printf '%s\n' "${job}" | awk -v n="      - name: ${FS_STEP}" '/^      - / { instep = ($0 == n) } instep { print }' | grep -vE '^[[:space:]]*(#|$)' || true)"
     if [ "${sblk}" != "$(fs_expected)" ]; then
-      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; merge_group and workflow_dispatch decided inline)"
+      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; workflow_dispatch decided inline)"
     fi
     # Right after the merge-queue guard step, when the job has one (its own
     # rule reports a missing guard step).

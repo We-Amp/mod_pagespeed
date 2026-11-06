@@ -226,11 +226,6 @@ class ConfigurationFile:public ReferenceCounter
 							// Bug 2 fix: use a flag instead of 'continue' to avoid
 							// skipping end-of-line advancement.
 							bool skip_option_parsing = false;
-							if (tokens.size() == 2 &&
-								(StringCaseEqual(tokens.at(0), "RemoteConfigurationUrl"))) {
-								skip_option_parsing = true;
-							}
-
 							if (!skip_option_parsing && tokens.size() == 2 &&
 								(StringCaseEqual(tokens.at(0), "FileCachePath")
 								 || StringCaseEqual(tokens.at(0), "LogDir")

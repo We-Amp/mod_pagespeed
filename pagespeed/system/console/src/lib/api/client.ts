@@ -389,11 +389,13 @@ export class AdminApiClient {
   }
 
   private entryQuery(entry: CacheEntryKey): URLSearchParams {
-    return new URLSearchParams({
+    const query = new URLSearchParams({
       url: entry.url,
       hostname: entry.host,
       scheme: entry.scheme,
     });
+    if (entry.site !== undefined) query.set("site", entry.site);
+    return query;
   }
 
   async daemonCacheAlternates(entry: CacheEntryKey): Promise<DaemonAlternatesResponse> {

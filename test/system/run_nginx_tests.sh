@@ -252,8 +252,9 @@ DAEMON_READY=""
 # them or fails the run.
 #
 # With the lane on, system/test_cache_purge.py's
-# TestCachePurgeWithPageSpeedOffInVhost (4 cases) fails until a purge applies
-# to every location of a server.
+# TestCachePurgeWithPageSpeedOffInVhost (4 cases) checks that a purge applies
+# under a location with pagespeed settings of its own; for cache.flush that is
+# nginx/test_nginx_cache.py's TestCacheFlushUnderLocation, on every run.
 SECONDARY_LANE="${PAGESPEED_SECONDARY_LANE:-0}"
 SECONDARY_TEMPLATE="$SCRIPT_DIR/nginx_secondary_vhosts.conf.in"
 SECONDARY_COMMON="$NGINX_CONFIG_DIR/secondary_common.inc"
@@ -661,6 +662,7 @@ EOF
         }
 
         # Inputs a rewritten resource must not grow more cacheable than.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
         location ~ /ipro/cc200p/ {
             add_header Cache-Control "private, max-age=200" always;
         }
@@ -687,6 +689,7 @@ EOF
         # automatic/test_rewrite_css.py::test_rewrite_css_images inlines a
         # small image into CSS; a request can only lower the threshold, so
         # the page gets it from the configuration.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
         location = /mod_pagespeed_example/rewrite_css_images.html {
             pagespeed CssImageInlineMaxBytes 2048;
         }
@@ -833,6 +836,7 @@ EOF
         # The flatten size limit is configuration only (not settable per
         # request); these locations give the flatten_css_imports tests a
         # small limit.
+        # Keep in sync with test/package-test/run-nginx-tests.sh.
         location ^~ /mod_pagespeed_test/flatten_limit_tiny/ {
             pagespeed CssFlattenMaxBytes 5;
         }

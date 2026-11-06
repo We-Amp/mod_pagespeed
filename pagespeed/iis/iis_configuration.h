@@ -36,9 +36,7 @@ namespace net_instaweb {
 struct global_settings { 
 	global_settings() 
 		: use_native_fetcher(false)
-		, use_per_vhost_statistics(true)
 		, message_buffer_size(1024*128)
-		, shm_cache_size_kb(0)
 		, num_rewrite_threads(0)
 		, num_expensive_rewrite_threads(0)
 		//, rate_limit_background_fetches(true)
@@ -48,13 +46,11 @@ struct global_settings {
 	{
 	}
 	bool use_native_fetcher;
-	bool use_per_vhost_statistics;
 	int message_buffer_size;
 	//bool rate_limit_background_fetches;
 	//bool force_caching;
 	//bool list_outstanding_urls_on_error;
 	//bool track_original_content_length;
-	int shm_cache_size_kb;
 	// NumRewriteThreads / NumExpensiveRewriteThreads; 0 means "use the built-in
 	// size" (the directive's "auto" and its default).
 	int num_rewrite_threads;
@@ -79,7 +75,7 @@ public:
 };
 
 // Sets every field of *out (MessageBufferSize, UseNativeFetcher,
-// UsePerVHostStatistics, the shared-memory size and the pool sizes) from the
+// and the pool sizes) from the
 // machine-wide file alone. Reads the file afresh, never from a cache, so every
 // site context of a process, and a context rebuilt after a file edit, gets the
 // same values. |machine_path| may be empty, which leaves the defaults.

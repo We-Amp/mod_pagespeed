@@ -267,6 +267,8 @@ export interface CacheEntryKey {
   url: string;
   host: string;
   scheme: "http" | "https";
+  /** The optimizer's per-site cache namespace (64 lowercase hex), when the list entry carried one. */
+  site?: string;
 }
 
 /** One entry of GET /v1/daemon/cache/urls. `url` is a path, not an absolute URL. */
@@ -274,6 +276,7 @@ export interface DaemonCacheUrlEntry {
   url?: string;
   hostname?: string;
   scheme?: string;
+  site?: string;
   alternate_count?: number;
   cache_key?: string;
   [key: string]: unknown;
