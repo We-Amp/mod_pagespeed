@@ -3082,8 +3082,9 @@ TEST_F(AdminSiteDaemonTest, AlternatesForwardsSite) {
       daemon_site_.get(),
       StrCat("http://localhost/pagespeed_global_admin/v1/daemon/cache/"
              "alternates?site=",
-             kSiteHex, "&scheme=https&hostname=www.example.test"
-                       "&url=%2Fhero.png"),
+             kSiteHex,
+             "&scheme=https&hostname=www.example.test"
+             "&url=%2Fhero.png"),
       RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
@@ -3165,8 +3166,9 @@ TEST_F(AdminSiteDaemonTest, ContentForwardsSite) {
       daemon_site_.get(),
       StrCat("http://localhost/pagespeed_global_admin/v1/daemon/cache/"
              "content?alternate_id=3&site=",
-             kSiteHex, "&scheme=https&hostname=www.example.test"
-                       "&url=%2Fhero.png"),
+             kSiteHex,
+             "&scheme=https&hostname=www.example.test"
+             "&url=%2Fhero.png"),
       RequestHeaders::kGet, &buffer);
   ASSERT_TRUE(fetch->done());
   EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
