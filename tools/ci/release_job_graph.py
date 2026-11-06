@@ -13,7 +13,10 @@ Runtime values (needs.X.result, vars.*, github.actor, ...) stay symbolic.
 Events:
   dispatch-dry-run  a plain workflow_dispatch with dry_run=true
   tag-push          a push of a module-v* tag
-Neither is a candidate or a rehearsal, so both constants are false for them.
+Neither is a candidate, a rehearsal or an adopting run, so those constants are
+false for them: the `adopt` job succeeds and its output `adopted` is 'false'.
+The `adopt` job is left out of the rendered `needs` lists for the same reason
+(it only decides whether a run adopts); it is rendered as a job of its own.
 
     release_job_graph.py render FILE [--event EVENT]    (default: both)
     release_job_graph.py compare OLD NEW                 (exit 1 on any difference)
@@ -39,6 +42,8 @@ EVENTS = {
         "needs.version.outputs.candidate": "false",
         "needs.version.outputs.rehearsal": "false",
         "needs.version.outputs.build_profile": "rehearsal",
+        "needs.adopt.result": "success",
+        "needs.adopt.outputs.adopted": "false",
     },
     "tag-push": {
         "github.event_name": "push",
@@ -49,6 +54,8 @@ EVENTS = {
         "needs.version.outputs.candidate": "false",
         "needs.version.outputs.rehearsal": "false",
         "needs.version.outputs.build_profile": "release",
+        "needs.adopt.result": "success",
+        "needs.adopt.outputs.adopted": "false",
     },
 }
 
@@ -300,10 +307,28 @@ def render_graph(path, event):
     for jid in sorted(jobs):
         j = jobs[jid]
         cond = "(none)" if j["if"] is None else evaluate(j["if"], consts)
+        # A condition that is constant true names no status function, so
+        # GitHub adds success(): the same as no condition at all.
+        if cond == "true":
+            cond = "(none)"
         lines.append("job %s" % jid)
-        lines.append("  needs: %s" % (", ".join(sorted(j["needs"])) or "(none)"))
+        needs = [n for n in j["needs"] if n != "adopt"]
+        lines.append("  needs: %s" % (", ".join(sorted(needs)) or "(none)"))
         lines.append("  if: %s" % cond)
     return "\n".join(lines) + "\n"
+
+
+def render_graph_text(text, consts):
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "p.yml")
+        with open(path, "w") as fh:
+            fh.write(text)
+        for name, c in EVENTS.items():
+            if c is consts:
+                return render_graph(path, name)
+    raise ValueError("unknown constants")
 
 
 def compare(old, new):
@@ -358,6 +383,22 @@ def self_test():
     eq("event name folds",
        evaluate("${{ github.event_name == 'pull_request' && github.actor == 'x' }}", d), "false")
     eq("negation of a symbolic atom", evaluate("${{ !cancelled() }}", d), "!cancelled()")
+    adopted = "needs.adopt.outputs.adopted != 'true'"
+    adopt_ok = "needs.adopt.result == 'success'"
+    eq("the adoption terms fold away on both events",
+       (evaluate("${{ %s && %s }}" % (adopt_ok, adopted), d), evaluate("${{ %s }}" % adopted, t)), ("true", "true"))
+    eq("an added adoption term does not change a condition",
+       evaluate("${{ !cancelled() && needs.a.result == 'success' && %s && %s }}" % (adopt_ok, adopted), t),
+       "!cancelled() && needs.a.result == 'success'")
+    eq("an adoption term inside a parenthesised guard folds as well",
+       evaluate("${{ needs.event-guard.result == 'success' && (!cancelled() && %s && %s) }}" % (adopt_ok, adopted), d),
+       "needs.event-guard.result == 'success' && !cancelled()")
+    eq("an adopted run is the one case the term does not fold away",
+       evaluate("${{ %s }}" % adopted, dict(d, **{"needs.adopt.outputs.adopted": "true"})), "false")
+    eq("a join that accepts an adopted run keeps its other terms",
+       evaluate("${{ needs.a.result == 'success' || needs.adopt.outputs.adopted == 'true' }}", d), "needs.a.result == 'success'")
+    eq("a condition that folds to true is the same as none", "job a\n  needs: (none)\n  if: (none)\n" in
+       render_graph_text("jobs:\n  a:\n    if: ${{ needs.adopt.outputs.adopted != 'true' }}\n", d), True)
     eq("double negation", evaluate("${{ !!cancelled() }}", d), "cancelled()")
     eq("parentheses kept where needed",
        evaluate("${{ (vars.A == 'x' || vars.B == 'y') && !cancelled() }}", d),
@@ -398,6 +439,11 @@ jobs:
         with open(q, "w") as fh:
             fh.write(body.replace("dry_run == 'false' }}", "dry_run == 'false' && needs.version.outputs.candidate != 'true' }}"))
         eq("compare: an added always-true term is no difference", compare(p, q), [])
+        a = os.path.join(td, "a.yml")
+        with open(a, "w") as fh:
+            fh.write(body.replace("    needs: [version]\n    if: ${{ !cancelled() && needs.version.result == 'success' }}",
+                                  "    needs: [version, adopt]\n    if: ${{ !cancelled() && needs.version.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}"))
+        eq("compare: adding adopt to needs and the adoption terms is no difference", compare(p, a), [])
         r = os.path.join(td, "r.yml")
         with open(r, "w") as fh:
             fh.write(body.replace("needs.build.result == 'success' && ", ""))
