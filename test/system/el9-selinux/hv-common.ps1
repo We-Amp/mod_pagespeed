@@ -243,6 +243,32 @@ function Stop-VmHard {
     Stop-VM -Name $VMName -TurnOff -Force -ErrorAction SilentlyContinue
 }
 
+# Seed ISOs moved from the old seeds directory to the new one. Checkpoints
+# taken before the move still record the old DVD path, so a restored VM would
+# boot with a DVD drive pointing at a file that no longer exists.
+$script:OldSeedDir = 'E:\hv\seeds\'
+$script:NewSeedDir = 'D:\hv\media\seeds\'
+
+function Repair-VmSeedIsoPath {
+    # Call after Restore-VMSnapshot and before Start-VM. Re-points a DVD drive
+    # whose path starts with the old seeds directory at the same file name in
+    # the new one. Throws if the file is missing there; paths that do not start
+    # with the old directory are left alone.
+    param([Parameter(Mandatory)] [string]$VMName)
+    $drives = @(Get-VMDvdDrive -VMName $VMName -ErrorAction Stop)
+    foreach ($dvd in $drives) {
+        $cur = [string]$dvd.Path
+        if ([string]::IsNullOrEmpty($cur)) { continue }
+        if (-not $cur.StartsWith($script:OldSeedDir, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        $new = $script:NewSeedDir + $cur.Substring($script:OldSeedDir.Length)
+        if (-not (Test-Path -LiteralPath $new)) {
+            throw "Seed ISO '$new' not found (checkpoint of $VMName points at '$cur')"
+        }
+        Write-Host "Re-pointing DVD drive of '$VMName': $cur -> $new"
+        Set-VMDvdDrive -VMName $VMName -ControllerNumber $dvd.ControllerNumber -ControllerLocation $dvd.ControllerLocation -Path $new -ErrorAction Stop
+    }
+}
+
 function ConvertTo-WslPath {
     # D:\x\y -> /mnt/d/x/y via wslpath (handles any drive and odd characters).
     param([Parameter(Mandatory)] [string]$WindowsPath)
