@@ -82,14 +82,14 @@ expect ok "check: dispatch master + tag"       check refs/heads/master workflow_
 expect no "check: dispatch master + side tag"  check refs/heads/master workflow_dispatch v9.9.9
 expect no "check: dispatch ci-dev branch"    check refs/heads/ci-dev workflow_dispatch v1.0.0
 expect no "check: dispatch empty tag"        check refs/heads/master workflow_dispatch ""
-expect ok "check: schedule on master"          check refs/heads/master schedule
+expect no "check: schedule on master, no rehearsal" check refs/heads/master schedule
 
 # Event allowlist: a release pipeline refuses every event but its own triggers.
 evcheck() { # evcheck EVENT ALLOWED
   ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME="$1" GITHUB_SHA="$main_sha" ALLOWED_EVENTS="$2"
     unset INPUT_TAG; ref_guard_check )
 }
-expect ok "events: unset list allows any"    evcheck schedule ""
+expect ok "events: unset list allows any"    evcheck push ""
 expect ok "events: push allowed"             evcheck push "push workflow_dispatch"
 expect no "events: pull_request refused"     evcheck pull_request "push workflow_dispatch"
 expect no "events: schedule refused"         evcheck schedule "push workflow_dispatch"
@@ -183,7 +183,7 @@ expect no "schedule without rehearsal"                       bash -c '. "$1"; ex
 expect no "schedule with rehearsal=false"                    bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule GITHUB_SHA="$2" REHEARSAL=false ALLOWED_TAG_GLOB="module-v*" ALLOWED_EVENTS="push workflow_dispatch schedule"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
 # A rehearsal flag that is not exactly "true" leaves the ordinary rules in force.
 expect no "rehearsal off: master dispatch with no tag"       bash -c '. "$1"; export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=workflow_dispatch INPUT_TAG= GITHUB_SHA="$2" REHEARSAL=false ALLOWED_TAG_GLOB="module-v*"; ref_guard_check' _ "$HERE/ref_guard.sh" "$main_sha"
-rehouts() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule INPUT_TAG= REHEARSAL=true GITHUB_SHA="${1:-$main_sha}"; ref_guard_outputs ); }
+rehouts() { ( export GITHUB_REF=refs/heads/master GITHUB_EVENT_NAME=schedule INPUT_TAG="" REHEARSAL=true GITHUB_SHA="${1:-$main_sha}"; ref_guard_outputs ); }
 expect_out "ref=$main_sha sha=$main_sha " "outputs: rehearsal -> the commit itself" rehouts
 
 [ "$fail" = 0 ] && echo "ref_guard self-test: all passed"
