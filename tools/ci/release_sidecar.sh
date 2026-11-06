@@ -88,6 +88,47 @@ TRANSIENT_FETCH_RE='Hash Sum mismatch|Unable to fetch some archives|bad record M
 
 die() { echo "::error::release_sidecar: $*" >&2; exit 1; }
 
+# apt_install_retry [--no-install-recommends] PKG...: apt-get update and the
+# install of the packages, each with Acquire::Retries, the whole of it re-run
+# up to three times with a short sleep between, so that a short mirror outage
+# does not fail the step. A real outage still does: stderr is never redirected,
+# apt's own error stays visible and the failure is returned to the caller. The
+# function runs in the container's shell, not in this one: every call site
+# splices it into its docker run command with "$(declare -f
+# apt_install_retry)" and passes SIDECAR_APT_MIRROR along. That variable, when
+# set and not empty, is a host (with an optional port) that replaces the
+# image's own host in every apt source URL before the first update; unset or
+# empty, the sources are left as the image has them.
+apt_install_retry() {
+  local flags=() files=() f attempt
+  if [ "${1:-}" = "--no-install-recommends" ]; then flags=(--no-install-recommends); shift; fi
+  if [ -n "${SIDECAR_APT_MIRROR:-}" ]; then
+    # The one-line and the deb822 sources of the Debian and the Ubuntu images.
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+      if [ -f "$f" ]; then files+=("$f"); fi
+    done
+    if [ "${#files[@]}" -gt 0 ]; then
+      sed -i -e "s|//deb.debian.org|//${SIDECAR_APT_MIRROR}|g" \
+        -e "s|//security.debian.org|//${SIDECAR_APT_MIRROR}|g" \
+        -e "s|//archive.ubuntu.com|//${SIDECAR_APT_MIRROR}|g" \
+        -e "s|//security.ubuntu.com|//${SIDECAR_APT_MIRROR}|g" "${files[@]}"
+    fi
+  fi
+  for attempt in 1 2 3; do
+    # stdout quiet as before; stderr left alone, also on the last attempt.
+    if apt-get update -qq -o Acquire::Retries=5 >/dev/null \
+      && apt-get install -y -qq -o Acquire::Retries=5 "${flags[@]}" "$@" >/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" -ge 3 ]; then
+      echo "::error::release_sidecar: apt install of $* failed after $attempt attempts" >&2
+      return 1
+    fi
+    echo "::warning::release_sidecar: apt install of $* failed (attempt $attempt of 3), retrying" >&2
+    sleep $((attempt * 5))
+  done
+}
+
 rid_of() {
   case "$1" in
     x64) echo linux-x64 ;;
@@ -269,11 +310,13 @@ hygiene() {
   [ -n "$ARCH" ] || die "hygiene: --arch is required"
   need_native; need_src; need_pair
   docker run --rm --platform "$(platform_of "$ARCH")" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
+    -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -v "$SRC:/src:ro" -v "$PAIR:/p:ro" -w /src \
     "$FOCAL_IMAGE" bash -c '
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -qq >/dev/null && apt-get install -y -qq binutils >/dev/null
+      '"$(declare -f apt_install_retry)"'
+      apt_install_retry binutils
       # The module: no OpenSSL, and only the nginx module symbols exported.
       bash install/nginx/assert_symbol_hygiene.sh /p/ngx_pagespeed_module.so
       fail=0
@@ -314,10 +357,12 @@ strip_pair() {
   need_native; need_pair
   mkdir -p "$DEBUG_DIR"; DEBUG_DIR="$(abs_dir "$DEBUG_DIR")"
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+    -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -v "$PAIR:/p" -v "$DEBUG_DIR:/d" "$FOCAL_IMAGE" bash -c '
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -qq >/dev/null && apt-get install -y -qq binutils file >/dev/null
+      '"$(declare -f apt_install_retry)"'
+      apt_install_retry binutils file
       trap "chown -R \"$HOST_UID:$HOST_GID\" /p /d" EXIT
       cd /p
       for b in nginx ngx_pagespeed_module.so pagespeed-nginx-launch; do
@@ -396,14 +441,16 @@ run_suite() {
   docker run --rm --init ${platform:+--platform "$platform"} \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e FW="$fw" -e PROPS="$props" -e RID="$rid" -e REQUIRE="$require" -e FILTER="$filter" -e TRX="$trx" \
+    -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
     -v "$work:/w" -v "$RESULTS:/results" -w /w \
     "$image" bash -c '
       set -euo pipefail
+      '"$(declare -f apt_install_retry)"'
       if [ -n "$RID" ]; then
         # The bundled nginx links PCRE; a consumer host provides it.
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends libpcre3 >/dev/null
+        apt_install_retry --no-install-recommends libpcre3
       fi
       # dotnet needs an account for the user it runs as.
       getent group "$HOST_GID" >/dev/null || groupadd -o -g "$HOST_GID" sidecar
