@@ -56,8 +56,9 @@ jobs:
   #
   # The job also decides the fleet scope (docs/ci/pipelines.md, "CI_SCOPE"):
   # `fleet` gates `vendor`, and with it every build runner job. A push whose
-  # commit the merge queue already proved may skip them; merge_group and
-  # workflow_dispatch always run them. checks: read lets the decision read the
+  # commit the merge queue already proved may skip them, and so may a
+  # docs-only pull request or merge group ("DOCS_LANE"); workflow_dispatch
+  # always runs them. checks: read lets the decision read the
   # commit's check suites; the calling job must grant it too.
   changes:
     name: Detect changed paths
@@ -136,18 +137,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CI_SCOPE: ${{ vars.CI_SCOPE }}
+          DOCS_LANE: ${{ vars.DOCS_LANE }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           SHA: ${{ github.sha }}
           BEFORE_SHA: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           FORK_OR_BOT: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}
           PR_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}
-        # merge_group and workflow_dispatch always run the full PR tier; the
-        # decision script is read from the default branch, never the tree.
+        # workflow_dispatch always runs the full PR tier; a pull request and a
+        # merge group go through the decision script (and its docs lane), read
+        # from the default branch, never the tree.
         run: |
           set -euo pipefail
           out="${RUNNER_TEMP}/fleet-scope.txt"
           case "${GITHUB_EVENT_NAME}" in
-            merge_group|workflow_dispatch) printf 'fleet=true\nheavy=true\n' > "${out}" ;;
+            workflow_dispatch) printf 'fleet=true\nheavy=true\n' > "${out}" ;;
             *)
               if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&
                 bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&

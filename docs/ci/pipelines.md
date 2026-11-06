@@ -926,9 +926,11 @@ is `true`, and every other build runner leg needs `vendor`, so `fleet=false`
 skips them all. The hosted jobs of the PR tier, the inline jobs of `ci.yml`
 and the whole full tier run as before.
 
-- `merge_group` and `workflow_dispatch` always run the whole PR tier. The step
-  decides them inline, whatever `CI_SCOPE` says, so a merge group and the
-  release candidate dispatch (`full: true`) never skip a fleet job.
+- `workflow_dispatch` always runs the whole PR tier. The step decides it
+  inline, whatever `CI_SCOPE` says, so the release candidate dispatch
+  (`full: true`) never skips a fleet job. A merge group runs the whole PR
+  tier too, except a docs-only merge group under an ALLGREEN queue once
+  `DOCS_LANE` is `on` (see "DOCS_LANE: the docs-only lane").
 - For every other event the step reads `tools/ci/pr_tier_scope.sh` from
   `origin/master` with `git show`, never from the tree under test, and runs
   that copy. A missing script, a failing script or any output other than
@@ -967,6 +969,53 @@ and the whole full tier run as before.
   the nightly tier's fuzz lanes and IIS lanes cover the rest every night.
   `tools/ci/test_pr_tier_scope.sh` covers the script against a fake `gh`, and
   the workflow-shape gate (`fleet-scope`) pins the step.
+
+## DOCS_LANE: the docs-only lane
+
+A pull request or merge group that changes documentation only does not need
+the fleet legs: no build, test or fleet job reads those paths. The
+`Decide the fleet scope` step hands a pull request and a merge group to
+`tools/ci/pr_tier_scope.sh` with `BASE` (the pull request's or merge group's
+base commit) and the repository variable `DOCS_LANE`.
+
+- **The classifier.** `tools/ci/docs_only.sh BASE HEAD` prints exactly
+  `docs_only=true` or `docs_only=false`. A change is docs-only when every path
+  of `git diff --no-renames --name-only BASE...HEAD` matches its allowlist:
+  `docs/`, `changelog.d/`, a Markdown file at the top level, a Markdown file directly under `.oss-scanner/`, `.github/ISSUE_TEMPLATE/` and `.github/pull_request_template.md`. Anything else is false: a path off the list (`tools/ci/` and
+  every workflow included), a rename out of a code path (renames are not
+  detected, so the old path is listed), a missing or unknown base, a failed
+  or empty diff. `pr_tier_scope.sh` reads the classifier from
+  `origin/master` with `git show`, like itself, so a pull request cannot
+  change its own lane; an unreadable classifier or any other output is false.
+  No workflow names the classifier (the workflow-shape gate's `docs-lane`
+  rule).
+- **Merge groups.** A docs-only merge group counts only while the merge queue
+  of `master` groups ALLGREEN, read from
+  `gh api repos/<repo>/rules/branches/master` (3 tries). Any other grouping,
+  no queue rule, more than one, or a failed read is the full tier. Under
+  ALLGREEN a code entry queued ahead of a docs entry merges only on its own
+  result, and the docs entry's range (`base_sha...head_sha`) is its own change.
+- **`DOCS_LANE`.** Unset, or any value other than `on` (lowercased), is shadow
+  mode: the decision is logged and the PR tier runs in full. `on` skips the
+  fleet legs (`fleet=false heavy=false reason=docs only`). The `ci:pr-full`
+  label always runs the full tier; `workflow_dispatch` and `push` never take
+  the lane.
+- **Log lines.** On every pull request and merge group:
+  `docs lane: mode=<on|shadow> would_skip=<bool> docs_only=<bool> queue=<grouping|none|mixed|error|n/a> pr_full=<bool>`,
+  the classifier's own `docs lane: docs_only=<bool> (<reason>)` line, and,
+  when the lane would skip, one line saying whether it did (`skipping vendor
+  and every fleet job that needs it`) or would have (`shadow: would skip
+  ...`).
+- **Push burst guard.** Once docs entries can pass the queue without the
+  fleet, the queue proof of a docs-only commit covers only that commit. With
+  `DOCS_LANE` on, a push whose tip commit is docs-only but whose
+  `BEFORE_SHA..SHA` range holds code drops the queue proof and runs the fleet
+  legs (`docs lane: burst guard: ...`); in shadow mode the line says what it
+  would do.
+- **Rollout and rollback.** Read the shadow lines on docs and code pull
+  requests first, then `gh variable set DOCS_LANE --body on --repo We-Amp/mod_pagespeed`.
+  Roll back with `gh variable delete DOCS_LANE --repo We-Amp/mod_pagespeed`; the next run
+  takes it.
 
 ## Required checks
 

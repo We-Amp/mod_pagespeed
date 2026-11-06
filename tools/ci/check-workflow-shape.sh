@@ -791,18 +791,22 @@ done
 # The fleet scope of the PR tier (docs/ci/pipelines.md, "CI_SCOPE") decides
 # whether `vendor`, and with it every fleet job, runs. Its decision script must
 # be read from the default branch, never from the tree under test, and
-# merge_group and workflow_dispatch must never reach it. In pipeline-pr.yml (and
-# any workflow that names the script):
+# workflow_dispatch must never reach it. The docs lane classifier
+# (tools/ci/docs_only.sh) is read by that script, from the default branch
+# too, so no workflow names it. In pipeline-pr.yml (and any workflow that
+# names either script):
 #   - the `changes` job holds exactly one step named FS_STEP, in exactly the
 #     spec form of fs_expected (comment and blank lines aside): no other key,
-#     env key or command, and the inline merge_group|workflow_dispatch branch;
+#     env key or command, and the inline workflow_dispatch branch;
 #   - the step comes right after the merge-queue guard step (so after the
 #     three pinned steps and before the path-filter diff step);
 #   - the `changes` job publishes `fleet` and `heavy` from that step;
 #   - outside that step, no non-comment line names `pr_tier_scope.sh` (the
-#     test script excepted).
+#     test script excepted), and no non-comment line anywhere names
+#     `docs_only.sh` (its test script excepted).
 FS_STEP="Decide the fleet scope"
 FS_PAT='(^|[^_A-Za-z0-9])pr_tier_scope\.sh'
+DO_PAT='docs_only\.sh'
 fs_expected() {
   # shellcheck disable=SC2016  # the text to match carries literal ${...}
   printf '%s\n' \
@@ -811,16 +815,18 @@ fs_expected() {
     '        env:' \
     '          GH_TOKEN: ${{ github.token }}' \
     '          CI_SCOPE: ${{ vars.CI_SCOPE }}' \
+    '          DOCS_LANE: ${{ vars.DOCS_LANE }}' \
     '          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}' \
     '          SHA: ${{ github.sha }}' \
     '          BEFORE_SHA: ${{ github.event.before }}' \
+    '          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}' \
     "          FORK_OR_BOT: \${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]') }}" \
     "          PR_FULL: \${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:pr-full') }}" \
     '        run: |' \
     '          set -euo pipefail' \
     '          out="${RUNNER_TEMP}/fleet-scope.txt"' \
     '          case "${GITHUB_EVENT_NAME}" in' \
-    "            merge_group|workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
+    "            workflow_dispatch) printf 'fleet=true\\nheavy=true\\n' > \"\${out}\" ;;" \
     '            *)' \
     '              if git show "origin/${DEFAULT_BRANCH}:tools/ci/pr_tier_scope.sh" > "${RUNNER_TEMP}/pr_tier_scope.sh" 2>/dev/null &&' \
     '                bash "${RUNNER_TEMP}/pr_tier_scope.sh" > "${out}" &&' \
@@ -837,6 +843,11 @@ fs_err() { err "${wf}: $1 (fleet-scope)"; }
 
 for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   [ -n "${wf}" ] || continue
+  # The docs lane classifier is read by pr_tier_scope.sh alone; any workflow
+  # that names it (its test script aside) could run the tree's copy.
+  if sed 's/test_docs_only\.sh//g' "${wf}" | grep -vE '^[[:space:]]*#' | grep -qE "${DO_PAT}"; then
+    err "${wf}: docs_only.sh is named in a workflow; only pr_tier_scope.sh reads it, from the default branch (docs-lane)"
+  fi
   fs_mentions="$(grep -E "${FS_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   qg_mentions="$(grep -E "${QG_PAT}" "${wf}" | grep -vcE '^[[:space:]]*#' || true)"
   if [ "$(basename "${wf}")" != "pipeline-pr.yml" ] && [ "${fs_mentions}" = "0" ] && [ "${qg_mentions}" = "0" ]; then
@@ -849,7 +860,7 @@ for wf in ${WORKFLOWS[@]+"${WORKFLOWS[@]}"}; do
   else
     sblk="$(printf '%s\n' "${job}" | awk -v n="      - name: ${FS_STEP}" '/^      - / { instep = ($0 == n) } instep { print }' | grep -vE '^[[:space:]]*(#|$)' || true)"
     if [ "${sblk}" != "$(fs_expected)" ]; then
-      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; merge_group and workflow_dispatch decided inline)"
+      fs_err "the step '${FS_STEP}' must be in exactly the spec form (no other key, env key or command; workflow_dispatch decided inline)"
     fi
     # Right after the merge-queue guard step, when the job has one (its own
     # rule reports a missing guard step).
