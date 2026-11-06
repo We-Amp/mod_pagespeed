@@ -50,6 +50,7 @@
 #include "pagespeed/iis/iis_daemon_record.h"
 #include "net/instaweb/public/global_constants.h"
 #include "pagespeed/iis/iis_daemon_serve.h"
+#include "pagespeed/iis/iis_url_port.h"
 #include "pagespeed/iis/iis_entity_chunk.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/timer.h"
@@ -842,25 +843,11 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 		int port = ntohs(((PSOCKADDR_IN)pHttpContext->GetRequest()->GetLocalAddress())->sin_port);
 		bool noport = (https && port == 443) || (!https && port == 80) || xf != nullptr;
 		if (noport) {
-			int cc = 0;
-			int n_idx = 0;
-			int countslashes = 0;
-			for (int i = 0; i < url_len; i++) {
-				countslashes += (url[i] == '/') ? 1 : 0;
-				if (url[i] == ':' && countslashes == 2)
-					cc++;
-				if (cc == 1) {
-					if (url[i] == '/') {
-						cc++;
-						url[n_idx++] = url[i];
-					}
-				}
-				else {
-					url[n_idx++] = url[i];
-				}
-			}
-			url_len = n_idx;
-			url[n_idx] = 0;
+			// An IPv6 literal host is bracketed and holds colons of its own: only
+			// a colon after the closing bracket starts the port (iis_url_port.h).
+			const GoogleString without_port = IisUrlWithoutPort(url);
+			memcpy(url, without_port.c_str(), without_port.size() + 1);
+			url_len = static_cast<int>(without_port.size()) + 1;
 			log(pHttpContext, "noport processing url [%s]", url);
 		}
 
@@ -1642,6 +1629,10 @@ static bool ServeFromIisDaemonSubstrate(IHttpContext* http_context,
 						if (xmicrosoftajax.length() > 0 || (xrequestedwith.length() > 0 && StringCaseEqual(xrequestedwith, "XMLHttpRequest")) || xprototype.size() > 0)
 						{
 							log(pHttpContext, "OnSendResponse --- AJAX request -> no html rewriting.");
+							// The plain page this request gets must not be kept by IIS's
+							// response caches: they would hand it to every later visitor
+							// of the URL without the module, until the file changes.
+							DisarmResponseCaches(pHttpResponse);
 						}
 						else
 						{
