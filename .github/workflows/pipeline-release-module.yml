@@ -2059,6 +2059,15 @@ jobs:
               echo "=== Debian smoke test PASSED ==="
             '
 
+      # Remove this run's smoke image so images do not pile up on a
+      # shared host. Exactly the run-scoped tag, never a prune.
+      - name: Remove the smoke image
+        if: always()
+        run: |
+          if [ -n "${SMOKE_IMAGE:-}" ]; then
+            docker rmi "${SMOKE_IMAGE}" || echo "::warning title=Smoke image::could not remove ${SMOKE_IMAGE}"
+          fi
+
   package-smoke-deb-hosted:
     name: Smoke Test (Debian, hosted)
     needs: [version, linux-ready, optimizer-fetch]
@@ -2259,6 +2268,15 @@ jobs:
               echo "=== RPM smoke test PASSED ==="
             '
 
+      # Remove this run's smoke image so images do not pile up on a
+      # shared host. Exactly the run-scoped tag, never a prune.
+      - name: Remove the smoke image
+        if: always()
+        run: |
+          if [ -n "${SMOKE_IMAGE:-}" ]; then
+            docker rmi "${SMOKE_IMAGE}" || echo "::warning title=Smoke image::could not remove ${SMOKE_IMAGE}"
+          fi
+
   package-smoke-rpm-hosted:
     name: Smoke Test (RPM, hosted)
     needs: [version, linux-ready, optimizer-fetch]
@@ -2342,6 +2360,15 @@ jobs:
               /usr/local/nginx/sbin/nginx -p /tmp/nginx_test -c /tmp/nginx_test/nginx.conf -s stop
               echo "=== Nginx uninstall verification PASSED ==="
             '
+
+      # Remove this run's smoke image so images do not pile up on a
+      # shared host. Exactly the run-scoped tag, never a prune.
+      - name: Remove the smoke image
+        if: always()
+        run: |
+          if [ -n "${SMOKE_IMAGE:-}" ]; then
+            docker rmi "${SMOKE_IMAGE}" || echo "::warning title=Smoke image::could not remove ${SMOKE_IMAGE}"
+          fi
 
   package-smoke-nginx-hosted:
     name: Smoke Test (Nginx, hosted)
