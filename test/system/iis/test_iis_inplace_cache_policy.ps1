@@ -167,11 +167,14 @@ try {
         New-WebAppPool -Name $SiteName | Out-Null
         New-Website -Name $SiteName -Port $Port -PhysicalPath $root -ApplicationPool $SiteName | Out-Null
         Add-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/assets" -Filter "system.webServer/staticContent" -Name "." -Value @{ fileExtension = "."; mimeType = "text/css" }
-        $ipf = "system.webServer/security/ipSecurity"
-        foreach ($f in "ip-a.css", "ip-b.css") {
-            Set-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "allowUnlisted" -Value $false
-            foreach ($a in "127.0.0.1", "::1") {
-                Add-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "." -Value @{ ipAddress = $a; allowed = "true" }
+        $ipOk = [bool](Get-WindowsFeature Web-IP-Security).Installed
+        if ($ipOk) {
+            $ipf = "system.webServer/security/ipSecurity"
+            foreach ($f in "ip-a.css", "ip-b.css") {
+                Set-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "allowUnlisted" -Value $false
+                foreach ($a in "127.0.0.1", "::1") {
+                    Add-WebConfigurationProperty -PSPath $apphost -Location "$SiteName/secure/$f" -Filter $ipf -Name "." -Value @{ ipAddress = $a; allowed = "true" }
+                }
             }
         }
         $auth = [bool]((Get-WindowsFeature Web-Url-Auth).Installed -and (Get-WindowsFeature Web-Basic-Auth).Installed)
@@ -200,12 +203,13 @@ try {
             Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
             Select-Object -First 1).IPAddress
         if (-not $ip) { return "the guest has no non-loopback IPv4 address" }
-        "ok $ip $($ca.enabled) $($ca.enableKernelCache) $auth"
+        "ok $ip $($ca.enabled) $($ca.enableKernelCache) $auth $ipOk"
     }
     if (-not ("$setup" -like "ok *")) { throw "PRECONDITION: $setup" }
     $parts = "$setup" -split " "
     $GuestIp = $parts[1]
     $AuthOk = ($parts[4] -eq "True")
+    $IpOk = ($parts[5] -eq "True")
     Invoke-Command -Session $session -ScriptBlock { param($t) Set-Item function:global:Invoke-Raw ([scriptblock]::Create($t + "`nInvoke-Raw @args")) } -ArgumentList $RawText
     Check "defaults" ($parts[2] -eq "True" -and $parts[3] -eq "True") ("server caching enabled {0}, kernel cache {1}" -f $parts[2], $parts[3])
     $deadline = (Get-Date).AddSeconds($PollSeconds)
@@ -354,7 +358,8 @@ try {
             "{0} {1}" -f $r.Status, $r.Body.Contains("cpt-held")
         }
     }
-    $families = @(,@("ip", $false))
+    $families = @()
+    if ($IpOk) { $families += ,@("ip", $false) } else { Say "rules ip | Web-IP-Security (IP and Domain Restrictions) not installed | SKIP" }
     if ($AuthOk) { $families += ,@("auth", $true) } else { Say "rules auth | Web-Url-Auth or Web-Basic-Auth not installed | SKIP" }
     foreach ($fam in $families) {
         $kind = $fam[0]; $basic = $fam[1]
