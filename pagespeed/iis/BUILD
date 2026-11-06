@@ -176,6 +176,7 @@ cc_library(
         ":iis_proxy_fetch_completion",
         ":iis_self_fetch",
         ":iis_unclaimed_ref",
+        ":iis_url_port",
         ":iis_zerocopy_serve",
         "//net/instaweb:net_instaweb_lib",
         "//net/instaweb/http",
@@ -317,6 +318,18 @@ cc_library(
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/kernel/http",
         "//pagespeed/system:inplace_url_agreement",
+    ],
+)
+
+# Drops the port from the request URL's authority (IPv6-literal aware), split
+# out of iis_http_module.cpp so it can be unit-tested without the IIS headers.
+cc_library(
+    name = "iis_url_port",
+    srcs = ["iis_url_port.cc"],
+    hdrs = ["iis_url_port.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
     ],
 )
 

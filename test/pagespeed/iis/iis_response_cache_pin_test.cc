@@ -8,10 +8,12 @@
 // the URL without the module, to every client alike.  So every response of a
 // request the module takes up for in-place optimization, and every answer to
 // the module's own input fetches, is kept out of both caches; plain static
-// files the module never takes up keep IIS's caching.  The calls sit behind
-// the IIS runtime headers, so they are pinned by reading the port source as
-// data (the idiom of iis_request_stage_pin_test.cc); the effect is checked on
-// a real IIS by test/system/iis/test_iis_inplace_cache_policy.ps1.
+// files the module never takes up keep IIS's caching.  An HTML page the
+// module leaves plain for one request (an AJAX request) is kept out of both
+// caches as well.  The calls sit behind the IIS runtime headers, so they are
+// pinned by reading the port source as data (the idiom of
+// iis_request_stage_pin_test.cc); the effect is checked on a real IIS by
+// test/system/iis/test_iis_inplace_cache_policy.ps1.
 
 #include <cctype>
 
@@ -70,6 +72,22 @@ TEST(IisResponseCachePinTest, TheModulesOwnFetchIsNotCached) {
   ASSERT_NE(GoogleString::npos, disarm);
   EXPECT_LT(disarm, ret) << "the module's own fetch returns before its "
                             "answer is kept out of IIS's caches";
+}
+
+TEST(IisResponseCachePinTest, APageLeftPlainForAnAjaxRequestIsNotCached) {
+  // An HTML page the module leaves plain for one request (an AJAX request)
+  // is the same URL every visitor asks for: kept by HTTP.sys or the output
+  // cache, it would reach all of them without the module.
+  const GoogleString cc = ReadStrippedSource("iis_http_module.cpp");
+  const size_t ajax =
+      cc.find("log(pHttpContext,\"OnSendResponse---AJAXrequest->nohtmlrewriting.\");");
+  ASSERT_NE(GoogleString::npos, ajax)
+      << "the AJAX decline is no longer here; this pin needs updating";
+  const size_t close = cc.find("}else{", ajax);
+  ASSERT_NE(GoogleString::npos, close);
+  EXPECT_NE(GoogleString::npos,
+            cc.substr(ajax, close - ajax).find("DisarmResponseCaches(pHttpResponse);"))
+      << "the plain page an AJAX request gets can be kept by IIS's caches";
 }
 
 TEST(IisResponseCachePinTest, OnlyOptimizableTypesLoseIisCaching) {
