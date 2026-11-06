@@ -1,0 +1,1 @@
+- Response headers that are reused for a different response (for example after the content type changes) now have their cache-control state recomputed from scratch, so no earlier caching decision carries over.
