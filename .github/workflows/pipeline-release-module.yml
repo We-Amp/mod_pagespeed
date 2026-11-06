@@ -348,9 +348,17 @@ jobs:
           grep -qF "$VITE_APP_VERSION" "$html" || { echo "::error::admin_console.html does not contain $VITE_APP_VERSION"; exit 1; }
           echo "console stamped with ${VITE_APP_VERSION}"
 
+      # The marker travels with the tree into every job that extracts it. A
+      # CI step that reuses a warm workspace by its commit stamp treats a tree
+      # that holds it as stale (tools/ci/ensure-workspace.sh), so a release
+      # tree of the same commit is never tested as a CI tree
+      # (docs/ci/lane-write-sets.md). A marker, not a cleanup on exit: a
+      # cancelled job runs no cleanup.
       - &v-gitcommit
         name: Stamp GIT_COMMIT
-        run: echo -n "$RELEASE_SHA" > GIT_COMMIT
+        run: |
+          echo -n "$RELEASE_SHA" > GIT_COMMIT
+          echo "$RELEASE_SHA" > .release-lane-tree
 
       # The source tarball of the release: the committed files, the stamped
       # version and console, vendor/ and the commit stamp. A tarball build has
@@ -1136,7 +1144,8 @@ jobs:
           DISTRO: ${{ matrix.distro }}
         run: |
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
             --arch "$ARCH" --set main --distro "$DISTRO" \
@@ -1323,7 +1332,8 @@ jobs:
           DISTRO: ${{ matrix.distro }}
         run: |
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
             --arch "$ARCH" --set main --distro "$DISTRO" \
@@ -1416,7 +1426,8 @@ jobs:
       - name: Build the el10 module and package
         run: |
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-nginx-el10"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx-el10${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
             --arch "$ARCH" --set el10 \
@@ -1607,7 +1618,8 @@ jobs:
             SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=80g
           fi
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-${EL}"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-${EL}${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           docker run --rm --init \
             --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \

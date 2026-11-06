@@ -221,6 +221,8 @@ jobs:
         run: tools/ci/test_shared_cache_local_packages.sh
       - name: Dev image naming and build lock
         run: tools/ci/test_ensure_dev_image.sh
+      - name: CI and release lane write sets on one runner host
+        run: tools/ci/test_lane_write_sets.sh
       - name: Build script supply-chain checks
         run: tools/ci/test_build_nginx_verify.sh
       - name: nginx module filter order (builds from config)
