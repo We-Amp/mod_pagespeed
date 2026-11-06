@@ -14,9 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The ASP.NET Core sidecar starts on Debian 13 and Ubuntu 26.04.** The nginx
   bundled with the sidecar packages (`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`)
   needed `libpcre.so.3`, which those releases no longer ship, so the sidecar
-  failed to start there. The bundled nginx now links PCRE2 statically and needs
-  no PCRE library on the host, so the `libpcre3` prerequisite is gone. Debian 11
-  and 12 and Ubuntu 20.04 to 24.04 keep working.
+  failed to start there. The bundled nginx now carries PCRE2 10.49 statically
+  linked and needs no PCRE library on the host, so the `libpcre3` prerequisite
+  is gone. The pair is tested on Debian 11, 12 and 13 and Ubuntu 26.04.
 
 ## [2.8.0] - 2026-11-05
 

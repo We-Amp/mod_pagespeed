@@ -32,8 +32,10 @@
 # The gates, in the order the callers run them:
 #   hygiene  the module exports only the nginx module symbols and links no
 #            OpenSSL; nginx and the shim link no OpenSSL; none of the three
-#            needs libstdc++ or a glibc newer than 2.31.
-#   smoke    load, serve and optimize in Debian 11 and Debian 12
+#            needs libstdc++, a PCRE library of the host (nginx links the
+#            pinned PCRE2 statically) or a glibc newer than 2.31.
+#   smoke    load, serve and optimize in the SMOKE_IMAGES containers (Debian
+#            11, 12 and 13, Ubuntu 26.04), with no PCRE package installed
 #            (test/package-test/check-sidecar-pair.sh): X-Page-Speed carries
 #            the version of the tree, and no X-PageSpeed-Warn appears.
 #   strip    debug files split off into --debug, then hygiene and smoke
@@ -57,7 +59,8 @@
 #
 # `package` writes pagespeed-sidecar-native-<version>-linux-<arch>.tar.gz:
 # nginx, ngx_pagespeed_module.so, pagespeed-nginx-launch, build-info.json
-# (versions, the compilers that built the pair, and the sha256 of each binary)
+# (versions of nginx and PCRE2, the compilers that built the pair, and the
+# sha256 of each binary)
 # and the license files; with --debug also
 # pagespeed-sidecar-native-debug-<version>-linux-<arch>.tar.gz, the debug files
 # of the same binaries.
@@ -169,6 +172,15 @@ focal_nginx_version() {
   v="$(awk '/^[[:space:]]*focal\)[[:space:]]*DEF_NGINX_VER=/ {
               if (match($0, /[0-9]+\.[0-9]+\.[0-9]+/)) { print substr($0, RSTART, RLENGTH); exit } }' "$recipe")"
   [ -n "$v" ] || { echo "release_sidecar: no focal DEF_NGINX_VER in $recipe" >&2; return 1; }
+  printf '%s\n' "$v"
+}
+
+# The PCRE2 version the focal recipe links into nginx (its PCRE2_VERSION).
+focal_pcre2_version() {
+  local recipe="$1/install/nginx/build_module_in_container.sh" v
+  [ -f "$recipe" ] || { echo "release_sidecar: no recipe at $recipe" >&2; return 1; }
+  v="$(sed -n 's/^PCRE2_VERSION="${PCRE2_VERSION:-\([0-9][0-9.]*\)}"$/\1/p' "$recipe" | head -1)"
+  [ -n "$v" ] || { echo "release_sidecar: no PCRE2_VERSION in $recipe" >&2; return 1; }
   printf '%s\n' "$v"
 }
 
@@ -590,7 +602,7 @@ package() {
   need_src; need_pair
   printf '%s' "$SOURCE_SHA" | grep -Eq '^[0-9a-f]{40}$' || die "package: --source-sha is not a commit id"
   printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || die "package: bad --version '$VERSION'"
-  local rid ngxver tree name stage clang gcc
+  local rid ngxver pcre2ver tree name stage clang gcc
   rid="$(rid_of "$ARCH")"
   [ -s "$PAIR/toolchain.txt" ] || die "package: the pair has no toolchain.txt (built by an older build?)"
   clang="$(sed -n 's/^clang=//p' "$PAIR/toolchain.txt")"
@@ -598,6 +610,7 @@ package() {
   [ -n "$clang" ] && [ -n "$gcc" ] || die "package: toolchain.txt names no clang or gcc"
   case "$clang$gcc" in *\"*|*\\*) die "package: unexpected characters in toolchain.txt" ;; esac
   ngxver="$(focal_nginx_version "$SRC")"
+  pcre2ver="$(focal_pcre2_version "$SRC")"
   tree="$(tree_version "$SRC")"
   [ "$tree" = "$VERSION" ] || die "package: the tree is stamped $tree, not $VERSION"
   mkdir -p "$OUT"; OUT="$(abs_dir "$OUT")"
@@ -610,7 +623,7 @@ package() {
   # wherever the script runs. Every entry carries the time SOURCE_DATE_EPOCH
   # (default 0, the epoch), so the archive depends on its contents only.
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-    -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" \
+    -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" -e PCRE2VER="$pcre2ver" \
     -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$FOCAL_IMAGE" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
     -e CLANG="$clang" -e GCC="$gcc" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
     -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '
@@ -624,6 +637,7 @@ package() {
         printf "  \"mod_pagespeed_version\": \"%s\",\n" "$VERSION"
         printf "  \"rid\": \"%s\",\n" "$RID"
         printf "  \"nginx_version\": \"%s\",\n" "$NGXVER"
+        printf "  \"pcre2_version\": \"%s\",\n" "$PCRE2VER"
         printf "  \"glibc_floor\": \"%s\",\n" "$GLIBC_FLOOR"
         printf "  \"build_image\": \"%s\",\n" "$IMAGE"
         printf "  \"clang_version\": \"%s\",\n" "$CLANG"

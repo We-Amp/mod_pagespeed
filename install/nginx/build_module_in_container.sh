@@ -130,6 +130,24 @@ if [ -z "${NGINX_SRC_SHA256:-}" ]; then
   fi
 fi
 
+# PCRE2 for the sidecar's nginx (focal only). The bundled nginx is built
+# against this pinned upstream release, compiled from source and linked
+# statically (nginx --with-pcre=<dir> --with-pcre-jit), so it needs no PCRE
+# library on the host and does not freeze the old PCRE2 of the build base.
+# sha256 of pcre2-10.49.tar.gz from github.com/PCRE2Project/pcre2/releases,
+# 2026-11-06, signature verified against the release key of Nicholas Wilson
+# (A95536204A3BB489715231282A98E77EB6F24CA8).
+PCRE2_VERSION="${PCRE2_VERSION:-10.49}"
+PCRE2_SHA256_DEFAULT="929f0b20e62879252a15886b06c89f1edef61a363cbd5826fb041080a5e557ae"
+if [ -z "${PCRE2_SHA256:-}" ]; then
+  if [ "${PCRE2_VERSION}" = "10.49" ]; then
+    PCRE2_SHA256="${PCRE2_SHA256_DEFAULT}"
+  else
+    echo "ERROR: PCRE2_VERSION overridden to ${PCRE2_VERSION} but no PCRE2_SHA256 set (supply-chain pin)." >&2
+    exit 1
+  fi
+fi
+
 BAZEL="${BAZEL:-}"
 if [ -z "${BAZEL}" ]; then
   if command -v bazelisk >/dev/null 2>&1; then BAZEL=bazelisk; else BAZEL=bazel; fi
@@ -418,9 +436,10 @@ install_deps_focal() {
   # bakes in — and combined with -static-libstdc++/-static-libgcc on the module
   # link (step 6, focal-only LD_OPT) the .so carries NO libstdc++ runtime dep, so
   # it needs no newer glibc than 2.31. The matched nginx of the pair is built
-  # against PCRE2 (libpcre2-dev only; libpcre3-dev is NOT installed, so nginx
-  # cannot pick PCRE 1) and links libpcre2-8.a statically (step 6), so it needs
-  # no PCRE library on the host.
+  # against the pinned PCRE2 release (PCRE2_VERSION), built from source and
+  # linked statically (--with-pcre, steps 2a and 6), so it needs no PCRE library
+  # on the host. libpcre2-dev is installed only for the pcre2.h that the Bazel
+  # half of the module build includes; libpcre3-dev is NOT installed.
   # focal's stock toolchain is too old for the C++20/23 PSOL/Cyclone graph, so add
   # the LLVM apt repo (clang) + the toolchain PPA (g++-13 -> the libstdc++-13
   # headers/libs the clang-libstdcxx13 bazel config expects at /usr/{include/c++,
@@ -958,6 +977,16 @@ else
     || { echo "ERROR: nginx tarball sha256 mismatch (got $(sha256sum "${NGX_TARBALL}" | awk '{print $1}'), expected ${NGINX_SRC_SHA256})" >&2; exit 1; }
   tar -xzf "${NGX_TARBALL}" -C "${NGX_BUILD_DIR}"
 fi
+NGX_PCRE_ARGS=()
+if [ "${DISTRO}" = "focal" ]; then
+  PCRE2_TARBALL="${NGX_BUILD_DIR}/pcre2-${PCRE2_VERSION}.tar.gz"
+  wget -qO "${PCRE2_TARBALL}" "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz"
+  echo "==> verifying pcre2 tarball sha256 (${PCRE2_SHA256})"
+  echo "${PCRE2_SHA256}  ${PCRE2_TARBALL}" | sha256sum -c - \
+    || { echo "ERROR: pcre2 tarball sha256 mismatch (got $(sha256sum "${PCRE2_TARBALL}" | awk '{print $1}'), expected ${PCRE2_SHA256})" >&2; exit 1; }
+  tar -xzf "${PCRE2_TARBALL}" -C "${NGX_BUILD_DIR}"
+  NGX_PCRE_ARGS=( --with-pcre="${NGX_BUILD_DIR}/pcre2-${PCRE2_VERSION}" --with-pcre-jit )
+fi
 # First configure WITHOUT the module: generates objs/ngx_auto_config.h with the
 # SAME feature flags the runtime stock nginx uses (mirrors docker/Dockerfile +
 # the step-6 make-modules configure). The module add is deferred to step 6
@@ -979,6 +1008,7 @@ fi
   PATH="${NGX_PRECFG_PATH}" ./configure \
     --with-compat \
     "${NGX_HTTP_MODULES[@]}" \
+    ${NGX_PCRE_ARGS[@]+"${NGX_PCRE_ARGS[@]}"} \
     --with-threads
 )
 [ -f "${NGX_SRC}/objs/ngx_auto_config.h" ] || {
@@ -1295,6 +1325,7 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
     --add-dynamic-module="${SRCDIR}/pagespeed/nginx"
     --with-compat
     "${NGX_HTTP_MODULES[@]}"
+    ${NGX_PCRE_ARGS[@]+"${NGX_PCRE_ARGS[@]}"}
     --with-threads
     --with-cc-opt="${CC_OPT}"
   )
@@ -1341,16 +1372,13 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
       -e 's#[$][(]LINK[)] -o objs/ngx_pagespeed[.]so#g++-13 -o objs/ngx_pagespeed.so#' \
       -e 's# -lstdc++##g' \
       objs/Makefile
-    # The nginx binary of the pair links PCRE2 statically: replace the
-    # dynamic -lpcre2-8 with the archive, so the binary has no PCRE NEEDED and
-    # runs on hosts that ship neither libpcre3 nor libpcre2 (Debian 13, Ubuntu
-    # 26.04, slim container images). Fail the build if the Makefile does not
-    # link PCRE2 the way this expects, rather than ship a dynamic link.
-    PCRE2_A="/usr/lib/$(deb_triplet)/libpcre2-8.a"
-    [ -f "${PCRE2_A}" ] || { echo "ERROR: ${PCRE2_A} missing (libpcre2-dev)" >&2; exit 1; }
-    grep -q -- ' -lpcre2-8' objs/Makefile \
-      || { echo "ERROR: nginx was not configured against PCRE2 (no -lpcre2-8 in objs/Makefile)" >&2; exit 1; }
-    sed -i "s# -lpcre2-8# ${PCRE2_A}#g" objs/Makefile
+    # The nginx binary of the pair builds the pinned PCRE2 from source
+    # (--with-pcre, above) and links it statically. Fail the build if the
+    # Makefile would link a host PCRE2 instead.
+    if grep -q -- '-lpcre' objs/Makefile; then
+      echo "ERROR: objs/Makefile links a host PCRE library; the pinned PCRE2 source build was not used" >&2
+      exit 1
+    fi
   elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
     # Link the module .so with clang++ (matches the clang-compiled object graph;
     # the only C++23 driver available on the old-glibc targets). We must STATIC-

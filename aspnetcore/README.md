@@ -208,8 +208,9 @@ Two advanced cases use `Domains.AuthorizedDomains`:
 ## Container & runtime requirements
 
 The bundled nginx + module are glibc ELF binaries built for a glibc ≥ 2.31 floor, so they
-run on Debian 11, 12 and 13 and Ubuntu 20.04 to 26.04. The bundled nginx links PCRE2
-statically, so no PCRE library is needed on the host. Enterprise Linux (RHEL, AlmaLinux,
+run on Debian 11, 12 and 13 and Ubuntu 26.04 (the hosts the pair is tested on; Ubuntu 20.04
+to 24.04 meet the same glibc floor). The bundled nginx carries PCRE2 10.49 statically, so no
+PCRE library is needed on the host. Enterprise Linux (RHEL, AlmaLinux,
 Rocky) and Amazon Linux are not supported. `libstdc++` is statically linked and the build
 has no OpenSSL dependency, so there is no libstdc++ or libssl/libcrypto host requirement. The
 binaries are built on Ubuntu 20.04, which sets the glibc 2.31 floor; Ubuntu 20.04 itself is
@@ -223,8 +224,8 @@ small set of host shared libraries:
 
 - **Recommended base image:** `mcr.microsoft.com/dotnet/aspnet:8.0` (Debian); it has both
   libraries.
-- **Not supported:** `-chiseled` / `-distroless` .NET images (not tested) and
-  Alpine/musl images (the binaries are glibc-linked). Use a Debian/Ubuntu glibc base.
+- **Not supported:** `-chiseled` / `-distroless` .NET images (not tested; they probably lack `libcrypt.so.1`, which the
+  bundled nginx needs) and Alpine/musl images (the binaries are glibc-linked). Use a Debian/Ubuntu glibc base.
   nginx still runs in Inverse mode — on loopback — so the same base-image requirements
   apply.
 
