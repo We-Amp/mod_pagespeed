@@ -249,6 +249,9 @@ class SystemServerContext : public ServerContext {
   // time we Poll we will read the file.
   std::unique_ptr<AbstractMutex> cache_flush_mutex_;
   int64 last_cache_flush_check_sec_;  // seconds since 1970
+  // The cache_flush_timestamp_ms statistic as of this context's last read of
+  // cache.flush; a different value makes the next request read it again.
+  int64 last_seen_cache_flush_timestamp_ms_;
 
   Variable* cache_flush_count_;
   UpDownCounter* cache_flush_timestamp_ms_;

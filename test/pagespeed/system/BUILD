@@ -211,6 +211,16 @@ pagespeed_cc_test(
     ],
 )
 
+# How server contexts pick up a touch of cache.flush (no Redis/Memcached).
+pagespeed_cc_test(
+    name = "system_server_context_test",
+    srcs = ["system_server_context_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
 # Loopback route fetcher test - uses POSIX sockets (Linux-only).
 pagespeed_cc_test(
     name = "loopback_route_fetcher_test",
