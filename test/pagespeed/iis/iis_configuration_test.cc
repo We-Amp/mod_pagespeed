@@ -89,6 +89,26 @@ class IisConfigurationTest : public testing::Test {
   net_instaweb::GoogleMessageHandler handler_;
 };
 
+// Records the text of every message it is given.
+class RecordingMessageHandler : public net_instaweb::NullMessageHandler {
+ public:
+  bool Saw(const std::string& needle) const {
+    for (const std::string& m : messages_) {
+      if (m.find(needle) != std::string::npos) return true;
+    }
+    return false;
+  }
+
+ protected:
+  void MessageSImpl(net_instaweb::MessageType type,
+                    const GoogleString& message) override {
+    messages_.push_back(message);
+  }
+
+ private:
+  std::vector<std::string> messages_;
+};
+
 // ==========================================================================
 // Phase 2: Bug Exposure Tests
 // ==========================================================================
@@ -783,6 +803,50 @@ TEST_F(IisConfigurationTest, LogDirWithLongExpansion) {
   std::string expected = long_path;
   std::replace(expected.begin(), expected.end(), '\\', '/');
   EXPECT_EQ(expected, rwo.log_dir());
+}
+
+// The documented form sets the option; before the fix the line was skipped.
+TEST_F(IisConfigurationTest, RemoteConfigUrlPrefixedFormIsApplied) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig("pagespeed RemoteConfigurationUrl http://example.com/config\n",
+                    "", &rwo);
+  EXPECT_EQ("http://example.com/config", rwo.remote_configuration_url());
+}
+
+TEST_F(IisConfigurationTest, RemoteConfigUrlBareFormIsApplied) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig("RemoteConfigurationUrl http://example.com/config\n", "",
+                    &rwo);
+  EXPECT_EQ("http://example.com/config", rwo.remote_configuration_url());
+}
+
+// Machine-wide settings that IIS does not apply are reported, not ignored
+// silently.
+TEST_F(IisConfigurationTest, UsePerVHostStatisticsIsReportedAsUnsupported) {
+  RecordingMessageHandler recorder;
+  IisRewriteOptions rwo(nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed UsePerVHostStatistics off\n", &recorder, global_config_,
+      nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+  EXPECT_TRUE(recorder.Saw("UsePerVHostStatistics is not supported on IIS"));
+}
+
+TEST_F(IisConfigurationTest, SharedMemoryMetadataCacheIsReportedAsUnsupported) {
+  RecordingMessageHandler recorder;
+  IisRewriteOptions rwo(nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed CreateSharedMemoryMetadataCache /cache 8192\n", &recorder,
+      global_config_, nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+  EXPECT_TRUE(
+      recorder.Saw("CreateSharedMemoryMetadataCache is not supported on IIS"));
 }
 
 TEST_F(IisConfigurationTest, RemoteConfigUrlMultipleSubsequentLines) {

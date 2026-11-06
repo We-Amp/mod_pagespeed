@@ -367,10 +367,14 @@ IisRewriteOptions::ParseAndSetOptions(
   } else if (n_args == 2) {
     StringPiece arg = args[1];
     if (IsDirective(directive, "UsePerVHostStatistics")) {
-		if (!SetBoolFlag(&global_config.use_per_vhost_statistics,arg)) {
+		// Not applied on IIS: every site has its own statistics, so there is
+		// nothing to switch. Say so instead of ignoring the line silently.
+		bool unused = false;
+		if (!SetBoolFlag(&unused, arg)) {
 			msg = "Failed to set UsePerVHostStatistics value";
 			result = RewriteOptions::kOptionValueInvalid;
 		} else {
+			handler->Message(kWarning, "UsePerVHostStatistics is not supported on IIS and has no effect; ignoring.");
 			result = RewriteOptions::kOptionOk;
 		}
     } /* else if (IsDirective(directive, "InstallCrashHandler")) {
@@ -466,11 +470,10 @@ IisRewriteOptions::ParseAndSetOptions(
         result = RewriteOptions::kOptionValueInvalid;
         msg = "size_kb must be a positive 64-bit integer";
       } else {
-		  global_config.shm_cache_size_kb = kb;
+		  // Not applied on IIS: the module does not create a shared-memory
+		  // metadata cache. Say so instead of ignoring the line silently.
+		  handler->Message(kWarning, "CreateSharedMemoryMetadataCache is not supported on IIS and has no effect; ignoring.");
 		  result = kOptionOk;
-        //bool ok = driver_factory->caches()->CreateShmMetadataCache(
-        //    args[1].as_string(), kb, &msg);
-        //result = ok ? kOptionOk : kOptionValueInvalid; 
       }
     } else {
       result = ParseAndSetOptionFromName2(directive, args[1], args[2],

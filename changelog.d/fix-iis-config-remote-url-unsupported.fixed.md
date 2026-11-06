@@ -1,0 +1,2 @@
+- IIS: `pagespeed RemoteConfigurationUrl <url>` in `pagespeed.config` now sets the remote configuration URL. Before, only the form without the `pagespeed` prefix did, so the documented form never used remote configuration.
+- IIS: `UsePerVHostStatistics` and `CreateSharedMemoryMetadataCache` are not supported on IIS; setting either now logs a warning that it has no effect, instead of being accepted silently.
