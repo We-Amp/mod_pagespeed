@@ -66,8 +66,35 @@ TEST(IisUrlPortTest, UserinfoIsNotTakenForTheHost) {
   EXPECT_EQ("http://u:p@[::1]/", IisUrlWithoutPort("http://u:p@[::1]:80/"));
 }
 
+// A zone id is a "%25" escape inside the brackets. The URL parser does not
+// accept zone ids at all, so the port removal must neither invent nor lose
+// validity: the result is valid exactly when the input was.
+TEST(IisUrlPortTest, ZoneIdHostsKeepTheirZone) {
+  EXPECT_EQ("http://[fe80::1%25eth0]/",
+            IisUrlWithoutPort("http://[fe80::1%25eth0]:80/"));
+  GoogleUrl before("http://[fe80::1%25eth0]:80/");
+  GoogleUrl after(IisUrlWithoutPort("http://[fe80::1%25eth0]:80/"));
+  EXPECT_EQ(before.IsWebValid(), after.IsWebValid());
+}
+
+// An empty port ("host:") is the default port; the colon goes with it.
+TEST(IisUrlPortTest, EmptyPortLosesTheColon) {
+  EXPECT_EQ("http://host/x", IisUrlWithoutPort("http://host:/x"));
+  EXPECT_EQ("http://[::1]/x", IisUrlWithoutPort("http://[::1]:/x"));
+  EXPECT_TRUE(GoogleUrl(IisUrlWithoutPort("http://host:/x")).IsWebValid());
+  EXPECT_TRUE(GoogleUrl(IisUrlWithoutPort("http://[::1]:/x")).IsWebValid());
+}
+
+TEST(IisUrlPortTest, EmptyAuthorityIsLeftUnchanged) {
+  EXPECT_EQ("http:///x", IisUrlWithoutPort("http:///x"));
+  EXPECT_EQ("http://", IisUrlWithoutPort("http://"));
+  EXPECT_EQ("http://?q=1:2", IisUrlWithoutPort("http://?q=1:2"));
+}
+
 TEST(IisUrlPortTest, AnUnclosedBracketIsLeftUnchanged) {
   EXPECT_EQ("http://[::1:80/", IisUrlWithoutPort("http://[::1:80/"));
+  // Whatever comes back must not be accepted as a valid URL either.
+  EXPECT_FALSE(GoogleUrl(IisUrlWithoutPort("http://[::1:80/")).IsWebValid());
 }
 
 }  // namespace
