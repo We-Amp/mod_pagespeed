@@ -25,9 +25,15 @@
 #     unavailable, the release waits or is waived explicitly.
 #   * With FLEET_ENABLED=false the IIS jobs are skipped too; with
 #     FLEET_IIS_ENABLED=true the gate then refuses (fail closed).
-#   * No job of the two tiers is continue-on-error today. Such a job would be
-#     advisory: reported, not in REQUIRED. Making one required is a separate
-#     change.
+#   * full / Windows AppVerif is report-only in CI while it is quarantined
+#     (job-level continue-on-error, tools/ci/quarantine.txt): its failure
+#     does not fail the run or the CI gate, but it stays in REQUIRED, so the
+#     release still needs it green. No other job of the two tiers is
+#     continue-on-error.
+#   * pr / IIS System Tests (retry 1|2) run only after an infrastructure
+#     failure of pr / IIS System Tests (which then concludes success). They
+#     are not in REQUIRED: skipped is accepted, and a failure or cancellation
+#     refuses like that of any other job.
 #   * full / Windows ASan concludes success even when the ASan runtime is
 #     missing (its test step is then skipped), so the gate also requires that
 #     job's step "Run the unit tests under ASan" to be success.

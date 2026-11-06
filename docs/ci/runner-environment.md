@@ -127,6 +127,25 @@ The IIS system tests (a pull request job) need none of the guest variables.
 The two guest gates are release-lane building blocks (see
 `docs/ci/pipelines.md`).
 
+### Draining a runner
+
+A runner-health issue titled `[drain] Runner health: <runner> (IIS System
+Tests)` (docs/ci/pipelines.md, "IIS infrastructure failures") means the
+runner failed the IIS system tests for reasons of the host at least twice
+while the issue was open. CI does not drain a runner itself; the runner's
+owner does, in this order:
+
+1. take the runner out of the class: remove the `fleet-iis` label from it
+   (organization runner settings, or `DELETE
+   /orgs/<org>/actions/runners/<id>/labels/fleet-iis`), so new IIS jobs go
+   to the other runners of the class; a job already running finishes;
+2. repair the host (for the HTTP.sys IPv6 wedge: a reboot);
+3. put the label back and close the issue, which starts the count again.
+
+While a runner is out, the class is smaller: with one `fleet-iis` runner
+left, IIS jobs queue behind each other, and a retry leg that lands on the
+failed runner waits up to 40 minutes for another one.
+
 ## Linux additions
 
 - A registry mirror is configured in the container daemon of the host. No

@@ -1,0 +1,8 @@
+# Report-only CI jobs (job-level continue-on-error) and when that ends.
+# tools/ci/check_quarantine.py (CI tooling self-tests, every run) fails CI
+# when a line's expiry has passed, when a report-only job has no line, and
+# when a line's job is no longer report-only. An expiry is at most 28 days
+# out; moving it needs the reason written in the issue first.
+#
+# <workflow file>|<job id>|<job name>|<tracking issue>|<expires YYYY-MM-DD>
+pipeline-full.yml|win-appverif|Windows AppVerif|656|2026-11-20

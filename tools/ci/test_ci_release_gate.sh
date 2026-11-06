@@ -42,10 +42,13 @@ tier_jobs() {
 }
 
 # The release-relevant jobs of the two tiers, as the gate must require them:
-# every PR-tier job that runs on a fleet- class, every full-tier job but the
-# bookkeeping ones.
+# every PR-tier job that runs on a fleet- class but the IIS retry, every
+# full-tier job but the bookkeeping ones.
 {
   tier_jobs "${WF}/pipeline-pr.yml" | while IFS='|' read -r id name ro; do
+    # The IIS retry runs only after an infrastructure failure; skipped is
+    # its normal conclusion (the gate refuses its failure as any other's).
+    case "$id" in iis-sys-tests-retry) continue ;; esac
     case "$ro" in *fleet-*) echo "pr / ${name}" ;; esac
   done
   tier_jobs "${WF}/pipeline-full.yml" | while IFS='|' read -r id name ro; do

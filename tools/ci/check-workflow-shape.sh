@@ -33,7 +33,9 @@
 #       docs/ci/pipelines.md (the FLEET_ENABLED kill switch in its general,
 #       fleet-only or dispatch-only form, or the fleet-iis form that adds
 #       FLEET_IIS_ENABLED; a job routed to fleet-iis or fleet-hyperv must carry the last) verbatim as its if:, the general form optionally
-#       narrowed by `&& needs.changes.outputs.<name> == 'true'`, or
+#       narrowed by `&& needs.changes.outputs.<name> == 'true'` (the
+#       fleet-iis forms also by `&& needs.<job>.outputs.<name> == '<word>'`,
+#       for a retry job), or
 #       prefixed by `!cancelled() && needs.<job>.result == 'success' && `.
 #       The fleet-only and fleet-iis guards also have a switch form that
 #       tests `!= 'false'` (unset means on). A job routed by the switch
@@ -355,7 +357,8 @@ is_fleet_guard() {
 }
 
 # A fleet-iis guard (either form) in parentheses, narrowed by a path filter:
-# `&& needs.changes.outputs.<name> == 'true'`.
+# `&& needs.changes.outputs.<name> == 'true'`, or by an output of the job a
+# retry job retries: `&& needs.<job>.outputs.<name> == '<word>'`.
 is_iis_narrowed() {
   local v="$1" g name guards
   if [ "${PR_WF}" = 1 ]; then guards=( "${FLEET_IIS_QUEUE_GUARD}" ); else guards=( "${FLEET_IIS_GUARD}" "${FLEET_IIS_SWITCH_GUARD}" ); fi
@@ -365,6 +368,11 @@ is_iis_narrowed() {
       "\${{ (${g}) && needs.changes.outputs."*" == 'true' }}")
         name="${v#"\${{ (${g}) && needs.changes.outputs."}"; name="${name% == \'true\' \}\}}"
         printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
+        ;;
+      "\${{ (${g}) && needs."*".outputs."*" == '"*"' }}")
+        # A retry job: narrowed by an output of the job it retries.
+        name="${v#"\${{ (${g}) && needs."}"; name="${name% \}\}}"
+        printf '%s' "${name}" | grep -qE "^[a-z][a-z0-9-]*\.outputs\.[a-z][a-z_]* == '[a-z]+'$" && return 0
         ;;
     esac
   done
