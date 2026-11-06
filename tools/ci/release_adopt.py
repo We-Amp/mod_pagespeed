@@ -554,10 +554,20 @@ def check_actors(run, actor):
     return problems
 
 
-def check_age(run, started_at):
-    """Check 7."""
+def check_age(listing, started_at):
+    """Check 7. The candidate's completion is the latest attempt's: the newest
+    completed_at over the jobs listing (filter=latest). The run's updated_at
+    moves on re-runs and other edits, so it is not used."""
+    if not listing:
+        return ["check 7: the jobs listing is empty, so the candidate's completion time is unknown"]
     try:
-        done = parse_time(run.get("updated_at"))
+        stamps = []
+        for j in listing:
+            if not j.get("completed_at"):
+                return ["check 7: job %r has no completed_at, so the candidate's completion time is unknown"
+                        % (j.get("name"),)]
+            stamps.append(parse_time(j["completed_at"]))
+        done = max(stamps)
         start = parse_time(started_at)
     except VerifyError as e:
         return ["check 7: %s" % e]
@@ -734,10 +744,10 @@ def verify(api, repo, candidate_run, tag, tag_commit, trailers, actor, lane_sha,
     problems = check_run(run, repo, candidate_run, tag, tag_commit)
     problems += check_lane(run, lane_sha)
     problems += check_actors(run, actor)
-    problems += check_age(run, started_at)
 
     # check 5: the jobs, against the pipeline file at the candidate's lane commit
     listing = api.jobs(repo, candidate_run)
+    problems += check_age(listing, started_at)
     jobs = None
     try:
         jobs = parse_pipeline(api.contents(repo, PIPELINE_FILE, lane_sha))
@@ -924,7 +934,7 @@ def verify(api, repo, candidate_run, tag, tag_commit, trailers, actor, lane_sha,
         "candidate": {"run": candidate_run, "attempt": run.get("run_attempt"), "build_sha": tag_commit,
                       "actor": (run.get("actor") or {}).get("login"),
                       "triggering_actor": (run.get("triggering_actor") or {}).get("login"),
-                      "completed_at": run.get("updated_at")},
+                      "completed_at": max(j["completed_at"] for j in listing)},
         "tag": {"name": tag, "commit": tag_commit, "object": tag_object or {}},
         "lane_sha": lane_sha,
         "trailers": {"Release-Candidate-Run": derived["run"],
@@ -1251,6 +1261,13 @@ def _verify_cases():
          refused="bot")
     case("refuse: bot actor by account type", run(triggering_actor={"login": _PUSHER, "type": "Bot"}), refused="is a bot")
     case("refuse: candidate older than three days", kw(started_at="2026-11-09T12:00:01Z"), refused="days before")
+    case("accept: run updated_at is much later than the jobs' completion (jobs inside the window)",
+         run(updated_at="2026-11-09T08:00:00Z"))
+    case("refuse: updated_at is recent but the jobs completed more than three days before this run started",
+         lambda w: (w["fx"]["run"].update(updated_at="2026-11-09T08:00:00Z"), w["kw"].update(started_at="2026-11-09T12:00:01Z")),
+         refused="check 7: the candidate finished 4.0 days before")
+    case("refuse: a listed job has no completed_at", lambda w: w["listing"][2].pop("completed_at"),
+         refused="check 7: job")
     case("refuse: the Release-Candidate-Run trailer names another run",
          lambda w: w["kw"]["trailers"].update(run="5"), refused="trailer names run")
     case("refuse: a signing job did not conclude skipped",

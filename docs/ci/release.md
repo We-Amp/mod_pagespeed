@@ -241,7 +241,9 @@ the Actions API first and the downloaded bytes second:
 6. every sealed artifact is listed with the sealed id and digest, unexpired,
    of the candidate run and commit, and the single `candidate-seal` artifact
    was uploaded by the passing `candidate-seal` job;
-7. the candidate finished at most three days before the adopting run started;
+7. the candidate finished at most three days before the adopting run started,
+   where the finish is the newest `completed_at` over the latest attempt's jobs
+   (never the run's `updated_at`), and every listed job has one;
 8. the seal hashes to its trailer, says `candidate: true`, `dry_run: true`
    and the API's tag, version and commit, every file of every sealed artifact
    matches the seal, and `SHA256SUMS` matches both the seal and its trailer;
