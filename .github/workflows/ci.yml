@@ -254,6 +254,8 @@ jobs:
         run: python3 -I tools/ci/iis_failure_class.py --self-test
       - name: Runner-health record
         run: tools/ci/test_runner_health.sh
+      - name: IIS retry check of the skip-check job
+        run: tools/ci/test_iis_retry_check.sh
       - name: Report-only job registry
         run: tools/ci/test_check_quarantine.sh
       # Red on every run once a report-only job's expiry has passed

@@ -39,6 +39,12 @@
 
 set -uo pipefail
 
+# mapfile below needs bash 4 or newer.
+if [ -z "${BASH_VERSINFO[0]:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+  echo "::error::runner health: needs bash 4 or newer (this is ${BASH_VERSION:-not bash})" >&2
+  exit 1
+fi
+
 log() { echo "runner health: $*" >&2; }
 die() { echo "::error::runner health: $*" >&2; exit 1; }
 

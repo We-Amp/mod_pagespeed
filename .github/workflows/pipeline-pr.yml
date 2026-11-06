@@ -3049,7 +3049,10 @@ jobs:
       # the first attempt failed on holds that runner, without testing, until
       # its sibling leg has started on another runner (so the sibling cannot
       # be given the same runner), then ends green; with no other runner in
-      # 40 minutes it fails. It reads this run's job list (actions: read).
+      # 40 minutes it fails. It reads this run's job list (actions: read). A
+      # leg re-run on its own lands in a new run attempt without its sibling:
+      # it tests when it lands on another runner, and fails at once when it
+      # lands on the failed one (re-run all jobs instead).
       - name: Pick this job's role
         id: role
         env:
@@ -3072,8 +3075,15 @@ jobs:
                   $sib = $jobs | Where-Object { $_.name -like "*IIS System Tests (retry $other)" } | Select-Object -First 1
                   if ($sib -or $jobs.Count -lt 100) { break }
                 }
-                if ($sib -and $sib.runner_name -and $sib.runner_name -ne $env:RUNNER_NAME) { $placed = $sib.runner_name }
-                elseif ($sib -and $sib.status -eq 'completed') { $placed = 'a finished leg' }
+                if (-not $sib) {
+                  # Both legs start in one attempt. A sibling missing from
+                  # this attempt's job list means only this leg was re-run
+                  # ("Re-run failed jobs"): it can never be placed.
+                  Write-Host "::error::the other retry leg is not part of this run attempt (only this leg was re-run?); re-run all jobs of the workflow instead"
+                  exit 1
+                }
+                if ($sib.runner_name -and $sib.runner_name -ne $env:RUNNER_NAME) { $placed = $sib.runner_name }
+                elseif ($sib.status -eq 'completed') { $placed = 'a finished leg' }
               } catch {
                 Write-Host "the jobs API call failed, trying again: $($_.Exception.Message)"
               }
@@ -3273,6 +3283,8 @@ jobs:
           PAGESPEED_TEST_FETCH_RETRIES: "1"
         run: |
           $ErrorActionPreference = 'Stop'
+          # A fresh start: only this run's setup may leave the host-failure marker.
+          Remove-Item -LiteralPath (Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt') -Force -ErrorAction SilentlyContinue
           .\tools\ci\Start-OptimizerWorker.ps1 -Action start
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose -TestFilter 'not slow_recovery'
@@ -3701,16 +3713,20 @@ jobs:
   # registered (FLEET_IIS_ENABLED is not 'true'), the path filter found no
   # IIS-relevant change, or a job they need failed.
   # Any other skip is a routing mistake and fails here, so the CI gate never
-  # accepts it silently.
+  # accepts it silently. The job also fails when the first IIS attempt ended
+  # green after a failure of the host (failure_class=infra) and the retry did
+  # not succeed.
   fleet-only-skip-check:
     permissions: {}
     name: IIS system tests ran or were switched off
-    needs: [changes, windows-build, windows-unit-tests, iis-sys-tests]
+    needs: [changes, windows-build, windows-unit-tests, iis-sys-tests, iis-sys-tests-retry]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       IIS_RESULT: ${{ needs.iis-sys-tests.result }}
+      IIS_CLASS: ${{ needs.iis-sys-tests.outputs.failure_class }}
+      RETRY_RESULT: ${{ needs.iis-sys-tests-retry.result }}
       BUILD_RESULT: ${{ needs.windows-build.result }}
       UNIT_RESULT: ${{ needs.windows-unit-tests.result }}
       FLEET: ${{ vars.FLEET_ENABLED }}
@@ -3736,5 +3752,16 @@ jobs:
             echo "::notice::IIS system tests skipped: no IIS-relevant change"
           else
             echo "::error::IIS system tests were skipped with the fleet on and the class enabled"
+            exit 1
+          fi
+
+      # A first attempt that ended green after a failure of the host passed
+      # nothing: the retry must have passed (tools/ci/test_iis_retry_check.sh
+      # runs this step's script).
+      - name: Check the IIS retry after a host failure
+        run: |
+          echo "iis-sys-tests failure_class=${IIS_CLASS:-none} iis-sys-tests-retry=${RETRY_RESULT}"
+          if [ "${IIS_CLASS}" = infra ] && [ "${RETRY_RESULT}" != success ]; then
+            echo "::error::IIS System Tests failed for a reason of the host and the retry is '${RETRY_RESULT}', not success"
             exit 1
           fi

@@ -33,9 +33,9 @@
 #       docs/ci/pipelines.md (the FLEET_ENABLED kill switch in its general,
 #       fleet-only or dispatch-only form, or the fleet-iis form that adds
 #       FLEET_IIS_ENABLED; a job routed to fleet-iis or fleet-hyperv must carry the last) verbatim as its if:, the general form optionally
-#       narrowed by `&& needs.changes.outputs.<name> == 'true'` (the
-#       fleet-iis forms also by `&& needs.<job>.outputs.<name> == '<word>'`,
-#       for a retry job), or
+#       narrowed by `&& needs.changes.outputs.<name> == 'true'` (and the
+#       job iis-sys-tests-retry of pipeline-pr.yml, alone, by exactly
+#       `&& needs.iis-sys-tests.outputs.failure_class == 'infra'`), or
 #       prefixed by `!cancelled() && needs.<job>.result == 'success' && `.
 #       The fleet-only and fleet-iis guards also have a switch form that
 #       tests `!= 'false'` (unset means on). A job routed by the switch
@@ -357,10 +357,11 @@ is_fleet_guard() {
 }
 
 # A fleet-iis guard (either form) in parentheses, narrowed by a path filter:
-# `&& needs.changes.outputs.<name> == 'true'`, or by an output of the job a
-# retry job retries: `&& needs.<job>.outputs.<name> == '<word>'`.
-is_iis_narrowed() {
-  local v="$1" g name guards
+# `&& needs.changes.outputs.<name> == 'true'`; in pipeline-pr.yml the job
+# iis-sys-tests-retry alone may instead be narrowed by exactly
+# `&& needs.iis-sys-tests.outputs.failure_class == 'infra'`.
+is_iis_narrowed() { # <if value> <job id>
+  local v="$1" job_name="${2:-}" g name guards
   if [ "${PR_WF}" = 1 ]; then guards=( "${FLEET_IIS_QUEUE_GUARD}" ); else guards=( "${FLEET_IIS_GUARD}" "${FLEET_IIS_SWITCH_GUARD}" ); fi
   for g in "${guards[@]}"; do
     g="${g#\$\{\{ }"; g="${g% \}\}}"
@@ -369,10 +370,9 @@ is_iis_narrowed() {
         name="${v#"\${{ (${g}) && needs.changes.outputs."}"; name="${name% == \'true\' \}\}}"
         printf '%s' "${name}" | grep -qE '^[a-z][a-z_]*$' && return 0
         ;;
-      "\${{ (${g}) && needs."*".outputs."*" == '"*"' }}")
-        # A retry job: narrowed by an output of the job it retries.
-        name="${v#"\${{ (${g}) && needs."}"; name="${name% \}\}}"
-        printf '%s' "${name}" | grep -qE "^[a-z][a-z0-9-]*\.outputs\.[a-z][a-z_]* == '[a-z]+'$" && return 0
+      "\${{ (${g}) && needs.iis-sys-tests.outputs.failure_class == 'infra' }}")
+        # The one retry job, narrowed by the class of the attempt it retries.
+        [ "${PR_WF}" = 1 ] && [ "${job_name}" = "iis-sys-tests-retry" ] && return 0
         ;;
     esac
   done
@@ -504,10 +504,10 @@ EOT
         if is_fleet_iis_route "${val}"; then
           route_class="${val%\' \}\}}"; route_class="${route_class##*\'}"
           if [ "${PR_WF}" = 1 ]; then
-            if [ "${if_val}" != "${FLEET_IIS_QUEUE_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
+            if [ "${if_val}" != "${FLEET_IIS_QUEUE_GUARD}" ] && ! is_iis_narrowed "${if_val}" "${job}"; then
               err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis queue guard (FLEET_IIS_ENABLED and the fleet route) verbatim as its if: (rule d)"
             fi
-          elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}"; then
+          elif [ "${if_val}" != "${FLEET_IIS_GUARD}" ] && [ "${if_val}" != "${FLEET_IIS_SWITCH_GUARD}" ] && ! is_iis_narrowed "${if_val}" "${job}"; then
             err "${wf}:${lineno}: ${route_class} job '${job}' must carry the fleet-iis guard (FLEET_IIS_ENABLED) verbatim as its if: (rule d)"
           fi
         elif [ "${PR_WF}" = 1 ]; then

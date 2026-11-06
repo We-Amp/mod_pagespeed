@@ -768,6 +768,22 @@ ejected a pull request from the queue and rebuilt the entries behind it.
   any failure there fails the job, an infrastructure failure included. A
   marker can therefore cost one retry, but it cannot turn a failing test
   green. The steps are shared with `iis-sys-tests` through a YAML anchor.
+  Before the tests start, the job deletes any marker left in the evidence
+  directory, so only this run's setup can write one.
+- **Required, not by convention.** `fleet-only-skip-check` (and so the `CI
+  gate`) fails when the first attempt ended with `failure_class=infra` and
+  `iis-sys-tests-retry` did not conclude `success`, whatever skipped it. The
+  release lane's gate reads the first attempt's step `Classify the failure`:
+  when it concluded `success` (the host failed and the job ended green), at
+  least one `IIS System Tests (retry N)` leg must be `success` and every leg
+  listed must be `success`.
+- **Re-running.** Re-run all jobs of the workflow. "Re-run failed jobs" after
+  a failed retry leg re-runs that leg alone, in a new run attempt that does
+  not hold its sibling: when it lands on a runner other than the one the
+  first attempt failed on, it tests as usual; when it lands on that runner,
+  it fails at once with an error that says to re-run all jobs (it could
+  never be placed elsewhere). The first attempt is not re-run, so its
+  outputs, the failed runner's name included, carry over.
 - **Drain signal.** `pipeline-pr.yml` runs on merge groups and holds no
   write token (rule queue-route), so the hourly `runner-health` job of
   `pipeline-sweep.yml` reads the `ci.yml` runs of the last 6 hours instead
@@ -784,8 +800,9 @@ ejected a pull request from the queue and rebuilt the entries behind it.
   `tools/ci/test_runner_health.sh`, which the job runs first.
 
 The release lane's gate (`tools/ci/ci_release_gate.sh`) keeps requiring
-`pr / IIS System Tests`; the retry legs are not in its list, so skipped is
-fine and a failed leg refuses like any other failed job.
+`pr / IIS System Tests`; the retry legs are not in its list of required jobs:
+skipped is fine after a green first attempt, a failed leg refuses like any
+other failed job, and after a host failure the rule above applies.
 
 ## Report-only jobs
 
