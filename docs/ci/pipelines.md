@@ -732,7 +732,19 @@ and a 40-hex `sha` equal to the commit the run is at; the ref it outputs is
 that commit. The run never enters the `release` environment, and ends with a
 seal of its artifacts (docs/ci/release.md, "A candidate run").
 `tools/ci/check-workflow-shape.sh` requires every `environment: release` job
-of the module lane to refuse a dry run and a candidate in its `if:`.
+of the module lane to refuse a dry run, a candidate and a rehearsal in its
+`if:`.
+
+Rehearsal mode (`rehearsal: true`) is the weekly lane rehearsal
+(docs/ci/release.md, "The weekly rehearsal"). The guard then requires the
+event `schedule` or `workflow_dispatch`, the ref `refs/heads/master`, an empty
+tag, `dry_run` true and no candidate; the ref it outputs is the commit the run
+is at. A `schedule` event is refused unless it is a rehearsal. The event
+guards of the module lane and of the two gates it calls allow `schedule` for
+that reason. The weekly caller is `release-rehearsal.yml`; a red run is
+reported by the nightly's red reporter under the label `lane-rehearsal-red`
+(`REPORT_LABEL`, `REPORT_TITLE`, `REPORT_JOB_PREFIX` and `REPORT_HISTORY` of
+`tools/ci/nightly_red_report.sh`; the defaults are the nightly's).
 
 ## The queued-run sweep
 

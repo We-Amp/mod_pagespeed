@@ -28,6 +28,8 @@ mkdir -p "${BIN}"
 #   api [--paginate] .../actions/runs/<id>/jobs...  FAKE_JOBS_<id> (HTTP 500
 #                                                    when FAKE_JOBS_FAIL_<id>=1)
 #   api .../actions/workflows/nightly.yml/runs...   FAKE_RUNS_NIGHTLY
+#   api .../actions/workflows/release-rehearsal.yml/runs...
+#                                                   FAKE_RUNS_REHEARSAL
 #   api .../actions/workflows/ci.yml/runs...&event=workflow_dispatch...
 #                                                   FAKE_RUNS_CI_DISPATCH
 #   api .../actions/workflows/ci.yml/runs...&event=push...
@@ -74,6 +76,7 @@ case "$1 $2" in
         answer "FAKE_JOBS_${id}"
         ;;
       */actions/workflows/nightly.yml/runs*) answer FAKE_RUNS_NIGHTLY ;;
+      */actions/workflows/release-rehearsal.yml/runs*) answer FAKE_RUNS_REHEARSAL ;;
       */actions/workflows/ci.yml/runs*event=workflow_dispatch*) answer FAKE_RUNS_CI_DISPATCH ;;
       */actions/workflows/ci.yml/runs*event=push*) answer FAKE_RUNS_CI_PUSH ;;
       */actions/runs/*" --jq .created_at")
@@ -592,6 +595,50 @@ expect ceiling "5 history jobs calls" eq "$(grep -E 'actions/runs/[0-9]+/jobs' "
 expect ceiling "body says so" body_has "no green within 0 completed full-tier runs (API call ceiling reached)"
 done_case api-call-ceiling-stops-search
 for n in $(seq 70 84); do unset "FAKE_JOBS_${n}"; done
+
+# --- the weekly lane rehearsal: the same script under another label, title,
+# job prefix and history (release-rehearsal.yml). The nightly's variables stay
+# at their defaults in every case above.
+REH_ENV=(REPORT_LABEL=lane-rehearsal-red "REPORT_TITLE=Release lane rehearsal red"
+  "REPORT_LABEL_DESC=The weekly release lane rehearsal is red"
+  "REPORT_INTRO=The weekly release lane rehearsal is red" "REPORT_JOB_PREFIX=module / "
+  "REPORT_HISTORY=release-rehearsal.yml|" "REPORT_RUN_NOUN=rehearsal run" REPORT_SKIPPED=off)
+REH_RED="$(jobs "601|module / Vendor Dependencies|success|" "602|module / Linux Release Build (x64)|failure|" \
+  "603|full / Linux TSan|failure|" "604|module / Gate, cPanel (el9)|skipped|")"
+REH_H60="$(runs "60|schedule|${C1}|2026-10-25T06:30:00Z")"
+REH_J60="$(jobs "6001|module / Linux Release Build (x64)|success|")"
+start
+run "${REH_ENV[@]}" FAKE_JOBS_50="${REH_RED}" FAKE_LOG_602="Linux Release Build (x64)	Build	2026-10-26T06:40:00.0000000Z //t:race_test    FAILED in 3.1s" \
+  FAKE_RUNS_REHEARSAL="${REH_H60}" FAKE_JOBS_60="${REH_J60}"
+expect rehearsal-red-creates-issue "exit 0" eq "${RC}" 0
+expect rehearsal-red-creates-issue "create carries the rehearsal title and label" \
+  grep -qF -- "gh issue create --title Release lane rehearsal red --label lane-rehearsal-red --body-file" "${WORK}/gh.log"
+expect rehearsal-red-creates-issue "label created with its description" \
+  grep -qF -- "gh label create lane-rehearsal-red --color B60205 --description The weekly release lane rehearsal is red" "${WORK}/gh.log"
+expect rehearsal-red-creates-issue "the open issues are looked up under the rehearsal label" \
+  grep -qF -- "gh issue list --label lane-rehearsal-red --state open" "${WORK}/gh.log"
+for s in "The weekly release lane rehearsal is red in run" "module / Linux Release Build (x64)" "//t:race_test" \
+  "actions/runs/60" "<!-- nightly-red-job: module / Linux Release Build (x64) -->"; do
+  expect rehearsal-red-creates-issue "body has '${s}'" body_has "${s}"
+done
+expect rehearsal-red-creates-issue "a full-tier job of the run is not judged" no body_has "full / Linux TSan"
+expect rehearsal-red-creates-issue "no skipped line" no body_has "Skipped (neither"
+expect rehearsal-red-creates-issue "only the rehearsal history is read" eq "$(calls 'actions/workflows/')" 1
+expect rehearsal-red-creates-issue "that history is release-rehearsal.yml" \
+  grep -qxF -- "gh api repos/We-Amp/example/actions/workflows/release-rehearsal.yml/runs?branch=main&status=completed&per_page=20" "${WORK}/gh.log"
+expect rehearsal-red-creates-issue "the nightly label is never touched" eq "$(calls 'nightly-red')" 0
+done_case rehearsal-red-creates-issue
+
+# --- a green rehearsal closes its own issue, and only that one
+REH_ISSUE='[{"number":9,"body":"red.\n\n### module / Linux Release Build (x64)\n<!-- nightly-red-job: module / Linux Release Build (x64) -->\n- SHA: x"}]'
+start
+run "${REH_ENV[@]}" FAKE_JOBS_50="$(jobs "601|module / Vendor Dependencies|success|" "602|module / Linux Release Build (x64)|success|" "603|full / Linux TSan|failure|")" \
+  FAKE_ISSUES="${REH_ISSUE}"
+expect rehearsal-green-closes-issue "exit 0" eq "${RC}" 0
+expect rehearsal-green-closes-issue "close 9" eq "$(calls '^gh issue close 9')" 1
+expect rehearsal-green-closes-issue "looked up under the rehearsal label" \
+  grep -qF -- "gh issue list --label lane-rehearsal-red --state open" "${WORK}/gh.log"
+done_case rehearsal-green-closes-issue
 
 # --- missing-env
 start

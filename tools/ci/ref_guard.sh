@@ -16,8 +16,16 @@
 # INPUT_DRY_RUN (must be true) are required, and the tag must be absent from
 # the remote and a release (X.Y.Z) or a release candidate (X.Y.Z-rc.N).
 #
+# Rehearsal mode (docs/ci/release.md): the weekly rehearsal builds the master
+# tip under a tag it makes up, and no tag exists. REHEARSAL=true turns it on;
+# then the event must be a schedule or a manual dispatch on refs/heads/master,
+# INPUT_TAG must be empty, INPUT_DRY_RUN must be true and CANDIDATE must not
+# be true. The reverse holds as well: a schedule event is refused unless it is
+# a rehearsal, so no other run of a release pipeline can be started by a timer.
+#
 # Usage (CI):   GITHUB_REF=... GITHUB_EVENT_NAME=... [INPUT_TAG=...] \
 #                 [CANDIDATE=true CANDIDATE_SHA=... INPUT_DRY_RUN=true] \
+#                 [REHEARSAL=true INPUT_DRY_RUN=true] \
 #                 [ALLOWED_TAG_GLOB='v*'] [ALLOWED_EVENTS='push workflow_dispatch'] \
 #                 bash tools/ci/ref_guard.sh check
 #               ALLOWED_TAG_GLOB empty = master only (no tag may run the job).
@@ -152,7 +160,39 @@ ref_guard_event_allowed() {
 ref_guard_check() {
   local glob="${ALLOWED_TAG_GLOB-v*}" main_ref="${MAIN_REF:-origin/master}"
   ref_guard_event_allowed "${GITHUB_EVENT_NAME:-}" "${ALLOWED_EVENTS:-}" || return 1
+  if [ "${GITHUB_EVENT_NAME:-}" = schedule ] && [ "${REHEARSAL:-}" != true ]; then
+    echo "ref-guard: a schedule event may only run a rehearsal" >&2
+    return 1
+  fi
   ref_guard_ref_allowed "${GITHUB_REF:-}" "$glob" || return 1
+  if [ "${REHEARSAL:-}" = true ]; then
+    # A rehearsal builds the master tip under a made-up tag. It never signs or
+    # publishes and can never be adopted, so it is a dry run on master with no
+    # tag and no candidate, started by a timer or by hand.
+    case "${GITHUB_EVENT_NAME:-}" in
+      schedule|workflow_dispatch) ;;
+      *) echo "ref-guard: a rehearsal is a schedule or a manual dispatch (event '${GITHUB_EVENT_NAME:-}')" >&2; return 1 ;;
+    esac
+    if [ "${GITHUB_REF:-}" != refs/heads/master ]; then
+      echo "ref-guard: a rehearsal runs on refs/heads/master, not '${GITHUB_REF:-}'" >&2
+      return 1
+    fi
+    if [ "${CANDIDATE:-}" = true ]; then
+      echo "ref-guard: a rehearsal is not a candidate" >&2
+      return 1
+    fi
+    if [ -n "${INPUT_TAG-}" ]; then
+      echo "ref-guard: a rehearsal names no tag (tag='${INPUT_TAG}')" >&2
+      return 1
+    fi
+    if [ "${INPUT_DRY_RUN:-}" != true ]; then
+      echo "ref-guard: a rehearsal is a dry run (dry_run='${INPUT_DRY_RUN:-}')" >&2
+      return 1
+    fi
+    ref_guard_sha_on_main "${GITHUB_SHA:-}" "$main_ref" || return 1
+    echo "ref-guard: ok, rehearsal at ${GITHUB_SHA}"
+    return 0
+  fi
   if [ "${CANDIDATE:-}" = true ]; then
     # A candidate builds the master tip under a tag that does not exist yet.
     # It never signs or publishes, so it is a dry run on master and nothing else.
@@ -201,6 +241,9 @@ ref_guard_checkout_ref() {
   if [ "${CANDIDATE:-}" = true ]; then
     # The tag does not exist yet: build exactly the commit named.
     printf '%s\n' "${CANDIDATE_SHA:-}"
+  elif [ "${REHEARSAL:-}" = true ]; then
+    # No tag at all: build the commit the run is at.
+    printf '%s\n' "${GITHUB_SHA:-}"
   elif [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && [ -n "${INPUT_TAG:-}" ]; then
     printf 'refs/tags/%s\n' "$INPUT_TAG"
   else
@@ -227,8 +270,8 @@ ref_guard_outputs() {
       esac ;;
     *) sha="${GITHUB_SHA:-}"
        # A candidate's ref is its commit; it must still be the one the run is at.
-       if [ "${CANDIDATE:-}" = true ] && [ "$ref" != "$sha" ]; then
-         echo "ref-guard: candidate ref '$ref' is not the run's commit '$sha'" >&2
+       if { [ "${CANDIDATE:-}" = true ] || [ "${REHEARSAL:-}" = true ]; } && [ "$ref" != "$sha" ]; then
+         echo "ref-guard: the ref '$ref' of a candidate or rehearsal is not the run's commit '$sha'" >&2
          return 1
        fi ;;
   esac

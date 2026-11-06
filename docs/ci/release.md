@@ -34,6 +34,7 @@ The lane releases a tag `module-v<version>`:
 |---|---|
 | `module-v1.19.0` | a release |
 | `module-v1.19.0-rc.1` | a release candidate: built and validated, flagged `prerelease: true` in the manifest, and never to be taken up by a consumer |
+| `module-v1.19.0-rehearsal.7` | made up by the weekly rehearsal (see "The weekly rehearsal"); never pushed as a tag |
 
 The version has the form `X.Y.Z` with an optional `-prerelease`. Build
 metadata (`+r1` and similar) is refused: a new build of the same sources gets
@@ -212,6 +213,48 @@ title or commit disagree with the version job. A release candidate version
 has no cPanel packages, so those three are not required for it. In a candidate
 run every sealed artifact is kept 14 days (`tree` stays at 3).
 
+### The weekly rehearsal
+
+The lane otherwise runs only when a release is cut, so a defect in it (a
+smoke fixture, a gate, a build recipe) waits for that day. Every Saturday at
+06:30 UTC, after the nightly, `release-rehearsal.yml` runs the lane as a
+rehearsal on the master tip. It can also be dispatched by hand:
+
+```text
+gh workflow run release-rehearsal.yml --ref master
+```
+
+The rehearsal calls `pipeline-release-module.yml` with `rehearsal: true` and
+passes no secret. The guards accept it only as a `schedule` or a
+`workflow_dispatch` on `refs/heads/master` with no tag, no candidate and
+`dry_run` true, and a `schedule` event is refused for any other run. No tag
+exists, so the `version` job makes one up from the pinned optimizer release:
+`module-v<pinned version>-rehearsal.<run number>`. That is a pre-release
+(`1.19.0~rehearsal.7` in the packages), so it can never be taken for a
+release; the pin and version-pair checks warn as in a `-pre` dry run. The
+`build_profile` is `rehearsal`, every job checks out the master commit, and
+no job of the `release` environment runs (each carries
+`rehearsal != 'true'` in its `if:`, enforced by
+`tools/ci/check-workflow-shape.sh`). `candidate-seal` does not run either, so
+a rehearsal can never be adopted by a release.
+
+The rehearsal is red on anything that would block a release: a failed build,
+smoke or gate. It is also red when the full tier has not been green on master
+for 7 days. In a rehearsal `ci-release-gate` has one more step,
+`tools/ci/rehearsal_fulltier_gate.sh`, which fails unless a completed
+`ci.yml` dispatch (`full=true`) or `nightly.yml` run on master from the last 7
+days has every full-tier job of the release gate's list green, with the same
+IIS and ASan rules as in "The CI gates". Runs are found through the runs API
+by their head commit and read job by job; a failed or unreadable API call
+fails the gate.
+
+A red rehearsal opens or updates one issue titled `Release lane rehearsal
+red`, labelled `lane-rehearsal-red` (job `rehearsal-red` of
+`release-rehearsal.yml`, which reuses `tools/ci/nightly_red_report.sh`; a
+green rehearsal closes it, a re-run never does). Only the rehearsal reports:
+a release run does not. While the issue is open the rehearsal has found
+something a release would hit.
+
 ### What a run needs from the repository settings
 
 - `FLEET_ENABLED` (a repository variable): `true` sends the build jobs to the
@@ -326,7 +369,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | Job | Class | What it does |
 |---|---|---|
 | `ref-guard` | hosted | enforces the ref guard (tag glob `module-v*`) |
-| `version` | hosted | derives version, package version, pin tag, `dry_run`, `candidate` and `build_profile` from the tag |
+| `version` | hosted | derives version, package version, pin tag, `dry_run`, `candidate`, `rehearsal` and `build_profile` from the tag (or, in a rehearsal, makes the tag up) |
 | `vendor` | fleet-heavy, pair | vendors dependencies, stamps the module version, rebuilds the admin console with it, makes the `tree` artifact and the source tarball |
 | `security-gates` | hosted | generates the SBOM for the stamped tree, then notices, VEX, grype with VEX applied on that SBOM; makes the versioned SBOM and VEX files |
 | `optimizer-fetch` | hosted | fetches the pinned optimizer release and verifies it (see below) |
@@ -820,6 +863,7 @@ the version check before anything is published.
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard (candidate mode included) and its test |
 | `tools/ci/release_adopt.py` | the candidate seal (`seal`, `--self-test`) |
+| `tools/ci/rehearsal_fulltier_gate.sh`, `tools/ci/test_rehearsal_fulltier_gate.sh` | the 7-day full-tier gate of the weekly rehearsal and its test (`--self-test`) |
 | `tools/ci/release_job_graph.py` | the job graph of a pipeline file per event, and the comparison of two files (`--self-test`) |
 | `tools/ci/systest_gate.sh`, `tools/ci/test_systest_gate.sh` | the system-test gate and its test |
 | `tools/ci/ci_release_gate.sh`, `tools/ci/test_ci_release_gate.sh` | the full-tier gate and its test |

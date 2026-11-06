@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+name: x
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo version
+  sign:
+    needs: [version]
+    if: ${{ !cancelled() && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: echo sign

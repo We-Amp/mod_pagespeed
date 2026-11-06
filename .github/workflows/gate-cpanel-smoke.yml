@@ -54,7 +54,7 @@ jobs:
           PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
-          ALLOWED: "push workflow_dispatch"
+          ALLOWED: "push workflow_dispatch schedule"
           ALLOWED_REFS: "refs/tags/* refs/heads/master"
         run: |
           set -euo pipefail
