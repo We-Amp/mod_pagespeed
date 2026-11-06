@@ -12,18 +12,20 @@
 #   1. vendor-tree     the release vendor job leaves its workspace: the commit
 #                      stamp of the release commit, a version-stamped VERSION,
 #                      vendor/. A CI reuse step of the same commit on that
-#                      runner must re-extract, not reuse it.
-#   2. extracted-tree  a release build job extracts the release tree and
-#                      leaves it. Same rule.
+#                      runner must re-extract, not reuse it. The real tree
+#                      tarball step must carry the marker.
+#   2. extracted-tree  a release build job extracts that tarball and leaves
+#                      the tree. Same rule.
 #   3. ci-tree         a tree CI extracted itself (stamp only) is still reused:
 #                      the warm path stays warm.
 #   4. per-runner      every host-level cache directory a workflow mounts
 #                      (CACHE_ROOT under ~/.cache) resolves to a different
-#                      directory for two runner instances that share one home.
-#   5. writers         two release legs on two runner instances of one host
-#                      write the same entry name into their nginx cache
-#                      directory, interleaved; each must read back its own.
+#                      directory for two runner instances that share one home,
+#                      so concurrent legs on one host never write one
+#                      directory (the nginx legs included).
 #
+# The release steps use GNU tar, as the runners have; on a host whose tar is
+# not GNU tar, gtar is used when present.
 # Run: tools/ci/test_lane_write_sets.sh
 set -uo pipefail
 
@@ -43,6 +45,12 @@ command -v zstd >/dev/null 2>&1 || { echo "FAIL: zstd is required"; exit 1; }
 
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/bin"
+if ! tar --version 2>/dev/null | grep -q 'GNU tar'; then
+  command -v gtar >/dev/null 2>&1 || { echo "FAIL: GNU tar (tar or gtar) is required"; exit 1; }
+  ln -s "$(command -v gtar)" "$T/bin/tar"
+fi
+export PATH="$T/bin:$PATH"
 
 # The run: body of the workflow step that carries the YAML anchor $2.
 step_body() {
@@ -88,7 +96,7 @@ SHA=0123456789abcdef0123456789abcdef01234567
 # Shims: docker (the stale-tree cleanup container) and the CI hub extract,
 # which writes the tree CI would get from the hub: the stamp and an
 # unstamped VERSION, no marker.
-mkdir -p "$T/bin" "$T/ci/_ci-tools/tools/ci"
+mkdir -p "$T/ci/_ci-tools/tools/ci"
 cat > "$T/bin/docker" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -143,9 +151,18 @@ GITCOMMIT_STEP="$(step_body "$RELEASE_WF" v-gitcommit)" || { echo "FAIL: $GITCOM
 ( cd "$W1" && RELEASE_SHA="$SHA" bash -euo pipefail -c "$GITCOMMIT_STEP" ) \
   || fail "vendor-tree: the commit stamp step failed"
 [ "$(cat "$W1/GIT_COMMIT")" = "$SHA" ] || fail "vendor-tree: the stamp step did not stamp the commit"
-# Keep a copy as the tree tarball the build jobs download.
+# The real tree tarball step, as the vendor job runs it after the stamp; its
+# tarball is what the build jobs download.
+TREE_STEP="$(step_body "$RELEASE_WF" v-tree)" || { echo "FAIL: $TREE_STEP"; exit 1; }
+( cd "$W1" && RUNNER_TEMP="$T/rt-vendor" bash -euo pipefail -c "$TREE_STEP" ) > "$T/tree-step.out" 2>&1 \
+  || { fail "vendor-tree: the tree tarball step failed"; sed 's/^/    /' "$T/tree-step.out"; }
 mkdir -p "$T/rt/tree"
-tar -C "$W1" -cf - . | zstd -q -o "$T/rt/tree/module-tree.tar.zst"
+cp "$T/rt-vendor/tree-out/module-tree.tar.zst" "$T/rt/tree/" 2>/dev/null
+if tar --zstd -tf "$T/rt/tree/module-tree.tar.zst" 2>/dev/null | grep -qx "\./$MARKER"; then
+  pass "vendor-tree: the tree tarball carries $MARKER"
+else
+  fail "vendor-tree: the tree tarball does not carry $MARKER"
+fi
 ci_reuse "$W1"
 expect_reextracted "$W1" "vendor-tree"
 
@@ -189,7 +206,7 @@ for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.yml"))):
                    if re.match(r"^\s*(RUNNER_TAG|CACHE_ROOT)=", x)]
         print("%s:%d\t%s" % (os.path.basename(path), i + 1, "; ".join(assigns)))
 PY
-n=0; shared=0; NGINX_A=""; NGINX_B=""
+n=0; shared=0
 while IFS=$'\t' read -r where code; do
   n=$((n + 1))
   # Inputs a step gets from its job env (the same for both runners).
@@ -199,40 +216,11 @@ while IFS=$'\t' read -r where code; do
     fail "per-runner: $where: two runner instances share $a"
     shared=$((shared + 1))
   fi
-  case "$a" in */mps-release-nginx|*/mps-release-nginx-runner*) [ -n "$NGINX_A" ] || { NGINX_A="$a"; NGINX_B="$b"; } ;; esac
 done < "$T/roots.txt"
 if [ "$n" -eq 0 ]; then
   fail "per-runner: no CACHE_ROOT found in the workflows"
 elif [ "$shared" -eq 0 ]; then
   pass "per-runner: all $n host cache directories are per runner instance"
-fi
-
-# --- 5. interleaved nginx cache writers ------------------------------------
-# Leg A writes its entry and waits; leg B writes the same entry name; leg A
-# reads it back. Shared directory: A reads B's bytes.
-if [ -z "$NGINX_A" ]; then
-  fail "writers: no nginx cache directory found in the release lane"
-else
-  H="$T/home"
-  da="$H${NGINX_A#/home/ci}"; db="$H${NGINX_B#/home/ci}"
-  mkdir -p "$da" "$db"
-  (
-    echo "leg A" > "$da/entry"; : > "$T/a-wrote"
-    while [ ! -e "$T/b-wrote" ]; do sleep 0.05; done
-    cat "$da/entry" > "$T/a-read"
-  ) &
-  pa=$!
-  (
-    while [ ! -e "$T/a-wrote" ]; do sleep 0.05; done
-    echo "leg B" > "$db/entry"; : > "$T/b-wrote"
-  ) &
-  pb=$!
-  wait "$pa" "$pb"
-  if [ "$(cat "$T/a-read")" = "leg A" ]; then
-    pass "writers: interleaved legs on two runner instances keep their own cache entries"
-  else
-    fail "writers: leg A read '$(cat "$T/a-read")' from the nginx cache directory both runners share"
-  fi
 fi
 
 if [ "$FAILS" -ne 0 ]; then
