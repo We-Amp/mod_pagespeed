@@ -16,6 +16,7 @@ version job derived.
 
     release_adopt.py seal --repo OWNER/REPO --run-id N --tag module-vX.Y.Z \\
         --version X.Y.Z --sha <40 hex> --out candidate-seal.json [--prerelease]
+    release_adopt.py schema --print
     release_adopt.py --self-test
 
 `seal` needs `gh` and a token with `actions: read` in GH_TOKEN.
@@ -84,6 +85,110 @@ NOT_SEALED_GLOBS = (
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:([0-9a-f]{64})$")
+
+PIPELINE_FILE = ".github/workflows/pipeline-release-module.yml"
+
+# Jobs an adopting run skips: the candidate built or checked these exact
+# bytes, and the adopting run takes their verdict from the candidate's job
+# list. Each fleet job and its hosted twin are listed. `release_adopt.py
+# schema --print` gives this list to the shape rule of check-workflow-shape.sh.
+ADOPTABLE = (
+    "security-gates",
+    "vendor",
+    "vendor-hosted",
+    "vendor-sidecar",
+    "linux-release-build",
+    "linux-release-build-hosted",
+    "linux-arm64-release-build",
+    "nginx-x64-plan",
+    "nginx-distro-build",
+    "nginx-distro-build-hosted",
+    "nginx-ready",
+    "nginx-arm64-plan",
+    "nginx-distro-build-arm64",
+    "nginx-arm64-join",
+    "nginx-distro-build-el10",
+    "nginx-distro-build-el10-hosted",
+    "sidecar-pair",
+    "sidecar-pair-arm64",
+    "apache-el8-build",
+    "apache-el8-build-hosted",
+    "apache-el10-build",
+    "apache-el10-build-hosted",
+    "unit-tests",
+    "unit-tests-hosted",
+    "package-smoke-deb",
+    "package-smoke-deb-hosted",
+    "package-smoke-rpm",
+    "package-smoke-rpm-hosted",
+    "package-smoke-nginx",
+    "package-smoke-nginx-hosted",
+    "package-load-check-nginx",
+    "package-load-check-nginx-hosted",
+    "package-load-check-nginx-arm64",
+    "package-smoke-nginx-packaged",
+    "package-smoke-nginx-packaged-hosted",
+    "ea4-build",
+    "ea4-build-hosted",
+    "ea4-el10-build",
+    "ea4-el10-build-hosted",
+    "windows-release-build",
+    "windows-release-build-hosted",
+)
+
+# Jobs that run in an adopting run as they do in any other.
+ALWAYS_RUNS = (
+    "event-guard",
+    "ref-guard",
+    "version",
+    "optimizer-fetch",
+    "systest-gate",
+    "ci-release-gate",
+    "vendor-ready",
+    "linux-ready",
+    "el8-ready",
+    "el10-ready",
+    "windows-ready",
+    "ea4-ready",
+    "msi-build",
+    "gate-iis-msi-upgrade",
+    "gate-cpanel-smoke-el9",
+    "gate-cpanel-smoke-el8",
+    "validate",
+)
+
+# Jobs of the `release` environment: skipped in a candidate run.
+ENVIRONMENT_JOBS = ("windows-sign", "msi-sign", "sign-checksums", "create-release")
+
+# Jobs that only a candidate run has.
+CANDIDATE_ONLY = ("candidate-seal",)
+
+# Sealed artifacts that an adopting run copies into itself under the same
+# name, because a job that still runs there reads them. The other sealed
+# artifacts (stock-el8, testdata-oldpkgs-*, release-assets) are recorded only.
+REUPLOADED = (
+    "asset-source",
+    "asset-sbom",
+    "asset-optimizer",
+    "asset-linux-x64",
+    "asset-linux-arm64",
+    "asset-nginx-x64",
+    "asset-nginx-arm64",
+    "asset-nginx-el10",
+    "asset-apache-el10",
+    "asset-ea4-el8",
+    "asset-ea4-el9",
+    "asset-ea4-el10",
+    "asset-sidecar-x64",
+    "asset-sidecar-arm64",
+    "unsigned-windows",
+    "msi-old",
+)
+
+# Logins that may dispatch or re-run a candidate that another login tags.
+ADMIN_ALLOWLIST = ("oschaaf",)
+
+MAX_AGE_SECONDS = 3 * 24 * 3600
 
 
 class SealError(Exception):
@@ -163,9 +268,20 @@ def hash_zip(path):
     return sorted(files, key=lambda f: f["path"])
 
 
-def seal(api, repo, run_id, tag, version, sha, prerelease, workdir):
+def check_plans(plans):
+    """plans: {plan job id: [leg, ...]}, the matrices the plan jobs published."""
+    for job, legs in plans.items():
+        if (not isinstance(legs, list) or not legs
+                or not all(isinstance(x, str) and re.match(r"^[A-Za-z0-9._-]+$", x) for x in legs)
+                or len(set(legs)) != len(legs)):
+            raise SealError("plan '%s' is not a non-empty list of distinct leg names" % job)
+
+
+def seal(api, repo, run_id, tag, version, sha, prerelease, workdir, plans=None):
     if not SHA_RE.match(sha):
         raise SealError("sha '%s' is not 40 lowercase hex digits" % sha)
+    if plans:
+        check_plans(plans)
     run = api.run(repo, run_id)
     problems = check_run_record(run, tag, sha)
     arts = api.artifacts(repo, run_id)
@@ -204,7 +320,7 @@ def seal(api, repo, run_id, tag, version, sha, prerelease, workdir):
         out.append({"name": n, "id": a["id"], "digest": a["digest"], "files": files})
     if sums_hash is None:
         raise SealError("release-assets is not among the sealed artifacts")
-    return {
+    doc = {
         "schema": SCHEMA,
         "candidate": True,
         "dry_run": True,
@@ -214,6 +330,132 @@ def seal(api, repo, run_id, tag, version, sha, prerelease, workdir):
         "artifacts": out,
         "release_assets_sha256sums_sha256": sums_hash,
     }
+    if plans:
+        # Additive: the legs of each matrix that a plan job published. Run
+        # outputs are not in the API, and `verify` needs them to name the
+        # jobs a candidate must have had. Readers of schema 2 ignore the key.
+        doc["plans"] = {k: plans[k] for k in sorted(plans)}
+    return doc
+
+
+# --------------------------------------------------------------------------
+# The expected job set: read from the pipeline file at the candidate's lane
+# commit. The reader is line-oriented (jobs at two spaces, their keys at
+# four, a matrix key at eight), like release_job_graph.py.
+
+JOB_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
+MATRIX_REF_RE = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}")
+PLAN_REF_RE = re.compile(r"fromJSON\(\s*needs\.([A-Za-z0-9_-]+)\.outputs\.[A-Za-z0-9_]+")
+
+
+class PipelineError(Exception):
+    pass
+
+
+def _unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+        return v[1:-1]
+    return v
+
+
+def parse_pipeline(text):
+    """{job id: {"name", "uses", "matrix"}} in file order. `matrix` is None or
+    (key, values, plan job id): values is a list for a literal matrix and
+    None for one taken from `fromJSON(needs.<plan>.outputs...)`."""
+    jobs = {}
+    in_jobs = False
+    cur = None
+    in_matrix = False
+    for line in text.split("\n"):
+        if not in_jobs:
+            in_jobs = line == "jobs:"
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = JOB_RE.match(line)
+        if m:
+            cur = m.group(1)
+            jobs[cur] = {"name": None, "uses": False, "matrix": None}
+            in_matrix = False
+            continue
+        if cur is None:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if indent == 4:
+            in_matrix = False
+            if body.startswith("name:"):
+                jobs[cur]["name"] = _unquote(body[5:])
+            elif body.startswith("uses:"):
+                jobs[cur]["uses"] = True
+            continue
+        if indent == 6 and body == "matrix:":
+            in_matrix = True
+            continue
+        if indent == 6:
+            in_matrix = False
+            continue
+        if in_matrix and indent == 8:
+            key, _, val = body.partition(":")
+            if jobs[cur]["matrix"] is not None or not key.isidentifier():
+                raise PipelineError("job '%s' has a matrix this reader does not support" % cur)
+            val = val.strip()
+            if val.startswith("["):
+                vals = [_unquote(x) for x in val.strip("[]").split(",") if x.strip()]
+                jobs[cur]["matrix"] = (key, vals, None)
+            else:
+                pm = PLAN_REF_RE.search(val)
+                if not pm:
+                    raise PipelineError("job '%s' has a matrix this reader does not support" % cur)
+                jobs[cur]["matrix"] = (key, None, pm.group(1))
+    for j, d in jobs.items():
+        if not d["name"]:
+            raise PipelineError("job '%s' has no name" % j)
+        stripped = MATRIX_REF_RE.sub("", d["name"])
+        if "${{" in stripped:
+            raise PipelineError("job '%s': name '%s' uses an expression this reader does not support" % (j, d["name"]))
+        if MATRIX_REF_RE.search(d["name"]) and not d["matrix"]:
+            raise PipelineError("job '%s' names a matrix it does not have" % j)
+    return jobs
+
+
+def schema_doc():
+    return {"adoptable": list(ADOPTABLE), "always_runs": list(ALWAYS_RUNS),
+            "environment": list(ENVIRONMENT_JOBS), "candidate_only": list(CANDIDATE_ONLY),
+            "reuploaded": list(REUPLOADED)}
+
+
+def twin_of(job_id, jobs):
+    """The other leg of a fleet/hosted pair, or None."""
+    if job_id.endswith("-hosted"):
+        base = job_id[: -len("-hosted")]
+        return base if base in jobs else None
+    return job_id + "-hosted" if job_id + "-hosted" in jobs else None
+
+
+def schema_problems(jobs):
+    """Problems with the job schema against a parsed pipeline file."""
+    problems = []
+    groups = (("adoptable", ADOPTABLE), ("always-runs", ALWAYS_RUNS),
+              ("environment", ENVIRONMENT_JOBS), ("candidate-only", CANDIDATE_ONLY))
+    where = {}
+    for label, group in groups:
+        for j in group:
+            if j in where:
+                problems.append("job '%s' is in both %s and %s" % (j, where[j], label))
+            where[j] = label
+    for j in jobs:
+        if j not in where:
+            problems.append("job '%s' is in no group of the adoption schema" % j)
+    for j in where:
+        if j not in jobs:
+            problems.append("schema names '%s', which the pipeline file does not have" % j)
+    for j in ADOPTABLE:
+        t = twin_of(j, jobs)
+        if t is not None and t not in ADOPTABLE:
+            problems.append("adoptable job '%s' has a twin '%s' that is not adoptable" % (j, t))
+    return problems
 
 
 class GhApi:
@@ -245,6 +487,54 @@ class GhApi:
 # --------------------------------------------------------------------------
 # Self-test
 
+
+
+_FAKE_PIPELINE = """name: x
+on: workflow_call
+jobs:
+  version:
+    name: Derive versions
+    runs-on: ubuntu-latest
+  vendor:
+    name: Vendor
+  vendor-hosted:
+    name: Vendor (hosted)
+  nginx-x64-plan:
+    name: Plan (x64)
+  nginx-distro-build:
+    name: Build (x64, ${{ matrix.distro }})
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
+    steps:
+      - name: not a job name
+  nginx-distro-build-hosted:
+    name: Build (x64, hosted, ${{ matrix.distro }})
+    strategy:
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
+  ea4-build:
+    name: EA4 (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [el9, el8]
+  ea4-build-hosted:
+    name: EA4 (${{ matrix.os }}, hosted)
+    strategy:
+      matrix:
+        os: [el9, el8]
+  gate-iis-msi-upgrade:
+    name: Gate, IIS installer
+    uses: o/r/.github/workflows/gate.yml@master
+  windows-sign:
+    name: Sign the Windows binaries
+    environment: release
+  validate:
+    name: Validate
+  candidate-seal:
+    name: Seal
+"""
 
 class FakeApi:
     def __init__(self, run, arts, zips):
@@ -294,7 +584,13 @@ def _fixture(prerelease=False, drop=(), extra=()):
 def self_test():
     fails = 0
 
-    def run_case(desc, want_ok, mutate=None, prerelease=False, drop=(), extra=(), want_in_error=""):
+    def check(desc, good, detail=""):
+        nonlocal fails
+        print("%s %s%s" % ("ok  " if good else "FAIL", desc, "" if good else " (%s)" % detail))
+        if not good:
+            fails += 1
+
+    def run_case(desc, want_ok, mutate=None, prerelease=False, drop=(), extra=(), want_in_error="", plans=None):
         nonlocal fails
         fx = _fixture(prerelease=prerelease, drop=drop, extra=extra)
         if mutate:
@@ -302,7 +598,8 @@ def self_test():
         api = FakeApi(fx["run"], fx["arts"], fx["zips"])
         with tempfile.TemporaryDirectory() as wd:
             try:
-                doc = seal(api, "o/r", fx["run_id"], fx["tag"], fx["version"], fx["sha"], prerelease, wd)
+                doc = seal(api, "o/r", fx["run_id"], fx["tag"], fx["version"], fx["sha"], prerelease, wd,
+                           plans=plans)
                 ok, msg = True, ""
             except SealError as e:
                 doc, ok, msg = None, False, str(e)
@@ -327,6 +624,12 @@ def self_test():
         if not shape:
             fails += 1
     run_case("accept: a release candidate version has no cPanel packages", True, prerelease=True)
+    pdoc = run_case("accept: plans are recorded as an additive field", True,
+                    plans={"nginx-x64-plan": ["el8", "el9"]})
+    check("seal with plans keeps the schema-2 keys and adds `plans`",
+          pdoc is not None and pdoc["schema"] == 2 and pdoc["plans"] == {"nginx-x64-plan": ["el8", "el9"]})
+    run_case("refuse: an empty plan", False, plans={"nginx-x64-plan": []}, want_in_error="non-empty list")
+    run_case("refuse: a plan with a repeated leg", False, plans={"p": ["a", "a"]}, want_in_error="distinct")
     run_case("refuse: allowlisted artifact missing", False, drop=("asset-linux-x64",),
              want_in_error="'asset-linux-x64' is missing")
     run_case("refuse: cPanel package missing on a final version", False, drop=("asset-ea4-el9",),
@@ -380,6 +683,42 @@ def self_test():
     except SealError:
         print("ok   refuse: short sha")
 
+
+    # ---- the adoption schema and the pipeline reader
+    pipeline_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", PIPELINE_FILE)
+    try:
+        with open(pipeline_path) as fh:
+            real_jobs = parse_pipeline(fh.read())
+        probs = schema_problems(real_jobs)
+    except (OSError, PipelineError) as e:
+        real_jobs, probs = {}, [str(e)]
+    check("every job of the real pipeline file is in exactly one schema group", not probs, "; ".join(probs))
+    check("the schema prints as the four groups and the re-uploaded set",
+          sorted(schema_doc()) == ["adoptable", "always_runs", "candidate_only", "environment", "reuploaded"]
+          and set(REUPLOADED) <= set(SEALED))
+
+    fake = parse_pipeline(_FAKE_PIPELINE)
+    probs = schema_problems(fake)
+    check("a job missing from the schema is named",
+          any("in no group" in x and "'brand-new'" in x for x in schema_problems(dict(fake, **{"brand-new": fake["version"]}))))
+    check("a schema job the file lacks is named", any("does not have" in x for x in probs))
+    check("matrix: literal values and plan reference are read",
+          fake["ea4-build"]["matrix"] == ("os", ["el9", "el8"], None)
+          and fake["nginx-distro-build"]["matrix"] == ("distro", None, "nginx-x64-plan")
+          and fake["gate-iis-msi-upgrade"]["uses"] is True and twin_of("vendor", fake) == "vendor-hosted"
+          and twin_of("vendor-hosted", fake) == "vendor" and twin_of("version", fake) is None)
+    try:
+        parse_pipeline("jobs:\n  a:\n    name: A ${{ github.run_id }}\n")
+        check("refuse: a job name with an expression other than a matrix key", False)
+    except PipelineError:
+        check("refuse: a job name with an expression other than a matrix key", True)
+    if real_jobs:
+        names = {}
+        for j, d in real_jobs.items():
+            names.setdefault(MATRIX_REF_RE.sub("*", d["name"]), []).append(j)
+        dup = [v for v in names.values() if len(v) > 1]
+        check("the real pipeline file has no two jobs with the same name pattern", not dup, str(dup))
+
     if fails:
         print("release_adopt self-test: %d failure(s)" % fails)
         return 1
@@ -398,16 +737,31 @@ def main(argv):
     sp.add_argument("--version", required=True)
     sp.add_argument("--sha", required=True)
     sp.add_argument("--prerelease", action="store_true", help="the version is a release candidate (no cPanel packages)")
+    sp.add_argument("--plan", action="append", default=[], metavar="JOB=JSON",
+                    help="a plan job's published legs, e.g. nginx-x64-plan='[\"el9\"]' (repeatable)")
     sp.add_argument("--out", required=True)
+    sc = sub.add_parser("schema", help="the adoption schema: which job ids are adopted, run, or neither")
+    sc.add_argument("--print", action="store_true", dest="print_schema", required=True)
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.cmd == "schema":
+        print(json.dumps(schema_doc(), indent=2))
+        return 0
     if args.cmd != "seal":
         ap.print_usage(sys.stderr)
         return 2
     try:
+        plans = {}
+        for item in args.plan:
+            job, _, raw = item.partition("=")
+            try:
+                plans[job] = json.loads(raw)
+            except ValueError:
+                raise SealError("--plan %s: not JSON" % job)
         with tempfile.TemporaryDirectory() as wd:
-            doc = seal(GhApi(), args.repo, args.run_id, args.tag, args.version, args.sha, args.prerelease, wd)
+            doc = seal(GhApi(), args.repo, args.run_id, args.tag, args.version, args.sha, args.prerelease, wd,
+                       plans=plans)
     except SealError as e:
         print("::error::candidate seal refused: %s" % e)
         return 1
