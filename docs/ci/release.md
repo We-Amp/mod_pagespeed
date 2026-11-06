@@ -153,6 +153,65 @@ gh workflow run ci.yml --ref master -f full=true
 Runs of one tag are serialized by the caller (`release.yml`), and a release
 always runs out: it is never cancelled by a newer run.
 
+### A candidate run
+
+A candidate run is a dry run of a release tag that does not exist yet. It
+builds and checks the release the way the real run of that tag will, so no
+`-pre` tag has to be pushed to find out whether a version will go through:
+
+```text
+gh workflow run release.yml --ref master -f tag=module-v1.19.0 \
+  -f dry_run=true -f candidate=true -f sha=<40-character master tip>
+```
+
+The guard accepts it only as a manual dispatch on `refs/heads/master` with
+`dry_run` true, for a tag that is not on the remote and that is `X.Y.Z` or
+`X.Y.Z-rc.N` (a `-pre` or `-rehearsal` version is refused), with `sha` equal to
+the commit the run is dispatched at. Every job checks out that commit. The
+run is titled `Release <tag> candidate dry run @ <sha>`; GitHub computes the
+title from `run-name` when the run is created, so it is a value no job can
+write.
+
+The `version` job gives a run a `build_profile`: `release` for a real run and
+a candidate, `rehearsal` for a plain dry run. What is built and checked follows
+the profile (the version stamps, the optimizer pair, the strictness of the pin
+and version checks, whether the `fleet-hyperv` gates must have run). Whether
+anything is signed follows `dry_run`, and the CI gates' strictness too. A
+candidate therefore stamps the final version, has no `optimizer-pair-version`
+file, fails on a pin that is not the version's pair (for `-rc.N` the pair does
+not exist, so the pin is taken as it is), builds the cPanel packages and
+requires the three gates to have run. It never enters the `release`
+environment: each of those jobs carries both `dry_run == 'false'` and
+`candidate != 'true'` in its `if:`, which `tools/ci/check-workflow-shape.sh`
+enforces, and the environment's tag policy would refuse a run on `master` in
+any case.
+
+A change to the conditions of the lane's jobs is checked by comparing the job
+graph before and after with `tools/ci/release_job_graph.py` (`compare OLD NEW`
+renders every job with its `needs` and its `if:` for a plain dry-run dispatch
+and a tag push; the two renderings must match job for job, apart from jobs
+that are new). The caller pins the lane to `master`, so a branch cannot be
+dispatched before it is merged.
+
+#### The seal
+
+After `validate`, the `candidate-seal` job (hosted, no environment, no secret)
+lists the artifacts of its own run through the Actions API, which is the
+source of names, ids and digests (matrix jobs do not aggregate outputs). It
+keeps the artifacts on the allowlist of `tools/ci/release_adopt.py` (the
+`asset-*` files, `unsigned-windows`, `msi-old`, `stock-el8`,
+`testdata-oldpkgs-*` and `release-assets`), fails on a missing allowlisted
+name and on any name that is neither sealed nor on the not-sealed list (`tree`,
+`tree-sidecar`, the per-distro nginx legs, `debug-*`,
+`testdata-sidecar-results-*`, `msi-unsigned`, `asset-windows`), downloads each
+by id, checks the zip against the API digest and records the hash of every
+file. `candidate-seal.json` (schema 2: `candidate`, `dry_run`, `tag`,
+`version`, `build_sha`, the artifact list and the hash of `SHA256SUMS`) is
+uploaded as `candidate-seal`. The job refuses to seal when the run's own
+title or commit disagree with the version job. A release candidate version
+has no cPanel packages, so those three are not required for it. In a candidate
+run every sealed artifact is kept 14 days (`tree` stays at 3).
+
 ### What a run needs from the repository settings
 
 - `FLEET_ENABLED` (a repository variable): `true` sends the build jobs to the
@@ -267,7 +326,7 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | Job | Class | What it does |
 |---|---|---|
 | `ref-guard` | hosted | enforces the ref guard (tag glob `module-v*`) |
-| `version` | hosted | derives version, package version, pin tag and `dry_run` from the tag |
+| `version` | hosted | derives version, package version, pin tag, `dry_run`, `candidate` and `build_profile` from the tag |
 | `vendor` | fleet-heavy, pair | vendors dependencies, stamps the module version, rebuilds the admin console with it, makes the `tree` artifact and the source tarball |
 | `security-gates` | hosted | generates the SBOM for the stamped tree, then notices, VEX, grype with VEX applied on that SBOM; makes the versioned SBOM and VEX files |
 | `optimizer-fetch` | hosted | fetches the pinned optimizer release and verifies it (see below) |
@@ -461,6 +520,7 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `msi-old` | the synthetic older installer of the upgrade gate | no |
 | `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`: signed in a real run, unsigned in a dry run | yes |
 | `release-signature` | `SHA256SUMS.asc` (real run) | the signature is added to the release by `create-release` |
+| `candidate-seal` | `candidate-seal.json`, the hashes of the sealed artifacts (candidate run only) | no |
 
 `validate` builds the asset set from the `asset-*` artifacts only. A directory
 it does not know, an empty file, a signature file or a name outside
@@ -758,7 +818,9 @@ the version check before anything is published.
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
-| `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |
+| `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard (candidate mode included) and its test |
+| `tools/ci/release_adopt.py` | the candidate seal (`seal`, `--self-test`) |
+| `tools/ci/release_job_graph.py` | the job graph of a pipeline file per event, and the comparison of two files (`--self-test`) |
 | `tools/ci/systest_gate.sh`, `tools/ci/test_systest_gate.sh` | the system-test gate and its test |
 | `tools/ci/ci_release_gate.sh`, `tools/ci/test_ci_release_gate.sh` | the full-tier gate and its test |
 

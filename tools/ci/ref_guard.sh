@@ -9,7 +9,15 @@
 # master, and a manually dispatched release may only name a tag that already
 # exists and is reachable from master.
 #
+# Candidate mode (docs/ci/release.md): a manual dispatch on refs/heads/master
+# may name a release tag that does not exist yet, to build and check it
+# without signing or publishing anything. CANDIDATE=true turns it on; then
+# INPUT_TAG, CANDIDATE_SHA (the 40-hex master tip the caller names) and
+# INPUT_DRY_RUN (must be true) are required, and the tag must be absent from
+# the remote and a release (X.Y.Z) or a release candidate (X.Y.Z-rc.N).
+#
 # Usage (CI):   GITHUB_REF=... GITHUB_EVENT_NAME=... [INPUT_TAG=...] \
+#                 [CANDIDATE=true CANDIDATE_SHA=... INPUT_DRY_RUN=true] \
 #                 [ALLOWED_TAG_GLOB='v*'] [ALLOWED_EVENTS='push workflow_dispatch'] \
 #                 bash tools/ci/ref_guard.sh check
 #               ALLOWED_TAG_GLOB empty = master only (no tag may run the job).
@@ -70,6 +78,51 @@ ref_guard_dispatch_tag_ok() {
   return 0
 }
 
+# ref_guard_remote_tag_absent TAG [REMOTE]: the tag is not on the remote
+# (default origin). A failed lookup refuses: absence must be proven.
+ref_guard_remote_tag_absent() {
+  local tag="${1:-}" remote="${2:-origin}" rc=0
+  git ls-remote --exit-code --tags "$remote" "refs/tags/${tag}" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    2) return 0 ;;
+    0) echo "ref-guard: candidate tag '$tag' already exists on the remote" >&2; return 1 ;;
+    *) echo "ref-guard: cannot look up tag '$tag' on '$remote' (exit $rc); refusing" >&2; return 1 ;;
+  esac
+}
+
+# ref_guard_candidate_ok TAG SHA [TAG_GLOB] [MAIN_REF]: the rules of a
+# candidate dispatch that do not depend on the event (see ref_guard_check).
+# Run inside a clone that has MAIN_REF (default origin/master).
+ref_guard_candidate_ok() {
+  local tag="${1:-}" sha="${2:-}" glob="${3-v*}" main_ref="${4:-origin/master}" ver
+  if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]*$'; then
+    echo "ref-guard: candidate tag '$tag' is empty or has unexpected characters" >&2
+    return 1
+  fi
+  if [ -z "$glob" ]; then
+    echo "ref-guard: this workflow takes no candidate tag" >&2
+    return 1
+  fi
+  # shellcheck disable=SC2254
+  case "$tag" in
+    $glob) ;;
+    *) echo "ref-guard: candidate tag '$tag' does not match '$glob'" >&2; return 1 ;;
+  esac
+  # Only a release or a release candidate: a pre-release or rehearsal tag
+  # (X.Y.Z-pre.N, X.Y.Z-rehearsal.N) is built by a plain dry run instead.
+  ver="${tag#"${tag%%[0-9]*}"}"
+  if ! printf '%s' "$ver" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[0-9]+)?$'; then
+    echo "ref-guard: candidate version '$ver' must be X.Y.Z or X.Y.Z-rc.N" >&2
+    return 1
+  fi
+  if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+    echo "ref-guard: candidate sha '$sha' is not 40 lowercase hex digits" >&2
+    return 1
+  fi
+  ref_guard_sha_on_main "$sha" "$main_ref" || return 1
+  ref_guard_remote_tag_absent "$tag" || return 1
+}
+
 # ref_guard_sha_on_main SHA [MAIN_REF]: SHA is reachable from MAIN_REF.
 ref_guard_sha_on_main() {
   local sha="${1:-}" main_ref="${2:-origin/master}"
@@ -100,6 +153,29 @@ ref_guard_check() {
   local glob="${ALLOWED_TAG_GLOB-v*}" main_ref="${MAIN_REF:-origin/master}"
   ref_guard_event_allowed "${GITHUB_EVENT_NAME:-}" "${ALLOWED_EVENTS:-}" || return 1
   ref_guard_ref_allowed "${GITHUB_REF:-}" "$glob" || return 1
+  if [ "${CANDIDATE:-}" = true ]; then
+    # A candidate builds the master tip under a tag that does not exist yet.
+    # It never signs or publishes, so it is a dry run on master and nothing else.
+    if [ "${GITHUB_EVENT_NAME:-}" != workflow_dispatch ]; then
+      echo "ref-guard: a candidate is a manual dispatch (event '${GITHUB_EVENT_NAME:-}')" >&2
+      return 1
+    fi
+    if [ "${GITHUB_REF:-}" != refs/heads/master ]; then
+      echo "ref-guard: a candidate runs on refs/heads/master, not '${GITHUB_REF:-}'" >&2
+      return 1
+    fi
+    if [ "${INPUT_DRY_RUN:-}" != true ]; then
+      echo "ref-guard: a candidate is a dry run (dry_run='${INPUT_DRY_RUN:-}')" >&2
+      return 1
+    fi
+    if [ "${CANDIDATE_SHA:-}" != "${GITHUB_SHA:-}" ]; then
+      echo "ref-guard: candidate sha '${CANDIDATE_SHA:-}' is not the master tip this run was dispatched at '${GITHUB_SHA:-}'" >&2
+      return 1
+    fi
+    ref_guard_candidate_ok "${INPUT_TAG-}" "${CANDIDATE_SHA:-}" "$glob" "$main_ref" || return 1
+    echo "ref-guard: ok, candidate ${INPUT_TAG} at ${CANDIDATE_SHA}"
+    return 0
+  fi
   case "${GITHUB_REF:-}" in
     refs/tags/*)
       # A tag name proves nothing: anyone with contents:write can push v9.9.9
@@ -122,7 +198,10 @@ ref_guard_check() {
 # ran on; any other event builds the ref that triggered it. Call after
 # ref_guard_check has validated the inputs.
 ref_guard_checkout_ref() {
-  if [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && [ -n "${INPUT_TAG:-}" ]; then
+  if [ "${CANDIDATE:-}" = true ]; then
+    # The tag does not exist yet: build exactly the commit named.
+    printf '%s\n' "${CANDIDATE_SHA:-}"
+  elif [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ] && [ -n "${INPUT_TAG:-}" ]; then
     printf 'refs/tags/%s\n' "$INPUT_TAG"
   else
     printf '%s\n' "${GITHUB_REF:-}"
@@ -146,7 +225,12 @@ ref_guard_outputs() {
             return 1
           fi ;;
       esac ;;
-    *) sha="${GITHUB_SHA:-}" ;;
+    *) sha="${GITHUB_SHA:-}"
+       # A candidate's ref is its commit; it must still be the one the run is at.
+       if [ "${CANDIDATE:-}" = true ] && [ "$ref" != "$sha" ]; then
+         echo "ref-guard: candidate ref '$ref' is not the run's commit '$sha'" >&2
+         return 1
+       fi ;;
   esac
   printf 'ref=%s\nsha=%s\n' "$ref" "$sha"
 }

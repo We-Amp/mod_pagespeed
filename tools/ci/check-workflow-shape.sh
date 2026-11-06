@@ -63,6 +63,12 @@
 #       lane; the fleet-hyperv gates get none). `secrets: inherit`, `secrets[` and
 #       `toJSON(secrets`, and a secret in an expression outside the jobs (a
 #       workflow-level env: block), are refused;
+#   (release-env) in pipeline-release-module.yml: each job with `environment: release`
+#       carries an if: that contains both
+#       needs.version.outputs.dry_run == 'false' and
+#       needs.version.outputs.candidate != 'true', so a dry run and a
+#       candidate run (which runs on master) never reach the environment
+#       even if its tag policy were loosened;
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -234,6 +240,27 @@ secret_env_records() {
         line=substr(line, RSTART + RLENGTH)
       }
     }
+  ' "$1"
+}
+
+# Jobs with `environment: release` whose if: lacks a required condition, one
+# per line: "<job> <tab> <line>". The if: is the job's 4-space `if:` key on one
+# line, like the other parsers; a job with none is reported too.
+release_env_if_records() {
+  awk -v tab="${TAB}" '
+    function flush() {
+      if (job != "" && env_line > 0 && (!has_dry || !has_cand)) printf "%s%s%d\n", job, tab, env_line
+    }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ { flush(); job=$1; sub(/:$/, "", job); env_line=0; has_dry=0; has_cand=0; next }
+    injobs && /^    environment:[[:space:]]*["\047]?release["\047]?[[:space:]]*$/ { env_line=NR }
+    injobs && /^    if:/ {
+      if (index($0, "needs.version.outputs.dry_run == \047false\047")) has_dry=1
+      if (index($0, "needs.version.outputs.candidate != \047true\047")) has_cand=1
+    }
+    END { flush() }
   ' "$1"
 }
 
@@ -565,6 +592,16 @@ EOF
   done <<EOF
 $(secret_env_records "${wf}")
 EOF
+  # (release-env) only the module lane has a candidate mode; the nginx.org
+  # lane's release jobs have their own guards.
+  if [ "${base}" = "pipeline-release-module.yml" ]; then
+    while IFS=$'\t' read -r sjob sline; do
+      [ -n "${sjob}" ] || continue
+      err "${wf}:${sline}: job '${sjob}' names environment release but its if: lacks needs.version.outputs.dry_run == 'false' and needs.version.outputs.candidate != 'true' (rule release-env)"
+    done <<EOF
+$(release_env_if_records "${wf}")
+EOF
+  fi
   while IFS=$'\t' read -r sjob sline; do
     [ -n "${sjob}" ] || continue
     err "${wf}:${sline}: 'secrets: inherit' on '${sjob}': pass secrets one by one (rule g)"

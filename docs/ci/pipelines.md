@@ -723,6 +723,17 @@ checkout of `master` with full history and tags, so the guard code is never the
 tree being released.
 `tools/ci/test_ref_guard.sh` is its self-test.
 
+Candidate mode (`candidate: true`, with the dispatch's `sha` and `dry_run`)
+lets a manual dispatch on `master` name a release tag that does not exist yet,
+so the module lane can build and check it without a pre-release tag. The guard
+then requires the event `workflow_dispatch`, the ref `refs/heads/master`,
+`dry_run` true, a tag absent from the remote that is `X.Y.Z` or `X.Y.Z-rc.N`,
+and a 40-hex `sha` equal to the commit the run is at; the ref it outputs is
+that commit. The run never enters the `release` environment, and ends with a
+seal of its artifacts (docs/ci/release.md, "A candidate run").
+`tools/ci/check-workflow-shape.sh` requires every `environment: release` job
+of the module lane to refuse a dry run and a candidate in its `if:`.
+
 ## The queued-run sweep
 
 A job whose runner label nothing serves (a retired label, or a runner class

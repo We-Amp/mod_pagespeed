@@ -25,10 +25,16 @@
 #   * push of a tag matching module-v*            -> dry_run is false
 #   * workflow_dispatch { tag, dry_run: true }    -> the default
 #   * workflow_dispatch { tag, dry_run: false }
+#   * workflow_dispatch { tag, dry_run: true, candidate: true, sha }
 # A dry run builds and validates everything, builds the installer unsigned
 # and runs the gates, and signs and creates nothing. The tag must exist and
 # its commit must be on master (the ref guard, which also refuses a run on any
 # other ref), for a dry run as well.
+# A candidate run is a dry run of a release tag that does not exist yet, on
+# master only, at the commit `sha` names. It builds and checks exactly what
+# the real run of that tag does (the `build_profile` of the version job is
+# `release`, not `rehearsal`), enters no `release` environment, and ends with
+# the `candidate-seal` job: hashes of the artifacts it produced.
 #
 # Runners. Every build job exists twice: on a runner class (fleet-heavy,
 # fleet-windows) while the repository variable FLEET_ENABLED is 'true', and as
@@ -64,6 +70,14 @@ on:
         description: Dispatch only. Nothing is signed or created when true. Ignored on a tag push.
         type: boolean
         default: true
+      candidate:
+        description: Dispatch only. A dry run of a tag that does not exist yet, on master, with the build of a real run. Needs dry_run and sha.
+        type: boolean
+        default: false
+      sha:
+        description: Candidate only. The 40-hex master tip to build; must be the commit the run is at.
+        type: string
+        default: ''
     # Declared per secret and passed one by one by the caller, never inherited.
     # They are environment secrets of `release`: a job that runs in that
     # environment reads the environment's value, which takes precedence over
@@ -147,6 +161,9 @@ jobs:
           tag-glob: 'module-v*'
           dispatch-tag: ${{ inputs.tag }}
           events: 'push workflow_dispatch'
+          candidate: ${{ inputs.candidate }}
+          candidate-sha: ${{ inputs.sha }}
+          dry-run: ${{ inputs.dry_run }}
 
   version:
     name: Derive versions from the tag
@@ -166,6 +183,9 @@ jobs:
       prerelease: ${{ steps.derive.outputs.prerelease }}
       is_prerelease: ${{ steps.derive.outputs.is_prerelease }}
       dry_run: ${{ steps.derive.outputs.dry_run }}
+      candidate: ${{ steps.derive.outputs.candidate }}
+      build_profile: ${{ steps.derive.outputs.build_profile }}
+      pair_lenient: ${{ steps.derive.outputs.pair_lenient }}
     steps:
       - name: Checkout master (version tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,6 +200,8 @@ jobs:
           SHA: ${{ needs.ref-guard.outputs.sha }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          CANDIDATE_INPUT: ${{ inputs.candidate }}
+          TAG_INPUT: ${{ inputs.tag }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
@@ -190,17 +212,51 @@ jobs:
             echo "::error::run number $RUN_NUMBER exceeds 65535, the largest installer build revision (install/iis/build-msi.ps1)"
             exit 1
           fi
-          # The guard also accepts the master branch; this lane releases a tag.
-          case "$REF" in
-            refs/tags/module-v*) ;;
-            *) echo "::error::the module lane releases a module-v* tag, not '$REF'"; exit 1 ;;
-          esac
-          TAG="${REF#refs/tags/}"
+          # A candidate is a dispatch that says so. It builds a commit, not a
+          # tag (the tag does not exist yet): the guard's ref is that commit
+          # and the tag comes from the input.
+          CANDIDATE=false
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$CANDIDATE_INPUT" = true ]; then
+            CANDIDATE=true
+          fi
+          if [ "$CANDIDATE" = true ]; then
+            [ "$REF" = "$SHA" ] || { echo "::error::a candidate builds its commit; the guard's ref '$REF' is not '$SHA'"; exit 1; }
+            TAG="$TAG_INPUT"
+            # Only a release or a release candidate (the ref guard says the
+            # same; this keeps the rule next to the version rules).
+            printf '%s' "${TAG#module-v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+              || { echo "::error::a candidate is X.Y.Z or X.Y.Z-rc.N, not '$TAG'"; exit 1; }
+          else
+            # The guard also accepts the master branch; this lane releases a tag.
+            case "$REF" in
+              refs/tags/module-v*) ;;
+              *) echo "::error::the module lane releases a module-v* tag, not '$REF'"; exit 1 ;;
+            esac
+            TAG="${REF#refs/tags/}"
+          fi
           # A tag push is a real run; a dispatch is real only when dry_run is
           # explicitly false.
           DRY_RUN=true
           if [ "$EVENT_NAME" = push ] || [ "$DRY_RUN_INPUT" = false ]; then
             DRY_RUN=false
+          fi
+          [ "$CANDIDATE" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a candidate is a dry run"; exit 1; }
+          # What the build does is separate from whether anything is signed.
+          # A real run and a candidate build the release exactly (final
+          # stamps, strict pair checks, the cPanel gates); only a plain dry
+          # run is a rehearsal. dry_run alone decides what is signed.
+          BUILD_PROFILE=rehearsal
+          if [ "$DRY_RUN" = false ] || [ "$CANDIDATE" = true ]; then
+            BUILD_PROFILE=release
+          fi
+          # The paired optimizer release may not exist yet: a rehearsal, and
+          # a candidate of a release candidate version (which has no pair),
+          # take the pinned release as the pair; every other build needs the
+          # pin to be the pair of this version.
+          PAIR_LENIENT=false
+          [ "$BUILD_PROFILE" != rehearsal ] || PAIR_LENIENT=true
+          if [ "$CANDIDATE" = true ]; then
+            case "$TAG" in module-v*-*) PAIR_LENIENT=true ;; esac
           fi
           {
             bash tools/ci/release_version.sh parse "$TAG"
@@ -208,6 +264,9 @@ jobs:
             echo "sha=$SHA"
             echo "short_sha=${SHA:0:7}"
             echo "dry_run=$DRY_RUN"
+            echo "candidate=$CANDIDATE"
+            echo "build_profile=$BUILD_PROFILE"
+            echo "pair_lenient=$PAIR_LENIENT"
           } | tee -a "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------
@@ -227,7 +286,7 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps: &vendor-steps
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -257,21 +316,22 @@ jobs:
           bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
           cat net/instaweb/public/VERSION
 
-      # A dry run may name a version whose paired optimizer release does not
+      # A rehearsal may name a version whose paired optimizer release does not
       # exist yet; the pin then names an older one and the packages depend on
       # that. The file tells the package build which version to depend on. A
-      # real run has none and depends on the tag's version.
-      - name: Record the optimizer pair version of a dry run
+      # real run and a candidate of a final version have none and depend on
+      # the tag's version.
+      - name: Record the optimizer pair version of a rehearsal
         run: |
           set -euo pipefail
           rm -f optimizer-pair-version
-          if [ "$DRY_RUN" = true ]; then
+          if [ "$PAIR_LENIENT" = true ]; then
             pin_tag="$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")"
             case "$pin_tag" in optimizer-v[0-9]*) ;; *) echo "::error::unusable optimizer pin tag '$pin_tag'"; exit 1 ;; esac
             pair="${pin_tag#optimizer-v}"
             tilde='~'
             printf '%s' "${pair/-/$tilde}" > optimizer-pair-version
-            echo "dry run: the packages depend on the pinned optimizer ${pair}"
+            echo "the packages depend on the pinned optimizer ${pair}"
           fi
 
       - &v-node
@@ -430,7 +490,7 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps: *vendor-steps
 
   vendor-ready:
@@ -565,7 +625,7 @@ jobs:
     env:
       OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
       GH_READ_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -594,11 +654,11 @@ jobs:
             PLACEHOLDER*) echo "::error::optimizer-pin.json is a placeholder: cut the optimizer release first and record the pin"; exit 1 ;;
           esac
           # The pinned optimizer tag must be the pair of this module version.
-          # In a dry run the paired release cannot exist yet, so the pin is
+          # In a rehearsal the paired release cannot exist yet, so the pin is
           # taken as it is and the packages are checked against it.
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
-            if [ "$DRY_RUN" = true ]; then
-              echo "::warning::dry run: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
+            if [ "$PAIR_LENIENT" = true ]; then
+              echo "::warning::rehearsal: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
             else
               echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
             fi
@@ -623,7 +683,7 @@ jobs:
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" optimizer-MODULE.bazel bazel/repositories.bzl
           # From 2.5.0 on the module version equals the pinned optimizer's
           # VERSION.txt. Only while the pin is not yet the pair this release
-          # needs (a dry run, see above) does a mismatch warn instead of fail.
+          # needs (a rehearsal, see above) does a mismatch warn instead of fail.
           GUARD=lane-tools/tools/ci/check_module_optimizer_version.py
           if python3 "$GUARD" --enforced --module-version "$RELEASE_VERSION"; then
             curl -fsSL --retry 5 --retry-all-errors \
@@ -633,8 +693,8 @@ jobs:
           VERSION_ARGS=(--module-version "$RELEASE_VERSION" --optimizer-version-file optimizer-VERSION.txt)
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
             VERSION_ARGS+=(--dry-run)
-          elif [ "$DRY_RUN" = true ]; then
-            echo "::notice::dry run with a final pin: optimizer-pin.json already names $PIN_TAG, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished pair, dispatch a dry run of a module-v2.5.0-pre.N tag instead."
+          elif [ "$PAIR_LENIENT" = true ]; then
+            echo "::notice::rehearsal with a final pin: optimizer-pin.json already names $PIN_TAG, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished pair, dispatch a dry run of a module-v2.5.0-pre.N tag instead."
           fi
           python3 "$GUARD" "${VERSION_ARGS[@]}"
 
@@ -1006,12 +1066,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # Every artifact the candidate seal records is kept 14 days in a
+      # candidate run; these two would otherwise expire sooner.
       - name: Upload the old-version packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: testdata-oldpkgs-${{ env.ARCH }}
           path: ${{ runner.temp }}/out/oldpkgs
-          retention-days: 3
+          retention-days: ${{ needs.version.outputs.candidate == 'true' && 14 || 3 }}
           if-no-files-found: error
 
       - name: Upload the debug files
@@ -1497,7 +1559,7 @@ jobs:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps:
       - *v-checkout
       - *v-verify
@@ -2914,7 +2976,7 @@ jobs:
   windows-sign:
     name: Sign the Windows binaries
     needs: [version, windows-ready]
-    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -3113,7 +3175,7 @@ jobs:
   msi-sign:
     name: Sign the Windows installer
     needs: [version, msi-build]
-    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -3284,6 +3346,7 @@ jobs:
       PAIR_VERSION: ${{ needs.optimizer-fetch.outputs.pair_pkg_version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      BUILD_PROFILE: ${{ needs.version.outputs.build_profile }}
       FLEET_ENABLED: ${{ vars.FLEET_ENABLED }}
     steps:
       # Every upstream job succeeded, except that of each build runner pair
@@ -3307,11 +3370,12 @@ jobs:
           bad=0
           in_pair=" "
           # The signing jobs run in a real run only: they must have
-          # succeeded there and been skipped in a dry run. The gates need the
-          # fleet-hyperv class and can succeed without testing anything, so in a
-          # real run each must have succeeded AND reported ran == true (the
+          # succeeded there and been skipped in a dry run (a candidate is a
+          # dry run). The gates need the fleet-hyperv class and can succeed
+          # without testing anything, so in a release build (a real run or a
+          # candidate) each must have succeeded AND reported ran == true (the
           # cPanel gates are exempt on a pre-release, which has no package);
-          # in a dry run a skipped gate is allowed.
+          # in a rehearsal a skipped gate is allowed.
           for j in windows-sign msi-sign; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             echo "${j}: ${r} (dry run: ${DRY_RUN})"
@@ -3321,9 +3385,9 @@ jobs:
           for j in gate-iis-msi-upgrade gate-cpanel-smoke-el9 gate-cpanel-smoke-el8; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             ran="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].outputs.ran // "false"')"
-            echo "${j}: ${r}, ran: ${ran} (dry run: ${DRY_RUN}, pre-release: ${IS_PRERELEASE})"
+            echo "${j}: ${r}, ran: ${ran} (build profile: ${BUILD_PROFILE}, pre-release: ${IS_PRERELEASE})"
             in_pair="${in_pair}${j} "
-            if [ "$DRY_RUN" = false ]; then
+            if [ "$BUILD_PROFILE" = release ]; then
               [ "$r" = success ] || { echo "::error::the ${j} gate did not succeed"; bad=1; }
               if [ "$IS_PRERELEASE" = true ] && [ "${j#gate-cpanel-smoke-}" != "$j" ]; then continue; fi
               [ "$ran" = true ] || { echo "::error::the ${j} gate did not run its smoke (it needs the fleet and its guest); a skipped gate is not a pass"; bad=1; }
@@ -3508,12 +3572,66 @@ jobs:
       # the protected `release` environment after this job and only when
       # needs.version.outputs.dry_run is 'false'. Nothing in this job holds a
       # secret or a write token.
+      # In a candidate run it is kept 14 days, like the other sealed artifacts.
       - name: Upload the validated asset set
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: ${{ runner.temp }}/release-assets/*
-          retention-days: 30
+          retention-days: ${{ needs.version.outputs.candidate == 'true' && 14 || 30 }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # Candidate seal: only a candidate run, after `validate`. Hosted, no
+  # environment, no secret. It lists the artifacts of its own run through the
+  # Actions API, keeps the ones on the allowlist of tools/ci/release_adopt.py,
+  # downloads each by id, checks it against the API digest and records the
+  # hash of every file in `candidate-seal`. Names, ids and digests come from
+  # the API, never from job outputs (matrix jobs do not aggregate them), and
+  # the run's own title and commit must agree with the version job. The
+  # script is master's, not the tree being released.
+  # ---------------------------------------------------------------------
+  candidate-seal:
+    name: Seal the candidate artifacts
+    needs: [version, validate]
+    if: ${{ !cancelled() && needs.version.outputs.candidate == 'true' && needs.validate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+    steps:
+      - name: Checkout master (seal tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Write the seal
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/seal"
+          args=()
+          [ "$IS_PRERELEASE" != true ] || args+=(--prerelease)
+          python3 -I tools/ci/release_adopt.py seal \
+            --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+            --tag "$TAG" --version "$VERSION" --sha "$RELEASE_SHA" \
+            "${args[@]}" --out "${RUNNER_TEMP}/seal/candidate-seal.json"
+          cat "${RUNNER_TEMP}/seal/candidate-seal.json"
+
+      - name: Upload the seal
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: candidate-seal
+          path: ${{ runner.temp }}/seal/candidate-seal.json
+          retention-days: 14
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
@@ -3525,7 +3643,7 @@ jobs:
   sign-checksums:
     name: Sign SHA256SUMS
     needs: [version, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
@@ -3666,7 +3784,7 @@ jobs:
   create-release:
     name: Create the GitHub release
     needs: [version, validate, sign-checksums]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
