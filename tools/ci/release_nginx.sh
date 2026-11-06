@@ -36,6 +36,28 @@
 # --pkgdir and on the tree in --src, which holds test/package-test/.
 set -euo pipefail
 
+# apt-get update + install with retries, for the throwaway gate containers: a
+# short Debian or Ubuntu mirror outage is waited out, a lasting one still fails
+# the container. The function is spliced into the container commands with
+# declare -f, so it runs in the container's shell. stdout is quiet; stderr is
+# never redirected.
+apt_install_retry() {
+  local opts=() attempt
+  [ "${1:-}" = "--no-install-recommends" ] && opts=("$1") && shift
+  for attempt in 1 2 3; do
+    if apt-get update -qq -o Acquire::Retries=5 >/dev/null \
+       && apt-get install -y -qq "${opts[@]}" -o Acquire::Retries=5 "$@" >/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::release_nginx: apt install of $* failed (attempt $attempt of 3), retrying" >&2
+      sleep $((attempt * 5))
+    fi
+  done
+  echo "::error::release_nginx: apt install of $* failed after 3 attempts" >&2
+  return 1
+}
+
 # Distro legs: name|image|nginx version|nginx source sha256|deb or rpm.
 # The nginx version is the distro's stock nginx; a dynamic module only loads
 # into the exact nginx version it was built against.
@@ -400,7 +422,8 @@ symbol_leak() {
   if [ "${#debs[@]}" -gt 0 ]; then
     docker run --rm -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro ubuntu:24.04 bash -c '
       set -e
-      apt-get update -qq >/dev/null && apt-get install -y -qq binutils >/dev/null
+      '"$(declare -f apt_install_retry)"'
+      apt_install_retry binutils
       shopt -s nullglob
       n=0
       for p in /pkgs/nginx-module-pagespeed_*_'"${DEB_ARCH}"'.deb /pkgs/nginx-module-pagespeed-nginxorg_*_'"${DEB_ARCH}"'.deb; do
@@ -549,8 +572,8 @@ suite() {
     docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro -e DISTRO="${distro}" "${image}" bash -c '
       set -e
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -qq
-      apt-get install -y --no-install-recommends nginx curl ca-certificates python3 python3-pip >/dev/null
+      '"$(declare -f apt_install_retry)"'
+      apt_install_retry --no-install-recommends nginx curl ca-certificates python3 python3-pip
       pip3 install --break-system-packages --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1 >/dev/null 2>&1 \
         || pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1 >/dev/null
       cp /pkgs/'"$(basename "$deb")"' /tmp/pkg.deb
