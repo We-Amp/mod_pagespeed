@@ -1054,46 +1054,98 @@ jobs:
   # Nginx distro packages. The module is built inside a container of each
   # target distro against that distro's stock nginx version, wrapped into a
   # deb or rpm, and checked for leaked symbols and, for an rpm, for its name
-  # routing. The legs run concurrently within the job (tools/ci/release_nginx.sh).
-  # One step list for the x64 job and its hosted twin.
+  # routing (tools/ci/release_nginx.sh).
+  #
+  # x64: one job per distro, like arm64 below, so the legs run side by side
+  # on separate runners instead of one after another in one runner slot (the
+  # memory budget of a slot fits one leg at a time). The plan job reads the
+  # distro names from the leg table, so the matrix cannot drift from it; the
+  # fleet matrix and its hosted twin share one step list; nginx-ready joins
+  # the two, runs the gates over the combined set and hands over
+  # `asset-nginx-x64`, the one artifact the asset set expects. The per-leg
+  # artifacts have no `asset-` prefix on purpose. The fleet matrix runs at
+  # most three legs at a time, so the rest of the lane, which starts at the
+  # same moment, still finds heavy runners.
   # ---------------------------------------------------------------------
+  nginx-x64-plan:
+    name: Nginx Distro Packages (x64, plan)
+    needs: [event-guard, version, vendor-ready]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      distros: ${{ steps.plan.outputs.distros }}
+    steps:
+      # The leg table and the build driver come from master, like the other
+      # tooling of this lane, so a tag cut before a tooling change still
+      # builds with it; the packages are built from the tag's tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          submodules: false
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: List the distro legs
+        id: plan
+        run: |
+          set -euo pipefail
+          D="$(bash tools/ci/release_nginx.sh legs --arch x64 --set main --json)"
+          echo "legs: ${D}"
+          echo "distros=${D}" >> "$GITHUB_OUTPUT"
+
   nginx-distro-build:
-    name: Nginx Distro Packages (x64)
-    needs: [version, vendor-ready]
+    name: Nginx Distro Packages (x64, ${{ matrix.distro }})
+    needs: [version, vendor-ready, nginx-x64-plan]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
-    timeout-minutes: 240
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
     env: &nginx-x64-env
       ARCH: x64
-    steps: &nginx-steps
+    steps: &nginx-x64-steps
       - *clear-workspace
+
+      # The build driver (and the leg table in it) comes from master, the same
+      # file the plan job listed the matrix from; it is kept outside the
+      # workspace, which is the tag's tree.
+      - name: Check out the build tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Keep the build tooling outside the tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tools"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh "${RUNNER_TEMP}/lane-tools/"
+          rm -rf lane-tools
+
       - *tree-download
       - *tree-extract
 
-      - name: Build all distro packages
+      - name: Build the distro package
+        env:
+          DISTRO: ${{ matrix.distro }}
         run: |
           set -euo pipefail
           CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
           mkdir -p "${CACHE_ROOT}"
-          CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
-            --arch "$ARCH" --set main \
+          CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
+            --arch "$ARCH" --set main --distro "$DISTRO" \
             --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/nginx-out"
-
-      - name: Symbol-leak gate
-        run: |
-          bash tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
-            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
-
-      - name: Rpm routing gate
-        run: |
-          mkdir -p "${RUNNER_TEMP}/nginx-rpms"
-          cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
-          bash tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
 
       - name: Upload the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: asset-nginx-${{ env.ARCH }}
+          name: nginx-x64-${{ matrix.distro }}
           path: ${{ runner.temp }}/nginx-out
           retention-days: 14
           if-no-files-found: error
@@ -1116,20 +1168,29 @@ jobs:
             || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
 
   nginx-distro-build-hosted:
-    name: Nginx Distro Packages (x64, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
+    name: Nginx Distro Packages (x64, hosted, ${{ matrix.distro }})
+    needs: [event-guard, version, vendor-ready, nginx-x64-plan]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && vars.FLEET_ENABLED != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
     env: *nginx-x64-env
-    steps: *nginx-steps
+    steps: *nginx-x64-steps
 
+  # The join: of the fleet matrix and its hosted twin exactly one ran; its
+  # per-distro packages are checked as one set, gated, and handed over as
+  # `asset-nginx-x64`.
   nginx-ready:
-    name: Nginx packages ready
-    needs: [event-guard, nginx-distro-build, nginx-distro-build-hosted]
+    name: Nginx Distro Packages (x64)
+    needs: [event-guard, version, nginx-distro-build, nginx-distro-build-hosted]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
+    env:
+      ARCH: x64
     steps:
       - name: One of the two legs succeeded
         env:
@@ -1138,6 +1199,55 @@ jobs:
         run: |
           echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
           [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the nginx x64 packages did not build"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          submodules: false
+          sparse-checkout: |
+            tools/ci
+            test/package-test
+          persist-credentials: false
+
+      # The gates' driver comes from master, like the plan and the legs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Download the per-distro packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: nginx-x64-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/nginx-out
+
+      - name: The set is exactly one package per leg
+        run: |
+          ls -l "${RUNNER_TEMP}/nginx-out"
+          bash lane-tools/tools/ci/release_nginx.sh check-set --arch "$ARCH" \
+            --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Symbol-leak gate
+        run: |
+          bash lane-tools/tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Rpm routing gate
+        run: |
+          mkdir -p "${RUNNER_TEMP}/nginx-rpms"
+          cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
+          bash lane-tools/tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-x64
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
 
   # arm64: one job per distro, so the legs run side by side on separate hosted
   # runners instead of one after another on one small runner. The plan job
@@ -3067,6 +3177,7 @@ jobs:
       - ci-release-gate
       - linux-ready
       - linux-arm64-release-build
+      - nginx-x64-plan
       - nginx-ready
       - nginx-arm64-plan
       - nginx-distro-build-arm64
