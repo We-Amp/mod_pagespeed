@@ -3071,6 +3071,109 @@ TEST_F(AdminSiteDaemonTest, AlternatesSchemeMustBeHttpOrHttps) {
   EXPECT_EQ(0, fake_reader_->call_count_);
 }
 
+// The optimizer stores entries per site: a 64-lowercase-hex `site` is
+// forwarded upstream (after scheme, before the numeric parameters).
+constexpr char kSiteHex[] =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+TEST_F(AdminSiteDaemonTest, AlternatesForwardsSite) {
+  GoogleString buffer;
+  auto fetch = FetchAdminPage(
+      daemon_site_.get(),
+      StrCat("http://localhost/pagespeed_global_admin/v1/daemon/cache/"
+             "alternates?site=",
+             kSiteHex, "&scheme=https&hostname=www.example.test"
+                       "&url=%2Fhero.png"),
+      RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_EQ(StrCat("/v1/cache/alternates?url=%2fhero.png"
+                   "&hostname=www.example.test&scheme=https&site=",
+                   kSiteHex),
+            fake_reader_->last_daemon_path_);
+}
+
+TEST_F(AdminSiteDaemonTest, AlternatesWithoutSiteIsUnchangedUpstream) {
+  GoogleString buffer;
+  auto fetch = FetchAdminPage(
+      daemon_site_.get(),
+      "http://localhost/pagespeed_global_admin/v1/daemon/cache/alternates"
+      "?url=%2Fhero.png&hostname=www.example.test&scheme=https",
+      RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_EQ(
+      "/v1/cache/alternates?url=%2fhero.png&hostname=www.example.test"
+      "&scheme=https",
+      fake_reader_->last_daemon_path_);
+}
+
+TEST_F(AdminSiteDaemonTest, SiteMustBe64LowercaseHex) {
+  const GoogleString upper = [] {
+    GoogleString s(kSiteHex);
+    s[10] = 'A';
+    return s;
+  }();
+  const GoogleString short_site(kSiteHex, 63);
+  const GoogleString long_site = StrCat(kSiteHex, "0");
+  const GoogleString non_hex = [] {
+    GoogleString s(kSiteHex);
+    s[0] = 'g';
+    return s;
+  }();
+  for (const char* leaf : {"cache/alternates", "cache/content", "cache/urls"}) {
+    for (const GoogleString& site :
+         {upper, short_site, long_site, non_hex, GoogleString(),
+          GoogleString("..%2f..%2f")}) {
+      GoogleString buffer;
+      auto fetch = FetchAdminPage(
+          daemon_site_.get(),
+          StrCat("http://localhost/pagespeed_global_admin/v1/daemon/", leaf,
+                 "?url=%2Fhero.png&hostname=www.example.test&scheme=https"
+                 "&alternate_id=3&site=",
+                 site),
+          RequestHeaders::kGet, &buffer);
+      ASSERT_TRUE(fetch->done()) << leaf << " " << site;
+      EXPECT_EQ(HttpStatus::kBadRequest,
+                fetch->response_headers()->status_code())
+          << leaf << " " << site;
+    }
+  }
+  EXPECT_EQ(0, fake_reader_->call_count_);
+}
+
+TEST_F(AdminSiteDaemonTest, ContentForwardsSite) {
+  fake_reader_->content_type_ = "image/png";
+  GoogleString buffer;
+  auto fetch = FetchAdminPage(
+      daemon_site_.get(),
+      StrCat("http://localhost/pagespeed_global_admin/v1/daemon/cache/"
+             "content?alternate_id=3&site=",
+             kSiteHex, "&scheme=https&hostname=www.example.test"
+                       "&url=%2Fhero.png"),
+      RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_EQ(StrCat("/v1/cache/content?url=%2fhero.png"
+                   "&hostname=www.example.test&scheme=https&site=",
+                   kSiteHex, "&alternate_id=3"),
+            fake_reader_->last_daemon_path_);
+}
+
+TEST_F(AdminSiteDaemonTest, UrlsListingForwardsSiteFilter) {
+  GoogleString buffer;
+  auto fetch = FetchAdminPage(
+      daemon_site_.get(),
+      StrCat("http://localhost/pagespeed_global_admin/v1/daemon/cache/urls"
+             "?limit=50&site=",
+             kSiteHex),
+      RequestHeaders::kGet, &buffer);
+  ASSERT_TRUE(fetch->done());
+  EXPECT_EQ(HttpStatus::kOK, fetch->response_headers()->status_code());
+  EXPECT_EQ(StrCat("/v1/cache/urls?site=", kSiteHex, "&limit=50"),
+            fake_reader_->last_daemon_path_);
+}
+
 TEST_F(AdminSiteDaemonTest, AlternatesIsWholeServerConsoleOnly) {
   const GoogleString url = StrCat(
       "http://example.com/pagespeed_admin/v1/daemon/cache/"

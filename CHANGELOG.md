@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The admin console's cache URL detail page no longer reports "not in index" for every URL. The console now passes the cache entry's site on to the optimizer when it looks up a URL's variants and previews, which the 2.8.0 optimizer needs to find the entry. Affected: 2.8.0.
+
 ## [2.8.0] - 2026-11-05
 
 ### Security
