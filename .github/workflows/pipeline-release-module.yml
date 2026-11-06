@@ -84,6 +84,10 @@ on:
         description: Candidate only. The 40-hex master tip to build; must be the commit the run is at.
         type: string
         default: ''
+      adopt:
+        description: Real run only. auto adopts the candidate run that the tag message names; off forces the full build. Anything but a real run builds its own artifacts.
+        type: string
+        default: auto
       rehearsal:
         description: Schedule or dispatch on master with no tag. A dry run of the lane on the master tip under a made-up pre-release version; needs dry_run, no tag and no candidate.
         type: boolean
@@ -312,6 +316,417 @@ jobs:
             echo "build_profile=$BUILD_PROFILE"
             echo "pair_lenient=$PAIR_LENIENT"
           } | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # Adoption (docs/ci/release.md). A real run of a tag that names a candidate
+  # run in its annotated tag message does not rebuild what that run already
+  # built and tested: this job checks the candidate against the Actions API
+  # (tools/ci/release_adopt.py verify, the nine checks), copies the candidate's
+  # artifacts that the remaining jobs read into this run under the same names,
+  # reads them back, and records the result in `adopt-binding`. Every other
+  # case (a dry run, a candidate, a rehearsal, adopt=off, a tag without the
+  # trailers) leaves `adopted` false and the run is the full build. Hosted,
+  # no environment, no secret, a read-only token. The code is master's, never
+  # the tree being released. A refusal ends the run here, before any approval.
+  # ---------------------------------------------------------------------
+  adopt:
+    name: Adopt the candidate run named by the tag
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      adopted: ${{ steps.out.outputs.adopted || 'false' }}
+      candidate_run: ${{ steps.out.outputs.candidate_run }}
+      candidate_attempt: ${{ steps.out.outputs.candidate_attempt }}
+      binding: ${{ steps.out.outputs.binding }}
+      binding_id: ${{ steps.out.outputs.binding_id }}
+      binding_sha256: ${{ steps.out.outputs.binding_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      CANDIDATE: ${{ needs.version.outputs.candidate }}
+      REHEARSAL: ${{ needs.version.outputs.rehearsal }}
+      ADOPT_INPUT: ${{ inputs.adopt }}
+      ACTOR: ${{ github.triggering_actor }}
+    steps:
+      # Only a real run adopts. The input is for recovery: `off` forces the
+      # full build of today, whatever the tag says.
+      - name: Decide whether this run can adopt
+        id: gate
+        run: |
+          set -euo pipefail
+          case "$ADOPT_INPUT" in auto|off) ;; *) echo "::error::adopt must be auto or off, not '$ADOPT_INPUT'"; exit 1 ;; esac
+          try=true
+          if [ "$DRY_RUN" != false ] || [ "$CANDIDATE" = true ] || [ "$REHEARSAL" = true ]; then
+            try=false
+            echo "A dry run, a candidate and a rehearsal build their own artifacts; nothing is adopted." | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$ADOPT_INPUT" = off ]; then
+            try=false
+            echo "adopt=off: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "try=$try" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout master (adoption tooling)
+        if: ${{ steps.gate.outputs.try == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      # The trailers are read from the tag object itself, which cannot change
+      # once pushed. A tag without all three (or a lightweight tag) names no
+      # candidate, and the run builds everything; a tag with only some of them
+      # is a mistake and fails.
+      - name: Read the trailers of the tag
+        id: tag
+        if: ${{ steps.gate.outputs.try == 'true' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force --depth 1 origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          if [ "$(git cat-file -t "refs/tags/${TAG}")" != tag ]; then
+            echo "${TAG} is a lightweight tag and names no candidate: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          body="$(git cat-file tag "refs/tags/${TAG}" | sed '1,/^$/d' | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d')"
+          count=0
+          for k in Release-Candidate-Run Release-Candidate-SHA256SUMS Release-Candidate-Seal; do
+            n="$(printf '%s\n' "$body" | grep -c -E "^${k}: " || true)"
+            [ "$n" -le 1 ] || { echo "::error::the tag message has $n $k lines"; exit 1; }
+            count=$((count + n))
+          done
+          if [ "$count" = 0 ]; then
+            echo "${TAG} names no candidate run: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          val() { printf '%s\n' "$body" | sed -n "s/^$1: \(.*\)\$/\1/p"; }
+          run="$(val Release-Candidate-Run)"
+          sums="$(val Release-Candidate-SHA256SUMS)"
+          seal="$(val Release-Candidate-Seal)"
+          printf '%s' "$run" | grep -Eq '^[0-9]+$' || { echo "::error::the tag needs a numeric Release-Candidate-Run trailer"; exit 1; }
+          printf '%s' "$sums" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::the tag needs a 64-hex Release-Candidate-SHA256SUMS trailer"; exit 1; }
+          printf '%s' "$seal" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::the tag needs a 64-hex Release-Candidate-Seal trailer"; exit 1; }
+          tag_object="$(git rev-parse "refs/tags/${TAG}")"
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          [ "$tag_commit" = "$RELEASE_SHA" ] || { echo "::error::the tag points at $tag_commit, this run is at $RELEASE_SHA"; exit 1; }
+          tagger="$(git cat-file tag "refs/tags/${TAG}" | awk '/^$/ { exit } /^tagger / { sub(/^tagger /, ""); sub(/ [0-9]+ [+-][0-9]+$/, ""); sub(/ *<[^>]*>/, ""); print; exit }')"
+          # What this run is, from the API and not from the candidate: the
+          # commit of the lane definition it runs (its entry for this file
+          # among referenced_workflows) and when it started.
+          attempt="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}")"
+          lane="$(printf '%s' "$attempt" | jq -r --arg p "${GITHUB_REPOSITORY}/.github/workflows/pipeline-release-module.yml@" \
+            '[.referenced_workflows[]? | select(.path | startswith($p)) | .sha] | if length == 1 then .[0] else "" end')"
+          started="$(printf '%s' "$attempt" | jq -r '.run_started_at // ""')"
+          [ -n "$lane" ] || { echo "::error::this run has no single referenced_workflows entry for pipeline-release-module.yml"; exit 1; }
+          [ -n "$started" ] || { echo "::error::the API gives no run_started_at for this run"; exit 1; }
+          {
+            echo "named=true"
+            echo "run=$run"
+            echo "sums=$sums"
+            echo "seal=$seal"
+            echo "tag_object=$tag_object"
+            echo "tag_commit=$tag_commit"
+            echo "tagger=$tagger"
+            echo "lane=$lane"
+            echo "started=$started"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the candidate run
+        id: verify
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        env:
+          CAND_RUN: ${{ steps.tag.outputs.run }}
+          SUMS: ${{ steps.tag.outputs.sums }}
+          SEAL: ${{ steps.tag.outputs.seal }}
+          TAG_OBJECT: ${{ steps.tag.outputs.tag_object }}
+          TAG_COMMIT: ${{ steps.tag.outputs.tag_commit }}
+          TAGGER: ${{ steps.tag.outputs.tagger }}
+          LANE: ${{ steps.tag.outputs.lane }}
+          STARTED: ${{ steps.tag.outputs.started }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/adopt"
+          if ! python3 -I tools/ci/release_adopt.py verify \
+              --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --candidate-run "$CAND_RUN" \
+              --tag "$TAG" --tag-commit "$TAG_COMMIT" --sums-trailer "$SUMS" --seal-trailer "$SEAL" \
+              --actor "$ACTOR" --lane-sha "$LANE" --started-at "$STARTED" \
+              --tag-object-sha "$TAG_OBJECT" --tagger "$TAGGER" \
+              --out "${RUNNER_TEMP}/adopt/adopt-binding.json" > "${RUNNER_TEMP}/adopt/verify.txt" 2>&1; then
+            cat "${RUNNER_TEMP}/adopt/verify.txt"
+            {
+              echo "### Adoption refused"
+              echo ""
+              echo "Candidate run ${CAND_RUN} cannot be adopted for ${TAG}. Nothing was signed or published."
+              echo ""
+              echo '```'
+              cat "${RUNNER_TEMP}/adopt/verify.txt"
+              echo '```'
+              echo ""
+              echo "Start a new candidate and tag again, or dispatch this tag with adopt=off for a full build."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat "${RUNNER_TEMP}/adopt/verify.txt"
+
+      - name: Plan the re-upload
+        id: plan
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          echo "ids=$(jq -r '[.artifacts[] | select(.reupload) | .id] | join(",")' "$b")" >> "$GITHUB_OUTPUT"
+          echo "names=$(jq -r '[.artifacts[] | select(.reupload) | .name] | "," + join(",") + ","' "$b")" >> "$GITHUB_OUTPUT"
+
+      # The token only reads the actions of this repository. Each artifact
+      # lands in its own directory below `in`, named after the artifact.
+      - name: Download the candidate's artifacts
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.plan.outputs.ids }}
+          run-id: ${{ steps.tag.outputs.run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/adopt/in
+
+      # One step per artifact, because an upload names its artifact in the
+      # step. A candidate of a release candidate version has no cPanel
+      # packages, so each step runs only for the artifacts the binding lists.
+      # overwrite makes the job safe to run again after a partial attempt.
+
+      - name: Re-upload asset-source
+        if: ${{ contains(steps.plan.outputs.names, ',asset-source,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-source
+          path: ${{ runner.temp }}/adopt/in/asset-source
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sbom
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sbom,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sbom
+          path: ${{ runner.temp }}/adopt/in/asset-sbom
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-optimizer
+        if: ${{ contains(steps.plan.outputs.names, ',asset-optimizer,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-optimizer
+          path: ${{ runner.temp }}/adopt/in/asset-optimizer
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-linux-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-linux-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-x64
+          path: ${{ runner.temp }}/adopt/in/asset-linux-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-linux-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-linux-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-linux-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-x64
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-el10
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-apache-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-apache-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-apache-el10
+          path: ${{ runner.temp }}/adopt/in/asset-apache-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el8
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el8,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el8
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el8
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el9
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el9,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el9
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el9
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el10
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sidecar-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-x64
+          path: ${{ runner.temp }}/adopt/in/asset-sidecar-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sidecar-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-sidecar-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload unsigned-windows
+        if: ${{ contains(steps.plan.outputs.names, ',unsigned-windows,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-windows
+          path: ${{ runner.temp }}/adopt/in/unsigned-windows
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      # Read each copy back from this run's own listing and check its files
+      # against the binding; the binding then carries the new ids and digests.
+      - name: Read the re-uploaded artifacts back
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py upload-check \
+            --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+            --binding "${RUNNER_TEMP}/adopt/adopt-binding.json"
+
+      - name: Hash the binding
+        id: hash
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "sha256=$(python3 -I tools/ci/release_adopt.py binding-hash --file "${RUNNER_TEMP}/adopt/adopt-binding.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the binding
+        id: bind
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: adopt-binding
+          path: ${{ runner.temp }}/adopt/adopt-binding.json
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+
+      # The job outputs are small values; the jobs that sign and validate
+      # download adopt-binding and check its hash against binding_sha256.
+      - name: Publish the binding
+        id: out
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        env:
+          BINDING_ID: ${{ steps.bind.outputs.artifact-id }}
+          BINDING_SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          {
+            echo "adopted=true"
+            echo "candidate_run=$(jq -r '.candidate.run' "$b")"
+            echo "candidate_attempt=$(jq -r '.candidate.attempt' "$b")"
+            echo "binding=$(jq -r '.binding' "$b")"
+            echo "binding_id=$BINDING_ID"
+            echo "binding_sha256=$BINDING_SHA256"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Adopted candidate run $(jq -r '.candidate.run' "$b")"
+            echo ""
+            echo "Binding: $(jq -r '.binding' "$b")"
+            echo ""
+            jq -r '"- candidate run \(.candidate.run), attempt \(.candidate.attempt), build commit `\(.candidate.build_sha)`",
+                   "- tag object `\(.tag.object.sha)`, lane definition `\(.lane_sha)`",
+                   "- Release-Candidate-Run: \(.trailers["Release-Candidate-Run"])",
+                   "- Release-Candidate-SHA256SUMS: `\(.trailers["Release-Candidate-SHA256SUMS"])`",
+                   "- Release-Candidate-Seal: `\(.trailers["Release-Candidate-Seal"])`"' "$b"
+            echo ""
+            echo "| Artifact | Candidate digest | This run's digest |"
+            echo "|---|---|---|"
+            jq -r '.artifacts[] | select(.reupload) | "| \(.name) | `\(.digest)` | `\(.new_digest)` |"' "$b"
+            echo ""
+            echo "adopt-binding.json: sha256 \`$BINDING_SHA256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------
   # Vendor: one prepared source tree for every build, as the `tree` artifact:
@@ -666,6 +1081,7 @@ jobs:
     outputs:
       pair_tag: ${{ steps.fetch.outputs.pair_tag }}
       pair_pkg_version: ${{ steps.fetch.outputs.pair_pkg_version }}
+      sums_sha256: ${{ steps.fetch.outputs.sums_sha256 }}
     env:
       OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
@@ -765,6 +1181,10 @@ jobs:
           sums_url=$(awk '$1 == "SHA256SUMS" { print $2 }' ../optimizer-assets.txt)
           curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$sums_url"
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
+          # The hash of the file that was just verified: a candidate's seal
+          # records it, and an adopting run compares it with the pin (check 9
+          # of tools/ci/release_adopt.py).
+          echo "sums_sha256=$(sha256sum SHA256SUMS | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
           # The package names the module needs, picked by name from the
           # verified list: every deb, every rpm and the Windows zip.
           awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS \
@@ -3647,7 +4067,7 @@ jobs:
   # ---------------------------------------------------------------------
   candidate-seal:
     name: Seal the candidate artifacts
-    needs: [version, validate]
+    needs: [version, validate, nginx-x64-plan, nginx-arm64-plan, optimizer-fetch]
     if: ${{ !cancelled() && needs.version.outputs.candidate == 'true' && needs.validate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -3660,6 +4080,13 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+      # The legs the two plan jobs published: run outputs are not in the
+      # Actions API, and an adopting run needs them to name the jobs the
+      # candidate had. The hash is of the pinned optimizer release's
+      # SHA256SUMS as `optimizer-fetch` verified it.
+      PLAN_X64: ${{ needs.nginx-x64-plan.outputs.distros }}
+      PLAN_ARM64: ${{ needs.nginx-arm64-plan.outputs.distros }}
+      OPTIMIZER_SUMS: ${{ needs.optimizer-fetch.outputs.sums_sha256 }}
     steps:
       - name: Checkout master (seal tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -3677,6 +4104,8 @@ jobs:
           python3 -I tools/ci/release_adopt.py seal \
             --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
             --tag "$TAG" --version "$VERSION" --sha "$RELEASE_SHA" \
+            --plan "nginx-x64-plan=${PLAN_X64}" --plan "nginx-arm64-plan=${PLAN_ARM64}" \
+            --optimizer-sums-sha256 "$OPTIMIZER_SUMS" \
             "${args[@]}" --out "${RUNNER_TEMP}/seal/candidate-seal.json"
           cat "${RUNNER_TEMP}/seal/candidate-seal.json"
 
