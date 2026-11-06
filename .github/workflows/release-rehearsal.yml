@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2024-2026 We-Amp B.V.
+#
+# Release rehearsal caller: a weekly dry run of the module release lane on the
+# master tip, with no tag. The module lane is otherwise exercised only when a
+# release is cut, so a defect in it (a smoke fixture, a gate, a build recipe)
+# waits for that day. The jobs live in pipeline-release-module.yml, pinned to
+# master like the release caller's; see docs/ci/release.md ("The weekly
+# rehearsal").
+#
+# The lane makes a pre-release version up from the pinned optimizer release
+# (module-v<version>-rehearsal.<run number>), builds and checks everything a
+# release does, signs and publishes nothing, and seals nothing, so a rehearsal
+# can never be adopted by a release. It fails on what would block a release,
+# and on a full tier that has not been green on master for 7 days. A red
+# rehearsal opens or updates one issue labelled lane-rehearsal-red.
+#
+# Triggers: a weekly schedule, and a manual dispatch.
+# Try it:  gh workflow run release-rehearsal.yml --ref master
+
+name: Release rehearsal
+
+run-name: "Release rehearsal${{ github.event_name == 'schedule' && ' (weekly)' || '' }} @ ${{ github.sha }}"
+
+on:
+  schedule:
+    # Saturday 06:30 UTC, after the nightly (04:17).
+    - cron: "30 6 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One rehearsal at a time, never cancelled. The group name has no "refs/"
+# part, so it cannot be the group of a real release run (release.yml
+# serializes per released ref: release-refs/...).
+concurrency:
+  group: release-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  module:
+    # The called workflow requests write access in its job of the `release`
+    # environment, and a called workflow cannot get more than its caller
+    # grants, so the grant is the release caller's. That job never runs in a
+    # rehearsal. `actions: read` is what its seal job requests; that job does
+    # not run either.
+    permissions:
+      contents: write
+      actions: read
+    uses: We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master
+    with:
+      tag: ''
+      dry_run: true
+      rehearsal: true
+    # No secret is passed: a rehearsal never enters the `release` environment,
+    # and the called workflow declares none of its secrets as required.
+
+  # The lane-rehearsal-red issue (docs/ci/release.md). Hosted, no secret: it
+  # reads this run's own job list and opens, updates or closes one issue
+  # labelled lane-rehearsal-red, with the script that reports the nightly's
+  # full tier. Only this workflow reports, so a release run never does. The
+  # script comes from master; on any other ref it is a dry run that prints
+  # what it would write.
+  rehearsal-red:
+    name: Rehearsal report
+    needs: [module]
+    if: always() && needs.module.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Open, update or close the lane-rehearsal-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: master
+          DRY_RUN: ${{ github.ref != 'refs/heads/master' }}
+          REPORT_LABEL: lane-rehearsal-red
+          REPORT_TITLE: Release lane rehearsal red
+          REPORT_LABEL_DESC: The weekly release lane rehearsal is red
+          REPORT_INTRO: The weekly release lane rehearsal is red
+          REPORT_JOB_PREFIX: "module / "
+          REPORT_HISTORY: "release-rehearsal.yml|"
+          REPORT_RUN_NOUN: rehearsal run
+          REPORT_SKIPPED: "off"
+        run: bash tools/ci/nightly_red_report.sh
