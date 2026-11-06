@@ -89,26 +89,6 @@ class IisConfigurationTest : public testing::Test {
   net_instaweb::GoogleMessageHandler handler_;
 };
 
-// Records the text of every message it is given.
-class RecordingMessageHandler : public net_instaweb::NullMessageHandler {
- public:
-  bool Saw(const std::string& needle) const {
-    for (const std::string& m : messages_) {
-      if (m.find(needle) != std::string::npos) return true;
-    }
-    return false;
-  }
-
- protected:
-  void MessageSImpl(net_instaweb::MessageType type,
-                    const GoogleString& message) override {
-    messages_.push_back(message);
-  }
-
- private:
-  std::vector<std::string> messages_;
-};
-
 // ==========================================================================
 // Phase 2: Bug Exposure Tests
 // ==========================================================================
@@ -832,7 +812,8 @@ TEST_F(IisConfigurationTest, UsePerVHostStatisticsIsReportedAsUnsupported) {
       nullptr);
   TestConfigFileGetConfig(cf, input, rwo);
   TestConfigFileRelease(cf);
-  EXPECT_TRUE(recorder.Saw("UsePerVHostStatistics is not supported on IIS"));
+  EXPECT_EQ(1, recorder.CountContaining(
+                   "UsePerVHostStatistics is not supported on IIS"));
 }
 
 TEST_F(IisConfigurationTest, SharedMemoryMetadataCacheIsReportedAsUnsupported) {
@@ -845,8 +826,8 @@ TEST_F(IisConfigurationTest, SharedMemoryMetadataCacheIsReportedAsUnsupported) {
       global_config_, nullptr);
   TestConfigFileGetConfig(cf, input, rwo);
   TestConfigFileRelease(cf);
-  EXPECT_TRUE(
-      recorder.Saw("CreateSharedMemoryMetadataCache is not supported on IIS"));
+  EXPECT_EQ(1, recorder.CountContaining(
+                   "CreateSharedMemoryMetadataCache is not supported on IIS"));
 }
 
 TEST_F(IisConfigurationTest, RemoteConfigUrlMultipleSubsequentLines) {
