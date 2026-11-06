@@ -144,6 +144,10 @@ expect_bad bad-queue-route-lock-push-no-actor-term "job 'lock-push' must carry e
 expect_bad bad-queue-guard-pipe-to-bash 'queue-guard-reads-default-branch'
 expect_bad bad-queue-route-iis-no-route-term 'fleet-iis queue guard'
 expect_bad bad-queue-route-iis-switch-guard 'fleet-iis queue guard'
+expect_good good-queue-route-iis-retry
+expect_bad bad-queue-route-iis-retry-other-output 'fleet-iis queue guard'
+expect_bad bad-queue-route-iis-narrowed-other-job 'fleet-iis queue guard'
+expect_bad bad-guard-iis-output-narrowed 'fleet-iis guard'
 expect_bad bad-queue-route-missing-fails-open 'queue-route'
 expect_bad bad-queue-route-step-absent 'queue-route'
 expect_bad bad-queue-route-output-missing 'queue-route'

@@ -75,6 +75,7 @@ tier.
 | `windows-build` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor`, `windows-build` | Windows unit tests |
 | `iis-sys-tests` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
+| `iis-sys-tests-retry` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests`, `iis-sys-tests` | runs only when `iis-sys-tests` failed for a reason of the host (see "IIS infrastructure failures"): two legs, `IIS System Tests (retry 1)` and `(retry 2)`; the leg that lands on the runner that just failed holds it until the other has a runner, so the tests run once more on a different one. Skipped otherwise |
 | `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
 | `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, a merge group routed to hosted runners, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
 
@@ -740,6 +741,91 @@ The threshold is a repository variable: set `SWEEP_MAX_AGE_MINUTES` (a whole
 number of minutes) to override the 30 minute default. The logic is tested
 against a fake `gh` by `tools/ci/test_sweep_queued_runs.sh`, which the sweep
 job runs first.
+
+## IIS infrastructure failures
+
+The IIS system tests run on a real IIS, and a host can fail them on its own:
+the test site cannot bind its ports (`appcmd start site` keeps failing with
+hresult 0x80070020), or HTTP.sys cannot bind its IPv6 transport until the
+host reboots. In the measurement of 2026-10-30 to 2026-11-06 all 9 merge-queue
+failures of `IIS System Tests` were of this kind, on one runner. Each one
+ejected a pull request from the queue and rebuilt the entries behind it.
+
+- **Classify.** When the setup script (`test/system/setup_iis_full.ps1`)
+  gives up on starting the site it writes `infra-class.txt` (a reason token:
+  `iis-site-start` or `httpsys-ipv6-wedge`) into the evidence directory.
+  After a failed test step, `tools/ci/iis_failure_class.py` reads it:
+  `infra <reason>` for a known token, `test` for anything else (no marker,
+  an unknown or malformed one).
+- **Retry once, elsewhere.** A `test` failure fails `iis-sys-tests` as
+  before. An `infra` failure ends it green, with a warning that names the
+  runner and the reason and the outputs `failure_class=infra`,
+  `failure_reason` and `runner`. Then `iis-sys-tests-retry` queues two legs
+  on `fleet-iis`. The leg that lands on the runner that just failed holds it
+  without testing until the other leg has a runner (it reads the run's job
+  list, hence `actions: read`), then ends green; with no other runner in 40
+  minutes it fails. Every leg that lands elsewhere runs all the tests, and
+  any failure there fails the job, an infrastructure failure included. A
+  marker can therefore cost one retry, but it cannot turn a failing test
+  green. The steps are shared with `iis-sys-tests` through a YAML anchor.
+  Before the tests start, the job deletes any marker left in the evidence
+  directory, so only this run's setup can write one.
+- **Required, not by convention.** `fleet-only-skip-check` (and so the `CI
+  gate`) fails when the first attempt ended with `failure_class=infra` and
+  `iis-sys-tests-retry` did not conclude `success`, whatever skipped it. The
+  release lane's gate reads the first attempt's step `Classify the failure`:
+  when it concluded `success` (the host failed and the job ended green), at
+  least one `IIS System Tests (retry N)` leg must be `success` and every leg
+  listed must be `success`.
+- **Re-running.** Re-run all jobs of the workflow. "Re-run failed jobs" after
+  a failed retry leg re-runs that leg alone, in a new run attempt that does
+  not hold its sibling: when it lands on a runner other than the one the
+  first attempt failed on, it tests as usual; when it lands on that runner,
+  it fails at once with an error that says to re-run all jobs (it could
+  never be placed elsewhere). The first attempt is not re-run, so its
+  outputs, the failed runner's name included, carry over.
+- **Drain signal.** `pipeline-pr.yml` runs on merge groups and holds no
+  write token (rule queue-route), so the hourly `runner-health` job of
+  `pipeline-sweep.yml` reads the `ci.yml` runs of the last 6 hours instead
+  (`tools/ci/runner_health.sh`): a green first try in a run attempt that
+  has retry legs, and a retry leg whose error says the host failed again,
+  are one record each against the runner they ran on. One open issue per
+  runner, labelled `runner-health` and titled `Runner health: <runner> (IIS
+  System Tests)`, holds the records (one marker line per job, so overlapping
+  sweeps count a job once). The second record while the issue is open
+  prefixes the title with `[drain]` and asks for the runner to be taken out
+  of the pool (docs/ci/runner-environment.md, "Draining a runner"). The
+  script changes no runner, label or registration. Closing the issue after
+  the repair starts the count again. It is tested against a fake `gh` by
+  `tools/ci/test_runner_health.sh`, which the job runs first.
+
+The release lane's gate (`tools/ci/ci_release_gate.sh`) keeps requiring
+`pr / IIS System Tests`; the retry legs are not in its list of required jobs:
+skipped is fine after a green first attempt, a failed leg refuses like any
+other failed job, and after a host failure the rule above applies.
+
+## Report-only jobs
+
+A job that fails for reasons nobody has fixed yet turns the default branch
+and the merge queue red for every change. It may be made report-only (a
+job-level `continue-on-error: true`): a failure still shows on the job, but
+not on the run or the `CI gate`. That state must end, so every report-only
+job has a line in `tools/ci/quarantine.txt`:
+
+    <workflow file>|<job id>|<job name>|<tracking issue>|<expires YYYY-MM-DD>
+
+`tools/ci/check_quarantine.py` runs in `CI tooling self-tests` on every pull
+request, merge group and push. It fails when a report-only job has no line,
+when a line names a missing job, another name, or a job that is no longer
+report-only (remove the line when the job is fixed), when the expiry is more
+than 28 days out, and, after the expiry date (UTC), on every run until the
+job is fixed or the expiry is moved with the reason written in the issue
+first. Three days before the expiry it warns. The release lane's gate does
+not read the file: a quarantined job that the release requires must still
+pass at the release commit. The nightly-red issue reads the run's job list,
+so a report-only job's failure in the nightly is still reported.
+
+As of 2026-11-06: `full / Windows AppVerif`, until 2026-11-20 (issue #656).
 
 ## The tidy sweep
 

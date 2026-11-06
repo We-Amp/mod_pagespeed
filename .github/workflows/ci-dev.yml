@@ -27,9 +27,11 @@ jobs:
     # gate, contents: write for its lock-push job alone (pushes a
     # regenerated MODULE.bazel.lock to a same-repository PR branch; it never
     # runs for a merge group or a fork) and checks: read for its fleet scope
-    # (reads the commit's check suites); a called workflow cannot exceed what
-    # its caller grants.
+    # (reads the commit's check suites), and actions: read for the IIS retry
+    # legs (read the run's job list to land on another runner); a called
+    # workflow cannot exceed what its caller grants.
     permissions:
+      actions: read
       checks: read
       contents: write
       pull-requests: read

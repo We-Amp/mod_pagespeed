@@ -3010,6 +3010,16 @@ jobs:
   # group whose changed files cannot affect IIS (the iis path filter of the
   # changes job). The module under test comes from the windows-build bundle; nothing
   # is built here. The job holds no secret and no write token.
+  #
+  # A failure of the host rather than of the change (the test site cannot
+  # bind its ports; tools/ci/iis_failure_class.py) does not fail this job: it
+  # ends green with the output failure_class=infra and a warning, and
+  # iis-sys-tests-retry runs every test once more on another runner, where
+  # any failure counts. The hourly runner-health job (pipeline-sweep.yml)
+  # records the failure against the runner and asks for it to be drained
+  # after the second one (docs/ci/pipelines.md, "IIS infrastructure
+  # failures"). The steps are shared with the retry job through the
+  # iis-sys-test-steps anchor.
   iis-sys-tests:
     permissions:
       contents: read
@@ -3018,10 +3028,19 @@ jobs:
     runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
     if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.changes.outputs.iis == 'true' }}
     timeout-minutes: 50
+    outputs:
+      failure_class: ${{ steps.classify.outputs.class }}
+      failure_reason: ${{ steps.classify.outputs.reason }}
+      runner: ${{ steps.classify.outputs.runner }}
     defaults:
       run:
         shell: powershell
-    steps:
+    env:
+      # First attempt: an infrastructure failure is retried, not failed.
+      IIS_ATTEMPT: "1"
+      IIS_LEG: ""
+      IIS_AVOID_RUNNER: ""
+    steps: &iis-sys-test-steps
       # This job runs pull request code with administrator rights. The guest
       # password that the host's runner environment holds is for the release
       # gates only, so it is blanked for every later step of this job.
@@ -3029,13 +3048,68 @@ jobs:
         run: |
           "CI_IIS_VM_ADMIN_PASSWORD=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      # The first attempt always tests. A retry leg that lands on the runner
+      # the first attempt failed on holds that runner, without testing, until
+      # its sibling leg has started on another runner (so the sibling cannot
+      # be given the same runner), then ends green; with no other runner in
+      # 40 minutes it fails. It reads this run's job list (actions: read). A
+      # leg re-run on its own lands in a new run attempt without its sibling:
+      # it tests when it lands on another runner, and fails at once when it
+      # lands on the failed one (re-run all jobs instead).
+      - name: Pick this job's role
+        id: role
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $role = 'test'
+          if ($env:IIS_LEG -and $env:RUNNER_NAME -eq $env:IIS_AVOID_RUNNER) {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $other = if ($env:IIS_LEG -eq '1') { '2' } else { '1' }
+            $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+            $base = "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT/jobs?per_page=100"
+            $deadline = (Get-Date).AddMinutes(40)
+            $placed = $null
+            while (-not $placed -and (Get-Date) -lt $deadline) {
+              try {
+                $sib = $null
+                foreach ($page in 1..5) {
+                  $jobs = @((Invoke-RestMethod -Uri "$base&page=$page" -Headers $headers -UseBasicParsing).jobs)
+                  $sib = $jobs | Where-Object { $_.name -like "*IIS System Tests (retry $other)" } | Select-Object -First 1
+                  if ($sib -or $jobs.Count -lt 100) { break }
+                }
+                if (-not $sib) {
+                  # Both legs start in one attempt. A sibling missing from
+                  # this attempt's job list means only this leg was re-run
+                  # ("Re-run failed jobs"): it can never be placed.
+                  Write-Host "::error::the other retry leg is not part of this run attempt (only this leg was re-run?); re-run all jobs of the workflow instead"
+                  exit 1
+                }
+                if ($sib.runner_name -and $sib.runner_name -ne $env:RUNNER_NAME) { $placed = $sib.runner_name }
+                elseif ($sib.status -eq 'completed') { $placed = 'a finished leg' }
+              } catch {
+                Write-Host "the jobs API call failed, trying again: $($_.Exception.Message)"
+              }
+              if (-not $placed) { Start-Sleep -Seconds 15 }
+            }
+            if (-not $placed) {
+              Write-Host "::error::no other IIS runner took the retry within 40 minutes; $($env:RUNNER_NAME) just failed for a reason of the host"
+              exit 1
+            }
+            Write-Host "this leg landed on $($env:RUNNER_NAME), where the first attempt failed; the other leg tests on $placed"
+            $role = 'hold'
+          }
+          "role=$role" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ steps.role.outputs.role == 'test' }}
 
       # Tool locations come from PATH, or from the runner's environment when
       # it provides one (docs/ci/runner-environment.md). Nothing here names a
       # drive, a user profile or an installation directory, and no tool
       # location is printed.
       - name: Resolve the runner environment
+        if: ${{ steps.role.outputs.role == 'test' }}
         run: |
           $ErrorActionPreference = 'Stop'
           function Set-JobEnv([string]$Name, [string]$Value) {
@@ -3079,6 +3153,7 @@ jobs:
       # then by probing the usual installation directories. The module is
       # already built, so a host without Visual Studio only warns.
       - name: Set up the MSVC runtime environment
+        if: ${{ steps.role.outputs.role == 'test' }}
         run: |
           $ErrorActionPreference = 'Continue'
           $vsDir = $null
@@ -3110,12 +3185,14 @@ jobs:
       # The module the windows-build job produced, checked against the
       # checksums that job wrote, and placed where the IIS harness looks.
       - name: Download the Windows build bundle
+        if: ${{ steps.role.outputs.role == 'test' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ci-artifacts-win-x64
           path: .ci-artifacts
 
       - name: Place the module
+        if: ${{ steps.role.outputs.role == 'test' }}
         run: |
           $ErrorActionPreference = 'Stop'
           $bundle = Join-Path $env:GITHUB_WORKSPACE '.ci-artifacts'
@@ -3144,6 +3221,7 @@ jobs:
             ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dest -Force }
 
       - name: Install test dependencies
+        if: ${{ steps.role.outputs.role == 'test' }}
         run: |
           $ErrorActionPreference = 'Stop'
           python -m pip install --quiet -r test\system\requirements.txt
@@ -3152,6 +3230,7 @@ jobs:
       # A previous job may have left Application Verifier or page heap armed
       # for the worker; the system tests must run without either.
       - name: Clear stale Application Verifier settings
+        if: ${{ steps.role.outputs.role == 'test' }}
         run: |
           $ErrorActionPreference = 'Continue'
           if (Get-Command appverif -ErrorAction SilentlyContinue) {
@@ -3171,6 +3250,7 @@ jobs:
       # run's dumps from older ones. The files are written outside the job's
       # directories, so cleanup removes this run's dumps again.
       - name: Arm worker crash dumps
+        if: ${{ steps.role.outputs.role == 'test' }}
         run: |
           $ErrorActionPreference = 'Stop'
           "IIS_RUN_T0=$((Get-Date).ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -3192,6 +3272,10 @@ jobs:
       # Full IIS, not IIS Express: the runner is a service, and IIS Express
       # needs an interactive desktop session.
       - name: Run the IIS system tests
+        id: tests
+        if: ${{ steps.role.outputs.role == 'test' }}
+        # The next step decides what a failure here means.
+        continue-on-error: true
         timeout-minutes: 35
         env:
           # Cold IIS under load can push a CSS-filter rewrite past its default
@@ -3202,15 +3286,41 @@ jobs:
           PAGESPEED_TEST_FETCH_RETRIES: "1"
         run: |
           $ErrorActionPreference = 'Stop'
+          # A fresh start: only this run's setup may leave the host-failure marker.
+          Remove-Item -LiteralPath (Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt') -Force -ErrorAction SilentlyContinue
           .\tools\ci\Start-OptimizerWorker.ps1 -Action start
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\test\system\run_iis_tests.ps1 -SkipBuild -UseFullIIS -Verbose -TestFilter 'not slow_recovery'
           exit $LASTEXITCODE
 
+      # A test failure fails the job. A failure of the host (the setup
+      # script's infra-class.txt marker) fails the job only on a retry; on the
+      # first attempt the job ends green with failure_class=infra, so the
+      # retry and the runner-health record run.
+      - name: Classify the failure
+        id: classify
+        if: ${{ steps.tests.outcome == 'failure' }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $line = "$(& python tools\ci\iis_failure_class.py $env:PAGESPEED_EVIDENCE_DIR | Select-Object -Last 1)".Trim()
+          $cls = 'test'; $reason = ''
+          if ($line -match '^infra ([a-z0-9-]+)$') { $cls = 'infra'; $reason = $Matches[1] }
+          "class=$cls", "reason=$reason", "runner=$($env:RUNNER_NAME)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          if ($cls -eq 'test') {
+            Write-Host "::error::the IIS system tests failed"
+            exit 1
+          }
+          if ($env:IIS_ATTEMPT -eq '1') {
+            Write-Host "::warning::IIS System Tests: a failure of the host ($reason), not of the change, on $($env:RUNNER_NAME); the tests run again on another runner"
+            exit 0
+          }
+          Write-Host "::error::IIS System Tests: the retry failed for a reason of the host too ($reason) on $($env:RUNNER_NAME)"
+          exit 1
+
       # The worker goes down with the job's tests, whatever their outcome; its
       # logs are in the evidence directory the failure upload ships.
       - name: Stop the optimizer worker
-        if: ${{ always() }}
+        if: ${{ always() && steps.role.outputs.role == 'test' }}
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Continue'
@@ -3221,7 +3331,7 @@ jobs:
       # symbols are available) into the evidence directory that the upload
       # below ships. The multi-gigabyte originals never leave the host.
       - name: Collect crash dumps
-        if: ${{ failure() }}
+        if: ${{ (failure() || steps.tests.outcome == 'failure') && steps.role.outputs.role == 'test' }}
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Continue'
@@ -3235,7 +3345,7 @@ jobs:
       # run's dumps are removed, older ones stay), and a stopped test site.
       # Each tolerates a host that is already clean.
       - name: Clean up the host
-        if: ${{ always() }}
+        if: ${{ always() && steps.role.outputs.role == 'test' }}
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Continue'
@@ -3249,14 +3359,43 @@ jobs:
           $global:LASTEXITCODE = 0
 
       - name: Upload the evidence
-        if: ${{ failure() }}
+        if: ${{ (failure() || steps.tests.outcome == 'failure') && steps.role.outputs.role == 'test' }}
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: iis-sys-tests-evidence
+          name: iis-sys-tests-evidence${{ env.IIS_LEG != '' && format('-retry-{0}', env.IIS_LEG) || '' }}
           path: ${{ runner.temp }}/iis-evidence
           retention-days: 7
           if-no-files-found: ignore
+
+  # The retry of an infrastructure failure of iis-sys-tests, with its steps.
+  # Two legs queue at once on the IIS class: the one that lands on the runner
+  # the first attempt failed on holds it until the other leg has a runner, so
+  # the tests run on a different one (both legs test when neither lands
+  # there). Any failure of a testing leg fails the job, an infrastructure
+  # failure included. Skipped (not failed) when the first attempt passed or
+  # failed a test. actions: read is for the holding leg's job-list read.
+  iis-sys-tests-retry:
+    permissions:
+      actions: read
+      contents: read
+    name: IIS System Tests (retry ${{ matrix.leg }})
+    needs: [changes, windows-build, windows-unit-tests, iis-sys-tests]
+    runs-on: ${{ ((github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'windows-2022' || 'fleet-iis' }}
+    if: ${{ (vars.FLEET_ENABLED != 'false' && vars.FLEET_IIS_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && needs.changes.outputs.route == 'fleet') && needs.iis-sys-tests.outputs.failure_class == 'infra' }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ["1", "2"]
+    defaults:
+      run:
+        shell: powershell
+    env:
+      IIS_ATTEMPT: "2"
+      IIS_LEG: ${{ matrix.leg }}
+      IIS_AVOID_RUNNER: ${{ needs.iis-sys-tests.outputs.runner }}
+    steps: *iis-sys-test-steps
 
   upgrade-rehearsal:
     permissions:
@@ -3577,16 +3716,20 @@ jobs:
   # registered (FLEET_IIS_ENABLED is not 'true'), the path filter found no
   # IIS-relevant change, or a job they need failed.
   # Any other skip is a routing mistake and fails here, so the CI gate never
-  # accepts it silently.
+  # accepts it silently. The job also fails when the first IIS attempt ended
+  # green after a failure of the host (failure_class=infra) and the retry did
+  # not succeed.
   fleet-only-skip-check:
     permissions: {}
     name: IIS system tests ran or were switched off
-    needs: [changes, windows-build, windows-unit-tests, iis-sys-tests]
+    needs: [changes, windows-build, windows-unit-tests, iis-sys-tests, iis-sys-tests-retry]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       IIS_RESULT: ${{ needs.iis-sys-tests.result }}
+      IIS_CLASS: ${{ needs.iis-sys-tests.outputs.failure_class }}
+      RETRY_RESULT: ${{ needs.iis-sys-tests-retry.result }}
       BUILD_RESULT: ${{ needs.windows-build.result }}
       UNIT_RESULT: ${{ needs.windows-unit-tests.result }}
       FLEET: ${{ vars.FLEET_ENABLED }}
@@ -3612,5 +3755,16 @@ jobs:
             echo "::notice::IIS system tests skipped: no IIS-relevant change"
           else
             echo "::error::IIS system tests were skipped with the fleet on and the class enabled"
+            exit 1
+          fi
+
+      # A first attempt that ended green after a failure of the host passed
+      # nothing: the retry must have passed (tools/ci/test_iis_retry_check.sh
+      # runs this step's script).
+      - name: Check the IIS retry after a host failure
+        run: |
+          echo "iis-sys-tests failure_class=${IIS_CLASS:-none} iis-sys-tests-retry=${RETRY_RESULT}"
+          if [ "${IIS_CLASS}" = infra ] && [ "${RETRY_RESULT}" != success ]; then
+            echo "::error::IIS System Tests failed for a reason of the host and the retry is '${RETRY_RESULT}', not success"
             exit 1
           fi

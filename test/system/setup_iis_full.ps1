@@ -1336,6 +1336,19 @@ function Start-IISSite {
                 Start-Process shutdown.exe -ArgumentList @('/r','/t','10','/c','PageSpeed IIS: HTTP.sys [::] transport wedge -- auto-reboot to self-heal') -NoNewWindow
             }
         }
+        # Tell CI this was the host, not the module: a site that cannot bind
+        # its ports fails before (or between) tests, whatever the change under
+        # test. tools/ci/iis_failure_class.py reads this file from the
+        # evidence directory and the IIS job retries once on another runner.
+        if ($env:PAGESPEED_EVIDENCE_DIR) {
+            try {
+                New-Item -ItemType Directory -Force -Path $env:PAGESPEED_EVIDENCE_DIR | Out-Null
+                $reason = if ($wedge) { 'httpsys-ipv6-wedge' } else { 'iis-site-start' }
+                Set-Content -LiteralPath (Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt') -Encoding ascii -Value @(
+                    $reason,
+                    "site $SiteName did not reach Started after $maxStartAttempts attempts (state: $siteState)")
+            } catch { }
+        }
         throw ("IIS site '$SiteName' did not reach Started after $maxStartAttempts attempts (state: $siteState). " +
                "Last appcmd start output: $siteStartOut. " +
                $(if ($wedge) { "ROOT CAUSE: HTTP.sys cannot bind the IPv6 transport [::]:$HttpsPort -- the runner needs a REBOOT (reboot-class flake; not a transient conflict). " }
