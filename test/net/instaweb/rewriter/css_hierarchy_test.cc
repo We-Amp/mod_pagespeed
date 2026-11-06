@@ -925,4 +925,78 @@ TEST_F(CssHierarchyTest, RollUpStylesheetsKeepsDebugMessages) {
   EXPECT_STREQ("Nothing to see here!", top.flattening_failure_reason());
 }
 
+// Rulesets whose media do not apply are dropped and the others keep their
+// order, however many of each there are.
+TEST_F(CssHierarchyTest, ParseDropsInapplicableRulesetsInOrder) {
+  GoogleString css;
+  for (int i = 0; i < 3000; ++i) {
+    GoogleString n = IntegerToString(i);
+    switch (i % 3) {
+      case 0:
+        StrAppend(&css, "@media print{.p", n, "{color:red}}");
+        break;
+      case 1:
+        StrAppend(&css, ".a", n, "{color:red}");
+        break;
+      default:
+        StrAppend(&css, "@media screen{.s", n, "{color:red}}");
+        break;
+    }
+  }
+  CssHierarchy hierarchy(nullptr);
+  GoogleUrl url("http://test.com/rulesets.css");
+  hierarchy.InitializeRoot(url, url, css, false /* has_unparseables */,
+                           0 /* flattened_result_limit */,
+                           nullptr /* stylesheet */, message_handler());
+  hierarchy.mutable_media()->push_back("screen");
+  ASSERT_TRUE(hierarchy.Parse());
+  ASSERT_TRUE(hierarchy.stylesheet() != nullptr);
+  const Css::Rulesets& rulesets = hierarchy.stylesheet()->rulesets();
+  ASSERT_EQ(2000u, rulesets.size());
+  // Survivors alternate between the unqualified and the screen rulesets.
+  for (size_t k = 0; k < rulesets.size(); ++k) {
+    ASSERT_EQ(1, rulesets[k]->selectors().size());
+    const int expected_index = (k / 2) * 3 + 1 + (k % 2);
+    GoogleString expected =
+        StrCat(k % 2 == 0 ? ".a" : ".s", IntegerToString(expected_index));
+    EXPECT_EQ(expected, rulesets[k]->selectors()[0]->ToString());
+  }
+}
+
+// Reasons are kept up to a fixed size, then one marker says there were more.
+TEST_F(CssHierarchyTest, FailureReasonTextIsBounded) {
+  CssHierarchy top(nullptr);
+  top.set_flattening_succeeded(false);
+  for (int i = 0; i < 5000; ++i) {
+    top.AddFlatteningFailureReason(
+        StrCat("Reason number ", IntegerToString(i)));
+  }
+  const GoogleString& text = top.flattening_failure_reason();
+  EXPECT_GE(CssHierarchy::kMaxFailureReasonBytes + 64,
+            static_cast<int>(text.size()));
+  EXPECT_TRUE(StringPiece(text).starts_with(
+      "Flattening failed: Reason number 0 AND Reason number 1 AND "));
+  EXPECT_EQ(1, CountSubstring(text, " AND more"));
+  EXPECT_TRUE(StringPiece(text).ends_with(" AND more"));
+}
+
+// A reason that is already held is recognised without searching the text.
+TEST_F(CssHierarchyTest, RepeatedFailureReasonDoesNotSearchText) {
+  CssHierarchy top(nullptr);
+  top.set_flattening_succeeded(false);
+  for (int i = 0; i < 40; ++i) {
+    top.AddFlatteningFailureReason(
+        StrCat("Reason number ", IntegerToString(i)));
+  }
+  const GoogleString before = top.flattening_failure_reason();
+  const int64 scanned = top.failure_reason_scan_bytes_for_testing();
+  EXPECT_LT(0, scanned);
+  for (int i = 0; i < 10000; ++i) {
+    top.AddFlatteningFailureReason(
+        StrCat("Flattening failed: REASON number ", IntegerToString(i % 40)));
+  }
+  EXPECT_EQ(before, top.flattening_failure_reason());
+  EXPECT_EQ(scanned, top.failure_reason_scan_bytes_for_testing());
+}
+
 }  // namespace net_instaweb

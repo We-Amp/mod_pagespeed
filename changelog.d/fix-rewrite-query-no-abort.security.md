@@ -1,1 +1,0 @@
-- A page could stop a server worker when options are added to rewritten URLs, for example through a stylesheet import flattened into an inline style; such resources now get no options in their URL and the page is served. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

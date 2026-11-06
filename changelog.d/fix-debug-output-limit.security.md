@@ -1,1 +1,0 @@
-- Hardened debug mode: the debug output written into one page is now bounded by a new directive. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

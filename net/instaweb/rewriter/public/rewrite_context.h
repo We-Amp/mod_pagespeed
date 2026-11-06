@@ -154,6 +154,15 @@ class RewriteContext {
  public:
   using InputInfoStarVector = std::vector<InputInfo*>;
   static const char kNumRewritesAbandonedForLockContention[];
+  // How often the rewrites of a document reached a limit of PageWorkBudget:
+  // a rewrite left undone for the input bytes, rewrites or partition entries
+  // the document had used, and a rewrite waiting for an input load to end.
+  static const char kRewriteBudgetInputBytesHits[];
+  static const char kRewriteBudgetInputLoadsHits[];
+  static const char kRewriteBudgetContextsHits[];
+  static const char kRewriteBudgetPartitionEntriesHits[];
+  // The debug message on an element left unrewritten for that reason.
+  static const char kPageBudgetDebugMessage[];
   static const char kNumDeadlineAlarmInvocations[];
   static const char kHashMismatchMessage[];
 
@@ -300,6 +309,15 @@ class RewriteContext {
   RewriteContext* nested(int i) const { return nested_[i]; }
 
   RewriteDriver* Driver() const { return driver_; }
+
+  // For a filter about to create a nested rewrite of this one: true if the
+  // document may start another rewrite. Otherwise false, and this rewrite is
+  // left undone (too busy, uncached) when it completes, so the filter need
+  // not create the nested rewrite at all. Takes nothing; AddNestedContext()
+  // takes the rewrite. Call it only from this rewrite's Rewrite() or
+  // Harvest(), before its RewriteDone(): a refusal is noted when the rewrite
+  // completes, in RewriteDoneImpl().
+  bool PageAllowsNestedContext();
 
   // If called with true, forces a rewrite and re-generates the output.
   void set_force_rewrite(bool x) { force_rewrite_ = x; }
@@ -579,13 +597,16 @@ class RewriteContext {
 
   // Whether a fetch of this context's output may store its result in the
   // metadata cache, under the key that an HTML rewrite of the same inputs
-  // reads.  A fetch reconstructs exactly what its URL names, so for most
-  // filters that result is the one the HTML path would compute, and storing
-  // it saves the next HTML rewrite the work.  A filter whose Partition()
-  // applies rules that the fetch path never runs returns false here, so that
-  // what a fetch produces never decides how pages are rewritten; the fetch is
-  // still served and its output still goes to the HTTP cache.
-  virtual bool FetchWritesPartition() const { return true; }
+  // reads.  The stored result carries the output URL, which later HTML
+  // rewrites render as is, so by default a fetch stores it only when it
+  // names a single input and its URL is the one an HTML rewrite of that input
+  // produces: same directory, domain mapping and shard, same encoded name.
+  // That URL is computed from the input URL and the options, never from the
+  // request.  A filter whose Partition() applies rules that the fetch path
+  // never runs returns false here, so that what a fetch produces never
+  // decides how pages are rewritten.  Either way the fetch is still served
+  // and its output still goes to the HTTP cache.
+  virtual bool FetchWritesPartition() const;
 
   // Adjust headers sent out for a stale or in-place result. We may send out
   // stale results in the fallback fetch pathway, but these results should not
@@ -604,6 +625,10 @@ class RewriteContext {
   // url is not rewritten.
   virtual void FetchTryFallback(const GoogleString& url,
                                 const StringPiece& hash);
+
+  // Whether a fetch that falls back to its original input may serve it from
+  // the HTTP cache only when the module fetched it itself.
+  virtual bool FallbackToInputNeedsFetchedEntry() const { return true; }
 
   // Freshens resources proactively to avoid expiration in the near future.
   void Freshen();
@@ -677,6 +702,18 @@ class RewriteContext {
       RewriteContext* rewrite_context, RewriteDriver* driver,
       GoogleString* error_out, CacheLookupResultCallback* callback);
 
+  // Takes num_entries copied or reported partition entries from the
+  // document's PageWorkBudget and returns true, or returns false when they do
+  // not fit. Always true for a rewrite done to answer a fetch. Call it only
+  // from this rewrite's Rewrite() or Harvest(), before its RewriteDone(): a
+  // refusal is counted, and its debug message added, when the rewrite
+  // completes, in RewriteDoneImpl() on the rewrite sequence.
+  bool TakePagePartitionEntries(int64 num_entries);
+
+  // Hands one debug message to the parent context, which keeps it as
+  // AddDebugMessages does.
+  void AddDebugMessageToParent(const GoogleString& message);
+
  private:
   class OutputCacheCallback;
   class WriteIfChanged;
@@ -718,6 +755,43 @@ class RewriteContext {
       ResourcePtr resource,  // NOLINT(performance-unnecessary-value-param)
       int slot_index);
   void ResourceRevalidateDone(InputInfo* input_info, bool success);
+
+  // Starts the revalidation loads of revalidate_inputs_ the document has
+  // room for; see OutputCacheRevalidate().
+  void RevalidateInputs();
+  void FinishRevalidation();
+
+  // True if this rewrite counts against the document's PageWorkBudget: it
+  // and every rewrite it is nested in work for an HTML document, not for a
+  // fetch.
+  bool ChargesPageBudget() const;
+
+  // Waits for the document to have room for another input load, then calls
+  // resume.
+  void WaitForPageInputLoad(void (RewriteContext::*resume)());
+  void ResumeFetchInputs();
+  void ResumeRevalidateInputs();
+
+  // Runs resume, a rewrite that waited for an input load, on the rewrite
+  // sequence; does nothing for nullptr.
+  void RunResumed(Function* resume);
+
+  // Counts a hit of the PageWorkBudget limit stat_name and, in debug mode,
+  // adds the debug message saying the element was left for a later view.
+  void NotePageBudgetHit(const char* stat_name);
+
+  // How ChargePagePartitionEntries() notes a refusal: now (statistic and
+  // debug message), when the rewrite completes (from Rewrite() or Harvest()),
+  // or by the statistic alone, for a rewrite whose partitions are already
+  // written and must not change.
+  enum class PageBudgetNote { kNow, kDeferred, kStatisticOnly };
+
+  // Takes num_entries partition entries; a refusal is noted as note says.
+  bool ChargePagePartitionEntries(int64 num_entries, PageBudgetNote note);
+
+  // Ends the rewrite as too busy, unrendered and uncached, because the
+  // document's input byte budget was spent before its inputs were loaded.
+  void StopForPageInputBytes();
   void LogMetadataCacheInfo(bool cache_ok, bool can_revalidate);
 
   // When a RewriteContext 'B' discovers that it's doing the exact same rewrite
@@ -965,6 +1039,27 @@ class RewriteContext {
   std::unique_ptr<OutputPartitions> partitions_;
   OutputResourceVector outputs_;
   int outstanding_fetches_;
+
+  // For a rewrite of an HTML document: the next slot FetchInputs() loads,
+  // whether the rewrite waits for room for another input load (holding a
+  // predecessor count meanwhile), and whether the document's input byte
+  // budget ran out before all its inputs were loaded.
+  int next_input_slot_ = 0;
+  bool waiting_for_input_load_ = false;
+  bool page_input_bytes_spent_ = false;
+
+  // For the document's rewrite budget: whether AddNestedContext() took this
+  // nested rewrite's place in it or found none left, so that Start() does
+  // not take it again; and a limit this rewrite reached from its Rewrite() or
+  // Harvest() (the only places that set it), noted, and the rewrite left
+  // undone, in RewriteDoneImpl().
+  bool page_context_taken_ = false;
+  bool page_context_refused_ = false;
+  const char* deferred_page_budget_hit_ = nullptr;
+
+  // The inputs OutputCacheRevalidate() checks, and the next one to load.
+  InputInfoStarVector revalidate_inputs_;
+  size_t next_revalidate_input_ = 0;
   int outstanding_rewrites_;
   std::unique_ptr<ResourceContext> resource_context_;
   GoogleString partition_key_;
@@ -1077,6 +1172,10 @@ class RewriteContext {
 
   // Set by FetchNotModified: this fetch is a conditional request.
   bool fetch_not_modified_ = false;
+
+  // Set when a fetch falls back to its original input, which is then served
+  // from the HTTP cache only if the module fetched it itself.
+  bool fallback_needs_fetched_input_ = false;
 
   // Indicates whether we have a metadata miss (or an unsuccessful revalidation
   // attempt) on the html path.

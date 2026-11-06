@@ -35,6 +35,7 @@
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -45,6 +46,8 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/thread/scheduler.h"
+#include "pagespeed/kernel/thread/scheduler_sequence.h"
 
 namespace net_instaweb {
 
@@ -155,6 +158,38 @@ void RecordingFetch::FreeDriver() {
   context_->Driver()->FetchComplete();
 }
 
+// Reports the module's own load of the in-place resource to its
+// RecordingFetch.
+class RecordingFetch::FetchedInputCallback : public Resource::AsyncCallback {
+ public:
+  FetchedInputCallback(const ResourcePtr& resource, RecordingFetch* fetch)
+      : AsyncCallback(resource), fetch_(fetch) {}
+
+  void Done(bool lock_failure, bool resource_ok) override {
+    // A load that tolerates uncacheable responses also reports an error
+    // response as loaded; only a 200 is something to optimize.
+    const bool loaded =
+        !lock_failure && resource_ok && resource()->HttpStatusOk();
+    // The load may finish on a fetcher thread; continue where the driver
+    // runs its tasks, which is the request thread on servers that need it.
+    Scheduler::Sequence* sequence =
+        fetch_->context_->Driver()->scheduler_sequence();
+    if (sequence != nullptr) {
+      sequence->Add(
+          MakeFunction(fetch_, &RecordingFetch::FetchedInputLoaded, loaded));
+    } else {
+      fetch_->FetchedInputLoaded(loaded);
+    }
+    delete this;
+  }
+
+ private:
+  RecordingFetch* fetch_;
+
+  FetchedInputCallback(const FetchedInputCallback&) = delete;
+  FetchedInputCallback& operator=(const FetchedInputCallback&) = delete;
+};
+
 bool RecordingFetch::ShouldStream() const {
   return !(can_in_place_rewrite_ &&
            context_->Options()->in_place_wait_for_optimized());
@@ -230,12 +265,26 @@ void RecordingFetch::HandleDone(bool success) {
     FreeDriver();
   } else if (success && can_in_place_rewrite_) {
     if (resource_->UseHttpCache()) {
+      // The recorded response is what the server sent this client.  The
+      // optimization is built only from the resource as the module loads it
+      // itself, so load it (from the cache when the module fetched it
+      // before); FetchedInputLoaded continues.
       // Note, if !UseHttpCache() then the value will already be populated.
       // See InPlaceRewriteContext::StartFetchReconstruction.
-      resource_->Link(&cache_value_, handler_);
-    } else {
-      DCHECK(resource_->loaded());
+      resource_->LoadAsync(Resource::kLoadEvenIfNotCacheable,
+                           context_->Driver()->request_context(),
+                           new FetchedInputCallback(resource_, this));
+      return;  // 'this' may be deleted already.
     }
+    DCHECK(resource_->loaded());
+    FetchedInputLoaded(true);
+    return;  // deleted 'this'.
+  }
+  delete this;
+}
+
+void RecordingFetch::FetchedInputLoaded(bool loaded) {
+  if (loaded) {
     if (streaming_) {
       context_->DetachFetch();
     }
@@ -243,6 +292,21 @@ void RecordingFetch::HandleDone(bool success) {
     if (streaming_) {
       context_->Driver()->FetchComplete();
     }
+  } else {
+    if (!streaming_) {
+      // The response was held back for the optimization; serve it as
+      // recorded instead.
+      if (desired_s_maxage_sec_ != -1 &&
+          response_headers()->status_code() == HttpStatus::kOK) {
+        response_headers()->SetSMaxAge(desired_s_maxage_sec_);
+      }
+      StringPiece contents;
+      cache_value_.ExtractContents(&contents);
+      SharedAsyncFetch::HandleHeadersComplete();
+      SharedAsyncFetch::HandleWrite(contents, handler_);
+      SharedAsyncFetch::HandleDone(true);
+    }
+    FreeDriver();
   }
   delete this;
 }

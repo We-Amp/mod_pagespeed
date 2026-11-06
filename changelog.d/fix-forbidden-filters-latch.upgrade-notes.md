@@ -1,2 +1,0 @@
-- Where `ForbidAllDisabledFilters` is on, query parameters, request headers, cookies and lower configuration scopes (such as a per-directory `.htaccess` file) can no longer turn on any filter that is off at that point, including filters that are off only because the rewrite level leaves them out; they can still turn filters off.
-  To run such a filter there, enable it in the same scope that sets `ForbidAllDisabledFilters`, or above it.

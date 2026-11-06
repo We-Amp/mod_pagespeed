@@ -25,6 +25,8 @@
 #include "net/instaweb/rewriter/dependencies.pb.h"
 #include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/dependency_tracker.h"
+#include "net/instaweb/rewriter/public/page_work_budget.h"
+#include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -33,6 +35,7 @@
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/proto_matcher.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
@@ -1939,6 +1942,120 @@ TEST_F(CollectDependenciesFilterTest, ImportValidityInfoIsBounded) {
   }
   EXPECT_GE(10000, copied_entries);
   rewrite_driver()->FinishParse();
+}
+
+// What the collector copies for a stylesheet counts against the document's
+// partition entries: the input info reported to its element, and the
+// validity info stored for it. A stylesheet whose copies do not fit is not
+// collected on that view; with room it is.
+TEST_F(CollectDependenciesFilterTest, CopiesStopAtPartitionEntries) {
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kExtendCacheImages);
+  rewrite_driver()->AddFilters();
+  GoogleString css;
+  for (int i = 0; i < 20; ++i) {
+    GoogleString image = StrCat("p", IntegerToString(i), ".png");
+    // Distinct lifetimes give each image its own input info.
+    SetResponseWithDefaultHeaders(image, kContentTypePng, "not really",
+                                  300 + i);
+    StrAppend(&css, ".p", IntegerToString(i), "{background:url(", image, ")}");
+  }
+  SetResponseWithDefaultHeaders("many.css", kContentTypeCss, css, 300);
+  const char kInput[] = "<link rel=stylesheet href=many.css>";
+
+  // Returns the validity info collected for the stylesheet on the last
+  // view, or -1 when it was not collected.
+  auto collected_validity = [this]() -> int {
+    ResetDriver();
+    rewrite_driver()->StartParse(kTestDomain);
+    const Dependencies* deps =
+        rewrite_driver()->dependency_tracker()->read_in_info();
+    int result = -1;
+    if (deps != nullptr) {
+      for (const Dependency& dep : deps->dependency()) {
+        if (dep.url().find("many.css") != GoogleString::npos) {
+          result = dep.validity_info_size();
+        }
+      }
+    }
+    rewrite_driver()->FinishParse();
+    return result;
+  };
+  Variable* hits = statistics()->GetVariable(
+      RewriteContext::kRewriteBudgetPartitionEntriesHits);
+
+  // Too little room for the input info reported to the element.
+  PageWorkBudget::Limits limits;
+  limits.partition_entries = 10;
+  rewrite_driver()->page_work_budget()->set_limits_for_testing(limits);
+  ResetDriver();
+  Parse("few_entries", kInput);
+  EXPECT_EQ(-1, collected_validity());
+  EXPECT_LE(1, hits->Get());
+  EXPECT_GE(limits.partition_entries,
+            rewrite_driver()->page_work_budget()->partition_entries_taken());
+
+  // Room for that, but not for what the collector copies.
+  hits->Clear();
+  limits.partition_entries = 30;
+  rewrite_driver()->page_work_budget()->set_limits_for_testing(limits);
+  ResetDriver();
+  Parse("some_entries", kInput);
+  EXPECT_EQ(-1, collected_validity());
+  EXPECT_LE(1, hits->Get());
+
+  // Room for all of it.
+  hits->Clear();
+  limits.partition_entries = 1000;
+  rewrite_driver()->page_work_budget()->set_limits_for_testing(limits);
+  ResetDriver();
+  Parse("enough_entries", kInput);
+  EXPECT_LE(21, collected_validity());
+  EXPECT_EQ(0, hits->Get());
+}
+
+// With debug on, input info that does not fit when a finished stylesheet
+// reports it to its element is counted and dropped, and the stylesheet's
+// written result is left as it was: it is still used, and carries no
+// message about the budget.
+TEST_F(CollectDependenciesFilterTest, ReportedInputsOverBudgetWithDebug) {
+  options()->EnableFilter(RewriteOptions::kRewriteCss);
+  options()->EnableFilter(RewriteOptions::kExtendCacheImages);
+  options()->EnableFilter(RewriteOptions::kDebug);
+  rewrite_driver()->AddFilters();
+  GoogleString css;
+  for (int i = 0; i < 20; ++i) {
+    GoogleString image = StrCat("p", IntegerToString(i), ".png");
+    // Distinct lifetimes give each image its own input info.
+    SetResponseWithDefaultHeaders(image, kContentTypePng, "not really",
+                                  300 + i);
+    StrAppend(&css, ".p", IntegerToString(i), "{background:url(", image, ")}");
+  }
+  SetResponseWithDefaultHeaders("many.css", kContentTypeCss, css, 300);
+  PageWorkBudget::Limits limits;
+  limits.partition_entries = 10;
+  rewrite_driver()->page_work_budget()->set_limits_for_testing(limits);
+  ResetDriver();
+
+  Parse("reported_inputs_over_budget", "<link rel=stylesheet href=many.css>");
+  EXPECT_EQ(
+      1, statistics()
+             ->GetVariable(RewriteContext::kRewriteBudgetPartitionEntriesHits)
+             ->Get());
+  EXPECT_NE(GoogleString::npos, output_buffer_.find(".pagespeed.cf."))
+      << output_buffer_;
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find(RewriteContext::kPageBudgetDebugMessage))
+      << output_buffer_;
+
+  // The stylesheet's cached result is used on the next view as it was
+  // written, again with no message about the budget.
+  ResetDriver();
+  Parse("reported_inputs_over_budget_again",
+        "<link rel=stylesheet href=many.css>");
+  EXPECT_NE(GoogleString::npos, output_buffer_.find(".pagespeed.cf."));
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find(RewriteContext::kPageBudgetDebugMessage));
 }
 
 }  // namespace

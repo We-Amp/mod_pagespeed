@@ -1,1 +1,0 @@
-- Reduced the memory and CPU that a single HTML page can take from a server worker while it is optimized. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

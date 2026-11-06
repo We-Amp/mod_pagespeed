@@ -26,6 +26,7 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_CSS_UTIL_H_
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "pagespeed/kernel/base/basictypes.h"
@@ -86,7 +87,9 @@ void InsertLicenseComments(const StringVector& comments, GoogleString* css);
 
 class StyleExtractor {
  public:
-  explicit StyleExtractor(HtmlElement* element);
+  // A style attribute longer than `max_style_bytes` (when that is positive)
+  // is not parsed and is reported as not parsable (kNotParsable).
+  explicit StyleExtractor(HtmlElement* element, int64 max_style_bytes = 0);
   virtual ~StyleExtractor();
 
   DimensionState state() const { return state_; }
@@ -102,7 +105,11 @@ class StyleExtractor {
   DimensionState dimension_state() { return state_; }
 
  private:
-  static Css::Declarations* GetDeclsFromElement(HtmlElement* element);
+  // Sets *over_bound when the style attribute is longer than the bound and
+  // so was not parsed.
+  static Css::Declarations* GetDeclsFromElement(HtmlElement* element,
+                                                int64 max_style_bytes,
+                                                bool* over_bound);
   std::unique_ptr<Css::Declarations> decls_;
   int width_px_;
   int height_px_;
@@ -172,25 +179,31 @@ void EliminateElementsNotIn(std::vector<T>* sorted_inner,
     if (sorted_inner->empty()) {
       *sorted_inner = sorted_outer;
     } else {
+      // One pass: the kept elements are moved down over the dropped ones.
       typename std::vector<T>::const_iterator outer_iter = sorted_outer.begin();
+      typename std::vector<T>::iterator keep_iter = sorted_inner->begin();
       typename std::vector<T>::iterator inner_iter = sorted_inner->begin();
 
-      while (inner_iter != sorted_inner->end()) {
-        if (outer_iter == sorted_outer.end()) {
-          // No more outer elements => delete all remaining inner elements.
-          inner_iter = sorted_inner->erase(inner_iter, sorted_inner->end());
-        } else if (*outer_iter == *inner_iter) {
-          // This inner element is in the outer => keep it and move on.
+      for (; inner_iter != sorted_inner->end(); ++inner_iter) {
+        while (outer_iter != sorted_outer.end() && *outer_iter < *inner_iter) {
+          // This outer element isn't in the inner => skip it.
           ++outer_iter;
-          ++inner_iter;
-        } else if (*outer_iter < *inner_iter) {
-          // This outer element isn't in the inner => skip it, try the next.
-          ++outer_iter;
-        } else {
-          // This inner element isn't in the outer => delete it, move on.
-          inner_iter = sorted_inner->erase(inner_iter);
         }
+        if (outer_iter == sorted_outer.end()) {
+          // No more outer elements => the remaining inner elements go.
+          break;
+        }
+        if (*outer_iter == *inner_iter) {
+          // This inner element is in the outer => keep it and move on.
+          if (keep_iter != inner_iter) {
+            *keep_iter = std::move(*inner_iter);
+          }
+          ++keep_iter;
+          ++outer_iter;
+        }
+        // Otherwise this inner element isn't in the outer => it goes.
       }
+      sorted_inner->erase(keep_iter, sorted_inner->end());
     }
   }
 }

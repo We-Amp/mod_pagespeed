@@ -1,1 +1,0 @@
-- Reduced the memory that Apache takes to optimize a single large uncompressed HTML page. Affected: 2.7.0 and earlier. Update recommended for Apache sites.

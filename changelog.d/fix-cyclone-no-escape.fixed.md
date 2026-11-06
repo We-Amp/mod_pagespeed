@@ -1,1 +1,0 @@
-- **A cache operation that hits an allocation failure no longer throws out of the Cyclone cache.** A read that runs out of memory is now a cache miss and a write that does is a failed write, each with a log line, instead of an exception reaching the caller.

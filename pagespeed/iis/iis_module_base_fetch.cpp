@@ -1051,6 +1051,12 @@ int IisModuleBaseFetch::CollectHeaders()
 	if (fetch_type_ == FetchType::kInPlace || fetch_type_ == FetchType::kResource)
 	{
 		r->DeleteHeader("Content-MD5");
+	}
+	if (fetch_type_ == FetchType::kInPlace)
+	{
+		// An in-place answer depends on the client (image formats among
+		// others), and IIS's response caches would hand one copy to every client.
+		DisarmResponseCaches(r);
 	} else if (fetch_type_ == FetchType::kHtml) 
 	{
 		// TODO(oschaaF): using header_id should be faster, but doesn't seem to work :(

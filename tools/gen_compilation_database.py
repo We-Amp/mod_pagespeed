@@ -74,6 +74,15 @@ def isCompileTarget(target, args):
     if filename.startswith("external/"):
       return False
 
+  # A persistent output base keeps the compdb fragments of targets that were
+  # since deleted; their sources no longer exist, and linting one fails.
+  # Only workspace sources are checked: generated and external files live
+  # under the execution root, not the workspace.
+  if not filename.startswith(("bazel-out/", "external/")) and \
+      not os.path.isabs(filename) and not os.path.exists(filename):
+    logging.warning("skipping compdb entry for a missing source: %s", filename)
+    return False
+
   # Always exclude third_party — upstream code we don't own
   if filename.startswith("third_party/"):
     return False

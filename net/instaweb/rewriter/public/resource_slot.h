@@ -142,6 +142,12 @@ class ResourceSlot : public RefCounted<ResourceSlot> {
   // may be nullptr.
   const std::vector<InputInfo>* inputs() const { return inputs_.get(); }
 
+  // Drops the inputs reported so far and ignores later reports, for when not
+  // all of them could be kept; inputs_incomplete() is true from then on, and
+  // whoever needs the aggregate input info gives up on it.
+  void DropReportedInputs();
+  bool inputs_incomplete() const { return inputs_incomplete_; }
+
   // Render is not thread-safe.  This must be called from the thread that
   // owns the DOM or CSS file. The RewriteContext state machine will only
   // call ResourceSlot::Render() on slots that were optimized successfully,
@@ -206,6 +212,7 @@ class ResourceSlot : public RefCounted<ResourceSlot> {
   bool disable_further_processing_;
   bool was_optimized_;
   bool need_aggregate_input_info_;
+  bool inputs_incomplete_ = false;
 
   // We track the RewriteContexts that are atempting to rewrite this
   // slot, to help us build a dependency graph between ResourceContexts.

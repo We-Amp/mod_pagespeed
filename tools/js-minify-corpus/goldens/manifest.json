@@ -37,6 +37,144 @@
    "output_sha256": "db95eab3c0da63f7ea78be29f8127570df0a634691842a3f91763f802d5d0b0a"
   },
   {
+   "input": "findings/repros/c01-regex-after-block-brace.js",
+   "input_sha256": "810f2cdbaae13db7c5f89e4de3fad39be88827f0646e993507d9fed5ef21acd6",
+   "status": "ok",
+   "output_sha256": "7c72b92287f510e2cee1fa6b198d6062abe739039230ca95cbf179ae4a47858a"
+  },
+  {
+   "input": "findings/repros/c02-regex-after-keyword.js",
+   "input_sha256": "28bd0affa689a480ed461a90d7c6a482adddc52ada7dbd3b373e82d3ff02f855",
+   "status": "ok",
+   "output_sha256": "b2dfe411cdcbdea42fe289ffbc7735b98f206f8b85015c199e947a37cc5ba9fa"
+  },
+  {
+   "input": "findings/repros/c03-regex-after-control-paren.js",
+   "input_sha256": "9e86252c37636f5fd1879001d05e767007f1de6663c8c664ee92c3168197e443",
+   "status": "ok",
+   "output_sha256": "4aebbc14a0a50b7b8d84fc6612edf8655bbc698c90f37754e323e396733894ac"
+  },
+  {
+   "input": "findings/repros/c04-template-nested-interp.js",
+   "input_sha256": "30ce167c96edb2c58e8dff16b658656e67af70b06c546d1a14e23a0a58c4822a",
+   "status": "ok",
+   "output_sha256": "41b6e51be6d37d9946bab9dab6eb20753f507959da37b0053ef2364ff6ba5466"
+  },
+  {
+   "input": "findings/repros/c05-template-raw-newlines.js",
+   "input_sha256": "db40c59de87391a0482a786fe8f3052dc84b244e953ced21947e48fb56897c72",
+   "status": "ok",
+   "output_sha256": "4196dc4bb40d1cccdab8df8ca17692d35b5c6089df8f3f0ca325d775fedb60bd"
+  },
+  {
+   "input": "findings/repros/c06-asi-paren-index-template.js",
+   "input_sha256": "bef65e76be330eff9d357c5008913b9f15b17bdfaf1dd3f446af065f3a64655a",
+   "status": "ok",
+   "output_sha256": "4514b0976c3aa3e8480b432b519fce0f5c4832dcc451a86d44e8c02cb08033f3"
+  },
+  {
+   "input": "findings/repros/c07-asi-prefix-postfix.js",
+   "input_sha256": "9e149f1038bdbc83c8ae92b248f545848b5f2600921f7ff4a2d58880c4f0a267",
+   "status": "ok",
+   "output_sha256": "53b833211f0cd2cbbb2bb1f1bef40f791711c223a5e81a6aab2a49e4ddf204d7"
+  },
+  {
+   "input": "findings/repros/c08-leading-semicolon.js",
+   "input_sha256": "9129960edad0fe8b642e14b3f2c20b5ea24bf5e53677f8bc744d0eb4ae76ed27",
+   "status": "ok",
+   "output_sha256": "1e7d53334e13a34b8e91a7101962f0b97b340a52a35631f72be31e1eef04249f"
+  },
+  {
+   "input": "findings/repros/c09-return-newline.js",
+   "input_sha256": "9ac64c71df272fc4b2742e3901930a15fab968249d5c9bc3cbb96bac7a02125d",
+   "status": "ok",
+   "output_sha256": "c35105186535d426e9583795663b86fcbb374b89e861f55e8cdeeccf84fb8780"
+  },
+  {
+   "input": "findings/repros/c10-unicode-escape-identifiers.js",
+   "input_sha256": "dba6055b9fc307a8d088ed4e14310949e680a327ba0ff36dd6b33e3809092e1b",
+   "status": "ok",
+   "output_sha256": "21bcb267e27eec83b200bdb060b9c8ca9c64a269ac8ca79a396cf1f1a9d0488d"
+  },
+  {
+   "input": "findings/repros/c11-unicode-raw-identifiers.js",
+   "input_sha256": "781d30ef4f7e626c5c7e81e21940dbc15fd103875d2a4572e683589d52c161fd",
+   "status": "ok",
+   "output_sha256": "973d3620a141d3c6da625c932838ce0e25f41bdc721efb6794a42ae443f02245"
+  },
+  {
+   "input": "findings/repros/c12-html-comment-markers.js",
+   "input_sha256": "1191c8c0331977aee559d8659b14538ca89b0e838406eaf304d3b7204f6497a1",
+   "status": "ok",
+   "output_sha256": "d968a3d6a3d646833fea9aaa231c36c1b3ebfcaa15406f8a5e138ed93cd910c3"
+  },
+  {
+   "input": "findings/repros/c13-html-close-comment-asi.js",
+   "input_sha256": "537e1c743a002892d60090a1671b26b75cb365c7aa8f339eae5090317b331c16",
+   "status": "ok",
+   "output_sha256": "bdb926613fc6c01a01ff80c9fb2d777c9e6011c2cedd4c78a5244f150c3ea723"
+  },
+  {
+   "input": "findings/repros/c14-script-close-in-strings.js",
+   "input_sha256": "70c99132d6fc7dc9e799d903d6f2510bef480b698ea65ae40fc75b5c6d5f967b",
+   "status": "ok",
+   "output_sha256": "de46341e9bfa1eca2816bc87cb954d34b6bf7b84921c4fc1f4962aa05a255eb3"
+  },
+  {
+   "input": "findings/repros/c15-numeric-separators-exponents.js",
+   "input_sha256": "0cbeab684bc7102d899f8b033ea24e7bd8fb0e7e1e4b9390e7697987d4fdf649",
+   "status": "ok",
+   "output_sha256": "781be102dc526dbe9636ef030b5aaecf5841756799edf4a8b1205b987ffe7f1d"
+  },
+  {
+   "input": "findings/repros/c16-object-getter-setter.js",
+   "input_sha256": "65a0db1e817baea8ba41e075bb476bac6e38a75b39b0910c3931919f9055955f",
+   "status": "ok",
+   "output_sha256": "7504cedab475b2114d59691a5785b719fdb2201f583354acf90e2322aeed708d"
+  },
+  {
+   "input": "findings/repros/c17-class-accessors.js",
+   "input_sha256": "fe0b6cdfc0781fb2017ea219e7426179b436f71c615fef6a8a5b80c8a6a0e2bf",
+   "status": "ok",
+   "output_sha256": "5195506de932425ece2e56011fcd0511ca9b9ae9cd9471aac6a2c6eb09cd8ed6"
+  },
+  {
+   "input": "findings/repros/c18-private-class-fields.js",
+   "input_sha256": "66efa905fd6f86287d79e3cfa925432f3cfe8f88ff77e47e29982f627552c017",
+   "status": "ok",
+   "output_sha256": "457e4dac5823a9fcbf8696a2e671b33d22fe51c7df0a958711707fc46a853d4b"
+  },
+  {
+   "input": "findings/repros/c19-optional-chaining.js",
+   "input_sha256": "46ac6f3e04e0d254f8883f5635e6dbb8897e1455f9cd5753bb99e3546220ad1d",
+   "status": "ok",
+   "output_sha256": "7a9d10fe8cf9d2a2c143c2efabc9a49ec3df4842932603db82557b857e33d240"
+  },
+  {
+   "input": "findings/repros/c20-labelled-loops.js",
+   "input_sha256": "e920d5d833924a143c546d9107ed9385f5b8b765080bbd0bac765503fcb4f672",
+   "status": "ok",
+   "output_sha256": "ea5917de55d90138202d05b7da2838a728b5c7f4a9281b7e4c3f64a08ac3ab10"
+  },
+  {
+   "input": "findings/repros/c21-regex-vs-division.js",
+   "input_sha256": "45e09b3b93942f81e6b6d95a5b64ab82b74ae9661ba63a2c7196c1b0012dd733",
+   "status": "ok",
+   "output_sha256": "9516255f3f77bfac88b910c13aaab29fb503d8879e9e7ab93d847721188e50dc"
+  },
+  {
+   "input": "findings/repros/c22-module-forms.mjs",
+   "input_sha256": "2d1a10cfa9b1a70c785036ad37d66e67d9687a9deb663d8ad27da3004e750b81",
+   "status": "ok",
+   "output_sha256": "94fe138a567d8e80b731729afa37863464122de5fe831bd8efa8d8a5e1b493f9"
+  },
+  {
+   "input": "findings/repros/c23-unicode-codepoint-escape-identifier.js",
+   "input_sha256": "e5e56a8de31d8c3bd2b6a24d1ab88a77b0a4b30e934294212e818eb0da3cea3c",
+   "status": "unmodelable",
+   "output_sha256": "b64f7bbc4f4e34a745d30366484614ae87425225497572ce517bfd906e47b0eb"
+  },
+  {
    "input": "findings/repros/k1-import-regex-control.mjs",
    "input_sha256": "9fafb6f499159c4f8b932eb623bdfede44904029ef3313910b2dab3236f75805",
    "status": "ok",

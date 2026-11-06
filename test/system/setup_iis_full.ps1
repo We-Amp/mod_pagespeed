@@ -379,6 +379,27 @@ function Initialize-TestEnvironment {
         Write-Status "Created no-cache web.config for $noCacheDir" "Gray"
     }
 
+    # Inputs an optimized resource must not grow more cacheable than, as
+    # Apache's debug.conf and the nginx test configuration set them.
+    foreach ($restrictive in @(
+            @{ Dir = "cc200p";  Custom = "private" },
+            @{ Dir = "cc200ns"; Custom = "no-store" })) {
+        $ccDir = "$WebRoot\mod_pagespeed_test\ipro\$($restrictive.Dir)"
+        if (Test-Path $ccDir) {
+            @"
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <system.webServer>
+    <staticContent>
+      <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="00:03:20" cacheControlCustom="$($restrictive.Custom)" />
+    </staticContent>
+  </system.webServer>
+</configuration>
+"@ | Set-Content "$ccDir\web.config" -Encoding UTF8
+            Write-Status "Created $($restrictive.Custom) web.config for $ccDir" "Gray"
+        }
+    }
+
     # Create a simple index.html for testing
     @"
 <!DOCTYPE html>
@@ -927,6 +948,15 @@ pagespeed CssImageInlineMaxBytes 2048
         if (Test-Path $noCacheDir) {
             Copy-Item "$WebRoot\pagespeed.config" "$noCacheDir\pagespeed.config" -Force
             Write-Status "Copied pagespeed.config to $noCacheDir" "Gray"
+        }
+
+        # The restrictive-input directories carry their own web.config too.
+        foreach ($ccName in @("cc200p", "cc200ns")) {
+            $ccDir = "$WebRoot\mod_pagespeed_test\ipro\$ccName"
+            if (Test-Path $ccDir) {
+                Copy-Item "$WebRoot\pagespeed.config" "$ccDir\pagespeed.config" -Force
+                Write-Status "Copied pagespeed.config to $ccDir" "Gray"
+            }
         }
 
         # Same for the /aspnet application: the module engages only when

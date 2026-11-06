@@ -34,6 +34,8 @@ FAILS=0
 PASSES=0
 pass() { PASSES=$((PASSES + 1)); echo "ok   $1"; }
 fail() { FAILS=$((FAILS + 1)); echo "FAIL $1: $2"; }
+# A case with no premise in this repository's table: not passed, not failed.
+skip() { echo "skip $1: $2"; }
 
 # --- The driver under test, next to its table and target parser ---------
 TOOLS="${WORK}/tools/ci"
@@ -465,23 +467,37 @@ fi
 # memcached reached over a unix socket) must stay out of the table and of the
 # step command: set but empty, the cache cases that need them run against a
 # server that is not there and fail for the wrong reason; unset, they skip.
-# The ports of the services the driver does start are still passed.
+# The ports of the services the driver does start are still passed. A table
+# whose jobs list no redis or memcached service has no ports to look for,
+# and one that names no unstarted-service variable has no names to look
+# for: the case skips (the same file runs in repositories of both kinds).
 CASE=unstarted-service-vars-are-left-out
 FAKE_STATE="${CULPRIT_STATE}"
-bad=""
-for k in ${BISECT_VARS_FOR_UNSTARTED_SERVICES:-}; do
-  grep -qE "(^|[[:space:]])${k}=" "${TOOLS}/bisect-job-table.sh" \
-    && bad="${bad} [${k} is still set in the table]"
-  grep -q -- "--test_env=${k}=" "${FAKE_STATE}/docker.log" \
-    && bad="${bad} [${k} reached the step as --test_env]"
-  grep -qE -- "-e ${k}=" "${FAKE_STATE}/docker.log" \
-    && bad="${bad} [${k} reached the step as container env]"
+table_services=""
+for job in ${BISECT_JOBS:-}; do
+  J="$(printf '%s' "${job}" | tr 'a-z-' 'A-Z_')"
+  table_services="${table_services} $(eval "printf '%s' \"\${BISECT_${J}_SERVICES:-}\"")"
 done
-for k in REDIS_PORT=6379 MEMCACHED_PORT=11211; do
-  grep -q -- "--test_env=${k} " "${FAKE_STATE}/docker.log" \
-    || bad="${bad} [--test_env=${k} missing]"
-done
-if [ -n "${bad}" ]; then fail "${CASE}" "${bad}"; else pass "${CASE}"; fi
+if ! grep -qw redis <<<"${table_services}" || ! grep -qw memcached <<<"${table_services}"; then
+  skip "${CASE}" "no redis or memcached service in the table"
+elif [ -z "${BISECT_VARS_FOR_UNSTARTED_SERVICES:-}" ]; then
+  skip "${CASE}" "the table names no unstarted-service variable"
+else
+  bad=""
+  for k in ${BISECT_VARS_FOR_UNSTARTED_SERVICES:-}; do
+    grep -qE "(^|[[:space:]])${k}=" "${TOOLS}/bisect-job-table.sh" \
+      && bad="${bad} [${k} is still set in the table]"
+    grep -q -- "--test_env=${k}=" "${FAKE_STATE}/docker.log" \
+      && bad="${bad} [${k} reached the step as --test_env]"
+    grep -qE -- "-e ${k}=" "${FAKE_STATE}/docker.log" \
+      && bad="${bad} [${k} reached the step as container env]"
+  done
+  for k in REDIS_PORT=6379 MEMCACHED_PORT=11211; do
+    grep -q -- "--test_env=${k} " "${FAKE_STATE}/docker.log" \
+      || bad="${bad} [--test_env=${k} missing]"
+  done
+  if [ -n "${bad}" ]; then fail "${CASE}" "${bad}"; else pass "${CASE}"; fi
+fi
 
 # git 2.55 and later print "<sha> is the first 'bad' commit", older ones
 # "is the first bad commit". A git shim rewrites `git bisect run` output to

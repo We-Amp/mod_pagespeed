@@ -102,4 +102,35 @@ TEST_F(CollapseWhitespaceFilterTest, DoNotCollapseWithinTextarea) {
                     "    is good  to     see you   </textarea></body>");
 }
 
+// In inline SVG and MathML, textarea is an ordinary element, so its
+// whitespace is collapsed like any other text.  (pre and code end SVG and
+// MathML content, so they are always HTML.)
+TEST_F(CollapseWhitespaceFilterTest, CollapseWithinForeignTextarea) {
+  ValidateExpected("collapse_within_foreign_textarea",
+                   "<body><svg><textarea>a   b</textarea></svg>"
+                   "<math><textarea>c   d</textarea></math>"
+                   "<svg><g><pre>e   f</pre></body>",
+                   "<body><svg><textarea>a b</textarea></svg>"
+                   "<math><textarea>c d</textarea></math>"
+                   "<svg><g><pre>e   f</pre></body>");
+}
+
+// HTML elements inside an integration point are HTML again.
+TEST_F(CollapseWhitespaceFilterTest, DoNotCollapseWithinPreInIntegrationPoint) {
+  ValidateNoChanges("pre_in_foreign_object",
+                    "<body><svg><foreignObject><pre>a   b</pre>"
+                    "</foreignObject></svg><math><mi><textarea>c   d"
+                    "</textarea></mi></math></body>");
+}
+
+// SVG script and style hold script and CSS text, so their whitespace,
+// including that of their child elements, is kept.
+TEST_F(CollapseWhitespaceFilterTest, DoNotCollapseWithinForeignScriptOrStyle) {
+  ValidateExpected("foreign_script_and_style",
+                   "<body><svg><script>x = \"a   b\"<g>c   d</g></script>"
+                   "<style>e   f</style><text>g   h</text></svg></body>",
+                   "<body><svg><script>x = \"a   b\"<g>c   d</g></script>"
+                   "<style>e   f</style><text>g h</text></svg></body>");
+}
+
 }  // namespace net_instaweb

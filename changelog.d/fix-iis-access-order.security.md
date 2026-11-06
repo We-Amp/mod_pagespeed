@@ -1,1 +1,0 @@
-- IIS: hardened request handling so that a client refused by an IIS access rule can no longer receive optimized or cached content for the URL it was refused. Affected: 2.7.0 and earlier. Update recommended for IIS sites that restrict access with IIS rules.

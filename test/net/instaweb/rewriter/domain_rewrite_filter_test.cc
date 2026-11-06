@@ -201,6 +201,31 @@ TEST_F(DomainRewriteFilterTest, RewriteHyperlinks) {
                    " src=\"http://to1.test.com/iframe.html\"/>");
 }
 
+// An SVG a or script element is not an HTML link or script, so its URL is
+// left alone; HTML elements inside foreignObject are rewritten as before.
+TEST_F(DomainRewriteFilterTest, SvgLinksAndScriptsAreNotRewritten) {
+  options()->ClearSignatureForTesting();
+  options()->set_domain_rewrite_hyperlinks(true);
+  ValidateExpected("svg a and script",
+                   StrCat("<svg><a href=\"", kFrom1Domain,
+                          "s.html\">s</a>"
+                          "<script src=\"",
+                          kFrom1Domain,
+                          "s.js\"></script>"
+                          "<foreignObject><a href=\"",
+                          kFrom1Domain,
+                          "h.html\">h</a>"
+                          "<script src=\"",
+                          kFrom1Domain,
+                          "h.js\"></script>"
+                          "</foreignObject></svg>"),
+                   "<svg><a href=\"http://from1.test.com/s.html\">s</a>"
+                   "<script src=\"http://from1.test.com/s.js\"></script>"
+                   "<foreignObject><a href=\"http://to1.test.com/h.html\">h</a>"
+                   "<script src=\"http://to1.test.com/h.js\"></script>"
+                   "</foreignObject></svg>");
+}
+
 TEST_F(DomainRewriteFilterTest, RewriteButDoNotShardHyperlinks) {
   options()->ClearSignatureForTesting();
   options()->set_domain_rewrite_hyperlinks(true);

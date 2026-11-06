@@ -2148,11 +2148,12 @@ TEST_F(InPlaceTest, FetchInPlaceResource) {
 
   // Now we allow HTTP fetches and we expect success.
   EXPECT_TRUE(TryFetchInPlaceResource(url, true /* proxy_mode */));
-  EXPECT_EQ(0, http_cache()->cache_hits()->Get());
-  EXPECT_EQ(1, http_cache()->cache_misses()->Get());
+  EXPECT_EQ(1, http_cache()->cache_hits()->Get());
+  // The module's own anonymous fetch before the optimization is built.
+  EXPECT_EQ(2, http_cache()->cache_misses()->Get());
   // We insert both original and rewritten resources.
-  EXPECT_EQ(2, http_cache()->cache_inserts()->Get());
-  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(3, http_cache()->cache_inserts()->Get());
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
   ClearStats();
 
   // Now that we've loaded the resource into cache, we expect success.

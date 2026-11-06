@@ -86,11 +86,14 @@ DimensionState GetDimensions(Css::Declarations* decls, int* width,
   return kNoDimensions;
 }
 
-StyleExtractor::StyleExtractor(HtmlElement* element)
-    : decls_(GetDeclsFromElement(element)),
-      width_px_(kNoValue),
-      height_px_(kNoValue) {
-  if (decls_.get() != nullptr) {
+StyleExtractor::StyleExtractor(HtmlElement* element, int64 max_style_bytes)
+    : width_px_(kNoValue), height_px_(kNoValue) {
+  bool over_bound = false;
+  decls_.reset(GetDeclsFromElement(element, max_style_bytes, &over_bound));
+  if (over_bound) {
+    // A style value that is not read still counts as one we cannot process.
+    state_ = kNotParsable;
+  } else if (decls_.get() != nullptr) {
     state_ = GetDimensions(decls_.get(), &width_px_, &height_px_);
   } else {
     state_ = kNoDimensions;
@@ -101,9 +104,17 @@ StyleExtractor::~StyleExtractor() {}
 
 // Return a Declarations* from the style attribute of an element.  If
 // there is no style, return NULL.
-Css::Declarations* StyleExtractor::GetDeclsFromElement(HtmlElement* element) {
+Css::Declarations* StyleExtractor::GetDeclsFromElement(HtmlElement* element,
+                                                       int64 max_style_bytes,
+                                                       bool* over_bound) {
   HtmlElement::Attribute* style = element->FindAttribute(HtmlName::kStyle);
   if ((style != nullptr) && (style->DecodedValueOrNull() != nullptr)) {
+    if (max_style_bytes > 0 &&
+        static_cast<int64>(strlen(style->DecodedValueOrNull())) >
+            max_style_bytes) {
+      *over_bound = true;
+      return nullptr;
+    }
     Css::Parser parser(style->DecodedValueOrNull());
     return parser.ParseDeclarations();
   }

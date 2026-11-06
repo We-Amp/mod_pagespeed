@@ -1,1 +1,0 @@
-- Hardened image spriting so that a request for a sprite of many images can no longer occupy a server worker for a disproportionate time. Affected: 2.7.0 and earlier. Update recommended for nginx, Apache and IIS sites.

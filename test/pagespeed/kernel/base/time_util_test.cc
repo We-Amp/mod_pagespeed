@@ -64,4 +64,32 @@ TEST_F(TimeUtilTest, TestIdentity) {
   EXPECT_EQ(kApr5, GetTimeString(GetTimeValue(kApr5)));
 }
 
+TEST_F(TimeUtilTest, TestConvertTimeToStringWithUs) {
+  // The instant of kApr5, plus a microsecond remainder.
+  int64 time_us = GetTimeValue(kApr5) * 1000 + 123456;
+  EXPECT_TRUE(ConvertTimeToStringWithUs(time_us, &out_));
+  EXPECT_EQ("Mon, 05 Apr 2010 18:49:46.123456 GMT", out_);
+
+  // Same second, with a remainder just under a full microsecond-slot.
+  time_us += 876543;
+  EXPECT_TRUE(ConvertTimeToStringWithUs(time_us, &out_));
+  EXPECT_EQ("Mon, 05 Apr 2010 18:49:46.999999 GMT", out_);
+}
+
+TEST_F(TimeUtilTest, TestConvertInvalidStringToTime) {
+  int64 time_ms = kTimestampMs;
+  // An empty string fails and zeroes the output.
+  EXPECT_FALSE(ConvertStringToTime("", &time_ms));
+  EXPECT_EQ(0, time_ms);
+
+  // Garbage, a truncated date and trailing junk all fail, leaving the
+  // output untouched.
+  time_ms = kTimestampMs;
+  EXPECT_FALSE(ConvertStringToTime("not a timestamp", &time_ms));
+  EXPECT_FALSE(ConvertStringToTime("Mon, 05 Apr 2010", &time_ms));
+  EXPECT_FALSE(
+      ConvertStringToTime("Mon, 05 Apr 2010 18:49:46 GMT junk", &time_ms));
+  EXPECT_EQ(kTimestampMs, time_ms);
+}
+
 }  // namespace net_instaweb

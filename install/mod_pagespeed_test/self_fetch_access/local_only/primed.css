@@ -1,0 +1,4 @@
+/* Self-fetch access test: read by a local client before others ask for it. */
+.sfa-primed-marker   {
+    color :   #0000ff ;
+}

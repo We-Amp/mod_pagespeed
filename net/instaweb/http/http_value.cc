@@ -50,6 +50,8 @@ namespace net_instaweb {
 
 class MessageHandler;
 
+const char HTTPValue::kFetchedInputHeader[] = "@Fetched-Input";
+
 void HTTPValue::CopyOnWrite() {
   CollapseToOwned();
   storage_.DetachRetainingContent();
@@ -166,6 +168,31 @@ unsigned int HTTPValue::SizeOfFirstChunk() const {
 // invalid entry rather than aborting the server.
 bool HTTPValue::ExtractHeaders(ResponseHeaders* headers,
                                MessageHandler* handler) const {
+  bool ret = ExtractRawHeaders(headers, handler);
+  if (ret && headers->RemoveAll(kFetchedInputHeader)) {
+    headers->ComputeCaching();
+  }
+  return ret;
+}
+
+bool HTTPValue::IsFetchedInput() const {
+  if (Empty()) {
+    return false;
+  }
+  ResponseHeaders headers;
+  return ExtractRawHeaders(&headers, nullptr) &&
+         headers.Has(kFetchedInputHeader);
+}
+
+void HTTPValue::SetHeadersMarkingFetchedInput(const ResponseHeaders& headers) {
+  ResponseHeaders marked;
+  marked.CopyFrom(headers);
+  marked.Replace(kFetchedInputHeader, "1");
+  SetHeaders(&marked);
+}
+
+bool HTTPValue::ExtractRawHeaders(ResponseHeaders* headers,
+                                  MessageHandler* handler) const {
   bool ret = false;
   headers->Clear();
   if (raw_size() >= kStorageOverhead) {

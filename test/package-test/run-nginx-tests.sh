@@ -168,6 +168,27 @@ http {
         location ~ /no_cache/ {
             add_header Cache-Control "no-cache" always;
         }
+
+        # Fixtures some automatic/ tests need (same as test/system/run_nginx_tests.sh).
+        # Inputs a rewritten resource must not grow more cacheable than.
+        location ~ /ipro/cc200p/ {
+            add_header Cache-Control "private, max-age=200" always;
+        }
+        location ~ /ipro/cc200ns/ {
+            add_header Cache-Control "no-store, max-age=200" always;
+        }
+        # A request can only lower the image inline threshold, so the page gets
+        # it from the configuration (test_rewrite_css.py::test_rewrite_css_images).
+        location = /mod_pagespeed_example/rewrite_css_images.html {
+            pagespeed CssImageInlineMaxBytes 2048;
+        }
+        # The flatten size limit is configuration only (not settable per request).
+        location ^~ /mod_pagespeed_test/flatten_limit_tiny/ {
+            pagespeed CssFlattenMaxBytes 5;
+        }
+        location ^~ /mod_pagespeed_test/flatten_limit_medium/ {
+            pagespeed CssFlattenMaxBytes 50;
+        }
         location ~ "^/pagespeed_static/" { }
         location ~ "^/ngx_pagespeed_beacon\$" { }
         location ~ "^/pagespeed_admin" { }

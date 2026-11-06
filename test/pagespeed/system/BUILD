@@ -667,6 +667,19 @@ pagespeed_cc_test(
     ],
 )
 
+# The in-place URL agreement shared by the nginx and Apache ports, with the
+# readings each server produces.
+pagespeed_cc_test(
+    name = "inplace_url_agreement_test",
+    srcs = ["inplace_url_agreement_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:inplace_url_agreement",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The host a serve is recorded under: the optimizer's host-name rule and the
 # configured-names rule, with the shapes real servers and clients produce.
 pagespeed_cc_test(

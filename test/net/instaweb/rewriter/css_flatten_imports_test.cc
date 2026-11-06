@@ -1797,6 +1797,81 @@ TEST_F(CssFlattenImportsOnlyTest, FlattenAndTrimInlineCssWithRelativeImage) {
   TestFlattenNested(true, false);
 }
 
+// Two stylesheets in different directories import one stylesheet. With URL
+// trimming each gets the image URL as it is trimmed for its own directory.
+TEST_F(CssFlattenImportsOnlyTest, FlattenedImportIsTrimmedPerImporter) {
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kLeftTrimUrls);
+  server_context()->ComputeSignature(options());
+
+  const GoogleString shared_url = StrCat(kTestDomain, "a/shared.css");
+  SetResponseWithDefaultHeaders(shared_url, kContentTypeCss,
+                                "p{background:url(img.png)}", 100);
+  const GoogleString in_a = StrCat("@import url(", shared_url, ");");
+  const GoogleString in_b = StrCat("@import url(", shared_url, ");");
+
+  ValidateRewriteExternalCss("a/top", in_a, "p{background:url(img.png)}",
+                             kExpectSuccess | kNoClearFetcher);
+  ValidateRewriteExternalCss("b/top", in_b, "p{background:url(/a/img.png)}",
+                             kExpectSuccess | kNoClearFetcher);
+}
+
+// With trimming, importers in the same directory share the flattened import
+// and one in another directory cannot: the second importer in a directory
+// stores two cache entries fewer than an importer elsewhere does.
+TEST_F(CssFlattenImportsOnlyTest, FlattenedImportIsSharedInOneDirectory) {
+  options()->ClearSignatureForTesting();
+  options()->EnableFilter(RewriteOptions::kLeftTrimUrls);
+  server_context()->ComputeSignature(options());
+
+  const GoogleString shared_url = StrCat(kTestDomain, "a/shared.css");
+  SetResponseWithDefaultHeaders(shared_url, kContentTypeCss,
+                                "p{background:url(img.png)}", 100);
+  const GoogleString in = StrCat("@import url(", shared_url, ");");
+
+  ValidateRewriteExternalCss("a/top1", in, "p{background:url(img.png)}",
+                             kExpectSuccess | kNoClearFetcher);
+  lru_cache()->ClearStats();
+  ValidateRewriteExternalCss("a/top2", in, "p{background:url(img.png)}",
+                             kExpectSuccess | kNoClearFetcher);
+  const int64 same_directory = lru_cache()->num_inserts();
+  lru_cache()->ClearStats();
+  ValidateRewriteExternalCss("b/top", in, "p{background:url(/a/img.png)}",
+                             kExpectSuccess | kNoClearFetcher);
+  const int64 other_directory = lru_cache()->num_inserts();
+  // The second importer in a directory finds the flattened import cached.
+  // One in another directory flattens it again, which stores its metadata,
+  // and stores new flattened output, since its trimmed content differs.
+  EXPECT_EQ(3, same_directory);
+  EXPECT_EQ(5, other_directory);
+}
+
+// Without trimming the flattened import does not depend on the importer, so
+// an importer in another directory stores as many entries as one in the
+// same directory: neither flattens the import again.
+TEST_F(CssFlattenImportsOnlyTest, FlattenedImportIsSharedWithoutTrimming) {
+  const GoogleString shared_url = StrCat(kTestDomain, "a/shared.css");
+  SetResponseWithDefaultHeaders(shared_url, kContentTypeCss,
+                                "p{background:url(img.png)}", 100);
+  const GoogleString in = StrCat("@import url(", shared_url, ");");
+  const GoogleString out =
+      StrCat("p{background:url(", kTestDomain, "a/img.png)}");
+
+  ValidateRewriteExternalCss("a/top1", in, out,
+                             kExpectSuccess | kNoClearFetcher);
+  lru_cache()->ClearStats();
+  ValidateRewriteExternalCss("a/top2", in, out,
+                             kExpectSuccess | kNoClearFetcher);
+  const int64 same_directory = lru_cache()->num_inserts();
+  lru_cache()->ClearStats();
+  ValidateRewriteExternalCss("b/top", in, out,
+                             kExpectSuccess | kNoClearFetcher);
+  const int64 other_directory = lru_cache()->num_inserts();
+  EXPECT_EQ(same_directory, other_directory);
+  EXPECT_EQ(3, same_directory);
+  EXPECT_EQ(3, other_directory);
+}
+
 class CssFlattenImportsAndRewriteImagesTest : public CssFlattenImportsTest {
  protected:
   void SetUpFilters() override {

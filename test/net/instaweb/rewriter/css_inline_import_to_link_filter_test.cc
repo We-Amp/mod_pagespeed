@@ -128,6 +128,22 @@ TEST_F(CssInlineImportToLinkFilterTest, DoNotConvertIntegrityStyle) {
       "<style INTEGRITY=\"sha384-x\">@import url(assets/styles.css);</style>");
 }
 
+// An SVG or MathML style element is not an HTML style element, so it is not
+// converted; an HTML style inside an integration point is.
+TEST_F(CssInlineImportToLinkFilterTest, DoNotConvertForeignStyle) {
+  AddFilter(RewriteOptions::kInlineImportToLink);
+  ValidateStyleUnchanged(
+      "<svg><style>@import url(assets/styles.css);</style></svg>");
+  ValidateStyleUnchanged(
+      "<math><style>@import url(assets/styles.css);</style></math>");
+  ValidateStyleToLink(
+      "<svg><foreignObject><style>@import url(assets/styles.css);</style>"
+      "</foreignObject></svg>",
+      "<svg><foreignObject>"
+      "<link rel=\"stylesheet\" href=\"assets/styles.css\">"
+      "</foreignObject></svg>");
+}
+
 TEST_F(CssInlineImportToLinkFilterTest, ConvertStyleWithMultipleImports) {
   AddFilter(RewriteOptions::kInlineImportToLink);
   ValidateStyleToLink(

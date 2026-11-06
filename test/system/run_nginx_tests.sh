@@ -744,6 +744,10 @@ EOF
         location = /mod_pagespeed_test/filter_order_cc/public.html {
             add_header Cache-Control "public, max-age=600";
         }
+        location = /mod_pagespeed_test/filter_order_cc/no_store_long_html_cache.html {
+            pagespeed MaxHtmlCacheTimeMs 60000;
+            add_header Cache-Control "no-store";
+        }
         location = /mod_pagespeed_test/filter_order_cc/keep_all.html {
             pagespeed ModifyCachingHeaders off;
             add_header Cache-Control "public, max-age=600";
@@ -957,6 +961,8 @@ EOF
         done
         printf '<html><head><link rel="stylesheet" href="style.css"></head><body><p>page</p></body></html>\n' \
             > "$site_root/a/page.html"
+        printf '<html><head><base href="http://base-b.example.test/"><link rel="stylesheet" href="style.css"></head><body><p>page</p></body></html>\n' \
+            > "$site_root/a/base-page.html"
         local site_common='pagespeed on;
         pagespeed RewriteLevel PassThrough;
         pagespeed EnableFilters rewrite_css;
@@ -1004,6 +1010,20 @@ EOF
         root $site_root/a;
         pagespeed MapRewriteDomain cdn.example.com cdn-page.example.com;
         pagespeed LoadFromFile "http://cdn-page.example.com/" "$site_root/a/";
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_A;
+        server_name base-a.example.test;
+        root $site_root/a;
+        pagespeed Domain base-b.example.test;
+        pagespeed LoadFromFile "http://base-b.example.test/" "$site_root/a/";
+        $site_common
+    }
+    server {
+        listen 127.0.0.1:$NGINX_SITE_PORT_B;
+        server_name base-b.example.test;
+        root $site_root/b;
         $site_common
     }
     server {
@@ -1128,6 +1148,52 @@ $(daemon_directives)
         location /pagespeed_statistics { }
         location / {
             try_files \$uri \$uri/ =404;
+        }
+    }
+
+    # Lane fixture daemon_arm, origin caching headers: an application origin
+    # (each image with its own Cache-Control) proxied by a server that sets
+    # its own caching headers for browsers
+    # (nginx/test_nginx_daemon_origin_caching.py).
+    server {
+        listen $NGINX_PORT;
+        server_name daemon-origin-src.example.com;
+        root $NGINX_CONFIG_DIR/www;
+        pagespeed off;
+        location = /daemon_origin/private.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "private, max-age=600";
+        }
+        location = /daemon_origin/nostore.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "no-store";
+        }
+        location = /daemon_origin/public.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "public, max-age=600";
+        }
+        location = /daemon_origin/short.jpg {
+            alias $NGINX_CONFIG_DIR/www/daemon_lane/lane.jpg;
+            add_header Cache-Control "public, max-age=15";
+        }
+    }
+    server {
+        listen $NGINX_PORT;
+        server_name daemon-origin.example.com;
+        root $DOC_ROOT;
+
+        pagespeed on;
+        pagespeed RewriteLevel PassThrough;
+        pagespeed InPlaceResourceOptimization on;
+        pagespeed DaemonSocketPath $DAEMON_SOCKET;
+        pagespeed DaemonVolumePath $DAEMON_VOLUME;
+
+        location ~ "^/pagespeed_admin" { }
+        location /pagespeed_statistics { }
+        location /daemon_origin/ {
+            proxy_pass http://127.0.0.1:$NGINX_PORT;
+            proxy_set_header Host daemon-origin-src.example.com;
+            expires 1h;
         }
     }
 
@@ -1311,6 +1377,10 @@ EOF
         }
         location = /mod_pagespeed_test/filter_order_cc/public.html {
             add_header Cache-Control "public, max-age=600";
+        }
+        location = /mod_pagespeed_test/filter_order_cc/no_store_long_html_cache.html {
+            pagespeed MaxHtmlCacheTimeMs 60000;
+            add_header Cache-Control "no-store";
         }
         location = /mod_pagespeed_test/filter_order_cc/keep_all.html {
             pagespeed ModifyCachingHeaders off;

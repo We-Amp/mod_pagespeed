@@ -38,6 +38,7 @@
 #include "net/instaweb/rewriter/public/fake_filter.h"
 #include "net/instaweb/rewriter/public/file_load_policy.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
+#include "net/instaweb/rewriter/public/page_work_budget.h"
 #include "net/instaweb/rewriter/public/resource.h"  // for ResourcePtr, etc
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -69,6 +70,7 @@
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "test/net/instaweb/http/mapped_backend_cache.h"
 #include "test/net/instaweb/http/mock_url_fetcher.h"
+#include "test/net/instaweb/rewriter/older_result_cache.h"
 #include "test/net/instaweb/rewriter/oob_slot_index_cache.h"
 #include "test/net/instaweb/rewriter/rewrite_context_test_base.h"
 #include "test/net/instaweb/rewriter/rewrite_test_base.h"
@@ -351,6 +353,58 @@ TEST_F(RewriteContextTest, MetadataOobSlotIndexTreatedAsMiss) {
   EXPECT_LE(1, corrupting_metadata->num_corrupted());
   EXPECT_EQ(0, metadata_cache_info().num_hits());
   EXPECT_LE(1, metadata_cache_info().num_misses());
+}
+
+// A cached result stored by a version that did not build optimizations only
+// from inputs the module fetched itself is not used: the rewrite is redone.
+TEST_F(RewriteContextTest, OlderResultTreatedAsMiss) {
+  GoogleString input_html, output_html;
+  TrimOnTheFlyStart(&input_html, &output_html);
+
+  // A warm request would normally be a metadata hit.
+  ValidateExpected("trimmable", input_html, output_html);
+  EXPECT_EQ(1, metadata_cache_info().num_hits());
+  EXPECT_EQ(0, metadata_cache_info().num_misses());
+  ClearStats();
+
+  // Every metadata hit now reads as the older version's record.  The
+  // wrapper does not own its delegate.
+  OlderResultCache* older_metadata =
+      new OlderResultCache(server_context()->metadata_cache());
+  server_context()->DeleteCacheOnDestruction(older_metadata);
+  server_context()->set_metadata_cache(older_metadata);
+
+  ValidateExpected("trimmable", input_html, output_html);
+  EXPECT_LE(1, older_metadata->num_aged());
+  EXPECT_EQ(0, metadata_cache_info().num_hits());
+  EXPECT_LE(1, metadata_cache_info().num_misses());
+}
+
+// An input the module's own fetch is refused is not served or optimized
+// through an optimized URL, even when a response served to some client is
+// stored under its URL.
+TEST_F(RewriteContextTest, ServedEntryOfRefusedInputNotUsed) {
+  InitTrimFilters(kRewrittenResource);
+  const GoogleString input_url = AbsolutifyUrl("held.css");
+  SetFetchResponse404(input_url);
+  const GoogleString output_url =
+      Encode(kTestDomain, "tw", "0", "held.css", "css");
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(output_url, &content));
+
+  ResponseHeaders served;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &served);
+  served.ComputeCaching();
+  http_cache()->Put(input_url, rewrite_driver()->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::kRespectVaryOnResources, &served,
+                    " held-content ", message_handler());
+  for (int i = 0; i < 2; ++i) {
+    content.clear();
+    ClearRewriteDriver();
+    FetchResourceUrl(output_url, &content);
+    EXPECT_EQ(GoogleString::npos, content.find("held-content")) << i;
+  }
 }
 
 TEST_F(RewriteContextTest, TrimOnTheFlyWithVaryCookie) {
@@ -1142,6 +1196,114 @@ TEST_F(RewriteContextTest, TrimFetchSeedsCache) {
   EXPECT_EQ(0, lru_cache()->num_inserts());
   EXPECT_EQ(0, counting_url_async_fetcher()->fetch_count());
   EXPECT_EQ(0, trim_filter_->num_rewrites());  // cached.
+}
+
+// A reconstruction requested under a name that puts the optimized resource
+// in another directory than its input is served, while pages keep naming the
+// optimized resource from the input's own directory.
+TEST_F(RewriteContextTest, FetchFromOtherDirectoryKeepsPageUrl) {
+  InitTrimFilters(kRewrittenResource);
+  SetResponseWithDefaultHeaders("dir/a.css", kContentTypeCss, " a ", 100);
+
+  // An optimized URL for dir/a.css, named under another directory.
+  GoogleString content;
+  EXPECT_TRUE(FetchResourceUrl(
+      StrCat(kTestDomain, "dir,_a.css.pagespeed.tw.0.css"), &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(1, trim_filter_->num_rewrites());
+
+  ValidateExpected("other_dir", CssLinkHref("dir/a.css"),
+                   CssLinkHref(Encode("dir/", TrimWhitespaceRewriter::kFilterId,
+                                      "0", "a.css", "css")));
+}
+
+// With a rewrite domain, a reconstruction requested at the URL pages use
+// still stores its result in the metadata cache. It is stored under the key
+// of the input that URL names on the rewrite domain, which pages do not read.
+TEST_F(RewriteContextTest, FetchAtRewriteDomainSeedsCache) {
+  const char kCdnDomain[] = "http://cdn.test.com/";
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  ASSERT_TRUE(lawyer->AddRewriteDomainMapping(kCdnDomain, kTestDomain,
+                                              message_handler()));
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  InitResourcesToDomain(kCdnDomain);
+
+  GoogleString content;
+  EXPECT_TRUE(
+      FetchResourceUrl(Encode(kCdnDomain, TrimWhitespaceRewriter::kFilterId,
+                              "0", "a.css", "css"),
+                       &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(3, lru_cache()->num_inserts());  // output, input, metadata
+}
+
+// With a rewrite domain, a reconstruction requested on the origin host is
+// served, while pages keep naming the optimized resource on the rewrite
+// domain.
+TEST_F(RewriteContextTest, FetchAtOriginHostKeepsRewriteDomainPageUrl) {
+  const char kCdnDomain[] = "http://cdn.test.com/";
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  ASSERT_TRUE(lawyer->AddRewriteDomainMapping(kCdnDomain, kTestDomain,
+                                              message_handler()));
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+
+  GoogleString content;
+  EXPECT_TRUE(
+      FetchResourceUrl(Encode(kTestDomain, TrimWhitespaceRewriter::kFilterId,
+                              "0", "a.css", "css"),
+                       &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(2, lru_cache()->num_inserts());  // output, input
+
+  ValidateExpected(
+      "origin_host", CssLinkHref("a.css"),
+      CssLinkHref(Encode(kCdnDomain, TrimWhitespaceRewriter::kFilterId, "0",
+                         "a.css", "css")));
+}
+
+// With shards, a reconstruction requested at the shard pages use is stored
+// for later rewrites, and one requested at the other shard is only served.
+TEST_F(RewriteContextTest, FetchAtPageShardOnlySeedsCache) {
+  const char kShard1[] = "http://s1.test.com/";
+  const char kShard2[] = "http://s2.test.com/";
+  DomainLawyer* lawyer = options()->WriteableDomainLawyer();
+  ASSERT_TRUE(lawyer->AddShard(kTestDomain, StrCat(kShard1, ",", kShard2),
+                               message_handler()));
+  InitTrimFilters(kRewrittenResource);
+  InitResources();
+  InitResourcesToDomain(kShard1);
+  InitResourcesToDomain(kShard2);
+
+  // Learn which shard pages use for this resource.
+  Parse("shard", CssLinkHref("a.css"));
+  const bool page_uses_shard1 =
+      (output_buffer_.find(kShard1) != GoogleString::npos);
+  ASSERT_NE(page_uses_shard1,
+            (output_buffer_.find(kShard2) != GoogleString::npos));
+  const char* page_shard = page_uses_shard1 ? kShard1 : kShard2;
+  const char* other_shard = page_uses_shard1 ? kShard2 : kShard1;
+  lru_cache()->Clear();
+  ClearStats();
+
+  GoogleString content;
+  EXPECT_TRUE(
+      FetchResourceUrl(Encode(other_shard, TrimWhitespaceRewriter::kFilterId,
+                              "0", "a.css", "css"),
+                       &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(2, lru_cache()->num_inserts());  // output, input
+  lru_cache()->Clear();
+  ClearStats();
+
+  content.clear();
+  EXPECT_TRUE(
+      FetchResourceUrl(Encode(page_shard, TrimWhitespaceRewriter::kFilterId,
+                              "0", "a.css", "css"),
+                       &content));
+  EXPECT_EQ("a", content);
+  EXPECT_EQ(3, lru_cache()->num_inserts());  // output, input, metadata
 }
 
 TEST_F(RewriteContextTest, TrimFetchRewriteFailureSeedsCache) {
@@ -5237,6 +5399,11 @@ TEST_F(RewriteContextTest, DropFetchesAndRecover) {
       TestRewriteDriverFactory::kMaxFetchGlobalQueueSize +
       TestRewriteDriverFactory::kFetchesPerHostOutgoingRequestThreshold +
       kExcessResources;
+  // One document now loads only a few inputs at a time; let this one load
+  // them all at once, so that it fills the fetch queue as before.
+  PageWorkBudget::Limits limits;
+  limits.input_loads_in_flight = kResourceCount;
+  rewrite_driver()->page_work_budget()->set_limits_for_testing(limits);
   GoogleString html;
   for (int i = 0; i < kResourceCount; ++i) {
     GoogleString url = absl::StrFormat("x%d.css", i);
@@ -5317,6 +5484,11 @@ TEST_F(RewriteContextTest, DropFetchesAndRecoverFetchPath) {
       TestRewriteDriverFactory::kMaxFetchGlobalQueueSize +
       TestRewriteDriverFactory::kFetchesPerHostOutgoingRequestThreshold +
       kExcessResources;
+  // One document now loads only a few inputs at a time; let this one load
+  // them all at once, so that it fills the fetch queue as before.
+  PageWorkBudget::Limits limits;
+  limits.input_loads_in_flight = kResourceCount;
+  rewrite_driver()->page_work_budget()->set_limits_for_testing(limits);
   GoogleString html;
   for (int i = 0; i < kResourceCount; ++i) {
     GoogleString url = absl::StrFormat("x%d.css", i);

@@ -165,5 +165,39 @@ TEST_F(DataUrlTest, ParseBadBase64) {
                &kContentTypeText, BASE64, "");
 }
 
+TEST_F(DataUrlTest, IsDataUrl) {
+  EXPECT_TRUE(IsDataUrl("data:text/plain,hello"));
+  EXPECT_TRUE(IsDataUrl("data:image/gif;base64,R0lGODlhAQABAAAAACw=="));
+  // Pure prefix check: no comma or valid mime type is required.
+  EXPECT_TRUE(IsDataUrl("data:"));
+
+  EXPECT_FALSE(IsDataUrl(""));
+  EXPECT_FALSE(IsDataUrl("http://www.example.com/image.png"));
+  EXPECT_FALSE(IsDataUrl("data"));
+  // The prefix must appear at the start of the URL.
+  EXPECT_FALSE(IsDataUrl("xdata:text/plain,hello"));
+  // Matching is case-sensitive.
+  EXPECT_FALSE(IsDataUrl("DATA:text/plain,hello"));
+}
+
+TEST_F(DataUrlTest, IsDataImageUrl) {
+  EXPECT_TRUE(IsDataImageUrl("data:image/gif;base64,R0lGODlhAQABAAAAACw=="));
+  EXPECT_TRUE(IsDataImageUrl("data:image/png;base64,iVBORw0KGgo="));
+  EXPECT_TRUE(IsDataImageUrl("data:image/gif,R0lGODlh"));
+
+  // data: URLs that do not carry an image mime type do not match.
+  EXPECT_FALSE(IsDataImageUrl("data:text/plain,hello"));
+  EXPECT_FALSE(IsDataImageUrl("data:text/css;base64,aGVsbG8="));
+  EXPECT_FALSE(IsDataImageUrl("data:;base64,AAAA"));
+  EXPECT_FALSE(IsDataImageUrl("data:"));
+
+  // Non-data URLs never match.
+  EXPECT_FALSE(IsDataImageUrl("http://www.example.com/image.png"));
+  // The prefix must appear at the start of the URL and matching is
+  // case-sensitive.
+  EXPECT_FALSE(IsDataImageUrl("xdata:image/png;base64,AAAA"));
+  EXPECT_FALSE(IsDataImageUrl("DATA:image/png;base64,AAAA"));
+}
+
 }  // namespace
 }  // namespace net_instaweb

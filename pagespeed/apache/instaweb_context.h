@@ -40,6 +40,7 @@
 namespace net_instaweb {
 
 class ApacheServerContext;
+class GoogleUrl;
 class GzipInflater;
 class QueryParams;
 class RequestHeaders;
@@ -48,6 +49,12 @@ class RewriteDriver;
 class RewriteOptions;
 
 const char kPagespeedOriginalUrl[] = "mod_pagespeed_original_url";
+
+// Saved beside kPagespeedOriginalUrl: whether httpd's reading of the request
+// and the module's name the same resource (see
+// InstawebContext::SaveInPlaceUrlAgreement).
+const char kPagespeedInPlaceUrlAgreement[] =
+    "mod_pagespeed_in_place_url_agreement";
 
 // Generic deleter meant to be used with apr_pool_cleanup_register().
 template <class T>
@@ -132,6 +139,33 @@ class InstawebContext {
   // Returns a fetchable URI from a request, using the request pool.
   static const char* MakeRequestUrl(const RewriteOptions& global_options,
                                     request_rec* request);
+
+  // The scheme MakeRequestUrl gives the URL of a request whose target is a
+  // path: httpd's scheme for the request, or a valid X-Forwarded-Proto when
+  // the server respects it.
+  static StringPiece OriginFormScheme(const RewriteOptions& global_options,
+                                      request_rec* request);
+
+  // Records whether httpd and the module read this request alike, beside the
+  // URL MakeRequestUrl saved, and returns it.  In-place optimization keys its
+  // lookups and recordings on `url`, the module's parse of the request line;
+  // httpd matched <Location> and <Directory> and applied its access rules on
+  // its own reading: `request->uri` (normalized, before any module rewrites
+  // it) on `server_host` under `server_scheme` (see OriginFormScheme),
+  // merging runs of slashes when `merge_slashes`.
+  // Called at translate_name time.  A request that follows another -- an
+  // internal redirect or a subrequest -- keeps the verdict of the request its
+  // URL came from, found exactly as MakeRequestUrl finds that URL; the
+  // verdict is computed only for a request that starts a chain.
+  static bool SaveInPlaceUrlAgreement(request_rec* request,
+                                      const GoogleUrl& url,
+                                      StringPiece server_scheme,
+                                      StringPiece server_host,
+                                      bool merge_slashes);
+
+  // The verdict SaveInPlaceUrlAgreement recorded for this request, or for the
+  // request its URL came from.  False when none was recorded.
+  static bool InPlaceUrlAgreed(request_rec* request);
 
   // The device class (phone, tablet, desktop) a page view's property-cache
   // lookup is keyed by, which is also recorded on the driver.

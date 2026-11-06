@@ -455,6 +455,7 @@ void RewriteDriver::Clear() NO_THREAD_SAFETY_ANALYSIS {
   fast_blocking_rewrite_ = true;
   num_inline_preview_images_ = 0;
   inlined_image_bytes_ = 0;
+  page_work_budget_.Reset();
   debug_output_bytes_ = 0;
   debug_output_truncated_ = false;
   debug_truncation_noted_ = false;
@@ -1860,6 +1861,7 @@ bool RewriteDriver::StartParseId(const StringPiece& url, const StringPiece& id,
     set_buffer_events(true);  // Release buffer when AMPness is discovered.
     base_was_set_ = false;
     inlined_image_bytes_ = 0;
+    page_work_budget_.Reset();
     debug_output_bytes_ = 0;
     debug_output_truncated_ = false;
     debug_truncation_noted_ = false;

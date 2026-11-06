@@ -556,6 +556,26 @@ class CollectDependenciesFilter::Context : public RewriteContext {
 
   void Rewrite(int partition_index, CachedResult* partition,
                const OutputResourcePtr& output_resource) override {
+    if (slot(0)->inputs_incomplete()) {
+      // Not all the input info of this element could be kept, so its
+      // validity is unknown: it is not collected on this view, and nothing
+      // is cached for it.
+      RewriteDone(kTooBusy, 0);
+      return;
+    }
+    // What is copied below counts against the document's partition entries:
+    // the input info reported to the slot, and the validity info stored for
+    // the dependency and for each one found inside it. A dependency that
+    // does not fit is not collected on this view, and nothing is cached for
+    // it.
+    const int64 num_inputs_before =
+        (slot(0)->inputs() == nullptr) ? 0 : slot(0)->inputs()->size();
+    if (!TakePagePartitionEntries(1 + 2 * partition->input_size() +
+                                  num_inputs_before)) {
+      RewriteDone(kTooBusy, 0);
+      return;
+    }
+
     // Modules go into their own field: a DEP_MODULE value read out of
     // collected_dependency by a binary that predates it would come back as
     // the closed-enum field default, DEP_JAVASCRIPT (see dependencies.proto).
@@ -590,6 +610,20 @@ class CollectDependenciesFilter::Context : public RewriteContext {
     if (dep_type_ == DEP_CSS) {
       ExtractNestedCssDependencies(dep, slot(0)->resource(), partition);
       ExtractFontDependencies(dep, slot(0)->resource(), partition);
+      int64 num_child_entries = 0;
+      for (int c = 1; c < partition->collected_dependency_size(); ++c) {
+        num_child_entries +=
+            1 + partition->collected_dependency(c).validity_info_size();
+      }
+      for (const Dependency& font : partition->collected_font_dependency()) {
+        num_child_entries += 1 + font.validity_info_size();
+      }
+      if (!TakePagePartitionEntries(num_child_entries)) {
+        partition->clear_collected_dependency();
+        partition->clear_collected_font_dependency();
+        RewriteDone(kTooBusy, 0);
+        return;
+      }
     }
 
     // TODO(morlovich): is_pagespeed_resource is not currently set, but I am not

@@ -163,6 +163,9 @@ class DaemonIproRecorderTest : public testing::Test {
     if (saved_cache_control != nullptr) {
       recorder->SaveCacheControl(saved_cache_control);
     }
+    if (origin_caching_ != nullptr) {
+      recorder->SetOriginCachingHeaders(*origin_caching_);
+    }
     recorder->Write(body, nullptr);
     recorder->DoneAndSetHeaders(headers, entire_response_received);
     return outcome;
@@ -174,6 +177,9 @@ class DaemonIproRecorderTest : public testing::Test {
   DaemonRecordRequest request_;
   GoogleString log_path_;
   int cache_token_ = 0;
+  // When set, handed to each recorder Run builds as the origin's caching
+  // headers.  Borrowed.
+  const ResponseHeaders* origin_caching_ = nullptr;
 };
 
 // --- the ordinary path ------------------------------------------------------
@@ -612,6 +618,146 @@ TEST_F(DaemonIproRecorderTest, TheOriginsCacheControlIsRecordedNotOurs) {
   EXPECT_NE(GoogleString::npos, log.find("s_maxage=0")) << log;
 }
 
+// --- the stricter of the origin's and the server's caching headers ---------
+//
+// The seam hands the recorder the caching headers as the origin sent them;
+// the final headers carry the server's.  Storing needs both to allow it, for
+// the shorter of the two lifetimes.
+
+class DaemonIproRecorderOriginCachingTest : public DaemonIproRecorderTest {
+ protected:
+  // Final headers whose caching fields the server set: Cache-Control
+  // `server_cache_control` (`max-age=3600` by default) and an Expires an
+  // hour out, whatever the origin said.
+  void MakeDirectiveHeaders(ResponseHeaders* headers,
+                            StringPiece server_cache_control = "max-age=3600") {
+    MakeOkHeaders(headers);
+    headers->SetDateAndCaching(timer_.NowMs(), 3600 * Timer::kSecondMs);
+    headers->Replace(HttpAttributes::kCacheControl, server_cache_control);
+    headers->ComputeCaching();
+  }
+
+  DaemonRecordOutcome RunWithOrigin(
+      StringPiece origin_cache_control,
+      StringPiece server_cache_control = "max-age=3600") {
+    ResponseHeaders origin;
+    origin.Add(HttpAttributes::kCacheControl, origin_cache_control);
+    origin_caching_ = &origin;
+    ResponseHeaders headers;
+    MakeDirectiveHeaders(&headers, server_cache_control);
+    const DaemonRecordOutcome outcome = Run(&headers, kBody);
+    origin_caching_ = nullptr;
+    return outcome;
+  }
+};
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       ThePremiseTheDirectiveAloneIsStored) {
+  // Without the origin's headers the final ones decide alone: the server's
+  // field is all there is, and it allows storing.
+  ResponseHeaders headers;
+  MakeDirectiveHeaders(&headers);
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  EXPECT_TRUE(outcome.stored);
+  EXPECT_NE(GoogleString::npos, CallLog().find("max_age=3600")) << CallLog();
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AnOriginPrivateResponseIsNotStored) {
+  const DaemonRecordOutcome outcome = RunWithOrigin("private, max-age=600");
+  EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_FALSE(outcome.stored);
+  EXPECT_FALSE(outcome.notified);
+  EXPECT_EQ(GoogleString::npos, CallLog().find("notify ")) << CallLog();
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AnOriginNoStoreResponseIsNotStored) {
+  const DaemonRecordOutcome outcome = RunWithOrigin("no-store");
+  EXPECT_FALSE(outcome.stored);
+  EXPECT_FALSE(outcome.notified);
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AnOriginPublicResponseIsStoredWithTheOriginsLifetime) {
+  const DaemonRecordOutcome outcome = RunWithOrigin("public, max-age=600");
+  ASSERT_TRUE(outcome.stored);
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("max_age=600")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("max_age=3600")) << log;
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AnOriginThatStatesNoCachingLeavesTheDirective) {
+  // A static file states nothing about caching: the directive overrides
+  // nothing, and it is the only lifetime there is.
+  ResponseHeaders origin;
+  origin.Add(HttpAttributes::kContentType, "text/css");
+  origin_caching_ = &origin;
+  ResponseHeaders headers;
+  MakeDirectiveHeaders(&headers);
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  origin_caching_ = nullptr;
+  ASSERT_TRUE(outcome.stored);
+  EXPECT_NE(GoogleString::npos, CallLog().find("max_age=3600")) << CallLog();
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest, TheOriginsHeadersOutrankASavedOne) {
+  // A seam may save a Cache-Control it read after the directive acted.
+  ResponseHeaders origin;
+  origin.Add(HttpAttributes::kCacheControl, "private, max-age=600");
+  origin_caching_ = &origin;
+  ResponseHeaders headers;
+  MakeDirectiveHeaders(&headers);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, nullptr, "max-age=3600");
+  origin_caching_ = nullptr;
+  EXPECT_FALSE(outcome.stored);
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest, AVaryOnlyTheOriginSentStillCounts) {
+  // The final headers' Vary is merged, never dropped, and the origin's is
+  // added to it: a Vary: Cookie the server did not pass on still refuses.
+  ResponseHeaders origin;
+  origin.Add(HttpAttributes::kCacheControl, "public, max-age=600");
+  origin.Add(HttpAttributes::kVary, "Cookie");
+  origin_caching_ = &origin;
+  ResponseHeaders headers;
+  MakeDirectiveHeaders(&headers);
+  const DaemonRecordOutcome outcome = Run(&headers, kBody);
+  origin_caching_ = nullptr;
+  EXPECT_FALSE(outcome.stored);
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AServerNoStoreRefusesAnOriginPublicResponse) {
+  const DaemonRecordOutcome outcome =
+      RunWithOrigin("public, max-age=600", "no-store");
+  EXPECT_FALSE(outcome.gate_ran);
+  EXPECT_FALSE(outcome.stored);
+  EXPECT_FALSE(outcome.notified);
+  EXPECT_EQ(GoogleString::npos, CallLog().find("notify ")) << CallLog();
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest, TheShorterLifetimeIsStored) {
+  const DaemonRecordOutcome outcome =
+      RunWithOrigin("public, max-age=600", "max-age=60");
+  ASSERT_TRUE(outcome.stored);
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("max_age=60 ")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("max_age=600 ")) << log;
+}
+
+TEST_F(DaemonIproRecorderOriginCachingTest,
+       AServerLifetimeClampsAnOriginThatStatesNone) {
+  // A storable origin with no lifetime would get the implicit one.
+  const DaemonRecordOutcome outcome = RunWithOrigin("public", "max-age=60");
+  ASSERT_TRUE(outcome.stored);
+  const GoogleString log = CallLog();
+  EXPECT_NE(GoogleString::npos, log.find("max_age=60 ")) << log;
+  EXPECT_EQ(GoogleString::npos, log.find("max_age=300 ")) << log;
+}
+
 TEST_F(DaemonIproRecorderTest, AnEncodedBodyIsNotTheOriginal) {
   // Decided from the PRELIMINARY headers, before the body is buffered: what
   // arrives after an upstream has encoded it is the encoded form, and storing
@@ -833,8 +979,8 @@ TEST_F(DaemonIproRecorderTest, ARecordedFallthroughCountsItsContentClass) {
 
   ResponseHeaders headers;
   MakeOkHeaders(&headers);  // Content-Type: text/css
-  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, nullptr,
-                                          nullptr, nullptr, &rewrite_stats);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, nullptr, nullptr, &rewrite_stats);
   EXPECT_TRUE(outcome.gate_ran);
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_js")->Get());
@@ -856,8 +1002,8 @@ TEST_F(DaemonIproRecorderTest, AnImageFallthroughCountsItsContentClass) {
   headers.Add(HttpAttributes::kEtag, "\"abc\"");
   headers.SetDate(timer_.NowMs());
   headers.ComputeCaching();
-  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, nullptr,
-                                          nullptr, nullptr, &rewrite_stats);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, nullptr, nullptr, &rewrite_stats);
   EXPECT_TRUE(outcome.gate_ran);
   EXPECT_EQ(1, stats.GetVariable("ipro_daemon_fallthrough_image")->Get());
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
@@ -900,8 +1046,8 @@ TEST_F(DaemonIproRecorderTest, AResponseThatBreaksBeforeTheGateCountsNothing) {
   MakeOkHeaders(&headers);
   headers.Replace(HttpAttributes::kCacheControl, "max-age=600, private");
   headers.ComputeCaching();
-  const DaemonRecordOutcome outcome = Run(&headers, kBody, true, nullptr,
-                                          nullptr, nullptr, &rewrite_stats);
+  const DaemonRecordOutcome outcome =
+      Run(&headers, kBody, true, nullptr, nullptr, nullptr, &rewrite_stats);
   EXPECT_FALSE(outcome.gate_ran);
   EXPECT_EQ(0, stats.GetVariable("ipro_daemon_fallthrough_css")->Get());
 }
