@@ -3121,22 +3121,38 @@ TEST_F(AdminSiteDaemonTest, SiteMustBe64LowercaseHex) {
     s[0] = 'g';
     return s;
   }();
-  for (const char* leaf : {"cache/alternates", "cache/content", "cache/urls"}) {
+  // Each leaf gets only the parameters it allows, so the 400 can only come
+  // from the site check.
+  struct {
+    const char* leaf;
+    const char* params;
+  } leaves[] = {
+      {"cache/alternates",
+       "?url=%2Fhero.png&hostname=www.example.test&scheme=https&site="},
+      {"cache/content",
+       "?url=%2Fhero.png&hostname=www.example.test&scheme=https"
+       "&alternate_id=3&site="},
+      {"cache/urls", "?limit=50&site="},
+  };
+  for (const auto& l : leaves) {
     for (const GoogleString& site :
          {upper, short_site, long_site, non_hex, GoogleString(),
           GoogleString("..%2f..%2f")}) {
       GoogleString buffer;
       auto fetch = FetchAdminPage(
           daemon_site_.get(),
-          StrCat("http://localhost/pagespeed_global_admin/v1/daemon/", leaf,
-                 "?url=%2Fhero.png&hostname=www.example.test&scheme=https"
-                 "&alternate_id=3&site=",
-                 site),
+          StrCat("http://localhost/pagespeed_global_admin/v1/daemon/", l.leaf,
+                 l.params, site),
           RequestHeaders::kGet, &buffer);
-      ASSERT_TRUE(fetch->done()) << leaf << " " << site;
+      ASSERT_TRUE(fetch->done()) << l.leaf << " " << site;
       EXPECT_EQ(HttpStatus::kBadRequest,
                 fetch->response_headers()->status_code())
-          << leaf << " " << site;
+          << l.leaf << " " << site;
+      EXPECT_THAT(buffer,
+                  ::testing::HasSubstr("\"error\":\"invalid_parameter\""))
+          << l.leaf << " " << site;
+      EXPECT_THAT(buffer, ::testing::HasSubstr("\"parameter\":\"site\""))
+          << l.leaf << " " << site;
     }
   }
   EXPECT_EQ(0, fake_reader_->call_count_);
