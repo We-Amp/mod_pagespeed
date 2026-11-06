@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2024-2026 We-Amp B.V.
 # Container entry point for run_module_check.sh: the worker as its systemd unit
-# would start it, the module under test, the fixtures as the document root, and
+# would start it, the module under test (MODULE_SO, or the installed package's
+# own when unset), the fixtures as the document root, and
 # DetectHydratedPages as DETECT says, in the server-wide configuration.
 set -e
 SERVER=$1
@@ -20,7 +21,7 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 if [ "$SERVER" = apache ]; then
-  cp "$MODULE_SO" /usr/lib/apache2/modules/mod_pagespeed.so
+  [ -z "${MODULE_SO:-}" ] || cp "$MODULE_SO" /usr/lib/apache2/modules/mod_pagespeed.so
   cat > /etc/apache2/conf-enabled/zz-hydration.conf <<CONF
 ModPagespeedDetectHydratedPages $DETECT
 ModPagespeedLoadFromFile http://$HOST_ALIAS/ /fixtures/
@@ -32,7 +33,7 @@ CONF
   sed -i 's#DocumentRoot .*#DocumentRoot /fixtures#' /etc/apache2/sites-enabled/000-default.conf
   exec apache2ctl -D FOREGROUND
 fi
-cp "$MODULE_SO" /usr/lib/nginx/modules/ngx_pagespeed_module.so
+[ -z "${MODULE_SO:-}" ] || cp "$MODULE_SO" /usr/lib/nginx/modules/ngx_pagespeed_module.so
 cat > /etc/nginx/conf.d/zz-hydration.conf <<CONF
 pagespeed DetectHydratedPages $DETECT;
 CONF

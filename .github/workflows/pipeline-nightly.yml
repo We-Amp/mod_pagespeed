@@ -1023,6 +1023,10 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 150
+    env:
+      # local: the check installs packages built from this tree and the pinned
+      # optimizer release, not the public package repository's.
+      LOCAL_PACKAGES: ${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}
     steps:
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -1050,6 +1054,29 @@ jobs:
 
       - name: Stamp GIT_COMMIT
         run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Record the package mode
+        run: |
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            mode="local (built from this tree, with the pinned optimizer release)"
+          else
+            mode="published (the public package repository)"
+          fi
+          echo "Hydration check packages: ${mode}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch the pinned optimizer package (local packages)
+        if: env.LOCAL_PACKAGES == 'true'
+        run: |
+          set -euo pipefail
+          # Verified against the pin file; the pair version is the one the
+          # module package depends on.
+          for s in apache nginx; do
+            bash test/system/shared_cache/fetch-optimizer-deb.sh "${RUNNER_TEMP}/hydration/pkgs-${s}" amd64
+          done
+          PIN_TAG=$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")
+          tilde='~'
+          PAIR="${PIN_TAG#optimizer-v}"
+          echo "PAIR_PKG_VERSION=${PAIR/-/$tilde}" >> "$GITHUB_ENV"
 
       - name: Ensure the dev image
         run: |
@@ -1082,6 +1109,7 @@ jobs:
             --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp/ci-home -e USER=dev -e "BZL_FLAGS=${BZL_FLAGS}" \
+            -e LOCAL_PACKAGES -e PAIR_PKG_VERSION \
             -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -v "${RUNNER_TEMP}/hydration:/out" \
@@ -1094,6 +1122,10 @@ jobs:
               # shellcheck disable=SC2086
               bazel --output_user_root=/tmp/bazel-out build ${BZL_FLAGS} //:libmod_pagespeed.so
               cp -L bazel-bin/libmod_pagespeed.so /out/mod_pagespeed.so
+              if [ "${LOCAL_PACKAGES}" = true ]; then
+                # The package of this tree, with the dependency on the pinned pair.
+                install/debian/build.sh -a x64 -b . -o /out/pkgs-apache -d "${PAIR_PKG_VERSION}"
+              fi
             '
 
       - name: Build the nginx module for Ubuntu 24.04's nginx
@@ -1127,6 +1159,10 @@ jobs:
             "${image}" \
             bash -c "set -e
               ./install/nginx/build_module_in_container.sh noble -o /out/ngx_pagespeed_module.so
+              if [ ${LOCAL_PACKAGES} = true ]; then
+                ./install/nginx/build_nginx_deb.sh -o /out/pkgs-nginx -s /out/ngx_pagespeed_module.so
+                chown -R $(id -u):$(id -g) /out/pkgs-nginx
+              fi
               chown $(id -u):$(id -g) /out/ngx_pagespeed_module.so"
 
       - name: Build the fixtures
@@ -1143,14 +1179,26 @@ jobs:
 
       - name: Hydration check, Apache
         run: |
+          # Local packages: the module comes from the package built above.
+          # Otherwise: the published packages, the fresh library swapped in.
+          so="${RUNNER_TEMP}/hydration/mod_pagespeed.so"
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            export PACKAGE_DIR="${RUNNER_TEMP}/hydration/pkgs-apache"
+            so=""
+          fi
           HYDRATION_PREFIX="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-a" \
-            bash test/browser/hydration/run_module_check.sh apache "${RUNNER_TEMP}/hydration/mod_pagespeed.so"
+            bash test/browser/hydration/run_module_check.sh apache ${so:+"$so"}
 
       - name: Hydration check, nginx
         if: ${{ !cancelled() }}
         run: |
+          so="${RUNNER_TEMP}/hydration/ngx_pagespeed_module.so"
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            export PACKAGE_DIR="${RUNNER_TEMP}/hydration/pkgs-nginx"
+            so=""
+          fi
           HYDRATION_PREFIX="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-n" \
-            bash test/browser/hydration/run_module_check.sh nginx "${RUNNER_TEMP}/hydration/ngx_pagespeed_module.so"
+            bash test/browser/hydration/run_module_check.sh nginx ${so:+"$so"}
 
       - name: Remove what the checks left behind
         if: always()
