@@ -2864,6 +2864,28 @@
      "descriptions": [
       {
        "lang": "en",
+       "value": "A buffer overflow vulnerability in the Brotli decoder (c/dec/decode.c) in Google Brotli versions 1.0.3 through 1.2.0 on all platforms allows a remote unauthenticated attacker to corrupt adjacent decoder state memory, disclose sensitive memory contents, cause a denial of service, or potentially execute arbitrary code using a crafted Brotli-compressed stream.      Users need to update any Brotli libraries or binaries between 1.0.3 through 1.2.0 to the latest available version: 1.0.10 or 1.1.1 or 1.2.1."
+      }
+     ],
+     "id": "CVE-2026-111497",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2026-10-22T14:17:37.190"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
        "value": "Envoy is a high-performance edge/middle/service proxy. Prior to 1.37.1, 1.36.5, 1.35.8, and 1.34.13, the Envoy RBAC (Role-Based Access Control) filter contains a logic vulnerability in how it validates HTTP headers when multiple values are present for the same header name. Instead of validating each header value individually, Envoy concatenates all values into a single comma-separated string. This behavior allows attackers to bypass RBAC policies\u2014specifically \"Deny\" rules\u2014by sending duplicate headers, effectively obscuring the malicious value from exact-match mechanisms. This vulnerability is fixed in 1.37.1, 1.36.5, 1.35.8, and 1.34.13."
       }
      ],
@@ -10580,6 +10602,382 @@
     }
    }
   ],
+  "cpe:2.3:a:pcre:pcre2": [
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Heap-based buffer overflow in PCRE 8.34 through 8.37 and PCRE2 10.10 allows remote attackers to execute arbitrary code via a crafted regular expression, as demonstrated by /^(?P=B)((?P=B)(?J:(?P<B>c)(?P<B>a(?P=B)))>WGXCREDITS)/, a different vulnerability than CVE-2015-8384."
+      }
+     ],
+     "id": "CVE-2015-3210",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2016-12-13T16:59:00.187"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "PCRE 7.8 and 8.32 through 8.37, and PCRE2 10.10 mishandle group empty matches, which might allow remote attackers to cause a denial of service (stack-based buffer overflow) via a crafted regular expression, as demonstrated by /^(?:(?(1)\\\\.|([^\\\\\\\\W_])?)+)+$/."
+      }
+     ],
+     "id": "CVE-2015-3217",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2016-12-13T16:59:02.220"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The compile_branch function in pcre_compile.c in PCRE 8.x before 8.39 and pcre2_compile.c in PCRE2 before 10.22 mishandles patterns containing an (*ACCEPT) substring in conjunction with nested parentheses, which allows remote attackers to execute arbitrary code or cause a denial of service (stack-based buffer overflow) via a crafted regular expression, as demonstrated by a JavaScript RegExp object encountered by Konqueror, aka ZDI-CAN-3542."
+      }
+     ],
+     "id": "CVE-2016-3191",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2016-03-17T23:59:01.447"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "libpcre1 in PCRE 8.40 and libpcre2 in PCRE2 10.23 allow remote attackers to cause a denial of service (segmentation violation for read access, and application crash) by triggering an invalid Unicode property lookup."
+      }
+     ],
+     "id": "CVE-2017-7186",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2017-03-20T00:59:00.190"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "PCRE2 before 10.30 has an out-of-bounds write caused by a stack-based buffer overflow in pcre2_match.c, related to a \"pattern with very many captures.\""
+      }
+     ],
+     "id": "CVE-2017-8399",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2017-05-01T18:59:00.403"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "pcre2test.c in PCRE2 10.23 allows remote attackers to cause a denial of service (heap-based buffer overflow) or possibly have unspecified other impact via a crafted regular expression."
+      }
+     ],
+     "id": "CVE-2017-8786",
+     "metrics": {
+      "cvssMetricV30": [
+       {
+        "cvssData": {
+         "baseScore": 9.8,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2017-05-05T00:29:00.213"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An out-of-bounds read was discovered in PCRE before 10.34 when the pattern \\X is JIT compiled and used to match specially crafted subjects in non-UTF mode. Applications that use PCRE to parse untrusted input may be vulnerable to this flaw, which would allow an attacker to crash the application. The flaw occurs in do_extuni_no_utf in pcre2_jit_compile.c."
+      }
+     ],
+     "id": "CVE-2019-20454",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2020-02-14T14:15:10.593"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An out-of-bounds read vulnerability was discovered in the PCRE2 library in the compile_xclass_matchingpath() function of the pcre2_jit_compile.c file. This involves a unicode property matching issue in JIT-compiled regular expressions. The issue occurs because the character was not fully read in case-less matching within JIT."
+      }
+     ],
+     "id": "CVE-2022-1586",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2022-05-16T21:15:07.793"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "An out-of-bounds read vulnerability was discovered in the PCRE2 library in the get_recurse_data_length() function of the pcre2_jit_compile.c file. This issue affects recursions in JIT-compiled regular expressions caused by duplicate data transfers."
+      }
+     ],
+     "id": "CVE-2022-1587",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2022-05-16T21:15:07.847"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "Integer overflow vulnerability in pcre2test before 10.41 allows attackers to cause a denial of service or other unspecified impacts via negative input."
+      }
+     ],
+     "id": "CVE-2022-41409",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.5,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2023-07-18T14:15:12.197"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "The PCRE2 library is a set of C functions that implement regular expression pattern matching. In version 10.45, a heap-buffer-overflow read vulnerability exists in the PCRE2 regular expression matching engine, specifically within the handling of the (*scs:...) (Scan SubString) verb when combined with (*ACCEPT) in src/pcre2_match.c. This vulnerability may potentially lead to information disclosure if the out-of-bounds data read during the memcmp affects the final match result in a way observable by the attacker. This issue has been resolved in version 10.46."
+      }
+     ],
+     "id": "CVE-2025-58050",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 9.1,
+         "baseSeverity": "CRITICAL"
+        }
+       }
+      ]
+     },
+     "published": "2025-08-27T19:15:37.560"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "PCRE2 before 10.48 has a pcre2_match out-of-bounds read after a JIT fallback when an attacker can provide invalid UTF data."
+      }
+     ],
+     "id": "CVE-2026-89156",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 2.9,
+         "baseSeverity": "LOW"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-11T04:18:03.230"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "PCRE2 before 10.48, on 32-bit platforms, has a pcre2_pattern_convert out-of-bounds write when an attacker can provide a large pattern."
+      }
+     ],
+     "id": "CVE-2026-89157",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 5.7,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-11T04:18:03.753"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "PCRE2 before 10.48, on 32-bit platforms, has a pcre2_compile_32 integer overflow and resultant out-of-bounds write."
+      }
+     ],
+     "id": "CVE-2026-89158",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 6.5,
+         "baseSeverity": "MEDIUM"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-11T04:18:03.970"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "PCRE2 before 10.48 has a pcre2_match out-of-bounds read during the PCRE2_MATCH_INVALID_UTF matching of an invalid UTF subject."
+      }
+     ],
+     "id": "CVE-2026-89160",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 3.7,
+         "baseSeverity": "LOW"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-11T04:18:04.343"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In PCRE2 before 10.48, pcre2_jit_match mishandles a previously copied subject being passed in as a context. An incorrect free operation can occur."
+      }
+     ],
+     "id": "CVE-2026-89161",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 7.4,
+         "baseSeverity": "HIGH"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-11T04:18:04.470"
+    }
+   },
+   {
+    "cve": {
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "In PCRE2 before 10.48, pcre2_serialize_encode might disclose two bytes to an adversary, typically in a situation where the access available to the adversary is already unsafe."
+      }
+     ],
+     "id": "CVE-2026-89162",
+     "metrics": {
+      "cvssMetricV31": [
+       {
+        "cvssData": {
+         "baseScore": 2.9,
+         "baseSeverity": "LOW"
+        }
+       }
+      ]
+     },
+     "published": "2026-09-11T05:16:38.697"
+    }
+   }
+  ],
   "cpe:2.3:a:redislabs:hiredis": [
    {
     "cve": {
@@ -10983,7 +11381,7 @@
    }
   ]
  },
- "generated": "2026-10-10T08:03:43Z",
+ "generated": "2026-11-06T18:12:29Z",
  "osv_feeds": {
   "https://curl.se/docs/vuln.json": [
    {
@@ -14465,6 +14863,80 @@
    },
    {
     "aliases": [
+     "CVE-2026-107928"
+    ],
+    "id": "CURL-CVE-2026-107928",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.86.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-107929"
+    ],
+    "id": "CURL-CVE-2026-107929",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.9.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
      "CVE-2026-11352"
     ],
     "id": "CURL-CVE-2026-11352",
@@ -15387,6 +15859,403 @@
    },
    {
     "aliases": [
+     "CVE-2026-86409"
+    ],
+    "id": "CURL-CVE-2026-86409",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.75.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-86410"
+    ],
+    "id": "CURL-CVE-2026-86410",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.81.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-86411"
+    ],
+    "id": "CURL-CVE-2026-86411",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-86412"
+    ],
+    "id": "CURL-CVE-2026-86412",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.18.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-86413"
+    ],
+    "id": "CURL-CVE-2026-86413",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-86414"
+    ],
+    "id": "CURL-CVE-2026-86414",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.10.8"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-86415"
+    ],
+    "id": "CURL-CVE-2026-86415",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-87861"
+    ],
+    "id": "CURL-CVE-2026-87861",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-87862"
+    ],
+    "id": "CURL-CVE-2026-87862",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.11.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-87863"
+    ],
+    "id": "CURL-CVE-2026-87863",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.2.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-87864"
+    ],
+    "id": "CURL-CVE-2026-87864",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.30.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.22.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-87865"
+    ],
+    "id": "CURL-CVE-2026-87865",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.69.1"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-87866"
+    ],
+    "id": "CURL-CVE-2026-87866",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.43.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
      "CVE-2026-8924"
     ],
     "id": "CURL-CVE-2026-8924",
@@ -15632,6 +16501,321 @@
        },
        {
         "fixed": "8.21.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92386"
+    ],
+    "id": "CURL-CVE-2026-92386",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.7.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92387"
+    ],
+    "id": "CURL-CVE-2026-92387",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.10.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92388"
+    ],
+    "id": "CURL-CVE-2026-92388",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.21.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92389"
+    ],
+    "id": "CURL-CVE-2026-92389",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.15.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92390"
+    ],
+    "id": "CURL-CVE-2026-92390",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.20.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92391"
+    ],
+    "id": "CURL-CVE-2026-92391",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.56.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-92392"
+    ],
+    "id": "CURL-CVE-2026-92392",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.12.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-94265"
+    ],
+    "id": "CURL-CVE-2026-94265",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
+       }
+      ],
+      "type": "SEMVER"
+     }
+    ]
+   },
+   {
+    "aliases": [
+     "CVE-2026-94266"
+    ],
+    "id": "CURL-CVE-2026-94266",
+    "ranges": [
+     {
+      "events": [
+       {
+        "introduced": "7.62.0"
+       },
+       {
+        "fixed": "8.14.3"
+       },
+       {
+        "introduced": "8.15.0"
+       },
+       {
+        "fixed": "8.16.2"
+       },
+       {
+        "introduced": "8.17.0"
+       },
+       {
+        "fixed": "8.20.2"
+       },
+       {
+        "introduced": "8.21.0"
+       },
+       {
+        "fixed": "8.23.0"
        }
       ],
       "type": "SEMVER"
