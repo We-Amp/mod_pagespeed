@@ -58,6 +58,11 @@
 #   REPORT_RUN_NOUN        what a history run is called (default "full-tier run")
 #   REPORT_SKIPPED         "off" leaves the skipped line out of the report
 #
+# Every read (the job lists, the runs lists, the run object, the issue list)
+# is retried on a transient failure (HTTP 5xx, a timeout, a dropped
+# connection): 5 tries, the delay doubling from REPORT_RETRY_BASE_SECONDS
+# (default 10). Writes are sent once, so a comment is never doubled.
+#
 # Exit 0 when done, 1 when an API call failed or its answer is unusable (the
 # job then shows red).
 
@@ -101,6 +106,33 @@ run_url="${server}/${repo}/actions/runs/${run}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
+retry_base="${REPORT_RETRY_BASE_SECONDS:-10}"
+case "${retry_base}" in ''|*[!0-9]*) retry_base=10 ;; esac
+TRANSIENT_RE='HTTP 5[0-9][0-9]|Bad Gateway|Service Unavailable|Gateway Time-?out|timed? ?out|timeout|connection (reset|refused)|EOF|temporar'
+
+# gh_read <gh arguments...>: a read-only gh call; the answer on stdout. A
+# transient failure is retried (see the header); any other failure, or the
+# fifth, returns gh's status with its error on stderr.
+gh_read() {
+  local try delay rc
+  delay="${retry_base}"
+  for try in 1 2 3 4 5; do
+    rc=0
+    gh "$@" < /dev/null > "${TMP}/gh-out" 2> "${TMP}/gh-err" || rc=$?
+    if [ "${rc}" -eq 0 ]; then
+      cat "${TMP}/gh-out"
+      return 0
+    fi
+    if [ "${try}" -eq 5 ] || ! grep -Eiq "${TRANSIENT_RE}" "${TMP}/gh-err"; then
+      cat "${TMP}/gh-err" >&2
+      return "${rc}"
+    fi
+    log "gh $1 $2 failed (try ${try}/5), retrying in ${delay}s: $(head -c 200 "${TMP}/gh-err")"
+    sleep "${delay}"
+    delay=$((delay * 2))
+  done
+}
+
 checks="$(printf '%s\n' "${RUNTIME_STEP_CHECKS:-}" | jq -R -s -c '
   [ split("\n")[] | sub("\r$"; "") | index("=") as $i | select($i != null)
     | { job: (.[:$i] | gsub("^\\s+|\\s+$"; "")),
@@ -127,7 +159,7 @@ def verdict($checks):
 # run_jobs <run id>: the run's latest-attempt jobs as one JSON array.
 run_jobs() {
   local raw
-  if ! raw="$(gh api --paginate "repos/${repo}/actions/runs/$1/jobs?filter=latest&per_page=100" < /dev/null)"; then
+  if ! raw="$(gh_read api --paginate "repos/${repo}/actions/runs/$1/jobs?filter=latest&per_page=100")"; then
     die "the jobs API call for run $1 failed"
   fi
   [ -n "${raw}" ] || die "the jobs API answer for run $1 is empty"
@@ -192,7 +224,7 @@ show_body() { # <file>: the text a dry run would have written
 # sets issue (empty when none) and issue_body.
 load_issue() {
   local issues
-  if ! issues="$(gh issue list --label "${LABEL}" --state open --json number,body --limit 5 < /dev/null)"; then
+  if ! issues="$(gh_read issue list --label "${LABEL}" --state open --json number,body --limit 5)"; then
     die "the issue list call failed"
   fi
   issue="$(printf '%s' "${issues}" | jq -r 'sort_by(.number) | .[0].number // empty' 2> /dev/null)" \
@@ -268,7 +300,7 @@ done
 # newest first, without this run and anything created after it. The cutoff is
 # the run's own creation time, which every re-run attempt keeps (its jobs get
 # new times).
-if ! cutoff="$(gh api "repos/${repo}/actions/runs/${run}" --jq .created_at < /dev/null)" \
+if ! cutoff="$(gh_read api "repos/${repo}/actions/runs/${run}" --jq .created_at)" \
     || [ -z "${cutoff}" ] || [ "${cutoff}" = "null" ]; then
   die "the run API call for run ${run} failed or named no created_at"
 fi
@@ -280,8 +312,8 @@ hist="${TMP}/hist"
 while IFS= read -r src; do
   [ -n "${src}" ] || continue
   wf="${src%%|*}"
-  if ! gh api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" \
-      < /dev/null > "${TMP}/runs"; then
+  if ! gh_read api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" \
+      > "${TMP}/runs"; then
     die "the runs API call for ${wf}${src#*|} failed"
   fi
   jq -c -n '[ (input.workflow_runs // error("no runs"))[]

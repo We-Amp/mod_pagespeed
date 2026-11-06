@@ -50,6 +50,10 @@ mkdir -p "${BIN}"
 #   issue create|edit|comment|close, label create   nothing, exit 0
 # An answer variable X can instead be a file: X_FILE names it (an answer too
 # large for an environment variable).
+# Transient failures: FAKE_FLAKY_<kind>=<n> makes the first n calls of that
+# kind fail with HTTP 502 before the normal answer, where kind is JOBS_<id>,
+# RUNS_NIGHTLY, RUN (the created_at call) or ISSUES. FAKE_FAIL_MSG replaces
+# the HTTP 500 text of the FAKE_*_FAIL failures (for a non-transient error).
 cat > "${BIN}/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_LOG}"
@@ -64,6 +68,20 @@ answer() {
   local var="$1" file="$1_FILE"
   if [ -n "${!file-}" ]; then cat "${!file}"; else printf '%s' "${!var-}"; fi
 }
+# flaky <kind>: fail this call with HTTP 502 while FAKE_FLAKY_<kind> calls of
+# that kind have not failed yet.
+flaky() {
+  local var="FAKE_FLAKY_$1" n counter
+  [ -n "${!var-}" ] || return 0
+  counter="${FAKE_LOG}.flaky-$1"
+  n="$(cat "${counter}" 2> /dev/null || echo 0)"
+  if [ "${n}" -lt "${!var}" ]; then
+    echo $((n + 1)) > "${counter}"
+    echo "gh: Server Error (HTTP 502)" >&2
+    exit 1
+  fi
+}
+FAIL_MSG="${FAKE_FAIL_MSG:-HTTP 500}"
 case "$1 $2" in
   "api --paginate"|"api repos/"*|"api --allow-escape-sequences")
     path="$*"
@@ -72,15 +90,17 @@ case "$1 $2" in
         id="${path#*/actions/runs/}"
         id="${id%%/*}"
         fail="FAKE_JOBS_FAIL_${id}"
-        if [ "${!fail-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+        if [ "${!fail-0}" = "1" ]; then echo "${FAIL_MSG}" >&2; exit 1; fi
+        flaky "JOBS_${id}"
         answer "FAKE_JOBS_${id}"
         ;;
-      */actions/workflows/nightly.yml/runs*) answer FAKE_RUNS_NIGHTLY ;;
+      */actions/workflows/nightly.yml/runs*) flaky RUNS_NIGHTLY; answer FAKE_RUNS_NIGHTLY ;;
       */actions/workflows/release-rehearsal.yml/runs*) answer FAKE_RUNS_REHEARSAL ;;
       */actions/workflows/ci.yml/runs*event=workflow_dispatch*) answer FAKE_RUNS_CI_DISPATCH ;;
       */actions/workflows/ci.yml/runs*event=push*) answer FAKE_RUNS_CI_PUSH ;;
       */actions/runs/*" --jq .created_at")
-        if [ "${FAKE_RUN_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+        if [ "${FAKE_RUN_FAIL:-0}" = "1" ]; then echo "${FAIL_MSG}" >&2; exit 1; fi
+        flaky RUN
         echo "${FAKE_RUN_CREATED}"
         ;;
       */actions/jobs/*/logs)
@@ -114,7 +134,8 @@ case "$1 $2" in
     answer "FAKE_LOG_${id}"
     ;;
   "issue list")
-    if [ "${FAKE_ISSUES_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+    if [ "${FAKE_ISSUES_FAIL:-0}" = "1" ]; then echo "${FAIL_MSG}" >&2; exit 1; fi
+    flaky ISSUES
     printf '%s' "${FAKE_ISSUES:-[]}"
     ;;
   "issue create"|"issue edit"|"issue comment"|"issue close"|"label create") ;;
@@ -169,6 +190,7 @@ ISSUE7='[{"number":7,"body":"The scheduled full tier is red.\n\n### full / Linux
 
 run() { # [env assignments...]
   : > "${WORK}/gh.log"
+  rm -f "${WORK}/gh.log.flaky-"*
   : > "${WORK}/bodies"
   set +e
   (cd "${REPO}" && env PATH="${BIN}:${PATH}" FAKE_LOG="${WORK}/gh.log" \
@@ -176,7 +198,7 @@ run() { # [env assignments...]
     GITHUB_RUN_ID=50 GITHUB_RUN_ATTEMPT=1 GITHUB_SHA="${C4}" \
     DEFAULT_BRANCH=main GH_TOKEN=fake FAKE_RUNS_NIGHTLY="${NO_RUNS}" \
     FAKE_RUNS_CI_DISPATCH="${NO_RUNS}" FAKE_RUNS_CI_PUSH="${NO_RUNS}" \
-    FAKE_RUN_CREATED=2026-10-26T04:00:00Z "$@" bash "${SCRIPT}" > "${WORK}/out" 2> "${WORK}/err")
+    FAKE_RUN_CREATED=2026-10-26T04:00:00Z REPORT_RETRY_BASE_SECONDS=0 "$@" bash "${SCRIPT}" > "${WORK}/out" 2> "${WORK}/err")
   RC=$?
   set -e
 }
@@ -538,6 +560,37 @@ run FAKE_RUN_FAIL=1 FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}"
 expect run-object-failure "exit 1" eq "${RC}" 1
 expect run-object-failure "no writes" eq "$(calls '^gh (issue (create|edit|comment|close)|label create)')" 0
 done_case run-object-failure-exits-1
+
+# --- transient api failures are retried
+start
+run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" FAKE_RUNS_NIGHTLY="${H40}" \
+  FAKE_JOBS_40="${GREEN_JOBS}" FAKE_FLAKY_JOBS_50=2 FAKE_FLAKY_JOBS_40=1 \
+  FAKE_FLAKY_RUNS_NIGHTLY=1 FAKE_FLAKY_RUN=1 FAKE_FLAKY_ISSUES=1
+expect transient-retried "exit 0" eq "${RC}" 0
+expect transient-retried "own jobs read three times" eq "$(calls 'actions/runs/50/jobs')" 3
+expect transient-retried "history jobs read twice" eq "$(calls 'actions/runs/40/jobs')" 2
+expect transient-retried "one issue create" eq "$(calls '^gh issue create ')" 1
+expect transient-retried "last green is run 40" body_has "[run 40]"
+expect transient-retried "retry logged" grep -qF "retrying" "${WORK}/err"
+done_case transient-api-failures-are-retried
+
+start
+run FAKE_JOBS_FAIL_50=1
+expect transient-gives-up "exit 1" eq "${RC}" 1
+expect transient-gives-up "five tries" eq "$(calls 'actions/runs/50/jobs')" 5
+done_case persistent-transient-failure-gives-up-after-five-tries
+
+start
+run FAKE_JOBS_FAIL_50=1 FAKE_FAIL_MSG="HTTP 404: Not Found"
+expect not-transient "exit 1" eq "${RC}" 1
+expect not-transient "one try" eq "$(calls 'actions/runs/50/jobs')" 1
+done_case non-transient-failure-is-not-retried
+
+start
+run FAKE_JOBS_50="${GREEN_JOBS}" FAKE_ISSUES="${ISSUE7}" FAKE_FLAKY_ISSUES=1
+expect write-not-retried "exit 0" eq "${RC}" 0
+expect write-not-retried "one close" eq "$(calls '^gh issue close 7')" 1
+done_case issue-list-retried-writes-once
 
 # --- push-runs-without-full-tier-do-not-consume-cap
 PUSH15=()

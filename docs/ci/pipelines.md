@@ -553,8 +553,12 @@ The body names jobs, SHAs, targets and run links only.
 When no job failed, the open issue is closed, with a comment, once every job
 named by a marker line is green in this run. **A re-run never closes it:** on
 `GITHUB_RUN_ATTEMPT` 2 or later the script only comments, because a re-run
-that goes green is a flake signal and not evidence of a fix. An API failure
-fails the job, so a reporter that could not report is visible. A run on any
+that goes green is a flake signal and not evidence of a fix. Every read is
+retried on a transient failure (HTTP 5xx, a timeout, a dropped connection),
+up to 5 tries with a doubling delay from `REPORT_RETRY_BASE_SECONDS` (10 s);
+writes are sent once. An API failure that outlasts the retries, or one that
+is not transient, fails the job, so a reporter that could not report is
+visible. A run on any
 ref other than `master` is a dry run that prints what it would write.
 `tools/ci/test_nightly_red_report.sh` and `tools/ci/test_failing_targets.sh`
 (in `CI tooling self-tests`) pin this behaviour.
