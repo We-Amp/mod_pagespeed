@@ -94,7 +94,7 @@ docker run --rm --init $PLAT_ARG \
     fi
     '"$(declare -f apt_install_retry)"'
     # stdout is noise; stderr stays visible so a mirror failure shows in the log.
-    apt_install_retry libpcre3 zlib1g curl procps
+    apt_install_retry zlib1g curl procps
     PN=$(grep -h "^PRETTY_NAME" /etc/os-release | cut -d= -f2)
     echo "  distro: $PN"
 

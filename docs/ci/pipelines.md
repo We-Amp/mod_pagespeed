@@ -160,12 +160,12 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   of `install/nginx/build_module_in_container.sh` in an Ubuntu 20.04 container
   pinned by digest (`FOCAL_IMAGE` in the script). Its glibc 2.31 is the
   compatibility floor of the sidecar, with libstdc++ linked statically. The
-  matched nginx also links `libpcre.so.3` (the `libpcre3` package), which is
-  what limits the hosts to Debian 11 and 12 and Ubuntu 20.04 to 24.04: Debian 13
-  and Ubuntu 26.04 no longer ship `libpcre3`, and Enterprise Linux and Amazon
-  Linux never had it under that name. (`libcrypt.so.1` is no obstacle: it is
-  `libcrypt1` on Debian and Ubuntu and `libxcrypt-compat` on EL9 and Amazon
-  Linux 2023.) Ubuntu 20.04 is past
+  matched nginx is built against PCRE2 10.49 (`PCRE2_VERSION` in the recipe,
+  compiled from the sha256-pinned upstream tarball, bumped with the nginx pin)
+  and links it statically, so the pair needs no PCRE library on the host. It is
+  tested on Debian 11, 12 and 13 and Ubuntu 26.04; Enterprise Linux and Amazon
+  Linux are not supported. (`libcrypt.so.1` is `libcrypt1` on
+  Debian and Ubuntu.) Ubuntu 20.04 is past
   its standard support (May 2025); it is only the build base, and nothing of
   it ships beyond what the glibc 2.31 floor implies. Moving to a newer base
   raises the floor and drops the hosts below it, so it is a support decision,
@@ -173,8 +173,8 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   with this paragraph if the base changes.
 - **Gates.** The module exports only the nginx module symbols and links no
   OpenSSL; nginx and the shim link no OpenSSL; none of the three needs
-  libstdc++ or a glibc above 2.31. The pair then loads, serves and optimizes in
-  Debian 11 and Debian 12 containers (`test/package-test/check-sidecar-pair.sh`:
+  libstdc++, a PCRE library of the host or a glibc above 2.31. The pair then loads, serves and optimizes in
+  Debian 11, 12 and 13 and Ubuntu 26.04 containers (`test/package-test/check-sidecar-pair.sh`:
   `X-Page-Speed` carries the version of the tree, no `X-PageSpeed-Warn`), is
   stripped (debug files kept apart), and goes through the gate and the smoke
   again.

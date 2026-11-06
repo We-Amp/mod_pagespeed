@@ -208,25 +208,24 @@ Two advanced cases use `Domains.AuthorizedDomains`:
 ## Container & runtime requirements
 
 The bundled nginx + module are glibc ELF binaries built for a glibc ≥ 2.31 floor, so they
-run on Debian 11 and 12 and Ubuntu 20.04 to 24.04. Beyond the glibc floor, the limit is
-`libpcre.so.3`, which the bundled nginx links and only the `libpcre3` package provides:
-Debian 13 and Ubuntu 26.04 no longer ship it, and Enterprise Linux (RHEL, AlmaLinux, Rocky)
-and Amazon Linux never had it under that name, so those hosts are not supported. `libstdc++` is statically linked and the build has no OpenSSL
-dependency, so there is no libstdc++ or libssl/libcrypto host requirement. The binaries
-are built on Ubuntu 20.04, which sets the glibc 2.31 floor; Ubuntu 20.04 itself is past
-its standard support, and nothing of it ships beyond that floor. The binaries link a small
-set of host shared libraries:
+run on Debian 11, 12 and 13 and Ubuntu 26.04 (the hosts the pair is tested on; Ubuntu 20.04
+to 24.04 meet the same glibc floor). The bundled nginx carries PCRE2 10.49 statically, so no
+PCRE library is needed on the host. Enterprise Linux (RHEL, AlmaLinux,
+Rocky) and Amazon Linux are not supported. `libstdc++` is statically linked and the build
+has no OpenSSL dependency, so there is no libstdc++ or libssl/libcrypto host requirement. The
+binaries are built on Ubuntu 20.04, which sets the glibc 2.31 floor; Ubuntu 20.04 itself is
+past its standard support, and nothing of it ships beyond that floor. The binaries link a
+small set of host shared libraries:
 
 | Host library | Provided by | Notes |
 |---|---|---|
-| `libpcre.so.3` | `libpcre3` | nginx PCRE — **missing from `-chiseled`/`-distroless` images** |
 | `libz.so.1` | `zlib1g` | present on standard .NET images |
 | `libcrypt.so.1` | `libcrypt1` | present on standard .NET images |
 
-- **Recommended base image:** `mcr.microsoft.com/dotnet/aspnet:8.0` (Debian); add the one
-  missing lib with `apt-get install -y libpcre3`.
-- **Not supported:** `-chiseled` / `-distroless` .NET images (no `libpcre3`) and
-  Alpine/musl images (the binaries are glibc-linked). Use a Debian/Ubuntu glibc base.
+- **Recommended base image:** `mcr.microsoft.com/dotnet/aspnet:8.0` (Debian); it has both
+  libraries.
+- **Not supported:** `-chiseled` / `-distroless` .NET images (not tested; they probably lack `libcrypt.so.1`, which the
+  bundled nginx needs) and Alpine/musl images (the binaries are glibc-linked). Use a Debian/Ubuntu glibc base.
   nginx still runs in Inverse mode — on loopback — so the same base-image requirements
   apply.
 
