@@ -213,6 +213,60 @@ title or commit disagree with the version job. A release candidate version
 has no cPanel packages, so those three are not required for it. In a candidate
 run every sealed artifact is kept 14 days (`tree` stays at 3).
 
+### Preparation for adoption: `verify` and `upload-check`
+
+Not wired into the lane yet: no workflow calls these, and a tag without
+candidate trailers builds everything as before. `tools/ci/release_adopt.py`
+carries the tooling that a later change will use so that the run of a tag can
+adopt the bytes of a candidate run.
+
+`verify` takes the repository, the candidate run id (the tag's
+`Release-Candidate-Run` trailer), the tag, the tag's commit, the other two
+trailers (`Release-Candidate-SHA256SUMS`, `Release-Candidate-Seal`), the
+triggering actor and the lane commit of the run that adopts, and that run's
+start time. The tag object itself is not read by the tool. It checks, through
+the Actions API first and the downloaded bytes second:
+
+1. the candidate run is a completed, successful `workflow_dispatch` of
+   `release.yml` on `master`, in this repository, titled for this tag and commit;
+2. it built the tag's commit;
+3. it ran the same `pipeline-release-module.yml` commit as the adopting run;
+4. its dispatcher and the user of its latest attempt are the adopting run's
+   actor or on `ADMIN_ALLOWLIST`; bots are refused;
+5. the `filter=latest` job listing matches the pipeline file at the candidate's
+   lane commit job for job: matrix legs are expanded from the `plans` the seal
+   records, of each fleet/hosted twin exactly one ran and the other was
+   skipped, the release-environment jobs were skipped and `candidate-seal`
+   succeeded;
+6. every sealed artifact is listed with the sealed id and digest, unexpired,
+   of the candidate run and commit, and the single `candidate-seal` artifact
+   was uploaded by the passing `candidate-seal` job;
+7. the candidate finished at most three days before the adopting run started;
+8. the seal hashes to its trailer, says `candidate: true`, `dry_run: true`
+   and the API's tag, version and commit, every file of every sealed artifact
+   matches the seal, and `SHA256SUMS` matches both the seal and its trailer;
+9. the optimizer pin at the tag names the optimizer release that the
+   candidate's `manifest.json` records.
+
+On success it writes `adopt-binding.json` (candidate run and attempt, build
+commit, tag, lane commit, trailers, the sealed job list, and every sealed
+artifact with its files) and prints `run <id> · seal <12 hex> · SHA256SUMS
+<12 hex>`. `--read-only` stops after the checks, writes nothing and prints the
+three trailer values, so the intended commit stands in for the tag commit
+before a tag exists.
+
+`upload-check` reads the artifacts that an adopting run copied into itself back
+from its own artifact listing, checks each zip against the API digest and the
+files against `adopt-binding.json`, and records the new id and digest.
+`binding-hash` prints, and optionally checks, the hash of `adopt-binding.json`.
+`schema --print` lists which jobs an adopting run skips, which always run and
+which belong to the environment; a self-test fails when a job of the pipeline
+file is in none of those groups.
+
+`seal` accepts `--plan JOB=JSON` for each plan job (`nginx-x64-plan`,
+`nginx-arm64-plan`) and records them as `plans` in the seal. The key is
+additive; readers of schema 2 ignore it.
+
 ### The weekly rehearsal
 
 The lane otherwise runs only when a release is cut, so a defect in it (a
@@ -862,7 +916,7 @@ the version check before anything is published.
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
 | `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard (candidate mode included) and its test |
-| `tools/ci/release_adopt.py` | the candidate seal (`seal`, `--self-test`) |
+| `tools/ci/release_adopt.py` | the candidate seal (`seal`), the adoption checks (`verify`, `upload-check`, `binding-hash`), the adoption job schema (`schema --print`) (`--self-test`) |
 | `tools/ci/rehearsal_fulltier_gate.sh`, `tools/ci/test_rehearsal_fulltier_gate.sh` | the 7-day full-tier gate of the weekly rehearsal and its test (`--self-test`) |
 | `tools/ci/release_job_graph.py` | the job graph of a pipeline file per event, and the comparison of two files (`--self-test`) |
 | `tools/ci/systest_gate.sh`, `tools/ci/test_systest_gate.sh` | the system-test gate and its test |
