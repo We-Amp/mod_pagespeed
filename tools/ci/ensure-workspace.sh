@@ -20,6 +20,10 @@
 # Behaviour:
 #   - Happy path (same box, GIT_COMMIT stamp == $GITHUB_SHA): no-op, the warm
 #     tree and box-local bazel disk cache are reused.
+#   - Release-lane tree (the tree holds .release-lane-tree): stale even when
+#     its stamp is $GITHUB_SHA. The release lane stamps the same commit into
+#     a tree with a release VERSION and its own vendor/; CI must not test
+#     that tree as its own (docs/ci/lane-write-sets.md).
 #   - Cross-box / stale (stamp missing or for a different SHA): clear any stale
 #     (possibly root-owned) tree, then fetch + extract the vendor tarball from
 #     the authoritative CI hub shared dir via extract-vendor-tarball.sh
@@ -55,12 +59,14 @@ LOCAL_TARBALL="${2:-}"
 : "${GITHUB_WORKSPACE:?ensure-workspace.sh: GITHUB_WORKSPACE must be set}"
 
 STAMPED="$(tr -d '[:space:]' < "${WORKSPACE_DIR}/GIT_COMMIT" 2>/dev/null || true)"
-if [ "$STAMPED" = "$GITHUB_SHA" ]; then
+if [ -e "${WORKSPACE_DIR}/.release-lane-tree" ]; then
+  echo "ensure-workspace: workspace holds a release-lane tree (have '${STAMPED}', want '${GITHUB_SHA}') -- self-healing from the CI hub"
+elif [ "$STAMPED" = "$GITHUB_SHA" ]; then
   echo "ensure-workspace: workspace current (${GITHUB_SHA}) -- reusing warm tree"
   exit 0
+else
+  echo "ensure-workspace: workspace missing/stale (have '${STAMPED}', want '${GITHUB_SHA}') -- self-healing from the CI hub"
 fi
-
-echo "ensure-workspace: workspace missing/stale (have '${STAMPED}', want '${GITHUB_SHA}') -- self-healing from the CI hub"
 
 # Ensure the workspace dir exists owned by THIS runner uid before we touch it.
 # On a box where the `vendor` job has never run, ${WORKSPACE_DIR} may not exist
