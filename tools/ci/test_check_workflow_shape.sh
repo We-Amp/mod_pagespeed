@@ -171,6 +171,13 @@ expect_bad bad-fleet-scope-short-circuit-removed 'fleet-scope'
 # fleet-scope-position
 expect_bad bad-fleet-scope-before-fork-guard 'fleet-scope'
 expect_bad bad-fleet-scope-after-diff 'fleet-scope'
+# fleet-scope docs lane: the step passes DOCS_LANE and the pull request /
+# merge group base, a merge group reaches the script, and no workflow runs the
+# classifier itself.
+expect_bad bad-fleet-scope-merge-group-inline 'fleet-scope'
+expect_bad bad-fleet-scope-docs-lane-missing 'fleet-scope'
+expect_bad bad-fleet-scope-base-from-head 'fleet-scope'
+expect_bad bad-docs-only-from-tree 'docs_only.sh is named in a workflow'
 expect_bad bad-event-guard-missing 'event-guard'
 expect_bad bad-event-guard-unreached 'event-guard'
 expect_bad bad-event-guard-extra-command 'event-guard'
