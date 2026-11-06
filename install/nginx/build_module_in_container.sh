@@ -417,10 +417,10 @@ install_deps_focal() {
   # NOT emit the __isoc23_* GLIBC_2.38 redirects that the noble (glibc 2.39) base
   # bakes in — and combined with -static-libstdc++/-static-libgcc on the module
   # link (step 6, focal-only LD_OPT) the .so carries NO libstdc++ runtime dep, so
-  # it needs no newer glibc than 2.31. The matched nginx of the pair also links
-  # libpcre.so.3 (libpcre3), so the pair's hosts are Debian 11/12 and Ubuntu
-  # 20.04 to 24.04 (later releases dropped libpcre3; Enterprise Linux and Amazon
-  # Linux never had it under that name).
+  # it needs no newer glibc than 2.31. The matched nginx of the pair is built
+  # against PCRE2 (libpcre2-dev only; libpcre3-dev is NOT installed, so nginx
+  # cannot pick PCRE 1) and links libpcre2-8.a statically (step 6), so it needs
+  # no PCRE library on the host.
   # focal's stock toolchain is too old for the C++20/23 PSOL/Cyclone graph, so add
   # the LLVM apt repo (clang) + the toolchain PPA (g++-13 -> the libstdc++-13
   # headers/libs the clang-libstdcxx13 bazel config expects at /usr/{include/c++,
@@ -430,7 +430,7 @@ install_deps_focal() {
   apt-get install -y --no-install-recommends \
     ca-certificates curl wget gnupg lsb-release software-properties-common \
     build-essential \
-    zlib1g-dev libpcre3-dev libssl-dev \
+    zlib1g-dev libpcre2-dev libssl-dev \
     python3 unzip zip gperf bison flex nasm \
     dpkg-dev fakeroot >/dev/null
   # g++-13 / libstdc++-13 from the Ubuntu toolchain PPA (focal ships g++-9).
@@ -1341,6 +1341,16 @@ export PAGESPEED_PSOL_ARCHIVE="${MERGED}"
       -e 's#[$][(]LINK[)] -o objs/ngx_pagespeed[.]so#g++-13 -o objs/ngx_pagespeed.so#' \
       -e 's# -lstdc++##g' \
       objs/Makefile
+    # The nginx binary of the pair links PCRE2 statically: replace the
+    # dynamic -lpcre2-8 with the archive, so the binary has no PCRE NEEDED and
+    # runs on hosts that ship neither libpcre3 nor libpcre2 (Debian 13, Ubuntu
+    # 26.04, slim container images). Fail the build if the Makefile does not
+    # link PCRE2 the way this expects, rather than ship a dynamic link.
+    PCRE2_A="/usr/lib/$(deb_triplet)/libpcre2-8.a"
+    [ -f "${PCRE2_A}" ] || { echo "ERROR: ${PCRE2_A} missing (libpcre2-dev)" >&2; exit 1; }
+    grep -q -- ' -lpcre2-8' objs/Makefile \
+      || { echo "ERROR: nginx was not configured against PCRE2 (no -lpcre2-8 in objs/Makefile)" >&2; exit 1; }
+    sed -i "s# -lpcre2-8# ${PCRE2_A}#g" objs/Makefile
   elif [ "${DEB_STATIC_STDCXX}" = "1" ]; then
     # Link the module .so with clang++ (matches the clang-compiled object graph;
     # the only C++23 driver available on the old-glibc targets). We must STATIC-

@@ -71,10 +71,13 @@ set -euo pipefail
 # aspnetcore/README.md.
 FOCAL_IMAGE="ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214"
 GLIBC_FLOOR="2.31"
-# The smoke hosts: the oldest and a current Debian the pair supports.
+# The smoke hosts: the oldest Debian the pair supports, the current Debian
+# releases, and Ubuntu 26.04 (none of the newer ones ships libpcre3).
 SMOKE_IMAGES=(
   "debian:11@sha256:6f519a81440354a85eb592c5f32109ab80605f6b892455983a6f618bf87fabe9"
   "debian:12@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858"
+  "debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6"
+  "ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
 )
 # The .NET SDKs the test suite runs under, one per framework the package ships.
 DOTNET_IMAGE_NET8="mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim@sha256:f7e28a0a3f6f9235929ec19274fd0ddf8534e9159f99fac602ac73304f1ce99f"
@@ -326,6 +329,9 @@ hygiene() {
         if printf "%s\n" "$needed" | grep -qiE "^lib(ssl|crypto)"; then
           echo "::error::$b links OpenSSL: the pair would not load where another OpenSSL is installed"; fail=1
         fi
+        if printf "%s\n" "$needed" | grep -qiE "^libpcre"; then
+          echo "::error::$b needs a PCRE library of the host: nginx must link PCRE2 statically"; fail=1
+        fi
         if printf "%s\n" "$needed" | grep -qE "^lib(stdc\+\+|gcc_s)"; then
           echo "::error::$b needs the C++ runtime of the host: it must be linked statically"; fail=1
         fi
@@ -446,12 +452,6 @@ run_suite() {
     -v "$work:/w" -v "$RESULTS:/results" -w /w \
     "$image" bash -c '
       set -euo pipefail
-      '"$(declare -f apt_install_retry)"'
-      if [ -n "$RID" ]; then
-        # The bundled nginx links PCRE; a consumer host provides it.
-        export DEBIAN_FRONTEND=noninteractive
-        apt_install_retry --no-install-recommends libpcre3
-      fi
       # dotnet needs an account for the user it runs as.
       getent group "$HOST_GID" >/dev/null || groupadd -o -g "$HOST_GID" sidecar
       getent passwd "$HOST_UID" >/dev/null || useradd -o -M -u "$HOST_UID" -g "$HOST_GID" -d /tmp/home sidecar

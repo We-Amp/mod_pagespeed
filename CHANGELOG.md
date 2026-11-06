@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The admin console's cache URL detail page no longer reports "not in index" for every URL. The console now passes the cache entry's site on to the optimizer when it looks up a URL's variants and previews. Affected: 2.8.0. Variant previews work with the 2.8.0 optimizer; the variants list needs the matching optimizer release that accepts the site on that lookup.
 
+- **The ASP.NET Core sidecar starts on Debian 13 and Ubuntu 26.04.** The nginx
+  bundled with the sidecar packages (`WeAmp.PageSpeed.Sidecar.NativeAssets.Linux`)
+  needed `libpcre.so.3`, which those releases no longer ship, so the sidecar
+  failed to start there. The bundled nginx now links PCRE2 statically and needs
+  no PCRE library on the host, so the `libpcre3` prerequisite is gone. Debian 11
+  and 12 and Ubuntu 20.04 to 24.04 keep working.
+
 ## [2.8.0] - 2026-11-05
 
 ### Security
