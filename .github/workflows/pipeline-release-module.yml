@@ -26,6 +26,7 @@
 #   * workflow_dispatch { tag, dry_run: true }    -> the default
 #   * workflow_dispatch { tag, dry_run: false }
 #   * workflow_dispatch { tag, dry_run: true, candidate: true, sha }
+#   * schedule, or workflow_dispatch, with rehearsal: true (release-rehearsal.yml)
 # A dry run builds and validates everything, builds the installer unsigned
 # and runs the gates, and signs and creates nothing. The tag must exist and
 # its commit must be on master (the ref guard, which also refuses a run on any
@@ -35,6 +36,11 @@
 # the real run of that tag does (the `build_profile` of the version job is
 # `release`, not `rehearsal`), enters no `release` environment, and ends with
 # the `candidate-seal` job: hashes of the artifacts it produced.
+# A rehearsal is a dry run of the lane on the master tip, with no tag: the
+# version job makes one up from the pinned optimizer release
+# (module-v<pinned version>-rehearsal.<run number>), it is a pre-release that
+# can never be confused with a release, no job of the `release` environment
+# runs, and nothing is sealed, so it can never be adopted.
 #
 # Runners. Every build job exists twice: on a runner class (fleet-heavy,
 # fleet-windows) while the repository variable FLEET_ENABLED is 'true', and as
@@ -78,6 +84,10 @@ on:
         description: Candidate only. The 40-hex master tip to build; must be the commit the run is at.
         type: string
         default: ''
+      rehearsal:
+        description: Schedule or dispatch on master with no tag. A dry run of the lane on the master tip under a made-up pre-release version; needs dry_run, no tag and no candidate.
+        type: boolean
+        default: false
     # Declared per secret and passed one by one by the caller, never inherited.
     # They are environment secrets of `release`: a job that runs in that
     # environment reads the environment's value, which takes precedence over
@@ -117,7 +127,7 @@ jobs:
           PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
-          ALLOWED: "push workflow_dispatch"
+          ALLOWED: "push workflow_dispatch schedule"
           ALLOWED_REFS: "refs/tags/* refs/heads/master"
         run: |
           set -euo pipefail
@@ -160,10 +170,11 @@ jobs:
         with:
           tag-glob: 'module-v*'
           dispatch-tag: ${{ inputs.tag }}
-          events: 'push workflow_dispatch'
+          events: 'push workflow_dispatch schedule'
           candidate: ${{ inputs.candidate }}
           candidate-sha: ${{ inputs.sha }}
           dry-run: ${{ inputs.dry_run }}
+          rehearsal: ${{ inputs.rehearsal }}
 
   version:
     name: Derive versions from the tag
@@ -184,6 +195,7 @@ jobs:
       is_prerelease: ${{ steps.derive.outputs.is_prerelease }}
       dry_run: ${{ steps.derive.outputs.dry_run }}
       candidate: ${{ steps.derive.outputs.candidate }}
+      rehearsal: ${{ steps.derive.outputs.rehearsal }}
       build_profile: ${{ steps.derive.outputs.build_profile }}
       pair_lenient: ${{ steps.derive.outputs.pair_lenient }}
     steps:
@@ -201,6 +213,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
           CANDIDATE_INPUT: ${{ inputs.candidate }}
+          REHEARSAL_INPUT: ${{ inputs.rehearsal }}
           TAG_INPUT: ${{ inputs.tag }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
@@ -219,7 +232,36 @@ jobs:
           if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$CANDIDATE_INPUT" = true ]; then
             CANDIDATE=true
           fi
-          if [ "$CANDIDATE" = true ]; then
+          # A rehearsal is a schedule or a dispatch that says so, and a
+          # schedule is nothing else (the ref guard says the same; this keeps
+          # the rule next to the version rules).
+          REHEARSAL=false
+          [ "$REHEARSAL_INPUT" != true ] || REHEARSAL=true
+          if [ "$EVENT_NAME" = schedule ] && [ "$REHEARSAL" != true ]; then
+            echo "::error::a schedule event runs a rehearsal only"; exit 1
+          fi
+          if [ "$REHEARSAL" = true ]; then
+            case "$EVENT_NAME" in schedule|workflow_dispatch) ;; *) echo "::error::a rehearsal is a schedule or a dispatch, not '$EVENT_NAME'"; exit 1 ;; esac
+            [ "$CANDIDATE" = false ] || { echo "::error::a rehearsal is not a candidate"; exit 1; }
+            [ -z "$TAG_INPUT" ] || { echo "::error::a rehearsal names no tag"; exit 1; }
+            [ "$REF" = "$SHA" ] || { echo "::error::a rehearsal builds its commit; the guard's ref '$REF' is not '$SHA'"; exit 1; }
+          fi
+          if [ "$REHEARSAL" = true ]; then
+            # No tag exists. The tag is made up from the pinned optimizer
+            # release of the commit being built, so the rehearsal builds
+            # what the next release of that pair would, under a version
+            # that is a pre-release and cannot be taken for a release. The
+            # pin is read from the commit itself, not from whatever master
+            # is when this job starts.
+            git fetch --quiet --depth 1 origin "$SHA"
+            pin_tag="$(git show "${SHA}:install/debian/optimizer-pin.json" | python3 -c "import json,sys;print(json.load(sys.stdin)['tag'])")"
+            pin_base="${pin_tag#optimizer-v}"
+            pin_base="${pin_base%%-*}"
+            printf '%s' "$pin_base" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              || { echo "::error::cannot make a rehearsal version from the optimizer pin tag '$pin_tag'"; exit 1; }
+            TAG="module-v${pin_base}-rehearsal.${RUN_NUMBER}"
+            echo "rehearsal version: ${TAG#module-v} (pinned optimizer ${pin_tag})"
+          elif [ "$CANDIDATE" = true ]; then
             [ "$REF" = "$SHA" ] || { echo "::error::a candidate builds its commit; the guard's ref '$REF' is not '$SHA'"; exit 1; }
             TAG="$TAG_INPUT"
             # Only a release or a release candidate (the ref guard says the
@@ -241,6 +283,7 @@ jobs:
             DRY_RUN=false
           fi
           [ "$CANDIDATE" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a candidate is a dry run"; exit 1; }
+          [ "$REHEARSAL" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a rehearsal is a dry run"; exit 1; }
           # What the build does is separate from whether anything is signed.
           # A real run and a candidate build the release exactly (final
           # stamps, strict pair checks, the cPanel gates); only a plain dry
@@ -265,6 +308,7 @@ jobs:
             echo "short_sha=${SHA:0:7}"
             echo "dry_run=$DRY_RUN"
             echo "candidate=$CANDIDATE"
+            echo "rehearsal=$REHEARSAL"
             echo "build_profile=$BUILD_PROFILE"
             echo "pair_lenient=$PAIR_LENIENT"
           } | tee -a "$GITHUB_OUTPUT"
@@ -823,6 +867,7 @@ jobs:
   # push run never counts. The order is: dispatch, then the gate (it waits
   # for the dispatch while it runs), then the tag. On a dry run the verdict
   # is reported and the run continues. See tools/ci/ci_release_gate.sh.
+  # A rehearsal adds the 7-day rule below.
   # ---------------------------------------------------------------------
   ci-release-gate:
     name: CI run of the release commit (full tier)
@@ -843,6 +888,15 @@ jobs:
           persist-credentials: false
       - name: Require a green full=true CI dispatch of this commit
         run: bash tools/ci/ci_release_gate.sh
+
+      # The weekly rehearsal builds the master tip, which has no full-tier run
+      # of its own, so the step above only warns there (a dry run). What the
+      # rehearsal must prove instead is that the full tier has been green on
+      # master at some point in the last 7 days; without such a run it fails.
+      # See tools/ci/rehearsal_fulltier_gate.sh.
+      - name: Require a green full-tier run on master in the last 7 days (rehearsal)
+        if: ${{ needs.version.outputs.rehearsal == 'true' }}
+        run: bash tools/ci/rehearsal_fulltier_gate.sh
 
   # ---------------------------------------------------------------------
   # Linux packages. One step list for three jobs: x64 on the build runners,
@@ -2976,7 +3030,7 @@ jobs:
   windows-sign:
     name: Sign the Windows binaries
     needs: [version, windows-ready]
-    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
+    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -3175,7 +3229,7 @@ jobs:
   msi-sign:
     name: Sign the Windows installer
     needs: [version, msi-build]
-    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
+    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -3643,7 +3697,7 @@ jobs:
   sign-checksums:
     name: Sign SHA256SUMS
     needs: [version, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
@@ -3784,7 +3838,7 @@ jobs:
   create-release:
     name: Create the GitHub release
     needs: [version, validate, sign-checksums]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release

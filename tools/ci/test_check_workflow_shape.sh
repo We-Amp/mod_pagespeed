@@ -91,6 +91,7 @@ expect_bad bad-secret-uses-job 'rule g'
 expect_good good-release-env
 expect_bad bad-release-env-no-candidate 'rule release-env'
 expect_bad bad-release-env-no-dry-run 'rule release-env'
+expect_bad bad-release-env-no-rehearsal 'rule release-env'
 expect_bad bad-release-env-no-if 'rule release-env'
 expect_good good-queue-guard
 expect_bad bad-queue-guard-from-tree 'queue-guard-reads-default-branch'

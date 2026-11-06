@@ -13,6 +13,7 @@ Runtime values (needs.X.result, vars.*, github.actor, ...) stay symbolic.
 Events:
   dispatch-dry-run  a plain workflow_dispatch with dry_run=true
   tag-push          a push of a module-v* tag
+Neither is a candidate or a rehearsal, so both constants are false for them.
 
     release_job_graph.py render FILE [--event EVENT]    (default: both)
     release_job_graph.py compare OLD NEW                 (exit 1 on any difference)
@@ -33,16 +34,20 @@ EVENTS = {
         "github.event_name": "workflow_dispatch",
         "inputs.dry_run": True,
         "inputs.candidate": False,
+        "inputs.rehearsal": False,
         "needs.version.outputs.dry_run": "true",
         "needs.version.outputs.candidate": "false",
+        "needs.version.outputs.rehearsal": "false",
         "needs.version.outputs.build_profile": "rehearsal",
     },
     "tag-push": {
         "github.event_name": "push",
         "inputs.dry_run": False,
         "inputs.candidate": False,
+        "inputs.rehearsal": False,
         "needs.version.outputs.dry_run": "false",
         "needs.version.outputs.candidate": "false",
+        "needs.version.outputs.rehearsal": "false",
         "needs.version.outputs.build_profile": "release",
     },
 }
@@ -330,7 +335,13 @@ def self_test():
     d, t = EVENTS["dispatch-dry-run"], EVENTS["tag-push"]
     real = "needs.version.outputs.dry_run == 'false'"
     cand = "needs.version.outputs.candidate != 'true'"
+    reh = "needs.version.outputs.rehearsal != 'true'"
     eq("constant folds true", evaluate("${{ %s }}" % cand, d), "true")
+    eq("the rehearsal term folds true on both events",
+       (evaluate("${{ %s }}" % reh, d), evaluate("${{ %s }}" % reh, t)), ("true", "true"))
+    eq("an added rehearsal term does not change the result",
+       evaluate("${{ !cancelled() && %s && %s && %s }}" % (real, cand, reh), t),
+       evaluate("${{ !cancelled() && %s && %s }}" % (real, cand), t))
     eq("dry_run condition: dispatch", evaluate("${{ %s }}" % real, d), "false")
     eq("dry_run condition: tag push", evaluate("${{ %s }}" % real, t), "true")
     eq("symbolic part is kept, true part dropped",

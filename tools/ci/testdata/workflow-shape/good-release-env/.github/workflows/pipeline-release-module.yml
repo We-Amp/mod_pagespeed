@@ -12,7 +12,7 @@ jobs:
       - run: echo version
   sign:
     needs: [version]
-    if: ${{ !cancelled() && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
+    if: ${{ !cancelled() && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: ubuntu-latest
     environment: release
     steps:
