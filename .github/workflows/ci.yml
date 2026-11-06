@@ -242,6 +242,8 @@ jobs:
           tools/ci/nginx_org_lane.sh --self-test
           tools/ci/release_sidecar.sh --self-test
           python3 -I tools/ci/sidecar_pair_manifest.py --self-test
+          python3 -I tools/ci/release_adopt.py --self-test
+          python3 -I tools/ci/release_job_graph.py --self-test
           tools/ci/release_ea4_build.sh --self-test
           python3 -I tools/ci/check_module_optimizer_version.py --self-test
           tools/ci/pair_rehearsal.sh --self-test
