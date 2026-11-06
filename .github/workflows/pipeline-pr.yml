@@ -1425,7 +1425,10 @@ jobs:
     permissions:
       contents: read
     name: Linux Unit Tests
-    needs: [changes, vendor, linux-build]
+    # No linux-build in needs: this job uses nothing the build job produces
+    # (no artifact, no output) and builds its own test tree, so it runs beside
+    # the build instead of after it. Both read the same remote cache.
+    needs: [changes, vendor]
     runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) || needs.changes.outputs.route != 'fleet') && 'ubuntu-latest' || 'fleet-heavy' }}
     timeout-minutes: 120
     steps:
