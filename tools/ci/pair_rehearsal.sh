@@ -98,6 +98,7 @@ jobs = doc.get("jobs", [])
 def named(pattern):
     return [j for j in jobs if re.fullmatch(pattern, j.get("name", ""))]
 PFX = r"(?:[^/]+ / )?"
+ADOPTED_SUFFIX = r"(?: \(adopted: run [0-9]+ \S+ seal [0-9a-f]{12} \S+ SHA256SUMS [0-9a-f]{12}\))?"
 one = [
     ("optimizer fetch", PFX + r"Fetch and verify the optimizer packages"),
 ]
@@ -128,8 +129,10 @@ for label, pat in [
                         % (label, j["name"], j.get("conclusion")))
 # A dry run signs and publishes nothing: these two jobs must exist and be skipped.
 for label, pat in [
-    ("signing", PFX + r"Sign SHA256SUMS"),
-    ("release creation", PFX + r"Create the GitHub release"),
+    # An adopting run appends its binding to these names; a dry run never adopts,
+    # so the suffix is optional here.
+    ("signing", PFX + r"Sign SHA256SUMS" + ADOPTED_SUFFIX),
+    ("release creation", PFX + r"Create the GitHub release" + ADOPTED_SUFFIX),
 ]:
     found = named(pat)
     if len(found) != 1:

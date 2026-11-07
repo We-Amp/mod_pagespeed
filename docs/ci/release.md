@@ -272,7 +272,8 @@ In an adopting run:
   sealed ones; `msi-sign` checks that the installer it downloads is the one
   `msi-build` built (its output `msi_sha256`). `msi-old` is not copied: the
   adopting run's `msi-build` builds its own;
-- the names of `windows-sign` and `msi-sign` carry the binding, `Sign the
+- the names of `windows-sign`, `msi-sign`, `sign-checksums` and
+  `create-release` (all four approvals) carry the binding, `Sign the
   Windows binaries (adopted: run <id> · seal <12 hex> · SHA256SUMS <12 hex>)`,
   so whoever approves the job can compare it with the tag's trailers and the
   record of the candidate. The prefix is today's name. Reject the approval if
