@@ -200,6 +200,8 @@ jobs:
         run: tools/ci/test_docs_only.sh
       - name: Push range base
         run: tools/ci/test_push_range_base.sh
+      - name: dnf retry helper
+        run: tools/ci/test_dnf_retry.sh
       - name: Full tier scope
         run: tools/ci/test_full_tier_scope.sh
       - name: Failing target extraction
