@@ -721,9 +721,15 @@ def is_bot(user):
 
 
 def split_ref(wf):
-    """(file path, ref) of a referenced_workflows path 'owner/repo/.github/...yml@ref'."""
-    path, _, ref = (wf.get("path") or "").partition("@")
-    return path, ref or wf.get("ref") or ""
+    """(file path, full ref) of a referenced_workflows entry. The API gives the
+    path as 'owner/repo/.github/...yml@<what the caller wrote>' (for example
+    '@master') and the resolved ref separately ('refs/heads/master'): the
+    explicit `ref` field wins, and a bare branch name is a refs/heads/ ref."""
+    path, _, at = (wf.get("path") or "").partition("@")
+    ref = wf.get("ref") or at or ""
+    if ref and not ref.startswith("refs/"):
+        ref = "refs/heads/" + ref
+    return path, ref
 
 
 def check_run(run, repo, candidate_run, tag, tag_commit):
@@ -814,8 +820,20 @@ def check_age(listing, started_at):
     return []
 
 
+# A job whose name carries the adoption binding is listed under the evaluated
+# name when it ran (" (adopted: run ...)", or nothing when the run did not
+# adopt) and under GitHub's normalised expression text when it was skipped
+# ("${{ (((needs.adopt.outputs.adopted == 'true') && ...) || '') }}"). Both are
+# stripped, so every listing name compares with the name in the pipeline file.
+# Other expressions (matrix keys, which end the name in ')') are untouched.
+LISTED_ADOPT_SUFFIX_RE = re.compile(
+    r"(?: \(adopted: run [0-9]+ \S+ seal [0-9a-f]{12} \S+ SHA256SUMS [0-9a-f]{12}\)|" + ADOPT_NAME_RE.pattern + r")$")
+
+
 def norm_job_name(name, prefix=CALLER_PREFIX):
-    return name[len(prefix):] if prefix and name.startswith(prefix) else name
+    if prefix and name.startswith(prefix):
+        name = name[len(prefix):]
+    return LISTED_ADOPT_SUFFIX_RE.sub("", name)
 
 
 def expand_expected(jobs, plans):
@@ -1241,6 +1259,11 @@ class GhApi:
 
 
 
+# The suffix GitHub lists for a skipped job named with the adoption binding,
+# exactly as a live candidate run lists it.
+LIVE_RAW_ADOPT_SUFFIX = ("${{ (((needs.adopt.outputs.adopted == 'true') && format(' (adopted: {0})', "
+                         "needs.adopt.outputs.binding)) || '') }}")
+
 _FAKE_PIPELINE = """name: x
 on: workflow_call
 jobs:
@@ -1540,6 +1563,26 @@ def _verify_cases():
     case("refuse: lane referenced from another ref",
          run(referenced_workflows=[{"path": "o/r/" + PIPELINE_FILE + "@refs/heads/topic", "sha": _LANE, "ref": "refs/heads/topic"}]),
          refused="lane ref")
+    # The shape the API really returns for a candidate run: the path
+    # names the ref as the caller wrote it, the resolved ref is a separate field.
+    case("accept: the live referenced_workflows shape (path '@master', ref 'refs/heads/master')",
+         run(referenced_workflows=[{"path": "o/r/" + PIPELINE_FILE + "@master", "sha": _LANE, "ref": "refs/heads/master"}]))
+    case("accept: a bare branch in the path and no ref field",
+         run(referenced_workflows=[{"path": "o/r/" + PIPELINE_FILE + "@master", "sha": _LANE}]))
+    case("refuse: the live shape on another branch",
+         run(referenced_workflows=[{"path": "o/r/" + PIPELINE_FILE + "@topic", "sha": _LANE, "ref": "refs/heads/topic"}]),
+         refused="lane ref is 'refs/heads/topic'")
+    case("refuse: a tag ref is not normalised to a branch",
+         run(referenced_workflows=[{"path": "o/r/" + PIPELINE_FILE + "@module-v1", "sha": _LANE, "ref": "refs/tags/module-v1"}]),
+         refused="lane ref is 'refs/tags/module-v1'")
+
+    def skipped_raw(w):
+        # A skipped job named with the adoption binding is listed under
+        # GitHub's normalised expression text, as in a live candidate run.
+        for e in w["listing"]:
+            if e["name"] == CALLER_PREFIX + "Sign the Windows binaries":
+                e["name"] += LIVE_RAW_ADOPT_SUFFIX
+    case("accept: a skipped signing job listed under its raw expression name", skipped_raw)
     case("refuse: candidate dispatched by another login", run(actor={"login": "mallory", "type": "User"}),
          refused="candidate's actor 'mallory'")
     case("refuse: latest attempt started by a login that is not allowlisted (rerun)",
@@ -1841,6 +1884,18 @@ def self_test():
         print("%s %s%s" % ("ok  " if good else "FAIL", desc, "" if good else " (%s)" % detail))
         if not good:
             fails += 1
+
+    for base in ("Sign the Windows binaries", "Sign the Windows installer", "Sign SHA256SUMS", "Create the GitHub release"):
+        check("live raw name of '%s' compares as the plain name" % base,
+              norm_job_name(CALLER_PREFIX + base + LIVE_RAW_ADOPT_SUFFIX) == base)
+        check("evaluated binding on '%s' compares as the plain name" % base,
+              norm_job_name(CALLER_PREFIX + base + " (adopted: run 123 \u00b7 seal 0123456789ab \u00b7 SHA256SUMS 0123456789ab)") == base)
+    for raw in ("Nginx Distro Packages (x64, ${{ matrix.distro }})", "EA4 Build (${{ matrix.os }}, hosted)"):
+        check("a matrix raw name is untouched: %r" % raw, norm_job_name(CALLER_PREFIX + raw) == raw)
+    check("the live referenced_workflows entry gives refs/heads/master",
+          split_ref({"path": "We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml@master",
+                     "ref": "refs/heads/master", "sha": "x"})
+          == ("We-Amp/mod_pagespeed/.github/workflows/pipeline-release-module.yml", "refs/heads/master"))
 
     def run_case(desc, want_ok, mutate=None, prerelease=False, drop=(), extra=(), want_in_error="", plans=None):
         nonlocal fails
