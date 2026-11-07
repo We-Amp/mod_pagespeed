@@ -88,7 +88,8 @@ env:
 jobs:
   event-guard:
     name: Event guard
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: A person's dispatch on a module release tag
@@ -114,7 +115,8 @@ jobs:
   plan:
     name: Plan
     needs: event-guard
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
       version: ${{ steps.inputs.outputs.version }}
@@ -333,7 +335,8 @@ jobs:
   build:
     name: Build the nginx.org packages (x64${{ matrix.which == 'previous' && ', previous nginx' || '' }})
     needs: plan
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     strategy:
       fail-fast: true
@@ -472,7 +475,8 @@ jobs:
   upgrade-tests:
     name: Upgrade tests (${{ matrix.cell }})
     needs: [plan, build]
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -578,7 +582,8 @@ jobs:
   validate:
     name: Validate the asset set, SHA256SUMS and manifest
     needs: [plan, build, upgrade-tests]
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       VERSION: ${{ needs.plan.outputs.version }}
@@ -643,7 +648,8 @@ jobs:
     name: Sign SHA256SUMS
     needs: [plan, validate]
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.plan.outputs.dry_run == 'false' }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
     steps:
@@ -731,7 +737,8 @@ jobs:
     name: Create the GitHub release
     needs: [plan, validate, sign-checksums]
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.plan.outputs.dry_run == 'false' }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: release
     permissions:

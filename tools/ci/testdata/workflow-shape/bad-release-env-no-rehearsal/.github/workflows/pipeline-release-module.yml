@@ -7,13 +7,13 @@ permissions:
   contents: read
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo version
   sign:
     needs: [version]
     if: ${{ !cancelled() && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     steps:
       - run: echo sign

@@ -8,7 +8,7 @@ permissions:
 jobs:
   event-guard:
     name: Event guard (refuses merge_group, unexpected events, refs and actors)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Refuse events, refs and actors this pipeline must never run on
         env:
@@ -34,7 +34,7 @@ jobs:
           echo "event ${EVENT} on ${REF} accepted"
 
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       fleet: ${{ steps.scope.outputs.fleet }}
       heavy: ${{ steps.scope.outputs.heavy }}
@@ -133,7 +133,7 @@ jobs:
       - id: diff
         run: echo "css=true" >> "$GITHUB_OUTPUT"
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo audit
   vendor:
@@ -179,7 +179,7 @@ jobs:
     steps:
       - run: echo shadow
   report:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write

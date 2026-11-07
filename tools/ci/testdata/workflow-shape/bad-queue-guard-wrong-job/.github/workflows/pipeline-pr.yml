@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       fleet: ${{ steps.scope.outputs.fleet }}
       heavy: ${{ steps.scope.outputs.heavy }}
@@ -63,7 +63,7 @@ jobs:
           esac
           echo "route=${route}" >> "$GITHUB_OUTPUT"
   other:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Classify the merge group
         id: queue
@@ -82,6 +82,6 @@ jobs:
           case "${rc}" in 0) echo route=fleet;; 3) echo route=hosted;; *) exit 1;; esac >> "$GITHUB_OUTPUT"
   vendor:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo vendor

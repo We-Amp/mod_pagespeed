@@ -8,7 +8,7 @@ permissions:
 jobs:
   relay:
     if: ${{ !cancelled() && needs.event-guard.result == 'success' && true }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo relay
   vendor:
@@ -30,6 +30,6 @@ jobs:
     steps:
       - run: echo report
   notice:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo hosted jobs need no edge
