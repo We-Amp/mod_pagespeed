@@ -12,7 +12,7 @@
 #
 # Usage: test/package-test/check-debian-maintscripts.sh [image]
 set -euo pipefail
-# shellcheck source=../../tools/ci/docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 IMAGE="${1:-ubuntu:24.04}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

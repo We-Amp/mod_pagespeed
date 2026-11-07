@@ -193,6 +193,7 @@ if [ -f "${BUNDLE_DIR}/nginx-version" ]; then
   install -m 644 "${BUNDLE_DIR}/nginx-version" .ci-artifacts/
 else
   echo "::warning::nginx-version absent from ${BUNDLE_DIR}/ -- deriving from base-runtime (no-op pin; old artifact)."
+  # local-image: built above
   docker run --rm pagespeed2-base-runtime sh -c "nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1" \
     > .ci-artifacts/nginx-version
 fi

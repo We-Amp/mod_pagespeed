@@ -5,7 +5,7 @@
 # the pin, an unchanged nginx, a rewriting request, and clean removal.
 # Usage: check-nginx-org-host.sh <image> <nginx version> <package file>
 set -euo pipefail
-# shellcheck source=../../tools/ci/docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 
 # dnf with retries, for the throwaway EL containers: a short mirror or

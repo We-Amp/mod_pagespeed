@@ -49,7 +49,7 @@
 #   2  symbol-leak assertion failed (THE blocking condition)
 #
 set -euo pipefail
-# shellcheck source=../../tools/ci/docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 
 die() { echo "::error::$*" >&2; exit "${2:-1}"; }

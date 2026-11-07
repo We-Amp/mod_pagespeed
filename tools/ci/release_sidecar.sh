@@ -65,7 +65,7 @@
 # pagespeed-sidecar-native-debug-<version>-linux-<arch>.tar.gz, the debug files
 # of the same binaries.
 set -euo pipefail
-# shellcheck source=docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 # The build image of the pair, pinned by digest: Ubuntu 20.04 (glibc 2.31), the

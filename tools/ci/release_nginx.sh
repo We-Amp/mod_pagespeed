@@ -35,7 +35,7 @@
 # The gates (symbol-leak, routing, load-check, suite) work on the packages in
 # --pkgdir and on the tree in --src, which holds test/package-test/.
 set -euo pipefail
-# shellcheck source=docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 # apt-get update + install with retries, for the throwaway gate containers: a
@@ -287,7 +287,7 @@ build() {
       # A previous run packaged as root inside the container, so the runner
       # user cannot delete what it left. Clear it through a throwaway root
       # container of the leg's own image.
-      docker_pull_retry "${image}" || true
+      docker_pull_retry --quiet "${image}" || true
       docker run --rm -v "$wsdir:/w" "${image}" sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null; true' >/dev/null 2>&1 || true
       rmdir "$wsdir" 2>/dev/null || true
     fi
@@ -347,9 +347,10 @@ build() {
       rc=0
       run_leg "$row" || rc=$?
       [ "$rc" -eq 0 ] && return 0
-      # 90 to 92 are the leg's own workspace preparation failures; the log
-      # then belongs to the previous attempt.
-      if [ "$rc" -ge 90 ] && [ "$rc" -le 92 ]; then return "$rc"; fi
+      # 90 to 92 are the leg's own workspace preparation failures and 93 is
+      # the failed pull of its image (already retried); the log then belongs
+      # to the previous attempt.
+      if [ "$rc" -ge 90 ] && [ "$rc" -le 93 ]; then return "$rc"; fi
       if [ "$attempt" -ge 3 ] || ! grep -qE "$TRANSIENT_FETCH_RE" "${logs}/${distro}.log" 2>/dev/null; then
         return "$rc"
       fi

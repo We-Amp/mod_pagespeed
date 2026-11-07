@@ -17,7 +17,7 @@
 # and python3. Every container and the network carry a prefix unique to this run and
 # are removed on exit.
 set -u
-# shellcheck source=../../../tools/ci/docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../../tools/ci/docker_pull_retry.sh"
 SERVER=${1:?usage: run_module_check.sh apache|nginx module.so}
 # A job that means local packages (LOCAL_PACKAGES=true) must have staged them:
@@ -47,6 +47,9 @@ IMAGE="$PREFIX-origin:local"
 BROWSER_IMAGE="mcr.microsoft.com/playwright:v1.58.2-noble@sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d"
 [ -f "$HERE/out/next/index.html" ] && [ -f "$HERE/out/nuxt/index.html" ] || "$HERE/build_all.sh" || exit 2
 [ -d "$ROOT/test/browser/node_modules/playwright" ] || (cd "$ROOT/test/browser" && npm ci --no-fund --no-audit) || exit 2
+
+# The browser image once, here: the container runs below are not retried.
+docker_pull_retry "$BROWSER_IMAGE" || exit 2
 
 CTX=""
 cleanup() {
@@ -105,14 +108,12 @@ if [ "$PACKAGES" = local ] && docker exec "$PREFIX-on" grep -rqsi modpagespeed /
 fi
 
 run_browser() { # alias expect
-  docker_pull_retry "$BROWSER_IMAGE" || exit 1
   docker run --rm --name "$PREFIX-browser-$1" --network "$NET" --init \
     -v "$ROOT/test/browser:/browser:ro" -v "$HERE/out:/fixtures:ro" -w /browser \
     -e HYDRATION_ORIGIN="http://$1" -e HYDRATION_EXPECT="$2" -e HYDRATION_FIXTURES=/fixtures \
     "$BROWSER_IMAGE" node hydration_test.mjs
 }
 wait_ready() { # alias
-  docker_pull_retry "$BROWSER_IMAGE" || exit 1
   docker run --rm --network "$NET" "$BROWSER_IMAGE" bash -c "for i in \$(seq 1 120); do
     curl -fsS -o /dev/null http://$1/a.css && exit 0; sleep 1; done; exit 1" || \
     { docker logs --tail 40 "$PREFIX-${1#origin-}" >&2; exit 2; }

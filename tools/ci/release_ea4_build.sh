@@ -26,7 +26,7 @@
 #     release version only.
 #   - el10: any mismatch is a skip (this operating system is additive).
 set -euo pipefail
-# shellcheck source=docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK=""

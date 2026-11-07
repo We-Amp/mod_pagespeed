@@ -105,7 +105,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sidecar_pair=true
-          paths='^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|\.github/workflows/pipeline-full\.yml)'
+          paths='^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|tools/ci/docker_pull_retry\.sh|\.github/workflows/pipeline-full\.yml)'
           changed="${RUNNER_TEMP}/changed-files.txt"
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             git diff --name-only "${BASE}...HEAD" > "${changed}"

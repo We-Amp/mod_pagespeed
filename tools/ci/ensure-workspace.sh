@@ -50,6 +50,8 @@
 #
 # Requires (set by the workflow env): WORKSPACE_DIR, GITHUB_SHA, GITHUB_WORKSPACE.
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 SHORT_SHA="${1:-}"
 [ -n "$SHORT_SHA" ] || { echo "::error::ensure-workspace.sh: <short_sha> argument required" >&2; exit 2; }
@@ -80,6 +82,7 @@ mkdir -p "${WORKSPACE_DIR}" 2>/dev/null || true
 # (Docker writes as root), which the unprivileged runner can't rm directly --
 # mirror linux-build's Prepare workspace and nuke them via a throwaway
 # container, also normalising ownership of the dir itself back to this runner.
+docker_pull_retry --quiet alpine || true
 docker run --rm -v "${WORKSPACE_DIR}":/workspace alpine sh -c \
   "rm -rf /workspace/* /workspace/.[!.]* 2>/dev/null || true; chown $(id -u):$(id -g) /workspace" \
   2>/dev/null || true

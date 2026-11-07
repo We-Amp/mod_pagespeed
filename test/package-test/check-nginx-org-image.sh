@@ -4,7 +4,7 @@
 # package: build the image from clean, run it, and make a real request.
 # Usage: check-nginx-org-image.sh <image tag, e.g. nginx:1.30.6> <nginx-module-pagespeed-nginxorg .deb>
 set -euo pipefail
-# shellcheck source=../../tools/ci/docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 IMAGE="${1:?image}"; DEB="${2:?deb}"
 TAG="pagespeed-nginxorg-check-$$"; NAME="${TAG}-run"

@@ -9,7 +9,7 @@
 # Usage: check-nginx-org-upgrade.sh <image> <old nginx> <old package> <new nginx> <new package>
 # SCENARIOS="a b" runs only the named scenarios (default: all).
 set -uo pipefail
-# shellcheck source=../../tools/ci/docker_pull_retry.sh
+# shellcheck source=tools/ci/docker_pull_retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 IMAGE="${1:?image}"; OLDV="${2:?old nginx}"; OLDP="${3:?old package}"; NEWV="${4:?new nginx}"; NEWP="${5:?new package}"
 DIR="$(cd "$(dirname "$OLDP")" && pwd)"
