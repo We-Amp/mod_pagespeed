@@ -57,6 +57,45 @@
 #                       else nproc).
 
 set -euo pipefail
+
+# dnf with retries, for the throwaway EL containers: a short mirror or
+# metadata outage (a Rocky/Alma mirror serving an empty repomd.xml, a curl
+# error, a 5xx) is waited out, anything else (a missing package, a conflict,
+# a dependency error) fails on the first attempt. Up to 3 tries, with
+# `dnf clean metadata` and a growing pause between them; a lasting outage
+# still fails loud with dnf's last output. Usage: dnf_retry install -y PKG...
+# or dnf_retry repoquery ... (stderr is shown after each attempt, stdout after
+# the last one). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
+# is spliced into container commands with declare -f, so it runs in the
+# container's shell.
+dnf_retry() {
+  local attempt rc out err
+  out="$(mktemp)" && err="$(mktemp)" || return 1
+  for attempt in 1 2 3; do
+    rc=0
+    dnf "$@" --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
+    cat "$err" >&2
+    if [ "$rc" -eq 0 ]; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    if ! grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)' "$out" "$err"; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return "$rc"
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::dnf $1 failed on a repository or network error (attempt $attempt of 3), retrying" >&2
+      dnf clean metadata >/dev/null 2>&1 || true
+      sleep $((attempt * ${DNF_RETRY_SLEEP_UNIT:-10}))
+    fi
+  done
+  echo "::error::dnf $1 failed after 3 attempts" >&2
+  cat "$out"
+  rm -f "$out" "$err"
+  return "$rc"
+}
 if [ "${VERBOSE:-}" ]; then set -x; fi
 
 DISTRO="${1:?usage: $0 <noble|resolute|el9|el10|bullseye|bookworm|trixie|jammy> [-o out.so]}"
@@ -478,7 +517,7 @@ install_deps_el9() {
   # perl: libaom's cmake configure hard-requires it (RTCD/asm generation). On el9
   # it arrives transitively anyway; pin it explicitly so a slimmer future base
   # image can't regress the aom build (el10's base did exactly that).
-  dnf install -y --allowerasing --setopt=install_weak_deps=False \
+  dnf_retry install -y --allowerasing --setopt=install_weak_deps=False \
     ca-certificates curl wget \
     gcc-toolset-13 \
     clang lld llvm \
@@ -492,7 +531,7 @@ install_deps_el9() {
   if [ "$(uname -m)" = "x86_64" ]; then
     dnf config-manager --set-enabled crb 2>/dev/null \
       || dnf config-manager --enable crb 2>/dev/null || true
-    dnf install -y --setopt=install_weak_deps=False nasm >/dev/null
+    dnf_retry install -y --setopt=install_weak_deps=False nasm >/dev/null
   fi
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
@@ -505,7 +544,7 @@ install_deps_el10() {
   # pcre1). gperf/bison/flex + some -devel live in CRB on el10, so enable it first.
   # Mirrors install_deps_el9 with the -13->-15 / pcre->pcre2 / CRB substitutions
   # proven by build_apache_el10_in_container.sh.
-  dnf install -y --setopt=install_weak_deps=False dnf-plugins-core >/dev/null
+  dnf_retry install -y --setopt=install_weak_deps=False dnf-plugins-core >/dev/null
   dnf config-manager --set-enabled crb 2>/dev/null \
     || dnf config-manager --enable crb 2>/dev/null || true
   # gnupg2 is REQUIRED on el10 (NOT optional): the AlmaLinux nginx.spec %prep runs
@@ -519,7 +558,7 @@ install_deps_el10() {
   # libaom", aom_configure.cmake) — the almalinux:10 base image, unlike el9,
   # ships NO perl even transitively; r20 attempt 4d el10 leg failed exactly
   # there. Verified installable in a real almalinux:10 container (perl 5.40).
-  dnf install -y --allowerasing --setopt=install_weak_deps=False \
+  dnf_retry install -y --allowerasing --setopt=install_weak_deps=False \
     ca-certificates curl wget gnupg2 \
     gcc-toolset-15 \
     clang lld llvm \
@@ -530,7 +569,7 @@ install_deps_el10() {
   # bazel/libaom.bzl); EL packages nasm for x86_64 only, and aarch64 aom uses
   # GNU as, so gate by arch.
   if [ "$(uname -m)" = "x86_64" ]; then
-    dnf install -y --setopt=install_weak_deps=False nasm >/dev/null
+    dnf_retry install -y --setopt=install_weak_deps=False nasm >/dev/null
   fi
   # bazelisk (pinned + checksum-verified) if bazel/bazelisk not already provided.
   install_bazelisk
@@ -914,12 +953,12 @@ if [ "${NGX_SRC_MODE}" = "distro" ] && { [ "${DISTRO}" = "el9" ] || [ "${DISTRO}
   # x86_64, so the build_nginx_rpm.sh pin holds. Pin the EXACT stock candidate the
   # smoke (and customers) run. repoquery %{version} is already epoch-free; NVR selects.
   NGX_RPM_ARCH="$(rpm --eval '%{_arch}')"
-  NGX_PKG_VER="$(dnf repoquery --latest-limit 1 --qf '%{version}-%{release}' "nginx.${NGX_RPM_ARCH}" 2>/dev/null | head -1)"
-  NGINX_SRC_VERSION="$(dnf repoquery --latest-limit 1 --qf '%{version}' "nginx.${NGX_RPM_ARCH}" 2>/dev/null | head -1)"
+  NGX_PKG_VER="$(dnf_retry repoquery --latest-limit 1 --qf '%{version}-%{release}' "nginx.${NGX_RPM_ARCH}" | head -1)"
+  NGINX_SRC_VERSION="$(dnf_retry repoquery --latest-limit 1 --qf '%{version}' "nginx.${NGX_RPM_ARCH}" | head -1)"
   [ -n "${NGX_PKG_VER}" ] && [ -n "${NGINX_SRC_VERSION}" ] || { echo "ERROR: cannot determine stock nginx candidate version on ${DISTRO}" >&2; exit 1; }
   echo "==> dnf download --source nginx-${NGX_PKG_VER} (upstream ${NGINX_SRC_VERSION}) on ${DISTRO}"
   mkdir -p "${NGX_BUILD_DIR}/srpm"
-  dnf download --source "nginx-${NGX_PKG_VER}" --destdir "${NGX_BUILD_DIR}/srpm"
+  dnf_retry download --source "nginx-${NGX_PKG_VER}" --destdir "${NGX_BUILD_DIR}/srpm"
   NGX_SRPM="$(ls "${NGX_BUILD_DIR}/srpm/"*.src.rpm 2>/dev/null | head -1)"
   [ -n "${NGX_SRPM}" ] || { echo "ERROR: dnf download --source produced no .src.rpm under ${NGX_BUILD_DIR}/srpm" >&2; exit 1; }
   # Supply-chain gate: the SRPM must carry a verified GPG signature, not just a

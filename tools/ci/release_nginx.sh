@@ -58,6 +58,45 @@ apt_install_retry() {
   return 1
 }
 
+# dnf with retries, for the throwaway EL containers: a short mirror or
+# metadata outage (a Rocky/Alma mirror serving an empty repomd.xml, a curl
+# error, a 5xx) is waited out, anything else (a missing package, a conflict,
+# a dependency error) fails on the first attempt. Up to 3 tries, with
+# `dnf clean metadata` and a growing pause between them; a lasting outage
+# still fails loud with dnf's last output. Usage: dnf_retry install -y PKG...
+# or dnf_retry repoquery ... (stderr is shown after each attempt, stdout after
+# the last one). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
+# is spliced into container commands with declare -f, so it runs in the
+# container's shell.
+dnf_retry() {
+  local attempt rc out err
+  out="$(mktemp)" && err="$(mktemp)" || return 1
+  for attempt in 1 2 3; do
+    rc=0
+    dnf "$@" --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
+    cat "$err" >&2
+    if [ "$rc" -eq 0 ]; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    if ! grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)' "$out" "$err"; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return "$rc"
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::dnf $1 failed on a repository or network error (attempt $attempt of 3), retrying" >&2
+      dnf clean metadata >/dev/null 2>&1 || true
+      sleep $((attempt * ${DNF_RETRY_SLEEP_UNIT:-10}))
+    fi
+  done
+  echo "::error::dnf $1 failed after 3 attempts" >&2
+  cat "$out"
+  rm -f "$out" "$err"
+  return "$rc"
+}
+
 # Distro legs: name|image|nginx version|nginx source sha256|deb or rpm.
 # The nginx version is the distro's stock nginx; a dynamic module only loads
 # into the exact nginx version it was built against.
@@ -436,7 +475,8 @@ symbol_leak() {
   if [ "${#rpms[@]}" -gt 0 ]; then
     docker run --rm -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro almalinux:9 bash -c '
       set -e
-      dnf install -y -q cpio binutils >/dev/null
+      '"$(declare -f dnf_retry)"'
+      dnf_retry install -y -q cpio binutils >/dev/null
       shopt -s nullglob
       n=0
       for p in /pkgs/nginx-module-pagespeed-*.'"${RPM_ARCH}"'.rpm; do
@@ -588,7 +628,8 @@ suite() {
   echo "=== suite: el9 - $(basename "$rpm") ==="
   docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro almalinux:9 bash -c '
     set -e
-    dnf install -y --allowerasing --setopt=install_weak_deps=False nginx curl ca-certificates python3 python3-pip tar gzip findutils >/dev/null
+    '"$(declare -f dnf_retry)"'
+    dnf_retry install -y --allowerasing --setopt=install_weak_deps=False nginx curl ca-certificates python3 python3-pip tar gzip findutils >/dev/null
     pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1 >/dev/null
     cp /pkgs/'"$(basename "$rpm")"' /tmp/pkg.rpm
     dnf install -y /tmp/pkg.rpm

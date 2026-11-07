@@ -5,6 +5,46 @@
 # the pin, an unchanged nginx, a rewriting request, and clean removal.
 # Usage: check-nginx-org-host.sh <image> <nginx version> <package file>
 set -euo pipefail
+
+# dnf with retries, for the throwaway EL containers: a short mirror or
+# metadata outage (a Rocky/Alma mirror serving an empty repomd.xml, a curl
+# error, a 5xx) is waited out, anything else (a missing package, a conflict,
+# a dependency error) fails on the first attempt. Up to 3 tries, with
+# `dnf clean metadata` and a growing pause between them; a lasting outage
+# still fails loud with dnf's last output. Usage: dnf_retry install -y PKG...
+# or dnf_retry repoquery ... (stderr is shown after each attempt, stdout after
+# the last one). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
+# is spliced into container commands with declare -f, so it runs in the
+# container's shell.
+dnf_retry() {
+  local attempt rc out err
+  out="$(mktemp)" && err="$(mktemp)" || return 1
+  for attempt in 1 2 3; do
+    rc=0
+    dnf "$@" --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
+    cat "$err" >&2
+    if [ "$rc" -eq 0 ]; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    if ! grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)' "$out" "$err"; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return "$rc"
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::dnf $1 failed on a repository or network error (attempt $attempt of 3), retrying" >&2
+      dnf clean metadata >/dev/null 2>&1 || true
+      sleep $((attempt * ${DNF_RETRY_SLEEP_UNIT:-10}))
+    fi
+  done
+  echo "::error::dnf $1 failed after 3 attempts" >&2
+  cat "$out"
+  rm -f "$out" "$err"
+  return "$rc"
+}
+
 IMAGE="${1:?image}"; NGXVER="${2:?nginx version}"; PKG="${3:?package}"
 NAME="pagespeed-nginxorg-host-$$"
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
@@ -12,6 +52,7 @@ trap cleanup EXIT
 BASE="$(basename "$PKG")"
 docker run --rm --name "$NAME" -v "$(cd "$(dirname "$PKG")" && pwd)":/pkgs:ro \
   -e NGXVER="$NGXVER" -e BASE="$BASE" "$IMAGE" bash -euc '
+'"$(declare -f dnf_retry)"'
 fail() { echo "FAIL: $*"; exit 1; }
 if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
@@ -42,7 +83,7 @@ enabled=1
 gpgkey=https://nginx.org/keys/nginx_signing.key
 module_hotfixes=true
 R
-  out="$(dnf -y install "nginx-2:${NGXVER}" --disablerepo=appstream 2>&1)" || { echo "$out" | tail -n 8; fail "nginx.org nginx ${NGXVER} did not install"; }
+  out="$(dnf_retry install -y "nginx-2:${NGXVER}" --disablerepo=appstream 2>&1)" || { echo "$out" | tail -n 8; fail "nginx.org nginx ${NGXVER} did not install"; }
   before="$(rpm -q --qf "%{EPOCH}:%{VERSION}-%{RELEASE}" nginx)"
   rpm -qp --requires "/pkgs/$BASE" 2>/dev/null | grep -Eq "^nginx = 2:${NGXVER}$" || fail "the package does not pin nginx 2:${NGXVER}"
   rpm -qp --conflicts "/pkgs/$BASE" 2>/dev/null | grep -Eq "^nginx-module-pagespeed( |$)" || fail "the package does not conflict with the stock build"
