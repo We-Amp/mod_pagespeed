@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -107,11 +107,11 @@ jobs:
   vendor:
     needs: changes
     if: ${{ needs.changes.outputs.fleet == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo vendor
   other:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: bash tools/ci/test_queue_fork_guard.sh
   linux-build:
@@ -132,7 +132,7 @@ jobs:
     steps:
       - run: echo iis
   lock-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents:
         write
@@ -145,7 +145,7 @@ jobs:
     name: Commit the regenerated lockfile
     needs: lock-check
     if: ${{ always() && !(github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]') && needs.lock-check.outputs.stale == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.ref_type == 'branch')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write

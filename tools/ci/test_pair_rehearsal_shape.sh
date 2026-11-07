@@ -47,8 +47,8 @@ if re.search(r"^\s+permissions:", jobs_text, re.M):
 job_names = re.findall(r"^  ([A-Za-z0-9_-]+):\s*$", jobs_text, re.M)
 if len(job_names) != 1:
     v.append("has %d jobs, not one" % len(job_names))
-if re.findall(r"^\s*runs-on:\s*(.*?)\s*$", code, re.M) != ["ubuntu-latest"]:
-    v.append("runs-on is not exactly one ubuntu-latest")
+if re.findall(r"^\s*runs-on:\s*(.*?)\s*$", code, re.M) != ["ubuntu-24.04"]:
+    v.append("runs-on is not exactly one ubuntu-24.04")
 if not has(r"^    if: \$\{\{ github\.event_name == 'workflow_dispatch' && github\.ref == 'refs/heads/master' \}\}$"):
     v.append("the job is not limited to a dispatch on master")
 if not has(r"^    timeout-minutes: \d+$"):
@@ -251,11 +251,11 @@ widen "a tag push"                "$RUN" "git push origin HEAD; $RUN"
 widen "a release command"         "$RUN" "gh release create x; $RUN"
 widen "gh api -X POST"            "$RUN" "gh api -X POST repos/x/y/dispatches; $RUN"
 widen "gh run rerun"              "$RUN" "gh run rerun 1; $RUN"
-widen "a non-hosted runner"       "runs-on: ubuntu-latest" "runs-on: fleet-heavy"
-widen "another hosted label"      "runs-on: ubuntu-latest" "runs-on: ubuntu-24.04"
+widen "a non-hosted runner"       "runs-on: ubuntu-24.04" "runs-on: fleet-heavy"
+widen "another hosted label"      "runs-on: ubuntu-24.04" "runs-on: ubuntu-latest"
 widen "a second job"              "    steps:" "    steps: []
   other:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:"
 widen "the master condition removed" "    if: \${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' }}
 " ""

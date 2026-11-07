@@ -31,7 +31,8 @@ permissions: {}
 jobs:
   sweep:
     name: Cancel runs that wait for a runner
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -58,7 +59,8 @@ jobs:
 
   runner-health:
     name: Runner health (IIS infrastructure failures)
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       actions: read
