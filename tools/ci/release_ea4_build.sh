@@ -76,8 +76,8 @@ set -euo pipefail
 # a dependency error) fails on the first attempt. Up to 3 tries, with
 # `dnf clean metadata` and a growing pause between them; a lasting outage
 # still fails loud with dnf's last output. Usage: dnf_retry install -y PKG...
-# or dnf_retry repoquery ... (stdout and stderr are passed through after each
-# attempt). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
+# or dnf_retry repoquery ... (stderr is shown after each attempt, stdout after
+# the last one). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
 # is spliced into container commands with declare -f, so it runs in the
 # container's shell.
 dnf_retry() {
@@ -85,14 +85,15 @@ dnf_retry() {
   out="$(mktemp)" && err="$(mktemp)" || return 1
   for attempt in 1 2 3; do
     rc=0
-    dnf "$@" --setopt=retries=5 --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
-    cat "$out"
+    dnf "$@" --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
     cat "$err" >&2
     if [ "$rc" -eq 0 ]; then
+      cat "$out"
       rm -f "$out" "$err"
       return 0
     fi
-    if ! cat "$out" "$err" | grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)'; then
+    if ! grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)' "$out" "$err"; then
+      cat "$out"
       rm -f "$out" "$err"
       return "$rc"
     fi
@@ -103,6 +104,7 @@ dnf_retry() {
     fi
   done
   echo "::error::dnf $1 failed after 3 attempts" >&2
+  cat "$out"
   rm -f "$out" "$err"
   return "$rc"
 }

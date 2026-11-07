@@ -66,9 +66,52 @@ for f in tools/ci/release_nginx.sh install/nginx/build_module_in_container.sh to
       resolution)       check "${f} ${mode}: fails"           1 "${rc}"; check "${f} ${mode}: 1 try" 1 "${tries}"
                         check "${f} ${mode}: error shown"      1 "$(grep -c 'Unable to find a match' "${WORK}/err")" ;;
       ok)               check "${f} ${mode}: passes"          0 "${rc}"; check "${f} ${mode}: 1 try" 1 "${tries}"
-                        check "${f} ${mode}: repo options"     1 "$(grep -c '^dnf install -y pkg --setopt=retries=5 --setopt=skip_if_unavailable=False$' "${FAKE_LOG}")" ;;
+                        check "${f} ${mode}: repo option"     1 "$(grep -c '^dnf install -y pkg --setopt=skip_if_unavailable=False$' "${FAKE_LOG}")" ;;
     esac
   done
 done
+
+
+# Structural check: a dnf_retry call inside a single-quoted container body
+# (opened by a line ending in `bash -c '`, `bash -euc '` ...) must follow a
+# `declare -f dnf_retry` splice in that body; the function defined on the host
+# does not exist in the container's shell.
+for f in tools/ci/release_nginx.sh install/nginx/build_module_in_container.sh tools/ci/release_ea4_build.sh \
+  test/package-test/check-nginx-packaged-load.sh test/package-test/check-nginx-org-host.sh; do
+  bad="$(awk '
+    /^dnf_retry\(\) \{/ { indef = 1 }
+    indef { if ($0 ~ /^\}/) indef = 0; next }
+    /^[[:space:]]*#/ { next }
+    /bash -[a-z]*c \x27[[:space:]]*$/ { body = 1; spliced = 0; next }
+    /declare -f dnf_retry/ { spliced = 1; next }
+    /(^|[^_[:alnum:]])dnf_retry[[:space:]]/ { if (body && !spliced) print NR": "$0 }
+    body && /\x27[[:space:]]*$/ && !/declare -f/ { body = 0 }
+  ' "${ROOT}/${f}")"
+  check "${f}: every container dnf_retry call has the function spliced in" "" "${bad}"
+done
+
+# Run the real container body of check-nginx-org-host.sh (through a stub docker
+# that runs the bash -euc body locally, cut before its first command) with a
+# fake dnf: the body's shell must have dnf_retry defined and working.
+mkdir "${WORK}/stub"
+cat > "${WORK}/stub/docker" <<'DOCKER'
+#!/usr/bin/env bash
+[ "$1" = run ] || exit 0
+while [ "$1" != "-euc" ]; do shift; done
+body="$(printf '%s\n' "$2" | sed '/^fail() {/,$d')"
+bash -euc "${body}
+dnf_retry install -y probe"
+DOCKER
+chmod +x "${WORK}/stub/docker"
+for mode in ok transient-always; do
+  export FAKE_LOG="${WORK}/log" FAKE_MODE="${mode}" DNF_RETRY_SLEEP_UNIT=0
+  : > "${FAKE_LOG}"
+  PATH="${WORK}/stub:${WORK}/bin:${PATH}" "${ROOT}/test/package-test/check-nginx-org-host.sh" img 1.0 /x/p.rpm >/dev/null 2>"${WORK}/err"
+  rc=$?
+  want=0; [ "${mode}" = ok ] || want=1
+  check "org-host container body ${mode}: rc" "${want}" "${rc}"
+  check "org-host container body ${mode}: tries" "$([ "${mode}" = ok ] && echo 1 || echo 3)" "$(grep -c -v '^dnf clean' "${FAKE_LOG}")"
+done
+
 
 [ "${FAILS}" -eq 0 ] && echo "all dnf_retry checks passed" || { echo "${FAILS} check(s) failed"; exit 1; }
