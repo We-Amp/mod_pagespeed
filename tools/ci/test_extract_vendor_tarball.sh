@@ -36,6 +36,9 @@
 #  12. late-sidecar       a sound tarball whose sidecar appears while the
 #                         reader is retrying: the digest is checked, not
 #                         skipped.
+#  13-15. hub sidecar     no rsync option a strict build rejects; a hub
+#                         sidecar is fetched and enforced (wrong digest
+#                         fails); an absent one falls back to zstd -t.
 #
 # Run:
 #   tools/ci/test_extract_vendor_tarball.sh
@@ -79,15 +82,22 @@ tar --zstd -cf "$GOOD" -C "$SRC" .
 # Shims. The script calls `rsync -a ... user@host:/path/NAME local` and
 # `ssh ... user@host "touch ..."`. We translate the "host:/path" form into a
 # copy out of $SHARED, and make ssh a no-op success (for the TTL `touch`).
-# `--ignore-missing-args` sidecar fetches must succeed-or-skip silently.
+# The rsync stand-in rejects `--ignore-missing-args` like a strict build does.
 # ---------------------------------------------------------------------------
 cat > "$FAKE_BIN/rsync" <<SH
 #!/usr/bin/env bash
+# Behaves like a build whose option parser is strict (macOS openrsync,
+# protocol 29): --ignore-missing-args is rejected outright.
+for a in "\$@"; do
+  case "\$a" in
+    --ignore-missing-args) echo "rsync: unrecognized option: --ignore-missing-args" >&2; exit 1 ;;
+  esac
+done
 # Last two non-option args are <remote_spec> <local_dest>.
 args=()
 for a in "\$@"; do
   case "\$a" in
-    -*) ;;            # drop flags (-a, -e, --ignore-missing-args)
+    -*) ;;            # drop flags (-a, -e)
     "ssh "*) ;;       # drop the -e ssh command value
     *) args+=("\$a") ;;
   esac
@@ -98,12 +108,7 @@ dest="\${args[\${#args[@]}-1]}"
 base="\$(basename "\${remote#*:}")"
 src="$SHARED/\$base"
 if [ ! -e "\$src" ]; then
-  # mimic rsync's behaviour: with --ignore-missing-args, a missing source is
-  # a silent no-op success; otherwise it's an error.
-  case " \$* " in
-    *" --ignore-missing-args "*) exit 0 ;;
-    *) echo "rsync: link_stat \"\$src\" failed: No such file or directory" >&2; exit 23 ;;
-  esac
+  echo "rsync: link_stat \"\$src\" failed: No such file or directory" >&2; exit 23
 fi
 cp "\$src" "\$dest"
 SH
@@ -395,6 +400,57 @@ if [ "$rc" = 0 ] && [ -f "$DEST/GIT_COMMIT" ] && grep -q "no usable .sha256 side
   ok "sidecar picked up on the retry and checked"
 else
   bad "late-sidecar: rc=$rc"; cat "$TEST_TMP/out12.log"
+fi
+
+# ===========================================================================
+echo "[13] sidecar-fetch: no rsync option that older rsync builds reject"
+# ===========================================================================
+# The CI hub's rsync can be a build (macOS openrsync, protocol 29) that rejects
+# --ignore-missing-args. A rejected option made the sidecar fetch fail every
+# time, silently (it is best effort), so the digest check never ran. The
+# stand-in rsync above now rejects that option like such a build does.
+if grep -nE '^[[:space:]]*rsync[^#]*--ignore-missing-args' "$EXTRACT" >"$TEST_TMP/out13.log"; then
+  bad "an rsync call in the script passes --ignore-missing-args"; cat "$TEST_TMP/out13.log"
+else
+  ok "no rsync call passes --ignore-missing-args"
+fi
+
+# ===========================================================================
+echo "[14] sidecar-present: hub sidecar is fetched and the digest is checked"
+# ===========================================================================
+DEST="$TEST_TMP/dest14"
+cp "$GOOD" "$SHARED/$NAME"
+if command -v sha256sum >/dev/null 2>&1; then GOODSUM="$(sha256sum "$GOOD" | cut -d' ' -f1)"; else GOODSUM="$(shasum -a 256 "$GOOD" | cut -d' ' -f1)"; fi
+printf '%s  %s\n' "$GOODSUM" "$NAME" > "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out14.log" 2>&1 \
+   && [ -f "$DEST/GIT_COMMIT" ] && ! grep -q "no usable .sha256 sidecar" "$TEST_TMP/out14.log"; then
+  ok "matching hub sidecar fetched and accepted (no zstd -t-only fallback)"
+else
+  bad "sidecar-present: matching sidecar not used"; cat "$TEST_TMP/out14.log"
+fi
+
+DEST="$TEST_TMP/dest14b"
+echo "0000000000000000000000000000000000000000000000000000000000000000  $NAME" > "$SHARED/$NAME.sha256"
+set +e
+run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out14b.log" 2>&1
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] && grep -q "sha256 mismatch" "$TEST_TMP/out14b.log" && [ ! -f "$DEST/GIT_COMMIT" ]; then
+  ok "wrong hub digest fails the fetch; nothing extracted"
+else
+  bad "sidecar-present: wrong digest was not enforced (rc=$rc)"; cat "$TEST_TMP/out14b.log"
+fi
+
+# ===========================================================================
+echo "[15] sidecar-absent: hub has no sidecar -> zstd -t floor, success"
+# ===========================================================================
+DEST="$TEST_TMP/dest15"
+cp "$GOOD" "$SHARED/$NAME"; rm -f "$SHARED/$NAME.sha256"
+if run_extract --sha "$SHA" --dest "$DEST" >"$TEST_TMP/out15.log" 2>&1 \
+   && [ -f "$DEST/GIT_COMMIT" ] && grep -q "Fetched and verified" "$TEST_TMP/out15.log"; then
+  ok "absent sidecar tolerated; verified by zstd -t alone"
+else
+  bad "sidecar-absent: fetch failed"; cat "$TEST_TMP/out15.log"
 fi
 
 echo ""
