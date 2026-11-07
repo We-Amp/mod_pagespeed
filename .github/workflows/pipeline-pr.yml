@@ -3524,16 +3524,23 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
-      # The tests never run as root: they run as the runner's user, or as
-      # uid 1000 when the runner is root. A root-run server drops its workers
-      # to an unprivileged user that cannot write the logs the tests read, so
-      # a root runner service hands the workspace to uid 1000 instead.
+      # The tests never run as root on the host: they run as the runner's
+      # user, or as uid 1000 when the runner is root. A root-run server drops
+      # its workers to an unprivileged user that cannot write the logs the
+      # tests read, so a root runner service hands the workspace to uid 1000
+      # instead. Under a rootless daemon, container root IS the runner's user
+      # on the host and every other container uid maps to a subordinate id
+      # that cannot write the workspace, so the tests run as container root
+      # there (tools/ci/container-identity.sh).
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
           if [ "$u" = 0 ]; then
             u=1000; g=1000
             chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          else
+            eval "$(sh tools/ci/container-identity.sh)"
+            u="${CONTAINER_USER%%:*}"; g="${CONTAINER_USER#*:}"
           fi
           echo "CI_UID=${u}" >> "$GITHUB_ENV"
           echo "CI_GID=${g}" >> "$GITHUB_ENV"
@@ -3647,16 +3654,23 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
-      # The tests never run as root: they run as the runner's user, or as
-      # uid 1000 when the runner is root. A root-run server drops its workers
-      # to an unprivileged user that cannot write the logs the tests read, so
-      # a root runner service hands the workspace to uid 1000 instead.
+      # The tests never run as root on the host: they run as the runner's
+      # user, or as uid 1000 when the runner is root. A root-run server drops
+      # its workers to an unprivileged user that cannot write the logs the
+      # tests read, so a root runner service hands the workspace to uid 1000
+      # instead. Under a rootless daemon, container root IS the runner's user
+      # on the host and every other container uid maps to a subordinate id
+      # that cannot write the workspace, so the tests run as container root
+      # there (tools/ci/container-identity.sh).
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
           if [ "$u" = 0 ]; then
             u=1000; g=1000
             chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
+          else
+            eval "$(sh tools/ci/container-identity.sh)"
+            u="${CONTAINER_USER%%:*}"; g="${CONTAINER_USER#*:}"
           fi
           echo "CI_UID=${u}" >> "$GITHUB_ENV"
           echo "CI_GID=${g}" >> "$GITHUB_ENV"
