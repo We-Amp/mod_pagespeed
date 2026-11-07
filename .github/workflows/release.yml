@@ -12,6 +12,9 @@
 #   * workflow_dispatch { tag, dry_run: true  }    -> the default
 #   * workflow_dispatch { tag, dry_run: false }
 #   * workflow_dispatch { tag, dry_run: true, candidate: true, sha }
+# A real run adopts the candidate run that the tag message names (the
+# Release-Candidate-* trailers), unless a dispatch sets adopt=off; a tag push
+# always means auto (docs/ci/release.md).
 # The tag must exist and its commit must be on master; the lane's ref guard
 # refuses anything else. A dry run builds and validates; it signs, creates and
 # publishes nothing. A real run signs and creates the release, in jobs of the
@@ -57,6 +60,12 @@ on:
         required: false
         type: string
         default: ''
+      adopt:
+        description: 'Real run only. auto: adopt the candidate run that the tag message names (a tag without the trailers builds everything). off: build everything. Default: auto.'
+        required: false
+        type: choice
+        options: [auto, off]
+        default: auto
 
 permissions:
   contents: read
@@ -85,6 +94,8 @@ jobs:
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
       candidate: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate }}
       sha: ${{ inputs.sha || '' }}
+      # A tag push is always auto. The input only matters to a real run.
+      adopt: ${{ inputs.adopt || 'auto' }}
     # Passed one by one, never `secrets: inherit`. The jobs of the `release`
     # environment read the environment's value of each; no other job reads one.
     secrets:

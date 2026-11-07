@@ -387,7 +387,7 @@ pair (it succeeds when one of the two legs did) and the dependent jobs `need`
 the join. GitHub skips a job when any ancestor job was skipped, so those
 dependents state their status check themselves: a build runner job's `if:` is
 `${{ !cancelled() && needs.<job>.result == 'success' && (<fleet guard>) }}`
-(the workflow-shape gate accepts that form), a hosted one omits the guard. Steps shared by the two jobs, and by an arm64 job, are written once
+(the workflow-shape gate accepts that form; in the module release lane the prefix may also hold `needs.adopt.outputs.adopted != 'true'`, which skips the job in a run that adopts a candidate), a hosted one omits the guard. Steps shared by the two jobs, and by an arm64 job, are written once
 with a YAML anchor.
 
 ## Artifacts
@@ -738,6 +738,18 @@ seal of its artifacts (docs/ci/release.md, "A candidate run").
 `tools/ci/check-workflow-shape.sh` requires every `environment: release` job
 of the module lane to refuse a dry run, a candidate and a rehearsal in its
 `if:`.
+
+A real run of a tag whose message names a candidate run (the
+`Release-Candidate-*` trailers) adopts that run's artifacts instead of
+rebuilding them (docs/ci/release.md, "Adopting a candidate run"). The shape
+gate keeps that safe: the module lane's jobs whose `if:` has
+`needs.adopt.outputs.adopted != 'true'` must be exactly the adoptable jobs of
+`tools/ci/release_adopt.py schema --print`, a job without that condition may
+download only artifacts that the adopting run holds, and the `adopt` job
+uploads the schema's re-uploaded set and `adopt-binding` (rule adopt-shape,
+fixtures `good-adopt` and `bad-adopt-*`). `tools/ci/release_job_graph.py
+compare` renders the lane's conditions for a plain dry run and a tag push
+without trailers, where the adoption terms fold away.
 
 Rehearsal mode (`rehearsal: true`) is the weekly lane rehearsal
 (docs/ci/release.md, "The weekly rehearsal"). The guard then requires the

@@ -93,6 +93,18 @@ expect_bad bad-release-env-no-candidate 'rule release-env'
 expect_bad bad-release-env-no-dry-run 'rule release-env'
 expect_bad bad-release-env-no-rehearsal 'rule release-env'
 expect_bad bad-release-env-no-if 'rule release-env'
+# adopt-shape: the adoption conditions, the artifacts an adopting run holds
+# and the adopt job's own uploads match tools/ci/release_adopt.py.
+expect_good good-adopt
+expect_bad bad-adopt-ungated 'adopt-shape'
+expect_bad bad-adopt-not-in-schema 'adopt-shape'
+expect_bad bad-adopt-download 'adopt-shape'
+expect_bad bad-adopt-pattern 'adopt-shape'
+expect_bad bad-adopt-uploads 'adopt-shape'
+# sign-secrets: the signing jobs read secrets only inside their step named Sign.
+expect_bad bad-sign-secret-job-env 'sign-secrets'
+expect_bad bad-sign-secret-other-step 'sign-secrets'
+expect_bad bad-sign-step-renamed 'sign-secrets'
 expect_good good-queue-guard
 expect_bad bad-queue-guard-from-tree 'queue-guard-reads-default-branch'
 expect_bad bad-queue-guard-extra-command 'queue-guard-reads-default-branch'

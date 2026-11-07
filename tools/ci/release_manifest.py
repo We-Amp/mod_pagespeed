@@ -4,8 +4,8 @@
 """Assemble and verify the asset set of a module release (docs/ci/release.md).
 
   release_manifest.py build  --stage DIR --out DIR --tag TAG --version V
-                             --pkg-version P --source-sha SHA --run-id ID
-                             [--repository R] [--optimizer-tag T]
+                             --pkg-version P --source-sha SHA --run-id ID [--run-attempt N]
+                             [--build-run-id ID --build-run-attempt N] [--repository R] [--optimizer-tag T]
                              [--prerelease true|false] [--profile part-a|part-b|none]
   release_manifest.py build  ... --profile nginxorg --nginx-version N --nginx-sha256 H
                              --cells trixie,noble,el9 [--lane-revision R]
@@ -27,8 +27,15 @@ they are.
 
 manifest.json (schema 1):
   {schema, tag, version, pkg_version, prerelease, source_sha, run_id,
-   repository, optimizer_tag, files: [{asset, name, sha256, size, kind,
-   component, channel, channel_also, distro, arch}]}
+   build_run_id, build_run_attempt, repository, optimizer_tag,
+   files: [{asset, name, sha256, size, kind, component, channel, channel_also,
+   distro, arch}]}
+  run_id        the run that validated and signed the set
+  build_run_id, build_run_attempt
+                the run (and its attempt) that built the files: this run's
+                run_id and --run-attempt, unless the run adopted the files
+                from a candidate run, whose id and attempt are then given by
+                --build-run-id and --build-run-attempt
   asset         the uploaded name (what SHA256SUMS lists)
   name          the original name (what the packaging produced, '~' kept)
   kind          deb | rpm | tarball | so | zip | msi | json
@@ -366,6 +373,7 @@ def build(args):
                 print("::error::release_manifest: incomplete or ambiguous asset set: " + m, file=sys.stderr)
             raise SystemExit(1)
 
+    run_attempt = getattr(args, "run_attempt", "") or os.environ.get("GITHUB_RUN_ATTEMPT", "") or "1"
     manifest = {
         "schema": 1,
         "tag": args.tag,
@@ -374,6 +382,8 @@ def build(args):
         "prerelease": prerelease,
         "source_sha": args.source_sha,
         "run_id": args.run_id,
+        "build_run_id": getattr(args, "build_run_id", "") or args.run_id,
+        "build_run_attempt": getattr(args, "build_run_attempt", "") or run_attempt,
         "repository": args.repository,
         "optimizer_tag": args.optimizer_tag,
         "files": files,
@@ -458,10 +468,11 @@ def self_test():
         with open(os.path.join(d, name), "wb") as fh:
             fh.write(body)
 
-    def ns(stage, out, profile="none", pre="false", pkg="1.19.0"):
+    def ns(stage, out, profile="none", pre="false", pkg="1.19.0", **extra):
         return argparse.Namespace(stage=stage, out=out, tag="module-v1.19.0", version="1.19.0",
                                   pkg_version=pkg, source_sha="a" * 40, run_id="1", repository="o/r",
-                                  optimizer_tag="optimizer-v1.19.0", prerelease=pre, profile=profile)
+                                  optimizer_tag="optimizer-v1.19.0", prerelease=pre, profile=profile,
+                                  run_attempt="3", **extra)
 
     try:
         # 1. mapping, collisions and the contract of the output directory
@@ -483,6 +494,10 @@ def self_test():
             fail = 1
         with open(os.path.join(out, "manifest.json")) as fh:
             man = json.load(fh)
+        if (man["run_id"], man.get("build_run_id"), man.get("build_run_attempt")) != ("1", "1", "3"):
+            print("FAIL: a run that builds its own files names itself as the builder: %r"
+                  % ((man["run_id"], man.get("build_run_id"), man.get("build_run_attempt")),))
+            fail = 1
         by = {f["asset"]: f for f in man["files"]}
         deb = by["nginx-module-pagespeed_1.19.0-r1.bookworm_amd64.deb"]
         if deb["name"] != "nginx-module-pagespeed_1.19.0-r1~bookworm_amd64.deb" or deb["distro"] != "bookworm" \
@@ -508,6 +523,16 @@ def self_test():
             print("FAIL: manifest.json is not in SHA256SUMS")
             fail = 1
         verify(out)
+
+        # an adopting run names the candidate as the builder and itself as the run
+        out_a = os.path.join(tmp, "o1a")
+        build(ns(st, out_a, build_run_id="77", build_run_attempt="2"))
+        with open(os.path.join(out_a, "manifest.json")) as fh:
+            man_a = json.load(fh)
+        if (man_a["run_id"], man_a["build_run_id"], man_a["build_run_attempt"]) != ("1", "77", "2"):
+            print("FAIL: an adopting run names the candidate as the builder: %r" % man_a)
+            fail = 1
+        verify(out_a)
 
         # 2. tamper detection
         with open(os.path.join(out, "mod-pagespeed-1.19.0-1.x86_64.rpm"), "ab") as fh:
@@ -774,6 +799,9 @@ def main(argv):
     b.add_argument("--pkg-version", required=True)
     b.add_argument("--source-sha", required=True)
     b.add_argument("--run-id", required=True)
+    b.add_argument("--run-attempt", default="")
+    b.add_argument("--build-run-id", default="")
+    b.add_argument("--build-run-attempt", default="")
     b.add_argument("--repository", default="")
     b.add_argument("--optimizer-tag", default="")
     b.add_argument("--prerelease", choices=("true", "false"), default="false")

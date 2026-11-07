@@ -142,6 +142,7 @@ ALWAYS_RUNS = (
     "event-guard",
     "ref-guard",
     "version",
+    "adopt",
     "optimizer-fetch",
     "systest-gate",
     "ci-release-gate",
@@ -167,6 +168,9 @@ CANDIDATE_ONLY = ("candidate-seal",)
 # Sealed artifacts that an adopting run copies into itself under the same
 # name, because a job that still runs there reads them. The other sealed
 # artifacts (stock-el8, testdata-oldpkgs-*, release-assets) are recorded only.
+# So is `msi-old`: `msi-build` runs in an adopting run and uploads its own
+# (built from the payload that run signs), which the installer gate reads, so
+# a copy from the candidate would only collide with it.
 REUPLOADED = (
     "asset-source",
     "asset-sbom",
@@ -183,7 +187,6 @@ REUPLOADED = (
     "asset-sidecar-x64",
     "asset-sidecar-arm64",
     "unsigned-windows",
-    "msi-old",
 )
 
 # Logins that may dispatch or re-run a candidate that another login tags.
@@ -278,9 +281,11 @@ def check_plans(plans):
             raise SealError("plan '%s' is not a non-empty list of distinct leg names" % job)
 
 
-def seal(api, repo, run_id, tag, version, sha, prerelease, workdir, plans=None):
+def seal(api, repo, run_id, tag, version, sha, prerelease, workdir, plans=None, optimizer_sums=None):
     if not SHA_RE.match(sha):
         raise SealError("sha '%s' is not 40 lowercase hex digits" % sha)
+    if optimizer_sums is not None and not re.match(r"^[0-9a-f]{64}$", optimizer_sums):
+        raise SealError("the optimizer SHA256SUMS hash '%s' is not 64 lowercase hex digits" % optimizer_sums)
     if plans:
         check_plans(plans)
     run = api.run(repo, run_id)
@@ -336,6 +341,11 @@ def seal(api, repo, run_id, tag, version, sha, prerelease, workdir, plans=None):
         # outputs are not in the API, and `verify` needs them to name the
         # jobs a candidate must have had. Readers of schema 2 ignore the key.
         doc["plans"] = {k: plans[k] for k in sorted(plans)}
+    if optimizer_sums:
+        # Additive: the hash of the SHA256SUMS of the pinned optimizer release
+        # that `optimizer-fetch` downloaded and verified. `verify` compares it
+        # with the pin file at the tag (check 9).
+        doc["optimizer_sums_sha256"] = optimizer_sums
     return doc
 
 
@@ -347,6 +357,9 @@ def seal(api, repo, run_id, tag, version, sha, prerelease, workdir, plans=None):
 JOB_RE = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 MATRIX_REF_RE = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}")
 PLAN_REF_RE = re.compile(r"fromJSON\(\s*needs\.([A-Za-z0-9_-]+)\.outputs\.[A-Za-z0-9_]+")
+# A job name may carry the binding of an adopting run: an expression over
+# needs.adopt.outputs that is empty when the run does not adopt.
+ADOPT_NAME_RE = re.compile(r"\$\{\{(?:(?!\}\}).)*needs\.adopt\.outputs\.(?:(?!\}\}).)*\}\}")
 
 
 class PipelineError(Exception):
@@ -361,7 +374,9 @@ def _unquote(v):
 
 
 def parse_pipeline(text):
-    """{job id: {"name", "uses", "matrix"}} in file order. `matrix` is None or
+    """{job id: {"name", "raw", "uses", "matrix"}} in file order. `name` is what
+    the job is called in a run that does not adopt (an adoption expression
+    dropped); `raw` is the text as written. `matrix` is None or
     (key, values, plan job id): values is a list for a literal matrix and
     None for one taken from `fromJSON(needs.<plan>.outputs...)`."""
     jobs = {}
@@ -377,7 +392,7 @@ def parse_pipeline(text):
         m = JOB_RE.match(line)
         if m:
             cur = m.group(1)
-            jobs[cur] = {"name": None, "uses": False, "matrix": None}
+            jobs[cur] = {"name": None, "raw": None, "uses": False, "matrix": None}
             in_matrix = False
             continue
         if cur is None:
@@ -413,6 +428,8 @@ def parse_pipeline(text):
     for j, d in jobs.items():
         if not d["name"]:
             raise PipelineError("job '%s' has no name" % j)
+        d["raw"] = d["name"]
+        d["name"] = ADOPT_NAME_RE.sub("", d["name"])
         stripped = MATRIX_REF_RE.sub("", d["name"])
         if "${{" in stripped:
             raise PipelineError("job '%s': name '%s' uses an expression this reader does not support" % (j, d["name"]))
@@ -588,7 +605,7 @@ def expand_expected(jobs, plans):
     "need_plan": plan job id or None}}"""
     out = {}
     for j, d in jobs.items():
-        info = {"names": [d["name"]], "raw": d["name"], "uses": d["uses"], "need_plan": None}
+        info = {"names": [d["name"]], "raw": d["raw"], "uses": d["uses"], "need_plan": None}
         if d["matrix"]:
             key, vals, plan = d["matrix"]
             if vals is None:
@@ -925,6 +942,11 @@ def verify(api, repo, candidate_run, tag, tag_commit, trailers, actor, lane_sha,
     if not pin.get("tag") or pin.get("tag") != manifest.get("optimizer_tag"):
         raise VerifyError("check 9: %s names %r at the tag, the candidate's release-assets name %r"
                           % (PIN_FILE, pin.get("tag"), manifest.get("optimizer_tag")))
+    if not re.match(r"^[0-9a-f]{64}$", str(sd.get("optimizer_sums_sha256") or "")):
+        raise VerifyError("check 9: the seal records no hash of the pinned optimizer release's SHA256SUMS")
+    if pin.get("sha256sums_sha256") != sd["optimizer_sums_sha256"]:
+        raise VerifyError("check 9: %s names the optimizer SHA256SUMS %s at the tag, the candidate fetched %s"
+                          % (PIN_FILE, pin.get("sha256sums_sha256"), sd["optimizer_sums_sha256"]))
 
     derived = {"run": str(candidate_run), "sums": sums_hash, "seal": seal_hash}
     binding = {
@@ -941,6 +963,7 @@ def verify(api, repo, candidate_run, tag, tag_commit, trailers, actor, lane_sha,
                      "Release-Candidate-SHA256SUMS": derived["sums"],
                      "Release-Candidate-Seal": derived["seal"]},
         "jobs": sealed_jobs,
+        "sums_rows": rows,
         "artifacts": [{"name": x["name"], "reupload": x["name"] in REUPLOADED, "id": x["id"], "digest": x["digest"],
                        "new_id": None, "new_digest": None, "files": x["files"]} for x in sealed_arts],
         "binding": binding_string(candidate_run, seal_hash, sums_hash),
@@ -1097,6 +1120,7 @@ def _fixture(prerelease=False, drop=(), extra=()):
 
 
 _LANE = "c" * 40
+_OPT_SUMS = "e" * 64
 _PUSHER = "pusher"
 _T = "2026-11-05T"
 
@@ -1131,8 +1155,9 @@ def _world(prerelease=False):
     plans = {"nginx-x64-plan": ["el8", "el9"]}
     with tempfile.TemporaryDirectory() as wd:
         sd = seal(FakeApi(fx["run"], fx["arts"], fx["zips"]), "o/r", fx["run_id"], tag, tag[len("module-v"):],
-                  fx["sha"], prerelease, wd, plans=plans)
-    w = {"fx": fx, "listing": _listing(), "pin": json.dumps({"tag": "optimizer-v9.9.9"}), "pipeline": _FAKE_PIPELINE,
+                  fx["sha"], prerelease, wd, plans=plans, optimizer_sums=_OPT_SUMS)
+    w = {"fx": fx, "listing": _listing(),
+         "pin": json.dumps({"tag": "optimizer-v9.9.9", "sha256sums_sha256": _OPT_SUMS}), "pipeline": _FAKE_PIPELINE,
          "extra_arts": {}}
     w["kw"] = dict(repo="o/r", candidate_run=fx["run_id"], tag=tag, tag_commit=fx["sha"],
                    trailers={}, actor=_PUSHER, lane_sha=_LANE, started_at="2026-11-06T09:00:00Z",
@@ -1197,13 +1222,14 @@ def _verify_cases():
 
     def shape(w, b):
         want = {"schema", "repository", "adopting_run", "candidate", "tag", "lane_sha", "trailers", "jobs",
-                "artifacts", "binding"}
+                "artifacts", "binding", "sums_rows"}
         sealed = [a["name"] for a in b["artifacts"]]
         ok = (set(b) == want and b["candidate"]["run"] == 4242 and b["lane_sha"] == _LANE
               and b["tag"]["object"]["sha"] == "d" * 40
               and b["binding"].startswith("run 4242 \u00b7 seal ") and b["binding"].endswith(
                   "SHA256SUMS " + w["kw"]["trailers"]["sums"][:12])
-              and sealed == list(SEALED) and all(a["new_id"] is None and a["files"] for a in b["artifacts"])
+              and sealed == list(SEALED) and b["sums_rows"] == _rows_of(w["fx"]["sums"])
+              and all(a["new_id"] is None and a["files"] for a in b["artifacts"])
               and {j["conclusion"] for j in b["jobs"]} == {"success", "skipped"}
               and any(j["name"] == "Build (x64, el9)" and j["job"] == "nginx-distro-build" for j in b["jobs"]))
         return ok, "binding: %r" % (b,)
@@ -1349,7 +1375,19 @@ def _verify_cases():
              {"name": "surprise", "id": 1, "digest": "sha256:" + "0" * 64, "files": []}])), refused="unexpected artifact 'surprise'")
     case("refuse: a file of an asset artifact has no row in SHA256SUMS", lambda w: _drop_row(w), refused="no row with its hash")
     case("refuse: the pin at the tag is not the pin the candidate built from",
-         lambda w: w.update(pin=json.dumps({"tag": "optimizer-v1.0.0"})), refused="check 9")
+         lambda w: w.update(pin=json.dumps({"tag": "optimizer-v1.0.0", "sha256sums_sha256": _OPT_SUMS})), refused="check 9")
+    case("refuse: the pin at the tag names another optimizer SHA256SUMS than the candidate fetched",
+         lambda w: w.update(pin=json.dumps({"tag": "optimizer-v9.9.9", "sha256sums_sha256": "f" * 64})),
+         refused="the candidate fetched")
+    case("refuse: the pin at the tag has no optimizer SHA256SUMS hash",
+         lambda w: w.update(pin=json.dumps({"tag": "optimizer-v9.9.9"})), refused="check 9")
+
+    def seal_without_sums(w):
+        d = dict(w["seal_doc"])
+        d.pop("optimizer_sums_sha256")
+        w["set_seal"](d)
+    case("refuse: the seal records no hash of the optimizer SHA256SUMS", seal_without_sums,
+         refused="records no hash of the pinned optimizer")
     case("refuse: the pipeline file at the lane commit defines a job the candidate did not have",
          lambda w: w.update(pipeline=w["pipeline"] + "  new-job:\n    name: New\n"), refused="job 'new-job' is missing from the listing")
 
@@ -1471,6 +1509,10 @@ def _upload_cases():
     case("refuse: a file was added to the re-uploaded artifact", extra, refused="extra.bin")
     case("refuse: a name that is not re-uploaded", names=("release-assets",), refused="not a re-uploaded artifact")
     return out
+
+
+def _rows_of(sums):
+    return {line.split("  ")[1]: line.split("  ")[0] for line in sums.decode().splitlines()}
 
 
 def _drop_row(w):
@@ -1625,6 +1667,102 @@ def self_test():
     check("accept: adopt-binding hash matches the job output", r_ok == 0)
     check("refuse: adopt-binding hash mismatch", r_bad == 1)
 
+    # ---- what the jobs after `adopt` check
+    w = _world()
+    binding, _ = _verify_world(w)
+    odoc = w["seal_doc"]
+    check("the seal records the optimizer SHA256SUMS hash", odoc.get("optimizer_sums_sha256") == _OPT_SUMS)
+    try:
+        seal(FakeApi({}, [], {}), "o/r", 1, "module-v9.9.9", "9.9.9", "a" * 40, False, ".", optimizer_sums="xyz")
+        check("refuse: a malformed optimizer SHA256SUMS hash", False)
+    except SealError:
+        check("refuse: a malformed optimizer SHA256SUMS hash", True)
+
+    def needs_for(**over):
+        n = {j: {"result": "skipped", "outputs": {}} for j in ADOPTABLE}
+        n.update({j: {"result": "success", "outputs": {}} for j in ("version", "adopt", "windows-sign")})
+        for j, r in over.items():
+            n[j.replace("_", "-")] = {"result": r, "outputs": {}}
+        return n
+
+    def needs_case(desc, sealed_over, needs, want_ok, want_in=""):
+        b = json.loads(json.dumps(binding))
+        b["jobs"] = [e for e in b["jobs"] if e["job"] not in sealed_over] + [
+            {"job": j, "name": j, "conclusion": c, "run_attempt": 1} for j, c in sealed_over.items() if c]
+        adj, probs, _notes = adopted_needs(needs, b)
+        check(desc, (not probs) == want_ok and want_in in "; ".join(probs), "; ".join(probs))
+        return adj
+
+    # a binding in which the vendor pair has a fleet leg that ran, and every other adoptable job ran (the
+    # pair that has no hosted leg success is the hosted one)
+    all_ok = {j: "success" for j in ADOPTABLE}
+    for j in ADOPTABLE:
+        if j.endswith("-hosted") and j[: -len("-hosted")] in ADOPTABLE:
+            all_ok[j] = "skipped"
+    adj = needs_case("accept: every adoptable job skipped here and succeeded in the candidate", all_ok, needs_for(), True)
+    check("the accepted needs read the adopted fleet jobs as success and leave their hosted twins skipped",
+          adj["vendor"]["result"] == "success" and adj["vendor-hosted"]["result"] == "skipped")
+    needs_case("refuse: a job skipped here that the sealed list lacks", dict(all_ok, vendor=None), needs_for(), False,
+               "not in the candidate's sealed job list")
+    needs_case("refuse: a job skipped here that did not succeed in the candidate", dict(all_ok, **{"security-gates": "skipped"}),
+               needs_for(), False, "concluded skipped in the candidate")
+    needs_case("refuse: both legs of a pair succeeded in the candidate", dict(all_ok, **{"vendor-hosted": "success"}),
+               needs_for(), False, "expected one success")
+    needs_case("refuse: neither leg of a pair succeeded in the candidate", dict(all_ok, vendor="skipped"),
+               needs_for(), False, "expected one success")
+    needs_case("refuse: a job that is not adoptable was skipped here", all_ok, needs_for(**{"gate_iis_msi_upgrade": "skipped"}),
+               False, "not an adoptable job")
+    needs_case("refuse: a job failed here", all_ok, needs_for(**{"unit_tests": "failure"}), False, "concluded failure")
+    needs_case("accept: an adoptable job that ran here and succeeded", all_ok, needs_for(**{"unit_tests": "success"}), True)
+
+    d = os.path.join(tempfile.gettempdir(), "x")
+    with tempfile.TemporaryDirectory() as wd:
+        for rec in binding["artifacts"]:
+            if rec["name"] != "asset-linux-x64":
+                continue
+            od = os.path.join(wd, "a")
+            os.makedirs(od)
+            for f in rec["files"]:
+                with open(os.path.join(od, f["path"]), "wb") as fh:
+                    fh.write(b"payload of asset-linux-x64\n")
+            check("accept: the files of an adopted artifact match the binding", check_files(binding, "asset-linux-x64", od) == 1)
+            with open(os.path.join(od, rec["files"][0]["path"]), "ab") as fh:
+                fh.write(b"!")
+            try:
+                check_files(binding, "asset-linux-x64", od)
+                check("refuse: a changed file of an adopted artifact", False)
+            except VerifyError as e:
+                check("refuse: a changed file of an adopted artifact", "does not match" in str(e))
+            with open(os.path.join(od, "extra"), "wb") as fh:
+                fh.write(b"x")
+            try:
+                check_files(binding, "asset-linux-x64", od)
+                check("refuse: an extra file in an adopted artifact", False)
+            except VerifyError as e:
+                check("refuse: an extra file in an adopted artifact", "extra" in str(e))
+        try:
+            check_files(binding, "release-assets", wd)
+            check("refuse: an artifact that was not adopted", False)
+        except VerifyError:
+            check("refuse: an artifact that was not adopted", True)
+
+    cand = dict(binding["sums_rows"], **{"manifest.json": "1" * 64, "pagespeed-iis-9.9.9-win-x64.msi": "2" * 64})
+
+    def sums_bytes(rows):
+        return "".join("%s  %s\n" % (h, n) for n, h in sorted(rows.items())).encode()
+    b2 = dict(binding, sums_rows=cand)
+    mine = dict(cand, **{"manifest.json": "3" * 64, "pagespeed-iis-9.9.9-win-x64.msi": "4" * 64, "sidecar-pair.json": "5" * 64})
+    probs, diff = check_sums(b2, sums_bytes(mine))
+    check("accept: only the Windows installer and the manifests differ, each named",
+          not probs and diff == ["manifest.json", "pagespeed-iis-9.9.9-win-x64.msi", "sidecar-pair.json"], str((probs, diff)))
+    some = sorted(binding["sums_rows"])[0]
+    probs, _ = check_sums(b2, sums_bytes(dict(mine, **{some: "6" * 64})))
+    check("refuse: the row of an adopted release file differs", len(probs) == 1 and some in probs[0], str(probs))
+    probs, _ = check_sums(b2, sums_bytes({k: v for k, v in mine.items() if k != some}))
+    check("refuse: the row of an adopted release file is missing", len(probs) == 1 and "absent" in probs[0], str(probs))
+    probs, _ = check_sums(b2, sums_bytes(dict(mine, **{"surprise.deb": "7" * 64})))
+    check("refuse: a release file the candidate did not have", len(probs) == 1 and "surprise.deb" in probs[0], str(probs))
+
     # ---- the adoption schema and the pipeline reader
     pipeline_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", PIPELINE_FILE)
     try:
@@ -1638,6 +1776,12 @@ def self_test():
           sorted(schema_doc()) == ["adoptable", "always_runs", "candidate_only", "environment", "reuploaded"]
           and set(REUPLOADED) <= set(SEALED))
 
+    named = parse_pipeline("jobs:\n  s:\n    name: \"Sign it${{ needs.adopt.outputs.adopted == 'true' && "
+                           "format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}\"\n")
+    check("a job name may carry the binding: the name without it is the run's name when it does not adopt",
+          named["s"]["name"] == "Sign it" and named["s"]["raw"].startswith("Sign it${{"))
+    check("the schema: msi-old is rebuilt by the adopting run, not copied; adopt always runs",
+          "msi-old" not in REUPLOADED and "msi-old" in SEALED and "adopt" in ALWAYS_RUNS)
     fake = parse_pipeline(_FAKE_PIPELINE)
     probs = schema_problems(fake)
     check("a job missing from the schema is named",
@@ -1665,6 +1809,122 @@ def self_test():
         return 1
     print("release_adopt self-test: all passed")
     return 0
+
+
+# --------------------------------------------------------------------------
+# What the jobs after `adopt` check against the binding
+
+# Release files whose SHA256SUMS row an adopting run may change: the files of
+# the Windows build (the installer is rebuilt from the signed binaries), and
+# the two manifests, which name this run and are written again.
+SUMS_MAY_DIFFER = ("manifest.json", "sidecar-pair.json")
+SUMS_MAY_DIFFER_RE = re.compile(r"^pagespeed-iis-.*-win-x64\.msi$")
+
+
+def load_binding(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise VerifyError("cannot read %s: %s" % (path, e))
+    if not isinstance(doc, dict) or doc.get("schema") != BINDING_SCHEMA:
+        raise VerifyError("%s is not an adopt-binding of schema %d" % (path, BINDING_SCHEMA))
+    return doc
+
+
+def check_files(binding, name, directory):
+    """The files below `directory` are exactly the files the candidate sealed
+    for the adopted artifact `name`: same paths, sizes and sha256."""
+    rec = next((a for a in binding.get("artifacts") or [] if a.get("name") == name), None)
+    if rec is None or not rec.get("reupload"):
+        raise VerifyError("'%s' is not an adopted artifact of the binding" % name)
+    have = {}
+    for root, _dirs, files in os.walk(directory):
+        for f in files:
+            full = os.path.join(root, f)
+            if os.path.islink(full) or not os.path.isfile(full):
+                raise VerifyError("'%s': %s is not a regular file" % (name, full))
+            have[os.path.relpath(full, directory).replace(os.sep, "/")] = (os.path.getsize(full), sha256_file(full))
+    want = {f["path"]: (f["size"], f["sha256"]) for f in rec.get("files") or []}
+    if want != have:
+        diff = sorted(set(want) ^ set(have)) or sorted(p for p in want if want[p] != have[p])
+        raise VerifyError("'%s' does not match the binding: %s" % (name, ", ".join(diff[:5])))
+    return len(want)
+
+
+def adopted_needs(needs, binding):
+    """The `validate` rule for an adopting run. `needs` is toJSON(needs) of the
+    job. Every need concluded success in this run, or is an adoptable job that
+    was skipped here and succeeded in the candidate (the sealed job list). Of a
+    fleet job and its hosted twin exactly one succeeded in the candidate and
+    the other was skipped. Returns (needs with each adopted job's result read
+    as success, problems, notes)."""
+    states = {}
+    for e in binding.get("jobs") or []:
+        states.setdefault(e.get("job"), []).append(e.get("conclusion"))
+
+    def sealed(job):
+        c = states.get(job)
+        if not c:
+            return None
+        if all(x == "success" for x in c):
+            return "success"
+        if all(x == "skipped" for x in c):
+            return "skipped"
+        return "mixed"
+
+    def twin(job):
+        t = job[: -len("-hosted")] if job.endswith("-hosted") else job + "-hosted"
+        return t if t in ADOPTABLE and job in ADOPTABLE else None
+
+    adjusted = json.loads(json.dumps(needs))
+    problems, notes = [], []
+    for job in sorted(needs):
+        result = (needs[job] or {}).get("result")
+        if result == "success":
+            continue
+        if result != "skipped":
+            problems.append("job '%s' concluded %s in this run" % (job, result))
+            continue
+        if job not in ADOPTABLE:
+            problems.append("job '%s' was skipped in this run and is not an adoptable job" % job)
+            continue
+        mine, t = sealed(job), twin(job)
+        if mine is None:
+            problems.append("job '%s' was skipped in this run and is not in the candidate's sealed job list" % job)
+        elif t is not None:
+            theirs = sealed(t)
+            if {mine, theirs} != {"success", "skipped"}:
+                problems.append("of '%s' and its twin '%s' the candidate's run has %s and %s, expected one success "
+                                "and one skipped" % (job, t, mine, theirs))
+            elif mine == "success":
+                adjusted[job]["result"] = "success"
+                notes.append("%s: success in the candidate (twin %s skipped)" % (job, t))
+        elif mine != "success":
+            problems.append("job '%s' was skipped in this run and concluded %s in the candidate" % (job, mine))
+        else:
+            adjusted[job]["result"] = "success"
+            notes.append("%s: success in the candidate" % job)
+    return adjusted, problems, notes
+
+
+def check_sums(binding, sums_data):
+    """Every release file's SHA256SUMS row equals the candidate's, except the
+    Windows installer and the two manifests. Returns (problems, differing)."""
+    cand = binding.get("sums_rows") or {}
+    if not cand:
+        raise VerifyError("the binding holds no SHA256SUMS rows of the candidate")
+    mine = sums_rows(sums_data)
+    problems, differing = [], []
+    for name in sorted(set(cand) | set(mine)):
+        if cand.get(name) == mine.get(name):
+            continue
+        if name in SUMS_MAY_DIFFER or SUMS_MAY_DIFFER_RE.match(name):
+            differing.append(name)
+        else:
+            problems.append("the SHA256SUMS row of '%s' is %s here and %s in the candidate"
+                            % (name, mine.get(name, "absent"), cand.get(name, "absent")))
+    return problems, differing
 
 
 # --------------------------------------------------------------------------
@@ -1752,6 +2012,54 @@ def cmd_binding_hash(args):
     return 0
 
 
+def cmd_check_files(args):
+    try:
+        n = check_files(load_binding(args.binding), args.artifact, args.dir)
+    except (VerifyError, SealError, OSError) as e:
+        print("::error::%s" % e)
+        return 1
+    print("%s: %d files match the binding" % (args.artifact, n))
+    return 0
+
+
+def cmd_check_needs(args):
+    try:
+        binding = load_binding(args.binding)
+        with open(args.needs, encoding="utf-8") as fh:
+            needs = json.load(fh)
+        adjusted, problems, notes = adopted_needs(needs, binding)
+    except (VerifyError, OSError, ValueError) as e:
+        print("::error::%s" % e)
+        return 1
+    for n in notes:
+        print("adopted: %s" % n)
+    for p in problems:
+        print("::error::%s" % p)
+    if problems:
+        return 1
+    with open(args.out, "w", encoding="utf-8") as fh:
+        json.dump(adjusted, fh)
+    return 0
+
+
+def cmd_check_sums(args):
+    try:
+        binding = load_binding(args.binding)
+        with open(args.sums, "rb") as fh:
+            problems, differing = check_sums(binding, fh.read())
+    except (VerifyError, OSError) as e:
+        print("::error::%s" % e)
+        return 1
+    for n in differing:
+        print("row differs from the candidate (allowed): %s" % n)
+    for p in problems:
+        print("::error::%s" % p)
+    if problems:
+        return 1
+    print("every other SHA256SUMS row equals the candidate's")
+    return 0
+
+
 def write_binding(path, doc):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -1802,6 +2110,8 @@ def main(argv):
     sp.add_argument("--prerelease", action="store_true", help="the version is a release candidate (no cPanel packages)")
     sp.add_argument("--plan", action="append", default=[], metavar="JOB=JSON",
                     help="a plan job's published legs, e.g. nginx-x64-plan='[\"el9\"]' (repeatable)")
+    sp.add_argument("--optimizer-sums-sha256", default="",
+                    help="sha256 of the SHA256SUMS of the pinned optimizer release (from optimizer-fetch)")
     sp.add_argument("--out", required=True)
     vp = sub.add_parser("verify", help="check a candidate run for adoption and write adopt-binding.json")
     vp.add_argument("--repo", required=True)
@@ -1827,6 +2137,17 @@ def main(argv):
     bp = sub.add_parser("binding-hash", help="print the sha256 of adopt-binding.json, optionally checking it")
     bp.add_argument("--file", required=True)
     bp.add_argument("--expect", default="")
+    cf = sub.add_parser("check-files", help="the files in a directory are the ones the binding records for an artifact")
+    cf.add_argument("--binding", required=True)
+    cf.add_argument("--artifact", required=True)
+    cf.add_argument("--dir", required=True)
+    cn = sub.add_parser("check-needs", help="the validate rule for an adopting run; writes the needs it accepts")
+    cn.add_argument("--binding", required=True)
+    cn.add_argument("--needs", required=True, help="a file holding toJSON(needs)")
+    cn.add_argument("--out", required=True)
+    cs = sub.add_parser("check-sums", help="the SHA256SUMS rows of adopted release files equal the candidate's")
+    cs.add_argument("--binding", required=True)
+    cs.add_argument("--sums", required=True)
     sc = sub.add_parser("schema", help="the adoption schema: which job ids are adopted, run, or neither")
     sc.add_argument("--print", action="store_true", dest="print_schema", required=True)
     args = ap.parse_args(argv)
@@ -1843,6 +2164,12 @@ def main(argv):
         return cmd_upload_check(args)
     if args.cmd == "binding-hash":
         return cmd_binding_hash(args)
+    if args.cmd == "check-files":
+        return cmd_check_files(args)
+    if args.cmd == "check-needs":
+        return cmd_check_needs(args)
+    if args.cmd == "check-sums":
+        return cmd_check_sums(args)
     if args.cmd != "seal":
         ap.print_usage(sys.stderr)
         return 2
@@ -1856,7 +2183,7 @@ def main(argv):
                 raise SealError("--plan %s: not JSON" % job)
         with tempfile.TemporaryDirectory() as wd:
             doc = seal(GhApi(), args.repo, args.run_id, args.tag, args.version, args.sha, args.prerelease, wd,
-                       plans=plans)
+                       plans=plans, optimizer_sums=args.optimizer_sums_sha256 or None)
     except SealError as e:
         print("::error::candidate seal refused: %s" % e)
         return 1

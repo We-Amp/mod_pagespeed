@@ -41,6 +41,12 @@
 # (module-v<pinned version>-rehearsal.<run number>), it is a pre-release that
 # can never be confused with a release, no job of the `release` environment
 # runs, and nothing is sealed, so it can never be adopted.
+# A real run of a tag whose message names a candidate run (the
+# Release-Candidate-* trailers) adopts that run's artifacts: the `adopt` job
+# checks the candidate and copies what the later jobs read, the jobs that built
+# or tested those bytes are skipped, and the signing jobs and `validate` check
+# what they receive against the binding `adopt` records. A refusal ends the run
+# before any approval. `adopt: off` forces the full build.
 #
 # Runners. Every build job exists twice: on a runner class (fleet-heavy,
 # fleet-windows) while the repository variable FLEET_ENABLED is 'true', and as
@@ -84,6 +90,10 @@ on:
         description: Candidate only. The 40-hex master tip to build; must be the commit the run is at.
         type: string
         default: ''
+      adopt:
+        description: Real run only. auto adopts the candidate run that the tag message names; off forces the full build. Anything but a real run builds its own artifacts.
+        type: string
+        default: auto
       rehearsal:
         description: Schedule or dispatch on master with no tag. A dry run of the lane on the master tip under a made-up pre-release version; needs dry_run, no tag and no candidate.
         type: boolean
@@ -314,6 +324,417 @@ jobs:
           } | tee -a "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------
+  # Adoption (docs/ci/release.md). A real run of a tag that names a candidate
+  # run in its annotated tag message does not rebuild what that run already
+  # built and tested: this job checks the candidate against the Actions API
+  # (tools/ci/release_adopt.py verify, the nine checks), copies the candidate's
+  # artifacts that the remaining jobs read into this run under the same names,
+  # reads them back, and records the result in `adopt-binding`. Every other
+  # case (a dry run, a candidate, a rehearsal, adopt=off, a tag without the
+  # trailers) leaves `adopted` false and the run is the full build. Hosted,
+  # no environment, no secret, a read-only token. The code is master's, never
+  # the tree being released. A refusal ends the run here, before any approval.
+  # ---------------------------------------------------------------------
+  adopt:
+    name: Adopt the candidate run named by the tag
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      adopted: ${{ steps.out.outputs.adopted || 'false' }}
+      candidate_run: ${{ steps.out.outputs.candidate_run }}
+      candidate_attempt: ${{ steps.out.outputs.candidate_attempt }}
+      binding: ${{ steps.out.outputs.binding }}
+      binding_id: ${{ steps.out.outputs.binding_id }}
+      binding_sha256: ${{ steps.out.outputs.binding_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      CANDIDATE: ${{ needs.version.outputs.candidate }}
+      REHEARSAL: ${{ needs.version.outputs.rehearsal }}
+      ADOPT_INPUT: ${{ inputs.adopt }}
+      ACTOR: ${{ github.triggering_actor }}
+    steps:
+      # Only a real run adopts. The input is for recovery: `off` forces the
+      # full build of today, whatever the tag says.
+      - name: Decide whether this run can adopt
+        id: gate
+        run: |
+          set -euo pipefail
+          case "$ADOPT_INPUT" in auto|off) ;; *) echo "::error::adopt must be auto or off, not '$ADOPT_INPUT'"; exit 1 ;; esac
+          try=true
+          if [ "$DRY_RUN" != false ] || [ "$CANDIDATE" = true ] || [ "$REHEARSAL" = true ]; then
+            try=false
+            echo "A dry run, a candidate and a rehearsal build their own artifacts; nothing is adopted." | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$ADOPT_INPUT" = off ]; then
+            try=false
+            echo "adopt=off: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "try=$try" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout master (adoption tooling)
+        if: ${{ steps.gate.outputs.try == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      # The trailers are read from the tag object itself, which cannot change
+      # once pushed. A tag without all three (or a lightweight tag) names no
+      # candidate, and the run builds everything; a tag with only some of them
+      # is a mistake and fails.
+      - name: Read the trailers of the tag
+        id: tag
+        if: ${{ steps.gate.outputs.try == 'true' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force --depth 1 origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          if [ "$(git cat-file -t "refs/tags/${TAG}")" != tag ]; then
+            echo "${TAG} is a lightweight tag and names no candidate: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          body="$(git cat-file tag "refs/tags/${TAG}" | sed '1,/^$/d' | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d')"
+          count=0
+          for k in Release-Candidate-Run Release-Candidate-SHA256SUMS Release-Candidate-Seal; do
+            n="$(printf '%s\n' "$body" | grep -c -E "^${k}: " || true)"
+            [ "$n" -le 1 ] || { echo "::error::the tag message has $n $k lines"; exit 1; }
+            count=$((count + n))
+          done
+          if [ "$count" = 0 ]; then
+            echo "${TAG} names no candidate run: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          val() { printf '%s\n' "$body" | sed -n "s/^$1: \(.*\)\$/\1/p"; }
+          run="$(val Release-Candidate-Run)"
+          sums="$(val Release-Candidate-SHA256SUMS)"
+          seal="$(val Release-Candidate-Seal)"
+          printf '%s' "$run" | grep -Eq '^[0-9]+$' || { echo "::error::the tag needs a numeric Release-Candidate-Run trailer"; exit 1; }
+          printf '%s' "$sums" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::the tag needs a 64-hex Release-Candidate-SHA256SUMS trailer"; exit 1; }
+          printf '%s' "$seal" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::the tag needs a 64-hex Release-Candidate-Seal trailer"; exit 1; }
+          tag_object="$(git rev-parse "refs/tags/${TAG}")"
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          [ "$tag_commit" = "$RELEASE_SHA" ] || { echo "::error::the tag points at $tag_commit, this run is at $RELEASE_SHA"; exit 1; }
+          tagger="$(git cat-file tag "refs/tags/${TAG}" | awk '/^$/ { exit } /^tagger / { sub(/^tagger /, ""); sub(/ [0-9]+ [+-][0-9]+$/, ""); sub(/ *<[^>]*>/, ""); print; exit }')"
+          # What this run is, from the API and not from the candidate: the
+          # commit of the lane definition it runs (its entry for this file
+          # among referenced_workflows) and when it started.
+          attempt="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}")"
+          lane="$(printf '%s' "$attempt" | jq -r --arg p "${GITHUB_REPOSITORY}/.github/workflows/pipeline-release-module.yml@" \
+            '[.referenced_workflows[]? | select(.path | startswith($p)) | .sha] | if length == 1 then .[0] else "" end')"
+          started="$(printf '%s' "$attempt" | jq -r '.run_started_at // ""')"
+          [ -n "$lane" ] || { echo "::error::this run has no single referenced_workflows entry for pipeline-release-module.yml"; exit 1; }
+          [ -n "$started" ] || { echo "::error::the API gives no run_started_at for this run"; exit 1; }
+          {
+            echo "named=true"
+            echo "run=$run"
+            echo "sums=$sums"
+            echo "seal=$seal"
+            echo "tag_object=$tag_object"
+            echo "tag_commit=$tag_commit"
+            echo "tagger=$tagger"
+            echo "lane=$lane"
+            echo "started=$started"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the candidate run
+        id: verify
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        env:
+          CAND_RUN: ${{ steps.tag.outputs.run }}
+          SUMS: ${{ steps.tag.outputs.sums }}
+          SEAL: ${{ steps.tag.outputs.seal }}
+          TAG_OBJECT: ${{ steps.tag.outputs.tag_object }}
+          TAG_COMMIT: ${{ steps.tag.outputs.tag_commit }}
+          TAGGER: ${{ steps.tag.outputs.tagger }}
+          LANE: ${{ steps.tag.outputs.lane }}
+          STARTED: ${{ steps.tag.outputs.started }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/adopt"
+          if ! python3 -I tools/ci/release_adopt.py verify \
+              --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --candidate-run "$CAND_RUN" \
+              --tag "$TAG" --tag-commit "$TAG_COMMIT" --sums-trailer "$SUMS" --seal-trailer "$SEAL" \
+              --actor "$ACTOR" --lane-sha "$LANE" --started-at "$STARTED" \
+              --tag-object-sha "$TAG_OBJECT" --tagger "$TAGGER" \
+              --out "${RUNNER_TEMP}/adopt/adopt-binding.json" > "${RUNNER_TEMP}/adopt/verify.txt" 2>&1; then
+            cat "${RUNNER_TEMP}/adopt/verify.txt"
+            {
+              echo "### Adoption refused"
+              echo ""
+              echo "Candidate run ${CAND_RUN} cannot be adopted for ${TAG}. Nothing was signed or published."
+              echo ""
+              echo '```'
+              cat "${RUNNER_TEMP}/adopt/verify.txt"
+              echo '```'
+              echo ""
+              echo "Start a new candidate and tag again, or dispatch this tag with adopt=off for a full build."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat "${RUNNER_TEMP}/adopt/verify.txt"
+
+      - name: Plan the re-upload
+        id: plan
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          echo "ids=$(jq -r '[.artifacts[] | select(.reupload) | .id] | join(",")' "$b")" >> "$GITHUB_OUTPUT"
+          echo "names=$(jq -r '[.artifacts[] | select(.reupload) | .name] | "," + join(",") + ","' "$b")" >> "$GITHUB_OUTPUT"
+
+      # The token only reads the actions of this repository. Each artifact
+      # lands in its own directory below `in`, named after the artifact.
+      - name: Download the candidate's artifacts
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.plan.outputs.ids }}
+          run-id: ${{ steps.tag.outputs.run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/adopt/in
+
+      # One step per artifact, because an upload names its artifact in the
+      # step. A candidate of a release candidate version has no cPanel
+      # packages, so each step runs only for the artifacts the binding lists.
+      # overwrite makes the job safe to run again after a partial attempt.
+
+      - name: Re-upload asset-source
+        if: ${{ contains(steps.plan.outputs.names, ',asset-source,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-source
+          path: ${{ runner.temp }}/adopt/in/asset-source
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sbom
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sbom,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sbom
+          path: ${{ runner.temp }}/adopt/in/asset-sbom
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-optimizer
+        if: ${{ contains(steps.plan.outputs.names, ',asset-optimizer,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-optimizer
+          path: ${{ runner.temp }}/adopt/in/asset-optimizer
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-linux-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-linux-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-x64
+          path: ${{ runner.temp }}/adopt/in/asset-linux-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-linux-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-linux-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-linux-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-x64
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-el10
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-apache-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-apache-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-apache-el10
+          path: ${{ runner.temp }}/adopt/in/asset-apache-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el8
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el8,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el8
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el8
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el9
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el9,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el9
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el9
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el10
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sidecar-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-x64
+          path: ${{ runner.temp }}/adopt/in/asset-sidecar-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sidecar-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-sidecar-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload unsigned-windows
+        if: ${{ contains(steps.plan.outputs.names, ',unsigned-windows,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-windows
+          path: ${{ runner.temp }}/adopt/in/unsigned-windows
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      # Read each copy back from this run's own listing and check its files
+      # against the binding; the binding then carries the new ids and digests.
+      - name: Read the re-uploaded artifacts back
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py upload-check \
+            --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+            --binding "${RUNNER_TEMP}/adopt/adopt-binding.json"
+
+      - name: Hash the binding
+        id: hash
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "sha256=$(python3 -I tools/ci/release_adopt.py binding-hash --file "${RUNNER_TEMP}/adopt/adopt-binding.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the binding
+        id: bind
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: adopt-binding
+          path: ${{ runner.temp }}/adopt/adopt-binding.json
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+
+      # The job outputs are small values; the jobs that sign and validate
+      # download adopt-binding and check its hash against binding_sha256.
+      - name: Publish the binding
+        id: out
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        env:
+          BINDING_ID: ${{ steps.bind.outputs.artifact-id }}
+          BINDING_SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          {
+            echo "adopted=true"
+            echo "candidate_run=$(jq -r '.candidate.run' "$b")"
+            echo "candidate_attempt=$(jq -r '.candidate.attempt' "$b")"
+            echo "binding=$(jq -r '.binding' "$b")"
+            echo "binding_id=$BINDING_ID"
+            echo "binding_sha256=$BINDING_SHA256"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Adopted candidate run $(jq -r '.candidate.run' "$b")"
+            echo ""
+            echo "Binding: $(jq -r '.binding' "$b")"
+            echo ""
+            jq -r '"- candidate run \(.candidate.run), attempt \(.candidate.attempt), build commit `\(.candidate.build_sha)`",
+                   "- tag object `\(.tag.object.sha)`, lane definition `\(.lane_sha)`",
+                   "- Release-Candidate-Run: \(.trailers["Release-Candidate-Run"])",
+                   "- Release-Candidate-SHA256SUMS: `\(.trailers["Release-Candidate-SHA256SUMS"])`",
+                   "- Release-Candidate-Seal: `\(.trailers["Release-Candidate-Seal"])`"' "$b"
+            echo ""
+            echo "| Artifact | Candidate digest | This run's digest |"
+            echo "|---|---|---|"
+            jq -r '.artifacts[] | select(.reupload) | "| \(.name) | `\(.digest)` | `\(.new_digest)` |"' "$b"
+            echo ""
+            echo "adopt-binding.json: sha256 \`$BINDING_SHA256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------
   # Vendor: one prepared source tree for every build, as the `tree` artifact:
   # the source at the tag with the module version stamped into VERSION, the
   # admin console rebuilt with that version, vendor/, and the GIT_COMMIT
@@ -321,9 +742,9 @@ jobs:
   # ---------------------------------------------------------------------
   vendor:
     name: Vendor Dependencies
-    needs: [ref-guard, version]
+    needs: [ref-guard, version, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    if: ${{ needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env:
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
@@ -525,8 +946,8 @@ jobs:
 
   vendor-hosted:
     name: Vendor Dependencies (hosted)
-    needs: [event-guard, ref-guard, version]
-    if: ${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true') }}
+    needs: [event-guard, ref-guard, version, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -537,9 +958,12 @@ jobs:
       PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps: *vendor-steps
 
+  # The `-ready` joins below accept an adopted run as success: the build jobs
+  # they join are skipped there, and the candidate's artifacts are already in
+  # this run (adopt). If adopt failed, ADOPTED is empty and they fail.
   vendor-ready:
     name: Vendor ready
-    needs: [event-guard, vendor, vendor-hosted]
+    needs: [event-guard, vendor, vendor-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -547,10 +971,11 @@ jobs:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.vendor.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.vendor-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the vendor job did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the vendor job did not succeed"; exit 1; }
 
   # ---------------------------------------------------------------------
   # Release security gates, hosted: SBOM freshness at the module version,
@@ -559,7 +984,8 @@ jobs:
   # ---------------------------------------------------------------------
   security-gates:
     name: Security Gates (SBOM + Grype + VEX)
-    needs: [ref-guard, version]
+    needs: [ref-guard, version, adopt]
+    if: ${{ needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -660,12 +1086,13 @@ jobs:
   # ---------------------------------------------------------------------
   optimizer-fetch:
     name: Fetch and verify the optimizer packages
-    needs: [ref-guard, version]
+    needs: [ref-guard, version, adopt]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
       pair_tag: ${{ steps.fetch.outputs.pair_tag }}
       pair_pkg_version: ${{ steps.fetch.outputs.pair_pkg_version }}
+      sums_sha256: ${{ steps.fetch.outputs.sums_sha256 }}
     env:
       OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
@@ -765,6 +1192,10 @@ jobs:
           sums_url=$(awk '$1 == "SHA256SUMS" { print $2 }' ../optimizer-assets.txt)
           curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$sums_url"
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
+          # The hash of the file that was just verified: a candidate's seal
+          # records it, and an adopting run compares it with the pin (check 9
+          # of tools/ci/release_adopt.py).
+          echo "sums_sha256=$(sha256sum SHA256SUMS | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
           # The package names the module needs, picked by name from the
           # verified list: every deb, every rpm and the Windows zip.
           awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS \
@@ -819,12 +1250,31 @@ jobs:
           ls optimizer-dist
 
       - name: Upload the optimizer packages
+        if: ${{ needs.adopt.outputs.adopted != 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: asset-optimizer
           path: optimizer-dist/*
           retention-days: 14
           if-no-files-found: error
+
+      # An adopting run already holds the candidate's copy of this artifact
+      # (adopt). The pinned release is immutable, so what was just fetched
+      # and verified must be that copy, byte for byte.
+      - name: Download the adopted optimizer packages
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-optimizer
+          path: adopted-optimizer
+
+      - name: Compare with the adopted optimizer packages
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        run: |
+          set -euo pipefail
+          diff -r optimizer-dist adopted-optimizer \
+            || { echo "::error::the pinned optimizer release differs from the packages the candidate run built with"; exit 1; }
+          echo "the fetched optimizer packages equal the adopted asset-optimizer"
 
   # ---------------------------------------------------------------------
   # The release is gated on the system-test lanes of the CI run of the same
@@ -908,9 +1358,9 @@ jobs:
   # ---------------------------------------------------------------------
   linux-release-build:
     name: Linux Release Build (x64)
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &linux-x64-env
       ARCH: x64
@@ -1140,8 +1590,8 @@ jobs:
 
   linux-release-build-hosted:
     name: Linux Release Build (x64, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *linux-x64-env
@@ -1149,7 +1599,7 @@ jobs:
 
   linux-ready:
     name: Linux build ready
-    needs: [event-guard, linux-release-build, linux-release-build-hosted]
+    needs: [event-guard, linux-release-build, linux-release-build-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1157,15 +1607,16 @@ jobs:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.linux-release-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.linux-release-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Linux x64 build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Linux x64 build did not succeed"; exit 1; }
 
   linux-arm64-release-build:
     name: Linux Release Build (arm64)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success'}}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
@@ -1194,8 +1645,8 @@ jobs:
   # ---------------------------------------------------------------------
   nginx-x64-plan:
     name: Nginx Distro Packages (x64, plan)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success') }}
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -1221,9 +1672,9 @@ jobs:
 
   nginx-distro-build:
     name: Nginx Distro Packages (x64, ${{ matrix.distro }})
-    needs: [version, vendor-ready, nginx-x64-plan]
+    needs: [version, vendor-ready, nginx-x64-plan, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -1295,8 +1746,8 @@ jobs:
 
   nginx-distro-build-hosted:
     name: Nginx Distro Packages (x64, hosted, ${{ matrix.distro }})
-    needs: [event-guard, version, vendor-ready, nginx-x64-plan]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && vars.FLEET_ENABLED != 'true') }}
+    needs: [event-guard, version, vendor-ready, nginx-x64-plan, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
@@ -1311,8 +1762,8 @@ jobs:
   # `asset-nginx-x64`.
   nginx-ready:
     name: Nginx Distro Packages (x64)
-    needs: [event-guard, version, nginx-distro-build, nginx-distro-build-hosted]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
+    needs: [event-guard, version, nginx-distro-build, nginx-distro-build-hosted, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -1383,8 +1834,8 @@ jobs:
   # expects. The per-leg artifacts have no `asset-` prefix on purpose.
   nginx-arm64-plan:
     name: Nginx Distro Packages (arm64, plan)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' }}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -1410,8 +1861,8 @@ jobs:
 
   nginx-distro-build-arm64:
     name: Nginx Distro Packages (arm64, ${{ matrix.distro }})
-    needs: [version, vendor-ready, nginx-arm64-plan]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-arm64-plan.result == 'success' }}
+    needs: [version, vendor-ready, nginx-arm64-plan, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-arm64-plan.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     strategy:
@@ -1468,8 +1919,8 @@ jobs:
 
   nginx-arm64-join:
     name: Nginx Distro Packages (arm64)
-    needs: [version, nginx-distro-build-arm64]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success' }}
+    needs: [version, nginx-distro-build-arm64, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:
@@ -1528,9 +1979,9 @@ jobs:
   # is a leg of its own so that its long build cannot hold up the others.
   nginx-distro-build-el10:
     name: Nginx Distro Packages (el10)
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &nginx-el10-env
       ARCH: x64
@@ -1577,8 +2028,8 @@ jobs:
 
   nginx-distro-build-el10-hosted:
     name: Nginx Distro Packages (el10, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *nginx-el10-env
@@ -1605,7 +2056,8 @@ jobs:
   # ---------------------------------------------------------------------
   vendor-sidecar:
     name: Vendor Dependencies (sidecar, hosted)
-    needs: [ref-guard, version]
+    needs: [ref-guard, version, adopt]
+    if: ${{ needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -1638,8 +2090,8 @@ jobs:
 
   sidecar-pair:
     name: Sidecar Native Pair (x64, hosted)
-    needs: [version, vendor-sidecar]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' }}
+    needs: [version, vendor-sidecar, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
@@ -1694,8 +2146,8 @@ jobs:
 
   sidecar-pair-arm64:
     name: Sidecar Native Pair (arm64, hosted)
-    needs: [version, vendor-sidecar]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' }}
+    needs: [version, vendor-sidecar, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
@@ -1712,9 +2164,9 @@ jobs:
   # ---------------------------------------------------------------------
   apache-el8-build:
     name: Apache EL8 Build (glibc 2.28)
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 240
     env: &apache-el8-env
       EL: el8
@@ -1760,8 +2212,8 @@ jobs:
 
   apache-el8-build-hosted:
     name: Apache EL8 Build (glibc 2.28, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *apache-el8-env
@@ -1769,7 +2221,7 @@ jobs:
 
   el8-ready:
     name: EL8 build ready
-    needs: [event-guard, apache-el8-build, apache-el8-build-hosted]
+    needs: [event-guard, apache-el8-build, apache-el8-build-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1777,16 +2229,17 @@ jobs:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.apache-el8-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.apache-el8-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el8 build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el8 build did not succeed"; exit 1; }
 
   apache-el10-build:
     name: Apache EL10 Build (glibc 2.39, native)
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 240
     env: &apache-el10-env
       EL: el10
@@ -1795,8 +2248,8 @@ jobs:
 
   apache-el10-build-hosted:
     name: Apache EL10 Build (glibc 2.39, native, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env: *apache-el10-env
@@ -1804,7 +2257,7 @@ jobs:
 
   el10-ready:
     name: EL10 build ready
-    needs: [event-guard, apache-el10-build, apache-el10-build-hosted]
+    needs: [event-guard, apache-el10-build, apache-el10-build-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1812,10 +2265,11 @@ jobs:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.apache-el10-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.apache-el10-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el10 build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el10 build did not succeed"; exit 1; }
 
   # ---------------------------------------------------------------------
   # Unit tests of the optimized build, with the cache servers they talk to
@@ -1823,9 +2277,9 @@ jobs:
   # ---------------------------------------------------------------------
   unit-tests:
     name: Unit Tests (Release)
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 120
     env: &unit-env
       ARCH: x64
@@ -1954,8 +2408,8 @@ jobs:
 
   unit-tests-hosted:
     name: Unit Tests (Release, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env: *unit-env
@@ -1970,9 +2424,9 @@ jobs:
   # ---------------------------------------------------------------------
   package-smoke-deb:
     name: Smoke Test (Debian)
-    needs: [version, linux-ready, optimizer-fetch]
+    needs: [version, linux-ready, optimizer-fetch, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: &smoke-env
       RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
@@ -2198,8 +2652,8 @@ jobs:
 
   package-smoke-deb-hosted:
     name: Smoke Test (Debian, hosted)
-    needs: [version, linux-ready, optimizer-fetch]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, linux-ready, optimizer-fetch, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env: *smoke-env
@@ -2207,9 +2661,9 @@ jobs:
 
   package-smoke-rpm:
     name: Smoke Test (RPM)
-    needs: [version, linux-ready, optimizer-fetch]
+    needs: [version, linux-ready, optimizer-fetch, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: *smoke-env
     steps: &smoke-rpm-steps
@@ -2398,8 +2852,8 @@ jobs:
 
   package-smoke-rpm-hosted:
     name: Smoke Test (RPM, hosted)
-    needs: [version, linux-ready, optimizer-fetch]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, linux-ready, optimizer-fetch, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env: *smoke-env
@@ -2409,9 +2863,9 @@ jobs:
   # unpacked into a container that builds nginx from source to match it.
   package-smoke-nginx:
     name: Smoke Test (Nginx)
-    needs: [version, linux-ready]
+    needs: [version, linux-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     steps: &smoke-nginx-steps
       - *unlock-vendor
@@ -2491,8 +2945,8 @@ jobs:
 
   package-smoke-nginx-hosted:
     name: Smoke Test (Nginx, hosted)
-    needs: [version, linux-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, linux-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps: *smoke-nginx-steps
@@ -2504,9 +2958,9 @@ jobs:
   # by `nginx -t`.
   package-load-check-nginx:
     name: Packaged-Nginx Load Check (x64)
-    needs: [version, nginx-ready]
+    needs: [version, nginx-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 90
     env: &loadcheck-x64-env
       ARCH: x64
@@ -2528,8 +2982,8 @@ jobs:
 
   package-load-check-nginx-hosted:
     name: Packaged-Nginx Load Check (x64, hosted)
-    needs: [version, nginx-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, nginx-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env: *loadcheck-x64-env
@@ -2537,8 +2991,8 @@ jobs:
 
   package-load-check-nginx-arm64:
     name: Packaged-Nginx Load Check (arm64)
-    needs: [version, nginx-arm64-join]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-arm64-join.result == 'success' }}
+    needs: [version, nginx-arm64-join, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-arm64-join.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     env:
@@ -2549,9 +3003,9 @@ jobs:
   # against it.
   package-smoke-nginx-packaged:
     name: Smoke Test (Nginx, packaged)
-    needs: [version, nginx-ready]
+    needs: [version, nginx-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &packaged-env
       ARCH: x64
@@ -2573,8 +3027,8 @@ jobs:
 
   package-smoke-nginx-packaged-hosted:
     name: Smoke Test (Nginx, packaged, hosted)
-    needs: [version, nginx-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, nginx-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env: *packaged-env
@@ -2588,9 +3042,9 @@ jobs:
   # ---------------------------------------------------------------------
   ea4-build:
     name: EA4 Build (${{ matrix.os }})
-    needs: [version, linux-ready, el8-ready]
+    needs: [version, linux-ready, el8-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -2639,8 +3093,8 @@ jobs:
 
   ea4-build-hosted:
     name: EA4 Build (${{ matrix.os }}, hosted)
-    needs: [version, linux-ready, el8-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, linux-ready, el8-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -2654,9 +3108,9 @@ jobs:
   # the package instead of failing the release.
   ea4-el10-build:
     name: EA4 Build (el10)
-    needs: [version, linux-ready, el10-ready]
+    needs: [version, linux-ready, el10-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: &ea4-el10-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
@@ -2696,8 +3150,8 @@ jobs:
 
   ea4-el10-build-hosted:
     name: EA4 Build (el10, hosted)
-    needs: [version, linux-ready, el10-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, linux-ready, el10-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env: *ea4-el10-env
@@ -2713,9 +3167,9 @@ jobs:
   # ---------------------------------------------------------------------
   windows-release-build:
     name: Windows Release Build
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     defaults:
       run:
@@ -2970,8 +3424,8 @@ jobs:
 
   windows-release-build-hosted:
     name: Windows Release Build (hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 350
     defaults:
@@ -2981,7 +3435,7 @@ jobs:
 
   windows-ready:
     name: Windows build ready
-    needs: [windows-release-build, windows-release-build-hosted]
+    needs: [windows-release-build, windows-release-build-hosted, adopt]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2989,14 +3443,15 @@ jobs:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.windows-release-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.windows-release-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Windows build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Windows build did not succeed"; exit 1; }
 
   ea4-ready:
     name: cPanel packages ready
-    needs: [ea4-build, ea4-build-hosted, ea4-el10-build, ea4-el10-build-hosted]
+    needs: [ea4-build, ea4-build-hosted, ea4-el10-build, ea4-el10-build-hosted, adopt]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -3007,8 +3462,10 @@ jobs:
           B: ${{ needs.ea4-build-hosted.result }}
           C: ${{ needs.ea4-el10-build.result }}
           D: ${{ needs.ea4-el10-build-hosted.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
         run: |
-          echo "el9 and el8: ${A}, ${B}; el10: ${C}, ${D}"
+          echo "el9 and el8: ${A}, ${B}; el10: ${C}, ${D}; adopted: ${ADOPTED}"
+          [ "$ADOPTED" != true ] || exit 0
           if [ "$A" != success ] && [ "$B" != success ]; then echo "::error::the el9 and el8 cPanel build did not succeed"; exit 1; fi
           if [ "$C" != success ] && [ "$D" != success ]; then echo "::error::the el10 cPanel build did not succeed"; exit 1; fi
 
@@ -3027,10 +3484,14 @@ jobs:
   # master in any case. The artifact `asset-windows` is the installer that
   # the rest of the lane uses: signed in a real run, unsigned in a dry run.
   # ---------------------------------------------------------------------
+  # The name of each signing job carries the binding of an adopting run, so
+  # whoever approves it sees which candidate's bytes are about to be signed;
+  # the prefix is today's name. Before any secret is read, an adopting run
+  # checks that the payload it signs is the one the candidate sealed.
   windows-sign:
-    name: Sign the Windows binaries
-    needs: [version, windows-ready]
-    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    name: "Sign the Windows binaries${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, windows-ready, adopt]
+    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -3046,11 +3507,34 @@ jobs:
           sparse-checkout: /tools/ci/
           sparse-checkout-cone-mode: false
 
+      - name: Download the adoption binding
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: adopt-binding
+          path: adopt
+
+      - name: Check the adoption binding against the job output
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        env:
+          BINDING_SHA256: ${{ needs.adopt.outputs.binding_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -I tools\ci\release_adopt.py binding-hash --file adopt\adopt-binding.json --expect $env:BINDING_SHA256
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Download the unsigned payload
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: unsigned-windows
           path: signed-output
+
+      - name: Check the unsigned payload against the binding
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -I tools\ci\release_adopt.py check-files --binding adopt\adopt-binding.json --artifact unsigned-windows --dir signed-output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Sign
         env:
@@ -3079,6 +3563,7 @@ jobs:
           name: signed-windows
           path: signed-output
           retention-days: 14
+          overwrite: true
           if-no-files-found: error
 
   # No secret, no environment: the installer is built from the signed
@@ -3091,6 +3576,10 @@ jobs:
     if: ${{ !cancelled() && needs.windows-ready.result == 'success' && (needs.version.outputs.dry_run == 'true' || needs.windows-sign.result == 'success') }}
     runs-on: windows-2022
     timeout-minutes: 30
+    outputs:
+      # The hash of the installer this job built, which msi-sign compares
+      # with the installer it downloads in an adopting run.
+      msi_sha256: ${{ steps.build.outputs.msi_sha256 }}
     defaults:
       run:
         shell: powershell
@@ -3179,6 +3668,7 @@ jobs:
           Get-ChildItem msi-old -Filter *.msi | Format-Table Name, Length
 
       - name: Build the installer
+        id: build
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path 'msi-out' -Force | Out-Null
@@ -3197,6 +3687,8 @@ jobs:
             exit 1
           }
           Get-ChildItem msi-out | Format-Table Name, Length
+          $msiHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $found[0].FullName).Hash.ToLower()
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_sha256=$msiHash" -Encoding ascii
 
       - name: Upload the older installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -3215,6 +3707,7 @@ jobs:
           name: msi-unsigned
           path: msi-out/*.msi
           retention-days: 14
+          overwrite: true
           if-no-files-found: error
 
       - name: Upload the installer (dry run, unsigned)
@@ -3227,9 +3720,9 @@ jobs:
           if-no-files-found: error
 
   msi-sign:
-    name: Sign the Windows installer
-    needs: [version, msi-build]
-    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    name: "Sign the Windows installer${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, msi-build, adopt]
+    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -3250,6 +3743,22 @@ jobs:
         with:
           name: msi-unsigned
           path: msi
+
+      # The installer is built in this run, so the record of what it should be
+      # is msi-build's own output.
+      - name: Check the installer against the one msi-build built
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        env:
+          WANT_SHA256: ${{ needs.msi-build.outputs.msi_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = @(Get-ChildItem msi -Filter *.msi)
+          if ($msi.Count -ne 1) { Write-Host "::error::expected exactly one installer, found $($msi.Count)"; exit 1 }
+          $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi[0].FullName).Hash.ToLower()
+          if (-not $env:WANT_SHA256 -or $got -ne $env:WANT_SHA256) {
+            Write-Host "::error::the installer hashes to $got, msi-build built $($env:WANT_SHA256)"
+            exit 1
+          }
 
       - name: Sign
         env:
@@ -3387,11 +3896,16 @@ jobs:
       - ea4-build-hosted
       - ea4-el10-build
       - ea4-el10-build-hosted
+      - adopt
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       NEEDS: ${{ toJSON(needs) }}
+      ADOPTED: ${{ needs.adopt.outputs.adopted }}
+      BINDING_SHA256: ${{ needs.adopt.outputs.binding_sha256 }}
+      BUILD_RUN_ID: ${{ needs.adopt.outputs.candidate_run }}
+      BUILD_RUN_ATTEMPT: ${{ needs.adopt.outputs.candidate_attempt }}
       TAG: ${{ needs.version.outputs.tag }}
       VERSION: ${{ needs.version.outputs.version }}
       PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
@@ -3403,11 +3917,41 @@ jobs:
       BUILD_PROFILE: ${{ needs.version.outputs.build_profile }}
       FLEET_ENABLED: ${{ vars.FLEET_ENABLED }}
     steps:
+      - name: Checkout master (tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          persist-credentials: false
+
+      # In an adopting run the build, smoke, unit-test and scan jobs were
+      # skipped here and ran in the candidate. Their verdicts are taken from
+      # the sealed job list of the binding (which is checked against the hash
+      # adopt published), under one rule: every upstream job succeeded in this
+      # run, or was skipped here and succeeded in the candidate, and of a pair
+      # of runner and hosted twin jobs exactly one succeeded in the candidate.
+      - name: Download the adoption binding (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: adopt-binding
+          path: ${{ runner.temp }}/adopt
+
+      - name: Upstream jobs of an adopting run
+        if: ${{ env.ADOPTED == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py binding-hash --file "${RUNNER_TEMP}/adopt/adopt-binding.json" --expect "$BINDING_SHA256"
+          printf '%s' "$NEEDS" > "${RUNNER_TEMP}/adopt/needs.json"
+          python3 -I tools/ci/release_adopt.py check-needs --binding "${RUNNER_TEMP}/adopt/adopt-binding.json" \
+            --needs "${RUNNER_TEMP}/adopt/needs.json" --out "${RUNNER_TEMP}/adopt/needs-adopted.json"
+
       # Every upstream job succeeded, except that of each build runner pair
-      # exactly the leg that ran may have, and the other was skipped.
+      # exactly the leg that ran may have, and the other was skipped. In an
+      # adopting run the adopted jobs read as the success the candidate had.
       - name: Every upstream job succeeded
         run: |
           set -euo pipefail
+          if [ "${ADOPTED}" = true ]; then NEEDS="$(cat "${RUNNER_TEMP}/adopt/needs-adopted.json")"; fi
           # name of the job, then the name of its hosted twin ("-" for none)
           PAIRS="
           nginx-distro-build-el10 nginx-distro-build-el10-hosted
@@ -3465,17 +4009,31 @@ jobs:
           done
           [ "$bad" = 0 ] || { echo "::error::an upstream job did not succeed"; exit 1; }
 
-      - name: Checkout master (tooling)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: master
-          persist-credentials: false
-
       - name: Download the release files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/stage
           pattern: asset-*
+
+      - name: Download the adopted Windows payload (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-windows
+          path: ${{ runner.temp }}/adopted-extra/unsigned-windows
+
+      # Every file of every adopted artifact is what the candidate sealed.
+      - name: Re-hash the adopted artifacts (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          for n in $(jq -r '.artifacts[] | select(.reupload) | .name' "$b"); do
+            d="${RUNNER_TEMP}/stage/${n}"
+            [ -d "$d" ] || d="${RUNNER_TEMP}/adopted-extra/${n}"
+            [ -d "$d" ] || { echo "::error::adopted artifact ${n} is not in this run"; exit 1; }
+            python3 -I tools/ci/release_adopt.py check-files --binding "$b" --artifact "$n" --dir "$d"
+          done
 
       # The manifest of the sidecar pair, from the two tarballs: one more
       # release file, so SHA256SUMS (and its signature) covers it.
@@ -3494,6 +4052,10 @@ jobs:
         run: |
           set -euo pipefail
           ls "${RUNNER_TEMP}/stage"
+          # The run that built the files is the candidate's when this run
+          # adopted them, and this run otherwise.
+          build_args=()
+          [ "$ADOPTED" != true ] || build_args=(--build-run-id "$BUILD_RUN_ID" --build-run-attempt "$BUILD_RUN_ATTEMPT")
           python3 -I tools/ci/release_manifest.py build \
             --stage "${RUNNER_TEMP}/stage" \
             --out "${RUNNER_TEMP}/release-assets" \
@@ -3501,7 +4063,19 @@ jobs:
             --prerelease "$IS_PRERELEASE" \
             --source-sha "$RELEASE_SHA" --run-id "$GITHUB_RUN_ID" \
             --repository "$GITHUB_REPOSITORY" --optimizer-tag "$OPTIMIZER_TAG" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" "${build_args[@]+"${build_args[@]}"}" \
             --profile part-b
+
+      # The release files an adopting run took over are the candidate's: each
+      # has the candidate's row. Only the Windows installer (rebuilt from the
+      # signed binaries) and the two manifests may differ, and each differing
+      # row is named.
+      - name: SHA256SUMS rows of the adopted files (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py check-sums \
+            --binding "${RUNNER_TEMP}/adopt/adopt-binding.json" --sums "${RUNNER_TEMP}/release-assets/SHA256SUMS"
 
       # The commit stamp is what ties a shipped module to the release commit.
       # Every Linux module (Apache deb, rpm, el10 rpm and standalone .so; nginx
@@ -3633,6 +4207,7 @@ jobs:
           name: release-assets
           path: ${{ runner.temp }}/release-assets/*
           retention-days: ${{ needs.version.outputs.candidate == 'true' && 14 || 30 }}
+          overwrite: true
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
@@ -3647,7 +4222,7 @@ jobs:
   # ---------------------------------------------------------------------
   candidate-seal:
     name: Seal the candidate artifacts
-    needs: [version, validate]
+    needs: [version, validate, nginx-x64-plan, nginx-arm64-plan, optimizer-fetch]
     if: ${{ !cancelled() && needs.version.outputs.candidate == 'true' && needs.validate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -3660,6 +4235,13 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+      # The legs the two plan jobs published: run outputs are not in the
+      # Actions API, and an adopting run needs them to name the jobs the
+      # candidate had. The hash is of the pinned optimizer release's
+      # SHA256SUMS as `optimizer-fetch` verified it.
+      PLAN_X64: ${{ needs.nginx-x64-plan.outputs.distros }}
+      PLAN_ARM64: ${{ needs.nginx-arm64-plan.outputs.distros }}
+      OPTIMIZER_SUMS: ${{ needs.optimizer-fetch.outputs.sums_sha256 }}
     steps:
       - name: Checkout master (seal tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -3677,6 +4259,8 @@ jobs:
           python3 -I tools/ci/release_adopt.py seal \
             --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
             --tag "$TAG" --version "$VERSION" --sha "$RELEASE_SHA" \
+            --plan "nginx-x64-plan=${PLAN_X64}" --plan "nginx-arm64-plan=${PLAN_ARM64}" \
+            --optimizer-sums-sha256 "$OPTIMIZER_SUMS" \
             "${args[@]}" --out "${RUNNER_TEMP}/seal/candidate-seal.json"
           cat "${RUNNER_TEMP}/seal/candidate-seal.json"
 
