@@ -4276,11 +4276,13 @@ jobs:
   # Signing of the checksums and the release. Real runs only (dry_run
   # false), hosted, in the protected `release` environment, after `validate`
   # succeeded. The package signing key lives in this one job; the release job
-  # holds only the write token.
+  # holds only the write token. In an adopting run both names carry the
+  # binding, as the Windows signing jobs do, so the approver of these last two
+  # approvals sees which candidate the bytes came from.
   # ---------------------------------------------------------------------
   sign-checksums:
-    name: Sign SHA256SUMS
-    needs: [version, validate]
+    name: "Sign SHA256SUMS${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, adopt, validate]
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -4420,8 +4422,8 @@ jobs:
   # beyond that: no repository publication, no dispatch to another
   # repository. A pre-release tag produces a pre-release.
   create-release:
-    name: Create the GitHub release
-    needs: [version, validate, sign-checksums]
+    name: "Create the GitHub release${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, adopt, validate, sign-checksums]
     if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
