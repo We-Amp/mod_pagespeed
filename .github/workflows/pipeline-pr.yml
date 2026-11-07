@@ -674,7 +674,8 @@ jobs:
     permissions:
       contents: read
     name: Browser client-JS tests
-    runs-on: ubuntu-latest
+    # pinned until Playwright supports Ubuntu 26.04; see https://github.com/We-Amp/mod_pagespeed/issues/669
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -730,7 +731,8 @@ jobs:
     permissions:
       contents: read
     name: Console SPA tests
-    runs-on: ubuntu-latest
+    # pinned until Playwright supports Ubuntu 26.04; see https://github.com/We-Amp/mod_pagespeed/issues/669
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
