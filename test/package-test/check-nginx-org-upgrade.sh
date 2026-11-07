@@ -9,6 +9,8 @@
 # Usage: check-nginx-org-upgrade.sh <image> <old nginx> <old package> <new nginx> <new package>
 # SCENARIOS="a b" runs only the named scenarios (default: all).
 set -uo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 IMAGE="${1:?image}"; OLDV="${2:?old nginx}"; OLDP="${3:?old package}"; NEWV="${4:?new nginx}"; NEWP="${5:?new package}"
 DIR="$(cd "$(dirname "$OLDP")" && pwd)"
 [ "$DIR" = "$(cd "$(dirname "$NEWP")" && pwd)" ] || { echo "both packages must share a directory"; exit 2; }
@@ -82,6 +84,7 @@ run() { # name, script
   local name="$1" body="$2"
   case " ${SCENARIOS:-all} " in *" all "*|*" $name "*) ;; *) return 0 ;; esac
   echo "--- $name"
+  docker_pull_retry "$IMAGE" || return 1
   docker run --rm --name "pagespeed-nginxorg-upg-$$-$name" -v "$DIR":/pkgs:ro \
     -e OLDV="$OLDV" -e NEWV="$NEWV" -e OLDP="$(basename "$OLDP")" -e NEWP="$(basename "$NEWP")" \
     "$IMAGE" bash -uc "$COMMON

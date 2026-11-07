@@ -49,6 +49,8 @@
 #   2  symbol-leak assertion failed (THE blocking condition)
 #
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 
 die() { echo "::error::$*" >&2; exit "${2:-1}"; }
 
@@ -94,6 +96,7 @@ resolve_so() {
         # rpms use a zstd payload (no pure-python path). The almalinux:9 base
         # image (already cached on the release runner) ships rpm2archive + tar
         # but NOT cpio, so extract via rpm2archive|tar (no in-container install).
+        docker_pull_retry almalinux:9 || exit 1
         docker run --rm --user "$(id -u):$(id -g)" -v "$rpmfile":/pkg.rpm:ro -v "$WORK/rpm":/out almalinux:9 \
           bash -c "cd /out && rpm2archive - < /pkg.rpm | tar -xz"
       else

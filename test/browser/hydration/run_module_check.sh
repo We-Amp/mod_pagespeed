@@ -17,6 +17,8 @@
 # and python3. Every container and the network carry a prefix unique to this run and
 # are removed on exit.
 set -u
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../tools/ci/docker_pull_retry.sh"
 SERVER=${1:?usage: run_module_check.sh apache|nginx module.so}
 # A job that means local packages (LOCAL_PACKAGES=true) must have staged them:
 # an empty PACKAGE_DIR would otherwise run the published mode under a local name.
@@ -45,6 +47,9 @@ IMAGE="$PREFIX-origin:local"
 BROWSER_IMAGE="mcr.microsoft.com/playwright:v1.58.2-noble@sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d"
 [ -f "$HERE/out/next/index.html" ] && [ -f "$HERE/out/nuxt/index.html" ] || "$HERE/build_all.sh" || exit 2
 [ -d "$ROOT/test/browser/node_modules/playwright" ] || (cd "$ROOT/test/browser" && npm ci --no-fund --no-audit) || exit 2
+
+# The browser image once, here: the container runs below are not retried.
+docker_pull_retry "$BROWSER_IMAGE" || exit 2
 
 CTX=""
 cleanup() {
@@ -86,6 +91,7 @@ docker network create "$NET" >/dev/null || exit 2
 MODULE_ARGS=()
 [ -z "$SO" ] || MODULE_ARGS=(-e MODULE_SO=/module.so -v "$SO:/module.so:ro")
 start_server() { # name alias switch
+  # local-image: built by docker build above
   docker run -d --name "$1" --network "$NET" --network-alias "$2" \
     -e DETECT="$3" -e HOST_ALIAS="$2" ${MODULE_ARGS[@]+"${MODULE_ARGS[@]}"} \
     -v "$HERE/out:/fixtures:ro" -v "$HERE:/harness:ro" \

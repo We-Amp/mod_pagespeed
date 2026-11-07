@@ -234,7 +234,7 @@ jobs:
             fi
             # The ASP.NET Core sidecar, the focal recipe of its native pair and
             # the gates that check the pair.
-            if grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|${wf})" "${changed}"; then
+            if grep -qE "^(aspnetcore/|install/nginx/build_module_in_container\.sh|install/nginx/pagespeed-nginx-launch\.c|install/nginx/assert_symbol_hygiene\.sh|tools/ci/assert_module_symbols\.sh|test/package-test/check-sidecar-pair\.sh|tools/ci/release_sidecar\.sh|tools/ci/docker_pull_retry\.sh|${wf})" "${changed}"; then
               sidecar=true
             fi
             # The ported servers' system tests: the port's sources and tests,

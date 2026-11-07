@@ -35,6 +35,8 @@
 # The gates (symbol-leak, routing, load-check, suite) work on the packages in
 # --pkgdir and on the tree in --src, which holds test/package-test/.
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 # apt-get update + install with retries, for the throwaway gate containers: a
 # short Debian or Ubuntu mirror outage is waited out, a lasting one still fails
@@ -285,6 +287,7 @@ build() {
       # A previous run packaged as root inside the container, so the runner
       # user cannot delete what it left. Clear it through a throwaway root
       # container of the leg's own image.
+      docker_pull_retry --quiet "${image}" || true
       docker run --rm -v "$wsdir:/w" "${image}" sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null; true' >/dev/null 2>&1 || true
       rmdir "$wsdir" 2>/dev/null || true
     fi
@@ -310,6 +313,7 @@ build() {
     # the distro. On success the leg copies its packages to /collect and
     # empties its own workspace copy, so a runner with little disk never
     # holds more than the running legs.
+    docker_pull_retry "${image}" || return 93
     docker run --rm --init ${extra_docker[@]+"${extra_docker[@]}"} \
       --cpus="${cores}" --memory="${leg_mem}g" --memory-swap="${leg_mem}g" \
       -e BAZEL_CPUS="${cores}" -e MAKE_JOBS="${cores}" \
@@ -343,9 +347,10 @@ build() {
       rc=0
       run_leg "$row" || rc=$?
       [ "$rc" -eq 0 ] && return 0
-      # 90 to 92 are the leg's own workspace preparation failures; the log
-      # then belongs to the previous attempt.
-      if [ "$rc" -ge 90 ] && [ "$rc" -le 92 ]; then return "$rc"; fi
+      # 90 to 92 are the leg's own workspace preparation failures and 93 is
+      # the failed pull of its image (already retried); the log then belongs
+      # to the previous attempt.
+      if [ "$rc" -ge 90 ] && [ "$rc" -le 93 ]; then return "$rc"; fi
       if [ "$attempt" -ge 3 ] || ! grep -qE "$TRANSIENT_FETCH_RE" "${logs}/${distro}.log" 2>/dev/null; then
         return "$rc"
       fi
@@ -459,6 +464,7 @@ symbol_leak() {
     return 1
   fi
   if [ "${#debs[@]}" -gt 0 ]; then
+    docker_pull_retry ubuntu:24.04 || return 1
     docker run --rm -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro ubuntu:24.04 bash -c '
       set -e
       '"$(declare -f apt_install_retry)"'
@@ -473,6 +479,7 @@ symbol_leak() {
       [ "$n" = '"${#debs[@]}"' ] || { echo "::error::symbol-leak gate checked $n of '"${#debs[@]}"' debs"; exit 1; }'
   fi
   if [ "${#rpms[@]}" -gt 0 ]; then
+    docker_pull_retry almalinux:9 || return 1
     docker run --rm -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro almalinux:9 bash -c '
       set -e
       '"$(declare -f dnf_retry)"'
@@ -577,6 +584,7 @@ load_check() {
   if [ "$SET" = el10 ]; then
     rpm="$(first_of "$PKGDIR"/nginx-module-pagespeed-*.el10."${RPM_ARCH}".rpm)"
     echo "=== load check: el10 - $(basename "$rpm") ==="
+    docker_pull_retry almalinux:10 || return 1
     docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro -e DISTRO=el10 almalinux:10 bash -c '
       set -e
       cp /pkgs/'"$(basename "$rpm")"' /tmp/pkg.rpm
@@ -587,6 +595,7 @@ load_check() {
     IFS='|' read -r distro image <<<"$row"
     deb="$(first_of "$PKGDIR"/nginx-module-pagespeed_*~"${distro}"_"${DEB_ARCH}".deb)"
     echo "=== load check: ${distro} (${image}) - $(basename "$deb") ==="
+    docker_pull_retry "${image}" || return 1
     docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro -e DISTRO="${distro}" "${image}" bash -c '
       set -e
       cp /pkgs/'"$(basename "$deb")"' /tmp/pkg.deb
@@ -594,6 +603,7 @@ load_check() {
   done
   rpm="$(first_of "$PKGDIR"/nginx-module-pagespeed-*.el9."${RPM_ARCH}".rpm)"
   echo "=== load check: el9 - $(basename "$rpm") ==="
+  docker_pull_retry almalinux:9 || return 1
   docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro -e DISTRO=el9 almalinux:9 bash -c '
     set -e
     cp /pkgs/'"$(basename "$rpm")"' /tmp/pkg.rpm
@@ -609,6 +619,7 @@ suite() {
     IFS='|' read -r distro image <<<"$row"
     deb="$(first_of "$PKGDIR"/nginx-module-pagespeed_*~"${distro}"_"${DEB_ARCH}".deb)"
     echo "=== suite: ${distro} (${image}) - $(basename "$deb") ==="
+    docker_pull_retry "${image}" || return 1
     docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro -e DISTRO="${distro}" "${image}" bash -c '
       set -e
       export DEBIAN_FRONTEND=noninteractive
@@ -626,6 +637,7 @@ suite() {
   done
   rpm="$(first_of "$PKGDIR"/nginx-module-pagespeed-*.el9."${RPM_ARCH}".rpm)"
   echo "=== suite: el9 - $(basename "$rpm") ==="
+  docker_pull_retry almalinux:9 || return 1
   docker run --rm --init -v "$SRC":/src:ro -v "$PKGDIR":/pkgs:ro almalinux:9 bash -c '
     set -e
     '"$(declare -f dnf_retry)"'
