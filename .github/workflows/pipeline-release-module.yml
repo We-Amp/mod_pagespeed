@@ -1717,7 +1717,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/lane-tools"
-          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh "${RUNNER_TEMP}/lane-tools/"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh "${RUNNER_TEMP}/lane-tools/"
           rm -rf lane-tools
 
       - *tree-download
@@ -1908,7 +1908,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/lane-tools"
-          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh "${RUNNER_TEMP}/lane-tools/"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh "${RUNNER_TEMP}/lane-tools/"
           rm -rf lane-tools
 
       - *tree-download

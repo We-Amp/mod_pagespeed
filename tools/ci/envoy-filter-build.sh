@@ -24,6 +24,8 @@ WS="${GITHUB_WORKSPACE:-$(pwd)}"
 # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB); legacy values when unset.
 # shellcheck source=tools/ci/slot-budget.sh
 source "${WS}/tools/ci/slot-budget.sh"
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "${WS}/tools/ci/docker_pull_retry.sh"
 slot_budget 55g || exit 1
 
 EXTRA_DOCKER=()
@@ -35,6 +37,7 @@ else
   echo "::notice::BAZEL_CACHE_HOST not set: building without the remote cache (docs/ci/runner-environment.md)"
 fi
 
+docker_pull_retry "${DOCKER_IMAGE}" || exit 1
 docker run --rm --init "${EXTRA_DOCKER[@]}" \
   ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
   --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \

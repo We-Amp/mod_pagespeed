@@ -65,6 +65,8 @@
 # pagespeed-sidecar-native-debug-<version>-linux-<arch>.tar.gz, the debug files
 # of the same binaries.
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 # The build image of the pair, pinned by digest: Ubuntu 20.04 (glibc 2.31), the
 # compatibility floor of the sidecar. Ubuntu 20.04 is past its standard support
@@ -270,6 +272,7 @@ build() {
     # nginx tree under the workspace is removed again, and the workspace (Bazel
     # adds to the repository cache under vendor/) and the outputs are handed
     # back to the runner user, so that a later checkout can clear them.
+    docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
     if docker run --rm --init --platform "$(platform_of "$ARCH")" ${mem_args[@]+"${mem_args[@]}"} \
       -e HOME=/root \
       -e NGXVER="$ngxver" -e HOST_UID="$uid" -e HOST_GID="$gid" \
@@ -324,6 +327,7 @@ hygiene() {
   parse_args "$@" || return $?
   [ -n "$ARCH" ] || die "hygiene: --arch is required"
   need_native; need_src; need_pair
+  docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
     -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -v "$SRC:/src:ro" -v "$PAIR:/p:ro" -w /src \
@@ -374,6 +378,7 @@ strip_pair() {
   [ -n "$ARCH" ] && [ -n "$DEBUG_DIR" ] || die "strip: --arch and --debug are required"
   need_native; need_pair
   mkdir -p "$DEBUG_DIR"; DEBUG_DIR="$(abs_dir "$DEBUG_DIR")"
+  docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e SIDECAR_APT_MIRROR="${SIDECAR_APT_MIRROR:-}" \
     -v "$PAIR:/p" -v "$DEBUG_DIR:/d" "$FOCAL_IMAGE" bash -c '
@@ -456,6 +461,7 @@ PY
 run_suite() {
   local work="$1" image="$2" fw="$3" props="$4" rid="$5" require="$6" filter="$7" trx="$8" platform=""
   [ -z "$ARCH" ] || platform="$(platform_of "$ARCH")"
+  docker_pull_retry "$image" ${platform:+--platform "$platform"} || return 1
   docker run --rm --init ${platform:+--platform "$platform"} \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e FW="$fw" -e PROPS="$props" -e RID="$rid" -e REQUIRE="$require" -e FILTER="$filter" -e TRX="$trx" \
@@ -622,6 +628,7 @@ package() {
   # The tarball is written in a container: GNU tar for a reproducible archive
   # wherever the script runs. Every entry carries the time SOURCE_DATE_EPOCH
   # (default 0, the epoch), so the archive depends on its contents only.
+  docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
   docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e NAME="$name" -e RID="$rid" -e VERSION="$VERSION" -e NGXVER="$ngxver" -e PCRE2VER="$pcre2ver" \
     -e SOURCE_SHA="$SOURCE_SHA" -e IMAGE="$FOCAL_IMAGE" -e GLIBC_FLOOR="$GLIBC_FLOOR" \
@@ -665,6 +672,7 @@ package() {
       [ -s "$DEBUG_DIR/$f.debug" ] || die "package: no debug file $DEBUG_DIR/$f.debug"
       cp "$DEBUG_DIR/$f.debug" "$stage/$dname/"
     done
+    docker_pull_retry "$FOCAL_IMAGE" --platform "$(platform_of "$ARCH")" || die "pull of the build image failed"
     docker run --rm --platform "$(platform_of "$ARCH")" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
       -e NAME="$dname" -e EPOCH="${SOURCE_DATE_EPOCH:-0}" \
       -v "$stage:/s" -v "$OUT:/o" -w /s "$FOCAL_IMAGE" bash -c '

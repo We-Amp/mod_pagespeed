@@ -67,6 +67,8 @@
 # an ELF check).
 
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 # ---------------------------------------------------------------------------
 # Crypto provider libraries (assertion 1)
@@ -374,6 +376,7 @@ resolve_object() {
       elif command -v docker >/dev/null 2>&1; then
         # Last resort for a host with none of the above: unpack in a stock
         # EL container, which ships rpm2archive.
+        docker_pull_retry almalinux:9 || die "pull of almalinux:9 failed"
         docker run --rm --user "$(id -u):$(id -g)" \
           -v "${abs}":/pkg.rpm:ro -v "${work}":/out almalinux:9 \
           bash -c "cd /out && rpm2archive - < /pkg.rpm | tar -xz"
