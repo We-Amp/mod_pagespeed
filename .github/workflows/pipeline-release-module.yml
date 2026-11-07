@@ -41,6 +41,12 @@
 # (module-v<pinned version>-rehearsal.<run number>), it is a pre-release that
 # can never be confused with a release, no job of the `release` environment
 # runs, and nothing is sealed, so it can never be adopted.
+# A real run of a tag whose message names a candidate run (the
+# Release-Candidate-* trailers) adopts that run's artifacts: the `adopt` job
+# checks the candidate and copies what the later jobs read, the jobs that built
+# or tested those bytes are skipped, and the signing jobs and `validate` check
+# what they receive against the binding `adopt` records. A refusal ends the run
+# before any approval. `adopt: off` forces the full build.
 #
 # Runners. Every build job exists twice: on a runner class (fleet-heavy,
 # fleet-windows) while the repository variable FLEET_ENABLED is 'true', and as
