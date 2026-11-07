@@ -13,6 +13,7 @@
 /.github/workflows/release.yml @oschaaf
 /.github/workflows/pipeline-release-module.yml @oschaaf
 /.github/workflows/pair-rehearsal.yml @oschaaf
+/.github/workflows/release-rehearsal.yml @oschaaf
 /.github/workflows/nginx-org-rebuild.yml @oschaaf
 /tools/ci/release_nginx.sh @oschaaf
 /tools/ci/pair_rehearsal.sh @oschaaf
@@ -23,6 +24,7 @@
 /tools/ci/ref_guard.sh @oschaaf
 /tools/ci/check-workflow-shape.sh @oschaaf
 /tools/ci/ci_release_gate.sh @oschaaf
+/tools/ci/rehearsal_fulltier_gate.sh @oschaaf
 /tools/ci/pr_tier_scope.sh @oschaaf
 /tools/ci/docs_only.sh @oschaaf
 
