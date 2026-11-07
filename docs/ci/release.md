@@ -95,7 +95,14 @@ it was a dry run of exactly the given tag at the tag's commit (so a run of
 Debian and of the RPM install-and-serve smoke jobs, one variant (self-hosted
 or hosted) passed and the other was skipped; and `Sign SHA256SUMS` and
 `Create the GitHub release` exist and were skipped. The attempt number it
-read is printed. It is dispatch only, hosted and read-only, with no
+read is printed. For a final tag that does not exist yet (`module-vX.Y.Z` or
+`module-vX.Y.Z-rc.N`) the evidence is a candidate run instead
+(`candidate_run_id`, exclusive with `dry_run_id`). The run is read through the
+Actions API and must be of this repository, of `release.yml`, a dispatch on
+`master`, completed and successful, titled exactly
+`Release <tag> candidate dry run @ <head_sha>`, with a successful
+`candidate-seal` job. Its `head_sha` is the commit that is checked out and
+rehearsed, not a tag. It is dispatch only, hosted and read-only, with no
 environment, secret or write permission; `tools/ci/test_pair_rehearsal_shape.sh`
 fails if that changes. It does not prove the public package repository
 metadata or signatures, the shared-cache check (which installs from the public

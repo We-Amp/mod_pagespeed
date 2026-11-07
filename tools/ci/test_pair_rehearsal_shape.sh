@@ -67,8 +67,10 @@ if persist != ["false", "false"]:
 if has(r"^\s*repository:") or has(r"^\s*tok[e]n:") or has(r"^\s*ssh-key"):
     v.append("a checkout sets repository, token or ssh-key")
 refs = re.findall(r"^\s*ref:\s*(.*?)\s*$", code, re.M)
-if refs != ["master", "refs/tags/${{ inputs.tag }}"]:
-    v.append("checkout refs are %r: the check must come from master, the candidate from its tag" % refs)
+# The candidate is the commit the verified candidate run built, else the tag
+# (the rehearsal of a -pre tag); never any other input.
+if refs != ["master", "${{ steps.candidate.outputs.head_sha || format('refs/tags/{0}', inputs.tag) }}"]:
+    v.append("checkout refs are %r: the check must come from master, the candidate from the verified head_sha or its tag" % refs)
 if re.findall(r"^\s*path:\s*(\S+)", code, re.M) != ["candidate"]:
     v.append("the candidate is not checked out to candidate/ alone")
 if len(re.findall(r"sparse-checkout-cone-mode:\s*false\s*$", code, re.M)) != 2:
@@ -96,9 +98,29 @@ for pat, what in [
         v.append(what)
 
 # Run blocks: strict mode, no expression, and only the master copy is run.
-runs = re.findall(r"^( +)run:\s*\|\n((?:\1  .*\n|\n)+)", code + "\n", re.M)
+allruns = re.findall(r"^( +)run:\s*\|\n((?:\1  .*\n|\n)+)", code + "\n", re.M)
+if len(allruns) != 2:
+    v.append("has %d run blocks, expected the candidate verification and the rehearsal" % len(allruns))
+# The verification step: exactly these lines, in this order. It writes the
+# commit the verified run built, and nothing else, to the step output.
+RESOLVE = [
+    'set -euo pipefail',
+    'case "$TAG" in module-v*) ;; *) echo "::error::not a module-v* tag"; exit 1 ;; esac',
+    'case "$CANDIDATE_RUN_ID" in ""|*[!0-9]*) echo "::error::candidate_run_id is not a run id"; exit 1 ;; esac',
+    'bash tools/ci/pair_rehearsal.sh --resolve-candidate --tag "$TAG" --run-id "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --out "$GITHUB_OUTPUT"',
+]
+resolves = [b for _, b in allruns if "--resolve-candidate" in b]
+runs = [(i, b) for i, b in allruns if "--resolve-candidate" not in b]
+if len(resolves) != 1:
+    v.append("has %d candidate verification blocks, expected one" % len(resolves))
+for b in resolves:
+    got = [l.strip() for l in b.splitlines() if l.strip()]
+    if got != RESOLVE:
+        v.append("the candidate verification block is %r, not exactly %r" % (got, RESOLVE))
+if not has(r"^        if: \$\{\{ inputs\.candidate_run_id != '' \}\}$") or not has(r"^        id: candidate$"):
+    v.append("the candidate verification step is not an id: candidate step limited to a candidate_run_id")
 if len(runs) != 1:
-    v.append("has %d run blocks, expected one" % len(runs))
+    v.append("has %d rehearsal run blocks, expected one" % len(runs))
 for _, body in runs:
     if not re.search(r"^\s*set -euo pipefail\s*$", body, re.M):
         v.append("the run block does not set -euo pipefail")
@@ -109,6 +131,11 @@ for _, body in runs:
             r"PIN=candidate/install/debian/optimizer-pin\.json",
             r"--repositories-bzl candidate/bazel/repositories\.bzl\)",
             r'ARGS\+=\(--run-id "\$RUN_ID" --repo "\$GITHUB_REPOSITORY" --tag-sha "\$\(git -C candidate rev-parse HEAD\)"\)',
+            r'ARGS\+=\(--candidate-run-id "\$CANDIDATE_RUN_ID" --repo "\$GITHUB_REPOSITORY" --tag-sha "\$\(git -C candidate rev-parse HEAD\)"\)',
+            r'if \[ -n "\$RUN_ID" \] && \[ -n "\$CANDIDATE_RUN_ID" \]; then',
+            r'echo "::error::dry_run_id and candidate_run_id are exclusive"; exit 1',
+            r'if \[ -n "\$CANDIDATE_RUN_ID" \]; then',
+            r'case "\$CANDIDATE_RUN_ID" in \*\[!0-9\]\*\) echo "::error::candidate_run_id is not a run id"; exit 1 ;; esac',
         ]):
             v.append("the run block touches the candidate tree other than as data: %r" % ln.strip())
     for ln in body.splitlines():
@@ -129,20 +156,29 @@ for _, body in runs:
         if t.startswith("!") or re.search(r"\btrap\b", t):
             v.append("the run block negates a command or sets a trap: %r" % t)
         if "rev-parse" in t and t not in (
-                'ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")',):
+                'ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")',
+                'ARGS+=(--candidate-run-id "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")'):
             v.append("a rev-parse other than the candidate's own commit: %r" % t)
     if 'ARGS+=(--run-id "$RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")' not in body:
         v.append("the run id, repository and the candidate's commit are not passed as reviewed")
+    if 'ARGS+=(--candidate-run-id "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --tag-sha "$(git -C candidate rev-parse HEAD)")' not in body:
+        v.append("the candidate run id, repository and the checked-out commit are not passed as reviewed")
     if '--tag "$TAG"' not in body or '--pin "$PIN"' not in body:
         v.append("the tag and pin are not passed from TAG and PIN")
     if not re.search(r'case "\$TAG" in module-v\*\)', body):
         v.append("the tag input is not checked")
 
-# The rehearsal step's env: is exactly the three inputs, never a literal.
+# The steps' env: is exactly the inputs, never a literal: the verification
+# step first, the rehearsal step second.
 envs = re.findall(r"^        env:\n((?:          .*\n)+)", code + "\n", re.M)
-want_env = ["TAG: ${{ inputs.tag }}", "RUN_ID: ${{ inputs.dry_run_id }}", "GH_TOKEN: ${{ github.token }}"]
-if len(envs) != 1 or [l.strip() for l in envs[0].splitlines()] != want_env:
-    v.append("the step env: is %r, not exactly %r" % ([l.strip() for l in envs[0].splitlines()] if envs else None, want_env))
+want_envs = [
+    ["TAG: ${{ inputs.tag }}", "CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}", "GH_TOKEN: ${{ github.token }}"],
+    ["TAG: ${{ inputs.tag }}", "RUN_ID: ${{ inputs.dry_run_id }}", "CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}",
+     "GH_TOKEN: ${{ github.token }}"],
+]
+got_envs = [[l.strip() for l in e.splitlines()] for e in envs]
+if got_envs != want_envs:
+    v.append("the step env: blocks are %r, not exactly %r" % (got_envs, want_envs))
 
 # The script: its only gh calls are reads.
 src = open(sys.argv[2]).read()
@@ -155,6 +191,23 @@ for m in re.finditer(r"^[^#\n]*\bgh (\S+)( \S+)?[^\n]*$", src, re.M):
         v.append("pair_rehearsal.sh calls gh %s" % sub)
     if re.search(r"\s(-X|--method|-f|-F|--field|--raw-field|--input)\b", ln):
         v.append("pair_rehearsal.sh makes a gh write call")
+# The candidate verification of the script keeps each of its conditions: a run
+# of another repository or fork, of another workflow file, not a dispatch, not
+# on master, not completed/success, with another title, whose seal job did not
+# succeed, or whose commit is not the checked-out one, is refused.
+for need, what in [
+    ('for key in ("repository", "head_repository"):\n    got = (doc.get(key) or {}).get("full_name")\n    if got != repo:', "repository check"),
+    ('if path != ".github/workflows/release.yml":\n    errs.append("run is of workflow file %r, not .github/workflows/release.yml" % doc.get("path"))\nif doc.get("event")', "candidate workflow file check"),
+    ('if doc.get("event") != "workflow_dispatch":\n    errs.append("run event is %r, not a dispatch" % doc.get("event"))', "candidate dispatch check"),
+    ('if doc.get("head_branch") != "master":', "head_branch check"),
+    ('if doc.get("status") != "completed" or doc.get("conclusion") != "success":\n    errs.append("run is %r/%r, it must be completed/success" % (doc.get("status"), doc.get("conclusion")))\nsha = doc.get("head_sha")', "candidate run status check"),
+    ('want = "Release %s candidate dry run @ %s" % (tag, sha)\nif doc.get("display_title") != want:', "title check"),
+    ('if len(seal) != 1:', "seal job count check"),
+    ('for j in seal:\n    if j.get("conclusion") != "success":', "seal job conclusion check"),
+    ('elif [ "$cres" != "$tagsha" ]; then', "built-commit check"),
+]:
+    if need not in src:
+        v.append("pair_rehearsal.sh lost its %s" % what)
 print("\n".join(v))
 PY
 }
@@ -212,7 +265,41 @@ widen "continue-on-error"         "    timeout-minutes: 10" "    timeout-minutes
 widen "pipefail removed"          "set -euo pipefail" "set -eu"
 widen "errexit switched off"      "set -euo pipefail" "set -euo pipefail; set +e"
 widen "the tool checkout at the tag" "          ref: master" "          ref: refs/tags/\${{ inputs.tag }}"
-widen "the candidate at a branch" "          ref: refs/tags/\${{ inputs.tag }}" "          ref: \${{ inputs.tag }}"
+widen "the candidate at a branch" "format('refs/tags/{0}', inputs.tag)" "inputs.tag"
+widen "a checkout ref from the dispatch input, not the verified head_sha" "steps.candidate.outputs.head_sha" "inputs.candidate_run_id"
+widen "a checkout ref from another step output" "steps.candidate.outputs.head_sha" "steps.candidate.outputs.tag"
+widen "a checkout ref of master as the candidate" "steps.candidate.outputs.head_sha || format('refs/tags/{0}', inputs.tag)" "steps.candidate.outputs.head_sha || 'master'"
+widen "a checkout ref from the candidate tree" "steps.candidate.outputs.head_sha" "hashFiles('candidate/x')"
+widen "the verification step not limited to a candidate run id" "        if: \${{ inputs.candidate_run_id != '' }}
+" ""
+widen "the verification given a head_branch override" "--repo \"\$GITHUB_REPOSITORY\" --out" "--repo evil/fork --out"
+widen "the verification output redirected elsewhere" "--out \"\$GITHUB_OUTPUT\"" "--out \"\$GITHUB_ENV\""
+widen "the verification run id unchecked" "case \"\$CANDIDATE_RUN_ID\" in \"\"|*[!0-9]*) echo \"::error::candidate_run_id is not a run id\"; exit 1 ;; esac" "true"
+widen "the verification step with a secret" "          CANDIDATE_RUN_ID: \${{ inputs.candidate_run_id }}
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          set -euo pipefail
+          case \"\$TAG\" in module-v*) ;; *) echo \"::error::not a module-v* tag\"; exit 1 ;; esac
+          case \"\$CANDIDATE_RUN_ID\" in \"\"|*[!0-9]*)" "          CANDIDATE_RUN_ID: \${{ inputs.candidate_run_id }}
+          GH_TOKEN: \${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          case \"\$TAG\" in module-v*) ;; *) echo \"::error::not a module-v* tag\"; exit 1 ;; esac
+          case \"\$CANDIDATE_RUN_ID\" in \"\"|*[!0-9]*)"
+widen "the candidate commit taken from the repository's own HEAD" "--candidate-run-id \"\$CANDIDATE_RUN_ID\" --repo \"\$GITHUB_REPOSITORY\" --tag-sha \"\$(git -C candidate rev-parse HEAD)\"" "--candidate-run-id \"\$CANDIDATE_RUN_ID\" --repo \"\$GITHUB_REPOSITORY\" --tag-sha \"\$(git rev-parse HEAD)\""
+widen "the candidate evidence arguments dropped" "ARGS+=(--candidate-run-id \"\$CANDIDATE_RUN_ID\" --repo \"\$GITHUB_REPOSITORY\" --tag-sha \"\$(git -C candidate rev-parse HEAD)\")" "true"
+widen "a literal CANDIDATE_RUN_ID" "          CANDIDATE_RUN_ID: \${{ inputs.candidate_run_id }}
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          set -euo pipefail
+          case \"\$TAG\" in module-v*) ;; *) echo \"::error::not a module-v* tag\"; exit 1 ;; esac
+          case \"\$CANDIDATE_RUN_ID\" in \"\"|*[!0-9]*)" "          CANDIDATE_RUN_ID: 1
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          set -euo pipefail
+          case \"\$TAG\" in module-v*) ;; *) echo \"::error::not a module-v* tag\"; exit 1 ;; esac
+          case \"\$CANDIDATE_RUN_ID\" in \"\"|*[!0-9]*)"
+widen "an expression in the verification run block" "--out \"\$GITHUB_OUTPUT\"" "--out \"\$GITHUB_OUTPUT\" --x \${{ inputs.tag }}"
 widen "running the candidate's script" "$RUN" "bash candidate/tools/ci/pair_rehearsal.sh"
 widen "running candidate python"  "$RUN" "python3 candidate/tools/ci/x.py; $RUN"
 widen "a candidate script sourced" "$RUN" "source candidate/x.sh; $RUN"
@@ -236,9 +323,9 @@ widen "run evidence arguments removed" "--run-id \"\$RUN_ID\" --repo \"\$GITHUB_
 widen "a cone-mode sparse checkout" "          sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: Checkout the candidate tag" "          persist-credentials: false
+      # A candidate run is verified" "          persist-credentials: false
 
-      - name: Checkout the candidate tag"
+      # A candidate run is verified"
 widen "an artifact upload"        "      - name: Rehearse the pair" "      - name: x
         uses: actions/upload-artifact@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Rehearse the pair"
@@ -259,6 +346,33 @@ else echo "FAIL: did not refuse a gh write in the script"; FAILS=$((FAILS + 1));
 cp "$SCRIPT" "$T/s.sh"; sed -i.bak 's#gh api --allow-escape-sequences "repos#gh api -X POST --allow-escape-sequences "repos#' "$T/s.sh"
 if [ -n "$(violations "$WF" "$T/s.sh")" ]; then echo "PASS: refuses gh api -X in the script"
 else echo "FAIL: did not refuse gh api -X in the script"; FAILS=$((FAILS + 1)); fi
+
+# The candidate verification of the script: each condition removed is refused.
+widen_script() { # name old new
+  if ! python3 -I - "$SCRIPT" "$T/s.sh" "$2" "$3" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+assert sys.argv[3] in s, "mutation anchor missing: " + sys.argv[3]
+open(sys.argv[2], "w").write(s.replace(sys.argv[3], sys.argv[4], 1))
+PY
+  then echo "FAIL: anchor for $1 not found"; FAILS=$((FAILS + 1)); return; fi
+  if [ -n "$(violations "$WF" "$T/s.sh")" ]; then echo "PASS: refuses $1"
+  else echo "FAIL: did not refuse $1"; FAILS=$((FAILS + 1)); fi
+}
+widen_script "a candidate run on a non-master head_branch" 'if doc.get("head_branch") != "master":' 'if False:'
+widen_script "a candidate run with any title" 'if doc.get("display_title") != want:' 'if False:'
+widen_script "a candidate run whose seal job failed" '    if j.get("conclusion") != "success":
+        errs.append("candidate-seal' '    if False:
+        errs.append("candidate-seal'
+widen_script "a candidate run of another repository" '    if got != repo:' '    if False:'
+widen_script "a candidate run of another workflow file" 'if path != ".github/workflows/release.yml":
+    errs.append("run is of workflow file %r, not .github/workflows/release.yml" % doc.get("path"))
+if doc.get("event")' 'if False:
+    errs.append("x")
+if doc.get("event")'
+widen_script "a candidate run that is not a dispatch" 'if doc.get("event") != "workflow_dispatch":
+    errs.append("run event is %r, not a dispatch" % doc.get("event"))' 'pass'
+widen_script "a checkout of a commit the run did not build" 'elif [ "$cres" != "$tagsha" ]; then' 'elif false; then'
 
 # A missing workflow is a failure, not a pass.
 if bash "${BASH_SOURCE[0]}" "$T/none.yml" >/dev/null 2>&1; then echo "FAIL: a missing workflow file passed"; FAILS=$((FAILS + 1))
