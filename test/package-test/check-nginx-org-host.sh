@@ -5,6 +5,8 @@
 # the pin, an unchanged nginx, a rewriting request, and clean removal.
 # Usage: check-nginx-org-host.sh <image> <nginx version> <package file>
 set -euo pipefail
+# shellcheck source=../../tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 
 # dnf with retries, for the throwaway EL containers: a short mirror or
 # metadata outage (a Rocky/Alma mirror serving an empty repomd.xml, a curl
@@ -50,6 +52,7 @@ NAME="pagespeed-nginxorg-host-$$"
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 BASE="$(basename "$PKG")"
+docker_pull_retry "$IMAGE" || exit 1
 docker run --rm --name "$NAME" -v "$(cd "$(dirname "$PKG")" && pwd)":/pkgs:ro \
   -e NGXVER="$NGXVER" -e BASE="$BASE" "$IMAGE" bash -euc '
 '"$(declare -f dnf_retry)"'

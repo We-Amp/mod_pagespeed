@@ -17,6 +17,8 @@
 # and python3. Every container and the network carry a prefix unique to this run and
 # are removed on exit.
 set -u
+# shellcheck source=../../../tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../tools/ci/docker_pull_retry.sh"
 SERVER=${1:?usage: run_module_check.sh apache|nginx module.so}
 # A job that means local packages (LOCAL_PACKAGES=true) must have staged them:
 # an empty PACKAGE_DIR would otherwise run the published mode under a local name.
@@ -86,6 +88,7 @@ docker network create "$NET" >/dev/null || exit 2
 MODULE_ARGS=()
 [ -z "$SO" ] || MODULE_ARGS=(-e MODULE_SO=/module.so -v "$SO:/module.so:ro")
 start_server() { # name alias switch
+  # local-image: built by docker build above
   docker run -d --name "$1" --network "$NET" --network-alias "$2" \
     -e DETECT="$3" -e HOST_ALIAS="$2" ${MODULE_ARGS[@]+"${MODULE_ARGS[@]}"} \
     -v "$HERE/out:/fixtures:ro" -v "$HERE:/harness:ro" \
@@ -102,12 +105,14 @@ if [ "$PACKAGES" = local ] && docker exec "$PREFIX-on" grep -rqsi modpagespeed /
 fi
 
 run_browser() { # alias expect
+  docker_pull_retry "$BROWSER_IMAGE" || exit 1
   docker run --rm --name "$PREFIX-browser-$1" --network "$NET" --init \
     -v "$ROOT/test/browser:/browser:ro" -v "$HERE/out:/fixtures:ro" -w /browser \
     -e HYDRATION_ORIGIN="http://$1" -e HYDRATION_EXPECT="$2" -e HYDRATION_FIXTURES=/fixtures \
     "$BROWSER_IMAGE" node hydration_test.mjs
 }
 wait_ready() { # alias
+  docker_pull_retry "$BROWSER_IMAGE" || exit 1
   docker run --rm --network "$NET" "$BROWSER_IMAGE" bash -c "for i in \$(seq 1 120); do
     curl -fsS -o /dev/null http://$1/a.css && exit 0; sleep 1; done; exit 1" || \
     { docker logs --tail 40 "$PREFIX-${1#origin-}" >&2; exit 2; }

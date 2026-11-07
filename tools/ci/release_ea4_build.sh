@@ -26,6 +26,8 @@
 #     release version only.
 #   - el10: any mismatch is a skip (this operating system is additive).
 set -euo pipefail
+# shellcheck source=docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK=""
 
@@ -221,6 +223,7 @@ run() {
   cp "${rpms[0]}" "$WORK/upstream/"
   patch_spec "$WORK/spec/ea-apache24-mod_pagespeed.spec" "$(sed -n 's/^LASTCHANGE=//p' "$VERSION_FILE" | head -n 1 | sed 's/^$/1/')"
   inner_script > "$WORK/inner.sh"
+  docker_pull_retry "almalinux:${OS#el}" || return 1
   docker run --rm --init \
     -v "$WORK":/work -w /work \
     -e EA4_OS="$OS" -e EA4_REPO="$repo" \

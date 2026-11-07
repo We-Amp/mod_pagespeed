@@ -410,7 +410,7 @@ jobs:
           set -euo pipefail
           T="${RUNNER_TEMP}/lane-ci"
           mkdir -p "$T"
-          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh "$T/"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh "$T/"
           s=$(date +%s)
           CACHE_DIR="${RUNNER_TEMP}/nginx-cache" bash "$T/release_nginx.sh" build \
             --arch "$ARCH" --set nginxorg --workspace "$WS" --out "${RUNNER_TEMP}/nginx-out"

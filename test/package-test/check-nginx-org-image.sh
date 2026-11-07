@@ -4,12 +4,15 @@
 # package: build the image from clean, run it, and make a real request.
 # Usage: check-nginx-org-image.sh <image tag, e.g. nginx:1.30.6> <nginx-module-pagespeed-nginxorg .deb>
 set -euo pipefail
+# shellcheck source=../../tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 IMAGE="${1:?image}"; DEB="${2:?deb}"
 TAG="pagespeed-nginxorg-check-$$"; NAME="${TAG}-run"
 CTX="$(mktemp -d)"
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; docker image rm -f "$TAG" >/dev/null 2>&1 || true; rm -rf "$CTX"; }
 trap cleanup EXIT
 cp "$DEB" "$CTX/module.deb"
+docker_pull_retry "$IMAGE" || exit 1
 depends="$(dpkg-deb -f "$CTX/module.deb" Depends 2>/dev/null || docker run --rm -v "$CTX":/c "$IMAGE" dpkg-deb -f /c/module.deb Depends)"
 echo "Depends: $depends"
 case "$depends" in
@@ -39,7 +42,9 @@ RUN printf '<html><head><link rel=stylesheet href=/a.css></head><body>\n\n\n  <p
  && printf 'body {  color : red ;   margin : 0 ; }\n' > /usr/share/nginx/html/a.css
 DOCKER
 docker build -q -t "$TAG" "$CTX" >/dev/null
+# local-image: built above
 docker run --rm "$TAG" nginx -t 2>&1 | tail -n 1
+# local-image: built above
 docker run -d --name "$NAME" "$TAG" >/dev/null
 for _ in $(seq 1 20); do
   docker exec "$NAME" sh -c 'exec 3<>/dev/tcp/127.0.0.1/8080' 2>/dev/null && break

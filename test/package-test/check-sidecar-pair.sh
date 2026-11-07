@@ -28,6 +28,8 @@
 #   EXPECTED_XPS    optional expected X-Page-Speed value; overrides the VERSION-file
 #                   derivation
 set -uo pipefail
+# shellcheck source=../../tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
 
 # apt-get update + install with retries, for the smoke container below: a short
 # Debian or Ubuntu mirror outage is waited out, a lasting one still fails. The
@@ -75,6 +77,7 @@ fi
 
 echo "===== sidecar pair smoke: $IMAGE (expect X-Page-Speed ${EXPECTED_XPS}) ====="
 # shellcheck disable=SC2086
+docker_pull_retry "$IMAGE" ${DOCKER_PLATFORM:+--platform "$DOCKER_PLATFORM"} || exit 1
 docker run --rm --init $PLAT_ARG \
   -v "$PAIR:/p:ro" \
   -e EXPECTED_XPS="$EXPECTED_XPS" \
