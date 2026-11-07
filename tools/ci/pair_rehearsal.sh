@@ -98,7 +98,11 @@ jobs = doc.get("jobs", [])
 def named(pattern):
     return [j for j in jobs if re.fullmatch(pattern, j.get("name", ""))]
 PFX = r"(?:[^/]+ / )?"
-ADOPTED_SUFFIX = r"(?: \(adopted: run [0-9]+ \S+ seal [0-9a-f]{12} \S+ SHA256SUMS [0-9a-f]{12}\))?"
+# The names of these two jobs carry the adoption binding in an adopting run.
+# GitHub lists a job that was skipped under its raw, unevaluated name (the
+# `${{ ... }}` text), and a job that ran under the evaluated one, so accept
+# the plain name, the evaluated suffix and the raw expression.
+ADOPTED_SUFFIX = r"(?: \(adopted: run [0-9]+ \S+ seal [0-9a-f]{12} \S+ SHA256SUMS [0-9a-f]{12}\)|\$\{\{.*\}\})?"
 one = [
     ("optimizer fetch", PFX + r"Fetch and verify the optimizer packages"),
 ]
@@ -129,8 +133,7 @@ for label, pat in [
                         % (label, j["name"], j.get("conclusion")))
 # A dry run signs and publishes nothing: these two jobs must exist and be skipped.
 for label, pat in [
-    # An adopting run appends its binding to these names; a dry run never adopts,
-    # so the suffix is optional here.
+    # See ADOPTED_SUFFIX: optional, evaluated or raw.
     ("signing", PFX + r"Sign SHA256SUMS" + ADOPTED_SUFFIX),
     ("release creation", PFX + r"Create the GitHub release" + ADOPTED_SUFFIX),
 ]:
@@ -449,6 +452,10 @@ PY
   mut "release job waiting"                1 'job("module / Create the GitHub release")["conclusion"]=None'
   mut "no signing job"                     1 'd["jobs"]=[j for j in d["jobs"] if j["name"]!="module / Sign SHA256SUMS"]'
   mut "no release job"                     1 'd["jobs"]=[j for j in d["jobs"] if "Create the GitHub" not in j["name"]]'
+  # Since adoption the two names carry an expression; a skipped job is listed
+  # under the raw text (as in a real dry run on master).
+  mut "raw expression names of the skipped jobs" 0 \
+    'raw="${{ (((needs.adopt.outputs.adopted == '"'"'true'"'"') && format('"'"' (adopted: {0})'"'"', needs.adopt.outputs.binding)) || '"'"''"'"') }}"; job("module / Sign SHA256SUMS")["name"]+=raw; job("module / Create the GitHub release")["name"]+=raw'
   # A real dispatch (dry_run=false) whose release gate is waiting at the environment.
   mut "TEETH real dispatch at the release environment" 1 \
     'job("module / Create the GitHub release")["conclusion"]=None; job("module / Sign SHA256SUMS")["conclusion"]=None' \
@@ -544,6 +551,14 @@ PY
   if grep -q "^NOT CHECKED" "$t/out"; then echo "  ok   no dry run id is reported as not checked"
   else echo "  FAIL no dry run id was not reported"; fails=$((fails + 1)); fi
 
+  # The two job names are matched on their fixed text plus an optional suffix,
+  # so no other job of the release pipeline may start with that text.
+  local wf="${HERE}/../../.github/workflows/pipeline-release-module.yml" pfx n
+  for pfx in "Sign SHA256SUMS" "Create the GitHub release"; do
+    n="$(grep -cE "^    name: \"?${pfx}" "$wf" || true)"
+    if [ "$n" = 1 ]; then echo "  ok   exactly one release job name starts with '${pfx}'"
+    else echo "  FAIL ${n} release job names start with '${pfx}', expected 1"; fails=$((fails + 1)); fi
+  done
   if [ "$fails" -eq 0 ]; then echo "pair_rehearsal self-test passed"
   else echo "pair_rehearsal self-test: $fails failed"; return 1; fi
 }
