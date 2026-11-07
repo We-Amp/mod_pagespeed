@@ -3524,14 +3524,16 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
-      # The tests never run as root on the host: they run as the runner's
-      # user, or as uid 1000 when the runner is root. A root-run server drops
-      # its workers to an unprivileged user that cannot write the logs the
-      # tests read, so a root runner service hands the workspace to uid 1000
-      # instead. Under a rootless daemon, container root IS the runner's user
-      # on the host and every other container uid maps to a subordinate id
-      # that cannot write the workspace, so the tests run as container root
-      # there (tools/ci/container-identity.sh).
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
+      # Under a rootless daemon (tools/ci/container-identity.sh) the runner's
+      # uid inside the container maps to a subordinate id on the host, which
+      # cannot write the checkout; the tests write it in two places only (the
+      # pytest cache and the failure diagnostics), so those two are made
+      # writable. The next job's start hook hands what they leave back to the
+      # runner user.
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
@@ -3540,7 +3542,12 @@ jobs:
             chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
           else
             eval "$(sh tools/ci/container-identity.sh)"
-            u="${CONTAINER_USER%%:*}"; g="${CONTAINER_USER#*:}"
+            if [ "${DOCKER_ROOTLESS}" = 1 ]; then
+              for d in _systest-logs test/system/.pytest_cache; do
+                mkdir -p "${GITHUB_WORKSPACE}/${d}"
+                chmod 1777 "${GITHUB_WORKSPACE}/${d}"
+              done
+            fi
           fi
           echo "CI_UID=${u}" >> "$GITHUB_ENV"
           echo "CI_GID=${g}" >> "$GITHUB_ENV"
@@ -3654,14 +3661,16 @@ jobs:
           CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
           echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
 
-      # The tests never run as root on the host: they run as the runner's
-      # user, or as uid 1000 when the runner is root. A root-run server drops
-      # its workers to an unprivileged user that cannot write the logs the
-      # tests read, so a root runner service hands the workspace to uid 1000
-      # instead. Under a rootless daemon, container root IS the runner's user
-      # on the host and every other container uid maps to a subordinate id
-      # that cannot write the workspace, so the tests run as container root
-      # there (tools/ci/container-identity.sh).
+      # The tests never run as root: they run as the runner's user, or as
+      # uid 1000 when the runner is root. A root-run server drops its workers
+      # to an unprivileged user that cannot write the logs the tests read, so
+      # a root runner service hands the workspace to uid 1000 instead.
+      # Under a rootless daemon (tools/ci/container-identity.sh) the runner's
+      # uid inside the container maps to a subordinate id on the host, which
+      # cannot write the checkout; the tests write it in two places only (the
+      # pytest cache and the failure diagnostics), so those two are made
+      # writable. The next job's start hook hands what they leave back to the
+      # runner user.
       - name: Container identity
         run: |
           u="$(id -u)"; g="$(id -g)"
@@ -3670,7 +3679,12 @@ jobs:
             chown -R "${u}:${g}" "${GITHUB_WORKSPACE}"
           else
             eval "$(sh tools/ci/container-identity.sh)"
-            u="${CONTAINER_USER%%:*}"; g="${CONTAINER_USER#*:}"
+            if [ "${DOCKER_ROOTLESS}" = 1 ]; then
+              for d in _systest-logs test/system/.pytest_cache; do
+                mkdir -p "${GITHUB_WORKSPACE}/${d}"
+                chmod 1777 "${GITHUB_WORKSPACE}/${d}"
+              done
+            fi
           fi
           echo "CI_UID=${u}" >> "$GITHUB_ENV"
           echo "CI_GID=${g}" >> "$GITHUB_ENV"

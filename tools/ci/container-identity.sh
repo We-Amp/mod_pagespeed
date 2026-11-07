@@ -21,6 +21,7 @@
 #                 $XDG_RUNTIME_DIR), else /var/run/docker.sock.
 # DOCKER_GID      group of DOCKER_SOCK, for --group-add; 0 when unknown and
 #                 on a rootless daemon.
+# DOCKER_ROOTLESS 1 under a rootless daemon, else 0.
 set -eu
 
 uid="$(id -u)"
@@ -45,4 +46,4 @@ case "$sgid" in ''|*[!0-9]*) sgid=0 ;; esac
 # socket there anyway.
 [ "$rootless" = 1 ] && sgid=0
 
-printf "CONTAINER_USER='%s'\nDOCKER_SOCK='%s'\nDOCKER_GID='%s'\n" "$uid:$gid" "$sock" "$sgid"
+printf "CONTAINER_USER='%s'\nDOCKER_SOCK='%s'\nDOCKER_GID='%s'\nDOCKER_ROOTLESS='%s'\n" "$uid:$gid" "$sock" "$sgid" "$rootless"

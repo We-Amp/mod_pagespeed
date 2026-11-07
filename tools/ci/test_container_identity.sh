@@ -44,6 +44,11 @@ pass "rootless daemon: container user is 0:0 (the runner user on the host)"
 [ "$(get CONTAINER_USER FAKE_DAEMON=down)" = "$ME" ] || fail "unreachable daemon: falls back to the runner's uid:gid"
 pass "unreachable daemon: falls back to the runner's uid:gid"
 
+[ "$(get DOCKER_ROOTLESS FAKE_DAEMON=rootful)" = "0" ] || fail "rootful daemon: DOCKER_ROOTLESS 0"
+pass "rootful daemon: DOCKER_ROOTLESS 0"
+[ "$(get DOCKER_ROOTLESS FAKE_DAEMON=rootless)" = "1" ] || fail "rootless daemon: DOCKER_ROOTLESS 1"
+pass "rootless daemon: DOCKER_ROOTLESS 1"
+
 [ "$(get DOCKER_SOCK)" = "/var/run/docker.sock" ] || fail "no DOCKER_HOST: default socket"
 pass "no DOCKER_HOST: /var/run/docker.sock"
 [ "$(get DOCKER_SOCK DOCKER_HOST="unix://$SOCK")" = "$SOCK" ] || fail "unix DOCKER_HOST: socket taken from it"
