@@ -217,7 +217,11 @@ def classify(names, prerelease):
     problems = []
     seen = set()
     for n in names:
-        if n in seen:
+        # A name may appear once per attempt of the run, because a re-run job
+        # uploads again and the API lists the artifacts of every attempt. A
+        # sealed name is resolved to one copy by `select_copies`; a not-sealed
+        # name is never used. The seal artifact keeps the strict rule.
+        if n in seen and n == "candidate-seal":
             problems.append("artifact name '%s' appears more than once" % n)
         seen.add(n)
     required = [n for n in SEALED if not (prerelease and n in SEALED_OPTIONAL_ON_PRERELEASE)]
@@ -293,9 +297,24 @@ def seal(api, repo, run_id, tag, version, sha, prerelease, workdir, plans=None, 
     arts = api.artifacts(repo, run_id)
     sealed_names, more = classify([a["name"] for a in arts], prerelease)
     problems += more
-    by_name = {a["name"]: a for a in arts}
+    # The API lists the artifacts of every attempt: pick, per sealed name, the
+    # copy that the producing job uploaded in its latest attempt.
+    try:
+        text = api.contents(repo, PIPELINE_FILE, sha)
+    except (SealError, VerifyError) as e:
+        text = None
+        problems.append("the pipeline file at %s cannot be read: %s" % (sha, e))
+    by_name = {}
+    if text is not None:
+        # The seal job runs in the candidate run, whose job names carry the
+        # caller prefix ("module / "), as in the listing `verify` reads.
+        by_name, reasons = select_copies(arts, text, api.jobs(repo, run_id), plans or {}, CALLER_PREFIX,
+                                         sealed_names)
+        problems += reasons.values()
     for n in sealed_names:
-        a = by_name[n]
+        a = by_name.get(n)
+        if a is None:
+            continue
         if a.get("expired"):
             problems.append("artifact '%s' has expired" % n)
         wr = a.get("workflow_run") or {}
@@ -474,6 +493,205 @@ def schema_problems(jobs):
         if t is not None and t not in ADOPTABLE:
             problems.append("adoptable job '%s' has a twin '%s' that is not adoptable" % (j, t))
     return problems
+
+
+# --------------------------------------------------------------------------
+# Which copy of a sealed artifact. The artifacts API of a run spans all of its
+# attempts, so after "Re-run failed jobs" a name that a job uploaded in both
+# attempts is listed twice. The producing job (read from the pipeline file) has
+# one latest attempt in the `filter=latest` jobs listing; the copy created
+# inside that job's started_at..completed_at window is the one it uploaded.
+
+ENV_EXPR_RE = re.compile(r"\$\{\{\s*env\.([A-Za-z0-9_]+)\s*\}\}")
+UPLOAD_USES_RE = re.compile(r"uses:\s*actions/upload-artifact@")
+ANCHOR_RE = re.compile(r"^([&*])([A-Za-z0-9_-]+)$")
+# Jobs that never produce a sealed artifact in a candidate run: `adopt`
+# re-uploads only in an adopting run, and the environment jobs are skipped.
+NOT_PRODUCERS = ("adopt",) + ENVIRONMENT_JOBS
+
+
+def parse_uploads(text):
+    """{job id: {"env": {KEY: literal}, "uploads": [name as written]}}. The
+    reader is line-oriented like parse_pipeline; `env:` and `steps:` of a job
+    may be a YAML anchor or an alias of another job's (the hosted twins)."""
+    jobs = {}
+    anchors = {"env": {}, "steps": {}}
+    in_jobs = False
+    cur = section = None
+    pending = False
+    for line in text.split("\n"):
+        if not in_jobs:
+            in_jobs = line == "jobs:"
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = JOB_RE.match(line)
+        if m:
+            cur = m.group(1)
+            jobs[cur] = {"env": {}, "uploads": []}
+            section, pending = None, False
+            continue
+        if cur is None:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        body = line.strip()
+        if indent == 4:
+            section, pending = None, False
+            key, _, rest = body.partition(":")
+            if key not in ("env", "steps"):
+                continue
+            section = key
+            slot = "env" if key == "env" else "uploads"
+            am = ANCHOR_RE.match(rest.split("#")[0].strip()) if rest.strip() else None
+            if am and am.group(1) == "*":
+                src = anchors[key].get(am.group(2))
+                if src is None:
+                    raise PipelineError("job '%s': %s alias '*%s' has no anchor before it" % (cur, key, am.group(2)))
+                jobs[cur][slot] = dict(src) if key == "env" else list(src)
+                section = None
+            elif am:
+                anchors[key][am.group(2)] = jobs[cur][slot]
+            continue
+        if section == "env" and indent == 6:
+            k, _, v = body.partition(":")
+            jobs[cur]["env"][k.strip()] = _unquote(v.split(" #")[0])
+        elif section == "steps":
+            if UPLOAD_USES_RE.search(body):
+                pending = True
+            elif body.startswith("- "):
+                pending = False
+            elif pending and indent == 10 and body.startswith("name:"):
+                jobs[cur]["uploads"].append(_unquote(body[5:].split(" #")[0]))
+                pending = False
+    return jobs
+
+
+def _job_uploads(job_id, uploads, jobs):
+    """[(artifact name or glob, matrix value or None)] for one job: `env.X` and
+    `matrix.K` in an upload name are resolved the way the job's own env and
+    matrix give them; what stays unknown becomes `*`."""
+    env = uploads[job_id]["env"]
+    matrix = jobs[job_id]["matrix"] if job_id in jobs else None
+    out = []
+    for tmpl in uploads[job_id]["uploads"]:
+        t = ENV_EXPR_RE.sub(lambda m: env.get(m.group(1)) or "\0", tmpl)
+        legs = [(t, None)]
+        if MATRIX_REF_RE.search(t):
+            if matrix and matrix[1] is not None and all(m.group(1) == matrix[0] for m in MATRIX_REF_RE.finditer(t)):
+                legs = [(MATRIX_REF_RE.sub(lambda m, v=v: v, t), v) for v in matrix[1]]
+            else:
+                legs = [(t, None)]
+        for n, v in legs:
+            n = re.sub(r"\$\{\{.*?\}\}", "*", n).replace("\0", "*")
+            out.append((n, v))
+    return out
+
+
+def _base_job(job_id):
+    return job_id[: -len("-hosted")] if job_id.endswith("-hosted") else job_id
+
+
+def producers_of(name, jobs, uploads):
+    """[(job id, matrix value or None)] of the jobs that upload `name`, without
+    the jobs that cannot produce it in a candidate run."""
+    out = []
+    for j in uploads:
+        if j in NOT_PRODUCERS or j not in jobs:
+            continue
+        for n, v in _job_uploads(j, uploads, jobs):
+            if n == name or ("*" in n and fnmatch.fnmatchcase(name, n)):
+                out.append((j, v))
+    return out
+
+
+def producer_group(name, jobs, uploads):
+    """(producer list, error). The group is a job and its hosted twin."""
+    prods = producers_of(name, jobs, uploads)
+    if not prods:
+        return [], "no job of the pipeline file uploads it"
+    bases = sorted(set(_base_job(j) for j, _ in prods))
+    if len(bases) != 1:
+        return [], "more than one job group uploads it (%s)" % ", ".join(bases)
+    return prods, None
+
+
+def resolve_windows(text, listing, plans, prefix, names):
+    """For each sealed name: {"job", "attempt", "t0", "t1"} of the producing
+    job that succeeded in the latest attempt, or {"error": reason}. `listing`
+    is the `filter=latest` job list, `prefix` the caller prefix of its names."""
+    try:
+        jobs = parse_pipeline(text)
+        uploads = parse_uploads(text)
+    except PipelineError as e:
+        return {n: {"error": "its producing job cannot be determined, the pipeline file: %s" % e} for n in names}
+    exp = expand_expected(jobs, plans)
+    entries = {}
+    for e in listing:
+        entries.setdefault(norm_job_name(e.get("name") or "", prefix), []).append(e)
+    out = {}
+    for n in names:
+        prods, err = producer_group(n, jobs, uploads)
+        if err:
+            out[n] = {"error": "its producing job cannot be determined: %s" % err}
+            continue
+        ok, seen = [], []
+        bad = None
+        for j, v in prods:
+            info = exp[j]
+            if info["names"] is None:
+                bad = "its producing job '%s' needs the legs of plan '%s', which are not known" % (j, info["need_plan"])
+                break
+            if jobs[j]["matrix"] and v is None:
+                bad = "its producing job '%s' has matrix legs that all upload it" % j
+                break
+            leg = MATRIX_REF_RE.sub(lambda m: v, jobs[j]["name"]) if v is not None else jobs[j]["name"]
+            es = entries.get(leg) or []
+            if len(es) > 1:
+                bad = "the listing has %d jobs named %r" % (len(es), leg)
+                break
+            if not es:
+                seen.append("%s=missing" % j)
+            elif es[0].get("conclusion") == "success":
+                ok.append((j, es[0]))
+            else:
+                seen.append("%s=%s" % (j, es[0].get("conclusion")))
+        if bad:
+            out[n] = {"error": "its producing job cannot be determined: %s" % bad}
+        elif len(ok) != 1:
+            out[n] = {"error": "%d producing jobs succeeded in the latest attempt, expected 1 (%s)" % (
+                len(ok), ", ".join(seen + ["%s=success" % j for j, _ in ok]) or "none")}
+        else:
+            j, e = ok[0]
+            out[n] = {"job": j, "attempt": e.get("run_attempt"), "t0": e.get("started_at"), "t1": e.get("completed_at")}
+    return out
+
+
+def select_copies(arts, text, listing, plans, prefix, names):
+    """(selected {name: artifact}, reasons {name: refusal}). Only names that
+    have at least one copy are decided; a name with none is for the caller."""
+    wins = resolve_windows(text, listing, plans, prefix, [n for n in names if any(a.get("name") == n for a in arts)])
+    selected, reasons = {}, {}
+    for n, w in wins.items():
+        copies = [a for a in arts if a.get("name") == n]
+        if "error" in w:
+            reasons[n] = "artifact '%s': %s" % (n, w["error"])
+            continue
+        where = "producing job '%s' (attempt %s, %s to %s)" % (w["job"], w["attempt"], w["t0"], w["t1"])
+        try:
+            t0, t1 = parse_time(w["t0"]), parse_time(w["t1"])
+            inside = [a for a in copies if t0 <= parse_time(a.get("created_at")) <= t1]
+        except VerifyError as e:
+            reasons[n] = "artifact '%s': %s" % (n, e)
+            continue
+        if len(inside) == 1:
+            selected[n] = inside[0]
+        elif not inside:
+            reasons[n] = "artifact '%s' has no copy created inside the latest-attempt window of its %s; %d copies exist (created %s)" % (
+                n, where, len(copies), ", ".join(str(a.get("created_at")) for a in copies))
+        else:
+            reasons[n] = "artifact '%s' has %d copies created inside the latest-attempt window of its %s (ids %s); cannot tell which one it uploaded" % (
+                n, len(inside), where, ", ".join(str(a.get("id")) for a in inside))
+    return selected, reasons
 
 
 # --------------------------------------------------------------------------
@@ -766,8 +984,10 @@ def verify(api, repo, candidate_run, tag, tag_commit, trailers, actor, lane_sha,
     listing = api.jobs(repo, candidate_run)
     problems += check_age(listing, started_at)
     jobs = None
+    pipeline_text = None
     try:
-        jobs = parse_pipeline(api.contents(repo, PIPELINE_FILE, lane_sha))
+        pipeline_text = api.contents(repo, PIPELINE_FILE, lane_sha)
+        jobs = parse_pipeline(pipeline_text)
     except (PipelineError, VerifyError) as e:
         problems.append("check 5: the pipeline file at %s: %s" % (lane_sha, e))
     seal_job = None
@@ -857,21 +1077,30 @@ def verify(api, repo, candidate_run, tag, tag_commit, trailers, actor, lane_sha,
         _states, sealed_jobs, more = job_states(jobs, plans, listing, prefix)
         problems += more
 
-    # check 6, second part: every sealed artifact is listed unchanged
-    by_name = {}
-    for a in arts:
-        by_name.setdefault(a.get("name"), []).append(a)
+    # check 6, second part: every sealed artifact is listed unchanged. A name
+    # that was uploaded in more than one attempt is resolved to the copy of its
+    # producing job's latest attempt, the same rule the seal used.
     sealed_names = [x.get("name") for x in sealed_arts]
     prerelease = "-" in tag[len("module-v"):]
     _, cls = classify(sealed_names, prerelease)
     problems += ["check 6: the seal: %s" % c for c in cls]
+    for n in sorted(set(sealed_names)):
+        if sealed_names.count(n) > 1:
+            problems.append("check 6: the seal lists '%s' %d times" % (n, sealed_names.count(n)))
+    selected, reasons = {}, {}
+    if pipeline_text is not None and jobs is not None:
+        selected, reasons = select_copies(arts, pipeline_text, listing, plans, prefix, sealed_names)
     for x in sealed_arts:
         n = x.get("name")
-        listed = by_name.get(n) or []
-        if len(listed) != 1:
-            problems.append("check 6: sealed artifact '%s' is listed %d times by the API" % (n, len(listed)))
+        if not any(a.get("name") == n for a in arts):
+            problems.append("check 6: sealed artifact '%s' is listed 0 times by the API" % n)
             continue
-        a = listed[0]
+        if n in reasons:
+            problems.append("check 6: %s" % reasons[n])
+            continue
+        a = selected.get(n)
+        if a is None:
+            continue
         if a.get("id") != x.get("id"):
             problems.append("check 6: artifact '%s' has id %s, the seal says %s" % (n, a.get("id"), x.get("id")))
         if a.get("digest") != x.get("digest"):
@@ -1042,11 +1271,34 @@ jobs:
     strategy:
       matrix:
         os: [el9, el8]
+    steps: &ea4-steps
+      - name: Upload the package
+        uses: actions/upload-artifact@x # v7
+        with:
+          name: asset-ea4-${{ matrix.os }}
   ea4-build-hosted:
     name: EA4 (${{ matrix.os }}, hosted)
     strategy:
       matrix:
         os: [el9, el8]
+    steps: *ea4-steps
+  pair:
+    name: Pair
+    env: &pair-env
+      ARCH: x64
+    steps: &pair-steps
+      - name: Upload the release files
+        uses: actions/upload-artifact@x # v7
+        with:
+          name: asset-sidecar-${{ env.ARCH }}
+      - name: Upload the test results
+        uses: actions/upload-artifact@x # v7
+        with:
+          name: testdata-sidecar-results-${{ env.ARCH }}
+  pair-hosted:
+    name: Pair (hosted)
+    env: *pair-env
+    steps: *pair-steps
   gate-iis-msi-upgrade:
     name: Gate, IIS installer
     uses: o/r/.github/workflows/gate.yml@master
@@ -1057,7 +1309,10 @@ jobs:
     name: Validate
   candidate-seal:
     name: Seal
-"""
+""" + "".join(
+    "  produce-%s:\n    name: Produce %s\n    steps:\n      - name: Upload\n"
+    "        uses: actions/upload-artifact@x # v7\n        with:\n          name: %s\n" % (n, n, n)
+    for n in SEALED if n not in ("asset-ea4-el8", "asset-ea4-el9", "asset-sidecar-x64"))
 
 class FakeApi:
     def __init__(self, run, arts, zips, jobs=None, contents=None, arts_by_run=None):
@@ -1113,10 +1368,11 @@ def _fixture(prerelease=False, drop=(), extra=()):
         z = _zip_bytes(contents[n])
         zips[i] = z
         arts.append({"id": i, "name": n, "expired": False, "digest": "sha256:" + hashlib.sha256(z).hexdigest(),
-                     "workflow_run": {"id": run_id, "head_sha": sha}})
+                     "created_at": _T + "11:05:00Z", "workflow_run": {"id": run_id, "head_sha": sha}})
     run = {"display_title": expected_title(tag, sha), "head_sha": sha, "event": "workflow_dispatch",
            "head_branch": "master"}
-    return dict(tag=tag, version="9.9.9", sha=sha, run_id=run_id, run=run, arts=arts, zips=zips, sums=sums)
+    return dict(tag=tag, version="9.9.9", sha=sha, run_id=run_id, run=run, arts=arts, zips=zips, sums=sums,
+                listing=_listing(), pipeline=_FAKE_PIPELINE)
 
 
 _LANE = "c" * 40
@@ -1130,14 +1386,19 @@ def _job(name, concl="success", attempt=1, t0="11:00:00", t1="11:10:00", prefix=
             "started_at": _T + t0 + "Z", "completed_at": _T + t1 + "Z"}
 
 
-def _listing():
-    return [_job("Derive versions"), _job("Vendor"), _job("Vendor (hosted)", "skipped"), _job("Plan (x64)"),
+def _listing(prefix=CALLER_PREFIX):
+    jobs = [_job("Derive versions"), _job("Vendor"), _job("Vendor (hosted)", "skipped"), _job("Plan (x64)"),
             _job("Build (x64, el8)"), _job("Build (x64, el9)"),
             _job("Build (x64, hosted, ${{ matrix.distro }})", "skipped"),
             _job("EA4 (el9)"), _job("EA4 (el8)"), _job("EA4 (${{ matrix.os }}, hosted)", "skipped"),
             _job("Gate, IIS installer / inner"),
             _job("Sign the Windows binaries", "skipped"), _job("Validate"),
-            _job("Seal", "success", 1, "11:50:00", "11:55:00")]
+            _job("Pair"), _job("Pair (hosted)", "skipped")]
+    jobs += [_job("Produce %s" % n) for n in SEALED if n not in ("asset-ea4-el8", "asset-ea4-el9", "asset-sidecar-x64")]
+    jobs.append(_job("Seal", "success", 1, "11:50:00", "11:55:00"))
+    for j in jobs:
+        j["name"] = prefix + j["name"][len(CALLER_PREFIX):]
+    return jobs
 
 
 def _world(prerelease=False):
@@ -1154,7 +1415,8 @@ def _world(prerelease=False):
     })
     plans = {"nginx-x64-plan": ["el8", "el9"]}
     with tempfile.TemporaryDirectory() as wd:
-        sd = seal(FakeApi(fx["run"], fx["arts"], fx["zips"]), "o/r", fx["run_id"], tag, tag[len("module-v"):],
+        sd = seal(FakeApi(fx["run"], fx["arts"], fx["zips"], jobs=fx["listing"],
+                          contents={(PIPELINE_FILE, fx["sha"]): fx["pipeline"]}), "o/r", fx["run_id"], tag, tag[len("module-v"):],
                   fx["sha"], prerelease, wd, plans=plans, optimizer_sums=_OPT_SUMS)
     w = {"fx": fx, "listing": _listing(),
          "pin": json.dumps({"tag": "optimizer-v9.9.9", "sha256sums_sha256": _OPT_SUMS}), "pipeline": _FAKE_PIPELINE,
@@ -1321,6 +1583,36 @@ def _verify_cases():
     def drop_art(w):
         w["fx"]["arts"] = [a for a in w["fx"]["arts"] if a["name"] != "asset-linux-x64"]
     case("refuse: a sealed artifact is missing from the API listing", drop_art, refused="'asset-linux-x64' is listed 0 times")
+    def arts_of(w, n):
+        return [a for a in w["fx"]["arts"] if a["name"] == n]
+
+    case("accept: a duplicated not-sealed name (one copy per attempt, as in a re-run)",
+         lambda w: w["extra_arts"].update(list=[dict(arts_of(w, "testdata-sidecar-results-x64")[0], id=998,
+                                                      created_at=_T + "10:14:00Z")]))
+    old_copy = lambda w: dict(arts_of(w, "asset-source")[0], id=50, created_at=_T + "10:30:00Z")
+    case("accept: a duplicated sealed name with one older copy outside the window",
+         lambda w: w["extra_arts"].update(list=[old_copy(w)]),
+         after=lambda w, binding: ([x["id"] for x in binding["artifacts"] if x["name"] == "asset-source"]
+                                   == [arts_of(w, "asset-source")[0]["id"]], "wrong id recorded"))
+    case("refuse: a duplicated sealed name with two copies inside the window",
+         lambda w: w["extra_arts"].update(list=[dict(old_copy(w), created_at=_T + "11:06:00Z")]),
+         refused="'asset-source' has 2 copies created inside the latest-attempt window")
+    case("refuse: a sealed name with no copy inside the window",
+         lambda w: arts_of(w, "asset-source")[0].update(created_at=_T + "12:00:00Z"),
+         refused="'asset-source' has no copy created inside the latest-attempt window")
+
+    def producer_reran(w):
+        # the producer ran again after the seal chose its copy: the newer copy is not the sealed one
+        w["extra_arts"].update(list=[dict(arts_of(w, "asset-source")[0], id=1500, created_at=_T + "13:05:00Z")])
+        for e in w["listing"]:
+            if e["name"] == CALLER_PREFIX + "Produce asset-source":
+                e.update(run_attempt=2, started_at=_T + "13:00:00Z", completed_at=_T + "13:10:00Z")
+    case("refuse: the seal recorded the older copy of a name its producer uploaded again", producer_reran,
+         refused="artifact 'asset-source' has id 1500")
+    case("refuse: the seal lists a name twice",
+         lambda w: w["set_seal"](dict(w["seal_doc"], artifacts=w["seal_doc"]["artifacts"] + w["seal_doc"]["artifacts"][:1])),
+         refused="the seal lists 'asset-source' 2 times")
+
     case("refuse: a sealed artifact expired", lambda w: w["fx"]["arts"][0].update(expired=True), refused="has expired")
     case("refuse: a sealed artifact has another id than the seal", lambda w: w["fx"]["arts"][0].update(id=555),
          refused="has id 555")
@@ -1555,7 +1847,8 @@ def self_test():
         fx = _fixture(prerelease=prerelease, drop=drop, extra=extra)
         if mutate:
             mutate(fx)
-        api = FakeApi(fx["run"], fx["arts"], fx["zips"])
+        api = FakeApi(fx["run"], fx["arts"], fx["zips"], jobs=fx["listing"],
+                      contents={(PIPELINE_FILE, fx["sha"]): fx["pipeline"]})
         with tempfile.TemporaryDirectory() as wd:
             try:
                 doc = seal(api, "o/r", fx["run_id"], fx["tag"], fx["version"], fx["sha"], prerelease, wd,
@@ -1588,6 +1881,16 @@ def self_test():
                     plans={"nginx-x64-plan": ["el8", "el9"]})
     check("seal with plans keeps the schema-2 keys and adds `plans`",
           pdoc is not None and pdoc["schema"] == 2 and pdoc["plans"] == {"nginx-x64-plan": ["el8", "el9"]})
+    # The real pipeline file: every sealed name has exactly one producer group.
+    real = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", PIPELINE_FILE)
+    try:
+        with open(real) as fh:
+            rtext = fh.read()
+        rjobs, rups = parse_pipeline(rtext), parse_uploads(rtext)
+        bad = {n: producer_group(n, rjobs, rups)[1] for n in SEALED if producer_group(n, rjobs, rups)[1]}
+        check("every sealed name has exactly one producer group in the real pipeline file", not bad, repr(bad))
+    except (OSError, PipelineError) as e:
+        check("every sealed name has exactly one producer group in the real pipeline file", False, str(e))
     run_case("refuse: an empty plan", False, plans={"nginx-x64-plan": []}, want_in_error="non-empty list")
     run_case("refuse: a plan with a repeated leg", False, plans={"p": ["a", "a"]}, want_in_error="distinct")
     run_case("refuse: allowlisted artifact missing", False, drop=("asset-linux-x64",),
@@ -1619,9 +1922,69 @@ def self_test():
         fx["run"]["head_branch"] = "feature"
     run_case("refuse: run is not on master", False, mutate=bad_branch, want_in_error="head_branch")
 
-    def dup(fx):
-        fx["arts"].append(dict(fx["arts"][0], id=999))
-    run_case("refuse: duplicate artifact name", False, mutate=dup, want_in_error="more than once")
+    # A re-run job uploads again: the API lists the artifacts of every attempt.
+    def pick(fx, n):
+        return next(a for a in fx["arts"] if a["name"] == n)
+
+    def dup_results(fx):
+        # the real shape of a re-run: one results copy per attempt
+        fx["arts"].append(dict(pick(fx, "testdata-sidecar-results-x64"), id=998, created_at=_T + "10:14:00Z"))
+    run_case("accept: a duplicated not-sealed name (one copy per attempt)", True, mutate=dup_results)
+
+    def dup_old(fx):
+        fx["arts"].append(dict(pick(fx, "asset-source"), id=50, created_at=_T + "10:30:00Z"))
+    doc = run_case("accept: a sealed name with one copy inside its producer's window and one older", True,
+                   mutate=dup_old)
+    check("the copy inside the window is the one that is sealed",
+          doc is not None and [a["id"] for a in doc["artifacts"] if a["name"] == "asset-source"]
+          == [pick(_fixture(), "asset-source")["id"]])
+
+    def dup_new(fx):
+        # attempt 2 of the producer: its window is later, the sealed copy is the new one
+        fx["arts"].append(dict(pick(fx, "asset-source"), id=1500, created_at=_T + "13:05:00Z"))
+        fx["zips"][1500] = fx["zips"][pick(fx, "asset-source")["id"]]
+        for e in fx["listing"]:
+            if e["name"] == CALLER_PREFIX + "Produce asset-source":
+                e.update(run_attempt=2, started_at=_T + "13:00:00Z", completed_at=_T + "13:10:00Z")
+    doc = run_case("accept: the producer re-ran, so the newer copy is sealed", True, mutate=dup_new)
+    check("the newer id is recorded", doc is not None
+          and [a["id"] for a in doc["artifacts"] if a["name"] == "asset-source"] == [1500])
+
+    def dup_two(fx):
+        fx["arts"].append(dict(pick(fx, "asset-source"), id=999, created_at=_T + "11:06:00Z"))
+    run_case("refuse: two copies inside the producer's window", False, mutate=dup_two,
+             want_in_error="'asset-source' has 2 copies created inside the latest-attempt window")
+
+    def none_inside(fx):
+        pick(fx, "asset-source")["created_at"] = _T + "12:00:00Z"
+    run_case("refuse: no copy inside the producer's window", False, mutate=none_inside,
+             want_in_error="'asset-source' has no copy created inside the latest-attempt window")
+
+    def no_producer(fx):
+        fx["pipeline"] = fx["pipeline"].replace("  produce-asset-sbom:", "  not-a-producer:").replace(
+            "          name: asset-sbom\n", "          name: other\n")
+    run_case("refuse: a sealed name whose producer cannot be determined", False, mutate=no_producer,
+             want_in_error="'asset-sbom': its producing job cannot be determined: no job of the pipeline file uploads it")
+
+    def two_groups(fx):
+        fx["pipeline"] += ("  second:\n    name: Second\n    steps:\n      - name: Upload\n"
+                           "        uses: actions/upload-artifact@x # v7\n        with:\n          name: asset-sbom\n")
+        fx["listing"].insert(-1, _job("Second"))
+    run_case("refuse: a sealed name uploaded by two job groups", False, mutate=two_groups,
+             want_in_error="more than one job group uploads it (produce-asset-sbom, second)")
+
+    def producer_failed(fx):
+        for e in fx["listing"]:
+            if e["name"] == CALLER_PREFIX + "Pair":
+                e["conclusion"] = "failure"
+    run_case("refuse: neither leg of the producing pair succeeded", False, mutate=producer_failed,
+             want_in_error="0 producing jobs succeeded in the latest attempt")
+
+    def dup_seal(fx):
+        fx["arts"].append({"id": 997, "name": "candidate-seal", "created_at": _T + "11:05:00Z"})
+        fx["arts"].append({"id": 996, "name": "candidate-seal", "created_at": _T + "11:06:00Z"})
+    run_case("refuse: a duplicated candidate-seal artifact keeps its own rule", False, mutate=dup_seal,
+             want_in_error="'candidate-seal' appears more than once")
 
     def expired(fx):
         fx["arts"][0]["expired"] = True

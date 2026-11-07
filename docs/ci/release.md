@@ -229,6 +229,19 @@ title or commit disagree with the version job. A release candidate version
 has no cPanel packages, so those three are not required for it. In a candidate
 run every sealed artifact is kept 14 days (`tree` stays at 3).
 
+The artifacts API of a run spans all attempts, so a job that uploaded in an
+attempt and again after "Re-run failed jobs" leaves a name listed once per
+attempt. A not-sealed name may be listed more than once and is ignored (only
+`candidate-seal` must be unique). A sealed name is resolved to one copy: the
+producing job is read from the pipeline file (the job whose upload step names
+it, with `env.*` and `matrix.*` in the name resolved; a fleet job and its
+hosted twin are one producer group, and the one that succeeded in the latest
+attempt counts), and the copy created between that job's `started_at` and
+`completed_at` in the `filter=latest` job list is the one sealed. The seal
+and `verify` refuse a sealed name whose producer cannot be determined, whose
+window holds no copy, or whose window holds more than one. Copies of older
+attempts lie outside the window and are ignored.
+
 ### Adopting a candidate run
 
 A real run does not rebuild what a green candidate run already built and
@@ -321,7 +334,8 @@ the Actions API first and the downloaded bytes second:
    records, of each fleet/hosted twin exactly one ran and the other was
    skipped, the release-environment jobs were skipped and `candidate-seal`
    succeeded;
-6. every sealed artifact is listed with the sealed id and digest, unexpired,
+6. every sealed artifact is, by the window rule of the seal, the listed copy
+   with the sealed id and digest, unexpired,
    of the candidate run and commit, and the single `candidate-seal` artifact
    was uploaded by the passing `candidate-seal` job;
 7. the candidate finished at most three days before the adopting run started,
