@@ -66,3 +66,27 @@ jobs:
         with:
           pattern: asset-a*
           path: stage
+  windows-sign:
+    needs: [version, adopt]
+    if: ${{ !cancelled() && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    runs-on: windows-2022
+    environment: release
+    steps:
+      - name: Check the payload
+        run: echo check
+      - name: Sign
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: echo sign
+  msi-sign:
+    needs: [version, adopt]
+    if: ${{ !cancelled() && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    runs-on: windows-2022
+    environment: release
+    steps:
+      - name: Check the payload
+        run: echo check
+      - name: Sign
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: echo sign

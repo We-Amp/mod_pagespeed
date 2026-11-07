@@ -85,6 +85,14 @@
 #       of the re-uploaded set or one that a job without the condition
 #       uploads; and the artifacts the `adopt` job uploads are the
 #       re-uploaded set plus adopt-binding;
+#   (sign-secrets) in pipeline-release-module.yml, when it has an `adopt` job:
+#       in the jobs `windows-sign` and `msi-sign`, every `secrets.<NAME>`
+#       (secrets.GITHUB_TOKEN excepted) sits inside the step named exactly
+#       `Sign`, and each job has exactly one such step. The adoption
+#       pre-checks (the binding hash and the payload hashes) run in earlier
+#       steps of these jobs and must run before any secret is readable; a
+#       secret at job level (env:, with:) or in an earlier step would be
+#       readable by them;
 #   (yaml-alias) in every workflow's jobs: section, no YAML anchor or alias
 #       on a job or on a job-level key other than steps: and env:, and no
 #       `<<:` merge key: the gate reads the text and cannot resolve them;
@@ -382,6 +390,51 @@ EOF
   ups="$(printf '%s\n' "${recs}" | awk -F"${TAB}" '$1=="U" && $2=="adopt" {print $3}' | LC_ALL=C sort)"
   want="$(printf '%s\nadopt-binding\n' "${reup}" | LC_ALL=C sort)"
   [ "${ups}" = "${want}" ] || echo "the adopt job uploads $(printf '%s' "${ups}" | tr '\n' ' '), expected the re-uploaded artifacts of release_adopt.py and adopt-binding"
+}
+
+# Problems with where the signing jobs read secrets, one per line. See the
+# (sign-secrets) rule above: the adoption pre-checks run in earlier steps of
+# windows-sign and msi-sign and must run before any secret is readable, so a
+# secret may appear only inside the one step named exactly `Sign`.
+sign_secret_problems() { # workflow file
+  awk '
+    function flush() {
+      if (job == "") return
+      if (nsign != 1) printf "job \047%s\047 has %d steps named Sign, expected exactly one\n", job, nsign
+      seen[job]=1
+    }
+    function stepname(l, re) { sub(re, "", l); sub(/[[:space:]]+$/, "", l); gsub(/^["\047]|["\047]$/, "", l); return l }
+    /^[[:space:]]*#/ { next }
+    /^jobs:[[:space:]]*$/ { injobs=1; next }
+    injobs && /^[^[:space:]#]/ { flush(); injobs=0; job="" }
+    injobs && /^  [^[:space:]]/ {
+      flush(); job=$1; sub(/:$/, "", job)
+      if (job != "windows-sign" && job != "msi-sign") job=""
+      nsign=0; insteps=0; step=""; next
+    }
+    job == "" { next }
+    /^    [A-Za-z_-]+:/ { insteps = ($0 ~ /^    steps:/); step="" }
+    insteps && /^      - / {
+      step="@unnamed"
+      if ($0 ~ /^      - name:/) { step=stepname($0, "^      - name:[[:space:]]*"); if (step=="Sign") nsign++ }
+    }
+    insteps && /^        name:/ && step == "@unnamed" { step=stepname($0, "^        name:[[:space:]]*"); if (step=="Sign") nsign++ }
+    {
+      line=$0
+      while (match(line, /secrets\.[A-Za-z_][A-Za-z0-9_]*/)) {
+        name=substr(line, RSTART + 8, RLENGTH - 8)
+        if (name != "GITHUB_TOKEN") {
+          if (!insteps) printf "line %d: job \047%s\047 reads secrets.%s outside its steps\n", NR, job, name
+          else if (step != "Sign") printf "line %d: job \047%s\047 reads secrets.%s outside the step named Sign\n", NR, job, name
+        }
+        line=substr(line, RSTART + RLENGTH)
+      }
+    }
+    END { flush()
+      if (!("windows-sign" in seen)) print "job \047windows-sign\047 is missing"
+      if (!("msi-sign" in seen)) print "job \047msi-sign\047 is missing"
+    }
+  ' "$1"
 }
 
 # Callees of a call job that may be passed secrets. Each is a reusable workflow
@@ -729,6 +782,12 @@ EOF
       err "${wf}: ${aprob} (adopt-shape)"
     done <<EOF
 $(adopt_shape_problems "${wf}")
+EOF
+    while IFS= read -r sprob; do
+      [ -n "${sprob}" ] || continue
+      err "${wf}: ${sprob} (sign-secrets)"
+    done <<EOF
+$(sign_secret_problems "${wf}")
 EOF
   fi
   while IFS=$'\t' read -r sjob sline; do
