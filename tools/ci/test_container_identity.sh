@@ -55,6 +55,8 @@ pass "tcp:// DOCKER_HOST: default socket"
 pass "DOCKER_GID is the socket file's group"
 [ "$(get DOCKER_GID DOCKER_HOST="unix://$ROOT/missing.sock")" = "0" ] || fail "missing socket: DOCKER_GID 0"
 pass "missing socket: DOCKER_GID falls back to 0"
+[ "$(get DOCKER_GID FAKE_DAEMON=rootless DOCKER_HOST="unix://$SOCK")" = "0" ] || fail "rootless daemon: DOCKER_GID 0"
+pass "rootless daemon: DOCKER_GID 0 (the socket's group is a subordinate id the container cannot add)"
 
 if env -u DOCKER_HOST PATH="$ROOT/bin:$PATH" DOCKER_HOST="unix://$ROOT/it's.sock" "$SUT" >/dev/null 2>&1; then
   fail "a socket path with a single quote is refused"
