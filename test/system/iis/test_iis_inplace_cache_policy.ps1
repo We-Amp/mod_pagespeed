@@ -20,7 +20,9 @@
 #   assets/site.css, assets/head.css   stylesheets
 #   assets/x (served as text/css) beside assets/x#y.css
 #   assets/pic.png                     the IIS start page image
-#   pages/ajax.html, pages/v6.html     HTML pages
+#   pages/ajax.html, pages/v6.html,    HTML pages
+#   pages/if-range.html, pages/unit.html,
+#   pages/scheme.html
 # Checks (PASS/FAIL; INFO rows report without judging):
 #   defaults   kernel caching is on for the server (precondition)
 #   plain      assets/site.css without a query, polled: optimized in place
@@ -40,6 +42,14 @@
 #              module) four times within a few seconds, then by a browser:
 #              every browser answer went through the module, and HTTP.sys does
 #              not hold the page
+#   leftpage   HTML pages requested in a way the module steps aside from
+#              before it takes the request up, four times within a few
+#              seconds each, then by a browser: pages/if-range.html with
+#              If-Range and no Range, pages/unit.html with a Range in a unit
+#              IIS does not serve, pages/scheme.html with an X-Forwarded-Proto
+#              the module cannot build a URL from (IIS answers each with the
+#              plain page): every browser answer went through the module, and
+#              HTTP.sys holds none of the pages
 #   ipv6       pages/v6.html requested in the guest over IPv6 loopback with a
 #              bracketed IPv6 host (and X-Forwarded-Proto, so the module drops
 #              the port from the URL it builds): the module rewrites the page
@@ -144,7 +154,7 @@ try {
         if (Test-Path "IIS:\AppPools\$SiteName") { Remove-WebAppPool -Name $SiteName }
         Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force "$root\assets", "$root\secure", "$root\pages" | Out-Null
-        foreach ($f in "ajax.html", "v6.html") {
+        foreach ($f in "ajax.html", "v6.html", "if-range.html", "unit.html", "scheme.html") {
             [IO.File]::WriteAllText("$root\pages\$f", "<html><head><title>cpt</title></head><body>`r`n<p>cpt-page</p>`r`n</body></html>`r`n")
         }
         $css = "/* stylesheet */`r`n.cpt-marker   {   color :  #ff0000 ;   margin :  0px  0px ;   }`r`n"
@@ -293,6 +303,31 @@ try {
         (& netsh http show cachestate) | Where-Object { $_ -match "URL:" } | ForEach-Object { ($_ -replace '^\s*URL:\s*', '').Trim() }
     }) | Where-Object { $_ -like ("*:{0}/pages/ajax.html" -f $Port) }
     Check "ajax" (@($pagesHeld).Count -eq 0) ("/pages/ajax.html held by HTTP.sys: {0}" -f (@($pagesHeld).Count -gt 0))
+
+    # --- leftpage: pages the module steps aside from for one request ----------
+    # Each request below reaches the module before it takes the request up,
+    # and the module leaves it to IIS, which answers with the plain page.
+    $leftCases = @(
+        @("/pages/if-range.html", @{ "User-Agent" = $BrowserUa; "If-Range" = '"cpt-not-the-etag"' }),
+        @("/pages/unit.html", @{ "User-Agent" = $BrowserUa; "Range" = "items=0-1" }),
+        @("/pages/scheme.html", @{ "User-Agent" = $BrowserUa; "X-Forwarded-Proto" = "cpt" })
+    )
+    foreach ($lc in $leftCases) {
+        $path = $lc[0]
+        $codes = @()
+        for ($i = 0; $i -lt 4; $i++) { $codes += (Invoke-Raw $GuestIp $Port $path "GET" $lc[1]).Status; Start-Sleep -Milliseconds 300 }
+        $plainPages = 0
+        for ($i = 0; $i -lt 6; $i++) {
+            $x = Invoke-Raw $GuestIp $Port $path "GET" $Page
+            if ($x.Status -ne 200 -or $x.Head -notmatch '(?im)^X-Page-Speed:') { $plainPages++ }
+            Start-Sleep -Milliseconds 300
+        }
+        Check "leftpage" ($plainPages -eq 0) ("{0} after 4 requests the module leaves to IIS (answers {1}), 6 browser requests, answers without the module: {2}" -f $path, ($codes -join ","), $plainPages)
+    }
+    $pagesHeld = @(Invoke-Command -Session $session -ScriptBlock {
+        (& netsh http show cachestate) | Where-Object { $_ -match "URL:" } | ForEach-Object { ($_ -replace '^\s*URL:\s*', '').Trim() }
+    }) | Where-Object { $_ -match (":{0}/pages/(if-range|unit|scheme)\.html" -f $Port) }
+    Check "leftpage" (@($pagesHeld).Count -eq 0) ("pages left to IIS for one request, held by HTTP.sys: {0} [{1}]" -f @($pagesHeld).Count, (@($pagesHeld) -join " "))
 
     # --- ipv6: a request over IPv6 with a bracketed IPv6 host -------------------
     $v6 = Invoke-Command -Session $session -ArgumentList $Port -ScriptBlock {

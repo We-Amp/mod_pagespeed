@@ -124,20 +124,25 @@ TEST_F(IisRequestCleanupPinTest,
   // bare keyword keeps a "return" inside a log string or a comment from
   // reading as a statement. On the pre-fix source none of the returns made
   // the call, so this pin goes red there.
+  // A return that leaves the request to IIS goes through
+  // LeaveToIisUncached(), so that form counts as a return statement too.
   const GoogleString window = body.substr(created, stored - created);
   int returns = 0;
-  size_t at = window.find("returnRQ_NOTIFICATION_");
-  while (at != GoogleString::npos) {
-    ++returns;
-    const bool covered =
-        at >= kFreeCall.size() &&
-        window.compare(at - kFreeCall.size(), kFreeCall.size(), kFreeCall) ==
-            0;
-    EXPECT_TRUE(covered)
-        << "a return between CreateRequestContext and SetModuleContext is "
-           "not preceded by "
-        << kFreeCall << "; the request state leaks on that path";
-    at = window.find("returnRQ_NOTIFICATION_", at + 1);
+  for (const char* form :
+       {"returnRQ_NOTIFICATION_", "returnLeaveToIisUncached("}) {
+    size_t at = window.find(form);
+    while (at != GoogleString::npos) {
+      ++returns;
+      const bool covered =
+          at >= kFreeCall.size() &&
+          window.compare(at - kFreeCall.size(), kFreeCall.size(),
+                         kFreeCall) == 0;
+      EXPECT_TRUE(covered)
+          << "a return between CreateRequestContext and SetModuleContext is "
+             "not preceded by "
+          << kFreeCall << "; the request state leaks on that path";
+      at = window.find(form, at + 1);
+    }
   }
   // Fail closed: a window that silently matched nothing would make the loop
   // above vacuous. Four returns sit between the two calls today: the
