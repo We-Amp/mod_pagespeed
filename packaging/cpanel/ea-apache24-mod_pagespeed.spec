@@ -188,7 +188,7 @@ if [ "$1" = "0" ] && [ -x /scripts/restartsrv_httpd ]; then
 fi
 
 %changelog
-* Sun Nov 08 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:2.8.1-1.cpanel
+* Mon Nov 09 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:2.8.1-1.cpanel
 - Repackage mod-pagespeed-2.8.1; mps_version tracks VERSION.
 
 * Thu Nov 05 2026 Otto van der Schaaf <oschaaf@we-amp.com> - 2:2.8.0-1.cpanel
