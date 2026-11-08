@@ -615,7 +615,8 @@ jobs:
                 --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
                 --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
                 --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
-                -- //test/pagespeed/kernel/... //test/net/... \
+                -- //third_party/css_parser:css_parser_test \
+                   //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
@@ -775,7 +776,8 @@ jobs:
                 --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
                 --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
                 --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
-                -- //test/pagespeed/kernel/... //test/net/... \
+                -- //third_party/css_parser:css_parser_test \
+                   //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
@@ -1996,7 +1998,8 @@ jobs:
                 --test_env=REDIS_AUTH_USER_PASSWORD="${REDIS_AUTH_USER_PASSWORD}" \
                 --test_env=REDIS_AUTH_SOCKET=/sock/redis.sock \
                 --test_env=MEMCACHED_SOCKET=/sock/memcached.sock \
-                -- //test/pagespeed/kernel/... //test/net/... \
+                -- //third_party/css_parser:css_parser_test \
+                   //test/pagespeed/kernel/... //test/net/... \
                 //test/pagespeed/opt/... //test/pagespeed/system/... \
                 //test/pagespeed/automatic/... \
                 //test/pagespeed/apache/... //test/pagespeed/nginx/...
