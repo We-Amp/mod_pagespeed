@@ -1,3 +1,99 @@
+# mod_pagespeed 2.8.1 Release Notes
+
+**Release date:** 2026-11-09
+
+**Status:** Stable
+
+**Packages:** the same packages, platforms and channels as 2.8.0. The module packages
+for Apache, nginx and IIS, the cPanel package and `pagespeed-optimizer` are 2.8.1;
+install the module and the optimizer of the same version together. The container
+images, the NuGet packages (including the ASP.NET Core sidecar packages) and the
+application version of the Helm chart (chart 0.3.15) are 2.8.1 as well.
+
+## Highlights
+
+- **Pages built with Tailwind CSS v4, and pages whose stylesheet is larger than
+  64 KiB, get inlined critical CSS and deferred stylesheets again.** In 2.8.0 both
+  kinds of page were served correctly but with ordinary render-blocking stylesheets.
+- **After a cache flush through `cache.flush`, every server process serves the
+  flushed state.** This fixes the known issue listed for 2.8.0.
+- **The ASP.NET Core sidecar starts on Debian 13 and Ubuntu 26.04**, and no longer
+  needs a PCRE library on the host.
+- **IIS fixes:** pages are no longer served without optimization from IIS's response
+  caches, requests with an IPv6 address as the host are optimized, and the
+  `pagespeed RemoteConfigurationUrl` line in `pagespeed.config` now takes effect (see
+  Action required when upgrading).
+- **The admin console's cache detail view finds entries stored per site again.**
+
+## Action required when upgrading
+
+- **IIS: check `pagespeed.config` for a `pagespeed RemoteConfigurationUrl` line
+  before you upgrade.** 2.8.0 and earlier ignored that line silently; only the form
+  without the `pagespeed` prefix worked. From 2.8.1 the module fetches and applies
+  the remote configuration it names. Requests may wait up to
+  `RemoteConfigurationTimeoutMs` (1 second by default) while it is fetched or
+  refreshed, and when a fetch fails the module uses the local configuration, or the
+  last good remote copy. Remove the line if you do not want remote configuration.
+- Install the module and `pagespeed-optimizer` 2.8.1 together. The admin console's
+  list of a URL's variants needs both at 2.8.1.
+- The cache is kept across the upgrade.
+
+## Fixed
+
+_Module (all ports unless named)_
+
+- **After a cache flush through `cache.flush`, every server process serves the
+  flushed state.** A server process could keep serving cache entries from before the
+  flush, so a page could switch between results (for example between deferred and
+  render-blocking stylesheets) depending on which process served it. Affected: 2.8.0
+  and earlier.
+- The console's cache URL detail page shows each URL's variants and previews again.
+  Affected: 2.8.0.
+- CSS rewriting no longer breaks rules for class and id names that start with a
+  digit, such as Tailwind's `2xl:` responsive utilities. Before, browsers ignored those
+  rules. Affected: 2.8.0 and earlier.
+- IIS: visitors could sometimes get a page without optimization from IIS's response
+  caches. Those pages are now optimized.
+- IIS: requests that arrive over IPv6 with an IPv6 address as the host (for example
+  `http://[::1]/`) on the default ports are now optimized. Before, they were served
+  without optimization and the admin pages answered 404.
+- IIS: `pagespeed RemoteConfigurationUrl <url>` in `pagespeed.config` now takes
+  effect. See Action required when upgrading.
+
+_Optimizer worker and its nginx module_
+
+- **Pages built with Tailwind CSS v4 get inlined critical CSS and deferred
+  stylesheets again.** In 2.8.0 those pages kept render-blocking stylesheets and no
+  inlined critical CSS. Affected: 2.8.0.
+- **Pages whose stylesheet is larger than 64 KiB get critical CSS and deferred
+  stylesheets again.** In 2.8.0 those pages kept render-blocking stylesheets and no
+  inlined critical CSS. Pages were still served correctly. Affected: 2.8.0.
+- **The cache detail view of the admin console and `GET /v1/cache/alternates` find
+  entries stored per site.** The endpoint takes the `site` listed by
+  `GET /v1/cache/urls`. In 2.8.0 every such entry showed as not in the index.
+  Affected: 2.8.0.
+
+_ASP.NET Core package_
+
+- **The ASP.NET Core sidecar starts on Debian 13 and Ubuntu 26.04.** The nginx
+  bundled with `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux` needed `libpcre.so.3`,
+  which those releases no longer ship. The bundled nginx now carries PCRE2 10.49
+  statically linked and needs no PCRE library on the host, so the `libpcre3`
+  prerequisite is gone. Tested on Debian 11, 12 and 13 and Ubuntu 26.04.
+
+## Changed
+
+- IIS: `UsePerVHostStatistics` and `CreateSharedMemoryMetadataCache` are not
+  supported on IIS. Setting either now logs a warning at configuration load that it
+  has no effect, instead of being accepted silently. Invalid values are still
+  rejected.
+
+## Known issues
+
+- `ps_css_validate` in the C API and `CssProcessor.Validate` in the ASP.NET Core
+  package still reject Tailwind CSS v4 stylesheets, as in 2.8.0. The critical CSS fix
+  above does not change them.
+
 # mod_pagespeed 2.8.0 Release Notes
 
 **Release date:** 2026-11-05

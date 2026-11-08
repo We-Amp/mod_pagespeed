@@ -1,1 +1,0 @@
-- IIS: some requests could still leave a page without optimization in IIS's response caches (the HTTP.sys kernel cache and the output cache), so later visitors of that page could get it unoptimized. Those answers are now kept out of IIS's caches as well.
