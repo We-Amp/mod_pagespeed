@@ -3014,9 +3014,22 @@ jobs:
           # before it is idle); cap the disk cache with CI_WIN_CACHE_MAX_SIZE ourselves.
           if ($env:WIN_CACHE_DIR) { & $prune -CacheDir $env:WIN_CACHE_DIR }
           # Build-tool runfiles trees with junctions that an earlier job left in this
-          # output base break rules_foreign_cc's tool copy; drop them first.
+          # output base break rules_foreign_cc's tool copy; drop them first. The
+          # test runfiles trees go too: Bazel fills them with copies and keeps a
+          # tree whose manifest is unchanged, so a persistent output base would
+          # run the test binary of an earlier job. Master's copy of the script
+          # runs on every branch (a branch that predates the test-tree removal
+          # must not run stale binaries either).
           $outputBase = "$(& $bazel $root info output_base 2>$null)".Trim()
-          if ($outputBase) { & (Join-Path $env:GITHUB_WORKSPACE 'tools\ci\Remove-StaleToolRunfiles.ps1') -OutputBase $outputBase }
+          if ($outputBase) {
+            $rsr = & $dbt -Path 'tools/ci/Remove-StaleToolRunfiles.ps1' -PreferDefault | Select-Object -Last 1
+            if (-not $rsr -or -not (Test-Path -LiteralPath $rsr)) { Write-Host "::error::could not locate Remove-StaleToolRunfiles.ps1"; exit 1 }
+            & $rsr -OutputBase $outputBase
+          }
+          # A new test-action key, so no test result cached before the
+          # test-tree removal (some came from a stale binary) is reused. Bump
+          # it whenever cached Windows test results must not be trusted.
+          $common += '--test_env=CI_WIN_TEST_RESULTS_EPOCH=2026-11-08'
           & $bazel $root test @common --test_output=errors --keep_going -- `
             //test/pagespeed/iis/... `
             //test/pagespeed/system:daemon_adapter_test `

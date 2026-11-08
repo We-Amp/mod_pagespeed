@@ -3,8 +3,8 @@
 
 <#
 .SYNOPSIS
-    Remove build-tool runfiles trees that hold directory junctions from a
-    Bazel output base.
+    Remove build-tool runfiles trees that hold directory junctions, and all
+    test runfiles trees, from a Bazel output base.
 
 .DESCRIPTION
     Bazel 8 on Windows creates a directory junction for a runfiles entry whose
@@ -19,7 +19,18 @@
     persists between jobs keeps the ones made before. This removes them: only
     runfiles trees of exec-configuration outputs (build tools), and only those
     that contain a junction. Tools then resolve their runfiles through the
-    manifest, as in a fresh output base. Test runfiles trees are left alone.
+    manifest, as in a fresh output base.
+
+    It also removes every runfiles tree of a target configuration (the trees
+    `bazel test` makes for a test). Without symlink support Bazel fills such a
+    tree with COPIES of the test binary and its data, and it skips rebuilding
+    the tree while the tree's MANIFEST equals the test's runfiles manifest.
+    The manifest lists paths, not contents, so after the test binary is
+    rebuilt the tree keeps the old copy and the test runner executes that
+    stale binary: a changed test can fail against assertions it no longer
+    has, and a regression in code the test links can pass unseen. Removing
+    the trees makes the next `bazel test` build them from the current
+    outputs, as in a fresh output base.
 
     Safety: the walks never descend into a link (Windows PowerShell 5.1's
     Get-ChildItem -Recurse and Remove-Item -Recurse do), a listing error
@@ -96,4 +107,27 @@ if (Test-Path -LiteralPath $out) {
     }
 }
 Write-Host "stale tool runfiles trees removed: $removed"
+
+# Test runfiles trees: every *.runfiles tree under a target (non-exec)
+# configuration's bin directory. Decide first, then delete.
+$testRemoved = 0
+if (Test-Path -LiteralPath $out) {
+    $targetBins = @([IO.Directory]::GetDirectories($out) |
+        Where-Object { (Split-Path -Leaf $_) -notlike '*-exec*' } |
+        ForEach-Object { Join-Path $_ 'bin' } |
+        Where-Object { Test-Path -LiteralPath $_ })
+    $testTrees = @(foreach ($bin in $targetBins) {
+        if (Test-IsLink $bin) { continue }
+        Find-RunfilesTrees $bin
+    })
+    foreach ($tree in $testTrees) {
+        & $env:ComSpec /c "rmdir /s /q `"$tree`""
+        if (Test-Path -LiteralPath $tree) {
+            Write-Host "::error::could not remove the test runfiles tree $tree"
+            throw "could not remove the test runfiles tree $tree"
+        }
+        $testRemoved++
+    }
+}
+Write-Host "test runfiles trees removed: $testRemoved"
 $global:LASTEXITCODE = 0
