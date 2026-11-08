@@ -38,7 +38,9 @@ string EscapeIdentifier(CssStringPiece src);
 string EscapeIdentifier(const UnicodeText& src);
 // Like EscapeIdentifier, for a name that must be a complete CSS identifier,
 // such as a class or id name in a selector: a leading digit, or a digit after
-// a leading '-', is written as a hex escape (CSS Syntax 3, section 4.3.9).
+// a leading '-', is written as a hex escape, and a lone '-' is escaped, so
+// the name passes "check if three code points would start an ident sequence"
+// (CSS Syntax Level 3).
 // EscapeIdentifier leaves those digits as they are, because it also writes
 // names the parser accepts that are not identifiers in the source.
 string EscapeIdentifierName(CssStringPiece src);

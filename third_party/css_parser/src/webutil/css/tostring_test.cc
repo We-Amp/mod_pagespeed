@@ -147,7 +147,9 @@ TEST_F(ToStringTest, EscapeIdentifierNameLeadingDigit) {
   EXPECT_EQ("a1b", Css::EscapeIdentifierName("a1b"));
   EXPECT_EQ("x2", Css::EscapeIdentifierName("x2"));
   EXPECT_EQ("--1x", Css::EscapeIdentifierName("--1x"));
-  EXPECT_EQ("-", Css::EscapeIdentifierName("-"));
+  // A name that is exactly '-' is not an identifier unless the '-' is
+  // escaped.
+  EXPECT_EQ("\\-", Css::EscapeIdentifierName("-"));
   EXPECT_EQ("", Css::EscapeIdentifierName(""));
   EXPECT_EQ("\\32 \\.", Css::EscapeIdentifierName("2."));
   // EscapeIdentifier also writes names that are not identifiers in the
@@ -182,6 +184,9 @@ TEST_F(ToStringTest, SelectorEscapesRoundTrip) {
       {".\\32 ", ".\\32 "},
       // Id selectors follow the same rule.
       {"#\\31 23", "#\\31 23"},
+      // A name that is an escaped '-' alone.
+      {".\\2d ", ".\\-"},
+      {"#\\-", "#\\-"},
       // An escaped colon alone.
       {".hover\\:x", ".hover\\:x"},
   };
@@ -203,7 +208,8 @@ TEST_F(ToStringTest, SelectorEscapesRoundTrip) {
 // A class or id name that starts with an unescaped digit is not a valid
 // selector; browsers ignore the rule, so the parser reports a selector error.
 TEST_F(ToStringTest, SelectorUnescapedLeadingDigitIsError) {
-  const char* const kCases[] = {".1a", "#123", ".-1x", "a.2xl\\:p-4"};
+  const char* const kCases[] = {".1a", "#123", ".-1x", "a.2xl\\:p-4",
+                                ".-",  "#-",   ".- .b"};
   for (const char* in : kCases) {
     SCOPED_TRACE(in);
     const string css = absl::StrFormat("%s {}", in);

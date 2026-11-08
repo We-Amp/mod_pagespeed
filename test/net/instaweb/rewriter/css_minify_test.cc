@@ -349,6 +349,30 @@ TEST_F(CssMinifyTest, ClassNameUnescapedLeadingDigitKeptVerbatim) {
   EXPECT_EQ(".1a {color:red}#123 , .b {color:#00f}.c{color:#ff0}", minified);
 }
 
+// The stylesheet from the report, with an unescaped '(' in the class name:
+// not a valid selector, so the selector is kept exactly as written.
+TEST_F(CssMinifyTest, ClassNameUnescapedParenKeptVerbatim) {
+  static const char kCss[] =
+      ".\\32 xl\\:col-(--col-span-2xl) {\n"
+      "    grid-column: var(--col-span-2xl);\n"
+      "}\n"
+      "\n"
+      ".\\32 xl\\:grid-cols-(--grid-cols-2xl) {\n"
+      "    grid-template-columns: var(--grid-cols-2xl);\n"
+      "}\n";
+
+  GoogleString minified;
+  StringWriter writer(&minified);
+  CssMinify minify(&writer, &handler_);
+
+  EXPECT_TRUE(minify.ParseStylesheet(kCss));
+  EXPECT_EQ(
+      ".\\32 xl\\:col-(--col-span-2xl) {grid-column:var(--col-span-2xl)}"
+      ".\\32 xl\\:grid-cols-(--grid-cols-2xl) "
+      "{grid-template-columns:var(--grid-cols-2xl)}",
+      minified);
+}
+
 // checking unit is retained for zero value in calc with nested var()
 TEST_F(CssMinifyTest, CalcFunctionNestedVarKeepsZeroUnit) {
   static const char kCss[] =

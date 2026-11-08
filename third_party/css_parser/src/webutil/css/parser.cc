@@ -1982,14 +1982,25 @@ SimpleSelector* Parser::ParseAttributeSelector() {
     return nullptr;
 }
 
-// A class or id name is a CSS identifier, which cannot start with an
-// unescaped digit or with '-' and an unescaped digit (CSS Syntax 3, section
-// 4.3.9). Browsers ignore a rule whose selector has such a name, so the
-// parser treats it as a selector error rather than reading it as the name
-// that the escaped form (".\31 a") spells.
-bool Parser::AtDigitLedName() const {
+// A class or id name is a CSS identifier, so it must pass "check if three
+// code points would start an ident sequence" (CSS Syntax Level 3): it cannot
+// be an unescaped digit, '-' and an unescaped digit, or a lone '-'. Browsers
+// ignore a rule whose selector has such a name, so the parser treats it as a
+// selector error rather than reading it as the name that the escaped form
+// (".\31 a", ".\-") spells.
+bool Parser::AtInvalidNameStart() const {
   const char* p = in_;
-  if (p < end_ && *p == '-') p++;
+  if (p < end_ && *p == '-') {
+    p++;
+    // A lone '-': what follows cannot continue an identifier.
+    if (p == end_) return true;
+    const char c = *p;
+    if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '\\' ||
+          !IsAscii(c))) {
+      return true;
+    }
+  }
   return p < end_ && *p >= '0' && *p <= '9';
 }
 
@@ -2002,9 +2013,9 @@ SimpleSelector* Parser::ParseSimpleSelector() {
   switch (*in_) {
     case '#': {
       in_++;
-      if (AtDigitLedName()) {
+      if (AtInvalidNameStart()) {
         ParseIdent();  // Consume the name so that parsing makes progress.
-        ReportParsingError(kSelectorError, "Id name starts with a digit.");
+        ReportParsingError(kSelectorError, "Id name is not an identifier.");
         break;
       }
       UnicodeText id = ParseIdent();
@@ -2013,9 +2024,9 @@ SimpleSelector* Parser::ParseSimpleSelector() {
     }
     case '.': {
       in_++;
-      if (AtDigitLedName()) {
+      if (AtInvalidNameStart()) {
         ParseIdent();  // Consume the name so that parsing makes progress.
-        ReportParsingError(kSelectorError, "Class name starts with a digit.");
+        ReportParsingError(kSelectorError, "Class name is not an identifier.");
         break;
       }
       UnicodeText classname = ParseIdent();
