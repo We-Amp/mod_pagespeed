@@ -30,7 +30,7 @@ param(
   [string]$RigDir      = $(if (Test-Path 'D:\') { 'D:\iis-asan-rig' } else { 'C:\iis-asan-rig' }),
   [Parameter(Mandatory=$true)][string]$DllSourceDir,   # dir holding the freshly built ASan pagespeed_iis.dll (+ .pdb)
   [string]$AsanRuntime = '',                            # clang_rt.asan_dynamic-x86_64.dll; auto-detected if empty
-  [int]$Port           = 18180,
+  [int]$Port           = 18500,  # not reachable by any runner-slot port offset (k*1000 + a base port in tools/ci/runner-ports.sh)
   [string]$PoolName    = 'PageSpeedAsanStressPool',
   [string]$SiteName    = 'PageSpeedAsanStressSite',
   [string]$ModuleName  = 'PageSpeedAsanModule',
