@@ -49,8 +49,11 @@ _Module (all ports unless named)_
   and earlier.
 - The console's cache URL detail page shows each URL's variants and previews again.
   Affected: 2.8.0.
+- CSS rewriting no longer breaks rules for class and id names that start with a
+  digit, such as Tailwind's `2xl:` responsive utilities. Before, browsers ignored those
+  rules. Affected: 2.8.0 and earlier.
 - IIS: visitors could sometimes get a page without optimization from IIS's response
-  caches until the file changed. Those pages are now optimized.
+  caches. Those pages are now optimized.
 - IIS: requests that arrive over IPv6 with an IPv6 address as the host (for example
   `http://[::1]/`) on the default ports are now optimized. Before, they were served
   without optimization and the admin pages answered 404.
