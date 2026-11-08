@@ -193,8 +193,8 @@ and version checks, whether the `fleet-hyperv` gates must have run). Whether
 anything is signed follows `dry_run`, and the CI gates' strictness too. A
 candidate therefore stamps the final version, has no `optimizer-pair-version`
 file, fails on a pin that is not the version's pair (for `-rc.N` the pair does
-not exist, so the pin is taken as it is), builds the cPanel packages and
-requires the three gates to have run. It never enters the `release`
+not exist, so the pin is taken as it is, in a real run too), builds the cPanel
+packages and requires the three gates to have run. It never enters the `release`
 environment: each of those jobs carries both `dry_run == 'false'` and
 `candidate != 'true'` in its `if:`, which `tools/ci/check-workflow-shape.sh`
 enforces, and the environment's tag policy would refuse a run on `master` in
