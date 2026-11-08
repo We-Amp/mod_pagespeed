@@ -7,7 +7,11 @@
 #     directory (with a sentinel file) and a dangling junction: removed, and
 #     the sentinel and its directory must survive;
 #   * a tool runfiles tree without links: kept;
-#   * a test (non-exec) runfiles tree holding a junction: kept;
+#   * a test (non-exec) runfiles tree holding a junction: removed, the
+#     junction's target kept;
+#   * a test runfiles tree holding a stale COPY of its test binary (what
+#     Bazel leaves without symlink support when the manifest is unchanged):
+#     removed, the built test binary kept;
 # and checks that an output base outside WIN_BAZEL_OUTPUT_ROOT is refused.
 #
 # Run:   powershell -NoProfile -File tools\ci\Remove-StaleToolRunfiles_test.ps1
@@ -55,13 +59,27 @@ try {
   New-Item -ItemType Directory -Force -Path $testTree | Out-Null
   New-Junction (Join-Path $testTree 'real') $keepDir
 
+  # 5. A test runfiles tree with a stale copy of the test binary.
+  $tbin = Join-Path $out 'x64_windows-fastbuild\bin\test\pkg'
+  New-Item -ItemType Directory -Force -Path $tbin | Out-Null
+  $built = Join-Path $tbin 'pin_test.exe'
+  Set-Content -LiteralPath $built -Value 'new binary' -Encoding ascii
+  $copyTree = Join-Path $tbin 'pin_test.exe.runfiles'
+  New-Item -ItemType Directory -Force -Path (Join-Path $copyTree '_main\test\pkg') | Out-Null
+  Set-Content -LiteralPath (Join-Path $copyTree 'MANIFEST') -Value 'x' -Encoding ascii
+  Set-Content -LiteralPath (Join-Path $copyTree '_main\test\pkg\pin_test.exe') -Value 'old binary' -Encoding ascii
+
   $env:WIN_BAZEL_OUTPUT_ROOT = $root
   $log = & $script -OutputBase $base 6>&1 | Out-String
   if (-not (Test-Path -LiteralPath $stale)) { Pass '1: stale tool tree removed' } else { Fail '1: stale tool tree still there' }
   if (Test-Path -LiteralPath $sentinel) { Pass '1: link target contents intact' } else { Fail '1: link target contents were deleted' }
   if ($log -match 'removed: 1') { Pass '1: reports one tree' } else { Fail "1: unexpected report: $log" }
   if (Test-Path -LiteralPath (Join-Path $clean 'tool+\other.exe')) { Pass '2: clean tool tree kept' } else { Fail '2: clean tool tree removed' }
-  if (Test-Path -LiteralPath (Join-Path $testTree 'real')) { Pass '3: test runfiles tree kept' } else { Fail '3: test runfiles tree touched' }
+  if (-not (Test-Path -LiteralPath $testTree)) { Pass '3: test runfiles tree with a junction removed' } else { Fail '3: test runfiles tree with a junction still there' }
+  if (Test-Path -LiteralPath $sentinel) { Pass '3: its junction target intact' } else { Fail '3: its junction target was deleted' }
+  if (-not (Test-Path -LiteralPath $copyTree)) { Pass '5: test runfiles tree with a stale copy removed' } else { Fail '5: test runfiles tree with a stale copy still there' }
+  if ((Test-Path -LiteralPath $built) -and ((Get-Content -LiteralPath $built -Raw).Trim() -eq 'new binary')) { Pass '5: built test binary kept' } else { Fail '5: built test binary touched' }
+  if ($log -match 'test runfiles trees removed: 2') { Pass '5: reports two test trees' } else { Fail "5: unexpected report: $log" }
 
   # 4. Refuses an output base outside WIN_BAZEL_OUTPUT_ROOT.
   $env:WIN_BAZEL_OUTPUT_ROOT = Join-Path $root 'elsewhere'
