@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `http://[::1]/`) on the default ports are now optimized. Before, they were served
   without optimization and the admin pages answered 404.
 - IIS: `pagespeed RemoteConfigurationUrl <url>` in `pagespeed.config` now takes
-  effect. See Upgrade notes.
+  effect. See Upgrade Notes.
 - **The ASP.NET Core sidecar starts on Debian 13 and Ubuntu 26.04.** The nginx
   bundled with `WeAmp.PageSpeed.Sidecar.NativeAssets.Linux` needed `libpcre.so.3`,
   which those releases no longer ship. The bundled nginx now carries PCRE2 10.49
