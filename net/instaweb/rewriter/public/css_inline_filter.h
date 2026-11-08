@@ -50,6 +50,7 @@ class CssInlineFilter : public CommonFilter {
   void StartDocumentImpl() override;
   void StartElementImpl(HtmlElement* element) override;
   void EndElementImpl(HtmlElement* element) override;
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "InlineCss"; }
   // Inlining css from unauthorized domains into HTML is considered
   // safe because it does not cause any new content to be executed compared
@@ -64,7 +65,9 @@ class CssInlineFilter : public CommonFilter {
   bool IntendedForInlining() const override { return true; }
 
   static void InitStats(Statistics* statistics);
-  static bool HasClosingStyleTag(StringPiece contents);
+  // Could a browser see markup in contents if it were the text of an inline
+  // <style> element?  Such CSS must not be written into the HTML.
+  static bool MayContainMarkup(StringPiece contents);
 
  protected:
   // Changes filter id code (which shows up in cache keys and

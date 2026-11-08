@@ -361,6 +361,14 @@ void HtmlParse::DisableFiltersInjectingScripts(const FilterList& filters) {
   }
 }
 
+void HtmlParse::DisableFiltersSkippedOnHydratedPages() {
+  for (HtmlFilter* filter : filters_) {
+    if (filter->SkippedOnHydratedPages()) {
+      filter->set_is_enabled(false);
+    }
+  }
+}
+
 // This is factored out of Flush() for testing purposes.
 void HtmlParse::ApplyFilter(HtmlFilter* filter) {
   // Keep track of the current filter in a state variable, for associating
@@ -1220,6 +1228,12 @@ HtmlName HtmlParse::MakeName(const StringPiece& str_piece) {
     str = atom.Rep();
   }
   return HtmlName(keyword, str);
+}
+
+HtmlName HtmlParse::MakeKeywordlessName(const StringPiece& str_piece) {
+  // Reuse the storage of MakeName, which keeps the spelling alive for the
+  // life of the parse, and drop only the keyword.
+  return HtmlName(HtmlName::kNotAKeyword, MakeName(str_piece).str_);
 }
 
 void HtmlParse::add_event_listener(HtmlFilter* listener) {

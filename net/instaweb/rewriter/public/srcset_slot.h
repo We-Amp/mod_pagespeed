@@ -71,6 +71,10 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   // and all their resources.
   void Initialize(CommonFilter* filter);
 
+  // The most candidates of one srcset that get a slot; the rest are kept
+  // as they are.
+  static constexpr int kMaxSlots = 256;
+
   int num_image_candidates() { return candidates_.size(); }
 
   // may be nullptr.
@@ -78,6 +82,7 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   const GoogleString& url(int idx) { return candidates_[idx].url; }
   void set_url(int idx, GoogleString new_url) {
     candidates_[idx].url = std::move(new_url);
+    dirty_ = true;
   }
   const GoogleString& descriptor(int idx) {
     return candidates_[idx].descriptor;
@@ -93,9 +98,9 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   int begin_line_number() const { return begin_line_number_; }
   int end_line_number() const { return end_line_number_; }
 
-  // This serializes everything back to the attribute.
-  // (Which is sadly quadratic, but the size should be small enough that it's
-  //  more practical than trying to coordinate).
+  // This serializes everything back to the attribute, if any URL was changed
+  // (by SrcSetSlot::Render()) since the last call. RewriteDriver calls it once
+  // per flush window, once every slot has rendered or been detached.
   void Commit();
 
   // Releases any references we have to SrcSetSlots.
@@ -122,6 +127,7 @@ class SrcSetSlotCollection : public RefCounted<SrcSetSlotCollection> {
   HtmlElement* element_;
   HtmlElement::Attribute* attribute_;
   CommonFilter* filter_;
+  bool dirty_;  // a URL in candidates_ changed since the last Commit().
   int begin_line_number_;
   int end_line_number_;
 

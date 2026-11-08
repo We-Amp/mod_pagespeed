@@ -595,6 +595,12 @@ RewriteDomainTransformer::~RewriteDomainTransformer() {}
 
 CssTagScanner::Transformer::TransformStatus RewriteDomainTransformer::Transform(
     GoogleString* str) {
+  // A fragment-only reference such as url(#clip) names an element of the
+  // document that uses the stylesheet, wherever the stylesheet is served
+  // from, so it stays as written.
+  if (!str->empty() && (*str)[0] == '#') {
+    return kNoChange;
+  }
   GoogleString rewritten;  // Result of rewriting domain.
   GoogleString out;        // Result after trimming.
   if (DomainRewriteFilter::Rewrite(*str, *old_base_url_, server_context_,

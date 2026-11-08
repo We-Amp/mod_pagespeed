@@ -75,6 +75,27 @@ class AmpDocumentFilterTest : public HtmlParseTestBase {
   AmpDocumentFilter amp_document_filter_;
 };
 
+TEST_F(AmpDocumentFilterTest, GivesUpWaitingAfterBufferingALot) {
+  // Comments before the root element are tolerated up to a limit; past it
+  // the document is taken not to be AMP, without waiting for its end.
+  html_parse_.StartParse("http://example.com/amp_doc_many_comments.html");
+  GoogleString comments;
+  for (size_t i = 0; i < AmpDocumentFilter::kMaxBufferedBytes / 200; ++i) {
+    comments.append("<!-- 0123456789012345678901234567890123456789 -->");
+  }
+  html_parse_.ParseText(comments);
+  html_parse_.Flush();
+  EXPECT_FALSE(disovered_called_);
+  for (int i = 0; i < 4; ++i) {
+    html_parse_.ParseText(comments);
+  }
+  html_parse_.Flush();
+  EXPECT_TRUE(disovered_called_);
+  EXPECT_FALSE(is_amp_);
+  html_parse_.ParseText("<html amp></html>");
+  html_parse_.FinishParse();
+}
+
 TEST_F(AmpDocumentFilterTest, IsAmpHtml) {
   RunWithEveryFlushPoint("<!doctype foo> <html amp><head/><body></body></html>",
                          true);

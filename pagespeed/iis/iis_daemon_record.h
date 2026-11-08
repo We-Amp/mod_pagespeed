@@ -90,10 +90,13 @@ void IisCapabilityHeaders(IHttpContext* http_context, StringPiece* accept,
 // pre-URL-rewrite one), the raw request's headers, and the resolved
 // options for this request.  Both halves or neither on the option context:
 // a configuration that cannot be named records nothing and asks for
-// nothing, which the gate answers.
+// nothing, which the gate answers.  `site` is the request's IIS site
+// (SiteIdFromServerFragment of its server context's fragment), never one
+// from `options`.
 void BuildDaemonRecordRequest(IHttpContext* http_context,
                               const GoogleUrl& url,
                               const RewriteOptions* options,
+                              const GoogleString& site,
                               DaemonRecordRequest* request);
 
 }  // namespace net_instaweb

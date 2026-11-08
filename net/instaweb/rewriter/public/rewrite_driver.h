@@ -40,6 +40,7 @@
 #include "net/instaweb/rewriter/public/inline_resource_slot.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
+#include "net/instaweb/rewriter/public/page_work_budget.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
@@ -240,6 +241,10 @@ class RewriteDriver : public HtmlParse {
   void TracePrintf(const char* fmt, ...);
   void TraceLiteral(const char* literal);
   void TraceString(const GoogleString& s);
+
+  // True while parsed events are held back until the type of the document is
+  // known. A flush then releases nothing.
+  bool EventsAreHeldBack() const { return buffer_events(); }
 
   // Return a mutable pointer to the response headers that filters can update
   // before the first flush.  Returns NULL after Flush has occurred.
@@ -1093,6 +1098,15 @@ class RewriteDriver : public HtmlParse {
   // We expect to this method to be called on the HTML parser thread.
   void increment_num_inline_preview_images();
 
+  // Takes num_bytes from the document's image inlining budget,
+  // RewriteOptions::document_image_inline_max_bytes(), and returns true, or
+  // returns false and takes nothing if that would exceed it. An image may be
+  // inlined only when this returns true. Safe to call from any thread.
+  bool ReserveInlinedImageBytes(int64 num_bytes);
+
+  // The rewrite work this document may still cause; see PageWorkBudget.
+  PageWorkBudget* page_work_budget() { return &page_work_budget_; }
+
   // Increment reference count for misc. async ops that need the RewriteDriver
   // kept alive.
   void IncrementAsyncEventsCount();
@@ -1143,6 +1157,25 @@ class RewriteDriver : public HtmlParse {
       HtmlElement* element);
   void InsertUnauthorizedDomainDebugComment(StringPiece url, InputRole role,
                                             HtmlElement* element);
+
+  // Like HtmlParse::InsertComment, for a debug message: inserts it at the
+  // current event when the document's debug budget allows. Returns false only
+  // when the comment could not be placed there safely (see InsertComment), so
+  // the caller may retry later; a message refused for the budget is dropped,
+  // and true is returned.
+  bool InsertDebugCommentHere(StringPiece unescaped);
+
+  // For a debug message a filter places itself, e.g. at the end of the body:
+  // returns a new comment node holding it when the document's debug budget
+  // allows. Otherwise returns, the first time only, the one comment saying
+  // the output was truncated, and nullptr after that. The caller inserts
+  // whatever is returned.
+  HtmlNode* NewBudgetedDebugCommentNode(StringPiece unescaped);
+
+  // Bytes of debug comments this document may still receive under
+  // RewriteOptions::debug_output_max_bytes(): -1 when there is no limit, 0
+  // once the budget is spent. Safe to call from any thread.
+  int64 DebugOutputBytesRemaining() const;
 
   // Generates an unauthorized domain debug comment. Public for unit tests.
   GoogleString GenerateUnauthorizedDomainDebugComment(const GoogleUrl& gurl,
@@ -1248,6 +1281,28 @@ class RewriteDriver : public HtmlParse {
   void SetIsAmpDocument(bool is_amp);
   bool is_amp_document() const { return is_amp_; }
 
+  // Latched for the rest of the document once something in the response shows
+  // that a client-side framework will hydrate it (see hydration_signals.h).
+  // ScanFilter, the first filter to see each flush window, sets this before
+  // any rewriting filter runs on that window, so a signal late in a window
+  // still covers the stylesheets earlier in the same window.
+  void set_is_hydrated_document() { is_hydrated_document_ = true; }
+  bool is_hydrated_document() const { return is_hydrated_document_; }
+
+  // Set once defer_javascript has retyped a script, an onload handler or an
+  // iframe in this document. Those only work if the deferral runtime follows,
+  // so from then on the deferral filters finish the document even if it turns
+  // out to be hydrated.
+  void set_js_deferral_started() { js_deferral_started_ = true; }
+  bool js_deferral_started() const { return js_deferral_started_; }
+
+  // The one answer the three deferral filters (defer_iframe, js_disable,
+  // js_defer_disabled) give to SkippedOnHydratedPages(), so they never part
+  // ways on a hydrated page: skipped, unless disable_javascript is on (it
+  // turns scripts off on purpose, so nothing hydrates) or deferral started in
+  // an earlier flush window.
+  bool SkipJsDeferralOnHydratedPage() const;
+
   // The currently active Content-Security-Policy. The returned
   // reference stays valid for the rest of the request even if a later
   // <meta> tag publishes a newer version (superseded versions are
@@ -1255,9 +1310,12 @@ class RewriteDriver : public HtmlParse {
   const CspContext& content_security_policy() const {
     return *csp_context_snapshot_.load(std::memory_order_acquire);
   }
+  // The most CSP policies kept for one document.
+  static constexpr size_t kMaxCspPolicies = 32;
   // Publishes a new CSP context version consisting of the current
   // policies plus 'policy' (copy-on-write; null is ignored). Must only
-  // be called from the HTML-parse thread.
+  // be called from the HTML-parse thread. A document with more than
+  // kMaxCspPolicies policies is treated as one that permits nothing.
   void AddCspPolicy(std::unique_ptr<CspPolicy> policy);
   // Resets the CSP context to empty. Must only be called from the
   // HTML-parse thread, and not while rewrites are in flight.
@@ -1717,12 +1775,38 @@ class RewriteDriver : public HtmlParse {
   std::unique_ptr<CriticalSelectorInfo> critical_selector_info_;
 
   // Memoized computation of whether the current doc has an XHTML mimetype.
+  // Takes num_bytes from the document's debug output budget and returns
+  // true, or returns false, and refuses every later request too, when it
+  // does not fit. Always true when there is no limit.
+  bool ReserveDebugOutputBytes(int64 num_bytes);
+  // The comment text saying debug output was truncated at the limit.
+  GoogleString DebugTruncatedMessage() const;
+
+  // Inserts a comment holding `escaped` after `node` when the document's
+  // debug budget allows, and returns it; otherwise returns nullptr, and the
+  // first refusal inserts the one comment saying the output was truncated.
+  HtmlNode* InsertBoundedDebugComment(StringPiece escaped, HtmlNode* node);
+
   bool xhtml_mimetype_computed_;
   XhtmlStatus xhtml_status_ : 8;
 
   // Number of images whose low quality images are inlined in the html page by
   // InlinePreviewFilter.
   int num_inline_preview_images_;
+
+  // Image bytes inlined into the document so far; see
+  // ReserveInlinedImageBytes.
+  std::atomic<int64> inlined_image_bytes_;
+
+  // Rewrite work done for the document so far; see page_work_budget().
+  PageWorkBudget page_work_budget_;
+
+  // Bytes of debug comments written into the document so far, whether one
+  // was refused for the budget, and whether the comment saying so is written;
+  // see ReserveDebugOutputBytes.
+  std::atomic<int64> debug_output_bytes_;
+  std::atomic<bool> debug_output_truncated_;
+  std::atomic<bool> debug_truncation_noted_;
 
   // The total number of bytes for which ParseText is called.
   int num_bytes_in_;
@@ -1755,6 +1839,12 @@ class RewriteDriver : public HtmlParse {
 
   // Indicates whether this document is determined to be AMP-HTML.
   bool is_amp_;
+
+  // See is_hydrated_document().
+  bool is_hydrated_document_;
+
+  // See js_deferral_started().
+  bool js_deferral_started_;
 
   // Indicates that task execution has started.
   AtomicBool executing_rewrite_tasks_;

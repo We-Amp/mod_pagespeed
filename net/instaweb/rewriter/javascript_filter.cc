@@ -159,6 +159,18 @@ class JavascriptFilter::Context : public SingleRewriteContext {
 
     ServerContext* server_context = FindServerContext();
     MessageHandler* message_handler = server_context->message_handler();
+    // The output is labelled as script, so only rewrite inputs the origin
+    // labelled as script.
+    const ContentType* input_type =
+        input->response_headers()->DetermineContentType();
+    if (input_type == nullptr || !input_type->IsJsLike()) {
+      message_handler->Message(
+          kInfo, "Script %s not rewritten: origin content type %s.",
+          input->UrlForDebug().c_str(),
+          (input_type == nullptr ? "[missing or unrecognized]"
+                                 : input_type->mime_type()));
+      return kRewriteFailed;
+    }
     JavascriptCodeBlock code_block(input->ExtractUncompressedContents(),
                                    config_, input->url(), message_handler);
     code_block.Rewrite();
@@ -541,7 +553,17 @@ void JavascriptFilter::RewriteInlineScript(HtmlCharactersNode* body_node) {
       driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml &&
       code_block.rewritten_code().find("]]>") != StringPiece::npos &&
       script->find("]]>") == GoogleString::npos;
-  if (!code_block.successfully_rewritten() || joins_cdata_end) {
+  // Minification must not change where an HTML parser ends the element (see
+  // JsInlineFilter::RenderInline); keep the original script if it could.
+  const bool moves_element_end =
+      code_block.successfully_rewritten() &&
+      (FindIgnoreCase(code_block.rewritten_code(), "</script") !=
+           StringPiece::npos ||
+       (code_block.rewritten_code().find("<!--") != StringPiece::npos &&
+        FindIgnoreCase(code_block.rewritten_code(), "<script") !=
+            StringPiece::npos));
+  if (!code_block.successfully_rewritten() || joins_cdata_end ||
+      moves_element_end) {
     config_->did_not_shrink()->Add(1);
     return;
   }

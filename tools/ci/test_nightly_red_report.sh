@@ -28,6 +28,8 @@ mkdir -p "${BIN}"
 #   api [--paginate] .../actions/runs/<id>/jobs...  FAKE_JOBS_<id> (HTTP 500
 #                                                    when FAKE_JOBS_FAIL_<id>=1)
 #   api .../actions/workflows/nightly.yml/runs...   FAKE_RUNS_NIGHTLY
+#   api .../actions/workflows/release-rehearsal.yml/runs...
+#                                                   FAKE_RUNS_REHEARSAL
 #   api .../actions/workflows/ci.yml/runs...&event=workflow_dispatch...
 #                                                   FAKE_RUNS_CI_DISPATCH
 #   api .../actions/workflows/ci.yml/runs...&event=push...
@@ -48,6 +50,10 @@ mkdir -p "${BIN}"
 #   issue create|edit|comment|close, label create   nothing, exit 0
 # An answer variable X can instead be a file: X_FILE names it (an answer too
 # large for an environment variable).
+# Transient failures: FAKE_FLAKY_<kind>=<n> makes the first n calls of that
+# kind fail with HTTP 502 before the normal answer, where kind is JOBS_<id>,
+# RUNS_NIGHTLY, RUN (the created_at call) or ISSUES. FAKE_FAIL_MSG replaces
+# the HTTP 500 text of the FAKE_*_FAIL failures (for a non-transient error).
 cat > "${BIN}/gh" <<'GH'
 #!/usr/bin/env bash
 echo "gh $*" >> "${FAKE_LOG}"
@@ -62,6 +68,20 @@ answer() {
   local var="$1" file="$1_FILE"
   if [ -n "${!file-}" ]; then cat "${!file}"; else printf '%s' "${!var-}"; fi
 }
+# flaky <kind>: fail this call with HTTP 502 while FAKE_FLAKY_<kind> calls of
+# that kind have not failed yet.
+flaky() {
+  local var="FAKE_FLAKY_$1" n counter
+  [ -n "${!var-}" ] || return 0
+  counter="${FAKE_LOG}.flaky-$1"
+  n="$(cat "${counter}" 2> /dev/null || echo 0)"
+  if [ "${n}" -lt "${!var}" ]; then
+    echo $((n + 1)) > "${counter}"
+    echo "gh: Server Error (HTTP 502)" >&2
+    exit 1
+  fi
+}
+FAIL_MSG="${FAKE_FAIL_MSG:-HTTP 500}"
 case "$1 $2" in
   "api --paginate"|"api repos/"*|"api --allow-escape-sequences")
     path="$*"
@@ -70,14 +90,17 @@ case "$1 $2" in
         id="${path#*/actions/runs/}"
         id="${id%%/*}"
         fail="FAKE_JOBS_FAIL_${id}"
-        if [ "${!fail-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+        if [ "${!fail-0}" = "1" ]; then echo "${FAIL_MSG}" >&2; exit 1; fi
+        flaky "JOBS_${id}"
         answer "FAKE_JOBS_${id}"
         ;;
-      */actions/workflows/nightly.yml/runs*) answer FAKE_RUNS_NIGHTLY ;;
+      */actions/workflows/nightly.yml/runs*) flaky RUNS_NIGHTLY; answer FAKE_RUNS_NIGHTLY ;;
+      */actions/workflows/release-rehearsal.yml/runs*) answer FAKE_RUNS_REHEARSAL ;;
       */actions/workflows/ci.yml/runs*event=workflow_dispatch*) answer FAKE_RUNS_CI_DISPATCH ;;
       */actions/workflows/ci.yml/runs*event=push*) answer FAKE_RUNS_CI_PUSH ;;
       */actions/runs/*" --jq .created_at")
-        if [ "${FAKE_RUN_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+        if [ "${FAKE_RUN_FAIL:-0}" = "1" ]; then echo "${FAIL_MSG}" >&2; exit 1; fi
+        flaky RUN
         echo "${FAKE_RUN_CREATED}"
         ;;
       */actions/jobs/*/logs)
@@ -111,7 +134,8 @@ case "$1 $2" in
     answer "FAKE_LOG_${id}"
     ;;
   "issue list")
-    if [ "${FAKE_ISSUES_FAIL:-0}" = "1" ]; then echo "HTTP 500" >&2; exit 1; fi
+    if [ "${FAKE_ISSUES_FAIL:-0}" = "1" ]; then echo "${FAIL_MSG}" >&2; exit 1; fi
+    flaky ISSUES
     printf '%s' "${FAKE_ISSUES:-[]}"
     ;;
   "issue create"|"issue edit"|"issue comment"|"issue close"|"label create") ;;
@@ -166,6 +190,7 @@ ISSUE7='[{"number":7,"body":"The scheduled full tier is red.\n\n### full / Linux
 
 run() { # [env assignments...]
   : > "${WORK}/gh.log"
+  rm -f "${WORK}/gh.log.flaky-"*
   : > "${WORK}/bodies"
   set +e
   (cd "${REPO}" && env PATH="${BIN}:${PATH}" FAKE_LOG="${WORK}/gh.log" \
@@ -173,7 +198,7 @@ run() { # [env assignments...]
     GITHUB_RUN_ID=50 GITHUB_RUN_ATTEMPT=1 GITHUB_SHA="${C4}" \
     DEFAULT_BRANCH=main GH_TOKEN=fake FAKE_RUNS_NIGHTLY="${NO_RUNS}" \
     FAKE_RUNS_CI_DISPATCH="${NO_RUNS}" FAKE_RUNS_CI_PUSH="${NO_RUNS}" \
-    FAKE_RUN_CREATED=2026-10-26T04:00:00Z "$@" bash "${SCRIPT}" > "${WORK}/out" 2> "${WORK}/err")
+    FAKE_RUN_CREATED=2026-10-26T04:00:00Z REPORT_RETRY_BASE_SECONDS=0 "$@" bash "${SCRIPT}" > "${WORK}/out" 2> "${WORK}/err")
   RC=$?
   set -e
 }
@@ -536,6 +561,37 @@ expect run-object-failure "exit 1" eq "${RC}" 1
 expect run-object-failure "no writes" eq "$(calls '^gh (issue (create|edit|comment|close)|label create)')" 0
 done_case run-object-failure-exits-1
 
+# --- transient api failures are retried
+start
+run FAKE_JOBS_50="${RED_JOBS}" FAKE_LOG_502="${TSAN_LOG}" FAKE_RUNS_NIGHTLY="${H40}" \
+  FAKE_JOBS_40="${GREEN_JOBS}" FAKE_FLAKY_JOBS_50=2 FAKE_FLAKY_JOBS_40=1 \
+  FAKE_FLAKY_RUNS_NIGHTLY=1 FAKE_FLAKY_RUN=1 FAKE_FLAKY_ISSUES=1
+expect transient-retried "exit 0" eq "${RC}" 0
+expect transient-retried "own jobs read three times" eq "$(calls 'actions/runs/50/jobs')" 3
+expect transient-retried "history jobs read twice" eq "$(calls 'actions/runs/40/jobs')" 2
+expect transient-retried "one issue create" eq "$(calls '^gh issue create ')" 1
+expect transient-retried "last green is run 40" body_has "[run 40]"
+expect transient-retried "retry logged" grep -qF "retrying" "${WORK}/err"
+done_case transient-api-failures-are-retried
+
+start
+run FAKE_JOBS_FAIL_50=1
+expect transient-gives-up "exit 1" eq "${RC}" 1
+expect transient-gives-up "five tries" eq "$(calls 'actions/runs/50/jobs')" 5
+done_case persistent-transient-failure-gives-up-after-five-tries
+
+start
+run FAKE_JOBS_FAIL_50=1 FAKE_FAIL_MSG="HTTP 404: Not Found"
+expect not-transient "exit 1" eq "${RC}" 1
+expect not-transient "one try" eq "$(calls 'actions/runs/50/jobs')" 1
+done_case non-transient-failure-is-not-retried
+
+start
+run FAKE_JOBS_50="${GREEN_JOBS}" FAKE_ISSUES="${ISSUE7}" FAKE_FLAKY_ISSUES=1
+expect write-not-retried "exit 0" eq "${RC}" 0
+expect write-not-retried "one close" eq "$(calls '^gh issue close 7')" 1
+done_case issue-list-retried-writes-once
+
 # --- push-runs-without-full-tier-do-not-consume-cap
 PUSH15=()
 for n in $(seq 70 84); do
@@ -592,6 +648,50 @@ expect ceiling "5 history jobs calls" eq "$(grep -E 'actions/runs/[0-9]+/jobs' "
 expect ceiling "body says so" body_has "no green within 0 completed full-tier runs (API call ceiling reached)"
 done_case api-call-ceiling-stops-search
 for n in $(seq 70 84); do unset "FAKE_JOBS_${n}"; done
+
+# --- the weekly lane rehearsal: the same script under another label, title,
+# job prefix and history (release-rehearsal.yml). The nightly's variables stay
+# at their defaults in every case above.
+REH_ENV=(REPORT_LABEL=lane-rehearsal-red "REPORT_TITLE=Release lane rehearsal red"
+  "REPORT_LABEL_DESC=The weekly release lane rehearsal is red"
+  "REPORT_INTRO=The weekly release lane rehearsal is red" "REPORT_JOB_PREFIX=module / "
+  "REPORT_HISTORY=release-rehearsal.yml|" "REPORT_RUN_NOUN=rehearsal run" REPORT_SKIPPED=off)
+REH_RED="$(jobs "601|module / Vendor Dependencies|success|" "602|module / Linux Release Build (x64)|failure|" \
+  "603|full / Linux TSan|failure|" "604|module / Gate, cPanel (el9)|skipped|")"
+REH_H60="$(runs "60|schedule|${C1}|2026-10-25T06:30:00Z")"
+REH_J60="$(jobs "6001|module / Linux Release Build (x64)|success|")"
+start
+run "${REH_ENV[@]}" FAKE_JOBS_50="${REH_RED}" FAKE_LOG_602="Linux Release Build (x64)	Build	2026-10-26T06:40:00.0000000Z //t:race_test    FAILED in 3.1s" \
+  FAKE_RUNS_REHEARSAL="${REH_H60}" FAKE_JOBS_60="${REH_J60}"
+expect rehearsal-red-creates-issue "exit 0" eq "${RC}" 0
+expect rehearsal-red-creates-issue "create carries the rehearsal title and label" \
+  grep -qF -- "gh issue create --title Release lane rehearsal red --label lane-rehearsal-red --body-file" "${WORK}/gh.log"
+expect rehearsal-red-creates-issue "label created with its description" \
+  grep -qF -- "gh label create lane-rehearsal-red --color B60205 --description The weekly release lane rehearsal is red" "${WORK}/gh.log"
+expect rehearsal-red-creates-issue "the open issues are looked up under the rehearsal label" \
+  grep -qF -- "gh issue list --label lane-rehearsal-red --state open" "${WORK}/gh.log"
+for s in "The weekly release lane rehearsal is red in run" "module / Linux Release Build (x64)" "//t:race_test" \
+  "actions/runs/60" "<!-- nightly-red-job: module / Linux Release Build (x64) -->"; do
+  expect rehearsal-red-creates-issue "body has '${s}'" body_has "${s}"
+done
+expect rehearsal-red-creates-issue "a full-tier job of the run is not judged" no body_has "full / Linux TSan"
+expect rehearsal-red-creates-issue "no skipped line" no body_has "Skipped (neither"
+expect rehearsal-red-creates-issue "only the rehearsal history is read" eq "$(calls 'actions/workflows/')" 1
+expect rehearsal-red-creates-issue "that history is release-rehearsal.yml" \
+  grep -qxF -- "gh api repos/We-Amp/example/actions/workflows/release-rehearsal.yml/runs?branch=main&status=completed&per_page=20" "${WORK}/gh.log"
+expect rehearsal-red-creates-issue "the nightly label is never touched" eq "$(calls 'nightly-red')" 0
+done_case rehearsal-red-creates-issue
+
+# --- a green rehearsal closes its own issue, and only that one
+REH_ISSUE='[{"number":9,"body":"red.\n\n### module / Linux Release Build (x64)\n<!-- nightly-red-job: module / Linux Release Build (x64) -->\n- SHA: x"}]'
+start
+run "${REH_ENV[@]}" FAKE_JOBS_50="$(jobs "601|module / Vendor Dependencies|success|" "602|module / Linux Release Build (x64)|success|" "603|full / Linux TSan|failure|")" \
+  FAKE_ISSUES="${REH_ISSUE}"
+expect rehearsal-green-closes-issue "exit 0" eq "${RC}" 0
+expect rehearsal-green-closes-issue "close 9" eq "$(calls '^gh issue close 9')" 1
+expect rehearsal-green-closes-issue "looked up under the rehearsal label" \
+  grep -qF -- "gh issue list --label lane-rehearsal-red --state open" "${WORK}/gh.log"
+done_case rehearsal-green-closes-issue
 
 # --- missing-env
 start

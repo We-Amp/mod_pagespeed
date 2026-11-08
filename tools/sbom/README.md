@@ -27,7 +27,7 @@ Generates SBOMs from **committed, deterministic inputs** and scans with grype:
 
 | Surface | Input (deterministic) | Status |
 |---|---|---|
-| **npm** | **every** committed lockfile — `pagespeed/system/console/pnpm-lock.yaml` (shipped admin-console SPA), `test/browser/`, `tools/stress/loadtest_collect/`, `tools/js-minify-corpus/bundle-fixtures/` (`package-lock.json`) | covered, **blocking at medium+** |
+| **npm** | **every** committed lockfile — `pagespeed/system/console/pnpm-lock.yaml` (shipped admin-console SPA), `test/browser/`, `test/browser/hydration/` (and its `next-app/` and `nuxt-app/`), `tools/stress/loadtest_collect/`, `tools/js-minify-corpus/bundle-fixtures/` (`package-lock.json`) | covered, **blocking at medium+** |
 | **images** (`--images`) | the **built package-test images** from the local docker cache — `mps-smoke-nginx`, `package-test-test-ubuntu-apache`, `package-test-test-rocky-apache` (a production-representative base OS + Apache/nginx with the actual shipped `.deb` / `.rpm` / `ngx_pagespeed` `.so` installed on top — `test/package-test/Dockerfile.*`) | covered, build-machine only |
 | **cargo** | — | **n/a** — 1.1 ships no Rust (no `Cargo.toml` / `Cargo.lock` in the tree) |
 | **.NET** | the shipped **`.nupkg`** / publish output (the `aspnetcore` middleware + `WeAmpSite`), **NOT** a dev-time `dotnet restore` (that undercounts and the NativeAssets are injected by the build) | **deferred** to a post-build scan |

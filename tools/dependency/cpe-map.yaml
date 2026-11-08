@@ -209,3 +209,11 @@ deps:
     # generate-sbom.py pins it as {"literal": "1.30.6"}; keep that literal lockstep with
     # DEF_NGINX_VER (focal) when the bundled nginx is bumped.
     release_date: "2026-10-14"                   # nginx 1.30.6 stable — upstream release 2026-10-14 (security: CVE-2026-15176, CVE-2026-93479)
+
+  pcre2:
+    cpe: "cpe:2.3:a:pcre:pcre2"                  # NVD: PCRE2 tracked under vendor pcre
+    # Statically linked into the bundled sidecar nginx. SHIPPED version is
+    # PCRE2_VERSION in install/nginx/build_module_in_container.sh = 10.49, built from
+    # the sha256-pinned upstream tarball; generate-sbom.py pins it as {"literal": "10.49"};
+    # keep both lockstep when it is bumped.
+    release_date: "2026-09-28"                   # pcre2-10.49 upstream release

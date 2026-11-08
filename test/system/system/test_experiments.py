@@ -202,26 +202,28 @@ class TestExperimentFramework:
         )
         assert_not_contains(_wget_dump(response), r"PageSpeedExperiment=")
 
-    def test_beacon_includes_the_experiment_id(self, vhost_client):
+    def test_beacon_includes_the_experiment_id(self, vhost_client, server_config):
         vhost = vhost_client(EXPERIMENT_VHOST)
         host_re = re.escape(EXPERIMENT_VHOST)
         for cookie, exptid in (("7", "7"), ("2", "2")):
             response = vhost.get(EXTEND_CACHE, headers={"Cookie": f"PageSpeedExperiment={cookie}"})
             assert_contains(
                 _wget_dump(response),
-                r"pagespeed\.addInstrumentationInit\('/mod_pagespeed_beacon', "
+                rf"pagespeed\.addInstrumentationInit\('{re.escape(server_config.beacon_path)}', "
                 rf"'&exptid={exptid}', 'http://{host_re}(?::[0-9]+)?"
                 rf"{re.escape(EXTEND_CACHE)}'\);",
             )
 
-    def test_no_experiment_group_beacon_has_no_experiment_id(self, vhost_client):
+    def test_no_experiment_group_beacon_has_no_experiment_id(self, vhost_client, server_config):
         vhost = vhost_client(EXPERIMENT_VHOST)
         response = vhost.get(EXTEND_CACHE, headers={"Cookie": "PageSpeedExperiment=0"})
         require_status_ok(response, "extend_cache.html")
         assert response.header("X-Test-Vhost") == EXPERIMENT_VHOST, (
             f"served by {response.header('X-Test-Vhost')!r}"
         )
-        assert_not_contains(_wget_dump(response), r"mod_pagespeed_beacon.*exptid")
+        assert_not_contains(
+            _wget_dump(response), rf"{re.escape(server_config.beacon_path)}.*exptid"
+        )
 
     def test_resource_urls_are_rewritten_to_include_experiment_indexes(self, vhost_client):
         # id=7 is index a and id=2 is index b -- the order they're defined in

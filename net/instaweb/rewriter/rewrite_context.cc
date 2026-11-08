@@ -44,6 +44,7 @@
 #include "net/instaweb/rewriter/public/input_info_utils.h"
 #include "net/instaweb/rewriter/public/named_lock_schedule_rewrite_controller.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
+#include "net/instaweb/rewriter/public/page_work_budget.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_namer.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
@@ -396,6 +397,15 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
     return true;
   }
 
+  static bool AllBuiltFromFetchedInputs(const OutputPartitions& partitions) {
+    for (int i = 0, n = partitions.partition_size(); i < n; ++i) {
+      if (!partitions.partition(i).built_from_fetched_inputs()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Tries to decode result of a cache lookup (which may or may not have
   // succeeded) into partitions (in result->partitions), and also checks the
   // dependency tables.
@@ -449,6 +459,16 @@ class RewriteContext::OutputCacheCallback : public CacheInterface::Callback {
       // that does not exist must be rejected here, as a cache miss, before
       // any consumer can index out of bounds.
       if (!HasValidSlotIndexes(*partitions)) {
+        rewrite_context_->FindServerContext()
+            ->rewrite_stats()
+            ->cached_output_misses()
+            ->Add(1);
+        *can_revalidate = false;
+        return false;
+      }
+      // A result stored before optimizations were built only from inputs
+      // the module fetched itself is rebuilt, not used.
+      if (!AllBuiltFromFetchedInputs(*partitions)) {
         rewrite_context_->FindServerContext()
             ->rewrite_stats()
             ->cached_output_misses()
@@ -992,6 +1012,24 @@ class RewriteContext::FetchContext {
     rewrite_context_->FetchCallbackDone(ok);
   }
 
+  // Answers a conditional request. A null cached_result means a bare 304.
+  void NotModifiedDone(const CachedResult* cached_result) {
+    ResponseHeaders* headers = async_fetch_->response_headers();
+    headers->Clear();
+    bool has_caching_headers =
+        cached_result != nullptr &&
+        rewrite_context_->FindServerContext()
+            ->SetNotModifiedHeadersFromCachedResult(
+                cached_result->output_cache_control(), headers);
+    if (has_caching_headers) {
+      async_fetch_->FixCacheControlForGoogleCache();
+    } else {
+      headers->SetStatusAndReason(HttpStatus::kNotModified);
+    }
+    async_fetch_->HeadersComplete();
+    rewrite_context_->FetchCallbackDone(true);
+  }
+
   void set_requested_hash(const StringPiece& hash) {
     hash.CopyToString(&requested_hash_);
   }
@@ -1174,11 +1212,26 @@ class ScheduleRewriteContextImpl : public ScheduleRewriteContext {
 
 void RewriteContext::InitStats(Statistics* stats) {
   stats->AddVariable(kNumRewritesAbandonedForLockContention);
+  stats->AddVariable(kRewriteBudgetInputBytesHits);
+  stats->AddVariable(kRewriteBudgetInputLoadsHits);
+  stats->AddVariable(kRewriteBudgetContextsHits);
+  stats->AddVariable(kRewriteBudgetPartitionEntriesHits);
   RewriteContext::FetchContext::InitStats(stats);
 }
 
 const char RewriteContext::kNumRewritesAbandonedForLockContention[] =
     "num_rewrites_abandoned_for_lock_contention";
+const char RewriteContext::kRewriteBudgetInputBytesHits[] =
+    "rewrite_budget_input_bytes_hits";
+const char RewriteContext::kRewriteBudgetInputLoadsHits[] =
+    "rewrite_budget_input_loads_hits";
+const char RewriteContext::kRewriteBudgetContextsHits[] =
+    "rewrite_budget_contexts_hits";
+const char RewriteContext::kRewriteBudgetPartitionEntriesHits[] =
+    "rewrite_budget_partition_entries_hits";
+const char RewriteContext::kPageBudgetDebugMessage[] =
+    "Not optimized on this view: the page reached the limit on the "
+    "optimization work one page may cause; a later view continues.";
 const char RewriteContext::kNumDeadlineAlarmInvocations[] =
     "num_deadline_alarm_invocations";
 const char RewriteContext::kHashMismatchMessage[] =
@@ -1304,6 +1357,17 @@ void RewriteContext::Start() {
     }
   }
 
+  // Past the number of rewrites one document may start, this one is left
+  // undone, as when its lock is not available, and nothing is cached for it.
+  if (ChargesPageBudget() && !page_context_taken_ &&
+      (page_context_refused_ || !Driver()->page_work_budget()->TakeContext())) {
+    NotePageBudgetHit(kRewriteBudgetContextsHits);
+    MarkTooBusy();
+    rewrite_done_ = true;
+    RetireRewriteForHtml(RenderOp::kRender);
+    return;
+  }
+
   // The best-case scenario for a Rewrite is that we have already done
   // it, and just need to look up in our metadata cache what the final
   // rewritten URL is.  In the simplest scenario, we are doing a
@@ -1334,11 +1398,37 @@ void RewriteContext::Start() {
           new OutputCacheCallback(this, &RewriteContext::OutputCacheDone));
     }
   } else {
+    ContextSet visited;
+    if (IsWaitedOnBy(previous_handler, &visited)) {
+      // previous_handler cannot finish before we do, so waiting for it would
+      // never finish. Fail the way a recursive rewrite would.
+      RepeatedFailure();
+      return;
+    }
     if (previous_handler->slow()) {
       MarkSlow();
     }
     previous_handler->repeated_.push_back(this);
   }
+}
+
+bool RewriteContext::IsWaitedOnBy(const RewriteContext* context,
+                                  ContextSet* visited) {
+  if (this == context) {
+    return true;
+  }
+  if (!visited->insert(this).second) {
+    return false;
+  }
+  if ((parent_ != nullptr) && parent_->IsWaitedOnBy(context, visited)) {
+    return true;
+  }
+  for (auto repeated : repeated_) {
+    if (repeated->IsWaitedOnBy(context, visited)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 namespace {
@@ -1667,20 +1757,78 @@ bool RewriteContext::CreateOutputResourceFromContent(
 void RewriteContext::OutputCacheRevalidate(
     const InputInfoStarVector& to_revalidate) {
   DCHECK(!to_revalidate.empty());
-  outstanding_fetches_ = to_revalidate.size();
+  if (!ChargesPageBudget()) {
+    outstanding_fetches_ = to_revalidate.size();
+    for (auto input_info : to_revalidate) {
+      ResourcePtr resource = slots_[input_info->index()]->resource();
+      resource->LoadAsync(
+          Resource::kReportFailureIfNotCacheable, Driver()->request_context(),
+          new ResourceRevalidateCallback(this, resource, input_info));
+    }
+    return;
+  }
 
-  for (auto input_info : to_revalidate) {
+  // For an HTML document the loads share its PageWorkBudget, as in
+  // FetchInputs().
+  revalidate_inputs_ = to_revalidate;
+  next_revalidate_input_ = 0;
+  RevalidateInputs();
+}
+
+void RewriteContext::RevalidateInputs() {
+  PageWorkBudget* budget = Driver()->page_work_budget();
+  bool started_load = false;
+  while (next_revalidate_input_ < revalidate_inputs_.size()) {
+    if (budget->InputBytesSpent()) {
+      // The rest cannot be checked, so the cached result is not used; the
+      // rewrite then stops in FetchInputs() for the same reason.
+      revalidate_ok_ = false;
+      next_revalidate_input_ = revalidate_inputs_.size();
+      break;
+    }
+    if (!budget->TryStartInputLoad()) {
+      WaitForPageInputLoad(&RewriteContext::ResumeRevalidateInputs);
+      return;
+    }
+    started_load = true;
+    InputInfo* input_info = revalidate_inputs_[next_revalidate_input_++];
+    ++outstanding_fetches_;
     ResourcePtr resource = slots_[input_info->index()]->resource();
     resource->LoadAsync(
         Resource::kReportFailureIfNotCacheable, Driver()->request_context(),
         new ResourceRevalidateCallback(this, resource, input_info));
   }
+  if (!started_load) {
+    RunResumed(budget->NextWaitingIfRoom());
+  }
+  if (outstanding_fetches_ == 0) {
+    FinishRevalidation();
+  }
+}
+
+void RewriteContext::ResumeRevalidateInputs() {
+  DCHECK(waiting_for_input_load_);
+  waiting_for_input_load_ = false;
+  --num_predecessors_;
+  RevalidateInputs();
 }
 
 void RewriteContext::RepeatedSuccess(const RewriteContext* primary) {
   CHECK(outputs_.empty());
   CHECK_EQ(num_slots(), primary->num_slots());
   CHECK_EQ(primary->num_output_partitions(), primary->num_outputs());
+  // The copy counts against the document's partition entries; past them this
+  // repetition is left undone and uncached.
+  int64 num_entries = primary->partitions_->partition_size() +
+                      primary->partitions_->other_dependency_size();
+  for (const CachedResult& partition : primary->partitions_->partition()) {
+    num_entries += partition.input_size();
+  }
+  if (!ChargePagePartitionEntries(num_entries, PageBudgetNote::kNow)) {
+    MarkTooBusy();
+    RepeatedFailure();
+    return;
+  }
   // Copy over busy bit, partition tables, outputs, and render_slot_ (as well as
   // was_optimized) information --- everything we can set in normal
   // OutputCacheDone.
@@ -1709,6 +1857,12 @@ void RewriteContext::RepeatedSuccess(const RewriteContext* primary) {
 
   ok_to_write_output_partitions_ = false;
   Finalize();
+  if (!has_parent()) {
+    // Finalize() has rendered us, so our copy of the primary's partitions is
+    // no longer needed.  Nested contexts keep theirs: their parent still reads
+    // them when it harvests.
+    partitions_ = std::make_unique<OutputPartitions>();
+  }
 }
 
 void RewriteContext::RepeatedFailure() {
@@ -1747,7 +1901,20 @@ void RewriteContext::FetchInputs() {
   // A fetch's inputs are whatever its URL names, so they are loaded a few at
   // a time, and no more are started once the ones loaded so far exceed the
   // budget; ResourceFetchDone() calls back here to go on with the rest.
-  int first_slot = IsFetchRewrite() ? fetch_->num_inputs_started() : 0;
+  //
+  // The inputs of the rewrites of an HTML document share its
+  // PageWorkBudget: only a few load at once, a rewrite that finds no room
+  // waits and is resumed here when a load ends, and no load starts once the
+  // document has loaded its byte budget.
+  PageWorkBudget* page_budget = nullptr;
+  int first_slot = 0;
+  if (IsFetchRewrite()) {
+    first_slot = fetch_->num_inputs_started();
+  } else if (ChargesPageBudget()) {
+    page_budget = Driver()->page_work_budget();
+    first_slot = next_input_slot_;
+  }
+  bool started_page_load = false;
   for (int i = first_slot, n = slots_.size(); i < n; ++i) {
     if (IsFetchRewrite()) {
       if ((outstanding_fetches_ >= kMaxConcurrentFetchInputs) ||
@@ -1759,6 +1926,20 @@ void RewriteContext::FetchInputs() {
     const ResourceSlotPtr& slot = slots_[i];
     ResourcePtr resource(slot->resource());
     if (!(resource->loaded() && resource->HttpStatusOk())) {
+      if (page_budget != nullptr) {
+        if (page_budget->InputBytesSpent()) {
+          page_input_bytes_spent_ = true;
+          break;
+        }
+        if (!page_budget->TryStartInputLoad()) {
+          next_input_slot_ = i;
+          NotePageBudgetHit(kRewriteBudgetInputLoadsHits);
+          WaitForPageInputLoad(&RewriteContext::ResumeFetchInputs);
+          break;
+        }
+        started_page_load = true;
+        next_input_slot_ = i + 1;
+      }
       ++outstanding_fetches_;
 
       // Sometimes we can end up needing pagespeed resources as inputs.
@@ -1768,7 +1949,19 @@ void RewriteContext::FetchInputs() {
       // resource object (e.g. if we got a metadata hit on the previous step).
       bool handled_internally = false;
       GoogleUrl resource_gurl(resource->url());
-      if (FindServerContext()->IsPagespeedResource(resource_gurl)) {
+      bool is_pagespeed_resource =
+          FindServerContext()->IsPagespeedResource(resource_gurl);
+      if (is_pagespeed_resource && has_parent() && Driver()->is_nested()) {
+        // A nested context inside a reconstruction does not start another
+        // one. As with a lock failure, this says nothing about the resource,
+        // so don't remember it.
+        handled_internally = true;
+        ok_to_write_output_partitions_ = false;
+        Driver()->message_handler()->Message(
+            kInfo, "Not reconstructing %s inside another reconstruction",
+            resource->UrlForDebug().c_str());
+        ResourceCallbackUtils(this, resource, i).Done(false);
+      } else if (is_pagespeed_resource) {
         RewriteDriver* nested_driver = Driver()->Clone();
         RewriteFilter* filter = nullptr;
         // We grab the filter now (and not just call DecodeOutputResource
@@ -1815,8 +2008,85 @@ void RewriteContext::FetchInputs() {
     }
   }
 
+  if ((page_budget != nullptr) && !started_page_load &&
+      !waiting_for_input_load_) {
+    // This turn started no load, so it passes to a rewrite that waits.
+    RunResumed(page_budget->NextWaitingIfRoom());
+  }
+
   --num_predecessors_;
   Activate();  // TODO(jmarantz): remove.
+}
+
+void RewriteContext::ResumeFetchInputs() {
+  DCHECK(waiting_for_input_load_);
+  waiting_for_input_load_ = false;
+  --num_predecessors_;
+  FetchInputs();
+}
+
+bool RewriteContext::ChargesPageBudget() const {
+  const RewriteContext* root = this;
+  while (root->parent_ != nullptr) {
+    root = root->parent_;
+  }
+  return !root->IsFetchRewrite();
+}
+
+void RewriteContext::WaitForPageInputLoad(void (RewriteContext::*resume)()) {
+  DCHECK(!waiting_for_input_load_);
+  waiting_for_input_load_ = true;
+  ++num_predecessors_;
+  RunResumed(Driver()->page_work_budget()->WaitForInputLoad(
+      MakeFunction(this, resume)));
+}
+
+void RewriteContext::RunResumed(Function* resume) {
+  if (resume != nullptr) {
+    Driver()->AddRewriteTask(resume);
+  }
+}
+
+void RewriteContext::NotePageBudgetHit(const char* stat_name) {
+  Driver()->statistics()->GetVariable(stat_name)->Add(1);
+  if ((stat_name != kRewriteBudgetInputLoadsHits) && Driver()->DebugMode()) {
+    protobuf::RepeatedPtrField<GoogleString> messages;
+    *messages.Add() = kPageBudgetDebugMessage;
+    AddDebugMessages(messages);
+  }
+}
+
+void RewriteContext::StopForPageInputBytes() {
+  NotePageBudgetHit(kRewriteBudgetInputBytesHits);
+  MarkTooBusy();
+  Finalize();
+}
+
+bool RewriteContext::TakePagePartitionEntries(int64 num_entries) {
+  return ChargePagePartitionEntries(num_entries, PageBudgetNote::kDeferred);
+}
+
+bool RewriteContext::ChargePagePartitionEntries(int64 num_entries,
+                                                PageBudgetNote note) {
+  if (!ChargesPageBudget() ||
+      Driver()->page_work_budget()->TakePartitionEntries(num_entries)) {
+    return true;
+  }
+  switch (note) {
+    case PageBudgetNote::kNow:
+      NotePageBudgetHit(kRewriteBudgetPartitionEntriesHits);
+      break;
+    case PageBudgetNote::kDeferred:
+      deferred_page_budget_hit_ = kRewriteBudgetPartitionEntriesHits;
+      break;
+    case PageBudgetNote::kStatisticOnly:
+      Driver()
+          ->statistics()
+          ->GetVariable(kRewriteBudgetPartitionEntriesHits)
+          ->Add(1);
+      break;
+  }
+  return false;
 }
 
 void RewriteContext::ResourceFetchDone(
@@ -1840,6 +2110,10 @@ void RewriteContext::ResourceFetchDone(
     }
     FetchInputs();
   } else {
+    if (ChargesPageBudget()) {
+      RunResumed(Driver()->page_work_budget()->InputLoadDone(
+          resource->loaded() ? resource->UncompressedContentsSize() : 0));
+    }
     Activate();
   }
 }
@@ -1862,21 +2136,34 @@ void RewriteContext::ResourceRevalidateDone(InputInfo* input_info,
 
   revalidate_ok_ = revalidate_ok_ && ok;
   --outstanding_fetches_;
-  if (outstanding_fetches_ == 0) {
-    if (revalidate_ok_) {
-      // Increment num_successful_revalidates.
-      if (!has_parent()) {
-        AbstractLogRecord* log_record = Driver()->log_record();
-        ScopedMutex lock(log_record->mutex());
-        MetadataCacheInfo* metadata_log_info =
-            log_record->logging_info()->mutable_metadata_cache_info();
-        metadata_log_info->set_num_successful_revalidates(
-            metadata_log_info->num_successful_revalidates() + 1);
-      }
-      OutputCacheHit(true /* update the cache with new timestamps*/);
-    } else {
-      OutputCacheMiss();
+  if (ChargesPageBudget()) {
+    ResourcePtr resource = slots_[input_info->index()]->resource();
+    RunResumed(Driver()->page_work_budget()->InputLoadDone(
+        resource->loaded() ? resource->UncompressedContentsSize() : 0));
+    if (waiting_for_input_load_) {
+      // RevalidateInputs() goes on with the rest once resumed.
+      return;
     }
+  }
+  if (outstanding_fetches_ == 0) {
+    FinishRevalidation();
+  }
+}
+
+void RewriteContext::FinishRevalidation() {
+  if (revalidate_ok_) {
+    // Increment num_successful_revalidates.
+    if (!has_parent()) {
+      AbstractLogRecord* log_record = Driver()->log_record();
+      ScopedMutex lock(log_record->mutex());
+      MetadataCacheInfo* metadata_log_info =
+          log_record->logging_info()->mutable_metadata_cache_info();
+      metadata_log_info->set_num_successful_revalidates(
+          metadata_log_info->num_successful_revalidates() + 1);
+    }
+    OutputCacheHit(true /* update the cache with new timestamps*/);
+  } else {
+    OutputCacheMiss();
   }
 }
 
@@ -1890,7 +2177,11 @@ void RewriteContext::Activate() {
   if (ReadyToRewrite()) {
     if (!IsFetchRewrite()) {
       DCHECK(started_);
-      StartRewriteForHtml();
+      if (page_input_bytes_spent_) {
+        StopForPageInputBytes();
+      } else {
+        StartRewriteForHtml();
+      }
     } else {
       StartRewriteForFetch();
     }
@@ -1958,11 +2249,40 @@ void RewriteContext::PartitionDone(RewriteResult result_or_busy) {
   }
 }
 
+bool RewriteContext::FetchWritesPartition() const {
+  if (fetch_ == nullptr || num_slots() != 1) {
+    return false;
+  }
+  ResourcePtr input(slot(0)->resource());
+  if (input.get() == nullptr || !input->is_authorized_domain()) {
+    return false;
+  }
+  // The output an HTML rewrite of this input creates, through the same
+  // domain mapping (RewriteDriver::CreateOutputResourceFromResource).
+  GoogleString failure_reason;
+  OutputResourcePtr canonical(Driver()->CreateOutputResourceFromResource(
+      id(), encoder(), resource_context(), input, kind(), &failure_reason));
+  if (canonical.get() == nullptr) {
+    return false;
+  }
+  // Give it the hash, extension and signature of what the fetch produced, so
+  // that the two URLs agree exactly when the directory, domain, shard and
+  // encoded name do.
+  OutputResourcePtr fetched(fetch_->output_resource());
+  canonical->clear_hash();
+  ResourceNamer* canonical_name = canonical->mutable_full_name();
+  const ResourceNamer& fetched_name = fetched->full_name();
+  canonical_name->set_hash(fetched_name.hash());
+  canonical_name->set_ext(fetched_name.ext());
+  canonical_name->set_signature(fetched_name.signature());
+  return canonical->UrlEvenIfHashNotSet() == fetched->UrlEvenIfHashNotSet();
+}
+
 void RewriteContext::WritePartition() {
   ServerContext* server_context = FindServerContext();
   // If this was an IPRO rewrite which was forced for uncacheable rewrite, we
-  // should not write partition data.  Nor may a fetch write it for a filter
-  // whose partitioning the fetch path does not run.
+  // should not write partition data.  Nor may a fetch write it unless the
+  // result is the one an HTML rewrite would store (FetchWritesPartition()).
   const bool fetch_may_write = !IsFetchRewrite() || FetchWritesPartition();
   if (fetch_may_write && ok_to_write_output_partitions_ &&
       !server_context->shutting_down()) {
@@ -1975,6 +2295,11 @@ void RewriteContext::WritePartition() {
       CacheInterface* metadata_cache = server_context->metadata_cache();
       GoogleString buf;
       bool serialized;
+      // Every input of a rewrite is loaded as the module fetched it
+      // (CacheableResourceBase), so results stored from here on say so.
+      for (int i = 0, n = partitions_->partition_size(); i < n; ++i) {
+        partitions_->mutable_partition(i)->set_built_from_fetched_inputs(true);
+      }
       {
 #ifndef NDEBUG
         for (int i = 0, n = partitions_->partition_size(); i < n; ++i) {
@@ -2057,6 +2382,24 @@ void RewriteContext::AddNestedContext(RewriteContext* context) {
   ++num_pending_nested_;
   nested_.push_back(context);
   context->parent_ = this;
+  // A nested rewrite takes its place in the document's budget when it is
+  // created, so that the rewrites created ahead of any Start() stay bounded
+  // too; one created past it fails in Start().
+  if (context->ChargesPageBudget()) {
+    if (Driver()->page_work_budget()->TakeContext()) {
+      context->page_context_taken_ = true;
+    } else {
+      context->page_context_refused_ = true;
+    }
+  }
+}
+
+bool RewriteContext::PageAllowsNestedContext() {
+  if (!ChargesPageBudget() || Driver()->page_work_budget()->HasContextLeft()) {
+    return true;
+  }
+  deferred_page_budget_hit_ = kRewriteBudgetContextsHits;
+  return false;
 }
 
 void RewriteContext::StartNestedTasks() {
@@ -2099,6 +2442,13 @@ void RewriteContext::CheckAndAddOtherDependency(const InputInfo& input_info) {
   if (input_info.has_url() && HasDuplicateOtherDependency(input_info)) {
     return;
   }
+  // An entry can have more than one expiry for the same url, so de-dup every
+  // entry on its contents.
+  InputInfo key = input_info;
+  key.clear_index();
+  if (!other_dependency_set_.insert(key.SerializeAsString()).second) {
+    return;
+  }
 
   CheckNotFrozen();
   InputInfo* dep = partitions_->add_other_dependency();
@@ -2114,6 +2464,34 @@ void RewriteContext::CheckAndAddOtherDependency(const InputInfo& input_info) {
   if (dep->has_url()) {
     int index = partitions_->other_dependency_size() - 1;
     other_dependency_map_[dep->url()] = index;
+  }
+}
+
+void RewriteContext::AddDebugMessages(
+    const protobuf::RepeatedPtrField<GoogleString>& messages) {
+  CheckNotFrozen();
+  const int64 remaining = Driver()->DebugOutputBytesRemaining();
+  for (const GoogleString& message : messages) {
+    if (debug_message_set_.find(message) != debug_message_set_.end()) {
+      continue;
+    }
+    const int64 size = static_cast<int64>(message.size());
+    if (remaining >= 0 && size > remaining - debug_message_bytes_) {
+      // This context cannot emit more than the document's budget allows, so
+      // it does not hold on to messages past it.
+      return;
+    }
+    debug_message_set_.insert(message);
+    partitions_->add_debug_message(message);
+    debug_message_bytes_ += size;
+  }
+}
+
+void RewriteContext::AddDebugMessageToParent(const GoogleString& message) {
+  if (has_parent()) {
+    protobuf::RepeatedPtrField<GoogleString> messages;
+    *messages.Add() = message;
+    parent()->AddDebugMessages(messages);
   }
 }
 
@@ -2158,6 +2536,13 @@ void RewriteContext::RewriteDoneImpl(RewriteResult result,
   Driver()->request_context()->ReleaseDependentTraceContext(
       dependent_request_trace_);
   dependent_request_trace_ = nullptr;
+  if (deferred_page_budget_hit_ != nullptr) {
+    // Rewrite() reached a limit of the document's budget; note it here, on
+    // the rewrite sequence, and leave the rewrite undone.
+    NotePageBudgetHit(deferred_page_budget_hit_);
+    deferred_page_budget_hit_ = nullptr;
+    result = kTooBusy;
+  }
   if (result == kTooBusy) {
     MarkTooBusy();
   } else {
@@ -2222,6 +2607,30 @@ void RewriteContext::Propagate(RenderOp render_op) {
   bool render_slots = (render_op == RenderOp::kRender);
   DCHECK(rewrite_done_ && (num_pending_nested_ == 0));
   if (rewrite_done_ && (num_pending_nested_ == 0)) {
+    // The input info reported below to slots that aggregate it counts
+    // against the document's partition entries. When it does not fit, those
+    // slots drop what they hold, so that nothing is built from part of it.
+    bool report_inputs = true;
+    int64 num_reported = 0;
+    for (int p = 0, np = num_output_partitions(); p < np; ++p) {
+      const CachedResult* partition = output_partition(p);
+      for (int i = 0; i < partition->input_size(); ++i) {
+        int slot_index = partition->input(i).index();
+        if (render_slots_[slot_index] &&
+            slots_[slot_index]->need_aggregate_input_info()) {
+          num_reported +=
+              partitions_->other_dependency_size() + partition->input_size();
+        }
+      }
+    }
+    // This rewrite's partitions are already written (WritePartition()) and
+    // its own result stands, so a refusal is counted but adds no debug
+    // message to them; the slots that aggregate input info drop it below.
+    if ((num_reported > 0) &&
+        !ChargePagePartitionEntries(num_reported,
+                                    PageBudgetNote::kStatisticOnly)) {
+      report_inputs = false;
+    }
     if (render_slots) {
       if (was_too_busy_) {
         WillNotRender();
@@ -2231,8 +2640,7 @@ void RewriteContext::Propagate(RenderOp render_op) {
     }
     CHECK_EQ(num_output_partitions(), num_outputs());
     if (has_parent()) {
-      parent()->partitions()->mutable_debug_message()->MergeFrom(
-          partitions_->debug_message());
+      parent()->AddDebugMessages(partitions_->debug_message());
     } else if (num_slots() >= 1) {
       if (render_slots) {
         Driver()->InsertDebugComments(partitions_->debug_message(),
@@ -2255,8 +2663,7 @@ void RewriteContext::Propagate(RenderOp render_op) {
       int n = partition->input_size();
       if (partition->debug_message_size() > 0) {
         if (has_parent()) {
-          parent()->partitions()->mutable_debug_message()->MergeFrom(
-              partition->debug_message());
+          parent()->AddDebugMessages(partition->debug_message());
         } else if (render_slots) {
           // If no input slots defined, then we created a partition just to hold
           // debug information.  Put that information in 0th slot of context.
@@ -2282,7 +2689,9 @@ void RewriteContext::Propagate(RenderOp render_op) {
           ResourceSlotPtr slot = slots_[slot_index];
           ResourcePtr resource(outputs_[p]);
           slot->SetResource(resource);
-          if (slot->need_aggregate_input_info()) {
+          if (slot->need_aggregate_input_info() && !report_inputs) {
+            slot->DropReportedInputs();
+          } else if (slot->need_aggregate_input_info()) {
             for (int j = 0; j < partitions_->other_dependency_size(); ++j) {
               const InputInfo& other_dep = partitions_->other_dependency(j);
               slot->ReportInput(other_dep);
@@ -2811,7 +3220,24 @@ bool RewriteContext::LookupMetadataForOutputResourceImpl(
   return true;
 }
 
+bool RewriteContext::FetchNotModified(const OutputResourcePtr& output_resource,
+                                      AsyncFetch* fetch,
+                                      MessageHandler* message_handler) {
+  fetch_not_modified_ = true;
+  Driver()->InitiateFetch(this);
+  if (!PrepareFetch(output_resource, fetch, message_handler)) {
+    return false;
+  }
+  Driver()->AddRewriteTask(MakeFunction(this, &RewriteContext::StartFetch,
+                                        &RewriteContext::CancelFetch));
+  return true;
+}
+
 void RewriteContext::CancelFetch() {
+  if (fetch_not_modified_) {
+    fetch_->NotModifiedDone(nullptr);
+    return;
+  }
   AsyncFetch* fetch = fetch_->async_fetch();
   fetch->response_headers()->SetStatusAndReason(
       HttpStatus::kInternalServerError /* 500 */);
@@ -2859,6 +3285,7 @@ void RewriteContext::FetchCacheDone(CacheLookupResult* cache_result) {
       // the original instead, so try to do that.
       // (For simplicity, we will do an another rewrite attempt if it's not in
       // the cache).
+      fallback_needs_fetched_input_ = FallbackToInputNeedsFetchedEntry();
       FetchTryFallback(slot(0)->resource()->url(), "");
       return;
     }
@@ -2866,6 +3293,31 @@ void RewriteContext::FetchCacheDone(CacheLookupResult* cache_result) {
 
   // Didn't figure out anything clever; so just rewrite on demand.
   StartFetchReconstruction();
+}
+
+void RewriteContext::FetchNotModifiedCacheDone(
+    CacheLookupResult* cache_result) {
+  std::unique_ptr<CacheLookupResult> owned_cache_result(cache_result);
+  CheckNotFrozen();
+  partitions_.reset(owned_cache_result->partitions.release());
+  LogMetadataCacheInfo(owned_cache_result->cache_ok,
+                       owned_cache_result->can_revalidate);
+
+  // Only a current record for exactly the requested hash may speak for the
+  // response. Inputs past their lifetime could have changed their caching
+  // headers, so a stale record does not qualify.
+  const CachedResult* vouching_result = nullptr;
+  if (owned_cache_result->cache_ok && !stale_rewrite_ &&
+      num_output_partitions() == 1) {
+    const CachedResult* result = output_partition(0);
+    OutputResourcePtr output_resource;
+    if (result->optimizable() && result->has_output_cache_control() &&
+        CreateOutputResourceForCachedOutput(result, &output_resource) &&
+        output_resource->hash() == fetch_->requested_hash()) {
+      vouching_result = result;
+    }
+  }
+  fetch_->NotModifiedDone(vouching_result);
 }
 
 void RewriteContext::FetchTryFallback(const GoogleString& url,
@@ -2881,9 +3333,11 @@ void RewriteContext::FetchFallbackCacheDone(HTTPCache::FindResult result,
 
   StringPiece contents;
   ResponseHeaders* response_headers = data->response_headers();
-  bool usable = (result.status == HTTPCache::kFound) &&
-                data->http_value()->ExtractContents(&contents) &&
-                (response_headers->status_code() == HttpStatus::kOK);
+  bool usable =
+      (result.status == HTTPCache::kFound) &&
+      data->http_value()->ExtractContents(&contents) &&
+      (response_headers->status_code() == HttpStatus::kOK) &&
+      (!fallback_needs_fetched_input_ || data->http_value()->IsFetchedInput());
   // De-alias a borrowed mmap view before the port write, exactly like
   // CacheUrlAsyncFetcher's hit serve (see the zero-copy note there): the
   // pin ('data', released when this function returns) must not be relied on
@@ -2941,7 +3395,8 @@ bool RewriteContext::CanFetchFallbackToOriginal(
 void RewriteContext::StartFetch() {
   DCHECK_EQ(kind(), fetch_->output_resource()->kind());
 
-  if (!CreationLockBeforeStartFetch()) {
+  // A conditional request rebuilds nothing, so it has nothing to lock for.
+  if (fetch_not_modified_ || !CreationLockBeforeStartFetch()) {
     StartFetchImpl();
   } else {
     // Acquire the lock early, before checking the cache. This way, if another
@@ -2959,6 +3414,12 @@ void RewriteContext::CallStartFetchImpl() {
 }
 
 void RewriteContext::StartFetchImpl() {
+  if (fetch_not_modified_) {
+    FindServerContext()->metadata_cache()->Get(
+        partition_key_, new OutputCacheCallback(
+                            this, &RewriteContext::FetchNotModifiedCacheDone));
+    return;
+  }
   // If we have an on-the-fly resource, we almost always want to reconstruct it
   // --- there will be no shortcuts in the metadata cache unless the rewrite
   // fails, and it's ultra-cheap to reconstruct anyway.
@@ -3071,10 +3532,9 @@ bool RewriteContext::FetchContextDetached() {
   return fetch_->detached();
 }
 
-bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
-                                          StringPiece contents,
-                                          AsyncFetch* async_fetch,
-                                          MessageHandler* handler) {
+bool RewriteContext::IsFallbackContentTypeAllowed(StringPiece output_url_base,
+                                                  AsyncFetch* async_fetch,
+                                                  MessageHandler* handler) {
   const ContentType* content_type =
       async_fetch->response_headers()->DetermineContentType();
   if (content_type == nullptr ||
@@ -3090,6 +3550,16 @@ bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
         (content_type == nullptr ? "[missing or unrecognized]"
                                  : content_type->mime_type()));
 
+    return false;
+  }
+  return true;
+}
+
+bool RewriteContext::SendFallbackResponse(StringPiece output_url_base,
+                                          StringPiece contents,
+                                          AsyncFetch* async_fetch,
+                                          MessageHandler* handler) {
+  if (!IsFallbackContentTypeAllowed(output_url_base, async_fetch, handler)) {
     return false;
   }
 

@@ -63,6 +63,16 @@ struct CycloneCacheHandle {
   bool running = false;
 };
 
+// Test-only: read handles alive in this process, counted at construction and
+// destruction.  A test that fails allocations mid-read asserts it returns to
+// its starting value, so a leaked reference shows up.  Read through
+// cyclone_cache_test_live_read_handles(), not declared in cyclone_wrapper.h.
+// Compiled out of optimized (NDEBUG) builds, so production reads pay nothing;
+// the function then returns -1 and the tests skip the count check.
+#ifndef NDEBUG
+static std::atomic<int> g_live_read_handles{0};
+#endif
+
 // Internal structure that holds a read handle with reference counting.
 // Supports both zero-copy (mmap'd) access and a lazy data copy for compatibility.
 struct CycloneReadHandle {
@@ -73,6 +83,19 @@ struct CycloneReadHandle {
       nullptr;                   // Direct pointer to mmap'd data (zero-copy)
   size_t data_size = 0;          // Size of the data
   std::atomic<int> refcount{1};  // Reference count, starts at 1
+
+  CycloneReadHandle() {
+#ifndef NDEBUG
+    g_live_read_handles.fetch_add(1, std::memory_order_relaxed);
+#endif
+  }
+  ~CycloneReadHandle() {
+#ifndef NDEBUG
+    g_live_read_handles.fetch_sub(1, std::memory_order_relaxed);
+#endif
+  }
+  CycloneReadHandle(const CycloneReadHandle&) = delete;
+  CycloneReadHandle& operator=(const CycloneReadHandle&) = delete;
 
   // Lazily initialize data_copy from the mmap'd data.
   // Thread-safe: uses std::call_once to ensure initialization happens exactly once.
@@ -729,6 +752,16 @@ void cyclone_cache_test_busy_next_pre_write_exists(void) {
 // tests only.
 void cyclone_cache_test_fail_next_read(int kind) {
   g_test_fail_next_read.store(kind, std::memory_order_relaxed);
+}
+
+// Read handles currently alive (see g_live_read_handles; -1 in NDEBUG
+// builds, which do not count).  Unit tests only.
+int cyclone_cache_test_live_read_handles(void) {
+#ifndef NDEBUG
+  return g_live_read_handles.load(std::memory_order_relaxed);
+#else
+  return -1;
+#endif
 }
 
 void cyclone_cache_test_fail_next_commit(int kind) {

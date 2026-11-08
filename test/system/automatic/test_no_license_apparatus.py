@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""mod_pagespeed 2.1 ships without a licensing apparatus.
+"""mod_pagespeed ships without a licensing apparatus.
 
 Cross-port GA-gate assertions; this file runs under every port's system-test
 job (Apache / nginx / Envoy / IIS):

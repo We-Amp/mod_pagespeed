@@ -62,6 +62,7 @@ class CriticalCssBeaconFilter : public CssSummarizerBase {
 
   static void InitStats(Statistics* statistics);
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "CriticalCssBeacon"; }
   const char* id() const override { return "cb"; }
 

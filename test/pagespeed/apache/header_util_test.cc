@@ -96,10 +96,14 @@ TEST_F(HeaderUtilTest, DisableCaching) {
   EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, GetCacheControl());
 }
 
+// Rewritten HTML is never more storable than the origin or the operator
+// said: a private or a no-store on any Cache-Control line stays.
 TEST_F(HeaderUtilTest, DisablePrivateCaching) {
   SetCacheControl("private, max-age=60");
   DisableCacheControlHeader(&request_);
-  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, GetCacheControl());
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
+                      HttpAttributes::kPrivate),
+               GetCacheControl());
 }
 
 TEST_F(HeaderUtilTest, DisablePublicCaching) {
@@ -112,7 +116,7 @@ TEST_F(HeaderUtilTest, DisableNostore) {
   SetCacheControl("must-revalidate, private, no-store");
   DisableCacheControlHeader(&request_);
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
-                      HttpAttributes::kNoStore),
+                      HttpAttributes::kNoStore, ", ", HttpAttributes::kPrivate),
                GetCacheControl());
 }
 
@@ -121,7 +125,7 @@ TEST_F(HeaderUtilTest, DisableNostoreRetainNoCache) {
   SetLastModified("some random string");
   DisableCacheControlHeader(&request_);
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
-                      HttpAttributes::kNoStore),
+                      HttpAttributes::kNoStore, ", ", HttpAttributes::kPrivate),
                GetCacheControl());
   EXPECT_STREQ("some random string", GetLastModified());
 }
@@ -133,7 +137,7 @@ TEST_F(HeaderUtilTest, DisableCachingRelatedHeaders) {
   DisableCacheControlHeader(&request_);
   EXPECT_EQ(nullptr, GetLastModified());
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
-                      HttpAttributes::kNoStore),
+                      HttpAttributes::kNoStore, ", ", HttpAttributes::kPrivate),
                GetCacheControl());
 }
 
@@ -194,8 +198,88 @@ TEST_F(HeaderUtilTest, DisableErrNostore) {
   SetErrCacheControl("must-revalidate, private, no-store");
   DisableCacheControlHeader(&request_);
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
+                      HttpAttributes::kNoStore, ", ", HttpAttributes::kPrivate),
+               GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableErrPrivate) {
+  // "Header always set" and script origins put their Cache-Control in
+  // err_headers_out.
+  SetErrCacheControl("private, max-age=600");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
+                      HttpAttributes::kPrivate),
+               GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableKeepsPrivateAndNoStoreFromEveryLine) {
+  // Two lines in headers_out, as "Header add" leaves them: the second
+  // line's private and no-store stay, and only one line goes out.
+  apr_table_add(request_.headers_out, HttpAttributes::kCacheControl,
+                "public, max-age=600");
+  apr_table_add(request_.headers_out, HttpAttributes::kCacheControl,
+                "private, no-store");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
+                      HttpAttributes::kPrivate, ", ", HttpAttributes::kNoStore),
+               GetCacheControl());
+  int count = 0;
+  apr_table_do(
+      [](void* rec, const char*, const char*) {
+        ++*static_cast<int*>(rec);
+        return 1;
+      },
+      &count, request_.headers_out, HttpAttributes::kCacheControl, nullptr);
+  EXPECT_EQ(1, count);
+}
+
+TEST_F(HeaderUtilTest, DisableKeepsNoStoreFromASecondErrLine) {
+  apr_table_add(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "max-age=600");
+  apr_table_add(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "no-store");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
                       HttpAttributes::kNoStore),
                GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableKeepsPrivateFromBothTables) {
+  SetCacheControl("public, max-age=600");
+  apr_table_add(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "s-maxage=600");
+  apr_table_add(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "Private");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
+                      HttpAttributes::kPrivate),
+               GetCacheControl());
+  EXPECT_EQ(nullptr, GetErrCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisablePrivateWithFieldNames) {
+  // The qualified form limits the named fields only; the module keeps the
+  // whole response private, which is never more storable.
+  SetCacheControl("private=\"Set-Cookie\", max-age=600");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", ",
+                      HttpAttributes::kPrivate),
+               GetCacheControl());
+}
+
+TEST_F(HeaderUtilTest, DisableNeitherOnSeveralLinesIsUnchanged) {
+  // With neither private nor no-store anywhere, the value is as before.
+  apr_table_add(request_.headers_out, HttpAttributes::kCacheControl,
+                "public, max-age=600");
+  apr_table_add(request_.headers_out, HttpAttributes::kCacheControl,
+                "s-maxage=600");
+  apr_table_set(request_.err_headers_out, HttpAttributes::kCacheControl,
+                "max-age=60");
+  DisableCacheControlHeader(&request_);
+  EXPECT_STREQ(HttpAttributes::kNoCacheMaxAge0, GetCacheControl());
   EXPECT_EQ(nullptr, GetErrCacheControl());
 }
 
@@ -235,7 +319,7 @@ TEST_F(HeaderUtilTest, DisableCachingRelatedHeadersInErrHeaders) {
   EXPECT_EQ(nullptr,
             apr_table_get(request_.err_headers_out, HttpAttributes::kEtag));
   EXPECT_STREQ(StrCat(HttpAttributes::kNoCacheMaxAge0, ", must-revalidate, ",
-                      HttpAttributes::kNoStore),
+                      HttpAttributes::kNoStore, ", ", HttpAttributes::kPrivate),
                GetCacheControl());
 }
 

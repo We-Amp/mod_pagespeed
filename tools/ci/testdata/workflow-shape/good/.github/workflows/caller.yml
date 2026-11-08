@@ -21,7 +21,7 @@ jobs:
     name: CI gate
     needs: [pr]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check needed results
         run: |

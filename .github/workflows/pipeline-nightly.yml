@@ -10,7 +10,7 @@
 # Jobs by class:
 #   fleet-heavy   nightly-vendor (the vendored tree for every Linux job),
 #                 linux-offline-build, apache-asan-stress, apache-daemon-lane,
-#                 shared-cache-vary,
+#                 shared-cache-vary, hydration-browser,
 #                 nginx-asan-stress,
 #                 nginx-protocol-matrix, full-tree-lint (3 shards), fuzz-css, fuzz-html,
 #                 fuzz-packs, fuzz-js
@@ -79,7 +79,8 @@ permissions: {}
 jobs:
   event-guard:
     name: Event guard (refuses merge_group, unexpected events, refs and actors)
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     steps:
       - name: Refuse events, refs and actors this pipeline must never run on
         env:
@@ -117,7 +118,8 @@ jobs:
       contents: read
     name: Vendor Dependencies (nightly)
     needs: event-guard
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 45
     outputs:
       short_sha: ${{ steps.stamp.outputs.short_sha }}
@@ -168,8 +170,8 @@ jobs:
           key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
 
       # tools/vendor-deps.sh clones the git-only dependencies and fills the
-      # Bazel repository cache; it needs python3, git and a git identity that
-      # can read those repositories (the runner host's own).
+      # Bazel repository cache; it needs python3 and git. The repositories are
+      # public and cloned over anonymous https, so no git identity is needed.
       - name: Vendor all dependencies
         if: steps.vendor-cache.outputs.cache-hit != 'true'
         run: bash tools/vendor-deps.sh vendor
@@ -301,7 +303,8 @@ jobs:
       contents: read
     name: Linux Offline Build
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 120
     steps:
@@ -473,7 +476,8 @@ jobs:
       contents: read
     name: Apache ASan graceful-restart stress
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 90
     env:
@@ -656,7 +660,8 @@ jobs:
       contents: read
     name: Apache system tests (daemon lane)
     needs: nightly-vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 90
     steps:
       - name: Unlock a previous run's vendored toolchain files
@@ -817,7 +822,8 @@ jobs:
       contents: read
     name: Shared-cache check (Apache, nginx)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 150
     env:
@@ -1005,13 +1011,227 @@ jobs:
             docker run --rm -v "${LEG}:/w" alpine:3.20 sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null; true' >/dev/null 2>&1 || true
             rm -rf "${LEG}" 2>/dev/null || true
           fi
+  # ---------------------------------------------------------------------
+  # Pages a client-side framework hydrates, through the modules built from
+  # the tree: pinned fixtures for React, Next, Vue, Nuxt and Svelte in real
+  # Chromium, with detection on (must hydrate, keep stylesheet URLs and inline
+  # styles, fetch no resource twice) and off (a control that must show
+  # rewrites). test/browser/hydration/run_module_check.sh is the check. The
+  # modules are built as in shared-cache-vary. This job needs the network
+  # after the vendor step: the fixtures' pinned npm packages, the packaged
+  # server install and the browser image.
+  # ---------------------------------------------------------------------
+  hydration-browser:
+    permissions:
+      contents: read
+    name: Hydration browser check (Apache, nginx)
+    needs: nightly-vendor
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ vars.FLEET_ENABLED == 'true' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    timeout-minutes: 150
+    env:
+      # local: the check installs packages built from this tree and the pinned
+      # optimizer release, not the public package repository's.
+      LOCAL_PACKAGES: ${{ inputs.shared_cache_packages == 'local' && 'true' || 'false' }}
+    steps:
+      - name: Unlock a previous run's vendored toolchain files
+        # bazel vendor leaves read-only toolchain directories under vendor/;
+        # checkout's cleanup cannot remove them on a persistent runner.
+        run: |
+          [ -d "${GITHUB_WORKSPACE}/vendor" ] && chmod -R u+w "${GITHUB_WORKSPACE}/vendor" 2>/dev/null || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore vendored dependencies (cache channel)
+        if: needs.nightly-vendor.outputs.channel == 'cache'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: mod-pagespeed-vendor-${{ hashFiles('bazel/repositories.bzl', 'bazel/cyclone.bzl', 'tools/vendor-deps.sh', 'MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
+          fail-on-cache-miss: true
+
+      - name: Extract the vendored workspace (hub channel)
+        if: needs.nightly-vendor.outputs.channel == 'hub'
+        run: |
+          args=(--sha "${{ needs.nightly-vendor.outputs.short_sha }}" --dest "${GITHUB_WORKSPACE}" --prefix mod_pagespeed)
+          if [ -n "${CI_VENDOR_DIR:-}" ]; then
+            args+=(--local "${CI_VENDOR_DIR}/mod_pagespeed-${{ needs.nightly-vendor.outputs.short_sha }}.tar.zst")
+          fi
+          bash tools/ci/extract-vendor-tarball.sh "${args[@]}"
+
+      - name: Stamp GIT_COMMIT
+        run: echo -n "$GITHUB_SHA" > GIT_COMMIT
+
+      - name: Record the package mode
+        run: |
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            mode="local (built from this tree, with the pinned optimizer release)"
+          else
+            mode="published (the public package repository)"
+          fi
+          echo "Hydration check packages: ${mode}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch the pinned optimizer package (local packages)
+        if: env.LOCAL_PACKAGES == 'true'
+        run: |
+          set -euo pipefail
+          # Verified against the pin file; the pair version is the one the
+          # module package depends on.
+          for s in apache nginx; do
+            bash test/system/shared_cache/fetch-optimizer-deb.sh "${RUNNER_TEMP}/hydration/pkgs-${s}" amd64
+          done
+          PIN_TAG=$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")
+          tilde='~'
+          PAIR="${PIN_TAG#optimizer-v}"
+          echo "PAIR_PKG_VERSION=${PAIR/-/$tilde}" >> "$GITHUB_ENV"
+
+      - name: Ensure the dev image
+        run: |
+          # Content-hashed tag and a per-host lock around the build
+          # (tools/ci/ensure-dev-image.sh). A hosted runner builds it cold.
+          CONTENT_IMAGE=$(bash tools/ci/ensure-dev-image.sh x64 docker)
+          echo "DOCKER_IMAGE=${CONTENT_IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Build the Apache module
+        run: |
+          set -euo pipefail
+          CTR="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-apache"
+          RAM_GB="${CI_BUILD_RAM_BUDGET_GB:-16}"
+          case "${RAM_GB}" in ''|*[!0-9]*) RAM_GB=16 ;; esac
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the older RAM budget.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget "${RAM_GB}g" || exit 1
+          RAM_GB="${SLOT_MEM_GB}"
+          EXTRA=()
+          BZL_FLAGS="--config=vendored --config=clang-libstdcxx13 --cxxopt=-std=c++20 --host_cxxopt=-std=c++20 --define=go_build=disabled --nostamp --jobs=${SLOT_JOBS}"
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+            BZL_FLAGS="${BZL_FLAGS} --config=remote-cache"
+          fi
+          BZL_FLAGS="${BZL_FLAGS} --local_ram_resources=$((RAM_GB * 1024 * 3 / 4))"
+          mkdir -p "${RUNNER_TEMP}/hydration"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run --rm --init --name "${CTR}" "${EXTRA[@]}" \
+            ${SLOT_CPUS:+--cpus="${SLOT_CPUS}"} \
+            --memory="${RAM_GB}g" --memory-swap="${RAM_GB}g" \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp/ci-home -e USER=dev -e "BZL_FLAGS=${BZL_FLAGS}" \
+            -e LOCAL_PACKAGES -e PAIR_PKG_VERSION \
+            -e PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -v "${RUNNER_TEMP}/hydration:/out" \
+            -w /workspace \
+            "${DOCKER_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+              mkdir -p "$HOME"
+              # BZL_FLAGS is an intentional flag list: word splitting.
+              # shellcheck disable=SC2086
+              bazel --output_user_root=/tmp/bazel-out build ${BZL_FLAGS} //:libmod_pagespeed.so
+              cp -L bazel-bin/libmod_pagespeed.so /out/mod_pagespeed.so
+              if [ "${LOCAL_PACKAGES}" = true ]; then
+                # The package of this tree, with the dependency on the pinned pair.
+                install/debian/build.sh -a x64 -b . -o /out/pkgs-apache -d "${PAIR_PKG_VERSION}"
+              fi
+            '
+
+      - name: Build the nginx module for Ubuntu 24.04's nginx
+        run: |
+          set -euo pipefail
+          IFS='|' read -r _ image ngxver ngxsha _ < <(bash tools/ci/release_nginx.sh leg-row --arch x64 --distro noble)
+          CTR="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-nginx"
+          LEG="${RUNNER_TEMP}/hydration-noble"
+          # Per-slot budget (CI_SLOT_CPUS / CI_SLOT_MEM_GB) wins over the leg's
+          # own sizing.
+          source "${GITHUB_WORKSPACE}/tools/ci/slot-budget.sh"
+          slot_budget 24g || exit 1
+          CPUS="${SLOT_CPUS:-16}"
+          MEM="${SLOT_MEM:-24g}"
+          EXTRA=()
+          if [ -n "${BAZEL_CACHE_HOST:-}" ]; then
+            EXTRA+=(--add-host="bazel-remote-cache:${BAZEL_CACHE_HOST}")
+          fi
+          # Its own copy of the tree: the distribution container builds as
+          # root and must not leave root-owned output in the workspace.
+          rm -rf "${LEG}"
+          cp -a "${GITHUB_WORKSPACE}" "${LEG}"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          docker run --rm --init --name "${CTR}" "${EXTRA[@]}" \
+            --cpus="${CPUS}" --memory="${MEM}" --memory-swap="${MEM}" \
+            -e BAZEL_CPUS="${CPUS}" -e MAKE_JOBS="${CPUS}" -e HOME=/workspace \
+            -e NGINX_SRC_VERSION="${ngxver}" -e NGINX_SRC_SHA256="${ngxsha}" \
+            -v "${LEG}:/workspace" \
+            -v "${RUNNER_TEMP}/hydration:/out" \
+            -w /workspace \
+            "${image}" \
+            bash -c "set -e
+              ./install/nginx/build_module_in_container.sh noble -o /out/ngx_pagespeed_module.so
+              if [ ${LOCAL_PACKAGES} = true ]; then
+                ./install/nginx/build_nginx_deb.sh -o /out/pkgs-nginx -s /out/ngx_pagespeed_module.so
+                chown -R $(id -u):$(id -g) /out/pkgs-nginx
+              fi
+              chown $(id -u):$(id -g) /out/ngx_pagespeed_module.so"
+
+      - name: Build the fixtures
+        run: |
+          set -euo pipefail
+          CTR="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-fixtures"
+          docker rm -f "${CTR}" >/dev/null 2>&1 || true
+          # Same image as the check, so the job does not depend on the host's node.
+          docker run --rm --init --name "${CTR}" \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "${GITHUB_WORKSPACE}/test/browser:/browser" -w /browser \
+            "mcr.microsoft.com/playwright:v1.58.2-noble@sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d" \
+            bash -c 'set -e; npm ci --no-fund --no-audit; hydration/build_all.sh'
+
+      - name: Hydration check, Apache
+        run: |
+          # Local packages: the module comes from the package built above.
+          # Otherwise: the published packages, the fresh library swapped in.
+          so="${RUNNER_TEMP}/hydration/mod_pagespeed.so"
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            export PACKAGE_DIR="${RUNNER_TEMP}/hydration/pkgs-apache"
+            so=""
+          fi
+          HYDRATION_PREFIX="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-a" \
+            bash test/browser/hydration/run_module_check.sh apache ${so:+"$so"}
+
+      - name: Hydration check, nginx
+        if: ${{ !cancelled() }}
+        run: |
+          so="${RUNNER_TEMP}/hydration/ngx_pagespeed_module.so"
+          if [ "${LOCAL_PACKAGES}" = true ]; then
+            export PACKAGE_DIR="${RUNNER_TEMP}/hydration/pkgs-nginx"
+            so=""
+          fi
+          HYDRATION_PREFIX="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-n" \
+            bash test/browser/hydration/run_module_check.sh nginx ${so:+"$so"}
+
+      - name: Remove what the checks left behind
+        if: always()
+        run: |
+          P="nightly-hydration-browser-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-"
+          docker ps -aq --filter "name=^${P}" | xargs -r docker rm -f >/dev/null 2>&1 || true
+          docker network ls -q --filter "name=^${P}" | xargs -r docker network rm >/dev/null 2>&1 || true
+          docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${P}" | xargs -r docker image rm >/dev/null 2>&1 || true
+
+      - name: Remove the nginx build tree
+        if: always()
+        run: |
+          LEG="${RUNNER_TEMP}/hydration-noble"
+          if [ -d "${LEG}" ]; then
+            docker run --rm -v "${LEG}:/w" alpine:3.20 sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null; true' >/dev/null 2>&1 || true
+            rm -rf "${LEG}" 2>/dev/null || true
+          fi
+
 
   nginx-asan-stress:
     permissions:
       contents: read
     name: nginx ASan reload stress
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 90
     env:
@@ -1184,7 +1404,8 @@ jobs:
       contents: read
     name: IPRO proxy race smoke (h1/h2)
     needs: nightly-vendor
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 45
     env:
@@ -1349,7 +1570,8 @@ jobs:
       contents: read
     name: clang-tidy (full tree, shard ${{ matrix.shard }} of 3)
     needs: nightly-vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -1549,7 +1771,8 @@ jobs:
       contents: read
     name: CSS parser fuzz (corpus floor + libFuzzer)
     needs: nightly-vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 90
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -1783,7 +2006,8 @@ jobs:
       contents: read
     name: HTML parse fuzz (libFuzzer)
     needs: nightly-vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 90
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -2014,7 +2238,8 @@ jobs:
       contents: read
     name: Pack loader + filter fuzz (libFuzzer)
     needs: nightly-vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 150
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -2282,7 +2507,8 @@ jobs:
       contents: read
     name: JS minify fuzz (libFuzzer + classified findings)
     needs: nightly-vendor
-    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (vars.FLEET_ENABLED == 'false' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) && 'ubuntu-24.04' || 'fleet-heavy' }}
     timeout-minutes: 90
     env:
       FUZZ_SECONDS: ${{ inputs.fuzz_seconds || '600' }}
@@ -2748,7 +2974,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
-          $url = 'http://localhost:18180/stress/page1.html'
+          $url = 'http://localhost:18500/stress/page1.html'
           $deadline = (Get-Date).AddSeconds(180)
           $lastStatus = ''
           $lastBody = ''
@@ -3170,7 +3396,8 @@ jobs:
     permissions:
       contents: read
     name: NVD CVE scan (report only)
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       SEVERITY: ${{ inputs.severity }}
@@ -3248,7 +3475,8 @@ jobs:
     permissions:
       contents: read
     name: Dependency scan (nightly, pin age and images)
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       SYFT_VERSION: v1.44.0
@@ -3313,7 +3541,8 @@ jobs:
       contents: read
     name: Envoy Filter Build and Tests
     needs: event-guard
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
     if: ${{ vars.FLEET_ENABLED != 'false' && !(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
     timeout-minutes: 300
     steps:
@@ -3361,7 +3590,8 @@ jobs:
     permissions: {}
     name: Shared build runners are switched off
     if: ${{ vars.FLEET_ENABLED == 'false' }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Say what the switch changed

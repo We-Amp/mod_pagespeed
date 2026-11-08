@@ -45,7 +45,8 @@ permissions:
 jobs:
   event-guard:
     name: Event guard (refuses merge_group, unexpected events, refs and actors)
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     steps:
       - name: Refuse events, refs and actors this pipeline must never run on
         env:
@@ -55,7 +56,7 @@ jobs:
           PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
-          ALLOWED: "push workflow_dispatch"
+          ALLOWED: "push workflow_dispatch schedule"
           ALLOWED_REFS: "refs/tags/* refs/heads/master"
         run: |
           set -euo pipefail

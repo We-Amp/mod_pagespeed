@@ -31,6 +31,12 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${formatSig(value)} ${units[unit]}`;
 }
 
+/** Bytes with a sign: a negative amount reads "−1.50 KB", not "—". */
+export function formatSignedBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return "—";
+  return bytes < 0 ? `−${formatBytes(-bytes)}` : formatBytes(bytes);
+}
+
 /** A byte rate: the byte formatter with "/s" ("9.82 KB/s"); "—" when there is no value. */
 export function formatBytesRate(bytesPerSecond: number | null | undefined): string {
   const bytes = formatBytes(bytesPerSecond);

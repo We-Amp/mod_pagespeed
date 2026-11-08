@@ -88,8 +88,24 @@ if [ -z "${CODENAME}" ] && [ -r /etc/os-release ]; then
 fi
 [ -n "${CODENAME}" ] || { echo "ERROR: cannot determine distro codename (set CODENAME or run inside the target-distro container)" >&2; exit 1; }
 VERSIONFULL="${VERSION}-r${REVISION}~${CODENAME}"
+# A build for nginx.org's nginx names the nginx it is pinned to, so a rebuild for
+# a newer nginx sorts as an upgrade and each pinned build can stay published.
+# A rebuild of the same module and nginx (NGINXORG_LANE_REVISION=N, N > 0)
+# appends .N after the nginx version: +ngx1.30.7.1~ sorts above +ngx1.30.7~ and
+# below +ngx1.30.8~, which a revision in front of the nginx version would not.
+if [ -n "${NGINX_PKG_NAME:-}" ] && [ "${NGINX_PKG_NAME}" != "nginx-module-pagespeed" ]; then
+  _lane_rev="${NGINXORG_LANE_REVISION:-0}"
+  case "${_lane_rev}" in
+    0) _lane_rev="" ;;
+    [1-9]|[1-9][0-9]) _lane_rev=".${_lane_rev}" ;;
+    *) echo "ERROR: NGINXORG_LANE_REVISION must be 0 to 99 (got: ${_lane_rev})" >&2; exit 1 ;;
+  esac
+  VERSIONFULL="${VERSION}-r${REVISION}+ngx${NGINX_UPSTREAM_VERSION:?}${_lane_rev}~${CODENAME}"
+fi
 
-PACKAGE="nginx-module-pagespeed"   # D2: SEO-parity name (NOT mod-pagespeed-nginx)
+# D2: SEO-parity name (NOT mod-pagespeed-nginx). A build for nginx.org's nginx
+# ships under its own name, so nobody on distro nginx moves to it by accident.
+PACKAGE="${NGINX_PKG_NAME:-nginx-module-pagespeed}"
 MAINTNAME="mod_pagespeed developers"
 MAINTMAIL="info@we-amp.com"
 PRODUCTURL="https://github.com/we-amp/mod_pagespeed/"
@@ -213,6 +229,13 @@ if [ "$(sha256sum "${ADMIN_SNIPPET}" | cut -d' ' -f1)" != "${ADMIN_SNIPPET_SHA25
 fi
 
 # --- DEBIAN control ---------------------------------------------------------
+# Two builds of the module own the same files, so only one can be installed.
+PKG_RELATIONS=""
+if [ "${PACKAGE}" != "nginx-module-pagespeed" ]; then
+  PKG_RELATIONS="Conflicts: nginx-module-pagespeed
+Replaces: nginx-module-pagespeed
+"
+fi
 INSTSIZE=$(du -k -s "${STAGEDIR}" | cut -f1)
 cat > "${STAGEDIR}/DEBIAN/control" <<EOF
 Package: ${PACKAGE}
@@ -221,13 +244,13 @@ Section: httpd
 Priority: optional
 Architecture: ${TARGETARCH}
 Depends: ${NGINX_DEP}
-Maintainer: ${MAINTNAME} <${MAINTMAIL}>
+${PKG_RELATIONS}Maintainer: ${MAINTNAME} <${MAINTMAIL}>
 Installed-Size: ${INSTSIZE}
 Homepage: ${PRODUCTURL}
 Description: mod_pagespeed web page optimization module for nginx
  ngx_pagespeed is the nginx port of mod_pagespeed: it rewrites web pages and
  their resources (CSS, JavaScript, images) to apply web performance best
- practices automatically. Pinned to the exact stock nginx version it was built
+ practices automatically. Pinned to the exact nginx version it was built
  against — nginx refuses to load a dynamic module built for a different
  version.
  .
@@ -256,8 +279,13 @@ if [ "$1" = "configure" ]; then
   # (which creates the group) is not installed, and a usermod failure must not
   # fail the install: the module logs the degraded state loudly at startup
   # instead.
-  if getent group pagespeed >/dev/null 2>&1 && id www-data >/dev/null 2>&1; then
-    usermod -a -G pagespeed www-data || true
+  # nginx.org's nginx runs as the user nginx instead.
+  if getent group pagespeed >/dev/null 2>&1; then
+    for u in www-data nginx; do
+      if id "$u" >/dev/null 2>&1; then
+        usermod -a -G pagespeed "$u" || true
+      fi
+    done
   fi
 fi
 exit 0

@@ -184,8 +184,13 @@ class NestedFilter : public RewriteFilter {
   int num_top_rewrites() const { return num_top_rewrites_; }
   int num_sub_rewrites() const { return upper_rewriter_->num_rewrites(); }
 
+  // Sum of num_output_partitions() over our top-level contexts at the time
+  // they were deleted, i.e. the partition tables still held after rendering.
+  int num_partitions_at_delete() const { return num_partitions_at_delete_; }
+
   void ClearStats() {
     num_top_rewrites_ = 0;
+    num_partitions_at_delete_ = 0;
     upper_rewriter_->ClearStats();
   }
 
@@ -266,6 +271,7 @@ class NestedFilter : public RewriteFilter {
 
   // Stats
   int num_top_rewrites_;
+  int num_partitions_at_delete_;
 
   NestedFilter(const NestedFilter&) = delete;
   NestedFilter& operator=(const NestedFilter&) = delete;
@@ -339,6 +345,12 @@ class CombiningFilter : public RewriteFilter {
     void DoRewrite(int partition_index, CachedResult* partition,
                    OutputResourcePtr output);
     bool PolicyPermitsRendering() const override { return true; }
+    // A fetch of a context with several inputs stores no result by default.
+    // This test combiner keeps storing it, so that the tests of what a
+    // stored result of several inputs does (cache control, conditional
+    // requests, seeding) go on running against one; the
+    // module's own combiners store none.
+    bool FetchWritesPartition() const override { return true; }
     void Render() override;
     void WillNotRender() override;
     void Cancel() override;

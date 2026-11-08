@@ -56,7 +56,8 @@ absl::Status CheckUtf8(const Json::Value& root);
 // nothing after the value, well-formed UTF-8, no raw control character inside
 // a string, and nesting of at most `max_depth` levels. A repeated key in an
 // object is an error only when `reject_duplicate_keys` is set (a browser keeps
-// the last one). Never throws.
+// the last one). Numbers never follow the thread's locale, and a subnormal
+// value (for example -1e-320) is accepted. Never throws.
 bool ParseStrictJson(std::string_view text, size_t max_depth,
                      bool reject_duplicate_keys, Json::Value* out);
 

@@ -3,34 +3,111 @@
 ## Requirements
 
 - A supported Linux distribution running its **stock** nginx package
-  (Debian 11/12/13, Ubuntu 22.04/24.04, AlmaLinux/RHEL/Rocky 9).
-- `x86_64` or `arm64`.
+  (Debian 12/13, Ubuntu 22.04/24.04/26.04, AlmaLinux/RHEL/Rocky 9/10; Debian 11
+  stays on the repository's final 1.15.0 packages), or nginx.org's stable nginx
+  on the distributions listed
+  [below](#nginxorgs-nginx-and-the-nginx-docker-image).
+- `x86_64` or `arm64` (AlmaLinux/RHEL/Rocky 10 and nginx.org's nginx: `x86_64`
+  only).
 
 The prebuilt module is a dynamic nginx module, and nginx pins dynamic modules to
 the **exact** nginx version they were built against (down to the patch;
-`--with-compat` does not relax this). The published packages are therefore built
-against each distribution's **stock** nginx. If you run a *custom* nginx —
-including the **nginx.org** repository's `nginx` (e.g. the 1.30.x stable line) —
-no published package matches it; build the module from the public source tree
-against your nginx instead (see `DEVELOPER.md`). The simplest path is your
-distribution's stock nginx.
+`--with-compat` does not relax this). The `nginx-module-pagespeed` packages are
+therefore built against each distribution's **stock** nginx. For nginx.org's
+stable nginx (as in the official nginx Docker image), the
+`nginx-module-pagespeed-nginxorg` package is available for Debian 13, Ubuntu
+24.04 and Enterprise Linux 9 (AlmaLinux, Rocky Linux, RHEL), amd64 (x86_64)
+only, one build per nginx version; see
+[nginx.org's nginx and the nginx Docker image](#nginxorgs-nginx-and-the-nginx-docker-image)
+below. For any other nginx, including nginx.org's mainline, build the module
+from the public source tree against your nginx instead (see `DEVELOPER.md`).
+The simplest path is your distribution's stock nginx.
 
 ## Install
 
 Add the We-Amp package repository (once), then install. All release artifacts are
-also listed on the [downloads page](https://modpagespeed.com/1.1/docs/downloads/).
+also listed on the [releases page](https://github.com/We-Amp/mod_pagespeed/releases).
 
 ```bash
 curl -fsSL https://packages.modpagespeed.com/install.sh | sudo sh
 
 sudo apt install nginx-module-pagespeed     # Debian / Ubuntu
-sudo dnf install nginx-module-pagespeed     # RHEL / AlmaLinux / Rocky 9
+sudo dnf install nginx-module-pagespeed     # RHEL / AlmaLinux / Rocky 9 and 10
 
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
 On stock nginx the package's `load_module` directive is auto-enabled, so no
 manual `nginx.conf` edit is needed.
+
+## nginx.org's nginx and the nginx Docker image
+
+The `nginx-module-pagespeed-nginxorg` package is the same module, built for
+nginx.org's stable nginx on Debian 13, Ubuntu 24.04 and Enterprise Linux 9
+(AlmaLinux, Rocky Linux, RHEL), amd64 (x86_64) only. Each build is pinned to
+one nginx version, which the package version names
+(`<version>+ngx1.30.6~trixie`, `<version>-0.ngx1.30.6.el9`), so it must match
+the nginx you run, and it cannot be installed alongside
+`nginx-module-pagespeed`. There is no build for Enterprise Linux 10, and none
+for nginx.org's mainline.
+
+On Debian and Ubuntu, nginx.org's `nginx.conf` does not read
+`modules-enabled`, so add that include.
+The package ships its `load_module` line there and takes it away when removed,
+so removing the package leaves nginx able to start.
+
+**On a host** that runs nginx.org's repository, install the package as on a
+distribution: `apt-get install nginx-module-pagespeed-nginxorg` takes the
+newest build and, when nginx.org carries it, the nginx that build is for.
+
+**On AlmaLinux, Rocky Linux or RHEL 9** with nginx.org's repository, install
+the package as on a distribution: `sudo dnf install nginx-module-pagespeed-nginxorg`,
+and add `include /usr/share/nginx/modules/*.conf;` at the top of
+`/etc/nginx/nginx.conf`. The package installs a dnf plugin that keeps a plain
+`dnf update` working while nginx.org is ahead of the matching build: it holds
+nginx back until that build is available, and `dnf check-update` still lists
+the pending nginx. To take an nginx security fix first:
+`sudo dnf upgrade nginx --allowerasing` (removes the module package; reinstall
+it when its build is available). The package's README has the details. Not
+tested so far:
+
+- Updates through PackageKit or Cockpit are likely to bypass dnf plugins, so a
+  plain update there may still fail while nginx.org is ahead of the matching
+  build; use `dnf update` on the command line.
+- dnf5 (Enterprise Linux 10) is untested; the package is for Enterprise Linux 9.
+- Only AlmaLinux 9 has been exercised; Rocky Linux 9 and RHEL 9 are expected to
+  behave the same but are untested.
+
+**In the nginx Docker image**, install the build for the image's nginx by its
+version: `apt-cache madison` lists the builds, the one whose version carries
+`+ngx<nginx version>~` is the match, and the image build fails at `test -n`
+rather than moving nginx when no package exists for that version yet.
+`NGINX_VERSION` is set by the image. Pin the tag to the exact stable version:
+`nginx:latest` follows mainline and the `alpine` variants use another package
+format, so neither works with this package.
+
+```dockerfile
+FROM nginx:1.30.6
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
+ && curl -fsSL https://packages.modpagespeed.com/install.sh | sh \
+ && apt-get update \
+ && v="$(apt-cache madison nginx-module-pagespeed-nginxorg \
+        | awk -v n="+ngx${NGINX_VERSION}~" 'index($3, n) { print $3; exit }')" \
+ && test -n "$v" \
+ && apt-get install -y "nginx-module-pagespeed-nginxorg=$v" \
+ && sed -i '1i include /etc/nginx/modules-enabled/*.conf;' /etc/nginx/nginx.conf \
+ && mkdir -p /var/cache/ngx_pagespeed && chown nginx /var/cache/ngx_pagespeed
+```
+
+Then enable PageSpeed in your server configuration as shown below.
+
+**When nginx moves.** A new nginx version needs a matching module package,
+which follows nginx.org's stable releases. Until it is available, `apt upgrade`
+holds nginx back, and `apt full-upgrade` removes the module (on Enterprise
+Linux 9, see the dnf notes above). If nginx ships a
+security fix first, take the fix: remove the module, upgrade nginx, and
+reinstall the module when its package is available. In Docker, move the image
+tag only once the package for that version exists.
 
 ## Configuration
 

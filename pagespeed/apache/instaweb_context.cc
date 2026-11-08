@@ -25,8 +25,10 @@
 #include "base/logging.h"
 #include "http_config.h"
 #include "http_core.h"
+#include "http_protocol.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
+#include "net/instaweb/rewriter/public/html_vary_filter.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rule_pack_provider.h"
@@ -49,6 +51,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 #include "pagespeed/kernel/util/gzip_inflater.h"
+#include "pagespeed/system/inplace_url_agreement.h"
 
 namespace net_instaweb {
 
@@ -57,6 +60,36 @@ namespace net_instaweb {
 const int kRequestChainLimit = 5;
 
 namespace {
+
+// Values of the kPagespeedInPlaceUrlAgreement note.
+const char kInPlaceUrlAgrees[] = "<AGREES>";
+const char kInPlaceUrlDiffers[] = "<DIFFERS>";
+
+// The value of `note` on the request this one follows, found the way
+// MakeRequestUrl finds the original URL: down the prev chain of internal
+// redirects, stopping at a request the module answered with a not-found
+// (what follows that one is httpd serving the site's ErrorDocument, an
+// unrelated URL), then down the main chain of subrequests; at most
+// kRequestChainLimit steps each.  nullptr when no request there has it.
+const char* NoteFromRequestChain(request_rec* request, const char* note) {
+  const char* value = nullptr;
+  request_rec* prev = request->prev;
+  for (int i = 0;
+       (value == nullptr) && (prev != nullptr) && (i < kRequestChainLimit);
+       ++i, prev = prev->prev) {
+    if (apr_table_get(prev->notes, kPagespeedNotFoundNote) != nullptr) {
+      break;
+    }
+    value = apr_table_get(prev->notes, note);
+  }
+  request_rec* main = request->main;
+  for (int i = 0;
+       (value == nullptr) && (main != nullptr) && (i < kRequestChainLimit);
+       ++i, main = main->main) {
+    value = apr_table_get(main->notes, note);
+  }
+  return value;
+}
 
 // Tracks a single property-cache lookup.
 class PropertyCallback : public PropertyPage {
@@ -167,6 +200,7 @@ InstawebContext::InstawebContext(
       inflater_ = std::make_unique<GzipInflater>(GzipInflater::kDeflate);
     }
     inflater_->Init();
+    inflater_->set_max_inflated_bytes(GzipInflater::kMaxInflatedHtmlBytes);
   }
 
   // Make the entire request headers available to filters.
@@ -182,28 +216,62 @@ InstawebContext::InstawebContext(
 
 InstawebContext::~InstawebContext() {}
 
+// Hands the window's pieces to the parser.
+class InstawebContext::WindowSink {
+ public:
+  explicit WindowSink(InstawebContext* context) : context_(context) {}
+  void Parse(const char* data, size_t size) {
+    context_->ProcessBytes(data, static_cast<int>(size));
+  }
+  // Only a parse that has started, and has got past the events held back
+  // until the document type is known, has anything a flush could release.
+  bool CanFlush() const {
+    return context_->started_parse_ &&
+           context_->html_detector_.already_decided() &&
+           FlushWouldRelease(*context_->rewrite_driver_);
+  }
+  void Flush() { context_->Flush(); }
+
+ private:
+  InstawebContext* context_;
+};
+
 void InstawebContext::Rewrite(const char* input, int size) {
+  WindowSink sink(this);
   if (inflater_.get() != nullptr) {
     char buf[kStackBufferSize];
     inflater_->SetInput(input, size);
     while (inflater_->HasUnconsumedInput()) {
       int num_inflated_bytes = inflater_->InflateBytes(buf, kStackBufferSize);
+      if (num_inflated_bytes < 0 && inflater_->limit_exceeded()) {
+        // The rest of the response is dropped, as it is for a corrupt one.
+        rewrite_driver_->message_handler()->Message(
+            kWarning, "Compressed HTML inflates to more than %d bytes",
+            static_cast<int>(GzipInflater::kMaxInflatedHtmlBytes));
+        break;
+      }
       DCHECK_LE(0, num_inflated_bytes) << "Corrupted zip inflation";
       if (num_inflated_bytes > 0) {
-        ProcessBytes(buf, num_inflated_bytes);
+        flush_window_.Add(&sink, buf, num_inflated_bytes);
       }
     }
   } else {
     DCHECK_LE(0, size) << "negatively sized buffer passed from apache";
     if (size > 0) {
-      ProcessBytes(input, size);
+      flush_window_.Add(&sink, input, size);
     }
   }
 }
 
 void InstawebContext::Flush() {
   if (html_detector_.already_decided() && started_parse_) {
+    // A flush while events are held back releases nothing, so it does not
+    // start a new window.
+    const bool releases = FlushWouldRelease(*rewrite_driver_);
     rewrite_driver_->Flush();
+    if (releases) {
+      flush_window_.Flushed();
+    }
   }
 }
 
@@ -215,6 +283,11 @@ bool InstawebContext::FlushWouldSendEditableHeaders() const {
     return false;
   }
   const RewriteOptions* options = rewrite_driver_->options();
+  StringVector vary_tokens;
+  HtmlVaryFilter::HtmlVaryTokens(*options, &vary_tokens);
+  if (!vary_tokens.empty()) {
+    return true;
+  }
   if (!options->Enabled(RewriteOptions::kRulePacks) ||
       options->rule_pack_files().empty()) {
     return false;
@@ -261,6 +334,12 @@ void InstawebContext::ProcessBytes(const char* input, int size) {
         // in all other spots as an error fallback.
         started_parse_ =
             rewrite_driver_->StartParseWithType(absolute_url_, content_type_);
+        if (started_parse_) {
+          // The Vary tokens depend on the options alone. Name them now, as
+          // the proxy fetch does, rather than leaving it to the filter: a
+          // flush can make the headers read-only before the filter runs.
+          HtmlVaryFilter::AddVaryTokens(rewrite_driver_);
+        }
       }
 
       // If we buffered up any bytes in previous calls, make sure to
@@ -382,16 +461,7 @@ const char* InstawebContext::MakeRequestUrl(
     // original would make the module answer the error document with the same
     // not-found again, so the redirect stops here and the request's own URL
     // is used.
-    request_rec* prev = request->prev;
-    for (int i = 0;
-         (url == nullptr) && (prev != nullptr) && (i < kRequestChainLimit);
-         ++i, prev = prev->prev) {
-      if (apr_table_get(prev->notes, kPagespeedNotFoundNote) != nullptr) {
-        break;
-      }
-      url = apr_table_get(prev->notes, kPagespeedOriginalUrl);
-    }
-
+    //
     // Chase 'main' chain as well, clamping at kRequestChainLimit loops.
     // This will eliminate spurious 'index.html' noise we've seen from
     // slurps.  See 'make apache_debug_slurp_test' -- the attempt to
@@ -402,12 +472,10 @@ const char* InstawebContext::MakeRequestUrl(
     // note that http_request.c:ap_internal_fast_redirect 'overlays'
     // the source r.notes onto the dest r.notes, which in this case would
     // work against us if we don't first propagate the OriginalUrl.
-    request_rec* main = request->main;
-    for (int i = 0;
-         (url == nullptr) && (main != nullptr) && (i < kRequestChainLimit);
-         ++i, main = main->main) {
-      url = apr_table_get(main->notes, kPagespeedOriginalUrl);
-    }
+    //
+    // Both walks are NoteFromRequestChain's, shared with the in-place
+    // agreement saved beside this URL.
+    url = NoteFromRequestChain(request, kPagespeedOriginalUrl);
 
     // ap_construct_url() only works when request->unparsed_uri is relative.
     // But sometimes (with mod_proxy/slurping) we see request->unparsed_uri
@@ -459,6 +527,57 @@ const char* InstawebContext::MakeRequestUrl(
     apr_table_setn(request->notes, kPagespeedOriginalUrl, url);
   }
   return url;
+}
+
+StringPiece InstawebContext::OriginFormScheme(
+    const RewriteOptions& global_options, request_rec* request) {
+  // The same rule MakeRequestUrl applies to the URL it builds.
+  StringPiece scheme = ap_http_scheme(request);
+  if (global_options.respect_x_forwarded_proto()) {
+    const char* x_forwarded_proto =
+        apr_table_get(request->headers_in, HttpAttributes::kXForwardedProto);
+    if (x_forwarded_proto != nullptr &&
+        (StringCaseEqual(x_forwarded_proto, "http") ||
+         StringCaseEqual(x_forwarded_proto, "https"))) {
+      scheme = x_forwarded_proto;
+    }
+  }
+  return scheme;
+}
+
+bool InstawebContext::SaveInPlaceUrlAgreement(request_rec* request,
+                                              const GoogleUrl& url,
+                                              StringPiece server_scheme,
+                                              StringPiece server_host,
+                                              bool merge_slashes) {
+  const char* verdict =
+      apr_table_get(request->notes, kPagespeedInPlaceUrlAgreement);
+  if (verdict == nullptr) {
+    verdict = NoteFromRequestChain(request, kPagespeedInPlaceUrlAgreement);
+  }
+  if (verdict == nullptr) {
+    // A request line may name a scheme other than the one httpd serves the
+    // request under; httpd then routes it on the Host header and its own
+    // scheme, so the scheme is part of the reading.
+    const bool agrees =
+        url.IsWebValid() && (request->uri != nullptr) &&
+        StringCaseEqual(url.Scheme(), server_scheme) &&
+        InPlaceUrlAgrees(request->uri, server_host, url.PathSansQuery(),
+                         url.Host(), merge_slashes);
+    verdict = agrees ? kInPlaceUrlAgrees : kInPlaceUrlDiffers;
+  }
+  // Both values are string literals, so the table need not copy them.
+  apr_table_setn(request->notes, kPagespeedInPlaceUrlAgreement, verdict);
+  return strcmp(verdict, kInPlaceUrlAgrees) == 0;
+}
+
+bool InstawebContext::InPlaceUrlAgreed(request_rec* request) {
+  const char* verdict =
+      apr_table_get(request->notes, kPagespeedInPlaceUrlAgreement);
+  if (verdict == nullptr) {
+    verdict = NoteFromRequestChain(request, kPagespeedInPlaceUrlAgreement);
+  }
+  return (verdict != nullptr) && (strcmp(verdict, kInPlaceUrlAgrees) == 0);
 }
 
 void InstawebContext::SetExperimentStateAndCookie(request_rec* request,

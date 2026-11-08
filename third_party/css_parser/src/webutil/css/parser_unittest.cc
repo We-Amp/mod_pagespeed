@@ -21,8 +21,10 @@
 
 #include <limits>
 #include <memory>
+#include <vector>
 
 #include "base/logging.h"
+#include "third_party/css_parser/src/webutil/css/string_util.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
 namespace Css {
@@ -3277,6 +3279,57 @@ TEST_F(ParserTest, GroupDepthLimit) {
             string(bytes.data(), bytes.size()));
 }
 
+TEST_F(ParserTest, MediaQueriesBytesLimit) {
+  // Very long media lists on blocks with many statements are refused: the
+  // parser reports an error so that callers leave the stylesheet alone.
+  const int kRepeat = 1000;
+  string queries = "a", expressions = "a", rules, font_faces, at_rules, groups;
+  for (int i = 0; i < kRepeat; ++i) {
+    queries += ",a";
+    expressions += " and (b)";
+    rules += "b{}";
+    font_faces += "@font-face{}";
+    at_rules += "@c;";
+    groups += "@layer{}";
+  }
+  const string text(10 * kRepeat, 'a');
+  const string kTooMuch[] = {
+      "@media " + queries + "{" + rules + "}",
+      "@media " + queries + "{" + font_faces + "}",
+      "@media " + queries + "{" + at_rules + "}",
+      "@media " + queries + "{" + groups + "}",
+      "@media " + expressions + "{" + rules + "}",
+      "@media " + text + "{" + rules + "}",
+      "@media (" + text + ":" + text + "){" + rules + "}",
+      "@media (" + text + ">1){" + rules + "}",
+      "@supports (a:b){@media " + queries + "{" + rules + "}}",
+  };
+  for (const string& css : kTooMuch) {
+    SCOPED_TRACE(css.substr(0, 30));
+    Parser p(css);
+    p.set_preservation_mode(true);
+    std::unique_ptr<Stylesheet> t(p.ParseRawStylesheet());
+    EXPECT_TRUE(p.errors_seen_mask() & Parser::kMediaError);
+    EXPECT_TRUE(p.Done());
+    int64_t bytes = 0;
+    for (const Ruleset* ruleset : t->rulesets()) {
+      bytes += ruleset->media_queries().ApproximateBytes();
+    }
+    for (const FontFace* font_face : t->font_faces()) {
+      bytes += font_face->media_queries().ApproximateBytes();
+    }
+    EXPECT_GE(Parser::MaxMediaQueriesBytes(css.size()), bytes);
+  }
+
+  // The same queries and the same rules side by side are fine.
+  const string css = "@media " + queries + "{b{}}@media a{" + rules + "}";
+  Parser p(css);
+  p.set_preservation_mode(true);
+  std::unique_ptr<Stylesheet> t(p.ParseRawStylesheet());
+  EXPECT_EQ(Parser::kNoError, p.errors_seen_mask());
+  EXPECT_EQ(kRepeat + 1, t->rulesets().size());
+}
+
 TEST_F(ParserTest, MediaRangeSyntax) {
   for (bool preserve : {false, true}) {
     SCOPED_TRACE(preserve ? "preservation" : "non-preservation");
@@ -4063,6 +4116,49 @@ TEST_F(ParserTest, UnicodeRangeLexingShapes) {
   ASSERT_EQ(1, wface.declarations().size());
   EXPECT_EQ(Property::UNPARSEABLE,
             wface.declarations().at(0)->property().prop());
+}
+
+// Non-ASCII text must behave the same whether plain char is signed (MSVC and
+// clang-cl on Windows) or unsigned: UTF-8 bytes above 0x7F are not negative.
+TEST_F(ParserTest, NonAsciiUtf8IteratesAsCodepoints) {
+  const string utf8 = "caf\xC3\xA9 \xE2\x82\xAC \xF0\x9F\x98\x80";
+  UnicodeText text = UTF8ToUnicodeText(utf8);
+  std::vector<char32> runes;
+  for (UnicodeText::const_iterator it = text.begin(); it != text.end(); ++it) {
+    runes.push_back(*it);
+  }
+  ASSERT_EQ(8, runes.size());
+  EXPECT_EQ('f', runes[2]);
+  EXPECT_EQ(0xE9, runes[3]);
+  EXPECT_EQ(0x20AC, runes[5]);
+  EXPECT_EQ(0x1F600, runes[7]);
+  UnicodeText::const_iterator last = text.begin();
+  for (int i = 0; i < 3; ++i) ++last;
+  EXPECT_EQ(2, last.utf8_length());
+  EXPECT_EQ("\xC3\xA9", last.get_utf8_string());
+}
+
+TEST_F(ParserTest, NonAsciiIdentLowercaseAndRoundTrip) {
+  const string upper = "CAF\xC3\x89";
+  EXPECT_EQ("caf\xC3\x89",
+            UnicodeTextToUTF8(LowercaseAscii(UTF8ToUnicodeText(upper))));
+
+  Parser a("font-family: caf\xC3\xA9");
+  std::unique_ptr<Declarations> declarations(a.ParseDeclarations());
+  ASSERT_EQ(1, declarations->size());
+  const Values* values = declarations->get(0)->values();
+  ASSERT_EQ(1, values->size());
+  EXPECT_EQ("caf\xC3\xA9",
+            UnicodeTextToUTF8(values->get(0)->GetIdentifierText()));
+  EXPECT_EQ("caf\xC3\xA9", values->get(0)->ToString());
+
+  Parser b("content: \"\xE2\x82\xAC sign\"");
+  std::unique_ptr<Declarations> content(b.ParseDeclarations());
+  ASSERT_EQ(1, content->size());
+  const Values* strings = content->get(0)->values();
+  ASSERT_EQ(1, strings->size());
+  EXPECT_EQ("\xE2\x82\xAC sign",
+            UnicodeTextToUTF8(strings->get(0)->GetStringValue()));
 }
 
 }  // namespace Css

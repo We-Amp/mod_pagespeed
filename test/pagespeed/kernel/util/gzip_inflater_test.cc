@@ -264,6 +264,61 @@ TEST_F(GzipInflaterTest, TestGzipUnGzip) {
   EXPECT_STREQ(payload, inflated);
 }
 
+// Inflates blanks of the given size through a streaming inflater with a limit,
+// counting what it hands out. Returns the last result of InflateBytes().
+int StreamBlanks(size_t blanks, int64 limit, GzipInflater* inflater,
+                 int64* handed_out) {
+  GoogleString deflated;
+  StringWriter writer(&deflated);
+  EXPECT_TRUE(GzipInflater::Deflate(GoogleString(blanks, ' '),
+                                    GzipInflater::kGzip, &writer));
+  inflater->Init();
+  inflater->set_max_inflated_bytes(limit);
+  EXPECT_TRUE(inflater->SetInput(deflated.data(), deflated.size()));
+  char buf[kStackBufferSize];
+  int result = 0;
+  *handed_out = 0;
+  while (inflater->HasUnconsumedInput()) {
+    result = inflater->InflateBytes(buf, sizeof(buf));
+    if (result > 0) {
+      *handed_out += result;
+    }
+  }
+  return result;
+}
+
+TEST_F(GzipInflaterTest, StreamingInflateStopsAtLimit) {
+  const int64 kLimit = 5 * kStackBufferSize + 17;
+  GzipInflater inflater(GzipInflater::kGzip);
+  int64 handed_out = 0;
+  EXPECT_EQ(-1, StreamBlanks(50 * kLimit, kLimit, &inflater, &handed_out));
+  EXPECT_TRUE(inflater.error());
+  EXPECT_TRUE(inflater.limit_exceeded());
+  EXPECT_FALSE(inflater.HasUnconsumedInput());
+  EXPECT_GT(handed_out, 0);
+  EXPECT_LE(handed_out, kLimit);
+  EXPECT_FALSE(inflater.SetInput("more", 4));
+}
+
+TEST_F(GzipInflaterTest, StreamingInflateUpToLimit) {
+  const int64 kLimit = 5 * kStackBufferSize + 17;
+  GzipInflater inflater(GzipInflater::kGzip);
+  int64 handed_out = 0;
+  StreamBlanks(kLimit, kLimit, &inflater, &handed_out);
+  EXPECT_FALSE(inflater.error());
+  EXPECT_FALSE(inflater.limit_exceeded());
+  EXPECT_TRUE(inflater.finished());
+  EXPECT_EQ(kLimit, handed_out);
+}
+
+TEST_F(GzipInflaterTest, StreamingInflateWithoutLimit) {
+  GzipInflater inflater(GzipInflater::kGzip);
+  int64 handed_out = 0;
+  StreamBlanks(10 * kStackBufferSize, -1, &inflater, &handed_out);
+  EXPECT_FALSE(inflater.error());
+  EXPECT_EQ(10 * kStackBufferSize, handed_out);
+}
+
 }  // namespace
 
 }  // namespace net_instaweb

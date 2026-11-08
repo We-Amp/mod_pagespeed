@@ -23,11 +23,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <vector>
 
-#include "fmt/core.h"
+#include "fmt/format.h"
 #include "spdlog/spdlog.h"
 
 namespace pagespeed_logging {
@@ -164,26 +165,32 @@ LogMessage::~LogMessage() {
   spdlog::logger* logger = HeldLogger();
 
   // Send to spdlog (via the held logger, never the registry free functions).
-  constexpr char fmtstring[] = "[pagespeed] [{}:{}] {}";
+  // The line is formatted here and handed to spdlog as a plain message:
+  // spdlog 1.17.0's format-string overloads convert through a member that fmt
+  // 12.2 marks deprecated, and no spdlog release yet avoids that conversion.
+  fmt::memory_buffer line;
+  fmt::format_to(std::back_inserter(line), "[pagespeed] [{}:{}] {}",
+                 base_filename, line_, msg);
+  const spdlog::string_view_t line_view(line.data(), line.size());
   switch (severity_) {
     case logging::LOG_INFO:
-      logger->info(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->info(line_view);
       break;
     case logging::LOG_WARNING:
-      logger->warn(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->warn(line_view);
       break;
     case logging::LOG_ERROR:
-      logger->error(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->error(line_view);
       break;
     case logging::LOG_FATAL:
-      logger->critical(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->critical(line_view);
       // Also write to stderr for death tests (EXPECT_DEBUG_DEATH captures stderr)
       std::cerr << "[FATAL] [" << base_filename << ":" << line_ << "] " << msg
                 << '\n';
       logger->dump_backtrace();
       break;
     default:
-      logger->info(fmt::runtime(fmtstring), base_filename, line_, msg);
+      logger->info(line_view);
       break;
   }
 

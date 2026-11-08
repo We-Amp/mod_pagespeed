@@ -15,6 +15,18 @@ pagespeed_cc_test(
     ],
 )
 
+# The Cache-Control the module writes on rewritten HTML keeps the operator's
+# and the origin's private and no-store; a pure function, tested standalone.
+pagespeed_cc_test(
+    name = "ngx_cache_control_merge_test",
+    srcs = ["ngx_cache_control_merge_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/nginx:ngx_cache_control_merge",
+    ],
+)
+
 # The weak If-None-Match comparison the module answers its own resources'
 # conditionals with -- a pure function over StringPiece, tested standalone.
 pagespeed_cc_test(
@@ -64,6 +76,17 @@ pagespeed_cc_test(
     ],
 )
 
+# Which caching headers the module keeps: ModifyCachingHeaders off keeps a
+# page's own headers, while a .pagespeed. resource always gets the module's.
+pagespeed_cc_test(
+    name = "ngx_caching_header_policy_test",
+    srcs = ["ngx_caching_header_policy_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/nginx:ngx_caching_header_policy",
+    ],
+)
+
 # The admin-style handler path lookup: exact vs subtree, unconfigured never
 # matches, and case-sensitive like the nginx `location` blocks that guard
 # these paths.
@@ -74,6 +97,24 @@ pagespeed_cc_test(
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
         "//pagespeed/nginx:ngx_admin_path_match",
+    ],
+)
+
+# The module's own fetches present as a non-local client to access rules: the
+# peer test, the relabel and restore of a connection's client address (on a
+# stand-in connection), and a source pin that the module registers the
+# relabel in the POST_READ phase.
+pagespeed_cc_test(
+    name = "ngx_self_fetch_label_test",
+    srcs = ["ngx_self_fetch_label_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//pagespeed/nginx:ngx_self_fetch_label",
+        "//pagespeed/system",
     ],
 )
 
@@ -89,12 +130,10 @@ pagespeed_cc_test(
     ],
 )
 
-# The in-place URL agreement: the server's reading of the request and the
-# module's must name the same path on the same host before a response is
-# looked up or recorded in place. A pure function over StringPiece, tested
-# standalone, plus a source pin that the in-place branch consults it with the
-# server's URI and the module's path (the port cannot be linked into a test;
-# see above).
+# The in-place URL agreement (//pagespeed/system:inplace_url_agreement,
+# tested in //test/pagespeed/system:inplace_url_agreement_test): a source pin
+# that the in-place branch consults it with the server's URI and the module's
+# path (the port cannot be linked into a test; see above).
 pagespeed_cc_test(
     name = "ngx_inplace_url_agreement_test",
     srcs = ["ngx_inplace_url_agreement_test.cc"],
@@ -104,7 +143,6 @@ pagespeed_cc_test(
     shard_count = 1,
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/nginx:ngx_inplace_url_agreement",
     ],
 )
 
@@ -224,6 +262,20 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pins for how response headers are copied into nginx (the port
+# cannot be linked into a test; see above).
+pagespeed_cc_test(
+    name = "ngx_response_header_copy_pin_test",
+    srcs = ["ngx_response_header_copy_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:nginx_sources",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Source pins for nginx fetcher teardown and allocation invariants (the port
 # cannot be linked into a test; see above).
 pagespeed_cc_test(
@@ -318,6 +370,21 @@ pagespeed_cc_test(
     ],
 )
 
+# Source pin: a request under a location with pagespeed settings of its own
+# takes the server's current purges and flushes (the port cannot be linked
+# into a test; see above).
+pagespeed_cc_test(
+    name = "ngx_location_purge_pin_test",
+    srcs = ["ngx_location_purge_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:ngx_pagespeed_src",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
 # Source pins for the optimization thread counts: the factory defers
 # resolution and reports worker_processes, and ps_init_module resolves (the
 # port cannot be linked into a test; see above).
@@ -347,5 +414,20 @@ pagespeed_cc_test(
     shard_count = 1,
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Source pin for a server block's cache keyspace (the port cannot be linked
+# into a test; see above).
+pagespeed_cc_test(
+    name = "ngx_site_cache_fragment_pin_test",
+    srcs = ["ngx_site_cache_fragment_pin_test.cc"],
+    data = [
+        "//pagespeed/nginx:nginx_sources",
+    ],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+        "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )

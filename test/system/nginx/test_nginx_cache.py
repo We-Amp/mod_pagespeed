@@ -21,6 +21,8 @@ IPRO caching, and no-cache header preservation.
 Test classes:
 - TestCacheHitTracking: Verifies cache hits are counted in statistics
 - TestCacheFlush: Verifies cache flushing via cache.flush file
+- TestCacheFlushUnderLocation: cache.flush also flushes under a location
+  with pagespeed settings of its own
 - TestDownstreamCacheHeaders: Verifies downstream cacheability headers
 - TestIproCaching: Tests In-Place Resource Optimization caching
 - TestPreserveNoCache: Tests no-cache header preservation
@@ -30,8 +32,11 @@ Environment Variables:
     PAGESPEED_STATS_PATH: Path to statistics endpoint (default: /pagespeed_statistics)
 """
 
+import pathlib
 import re
+import shutil
 import time
+import uuid
 from typing import Callable, Dict
 
 import pytest
@@ -218,6 +223,76 @@ class TestCacheFlush:
             f"Flush count: {flush_count_before} -> {flush_count_after}. "
             f"Activity stats: {[(s, stats_before.get(s, 0), stats_after.get(s, 0)) for s in cache_activity_stats]}"
         )
+
+
+# ============================================================================
+# TestCacheFlushUnderLocation: a flush applies under every location
+# ============================================================================
+
+
+def _unshortenable_hex_color() -> str:
+    """A random #rrggbb the CSS minifier keeps as it is (not #rgb-shortenable)."""
+    while True:
+        color = f"#{uuid.uuid4().int & 0xFFFFFF:06x}"
+        if any(color[i] != color[i + 1] for i in (1, 3, 5)):
+            return color
+
+
+@pytest.mark.nginx_only
+@pytest.mark.requires_stats
+@pytest.mark.requires_fixture("cache_flush", "doc_root_scratch")
+class TestCacheFlushUnderLocation:
+    """Touching cache.flush flushes the cache under a location with pagespeed
+    settings of its own, as it does where the server's settings apply.
+
+    The location (/mod_pagespeed_test/location_options/ in
+    run_nginx_tests.sh) repeats the server's rewrite level, so the two cases
+    differ only in where the settings are written. The page inlines
+    update.css; a changed update.css shows only once the cache is flushed,
+    since the cached copy is still fresh. The colors are random, so an
+    earlier run's content cannot match.
+    """
+
+    @pytest.mark.timeout(300)
+    @pytest.mark.parametrize(
+        "directory",
+        [
+            pytest.param("cache_flush", id="server-settings"),
+            pytest.param("location_options", id="location-settings"),
+        ],
+    )
+    def test_touching_cache_flush_shows_changed_css(
+        self,
+        client: PageSpeedClient,
+        doc_root: pathlib.Path,
+        flush_cache: Callable[[], None],
+        directory: str,
+    ):
+        test_root = doc_root / "mod_pagespeed_test"
+        template = (test_root / "cache_flush" / "cache_flush_test.html").read_text()
+        name = f"flush-{uuid.uuid4().hex[:12]}"
+        test_dir = test_root / directory / name
+        url_path = f"/mod_pagespeed_test/{directory}/{name}/cache_flush_test.html"
+        before, after = _unshortenable_hex_color(), _unshortenable_hex_color()
+        test_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (test_dir / "cache_flush_test.html").write_text(template)
+            (test_dir / "update.css").write_text(
+                f".class myclass {{ color: {before}; }}\n"
+            )
+            client.fetch_until_count(url_path, re.escape(before), 1)
+
+            (test_dir / "update.css").write_text(
+                f".class myclass {{ color: {after}; }}\n"
+            )
+            # cache.flush is compared by its mtime, in whole seconds.
+            time.sleep(2)
+            flush_cache()
+            # Well short of the five-minute lifetime of the cached
+            # update.css, so only the flush can bring in the new color.
+            client.fetch_until_count(url_path, re.escape(after), 1, timeout=30.0)
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
 
 
 # ============================================================================

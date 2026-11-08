@@ -98,6 +98,10 @@ class CssResourceSlotFactory {
                              size_t value_index);
   CssResourceSlotPtr UniquifySlot(CssResourceSlotPtr slot);
 
+  // Forgets all slots; the RewriteContexts that use them keep them alive.
+  // Call when the walk over one stylesheet is finished.
+  void Clear() { slots_.clear(); }
+
  private:
   class SlotComparator {
    public:

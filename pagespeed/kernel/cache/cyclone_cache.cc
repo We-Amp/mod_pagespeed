@@ -60,6 +60,39 @@ uint64_t ReadHandleNsUntilForcedWrap(void* user_data) {
       static_cast<CycloneReadHandle*>(user_data));
 }
 
+// Closes the read handle on every exit from a lookup, including an exception.
+struct ReadHandleCloser {
+  void operator()(CycloneReadHandle* handle) const {
+    cyclone_read_handle_close(handle);
+  }
+};
+
+// The cache library's C API is the first barrier against exceptions: it
+// catches std::bad_alloc and everything else and reports a failed operation.
+// The wrapper code around it allocates too (copying a cache hit, escaping a
+// key for the log, building log text), so the public operations of
+// CycloneCache are a second barrier: an exception that reaches it is reported
+// here and the operation counts as a miss or a failed write.  This must not
+// throw itself, and it is sampled like the other cache warnings.
+void LogEscapedException(MessageHandler* handler,
+                         std::atomic<uint64_t>* log_count,
+                         const char* operation, const char* outcome) noexcept {
+  try {
+    uint64_t n = log_count->fetch_add(1, std::memory_order_relaxed);
+    if ((n & 1023) == 0) {
+      handler->Message(
+          kWarning,
+          "CycloneCache: %s hit an internal error (out of memory?) and was "
+          "treated as %s (failure #%llu on this cache; this warning is "
+          "logged 1-in-1024)",
+          operation, outcome, static_cast<unsigned long long>(n) + 1);
+    }
+  } catch (...) {  // NOLINT(bugprone-empty-catch): outcome recorded by caller
+    // Logging needs memory as well; the caller has already recorded the
+    // outcome (a miss, a counted failure, or a best-effort delete).
+  }
+}
+
 }  // namespace
 
 // Lightweight CacheInterface view over an owning CycloneCache that routes
@@ -215,7 +248,15 @@ void CycloneCache::GetWithTier(const GoogleString& key, bool small_tier,
                                Callback* callback) {
   // The callback runs after the lock is dropped: it may call back into this
   // cache.
-  KeyState state = LookupWithTier(key, small_tier, callback);
+  KeyState state = kNotFound;
+  try {
+    state = LookupWithTier(key, small_tier, callback);
+  } catch (...) {
+    // An exception from the lookup (an allocation failure, say) is a miss.
+    misses_->Add(1);
+    LogEscapedException(handler_, &read_failure_log_count_, "A read", "a miss");
+    state = kNotFound;
+  }
   ValidateAndReportResult(key, state, callback);
 }
 
@@ -236,6 +277,10 @@ CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
       small_tier ? CYCLONE_TIER_SMALL : CYCLONE_TIER_DEFAULT, &read_handle);
 
   if (err == CYCLONE_OK && read_handle != nullptr) {
+    // Closes our reference on every path out of the hit branch, including an
+    // exception.
+    std::unique_ptr<CycloneReadHandle, ReadHandleCloser> handle_guard(
+        read_handle);
     // Cache hit - get the data
     size_t size = cyclone_read_handle_size(read_handle);
     bool ram_hit = cyclone_read_handle_is_ram_hit(read_handle) != 0;
@@ -247,23 +292,35 @@ CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
       // to the MappedSharedString are gone.
       const char* mapped_data = cyclone_read_handle_mapped_data(read_handle);
 
-      // Increment refcount since MappedSharedString will take ownership
+      // Increment refcount since MappedSharedString will take ownership.
+      // The value is built straight from the factory (no move, which would
+      // allocate inside a noexcept function), and everything that can throw
+      // from here on is inside the try.  Once the view exists it owns the
+      // reference and releases it from its destructor, also if set_value
+      // throws.
+      bool view_owns_ref = false;
       cyclone_read_handle_ref(read_handle);
-
-      MappedSharedString mapped_value = MappedSharedString::FromMappedView(
-          mapped_data, size, ReleaseReadHandle, RenewReadHandleLease,
-          RenewReadHandleLeaseStrict, ReadHandleNsUntilForcedWrap, read_handle);
-      callback->set_value(mapped_value);
+      try {
+        MappedSharedString mapped_value = MappedSharedString::FromMappedView(
+            mapped_data, size, ReleaseReadHandle, RenewReadHandleLease,
+            RenewReadHandleLeaseStrict, ReadHandleNsUntilForcedWrap,
+            read_handle);
+        view_owns_ref = true;
+        callback->set_value(mapped_value);
+      } catch (...) {
+        if (!view_owns_ref) cyclone_read_handle_unref(read_handle);
+        throw;
+      }
 
       // Close our reference to the read handle (decrements refcount).
       // The MappedSharedString still holds a reference.
-      cyclone_read_handle_close(read_handle);
+      handle_guard.reset();
     } else {
       // Fall back to the copied data (e.g., RAM cache hits may not have mmap)
       const char* data = cyclone_read_handle_data(read_handle);
       if (data == nullptr && size > 0) {
         // The copy could not be made (out of memory): nothing to serve.
-        cyclone_read_handle_close(read_handle);
+        handle_guard.reset();
         misses_->Add(1);
         return kNotFound;
       }
@@ -272,7 +329,7 @@ CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
       callback->set_value(value);
 
       // Close the read handle
-      cyclone_read_handle_close(read_handle);
+      handle_guard.reset();
     }
 
     // Update statistics
@@ -296,15 +353,19 @@ CacheInterface::KeyState CycloneCache::LookupWithTier(const GoogleString& key,
     uint64_t n =
         read_failure_log_count_.fetch_add(1, std::memory_order_relaxed);
     if ((n & 1023) == 0) {
-      const char* error = cyclone_get_last_error();
-      handler_->Message(
-          kWarning,
-          "CycloneCache: Read failed for key %s, served as a miss: %s "
-          "(failure #%llu on this cache; this warning is logged 1-in-1024)",
-          CEscape(key).c_str(),
-          error ? error
-                : (err == CYCLONE_CORRUPTED ? "damaged entry" : "I/O error"),
-          static_cast<unsigned long long>(n) + 1);
+      try {
+        const char* error = cyclone_get_last_error();
+        handler_->Message(
+            kWarning,
+            "CycloneCache: Read failed for key %s, served as a miss: %s "
+            "(failure #%llu on this cache; this warning is logged 1-in-1024)",
+            CEscape(key).c_str(),
+            error ? error
+                  : (err == CYCLONE_CORRUPTED ? "damaged entry" : "I/O error"),
+            static_cast<unsigned long long>(n) + 1);
+      } catch (...) {  // NOLINT(bugprone-empty-catch): read stays a miss
+        // Building the log line ran out of memory; the read is still a miss.
+      }
     }
   }
   return kNotFound;
@@ -326,6 +387,20 @@ void CycloneCache::PutWithTier(const GoogleString& key,
     return;
   }
 
+  bool failure_counted = false;
+  try {
+    PutLocked(key, value, small_tier, &failure_counted);
+  } catch (...) {
+    // An exception from the write path (an allocation failure, say) is a
+    // failed write.
+    if (!failure_counted) failures_->Add(1);
+    LogEscapedException(handler_, &write_failure_log_count_, "A write",
+                        "a failed write");
+  }
+}
+
+void CycloneCache::PutLocked(const GoogleString& key, const SharedString& value,
+                             bool small_tier, bool* failure_counted) {
   StringPiece data = value.Value();
   CycloneError err = cyclone_cache_write_tier(
       cache_, key.data(), key.size(), data.data(), data.size(),
@@ -343,6 +418,7 @@ void CycloneCache::PutWithTier(const GoogleString& key,
     // that would report a healthy cache as failing.
   } else {
     failures_->Add(1);
+    *failure_counted = true;
     // A full or unwritable cache fails every write, so a per-failure warning
     // floods the log at request rate without adding signal.  Log the first
     // failure and every 1024th after that; the cyclone_cache_failures
@@ -350,16 +426,20 @@ void CycloneCache::PutWithTier(const GoogleString& key,
     uint64_t n =
         write_failure_log_count_.fetch_add(1, std::memory_order_relaxed);
     if ((n & 1023) == 0) {
-      const char* error = cyclone_get_last_error();
-      // Keys embed request URLs; escape the key so control characters in it
-      // cannot forge log lines or emit terminal escapes.
-      handler_->Message(
-          kWarning,
-          "CycloneCache: Write failed for key %s: %s (failure #%llu on this "
-          "cache; every failure is counted in cyclone_cache_failures, this "
-          "warning is logged 1-in-1024)",
-          CEscape(key).c_str(), error ? error : "unknown error",
-          static_cast<unsigned long long>(n) + 1);
+      try {
+        const char* error = cyclone_get_last_error();
+        // Keys embed request URLs; escape the key so control characters in it
+        // cannot forge log lines or emit terminal escapes.
+        handler_->Message(
+            kWarning,
+            "CycloneCache: Write failed for key %s: %s (failure #%llu on this "
+            "cache; every failure is counted in cyclone_cache_failures, this "
+            "warning is logged 1-in-1024)",
+            CEscape(key).c_str(), error ? error : "unknown error",
+            static_cast<unsigned long long>(n) + 1);
+      } catch (...) {  // NOLINT(bugprone-empty-catch): failure is counted
+        // Building the log line ran out of memory; the failure is counted.
+      }
     }
   }
 }
@@ -377,12 +457,18 @@ void CycloneCache::DeleteWithTier(const GoogleString& key, bool small_tier) {
     return;
   }
 
-  CycloneError err = cyclone_cache_delete_tier(
-      cache_, key.data(), key.size(),
-      small_tier ? CYCLONE_TIER_SMALL : CYCLONE_TIER_DEFAULT);
-  if (err == CYCLONE_OK || err == CYCLONE_NOT_FOUND) {
-    // Both success and not-found are considered successful deletes
-    deletes_->Add(1);
+  try {
+    CycloneError err = cyclone_cache_delete_tier(
+        cache_, key.data(), key.size(),
+        small_tier ? CYCLONE_TIER_SMALL : CYCLONE_TIER_DEFAULT);
+    if (err == CYCLONE_OK || err == CYCLONE_NOT_FOUND) {
+      // Both success and not-found are considered successful deletes
+      deletes_->Add(1);
+    }
+  } catch (...) {
+    // A delete that hits an exception is a failed best-effort delete.
+    LogEscapedException(handler_, &delete_failure_log_count_, "A delete",
+                        "a failed delete");
   }
   // Note: We don't log failures for delete operations as they are
   // typically best-effort.

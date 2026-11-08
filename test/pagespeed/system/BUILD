@@ -211,6 +211,16 @@ pagespeed_cc_test(
     ],
 )
 
+# How server contexts pick up a touch of cache.flush (no Redis/Memcached).
+pagespeed_cc_test(
+    name = "system_server_context_test",
+    srcs = ["system_server_context_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
 # Loopback route fetcher test - uses POSIX sockets (Linux-only).
 pagespeed_cc_test(
     name = "loopback_route_fetcher_test",
@@ -394,6 +404,28 @@ cc_binary(
     win_def_file = "daemon_stub_no_generation.def",
 )
 
+# A library that publishes the HTML cache policy (PS_API 1.12). The default stub
+# does not, which is what stands for an older library.
+cc_binary(
+    name = "libdaemon_stub_html_policy.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = ["PS_STUB_HTML_POLICY"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_html_policy.def",
+)
+
 # A daemon package from before the per-failure explanation was published. Like
 # the two flavours above this entry point is bound OPTIONALLY, so this library
 # must still load and still work; without it "an older library is unaffected"
@@ -420,6 +452,79 @@ cc_binary(
     win_def_file = "daemon_stub_no_last_error.def",
 )
 
+# A library that REPORTS 1.12 but does not export the three _site cache entry
+# points. They are bound unconditionally, so the loader refuses it; without
+# this flavour "a 1.12 library without the sited calls is refused" would be a
+# comment. (No flavour exports the UNSITED cache calls at all: every suite that
+# loads a stub proves the module never resolves them.)
+cc_binary(
+    name = "libdaemon_stub_no_site.so",
+    testonly = True,
+    srcs = ["daemon_stub_lib.cc"],
+    defines = ["PS_STUB_OMIT_SITE"],
+    linkopts = select({
+        "@platforms//os:linux": ["-nostdlib++"],
+        "//conditions:default": [],
+    }),
+    # Windows exports come from the .def (the source exports plain
+    # extern "C", POSIX-style; without it the DLL exports nothing).
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    win_def_file = "daemon_stub_no_site.def",
+)
+
+# The ABI floor and the published layout the module binds: a library below
+# 1.12, and a 1.12 library without the sited cache calls, are refused; the
+# notification parameters are the published 88 bytes with the site and flags
+# where the peer reads them.
+pagespeed_cc_test(
+    name = "daemon_abi_test",
+    srcs = ["daemon_abi_test.cc"],
+    data = [
+        ":libdaemon_stub.so",
+        ":libdaemon_stub_no_site.so",
+    ],
+    shard_count = 1,
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//pagespeed/system:daemon_adapter",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:daemon_stub_test_util",
+    ],
+)
+
+# Every notification the in-place arms send, through the one builder: never
+# HTML, flags exactly from-module, never an agent request, never the llms.txt
+# mask, always the request's site.
+pagespeed_cc_test(
+    name = "daemon_notify_never_html_test",
+    srcs = [
+        "daemon_notify_never_html_test.cc",
+        "recording_daemon_abi.h",
+    ],
+    data = [":libdaemon_stub.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//net/instaweb/rewriter",
+        "//pagespeed/system:daemon_record_arm",
+        "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:site_cache_fragment",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+        "//test/pagespeed/system:test_base_core",
+    ],
+)
+
 # Optimizer-daemon adapter startup: the volume-sizing mirror (match starts,
 # divergence refuses), the degrade path when the daemon is absent or
 # unreachable, and the RAM-tier floor the adapter opens the shared volume
@@ -430,6 +535,7 @@ pagespeed_cc_test(
     srcs = ["daemon_adapter_test.cc"],
     data = [
         ":libdaemon_stub.so",
+        ":libdaemon_stub_html_policy.so",
         ":libdaemon_stub_no_generation.so",
         ":libdaemon_stub_no_last_error.so",
         ":libdaemon_stub_no_varies_accept.so",
@@ -484,7 +590,10 @@ pagespeed_cc_test(
 # the real dlopen-able stand-in, like the gate's own suite.
 pagespeed_cc_test(
     name = "daemon_ipro_recorder_test",
-    srcs = ["daemon_ipro_recorder_test.cc"],
+    srcs = [
+        "daemon_ipro_recorder_test.cc",
+        "recording_daemon_abi.h",
+    ],
     data = [":libdaemon_stub.so"],
     shard_count = 1,
     target_compatible_with = ["@platforms//os:linux"],
@@ -508,7 +617,10 @@ pagespeed_cc_test(
 # peer does (no compatible member, so nothing is selected at all).
 pagespeed_cc_test(
     name = "daemon_serve_arm_test",
-    srcs = ["daemon_serve_arm_test.cc"],
+    srcs = [
+        "daemon_serve_arm_test.cc",
+        "recording_daemon_abi.h",
+    ],
     data = [
         ":libdaemon_stub.so",
         ":libdaemon_stub_no_generation.so",
@@ -565,6 +677,19 @@ pagespeed_cc_test(
     ],
 )
 
+# The in-place URL agreement shared by the nginx and Apache ports, with the
+# readings each server produces.
+pagespeed_cc_test(
+    name = "inplace_url_agreement_test",
+    srcs = ["inplace_url_agreement_test.cc"],
+    shard_count = 1,
+    deps = [
+        "//pagespeed/kernel/http",
+        "//pagespeed/system:inplace_url_agreement",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
 # The host a serve is recorded under: the optimizer's host-name rule and the
 # configured-names rule, with the shapes real servers and clients produce.
 pagespeed_cc_test(
@@ -574,6 +699,16 @@ pagespeed_cc_test(
     deps = [
         "//pagespeed/system:serve_host_names",
         "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+pagespeed_cc_test(
+    name = "site_cache_fragment_test",
+    srcs = ["site_cache_fragment_test.cc"],
+    shard_count = 1,
+    deps = [
+        ":test_base_core",
+        "//pagespeed/system:site_cache_fragment",
     ],
 )
 
@@ -614,6 +749,40 @@ pagespeed_cc_test(
     deps = [
         "//test/net/instaweb/rewriter:test_base",
         "//test/pagespeed/system:test_base_core",
+    ],
+)
+
+# DaemonHtmlCache report-only: what the module does with the policy's answers,
+# against the dlopen-able stand-in.
+pagespeed_cc_test(
+    name = "daemon_html_report_test",
+    srcs = ["daemon_html_report_test.cc"],
+    data = [":libdaemon_stub_html_policy.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":daemon_stub_test_util",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_report",
+        "//test/pagespeed/kernel/base:kernel_test_util",
+    ],
+)
+
+# The decision log writer thread failing to start: the line is dropped and the
+# next one starts it. A binary of its own, so no earlier test has started it.
+pagespeed_cc_test(
+    name = "daemon_html_report_writer_start_test",
+    srcs = ["daemon_html_report_writer_start_test.cc"],
+    data = [":libdaemon_stub_html_policy.so"],
+    shard_count = 1,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":daemon_stub_test_util",
+        "//net/instaweb/rewriter",
+        "//pagespeed/kernel/util",
+        "//pagespeed/system:daemon_html_report",
+        "//test/pagespeed/kernel/base:kernel_test_util",
     ],
 )
 

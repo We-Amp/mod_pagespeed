@@ -17,7 +17,8 @@ permissions: {}
 jobs:
   analysis:
     name: Scorecard analysis
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     permissions:
       # Needed to upload results to the code scanning dashboard.
       security-events: write

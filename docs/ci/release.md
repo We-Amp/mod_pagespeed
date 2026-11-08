@@ -34,6 +34,7 @@ The lane releases a tag `module-v<version>`:
 |---|---|
 | `module-v1.19.0` | a release |
 | `module-v1.19.0-rc.1` | a release candidate: built and validated, flagged `prerelease: true` in the manifest, and never to be taken up by a consumer |
+| `module-v1.19.0-rehearsal.7` | made up by the weekly rehearsal (see "The weekly rehearsal"); never pushed as a tag |
 
 The version has the form `X.Y.Z` with an optional `-prerelease`. Build
 metadata (`+r1` and similar) is refused: a new build of the same sources gets
@@ -94,7 +95,14 @@ it was a dry run of exactly the given tag at the tag's commit (so a run of
 Debian and of the RPM install-and-serve smoke jobs, one variant (self-hosted
 or hosted) passed and the other was skipped; and `Sign SHA256SUMS` and
 `Create the GitHub release` exist and were skipped. The attempt number it
-read is printed. It is dispatch only, hosted and read-only, with no
+read is printed. For a final tag that does not exist yet (`module-vX.Y.Z` or
+`module-vX.Y.Z-rc.N`) the evidence is a candidate run instead
+(`candidate_run_id`, exclusive with `dry_run_id`). The run is read through the
+Actions API and must be of this repository, of `release.yml`, a dispatch on
+`master`, completed and successful, titled exactly
+`Release <tag> candidate dry run @ <head_sha>`, with a successful
+`candidate-seal` job. Its `head_sha` is the commit that is checked out and
+rehearsed, not a tag. It is dispatch only, hosted and read-only, with no
 environment, secret or write permission; `tools/ci/test_pair_rehearsal_shape.sh`
 fails if that changes. It does not prove the public package repository
 metadata or signatures, the shared-cache check (which installs from the public
@@ -152,6 +160,261 @@ gh workflow run ci.yml --ref master -f full=true
 
 Runs of one tag are serialized by the caller (`release.yml`), and a release
 always runs out: it is never cancelled by a newer run.
+
+A real run also takes an input `adopt` (`auto`, the default, or `off`). With
+`auto` it adopts the candidate run that the tag names (see "Adopting a
+candidate run"); `off` forces the full build of the lane. The input matters to
+a real dispatch only; a tag push is always `auto`, and a dry run, a candidate
+and a rehearsal never adopt.
+
+### A candidate run
+
+A candidate run is a dry run of a release tag that does not exist yet. It
+builds and checks the release the way the real run of that tag will, so no
+`-pre` tag has to be pushed to find out whether a version will go through:
+
+```text
+gh workflow run release.yml --ref master -f tag=module-v1.19.0 \
+  -f dry_run=true -f candidate=true -f sha=<40-character master tip>
+```
+
+The guard accepts it only as a manual dispatch on `refs/heads/master` with
+`dry_run` true, for a tag that is not on the remote and that is `X.Y.Z` or
+`X.Y.Z-rc.N` (a `-pre` or `-rehearsal` version is refused), with `sha` equal to
+the commit the run is dispatched at. Every job checks out that commit. The
+run is titled `Release <tag> candidate dry run @ <sha>`; GitHub computes the
+title from `run-name` when the run is created, so it is a value no job can
+write.
+
+The `version` job gives a run a `build_profile`: `release` for a real run and
+a candidate, `rehearsal` for a plain dry run. What is built and checked follows
+the profile (the version stamps, the optimizer pair, the strictness of the pin
+and version checks, whether the `fleet-hyperv` gates must have run). Whether
+anything is signed follows `dry_run`, and the CI gates' strictness too. A
+candidate therefore stamps the final version, has no `optimizer-pair-version`
+file, fails on a pin that is not the version's pair (for `-rc.N` the pair does
+not exist, so the pin is taken as it is, in a real run too), builds the cPanel
+packages and requires the three gates to have run. It never enters the `release`
+environment: each of those jobs carries both `dry_run == 'false'` and
+`candidate != 'true'` in its `if:`, which `tools/ci/check-workflow-shape.sh`
+enforces, and the environment's tag policy would refuse a run on `master` in
+any case.
+
+A change to the conditions of the lane's jobs is checked by comparing the job
+graph before and after with `tools/ci/release_job_graph.py` (`compare OLD NEW`
+renders every job with its `needs` and its `if:` for a plain dry-run dispatch
+and a tag push; the two renderings must match job for job, apart from jobs
+that are new). The caller pins the lane to `master`, so a branch cannot be
+dispatched before it is merged.
+
+#### The seal
+
+After `validate`, the `candidate-seal` job (hosted, no environment, no secret)
+lists the artifacts of its own run through the Actions API, which is the
+source of names, ids and digests (matrix jobs do not aggregate outputs). It
+keeps the artifacts on the allowlist of `tools/ci/release_adopt.py` (the
+`asset-*` files, `unsigned-windows`, `msi-old`, `stock-el8`,
+`testdata-oldpkgs-*` and `release-assets`), fails on a missing allowlisted
+name and on any name that is neither sealed nor on the not-sealed list (`tree`,
+`tree-sidecar`, the per-distro nginx legs, `debug-*`,
+`testdata-sidecar-results-*`, `msi-unsigned`, `asset-windows`), downloads each
+by id, checks the zip against the API digest and records the hash of every
+file. `candidate-seal.json` (schema 2: `candidate`, `dry_run`, `tag`,
+`version`, `build_sha`, the artifact list and the hash of `SHA256SUMS`, and
+additively the legs of the two nginx plan jobs as `plans` and the hash of the
+pinned optimizer release's `SHA256SUMS` as `optimizer_sums_sha256`, which
+`optimizer-fetch` outputs after it verified the file against the pin) is
+uploaded as `candidate-seal`. The job refuses to seal when the run's own
+title or commit disagree with the version job. A release candidate version
+has no cPanel packages, so those three are not required for it. In a candidate
+run every sealed artifact is kept 14 days (`tree` stays at 3).
+
+The artifacts API of a run spans all attempts, so a job that uploaded in an
+attempt and again after "Re-run failed jobs" leaves a name listed once per
+attempt. A not-sealed name may be listed more than once and is ignored (only
+`candidate-seal` must be unique). A sealed name is resolved to one copy: the
+producing job is read from the pipeline file (the job whose upload step names
+it, with `env.*` and `matrix.*` in the name resolved; a fleet job and its
+hosted twin are one producer group, and the one that succeeded in the latest
+attempt counts), and the copy created between that job's `started_at` and
+`completed_at` in the `filter=latest` job list is the one sealed. The seal
+and `verify` refuse a sealed name whose producer cannot be determined, whose
+window holds no copy, or whose window holds more than one. Copies of older
+attempts lie outside the window and are ignored.
+
+### Adopting a candidate run
+
+A real run does not rebuild what a green candidate run already built and
+tested. The lead names the candidate in the annotated tag, as three trailers
+of the tag message:
+
+```text
+Release-Candidate-Run: <run id of the candidate>
+Release-Candidate-SHA256SUMS: <sha256 of the candidate's release-assets SHA256SUMS>
+Release-Candidate-Seal: <sha256 of the candidate's candidate-seal.json>
+```
+
+The tag object is then an immutable record of which bytes may be published.
+A tag without the trailers (or a lightweight tag) names no candidate, and the
+run is the full build of any other real run, job for job. A tag with only some
+of the trailers fails. `adopt=off` on a real dispatch ignores them.
+
+The `adopt` job (hosted, no environment, no secret, a read-only token, code
+from `master`) reads the trailers from the tag object (`git cat-file tag`),
+takes this run's lane commit (its `referenced_workflows` entry for
+`pipeline-release-module.yml`), start time and triggering actor from the
+Actions API, and runs `release_adopt.py verify` (below). On success it copies
+the candidate's artifacts that the remaining jobs read into this run under the
+same names (`overwrite`, 14 days), reads each copy back and records the result
+in `adopt-binding.json`, which it uploads as `adopt-binding`. Its outputs are
+small: `adopted`, `candidate_run`, `candidate_attempt`, `binding` (`run <id> ·
+seal <12 hex> · SHA256SUMS <12 hex>`), `binding_id` and `binding_sha256`. The
+step summary prints the binding. The download uses the job's own token
+(`actions: read`) with the candidate's run id.
+
+In an adopting run:
+
+- the build, test, smoke, scan and vendor jobs of the lane (the adoptable group
+  of `release_adopt.py schema --print`, each with its hosted twin) are skipped;
+  their `-ready` joins read an adopted run as success;
+- `systest-gate`, `ci-release-gate` and `optimizer-fetch` run; `optimizer-fetch`
+  also compares what it fetched with the adopted `asset-optimizer` byte for byte;
+- `windows-sign`, `msi-build`, `msi-sign` and the gates run as before.
+  Before it reads a secret, `windows-sign` checks that `adopt-binding` hashes
+  to `binding_sha256` and that the downloaded `unsigned-windows` files are the
+  sealed ones; `msi-sign` checks that the installer it downloads is the one
+  `msi-build` built (its output `msi_sha256`). `msi-old` is not copied: the
+  adopting run's `msi-build` builds its own;
+- the names of `windows-sign`, `msi-sign`, `sign-checksums` and
+  `create-release` (all four approvals) carry the binding, `Sign the
+  Windows binaries (adopted: run <id> · seal <12 hex> · SHA256SUMS <12 hex>)`,
+  so whoever approves the job can compare it with the tag's trailers and the
+  record of the candidate. The prefix is today's name. Reject the approval if
+  they differ;
+- `validate` runs in full. Every job it needs concluded `success` in this run,
+  or was skipped here and succeeded in the sealed job list of the binding
+  (hash-checked), and of a fleet job and its hosted twin exactly one succeeded
+  in the candidate. It re-hashes every adopted artifact against the binding and
+  requires the candidate's `SHA256SUMS` row for every adopted release file;
+  only the Windows installer, `manifest.json` and `sidecar-pair.json` may
+  differ, and each differing row is named. All of its other checks stay.
+  `manifest.json` records the candidate as `build_run_id` and
+  `build_run_attempt`, and the adopting run as `run_id`.
+
+`check-workflow-shape.sh` keeps the lane in step with the schema: the jobs
+whose `if:` has `needs.adopt.outputs.adopted != 'true'` are exactly the
+adoptable group, and a job without that condition downloads only artifacts the
+adopting run holds (rule adopt-shape).
+
+**Refusal.** A failed check ends the `adopt` job red, before any approval is
+requested, and the step summary names the reason. Nothing is signed or
+published. Recover with a new candidate and a new tag, or dispatch the real run
+with `adopt=off` (a full build; the push run of the tag must have finished
+first, the two share a concurrency group). A network failure while copying is
+recovered by re-running the failed jobs: `adopt` overwrites and checks again.
+A re-run of all jobs repeats every check, including the three-day limit.
+
+#### What `release_adopt.py` checks
+
+`verify` takes the repository, the candidate run id (the tag's
+`Release-Candidate-Run` trailer), the tag, the tag's commit, the other two
+trailers (`Release-Candidate-SHA256SUMS`, `Release-Candidate-Seal`), the
+triggering actor and the lane commit of the run that adopts, and that run's
+start time. The tag object itself is not read by the tool. It checks, through
+the Actions API first and the downloaded bytes second:
+
+1. the candidate run is a completed, successful `workflow_dispatch` of
+   `release.yml` on `master`, in this repository, titled for this tag and commit;
+2. it built the tag's commit;
+3. it ran the same `pipeline-release-module.yml` commit as the adopting run;
+4. its dispatcher and the user of its latest attempt are the adopting run's
+   actor or on `ADMIN_ALLOWLIST`; bots are refused;
+5. the `filter=latest` job listing matches the pipeline file at the candidate's
+   lane commit job for job: matrix legs are expanded from the `plans` the seal
+   records, of each fleet/hosted twin exactly one ran and the other was
+   skipped, the release-environment jobs were skipped and `candidate-seal`
+   succeeded;
+6. every sealed artifact is, by the window rule of the seal, the listed copy
+   with the sealed id and digest, unexpired,
+   of the candidate run and commit, and the single `candidate-seal` artifact
+   was uploaded by the passing `candidate-seal` job;
+7. the candidate finished at most three days before the adopting run started,
+   where the finish is the newest `completed_at` over the latest attempt's jobs
+   (never the run's `updated_at`), and every listed job has one;
+8. the seal hashes to its trailer, says `candidate: true`, `dry_run: true`
+   and the API's tag, version and commit, every file of every sealed artifact
+   matches the seal, and `SHA256SUMS` matches both the seal and its trailer;
+9. the optimizer pin at the tag names the optimizer release that the
+   candidate's `manifest.json` records, and its `sha256sums_sha256` is the
+   hash of the optimizer `SHA256SUMS` that the candidate's `optimizer-fetch`
+   verified (recorded in the seal).
+
+On success it writes `adopt-binding.json` (candidate run and attempt, build
+commit, tag, lane commit, trailers, the sealed job list, and every sealed
+artifact with its files) and prints `run <id> · seal <12 hex> · SHA256SUMS
+<12 hex>`. `--read-only` stops after the checks, writes nothing and prints the
+three trailer values, so the intended commit stands in for the tag commit
+before a tag exists.
+
+`check-files` compares the files in a directory with those the binding records
+for one adopted artifact; `check-needs` applies the `validate` rule to a
+`toJSON(needs)` file and writes the needs it accepts; `check-sums` compares the
+final `SHA256SUMS` with the candidate's rows. The signing jobs and `validate`
+use them.
+
+`upload-check` reads the artifacts that an adopting run copied into itself back
+from its own artifact listing, checks each zip against the API digest and the
+files against `adopt-binding.json`, and records the new id and digest.
+`binding-hash` prints, and optionally checks, the hash of `adopt-binding.json`.
+`schema --print` lists which jobs an adopting run skips, which always run and
+which belong to the environment; a self-test fails when a job of the pipeline
+file is in none of those groups.
+
+`seal` accepts `--plan JOB=JSON` for each plan job (`nginx-x64-plan`,
+`nginx-arm64-plan`) and records them as `plans` in the seal. The key is
+additive; readers of schema 2 ignore it.
+
+### The weekly rehearsal
+
+The lane otherwise runs only when a release is cut, so a defect in it (a
+smoke fixture, a gate, a build recipe) waits for that day. Every Saturday at
+06:30 UTC, after the nightly, `release-rehearsal.yml` runs the lane as a
+rehearsal on the master tip. It can also be dispatched by hand:
+
+```text
+gh workflow run release-rehearsal.yml --ref master
+```
+
+The rehearsal calls `pipeline-release-module.yml` with `rehearsal: true` and
+passes no secret. The guards accept it only as a `schedule` or a
+`workflow_dispatch` on `refs/heads/master` with no tag, no candidate and
+`dry_run` true, and a `schedule` event is refused for any other run. No tag
+exists, so the `version` job makes one up from the pinned optimizer release:
+`module-v<pinned version>-rehearsal.<run number>`. That is a pre-release
+(`1.19.0~rehearsal.7` in the packages), so it can never be taken for a
+release; the pin and version-pair checks warn as in a `-pre` dry run. The
+`build_profile` is `rehearsal`, every job checks out the master commit, and
+no job of the `release` environment runs (each carries
+`rehearsal != 'true'` in its `if:`, enforced by
+`tools/ci/check-workflow-shape.sh`). `candidate-seal` does not run either, so
+a rehearsal can never be adopted by a release.
+
+The rehearsal is red on anything that would block a release: a failed build,
+smoke or gate. It is also red when the full tier has not been green on master
+for 7 days. In a rehearsal `ci-release-gate` has one more step,
+`tools/ci/rehearsal_fulltier_gate.sh`, which fails unless a completed
+`ci.yml` dispatch (`full=true`) or `nightly.yml` run on master from the last 7
+days has every full-tier job of the release gate's list green, with the same
+IIS and ASan rules as in "The CI gates". Runs are found through the runs API
+by their head commit and read job by job; a failed or unreadable API call
+fails the gate.
+
+A red rehearsal opens or updates one issue titled `Release lane rehearsal
+red`, labelled `lane-rehearsal-red` (job `rehearsal-red` of
+`release-rehearsal.yml`, which reuses `tools/ci/nightly_red_report.sh`; a
+green rehearsal closes it, a re-run never does). Only the rehearsal reports:
+a release run does not. While the issue is open the rehearsal has found
+something a release would hit.
 
 ### What a run needs from the repository settings
 
@@ -243,7 +506,7 @@ A run that failed or was cancelled before `create-release` published leaves at
 most a draft release; re-run the failed jobs, or dispatch the tag again.
 `create-release` deletes a draft of the same tag and makes it again, keeping
 the tag. A published release is never reused or replaced: it makes the job
-fail, and a new build of the same sources gets a new tag. Re-running failed jobs of the same run reuses that run's artifacts while they are kept; a new run rebuilds.
+fail, and a new build of the same sources gets a new tag. Re-running failed jobs of the same run reuses that run's artifacts while they are kept; a new run rebuilds. The uploads of `signed-windows`, `msi-unsigned` and `release-assets` use `overwrite`, so a re-run of all jobs replaces them instead of failing on the first attempt's copy.
 
 ### What the corp side does after
 
@@ -267,15 +530,16 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | Job | Class | What it does |
 |---|---|---|
 | `ref-guard` | hosted | enforces the ref guard (tag glob `module-v*`) |
-| `version` | hosted | derives version, package version, pin tag and `dry_run` from the tag |
+| `version` | hosted | derives version, package version, pin tag, `dry_run`, `candidate`, `rehearsal` and `build_profile` from the tag (or, in a rehearsal, makes the tag up) |
+| `adopt` | hosted | reads the candidate trailers of the tag and, in a real run that names a candidate, verifies it and copies its artifacts into the run (see "Adopting a candidate run"); `adopted` is false in every other run |
 | `vendor` | fleet-heavy, pair | vendors dependencies, stamps the module version, rebuilds the admin console with it, makes the `tree` artifact and the source tarball |
 | `security-gates` | hosted | generates the SBOM for the stamped tree, then notices, VEX, grype with VEX applied on that SBOM; makes the versioned SBOM and VEX files |
-| `optimizer-fetch` | hosted | fetches the pinned optimizer release and verifies it (see below) |
+| `optimizer-fetch` | hosted | fetches the pinned optimizer release and verifies it (see below); outputs the hash of the verified `SHA256SUMS`; in an adopting run compares the packages with the adopted `asset-optimizer` |
 | `systest-gate` | hosted | requires a green Apache and Nginx system test of the CI run of the release commit |
 | `ci-release-gate` | hosted | requires a green full-tier `full=true` CI dispatch of the release commit (see "The CI gates") |
 | `linux-release-build` | fleet-heavy, pair | x64: Apache module, deb, rpm, nginx module tarball, debug files, old-version packages |
 | `linux-arm64-release-build` | hosted arm64 | the same for arm64 |
-| `nginx-distro-build` | fleet-heavy, pair | x64 nginx module packages for noble, bookworm, trixie, jammy (deb) and el9 (rpm), with symbol-leak and rpm routing gates |
+| `nginx-x64-plan`, `nginx-distro-build`, `nginx-ready` | fleet-heavy, pair (plan and join hosted) | x64 nginx module packages for noble, resolute, bookworm, trixie, jammy (deb) and el9 (rpm), one matrix job per distro (the plan job lists them from the leg table; at most three at a time on the fleet); the join job `nginx-ready` takes the leg that ran of the pair, runs the symbol-leak and rpm routing gates over the combined set and hands over `asset-nginx-x64` |
 | `nginx-arm64-plan`, `nginx-distro-build-arm64`, `nginx-arm64-join` | hosted arm64 | the same for arm64, one matrix job per distro (the plan job lists them from the leg table); the join job runs the gates over the combined set and hands over `asset-nginx-arm64` |
 | `nginx-distro-build-el10` | fleet-heavy, pair | the el10 nginx module rpm, with the gates and a load check into the stock nginx |
 | `vendor-sidecar` | hosted | the release tree of the sidecar pair, prepared on a hosted runner with the steps of `vendor` (hands over `tree-sidecar`) |
@@ -285,9 +549,9 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `apache-el10-build` | fleet-heavy, pair | the stock Apache rpm built natively on el10 |
 | `windows-release-build` | fleet-windows, pair | the IIS module built optimized with debug symbols, plus the pinned optimizer worker, all unsigned; hands over `unsigned-windows` |
 | `windows-ready`, `ea4-ready` | hosted | join the Windows legs and the cPanel legs |
-| `windows-sign` | hosted Windows, environment `release`, real run only | signs the IIS module and the optimizer worker and library from `unsigned-windows` with Trusted Signing, has Windows verify each signature, hands over `signed-windows` |
+| `windows-sign` | hosted Windows, environment `release`, real run only | signs the IIS module and the optimizer worker and library from `unsigned-windows` with Trusted Signing, has Windows verify each signature, hands over `signed-windows`; in an adopting run first checks the binding and the unsigned payload, and its name carries the binding |
 | `msi-build` | hosted Windows | builds the installer with WiX from the signed binaries (a dry run: the unsigned ones), its ProductVersion `MAJOR.MINOR.BUILD.<release.yml run number>` so a rebuild of the same version upgrades the installed one, and the older installer the upgrade gate starts from; hands over `asset-windows` (a dry run) or `msi-unsigned` (a real run) and `msi-old` |
-| `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows` |
+| `msi-sign` | hosted Windows, environment `release`, real run only | signs the installer, has Windows verify the signature, hands over `asset-windows`; in an adopting run first checks the installer against `msi-build`'s output, and its name carries the binding |
 | `gate-iis-msi-upgrade` | fleet-hyperv (a reusable workflow of this repository) | installs the installer in a clean IIS guest (an upgrade over the older installer), smoke-tests and uninstalls it |
 | `gate-cpanel-smoke-el9`, `gate-cpanel-smoke-el8` | fleet-hyperv (the same, one job per operating system) | installs the cPanel package in a clean cPanel guest and smoke-tests it; skips on a pre-release |
 | `unit-tests` | fleet-heavy, pair | unit tests of the optimized build with redis and memcached containers |
@@ -297,8 +561,8 @@ hosted `-ready` job joins them for the jobs that depend on the pair.
 | `package-load-check-nginx-arm64` | hosted arm64 | the same for arm64 |
 | `package-smoke-nginx-packaged` | fleet-heavy, pair | installs each x64 package into its stock nginx and runs the nginx test suite |
 | `ea4-build`, `ea4-el10-build` | fleet-heavy, pair | the cPanel (EasyApache 4) packages for el9, el8 and el10, unsigned |
-| `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair |
-| `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets` |
+| `vendor-ready`, `linux-ready`, `nginx-ready`, `el8-ready`, `el10-ready` | hosted | join the two legs of a pair (`nginx-ready` also gates and hands over the x64 nginx set, see above) |
+| `validate` | hosted | writes `sidecar-pair.json` from the two sidecar tarballs, builds and checks the asset set (the installer included), checks the signatures at the job boundary in a real run, asserts that every Linux module (Apache deb, rpm, el10 rpm and standalone `.so`; nginx tarball, deb and rpm; cPanel rpm; x64 and arm64) carries the short release commit stamp next to the module version (`tools/ci/assert_release_stamp.sh`, a dry run included), writes `SHA256SUMS` and `manifest.json`, uploads `release-assets`; in an adopting run applies the adoption rule above |
 | `sign-checksums` | hosted, environment `release`, real run only | signs `SHA256SUMS` with the package signing key (detached, armored: `SHA256SUMS.asc`), pinned to the release signing key's full fingerprint and verified against `RELEASE-SIGNING-KEY.asc` from master |
 | `create-release` | hosted, environment `release`, real run only | creates the GitHub release as a draft with every asset, checks the draft against the set, publishes it |
 
@@ -418,9 +682,11 @@ without them otherwise. A hosted twin has no remote cache and a small machine
 that are the longest on a build runner (the Apache modules and the distro
 legs, which are cold builds) are not measured there yet. Their timeouts are
 set to the hosted maximum for that reason. Measure with `FLEET_ENABLED` unset
-before relying on a hosted release. The nginx distro legs of a small runner
-run one after the other (`tools/ci/release_nginx.sh` derives the concurrency
-from the cores and memory it finds).
+before relying on a hosted release. The x64 and arm64 nginx distro legs run
+as one job per distro; a job that builds more than one leg (the nginx.org
+set) runs them one after the other on a small runner
+(`tools/ci/release_nginx.sh` derives the concurrency from the cores and memory
+it finds).
 
 The queued-run sweep skips runs of the `Release` workflow (a real run may wait
 for an approval), so a release run whose runner class is not served waits until
@@ -459,6 +725,8 @@ Run artifacts of the lane, as kept for a few days (the file artifacts and
 | `msi-old` | the synthetic older installer of the upgrade gate | no |
 | `asset-windows` | the Windows installer, `pagespeed-iis-<version>-win-x64.msi`: signed in a real run, unsigned in a dry run | yes |
 | `release-signature` | `SHA256SUMS.asc` (real run) | the signature is added to the release by `create-release` |
+| `candidate-seal` | `candidate-seal.json`, the hashes of the sealed artifacts (candidate run only) | no |
+| `adopt-binding` | `adopt-binding.json`, what an adopting run took over and the candidate's job list and `SHA256SUMS` rows (adopting run only) | no |
 
 `validate` builds the asset set from the `asset-*` artifacts only. A directory
 it does not know, an empty file, a signature file or a name outside
@@ -507,6 +775,8 @@ every file through the sums. `SHA256SUMS.asc` is the one release asset that
   "prerelease": false,
   "source_sha": "<40 hex digits: the release commit>",
   "run_id": "<workflow run id>",
+  "build_run_id": "<run id of the run that built the files>",
+  "build_run_attempt": "<its attempt>",
   "repository": "We-Amp/mod_pagespeed",
   "optimizer_tag": "optimizer-v1.19.0",
   "files": [
@@ -531,7 +801,8 @@ every file through the sums. `SHA256SUMS.asc` is the one release asset that
 | `tag`, `version` | the released tag and its version (`1.19.0-rc.1` for a candidate) |
 | `pkg_version` | the version as dpkg and rpm spell it (`1.19.0~rc.1`) |
 | `prerelease` | true for a release candidate; a consumer must not take one up |
-| `source_sha`, `run_id`, `repository` | provenance: the commit, the workflow run and the repository |
+| `source_sha`, `run_id`, `repository` | provenance: the commit, the workflow run that validated and signed the set, and the repository |
+| `build_run_id`, `build_run_attempt` | the run and attempt that built the files: this run's own `run_id` and attempt, or the candidate run's when the run adopted them |
 | `optimizer_tag` | the optimizer release the packages are paired with |
 | `asset` | the uploaded name; what `SHA256SUMS` lists |
 | `name` | the original name, with any `~` kept; the name to give the file when it is put in a repository tree |
@@ -539,7 +810,7 @@ every file through the sums. `SHA256SUMS.asc` is the one release asset that
 | `component` | `module`, `optimizer`, `source`, `sbom` or `sidecar` |
 | `channel` | the routing hint for repository publication: `apt`, `rpm-el9`, `rpm-el10`, `rpm-ea4`, or `none` (a direct download only) |
 | `channel_also` | further channels the same file belongs to: the optimizer rpms are also in `rpm-el10` |
-| `distro` | a deb suite (`noble`, `bookworm`, `trixie`, `jammy`), an rpm family (`el8`, `el9`, `el10`) or `any` |
+| `distro` | a deb suite (`noble`, `resolute`, `bookworm`, `trixie`, `jammy`), an rpm family (`el8`, `el9`, `el10`) or `any` |
 | `arch` | `x64`, `arm64` or `any` |
 
 `channel` values: debs are `apt` and the suite is in `distro` (also in the
@@ -661,6 +932,85 @@ repository, which packs the pair into
   the spec: `%global mps_version` in `packaging/cpanel` must be bumped with the
   module version.
 
+## The nginx.org rebuild lane
+
+`nginx-org-rebuild.yml` builds `nginx-module-pagespeed-nginxorg`, the module
+for nginx.org's stable nginx (the nginx of the official nginx Docker image),
+for the cells of the `nginxorg` set in `tools/ci/release_nginx.sh` (Debian 13
+and Ubuntu 24.04 as debs, Enterprise Linux 9 as an rpm, x86_64). That nginx
+moves on its own schedule, and a dynamic module loads only into the exact
+nginx it was built against, so the lane rebuilds the current module release
+for each new nginx.org stable patch without a module release.
+
+**Dispatch.** By a person, on the tag of the current module release:
+
+```
+gh workflow run nginx-org-rebuild.yml --ref module-vX.Y.Z \
+  -f nginx_version=A.B.C -f nginx_sha256=<sha256 of nginx-A.B.C.tar.gz> -f dry_run=true
+```
+
+`lane_revision` (default 0) rebuilds the same module and nginx pair;
+`previous_nginx_version` and `previous_nginx_sha256` are needed only for a
+cell's first ship (below). `dry_run` defaults to true: build, test and
+validate, sign and release nothing.
+
+**What it checks before it builds** (`plan`): the input grammar; that the tag
+is the module release `/releases/latest` names, published and not a
+pre-release; that no tag or release exists yet for this pair and revision;
+the release's `SHA256SUMS` signature against `RELEASE-SIGNING-KEY.asc`, the
+manifest and source tarball rows, and that the tag's commit is the
+manifest's `source_sha`; the nginx tarball against the given sha256, and its
+signature against nginx.org's signing keys pinned in
+`tools/ci/nginx-org-source-signers.asc`; and, per cell, the newest published
+package, read from the repository's signed `InRelease` and `Packages` index
+(for Enterprise Linux 9: the yum tree's `repomd.xml`, its detached signature
+by the repository key, and the `primary` index it lists).
+An nginx on another stable line than the published package, or older than
+it, is refused: a new stable line is a change of the leg table, not a
+dispatch.
+
+**Build and tests.** The packages are built from the release's own source
+tarball (its commit stamp must be the release commit) with the build scripts
+of that tree, driven by `tools/ci/release_nginx.sh` from `master`, so the
+leg table, the gates and the tests can change without a module release. Then
+the exact-set check, the version and nginx pin of every package, the
+symbol-leak gate and the load check (nginx.org's nginx on each cell, and the
+`nginx:<version>` image for Debian 13). The upgrade tests
+(`test/package-test/check-nginx-org-upgrade.sh`) start from each cell's
+published package; a cell with none is on its first ship, and the lane then
+builds the previous nginx.org patch from the same tree to start from. With the
+same nginx on both sides (after a module release, or for a lane revision) the
+scenarios that need a newer nginx do not run.
+
+**Versions.** The package version names the module release, the nginx and a
+lane revision: `X.Y.Z-r0+ngxA.B.C~trixie`, then `X.Y.Z-r0+ngxA.B.C.1~trixie`
+for revision 1, which sorts above the first build of the pair and below
+`X.Y.Z-r0+ngxA.B.D~trixie`. The rpm carries the same in its release:
+`X.Y.Z-0.ngxA.B.C.el9`, then `X.Y.Z-0.ngxA.B.C.1.el9`. A new module release
+sorts above every build of the previous one, so a module release is followed
+by a lane run at the current nginx.
+
+**A real run** (`dry_run` false) signs `SHA256SUMS` and creates the release
+`nginxorg-vX.Y.Z-ngxA.B.C` (`-rN` for a revision) at the module release's
+commit, in the jobs of the `release` environment, as the module lane does. The
+release is made with the workflow token, so creating its tag starts no other
+workflow, and is never marked latest; `release.yml` passes only `module-v*`
+tags to the module lane. The asset set is checked by `release_manifest.py`
+with the profile `nginxorg`: one package per cell, nothing else, and the
+manifest also carries `nginx_version` and `nginx_sha256`.
+
+Every job runs on a GitHub-hosted runner.
+
+**Where each part comes from.** The workflow file runs from the release tag
+(the `release` environment admits only `module-v*` refs), so the lane exists
+from the first module release whose tree carries it, and a change to the
+workflow file takes effect with the next module release. Everything it runs
+comes from `master`: the tooling, the tests, the key files and the key
+fingerprints (`tools/ci/nginx_org_lane.sh pins`), so a new nginx.org signing
+key or a gate change needs no release. The build scripts of the packages are
+the release tree's; a tree that cannot build the lane's version shape fails
+the version check before anything is published.
+
 ## Tooling
 
 | File | Purpose |
@@ -668,6 +1018,8 @@ repository, which packs the pair into
 | `tools/ci/release_version.sh` | tag grammar, derived versions, VERSION stamping (`--self-test`) |
 | `tools/ci/release_manifest.py` | asset set, `SHA256SUMS`, `manifest.json`, verification (`--self-test`) |
 | `tools/ci/release_nginx.sh` | the nginx distro legs and their gates (`--self-test`) |
+| `tools/ci/nginx_org_lane.sh` | the checks of the nginx.org rebuild lane: inputs, pinned-key signatures, the release set, the signed package index, the previous package, the stable line (`--self-test`) |
+| `tools/ci/nginx-org-source-signers.asc` | the nginx.org signing keys the lane checks nginx source releases against |
 | `tools/ci/release_sidecar.sh` | the sidecar native pair: build, gates, smoke, strip, tests, the release tarballs (`--self-test`) |
 | `tools/ci/sidecar_pair_manifest.py` | `sidecar-pair.json`, and its verification against the tarballs (`--self-test`) |
 | `tools/ci/release_ea4_build.sh` | the cPanel package from the stock rpm; refuses a spec whose `mps_version` is not the release version (`--self-test`) |
@@ -675,7 +1027,10 @@ repository, which packs the pair into
 | `tools/ci/test_cache_gen_for_version.sh` | the version -> optimizer cache generation table of the two upgrade rehearsals (v3 from 2.5.0 on) |
 | `tools/ci/release_signature_check.py` | structural check that Windows files and the installer carry a signature (`--self-test`) |
 | `tools/ci/Sign-Windows.ps1` | Authenticode signing with Trusted Signing and verification (status Valid and signer subject exactly `CN=We-Amp B.V., O=We-Amp B.V., L=Castricum, C=NL`), used by the two signing jobs |
-| `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard and its test |
+| `tools/ci/ref_guard.sh`, `tools/ci/test_ref_guard.sh` | the ref guard (candidate mode included) and its test |
+| `tools/ci/release_adopt.py` | the candidate seal (`seal`), the adoption checks (`verify`, `upload-check`, `binding-hash`, `check-files`, `check-needs`, `check-sums`), the adoption job schema (`schema --print`) (`--self-test`) |
+| `tools/ci/rehearsal_fulltier_gate.sh`, `tools/ci/test_rehearsal_fulltier_gate.sh` | the 7-day full-tier gate of the weekly rehearsal and its test (`--self-test`) |
+| `tools/ci/release_job_graph.py` | the job graph of a pipeline file per event, and the comparison of two files (`--self-test`) |
 | `tools/ci/systest_gate.sh`, `tools/ci/test_systest_gate.sh` | the system-test gate and its test |
 | `tools/ci/ci_release_gate.sh`, `tools/ci/test_ci_release_gate.sh` | the full-tier gate and its test |
 

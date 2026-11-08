@@ -146,10 +146,12 @@ void ComposeIisServeResponse(const DaemonServeDecision& decision,
 #ifdef _WIN32
 
 void BuildDaemonServeRequest(IHttpContext* http_context, const GoogleUrl& url,
+                             const GoogleString& site,
                              DaemonServeRequest* request) {
   request->url = url.PathAndLeaf();
   request->hostname = url.HostAndPort();
   request->scheme = url.Scheme();
+  request->site = site;
   IisCapabilityHeaders(http_context, &request->accept, &request->user_agent,
                        &request->save_data, &request->accept_encoding,
                        &request->sec_ch_dpr);

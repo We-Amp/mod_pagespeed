@@ -25,10 +25,28 @@
 #   * push of a tag matching module-v*            -> dry_run is false
 #   * workflow_dispatch { tag, dry_run: true }    -> the default
 #   * workflow_dispatch { tag, dry_run: false }
+#   * workflow_dispatch { tag, dry_run: true, candidate: true, sha }
+#   * schedule, or workflow_dispatch, with rehearsal: true (release-rehearsal.yml)
 # A dry run builds and validates everything, builds the installer unsigned
 # and runs the gates, and signs and creates nothing. The tag must exist and
 # its commit must be on master (the ref guard, which also refuses a run on any
 # other ref), for a dry run as well.
+# A candidate run is a dry run of a release tag that does not exist yet, on
+# master only, at the commit `sha` names. It builds and checks exactly what
+# the real run of that tag does (the `build_profile` of the version job is
+# `release`, not `rehearsal`), enters no `release` environment, and ends with
+# the `candidate-seal` job: hashes of the artifacts it produced.
+# A rehearsal is a dry run of the lane on the master tip, with no tag: the
+# version job makes one up from the pinned optimizer release
+# (module-v<pinned version>-rehearsal.<run number>), it is a pre-release that
+# can never be confused with a release, no job of the `release` environment
+# runs, and nothing is sealed, so it can never be adopted.
+# A real run of a tag whose message names a candidate run (the
+# Release-Candidate-* trailers) adopts that run's artifacts: the `adopt` job
+# checks the candidate and copies what the later jobs read, the jobs that built
+# or tested those bytes are skipped, and the signing jobs and `validate` check
+# what they receive against the binding `adopt` records. A refusal ends the run
+# before any approval. `adopt: off` forces the full build.
 #
 # Runners. Every build job exists twice: on a runner class (fleet-heavy,
 # fleet-windows) while the repository variable FLEET_ENABLED is 'true', and as
@@ -64,6 +82,22 @@ on:
         description: Dispatch only. Nothing is signed or created when true. Ignored on a tag push.
         type: boolean
         default: true
+      candidate:
+        description: Dispatch only. A dry run of a tag that does not exist yet, on master, with the build of a real run. Needs dry_run and sha.
+        type: boolean
+        default: false
+      sha:
+        description: Candidate only. The 40-hex master tip to build; must be the commit the run is at.
+        type: string
+        default: ''
+      adopt:
+        description: Real run only. auto adopts the candidate run that the tag message names; off forces the full build. Anything but a real run builds its own artifacts.
+        type: string
+        default: auto
+      rehearsal:
+        description: Schedule or dispatch on master with no tag. A dry run of the lane on the master tip under a made-up pre-release version; needs dry_run, no tag and no candidate.
+        type: boolean
+        default: false
     # Declared per secret and passed one by one by the caller, never inherited.
     # They are environment secrets of `release`: a job that runs in that
     # environment reads the environment's value, which takes precedence over
@@ -93,7 +127,8 @@ permissions:
 jobs:
   event-guard:
     name: Event guard (refuses merge_group, unexpected events, refs and actors)
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     steps:
       - name: Refuse events, refs and actors this pipeline must never run on
         env:
@@ -103,7 +138,7 @@ jobs:
           PR_FORK: ${{ github.event.pull_request.head.repo.fork }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
-          ALLOWED: "push workflow_dispatch"
+          ALLOWED: "push workflow_dispatch schedule"
           ALLOWED_REFS: "refs/tags/* refs/heads/master"
         run: |
           set -euo pipefail
@@ -125,7 +160,8 @@ jobs:
   ref-guard:
     name: Ref guard
     needs: event-guard
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       ref: ${{ steps.guard.outputs.ref }}
@@ -146,12 +182,17 @@ jobs:
         with:
           tag-glob: 'module-v*'
           dispatch-tag: ${{ inputs.tag }}
-          events: 'push workflow_dispatch'
+          events: 'push workflow_dispatch schedule'
+          candidate: ${{ inputs.candidate }}
+          candidate-sha: ${{ inputs.sha }}
+          dry-run: ${{ inputs.dry_run }}
+          rehearsal: ${{ inputs.rehearsal }}
 
   version:
     name: Derive versions from the tag
     needs: ref-guard
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       ref: ${{ steps.derive.outputs.ref }}
@@ -166,6 +207,10 @@ jobs:
       prerelease: ${{ steps.derive.outputs.prerelease }}
       is_prerelease: ${{ steps.derive.outputs.is_prerelease }}
       dry_run: ${{ steps.derive.outputs.dry_run }}
+      candidate: ${{ steps.derive.outputs.candidate }}
+      rehearsal: ${{ steps.derive.outputs.rehearsal }}
+      build_profile: ${{ steps.derive.outputs.build_profile }}
+      pair_lenient: ${{ steps.derive.outputs.pair_lenient }}
     steps:
       - name: Checkout master (version tooling)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,6 +225,9 @@ jobs:
           SHA: ${{ needs.ref-guard.outputs.sha }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          CANDIDATE_INPUT: ${{ inputs.candidate }}
+          REHEARSAL_INPUT: ${{ inputs.rehearsal }}
+          TAG_INPUT: ${{ inputs.tag }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
@@ -190,25 +238,504 @@ jobs:
             echo "::error::run number $RUN_NUMBER exceeds 65535, the largest installer build revision (install/iis/build-msi.ps1)"
             exit 1
           fi
-          # The guard also accepts the master branch; this lane releases a tag.
-          case "$REF" in
-            refs/tags/module-v*) ;;
-            *) echo "::error::the module lane releases a module-v* tag, not '$REF'"; exit 1 ;;
-          esac
-          TAG="${REF#refs/tags/}"
+          # A candidate is a dispatch that says so. It builds a commit, not a
+          # tag (the tag does not exist yet): the guard's ref is that commit
+          # and the tag comes from the input.
+          CANDIDATE=false
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$CANDIDATE_INPUT" = true ]; then
+            CANDIDATE=true
+          fi
+          # A rehearsal is a schedule or a dispatch that says so, and a
+          # schedule is nothing else (the ref guard says the same; this keeps
+          # the rule next to the version rules).
+          REHEARSAL=false
+          [ "$REHEARSAL_INPUT" != true ] || REHEARSAL=true
+          if [ "$EVENT_NAME" = schedule ] && [ "$REHEARSAL" != true ]; then
+            echo "::error::a schedule event runs a rehearsal only"; exit 1
+          fi
+          if [ "$REHEARSAL" = true ]; then
+            case "$EVENT_NAME" in schedule|workflow_dispatch) ;; *) echo "::error::a rehearsal is a schedule or a dispatch, not '$EVENT_NAME'"; exit 1 ;; esac
+            [ "$CANDIDATE" = false ] || { echo "::error::a rehearsal is not a candidate"; exit 1; }
+            [ -z "$TAG_INPUT" ] || { echo "::error::a rehearsal names no tag"; exit 1; }
+            [ "$REF" = "$SHA" ] || { echo "::error::a rehearsal builds its commit; the guard's ref '$REF' is not '$SHA'"; exit 1; }
+          fi
+          if [ "$REHEARSAL" = true ]; then
+            # No tag exists. The tag is made up from the pinned optimizer
+            # release of the commit being built, so the rehearsal builds
+            # what the next release of that pair would, under a version
+            # that is a pre-release and cannot be taken for a release. The
+            # pin is read from the commit itself, not from whatever master
+            # is when this job starts.
+            git fetch --quiet --depth 1 origin "$SHA"
+            pin_tag="$(git show "${SHA}:install/debian/optimizer-pin.json" | python3 -c "import json,sys;print(json.load(sys.stdin)['tag'])")"
+            pin_base="${pin_tag#optimizer-v}"
+            pin_base="${pin_base%%-*}"
+            printf '%s' "$pin_base" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              || { echo "::error::cannot make a rehearsal version from the optimizer pin tag '$pin_tag'"; exit 1; }
+            TAG="module-v${pin_base}-rehearsal.${RUN_NUMBER}"
+            echo "rehearsal version: ${TAG#module-v} (pinned optimizer ${pin_tag})"
+          elif [ "$CANDIDATE" = true ]; then
+            [ "$REF" = "$SHA" ] || { echo "::error::a candidate builds its commit; the guard's ref '$REF' is not '$SHA'"; exit 1; }
+            TAG="$TAG_INPUT"
+            # Only a release or a release candidate (the ref guard says the
+            # same; this keeps the rule next to the version rules).
+            printf '%s' "${TAG#module-v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+              || { echo "::error::a candidate is X.Y.Z or X.Y.Z-rc.N, not '$TAG'"; exit 1; }
+          else
+            # The guard also accepts the master branch; this lane releases a tag.
+            case "$REF" in
+              refs/tags/module-v*) ;;
+              *) echo "::error::the module lane releases a module-v* tag, not '$REF'"; exit 1 ;;
+            esac
+            TAG="${REF#refs/tags/}"
+          fi
           # A tag push is a real run; a dispatch is real only when dry_run is
           # explicitly false.
           DRY_RUN=true
           if [ "$EVENT_NAME" = push ] || [ "$DRY_RUN_INPUT" = false ]; then
             DRY_RUN=false
           fi
+          [ "$CANDIDATE" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a candidate is a dry run"; exit 1; }
+          [ "$REHEARSAL" = false ] || [ "$DRY_RUN" = true ] || { echo "::error::a rehearsal is a dry run"; exit 1; }
+          # What the build does is separate from whether anything is signed.
+          # A real run and a candidate build the release exactly (final
+          # stamps, strict pair checks, the cPanel gates); only a plain dry
+          # run is a rehearsal. dry_run alone decides what is signed.
+          BUILD_PROFILE=rehearsal
+          if [ "$DRY_RUN" = false ] || [ "$CANDIDATE" = true ]; then
+            BUILD_PROFILE=release
+          fi
+          # The paired optimizer release may not exist yet: a rehearsal, and
+          # a release candidate version (module-vX.Y.Z-rc.N, which has no
+          # pair), whether a real run or a candidate, take the pinned
+          # release as the pair; every other build needs the pin to be the
+          # pair of this version.
+          PAIR_LENIENT=false
+          [ "$BUILD_PROFILE" != rehearsal ] || PAIR_LENIENT=true
+          case "$TAG" in module-v*-rc.*) PAIR_LENIENT=true ;; esac
           {
             bash tools/ci/release_version.sh parse "$TAG"
             echo "ref=$REF"
             echo "sha=$SHA"
             echo "short_sha=${SHA:0:7}"
             echo "dry_run=$DRY_RUN"
+            echo "candidate=$CANDIDATE"
+            echo "rehearsal=$REHEARSAL"
+            echo "build_profile=$BUILD_PROFILE"
+            echo "pair_lenient=$PAIR_LENIENT"
           } | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # Adoption (docs/ci/release.md). A real run of a tag that names a candidate
+  # run in its annotated tag message does not rebuild what that run already
+  # built and tested: this job checks the candidate against the Actions API
+  # (tools/ci/release_adopt.py verify, the nine checks), copies the candidate's
+  # artifacts that the remaining jobs read into this run under the same names,
+  # reads them back, and records the result in `adopt-binding`. Every other
+  # case (a dry run, a candidate, a rehearsal, adopt=off, a tag without the
+  # trailers) leaves `adopted` false and the run is the full build. Hosted,
+  # no environment, no secret, a read-only token. The code is master's, never
+  # the tree being released. A refusal ends the run here, before any approval.
+  # ---------------------------------------------------------------------
+  adopt:
+    name: Adopt the candidate run named by the tag
+    needs: version
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      adopted: ${{ steps.out.outputs.adopted || 'false' }}
+      candidate_run: ${{ steps.out.outputs.candidate_run }}
+      candidate_attempt: ${{ steps.out.outputs.candidate_attempt }}
+      binding: ${{ steps.out.outputs.binding }}
+      binding_id: ${{ steps.out.outputs.binding_id }}
+      binding_sha256: ${{ steps.out.outputs.binding_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      CANDIDATE: ${{ needs.version.outputs.candidate }}
+      REHEARSAL: ${{ needs.version.outputs.rehearsal }}
+      ADOPT_INPUT: ${{ inputs.adopt }}
+      ACTOR: ${{ github.triggering_actor }}
+    steps:
+      # Only a real run adopts. The input is for recovery: `off` forces the
+      # full build of today, whatever the tag says.
+      - name: Decide whether this run can adopt
+        id: gate
+        run: |
+          set -euo pipefail
+          case "$ADOPT_INPUT" in auto|off) ;; *) echo "::error::adopt must be auto or off, not '$ADOPT_INPUT'"; exit 1 ;; esac
+          try=true
+          if [ "$DRY_RUN" != false ] || [ "$CANDIDATE" = true ] || [ "$REHEARSAL" = true ]; then
+            try=false
+            echo "A dry run, a candidate and a rehearsal build their own artifacts; nothing is adopted." | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$ADOPT_INPUT" = off ]; then
+            try=false
+            echo "adopt=off: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "try=$try" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout master (adoption tooling)
+        if: ${{ steps.gate.outputs.try == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      # The trailers are read from the tag object itself, which cannot change
+      # once pushed. A tag without all three (or a lightweight tag) names no
+      # candidate, and the run builds everything; a tag with only some of them
+      # is a mistake and fails.
+      - name: Read the trailers of the tag
+        id: tag
+        if: ${{ steps.gate.outputs.try == 'true' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force --depth 1 origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          if [ "$(git cat-file -t "refs/tags/${TAG}")" != tag ]; then
+            echo "${TAG} is a lightweight tag and names no candidate: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          body="$(git cat-file tag "refs/tags/${TAG}" | sed '1,/^$/d' | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d')"
+          count=0
+          for k in Release-Candidate-Run Release-Candidate-SHA256SUMS Release-Candidate-Seal; do
+            n="$(printf '%s\n' "$body" | grep -c -E "^${k}: " || true)"
+            [ "$n" -le 1 ] || { echo "::error::the tag message has $n $k lines"; exit 1; }
+            count=$((count + n))
+          done
+          if [ "$count" = 0 ]; then
+            echo "${TAG} names no candidate run: this run builds everything." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          val() { printf '%s\n' "$body" | sed -n "s/^$1: \(.*\)\$/\1/p"; }
+          run="$(val Release-Candidate-Run)"
+          sums="$(val Release-Candidate-SHA256SUMS)"
+          seal="$(val Release-Candidate-Seal)"
+          printf '%s' "$run" | grep -Eq '^[0-9]+$' || { echo "::error::the tag needs a numeric Release-Candidate-Run trailer"; exit 1; }
+          printf '%s' "$sums" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::the tag needs a 64-hex Release-Candidate-SHA256SUMS trailer"; exit 1; }
+          printf '%s' "$seal" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::the tag needs a 64-hex Release-Candidate-Seal trailer"; exit 1; }
+          tag_object="$(git rev-parse "refs/tags/${TAG}")"
+          tag_commit="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          [ "$tag_commit" = "$RELEASE_SHA" ] || { echo "::error::the tag points at $tag_commit, this run is at $RELEASE_SHA"; exit 1; }
+          tagger="$(git cat-file tag "refs/tags/${TAG}" | awk '/^$/ { exit } /^tagger / { sub(/^tagger /, ""); sub(/ [0-9]+ [+-][0-9]+$/, ""); sub(/ *<[^>]*>/, ""); print; exit }')"
+          # What this run is, from the API and not from the candidate: the
+          # commit of the lane definition it runs (its entry for this file
+          # among referenced_workflows) and when it started.
+          attempt="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}")"
+          lane="$(printf '%s' "$attempt" | jq -r --arg p "${GITHUB_REPOSITORY}/.github/workflows/pipeline-release-module.yml@" \
+            '[.referenced_workflows[]? | select(.path | startswith($p)) | .sha] | if length == 1 then .[0] else "" end')"
+          started="$(printf '%s' "$attempt" | jq -r '.run_started_at // ""')"
+          [ -n "$lane" ] || { echo "::error::this run has no single referenced_workflows entry for pipeline-release-module.yml"; exit 1; }
+          [ -n "$started" ] || { echo "::error::the API gives no run_started_at for this run"; exit 1; }
+          {
+            echo "named=true"
+            echo "run=$run"
+            echo "sums=$sums"
+            echo "seal=$seal"
+            echo "tag_object=$tag_object"
+            echo "tag_commit=$tag_commit"
+            echo "tagger=$tagger"
+            echo "lane=$lane"
+            echo "started=$started"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the candidate run
+        id: verify
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        env:
+          CAND_RUN: ${{ steps.tag.outputs.run }}
+          SUMS: ${{ steps.tag.outputs.sums }}
+          SEAL: ${{ steps.tag.outputs.seal }}
+          TAG_OBJECT: ${{ steps.tag.outputs.tag_object }}
+          TAG_COMMIT: ${{ steps.tag.outputs.tag_commit }}
+          TAGGER: ${{ steps.tag.outputs.tagger }}
+          LANE: ${{ steps.tag.outputs.lane }}
+          STARTED: ${{ steps.tag.outputs.started }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/adopt"
+          if ! python3 -I tools/ci/release_adopt.py verify \
+              --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" --candidate-run "$CAND_RUN" \
+              --tag "$TAG" --tag-commit "$TAG_COMMIT" --sums-trailer "$SUMS" --seal-trailer "$SEAL" \
+              --actor "$ACTOR" --lane-sha "$LANE" --started-at "$STARTED" \
+              --tag-object-sha "$TAG_OBJECT" --tagger "$TAGGER" \
+              --out "${RUNNER_TEMP}/adopt/adopt-binding.json" > "${RUNNER_TEMP}/adopt/verify.txt" 2>&1; then
+            cat "${RUNNER_TEMP}/adopt/verify.txt"
+            {
+              echo "### Adoption refused"
+              echo ""
+              echo "Candidate run ${CAND_RUN} cannot be adopted for ${TAG}. Nothing was signed or published."
+              echo ""
+              echo '```'
+              cat "${RUNNER_TEMP}/adopt/verify.txt"
+              echo '```'
+              echo ""
+              echo "Start a new candidate and tag again, or dispatch this tag with adopt=off for a full build."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat "${RUNNER_TEMP}/adopt/verify.txt"
+
+      - name: Plan the re-upload
+        id: plan
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          echo "ids=$(jq -r '[.artifacts[] | select(.reupload) | .id] | join(",")' "$b")" >> "$GITHUB_OUTPUT"
+          echo "names=$(jq -r '[.artifacts[] | select(.reupload) | .name] | "," + join(",") + ","' "$b")" >> "$GITHUB_OUTPUT"
+
+      # The token only reads the actions of this repository. Each artifact
+      # lands in its own directory below `in`, named after the artifact.
+      - name: Download the candidate's artifacts
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.plan.outputs.ids }}
+          run-id: ${{ steps.tag.outputs.run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/adopt/in
+
+      # One step per artifact, because an upload names its artifact in the
+      # step. A candidate of a release candidate version has no cPanel
+      # packages, so each step runs only for the artifacts the binding lists.
+      # overwrite makes the job safe to run again after a partial attempt.
+
+      - name: Re-upload asset-source
+        if: ${{ contains(steps.plan.outputs.names, ',asset-source,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-source
+          path: ${{ runner.temp }}/adopt/in/asset-source
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sbom
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sbom,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sbom
+          path: ${{ runner.temp }}/adopt/in/asset-sbom
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-optimizer
+        if: ${{ contains(steps.plan.outputs.names, ',asset-optimizer,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-optimizer
+          path: ${{ runner.temp }}/adopt/in/asset-optimizer
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-linux-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-linux-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-x64
+          path: ${{ runner.temp }}/adopt/in/asset-linux-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-linux-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-linux-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-linux-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-linux-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-x64
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-nginx-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-nginx-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-el10
+          path: ${{ runner.temp }}/adopt/in/asset-nginx-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-apache-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-apache-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-apache-el10
+          path: ${{ runner.temp }}/adopt/in/asset-apache-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el8
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el8,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el8
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el8
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el9
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el9,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el9
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el9
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-ea4-el10
+        if: ${{ contains(steps.plan.outputs.names, ',asset-ea4-el10,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-ea4-el10
+          path: ${{ runner.temp }}/adopt/in/asset-ea4-el10
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sidecar-x64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-x64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-x64
+          path: ${{ runner.temp }}/adopt/in/asset-sidecar-x64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload asset-sidecar-arm64
+        if: ${{ contains(steps.plan.outputs.names, ',asset-sidecar-arm64,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-sidecar-arm64
+          path: ${{ runner.temp }}/adopt/in/asset-sidecar-arm64
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Re-upload unsigned-windows
+        if: ${{ contains(steps.plan.outputs.names, ',unsigned-windows,') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-windows
+          path: ${{ runner.temp }}/adopt/in/unsigned-windows
+          overwrite: true
+          retention-days: 14
+          compression-level: 0
+          if-no-files-found: error
+
+      # Read each copy back from this run's own listing and check its files
+      # against the binding; the binding then carries the new ids and digests.
+      - name: Read the re-uploaded artifacts back
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py upload-check \
+            --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+            --binding "${RUNNER_TEMP}/adopt/adopt-binding.json"
+
+      - name: Hash the binding
+        id: hash
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "sha256=$(python3 -I tools/ci/release_adopt.py binding-hash --file "${RUNNER_TEMP}/adopt/adopt-binding.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the binding
+        id: bind
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: adopt-binding
+          path: ${{ runner.temp }}/adopt/adopt-binding.json
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+
+      # The job outputs are small values; the jobs that sign and validate
+      # download adopt-binding and check its hash against binding_sha256.
+      - name: Publish the binding
+        id: out
+        if: ${{ steps.tag.outputs.named == 'true' }}
+        env:
+          BINDING_ID: ${{ steps.bind.outputs.artifact-id }}
+          BINDING_SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          {
+            echo "adopted=true"
+            echo "candidate_run=$(jq -r '.candidate.run' "$b")"
+            echo "candidate_attempt=$(jq -r '.candidate.attempt' "$b")"
+            echo "binding=$(jq -r '.binding' "$b")"
+            echo "binding_id=$BINDING_ID"
+            echo "binding_sha256=$BINDING_SHA256"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Adopted candidate run $(jq -r '.candidate.run' "$b")"
+            echo ""
+            echo "Binding: $(jq -r '.binding' "$b")"
+            echo ""
+            jq -r '"- candidate run \(.candidate.run), attempt \(.candidate.attempt), build commit `\(.candidate.build_sha)`",
+                   "- tag object `\(.tag.object.sha)`, lane definition `\(.lane_sha)`",
+                   "- Release-Candidate-Run: \(.trailers["Release-Candidate-Run"])",
+                   "- Release-Candidate-SHA256SUMS: `\(.trailers["Release-Candidate-SHA256SUMS"])`",
+                   "- Release-Candidate-Seal: `\(.trailers["Release-Candidate-Seal"])`"' "$b"
+            echo ""
+            echo "| Artifact | Candidate digest | This run's digest |"
+            echo "|---|---|---|"
+            jq -r '.artifacts[] | select(.reupload) | "| \(.name) | `\(.digest)` | `\(.new_digest)` |"' "$b"
+            echo ""
+            echo "adopt-binding.json: sha256 \`$BINDING_SHA256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------
   # Vendor: one prepared source tree for every build, as the `tree` artifact:
@@ -218,16 +745,17 @@ jobs:
   # ---------------------------------------------------------------------
   vendor:
     name: Vendor Dependencies
-    needs: [ref-guard, version]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) }}
+    needs: [ref-guard, version, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env:
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps: &vendor-steps
       - name: Unlock a previous run's vendored toolchain files
         # bazel vendor leaves read-only toolchain directories under vendor/;
@@ -257,21 +785,22 @@ jobs:
           bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
           cat net/instaweb/public/VERSION
 
-      # A dry run may name a version whose paired optimizer release does not
-      # exist yet; the pin then names an older one and the packages depend on
-      # that. The file tells the package build which version to depend on. A
-      # real run has none and depends on the tag's version.
-      - name: Record the optimizer pair version of a dry run
+      # A rehearsal or a release candidate version may name a version whose
+      # paired optimizer release does not exist; the pin then names an older
+      # one and the packages depend on that. The file tells the package build
+      # which version to depend on. A real run and a candidate of a final
+      # version have none and depend on the tag's version.
+      - name: Record the optimizer pair version when there is no pair release
         run: |
           set -euo pipefail
           rm -f optimizer-pair-version
-          if [ "$DRY_RUN" = true ]; then
+          if [ "$PAIR_LENIENT" = true ]; then
             pin_tag="$(python3 -c "import json;print(json.load(open('install/debian/optimizer-pin.json'))['tag'])")"
             case "$pin_tag" in optimizer-v[0-9]*) ;; *) echo "::error::unusable optimizer pin tag '$pin_tag'"; exit 1 ;; esac
             pair="${pin_tag#optimizer-v}"
             tilde='~'
             printf '%s' "${pair/-/$tilde}" > optimizer-pair-version
-            echo "dry run: the packages depend on the pinned optimizer ${pair}"
+            echo "the packages depend on the pinned optimizer ${pair}"
           fi
 
       - &v-node
@@ -348,9 +877,18 @@ jobs:
           grep -qF "$VITE_APP_VERSION" "$html" || { echo "::error::admin_console.html does not contain $VITE_APP_VERSION"; exit 1; }
           echo "console stamped with ${VITE_APP_VERSION}"
 
+      # The marker travels with the tree into every job that extracts it. A
+      # CI step that reuses a warm workspace by its commit stamp treats a tree
+      # that holds it as stale (tools/ci/ensure-workspace.sh), so a release
+      # tree of the same commit is never tested as a CI tree
+      # (docs/ci/lane-write-sets.md). A marker, not a cleanup on exit: a
+      # cancelled job runs no cleanup. The marker goes first, so a job killed
+      # between the two lines never leaves a stamped tree without it.
       - &v-gitcommit
         name: Stamp GIT_COMMIT
-        run: echo -n "$RELEASE_SHA" > GIT_COMMIT
+        run: |
+          echo "$RELEASE_SHA" > .release-lane-tree
+          echo -n "$RELEASE_SHA" > GIT_COMMIT
 
       # The source tarball of the release: the committed files, the stamped
       # version and console, vendor/ and the commit stamp. A tarball build has
@@ -412,32 +950,38 @@ jobs:
 
   vendor-hosted:
     name: Vendor Dependencies (hosted)
-    needs: [event-guard, ref-guard, version]
-    if: ${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true') }}
-    runs-on: ubuntu-latest
+    needs: [event-guard, ref-guard, version, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps: *vendor-steps
 
+  # The `-ready` joins below accept an adopted run as success: the build jobs
+  # they join are skipped there, and the candidate's artifacts are already in
+  # this run (adopt). If adopt failed, ADOPTED is empty and they fail.
   vendor-ready:
     name: Vendor ready
-    needs: [event-guard, vendor, vendor-hosted]
+    needs: [event-guard, vendor, vendor-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.vendor.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.vendor-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the vendor job did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the vendor job did not succeed"; exit 1; }
 
   # ---------------------------------------------------------------------
   # Release security gates, hosted: SBOM freshness at the module version,
@@ -446,8 +990,10 @@ jobs:
   # ---------------------------------------------------------------------
   security-gates:
     name: Security Gates (SBOM + Grype + VEX)
-    needs: [ref-guard, version]
-    runs-on: ubuntu-latest
+    needs: [ref-guard, version, adopt]
+    if: ${{ needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
@@ -547,16 +1093,18 @@ jobs:
   # ---------------------------------------------------------------------
   optimizer-fetch:
     name: Fetch and verify the optimizer packages
-    needs: [ref-guard, version]
-    runs-on: ubuntu-latest
+    needs: [ref-guard, version, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
       pair_tag: ${{ steps.fetch.outputs.pair_tag }}
       pair_pkg_version: ${{ steps.fetch.outputs.pair_pkg_version }}
+      sums_sha256: ${{ steps.fetch.outputs.sums_sha256 }}
     env:
       OPTIMIZER_TAG: ${{ needs.version.outputs.optimizer_tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
       GH_READ_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -585,11 +1133,12 @@ jobs:
             PLACEHOLDER*) echo "::error::optimizer-pin.json is a placeholder: cut the optimizer release first and record the pin"; exit 1 ;;
           esac
           # The pinned optimizer tag must be the pair of this module version.
-          # In a dry run the paired release cannot exist yet, so the pin is
-          # taken as it is and the packages are checked against it.
+          # In a rehearsal or for a release candidate version the paired
+          # release cannot exist, so the pin is taken as it is and the
+          # packages are checked against it.
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
-            if [ "$DRY_RUN" = true ]; then
-              echo "::warning::dry run: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
+            if [ "$PAIR_LENIENT" = true ]; then
+              echo "::warning::no paired optimizer release for this version: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
             else
               echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
             fi
@@ -614,7 +1163,7 @@ jobs:
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" optimizer-MODULE.bazel bazel/repositories.bzl
           # From 2.5.0 on the module version equals the pinned optimizer's
           # VERSION.txt. Only while the pin is not yet the pair this release
-          # needs (a dry run, see above) does a mismatch warn instead of fail.
+          # needs (see above) does a mismatch warn instead of fail.
           GUARD=lane-tools/tools/ci/check_module_optimizer_version.py
           if python3 "$GUARD" --enforced --module-version "$RELEASE_VERSION"; then
             curl -fsSL --retry 5 --retry-all-errors \
@@ -624,8 +1173,8 @@ jobs:
           VERSION_ARGS=(--module-version "$RELEASE_VERSION" --optimizer-version-file optimizer-VERSION.txt)
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
             VERSION_ARGS+=(--dry-run)
-          elif [ "$DRY_RUN" = true ]; then
-            echo "::notice::dry run with a final pin: optimizer-pin.json already names $PIN_TAG, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished pair, dispatch a dry run of a module-v2.5.0-pre.N tag instead."
+          elif [ "$PAIR_LENIENT" = true ]; then
+            echo "::notice::rehearsal with a final pin: optimizer-pin.json already names $PIN_TAG, so a VERSION.txt mismatch fails here as in a real run. To rehearse an unfinished pair, dispatch a dry run of a module-v2.5.0-pre.N tag instead."
           fi
           python3 "$GUARD" "${VERSION_ARGS[@]}"
 
@@ -652,6 +1201,10 @@ jobs:
           sums_url=$(awk '$1 == "SHA256SUMS" { print $2 }' ../optimizer-assets.txt)
           curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$sums_url"
           echo "$PIN_SUMS  SHA256SUMS" | sha256sum -c -
+          # The hash of the file that was just verified: a candidate's seal
+          # records it, and an adopting run compares it with the pin (check 9
+          # of tools/ci/release_adopt.py).
+          echo "sums_sha256=$(sha256sum SHA256SUMS | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
           # The package names the module needs, picked by name from the
           # verified list: every deb, every rpm and the Windows zip.
           awk '{ sub(/^\*/, "", $2); print $2 }' SHA256SUMS \
@@ -706,6 +1259,7 @@ jobs:
           ls optimizer-dist
 
       - name: Upload the optimizer packages
+        if: ${{ needs.adopt.outputs.adopted != 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: asset-optimizer
@@ -713,12 +1267,30 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # An adopting run already holds the candidate's copy of this artifact
+      # (adopt). The pinned release is immutable, so what was just fetched
+      # and verified must be that copy, byte for byte.
+      - name: Download the adopted optimizer packages
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: asset-optimizer
+          path: adopted-optimizer
+
+      - name: Compare with the adopted optimizer packages
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        run: |
+          set -euo pipefail
+          diff -r optimizer-dist adopted-optimizer \
+            || { echo "::error::the pinned optimizer release differs from the packages the candidate run built with"; exit 1; }
+          echo "the fetched optimizer packages equal the adopted asset-optimizer"
+
   # ---------------------------------------------------------------------
   # The release is gated on the system-test lanes of the CI run of the same
-  # commit: the package smokes below run the suite against a stock install,
-  # whose configuration lacks the lane fixtures, so their pytest step is
-  # informational. A completed run of the main workflow for the release
-  # commit must have passed both lanes. While that run is still queued or in
+  # commit: the package smokes below run the suite in the package-test
+  # harness, whose configuration lacks some lane fixtures, so the Apache
+  # smokes' pytest step is informational. A completed run of the main
+  # workflow for the release commit must have passed both lanes. While that run is still queued or in
   # progress the gate waits for it (the candidate full=true dispatch may
   # still be running when the gate starts), and transient API failures are
   # retried. On a dry run the verdict
@@ -727,7 +1299,8 @@ jobs:
   systest-gate:
     name: System-test gate (CI run of the release commit)
     needs: [ref-guard, version]
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     # Reads the workflow runs of this public repository with the default
     # read-only token; no extra permission is requested.
@@ -754,11 +1327,13 @@ jobs:
   # push run never counts. The order is: dispatch, then the gate (it waits
   # for the dispatch while it runs), then the tag. On a dry run the verdict
   # is reported and the run continues. See tools/ci/ci_release_gate.sh.
+  # A rehearsal adds the 7-day rule below.
   # ---------------------------------------------------------------------
   ci-release-gate:
     name: CI run of the release commit (full tier)
     needs: [ref-guard, version]
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
       GH_TOKEN: ${{ github.token }}
@@ -775,6 +1350,15 @@ jobs:
       - name: Require a green full=true CI dispatch of this commit
         run: bash tools/ci/ci_release_gate.sh
 
+      # The weekly rehearsal builds the master tip, which has no full-tier run
+      # of its own, so the step above only warns there (a dry run). What the
+      # rehearsal must prove instead is that the full tier has been green on
+      # master at some point in the last 7 days; without such a run it fails.
+      # See tools/ci/rehearsal_fulltier_gate.sh.
+      - name: Require a green full-tier run on master in the last 7 days (rehearsal)
+        if: ${{ needs.version.outputs.rehearsal == 'true' }}
+        run: bash tools/ci/rehearsal_fulltier_gate.sh
+
   # ---------------------------------------------------------------------
   # Linux packages. One step list for three jobs: x64 on the build runners,
   # its hosted twin, and arm64 on a hosted arm64 runner (a native build).
@@ -785,9 +1369,10 @@ jobs:
   # ---------------------------------------------------------------------
   linux-release-build:
     name: Linux Release Build (x64)
-    needs: [version, vendor-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, vendor-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &linux-x64-env
       ARCH: x64
@@ -911,6 +1496,14 @@ jobs:
               install -m 755 bazel-bin/libmod_pagespeed.so /workspace/libmod_pagespeed.so
               strip --strip-debug /workspace/libmod_pagespeed.so
 
+              # The debug file must belong to the module that ships.
+              so_id="$(readelf -n /workspace/libmod_pagespeed.so | awk "/Build ID/{print \$3}")"
+              dbg_id="$(readelf -n /workspace/debug/libmod_pagespeed.so.debug | awk "/Build ID/{print \$3}")"
+              if [ -z "$so_id" ] || [ "$so_id" != "$dbg_id" ]; then
+                echo "debug file build ID $dbg_id does not match the module $so_id" >&2
+                exit 1
+              fi
+
               mkdir -p /workspace/packages
               OPT_PKG_VERSION="$(. net/instaweb/public/VERSION; v="${MAJOR}.${MINOR}.${BUILD}"; [ -n "${PRERELEASE}" ] && v="${v}~${PRERELEASE}"; echo "$v")"
               # A dry run depends on the pinned optimizer (see the vendor job).
@@ -978,6 +1571,7 @@ jobs:
           cp ngx_pagespeed-*-linux-"${SO_ARCH}".tar.gz "$OUT/asset/"
           cp packages-old/* "$OUT/oldpkgs/"
           cp debug/* "$OUT/debug/"
+          tar -C debug -czf "$OUT/asset/libmod_pagespeed-debug-linux-${SO_ARCH}.tar.gz" libmod_pagespeed.so.debug
           ls -lh "$OUT"/*
 
       - name: Upload the release files
@@ -988,12 +1582,14 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # Every artifact the candidate seal records is kept 14 days in a
+      # candidate run; these two would otherwise expire sooner.
       - name: Upload the old-version packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: testdata-oldpkgs-${{ env.ARCH }}
           path: ${{ runner.temp }}/out/oldpkgs
-          retention-days: 3
+          retention-days: ${{ needs.version.outputs.candidate == 'true' && 14 || 3 }}
           if-no-files-found: error
 
       - name: Upload the debug files
@@ -1006,32 +1602,35 @@ jobs:
 
   linux-release-build-hosted:
     name: Linux Release Build (x64, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
-    runs-on: ubuntu-latest
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     env: *linux-x64-env
     steps: *linux-build-steps
 
   linux-ready:
     name: Linux build ready
-    needs: [event-guard, linux-release-build, linux-release-build-hosted]
+    needs: [event-guard, linux-release-build, linux-release-build-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.linux-release-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.linux-release-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Linux x64 build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Linux x64 build did not succeed"; exit 1; }
 
   linux-arm64-release-build:
     name: Linux Release Build (arm64)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success'}}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
@@ -1045,46 +1644,101 @@ jobs:
   # Nginx distro packages. The module is built inside a container of each
   # target distro against that distro's stock nginx version, wrapped into a
   # deb or rpm, and checked for leaked symbols and, for an rpm, for its name
-  # routing. The legs run concurrently within the job (tools/ci/release_nginx.sh).
-  # One step list for the x64 job and its hosted twin.
+  # routing (tools/ci/release_nginx.sh).
+  #
+  # x64: one job per distro, like arm64 below, so the legs run side by side
+  # on separate runners instead of one after another in one runner slot (the
+  # memory budget of a slot fits one leg at a time). The plan job reads the
+  # distro names from the leg table, so the matrix cannot drift from it; the
+  # fleet matrix and its hosted twin share one step list; nginx-ready joins
+  # the two, runs the gates over the combined set and hands over
+  # `asset-nginx-x64`, the one artifact the asset set expects. The per-leg
+  # artifacts have no `asset-` prefix on purpose. The fleet matrix runs at
+  # most three legs at a time, so the rest of the lane, which starts at the
+  # same moment, still finds heavy runners.
   # ---------------------------------------------------------------------
+  nginx-x64-plan:
+    name: Nginx Distro Packages (x64, plan)
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      distros: ${{ steps.plan.outputs.distros }}
+    steps:
+      # The leg table and the build driver come from master, like the other
+      # tooling of this lane, so a tag cut before a tooling change still
+      # builds with it; the packages are built from the tag's tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          submodules: false
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: List the distro legs
+        id: plan
+        run: |
+          set -euo pipefail
+          D="$(bash tools/ci/release_nginx.sh legs --arch x64 --set main --json)"
+          echo "legs: ${D}"
+          echo "distros=${D}" >> "$GITHUB_OUTPUT"
+
   nginx-distro-build:
-    name: Nginx Distro Packages (x64)
-    needs: [version, vendor-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
-    timeout-minutes: 240
+    name: Nginx Distro Packages (x64, ${{ matrix.distro }})
+    needs: [version, vendor-ready, nginx-x64-plan, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
     env: &nginx-x64-env
       ARCH: x64
-    steps: &nginx-steps
+    steps: &nginx-x64-steps
       - *clear-workspace
+
+      # The build driver (and the leg table in it) comes from master, the same
+      # file the plan job listed the matrix from; it is kept outside the
+      # workspace, which is the tag's tree.
+      - name: Check out the build tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Keep the build tooling outside the tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lane-tools"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh "${RUNNER_TEMP}/lane-tools/"
+          rm -rf lane-tools
+
       - *tree-download
       - *tree-extract
 
-      - name: Build all distro packages
+      - name: Build the distro package
+        env:
+          DISTRO: ${{ matrix.distro }}
         run: |
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
-          CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
-            --arch "$ARCH" --set main \
+          CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
+            --arch "$ARCH" --set main --distro "$DISTRO" \
             --workspace "${GITHUB_WORKSPACE}" --out "${RUNNER_TEMP}/nginx-out"
-
-      - name: Symbol-leak gate
-        run: |
-          bash tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
-            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
-
-      - name: Rpm routing gate
-        run: |
-          mkdir -p "${RUNNER_TEMP}/nginx-rpms"
-          cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
-          bash tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
 
       - name: Upload the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: asset-nginx-${{ env.ARCH }}
+          name: nginx-x64-${{ matrix.distro }}
           path: ${{ runner.temp }}/nginx-out
           retention-days: 14
           if-no-files-found: error
@@ -1107,20 +1761,31 @@ jobs:
             || echo "::warning::could not re-own the workspace; a later run on this runner may fail to clear it"
 
   nginx-distro-build-hosted:
-    name: Nginx Distro Packages (x64, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
-    runs-on: ubuntu-latest
+    name: Nginx Distro Packages (x64, hosted, ${{ matrix.distro }})
+    needs: [event-guard, version, vendor-ready, nginx-x64-plan, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-x64-plan.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJSON(needs.nginx-x64-plan.outputs.distros || '["none"]') }}
     env: *nginx-x64-env
-    steps: *nginx-steps
+    steps: *nginx-x64-steps
 
+  # The join: of the fleet matrix and its hosted twin exactly one ran; its
+  # per-distro packages are checked as one set, gated, and handed over as
+  # `asset-nginx-x64`.
   nginx-ready:
-    name: Nginx packages ready
-    needs: [event-guard, nginx-distro-build, nginx-distro-build-hosted]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    name: Nginx Distro Packages (x64)
+    needs: [event-guard, version, nginx-distro-build, nginx-distro-build-hosted, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ARCH: x64
     steps:
       - name: One of the two legs succeeded
         env:
@@ -1130,6 +1795,55 @@ jobs:
           echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
           [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the nginx x64 packages did not build"; exit 1; }
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          submodules: false
+          sparse-checkout: |
+            tools/ci
+            test/package-test
+          persist-credentials: false
+
+      # The gates' driver comes from master, like the plan and the legs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          path: lane-tools
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Download the per-distro packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: nginx-x64-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/nginx-out
+
+      - name: The set is exactly one package per leg
+        run: |
+          ls -l "${RUNNER_TEMP}/nginx-out"
+          bash lane-tools/tools/ci/release_nginx.sh check-set --arch "$ARCH" \
+            --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Symbol-leak gate
+        run: |
+          bash lane-tools/tools/ci/release_nginx.sh symbol-leak --arch "$ARCH" \
+            --src "${GITHUB_WORKSPACE}" --pkgdir "${RUNNER_TEMP}/nginx-out"
+
+      - name: Rpm routing gate
+        run: |
+          mkdir -p "${RUNNER_TEMP}/nginx-rpms"
+          cp "${RUNNER_TEMP}"/nginx-out/*.rpm "${RUNNER_TEMP}/nginx-rpms/"
+          bash lane-tools/tools/ci/release_nginx.sh routing --arch "$ARCH" --pkgdir "${RUNNER_TEMP}/nginx-rpms"
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: asset-nginx-x64
+          path: ${{ runner.temp }}/nginx-out
+          retention-days: 14
+          if-no-files-found: error
+
   # arm64: one job per distro, so the legs run side by side on separate hosted
   # runners instead of one after another on one small runner. The plan job
   # reads the distro names from the leg table of the release tree, so the
@@ -1138,9 +1852,10 @@ jobs:
   # expects. The per-leg artifacts have no `asset-` prefix on purpose.
   nginx-arm64-plan:
     name: Nginx Distro Packages (arm64, plan)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' }}
-    runs-on: ubuntu-latest
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       distros: ${{ steps.plan.outputs.distros }}
@@ -1165,8 +1880,8 @@ jobs:
 
   nginx-distro-build-arm64:
     name: Nginx Distro Packages (arm64, ${{ matrix.distro }})
-    needs: [version, vendor-ready, nginx-arm64-plan]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-arm64-plan.result == 'success' }}
+    needs: [version, vendor-ready, nginx-arm64-plan, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.nginx-arm64-plan.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     strategy:
@@ -1193,7 +1908,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/lane-tools"
-          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh "${RUNNER_TEMP}/lane-tools/"
+          cp lane-tools/tools/ci/release_nginx.sh lane-tools/tools/ci/slot-budget.sh lane-tools/tools/ci/docker_pull_retry.sh "${RUNNER_TEMP}/lane-tools/"
           rm -rf lane-tools
 
       - *tree-download
@@ -1204,7 +1919,8 @@ jobs:
           DISTRO: ${{ matrix.distro }}
         run: |
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-nginx"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           CACHE_DIR="${CACHE_ROOT}" bash "${RUNNER_TEMP}/lane-tools/release_nginx.sh" build \
             --arch "$ARCH" --set main --distro "$DISTRO" \
@@ -1222,8 +1938,8 @@ jobs:
 
   nginx-arm64-join:
     name: Nginx Distro Packages (arm64)
-    needs: [version, nginx-distro-build-arm64]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success' }}
+    needs: [version, nginx-distro-build-arm64, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-distro-build-arm64.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:
@@ -1282,9 +1998,10 @@ jobs:
   # is a leg of its own so that its long build cannot hold up the others.
   nginx-distro-build-el10:
     name: Nginx Distro Packages (el10)
-    needs: [version, vendor-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, vendor-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &nginx-el10-env
       ARCH: x64
@@ -1297,7 +2014,8 @@ jobs:
       - name: Build the el10 module and package
         run: |
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-nginx-el10"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-nginx-el10${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           CACHE_DIR="${CACHE_ROOT}" bash tools/ci/release_nginx.sh build \
             --arch "$ARCH" --set el10 \
@@ -1330,9 +2048,10 @@ jobs:
 
   nginx-distro-build-el10-hosted:
     name: Nginx Distro Packages (el10, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     env: *nginx-el10-env
     steps: *nginx-el10-steps
@@ -1358,15 +2077,17 @@ jobs:
   # ---------------------------------------------------------------------
   vendor-sidecar:
     name: Vendor Dependencies (sidecar, hosted)
-    needs: [ref-guard, version]
-    runs-on: ubuntu-latest
+    needs: [ref-guard, version, adopt]
+    if: ${{ needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
       RELEASE_REF: ${{ needs.version.outputs.ref }}
-      DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      PAIR_LENIENT: ${{ needs.version.outputs.pair_lenient }}
     steps:
       - *v-checkout
       - *v-verify
@@ -1391,9 +2112,10 @@ jobs:
 
   sidecar-pair:
     name: Sidecar Native Pair (x64, hosted)
-    needs: [version, vendor-sidecar]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' }}
-    runs-on: ubuntu-latest
+    needs: [version, vendor-sidecar, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     env:
       ARCH: x64
@@ -1447,8 +2169,8 @@ jobs:
 
   sidecar-pair-arm64:
     name: Sidecar Native Pair (arm64, hosted)
-    needs: [version, vendor-sidecar]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' }}
+    needs: [version, vendor-sidecar, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-sidecar.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 350
     env:
@@ -1465,9 +2187,10 @@ jobs:
   # ---------------------------------------------------------------------
   apache-el8-build:
     name: Apache EL8 Build (glibc 2.28)
-    needs: [version, vendor-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, vendor-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 240
     env: &apache-el8-env
       EL: el8
@@ -1488,7 +2211,8 @@ jobs:
             SLOT_JOBS='HOST_CPUS*.75' SLOT_CPUS='' SLOT_MEM=80g
           fi
           set -euo pipefail
-          CACHE_ROOT="${HOME}/.cache/mps-release-${EL}"
+          RUNNER_TAG="${RUNNER_NAME//[^A-Za-z0-9_.-]/_}"
+          CACHE_ROOT="${HOME}/.cache/mps-release-${EL}${RUNNER_TAG:+-${RUNNER_TAG}}"
           mkdir -p "${CACHE_ROOT}"
           docker run --rm --init \
             --memory="${SLOT_MEM}" --memory-swap="${SLOT_MEM}" \
@@ -1512,33 +2236,37 @@ jobs:
 
   apache-el8-build-hosted:
     name: Apache EL8 Build (glibc 2.28, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
-    runs-on: ubuntu-latest
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     env: *apache-el8-env
     steps: *apache-el-steps
 
   el8-ready:
     name: EL8 build ready
-    needs: [event-guard, apache-el8-build, apache-el8-build-hosted]
+    needs: [event-guard, apache-el8-build, apache-el8-build-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.apache-el8-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.apache-el8-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el8 build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el8 build did not succeed"; exit 1; }
 
   apache-el10-build:
     name: Apache EL10 Build (glibc 2.39, native)
-    needs: [version, vendor-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, vendor-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 240
     env: &apache-el10-env
       EL: el10
@@ -1547,27 +2275,30 @@ jobs:
 
   apache-el10-build-hosted:
     name: Apache EL10 Build (glibc 2.39, native, hosted)
-    needs: [event-guard, version, vendor-ready]
-    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true') }}
-    runs-on: ubuntu-latest
+    needs: [event-guard, version, vendor-ready, adopt]
+    if: ${{ needs.event-guard.result == 'success' && (!cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true') }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
     env: *apache-el10-env
     steps: *apache-el-steps
 
   el10-ready:
     name: EL10 build ready
-    needs: [event-guard, apache-el10-build, apache-el10-build-hosted]
+    needs: [event-guard, apache-el10-build, apache-el10-build-hosted, adopt]
     if: ${{ needs.event-guard.result == 'success' && (!cancelled()) }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.apache-el10-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.apache-el10-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el10 build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the el10 build did not succeed"; exit 1; }
 
   # ---------------------------------------------------------------------
   # Unit tests of the optimized build, with the cache servers they talk to
@@ -1575,9 +2306,10 @@ jobs:
   # ---------------------------------------------------------------------
   unit-tests:
     name: Unit Tests (Release)
-    needs: [version, vendor-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, vendor-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 120
     env: &unit-env
       ARCH: x64
@@ -1706,9 +2438,10 @@ jobs:
 
   unit-tests-hosted:
     name: Unit Tests (Release, hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     env: *unit-env
     steps: *unit-steps
@@ -1722,9 +2455,10 @@ jobs:
   # ---------------------------------------------------------------------
   package-smoke-deb:
     name: Smoke Test (Debian)
-    needs: [version, linux-ready, optimizer-fetch]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, linux-ready, optimizer-fetch, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: &smoke-env
       RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
@@ -1764,27 +2498,29 @@ jobs:
 
       # A minimal Ubuntu and Apache container WITHOUT the package installed,
       # so the test exercises the whole install, upgrade and uninstall life
-      # cycle.
+      # cycle with the package's own pagespeed.conf. The test suite runs in
+      # the package-test harness below.
       - name: Build the base test container
         run: |
-          docker build -t mps-smoke-deb-base - <<'DOCKERFILE'
+          # A run-scoped tag: release runs of two tags can share a host.
+          IMG="mps-smoke-deb-base:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SMOKE_IMAGE=${IMG}" >> "$GITHUB_ENV"
+          docker build -t "${IMG}" - <<'DOCKERFILE'
           FROM ubuntu:22.04
           ENV DEBIAN_FRONTEND=noninteractive
           RUN apt-get update && apt-get install -y --no-install-recommends \
-              apache2 ca-certificates curl python3 python3-pip \
+              apache2 ca-certificates curl \
               && rm -rf /var/lib/apt/lists/*
-          RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
           DOCKERFILE
 
-      - name: Run upgrade, test and uninstall
+      - name: Run upgrade and uninstall
         run: |
           docker run --rm --init \
             -e RELEASE_TAG -e EXPECTED_VERSION_STRING \
             -v "${RUNNER_TEMP}/packages-old:/packages-old:ro" \
             -v "${RUNNER_TEMP}/packages:/packages:ro" \
             -v "${RUNNER_TEMP}/optimizer:/optimizer:ro" \
-            -v "${GITHUB_WORKSPACE}:/src:ro" \
-            mps-smoke-deb-base bash -c '
+            "${SMOKE_IMAGE}" bash -c '
               set -ex
 
               force_restart_apache() {
@@ -1882,40 +2618,6 @@ jobs:
 
               grep -q "user customization marker" /etc/apache2/mods-available/pagespeed.conf
 
-              for dir in mod_pagespeed_example mod_pagespeed_test do_not_modify; do
-                [ -d "/src/install/$dir" ] && cp -r "/src/install/$dir" /var/www/html/
-              done
-              chown -R www-data:www-data /var/www/html
-              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
-              chown www-data:www-data /var/cache/mod_pagespeed /var/log/pagespeed
-
-              cd /src/test/system
-              export PAGESPEED_HOST=localhost
-              export PAGESPEED_PORT=80
-              export PAGESPEED_SERVER_TYPE=apache
-              export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed
-              export PAGESPEED_STATS_ENABLED=1
-              export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
-              export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
-              export PYTHONDONTWRITEBYTECODE=1
-              python3 -c "import pytest"
-              PYTEST_RC=0
-              python3 -m pytest -p no:cacheprovider automatic/ -v --tb=short \
-                > /tmp/pytest-smoke.out 2>&1 || PYTEST_RC=$?
-              cat /tmp/pytest-smoke.out
-              echo "pytest exit status: ${PYTEST_RC}"
-              if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
-                echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
-                exit "${PYTEST_RC}"
-              fi
-              if ! grep -Eq "[0-9]+ passed" /tmp/pytest-smoke.out; then
-                echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
-                exit 1
-              fi
-              if [ "${PYTEST_RC}" -eq 1 ]; then
-                echo "::warning title=Package smoke pytest (informational)::some pytest tests failed against the stock package config; the release gate is systest-gate"
-              fi
-
               apt-get remove -y mod-pagespeed
               apache2ctl configtest
               force_restart_apache
@@ -1924,20 +2626,78 @@ jobs:
               echo "=== Debian smoke test PASSED ==="
             '
 
+      # The package-test harness (test/package-test/), as the nginx smoke
+      # uses: the Dockerfile installs every packages/*.deb, the module and the
+      # optimizer it depends on, and the entrypoint configures Apache with the
+      # test fixtures and runs the pytest suite.
+      - name: Build the package-test container
+        run: |
+          set -euo pipefail
+          rm -rf test/package-test/packages
+          mkdir -p test/package-test/packages
+          for g in "${RUNNER_TEMP}"/packages/mod-pagespeed_*_amd64.deb "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer_*_amd64.deb; do
+            [ -f "$g" ] || { echo "::error::no package matches $g"; exit 1; }
+          done
+          cp -f "${RUNNER_TEMP}"/packages/mod-pagespeed_*_amd64.deb \
+            "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer_*_amd64.deb \
+            test/package-test/packages/
+          ls -l test/package-test/packages/
+          # A run-scoped tag, as for the base image.
+          IMG="mps-smoke-apache-deb:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SUITE_IMAGE=${IMG}" >> "$GITHUB_ENV"
+          docker build -t "${IMG}" -f test/package-test/Dockerfile.ubuntu-apache test/package-test/
+
+      # Informational, as before: the release gate is systest-gate. Exit 1 is
+      # a test failure and becomes a warning; any other non-zero exit, or a
+      # summary with no passed test, means the suite did not run.
+      - name: Run the test suite
+        run: &smoke-apache-suite |
+          PYTEST_RC=0
+          docker run --rm --init \
+            -v "${GITHUB_WORKSPACE}:/src:ro" \
+            "${SUITE_IMAGE}" automatic/ -v --tb=short \
+            > "${RUNNER_TEMP}/pytest-smoke.out" 2>&1 || PYTEST_RC=$?
+          cat "${RUNNER_TEMP}/pytest-smoke.out"
+          echo "pytest exit status: ${PYTEST_RC}"
+          if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
+            echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
+            exit "${PYTEST_RC}"
+          fi
+          if ! grep -Eq "[0-9]+ passed" "${RUNNER_TEMP}/pytest-smoke.out"; then
+            echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
+            exit 1
+          fi
+          if [ "${PYTEST_RC}" -eq 1 ]; then
+            echo "::warning title=Package smoke pytest (informational)::some pytest tests failed in the package-test harness; the release gate is systest-gate"
+          fi
+
+      # Remove this run's smoke images so images do not pile up on a
+      # shared host. Exactly the run-scoped tags, never a prune.
+      - name: Remove the smoke image
+        if: always()
+        run: |
+          for img in "${SMOKE_IMAGE:-}" "${SUITE_IMAGE:-}"; do
+            if [ -n "${img}" ]; then
+              docker rmi "${img}" || echo "::warning title=Smoke image::could not remove ${img}"
+            fi
+          done
+
   package-smoke-deb-hosted:
     name: Smoke Test (Debian, hosted)
-    needs: [version, linux-ready, optimizer-fetch]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, linux-ready, optimizer-fetch, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env: *smoke-env
     steps: *smoke-deb-steps
 
   package-smoke-rpm:
     name: Smoke Test (RPM)
-    needs: [version, linux-ready, optimizer-fetch]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, linux-ready, optimizer-fetch, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: *smoke-env
     steps: &smoke-rpm-steps
@@ -1963,25 +2723,28 @@ jobs:
           name: asset-optimizer
           path: ${{ runner.temp }}/optimizer
 
+      # As the Debian smoke: the life cycle with the package's own
+      # pagespeed.conf here, the test suite in the package-test harness below.
       - name: Build the base test container
         run: |
-          docker build -t mps-smoke-rpm-base - <<'DOCKERFILE'
+          # A run-scoped tag: release runs of two tags can share a host.
+          IMG="mps-smoke-rpm-base:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SMOKE_IMAGE=${IMG}" >> "$GITHUB_ENV"
+          docker build -t "${IMG}" - <<'DOCKERFILE'
           FROM rockylinux:9
           RUN dnf install -y --allowerasing \
-              httpd curl python3 python3-pip \
+              httpd curl \
               && dnf clean all
-          RUN pip3 install --no-cache-dir pytest==8.3.5 pytest-timeout==2.3.1
           DOCKERFILE
 
-      - name: Run upgrade, test and uninstall
+      - name: Run upgrade and uninstall
         run: |
           docker run --rm --init \
             -e RELEASE_TAG -e EXPECTED_VERSION_STRING \
             -v "${RUNNER_TEMP}/packages-old:/packages-old:ro" \
             -v "${RUNNER_TEMP}/packages:/packages:ro" \
             -v "${RUNNER_TEMP}/optimizer:/optimizer:ro" \
-            -v "${GITHUB_WORKSPACE}:/src:ro" \
-            mps-smoke-rpm-base bash -c '
+            "${SMOKE_IMAGE}" bash -c '
               set -ex
 
               force_restart_httpd() {
@@ -2079,40 +2842,6 @@ jobs:
 
               grep -q "user customization marker" /etc/httpd/conf.d/pagespeed.conf
 
-              for dir in mod_pagespeed_example mod_pagespeed_test do_not_modify; do
-                [ -d "/src/install/$dir" ] && cp -r "/src/install/$dir" /var/www/html/
-              done
-              chown -R apache:apache /var/www/html
-              mkdir -p /var/cache/mod_pagespeed /var/log/pagespeed
-              chown apache:apache /var/cache/mod_pagespeed /var/log/pagespeed
-
-              cd /src/test/system
-              export PAGESPEED_HOST=localhost
-              export PAGESPEED_PORT=80
-              export PAGESPEED_SERVER_TYPE=apache
-              export PAGESPEED_CACHE_DIR=/var/cache/mod_pagespeed
-              export PAGESPEED_STATS_ENABLED=1
-              export PAGESPEED_EXAMPLE_ROOT=/mod_pagespeed_example
-              export PAGESPEED_TEST_ROOT=/mod_pagespeed_test
-              export PYTHONDONTWRITEBYTECODE=1
-              python3 -c "import pytest"
-              PYTEST_RC=0
-              python3 -m pytest -p no:cacheprovider automatic/ -v --tb=short \
-                > /tmp/pytest-smoke.out 2>&1 || PYTEST_RC=$?
-              cat /tmp/pytest-smoke.out
-              echo "pytest exit status: ${PYTEST_RC}"
-              if [ "${PYTEST_RC}" -ne 0 ] && [ "${PYTEST_RC}" -ne 1 ]; then
-                echo "::error title=Package smoke pytest did not run::pytest exited ${PYTEST_RC} (not a plain test failure); the suite did not execute"
-                exit "${PYTEST_RC}"
-              fi
-              if ! grep -Eq "[0-9]+ passed" /tmp/pytest-smoke.out; then
-                echo "::error title=Package smoke pytest ran nothing useful::no passed test in the pytest summary; the suite did not meaningfully run"
-                exit 1
-              fi
-              if [ "${PYTEST_RC}" -eq 1 ]; then
-                echo "::warning title=Package smoke pytest (informational)::some pytest tests failed against the stock package config; the release gate is systest-gate"
-              fi
-
               dnf remove -y mod-pagespeed
               httpd -t
               force_restart_httpd
@@ -2121,11 +2850,46 @@ jobs:
               echo "=== RPM smoke test PASSED ==="
             '
 
+      # The package-test harness, as in the Debian smoke: the Dockerfile
+      # installs every packages/*.rpm.
+      - name: Build the package-test container
+        run: |
+          set -euo pipefail
+          rm -rf test/package-test/packages
+          mkdir -p test/package-test/packages
+          for g in "${RUNNER_TEMP}"/packages/mod-pagespeed-*.x86_64.rpm "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer-*.x86_64.rpm; do
+            [ -f "$g" ] || { echo "::error::no package matches $g"; exit 1; }
+          done
+          cp -f "${RUNNER_TEMP}"/packages/mod-pagespeed-*.x86_64.rpm \
+            "${RUNNER_TEMP}"/optimizer/pagespeed-optimizer-*.x86_64.rpm \
+            test/package-test/packages/
+          ls -l test/package-test/packages/
+          # A run-scoped tag, as for the base image.
+          IMG="mps-smoke-apache-rpm:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SUITE_IMAGE=${IMG}" >> "$GITHUB_ENV"
+          docker build -t "${IMG}" -f test/package-test/Dockerfile.rocky-apache test/package-test/
+
+      # Informational, as in the Debian smoke.
+      - name: Run the test suite
+        run: *smoke-apache-suite
+
+      # Remove this run's smoke images so images do not pile up on a
+      # shared host. Exactly the run-scoped tags, never a prune.
+      - name: Remove the smoke image
+        if: always()
+        run: |
+          for img in "${SMOKE_IMAGE:-}" "${SUITE_IMAGE:-}"; do
+            if [ -n "${img}" ]; then
+              docker rmi "${img}" || echo "::warning title=Smoke image::could not remove ${img}"
+            fi
+          done
+
   package-smoke-rpm-hosted:
     name: Smoke Test (RPM, hosted)
-    needs: [version, linux-ready, optimizer-fetch]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, linux-ready, optimizer-fetch, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.optimizer-fetch.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env: *smoke-env
     steps: *smoke-rpm-steps
@@ -2134,9 +2898,10 @@ jobs:
   # unpacked into a container that builds nginx from source to match it.
   package-smoke-nginx:
     name: Smoke Test (Nginx)
-    needs: [version, linux-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, linux-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     steps: &smoke-nginx-steps
       - *unlock-vendor
@@ -2155,7 +2920,13 @@ jobs:
           rm -rf test/package-test/packages
           mkdir -p test/package-test/packages
           cp -f "${RUNNER_TEMP}"/packages/ngx_pagespeed-*-linux-x86_64.tar.gz test/package-test/packages/
-          docker build -t mps-smoke-nginx -f test/package-test/Dockerfile.ubuntu-nginx test/package-test/
+          # A run-scoped tag: release runs of two tags can share a host. The
+          # plain name stays for the local image scan (tools/sbom/dep-scan.sh);
+          # nothing in the lane runs it.
+          IMG="mps-smoke-nginx:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SMOKE_IMAGE=${IMG}" >> "$GITHUB_ENV"
+          docker build -t "${IMG}" -f test/package-test/Dockerfile.ubuntu-nginx test/package-test/
+          docker tag "${IMG}" mps-smoke-nginx
 
       # The entrypoint sets up content, configures nginx, starts it and runs
       # the pytest suite.
@@ -2163,7 +2934,7 @@ jobs:
         run: |
           docker run --rm --init \
             -v "${GITHUB_WORKSPACE}:/src:ro" \
-            mps-smoke-nginx
+            "${SMOKE_IMAGE}"
 
       # Clean module load and unload, not a rewriting check: the install step
       # above runs the suite.
@@ -2171,7 +2942,7 @@ jobs:
         run: |
           docker run --rm --init --entrypoint bash \
             -v "${GITHUB_WORKSPACE}:/src:ro" \
-            mps-smoke-nginx -c '
+            "${SMOKE_IMAGE}" -c '
               set -ex
               mkdir -p /tmp/nginx_test/logs
               cat > /tmp/nginx_test/nginx.conf <<CONF
@@ -2199,11 +2970,21 @@ jobs:
               echo "=== Nginx uninstall verification PASSED ==="
             '
 
+      # Remove this run's smoke image so images do not pile up on a
+      # shared host. Exactly the run-scoped tag, never a prune.
+      - name: Remove the smoke image
+        if: always()
+        run: |
+          if [ -n "${SMOKE_IMAGE:-}" ]; then
+            docker rmi "${SMOKE_IMAGE}" || echo "::warning title=Smoke image::could not remove ${SMOKE_IMAGE}"
+          fi
+
   package-smoke-nginx-hosted:
     name: Smoke Test (Nginx, hosted)
-    needs: [version, linux-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, linux-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps: *smoke-nginx-steps
 
@@ -2214,9 +2995,10 @@ jobs:
   # by `nginx -t`.
   package-load-check-nginx:
     name: Packaged-Nginx Load Check (x64)
-    needs: [version, nginx-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, nginx-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 90
     env: &loadcheck-x64-env
       ARCH: x64
@@ -2238,17 +3020,18 @@ jobs:
 
   package-load-check-nginx-hosted:
     name: Packaged-Nginx Load Check (x64, hosted)
-    needs: [version, nginx-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, nginx-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env: *loadcheck-x64-env
     steps: *loadcheck-steps
 
   package-load-check-nginx-arm64:
     name: Packaged-Nginx Load Check (arm64)
-    needs: [version, nginx-arm64-join]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-arm64-join.result == 'success' }}
+    needs: [version, nginx-arm64-join, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-arm64-join.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     env:
@@ -2259,9 +3042,10 @@ jobs:
   # against it.
   package-smoke-nginx-packaged:
     name: Smoke Test (Nginx, packaged)
-    needs: [version, nginx-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, nginx-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     env: &packaged-env
       ARCH: x64
@@ -2283,9 +3067,10 @@ jobs:
 
   package-smoke-nginx-packaged-hosted:
     name: Smoke Test (Nginx, packaged, hosted)
-    needs: [version, nginx-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, nginx-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.nginx-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     env: *packaged-env
     steps: *packaged-steps
@@ -2298,9 +3083,10 @@ jobs:
   # ---------------------------------------------------------------------
   ea4-build:
     name: EA4 Build (${{ matrix.os }})
-    needs: [version, linux-ready, el8-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, linux-ready, el8-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -2349,9 +3135,10 @@ jobs:
 
   ea4-build-hosted:
     name: EA4 Build (${{ matrix.os }}, hosted)
-    needs: [version, linux-ready, el8-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, linux-ready, el8-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el8-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -2364,9 +3151,10 @@ jobs:
   # the package instead of failing the release.
   ea4-el10-build:
     name: EA4 Build (el10)
-    needs: [version, linux-ready, el10-ready]
-    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-latest' || 'fleet-heavy' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    needs: [version, linux-ready, el10-ready, adopt]
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'ubuntu-24.04' || 'fleet-heavy' }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 60
     env: &ea4-el10-env
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
@@ -2406,9 +3194,10 @@ jobs:
 
   ea4-el10-build-hosted:
     name: EA4 Build (el10, hosted)
-    needs: [version, linux-ready, el10-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
-    runs-on: ubuntu-latest
+    needs: [version, linux-ready, el10-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.linux-ready.result == 'success' && needs.el10-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env: *ea4-el10-env
     steps: *ea4-el10-steps
@@ -2423,9 +3212,9 @@ jobs:
   # ---------------------------------------------------------------------
   windows-release-build:
     name: Windows Release Build
-    needs: [version, vendor-ready]
+    needs: [version, vendor-ready, adopt]
     runs-on: ${{ (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]')) && 'windows-2022' || 'fleet-windows' }}
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' && (vars.FLEET_ENABLED == 'true' || (github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork == true || github.actor == 'dependabot[bot]'))) }}
     timeout-minutes: 180
     defaults:
       run:
@@ -2680,8 +3469,8 @@ jobs:
 
   windows-release-build-hosted:
     name: Windows Release Build (hosted)
-    needs: [version, vendor-ready]
-    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' }}
+    needs: [version, vendor-ready, adopt]
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.vendor-ready.result == 'success' && vars.FLEET_ENABLED != 'true' && needs.adopt.result == 'success' && needs.adopt.outputs.adopted != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 350
     defaults:
@@ -2691,24 +3480,27 @@ jobs:
 
   windows-ready:
     name: Windows build ready
-    needs: [windows-release-build, windows-release-build-hosted]
+    needs: [windows-release-build, windows-release-build-hosted, adopt]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: One of the two legs succeeded
         env:
           FLEET: ${{ needs.windows-release-build.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
           HOSTED: ${{ needs.windows-release-build-hosted.result }}
         run: |
-          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}"
-          [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Windows build did not succeed"; exit 1; }
+          echo "fleet leg: ${FLEET}, hosted leg: ${HOSTED}, adopted: ${ADOPTED}"
+          [ "$ADOPTED" = true ] || [ "$FLEET" = success ] || [ "$HOSTED" = success ] || { echo "::error::the Windows build did not succeed"; exit 1; }
 
   ea4-ready:
     name: cPanel packages ready
-    needs: [ea4-build, ea4-build-hosted, ea4-el10-build, ea4-el10-build-hosted]
+    needs: [ea4-build, ea4-build-hosted, ea4-el10-build, ea4-el10-build-hosted, adopt]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Each pair has a leg that succeeded
@@ -2717,8 +3509,10 @@ jobs:
           B: ${{ needs.ea4-build-hosted.result }}
           C: ${{ needs.ea4-el10-build.result }}
           D: ${{ needs.ea4-el10-build-hosted.result }}
+          ADOPTED: ${{ needs.adopt.outputs.adopted }}
         run: |
-          echo "el9 and el8: ${A}, ${B}; el10: ${C}, ${D}"
+          echo "el9 and el8: ${A}, ${B}; el10: ${C}, ${D}; adopted: ${ADOPTED}"
+          [ "$ADOPTED" != true ] || exit 0
           if [ "$A" != success ] && [ "$B" != success ]; then echo "::error::the el9 and el8 cPanel build did not succeed"; exit 1; fi
           if [ "$C" != success ] && [ "$D" != success ]; then echo "::error::the el10 cPanel build did not succeed"; exit 1; fi
 
@@ -2737,10 +3531,14 @@ jobs:
   # master in any case. The artifact `asset-windows` is the installer that
   # the rest of the lane uses: signed in a real run, unsigned in a dry run.
   # ---------------------------------------------------------------------
+  # The name of each signing job carries the binding of an adopting run, so
+  # whoever approves it sees which candidate's bytes are about to be signed;
+  # the prefix is today's name. Before any secret is read, an adopting run
+  # checks that the payload it signs is the one the candidate sealed.
   windows-sign:
-    name: Sign the Windows binaries
-    needs: [version, windows-ready]
-    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    name: "Sign the Windows binaries${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, windows-ready, adopt]
+    if: ${{ !cancelled() && needs.windows-ready.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -2756,11 +3554,34 @@ jobs:
           sparse-checkout: /tools/ci/
           sparse-checkout-cone-mode: false
 
+      - name: Download the adoption binding
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: adopt-binding
+          path: adopt
+
+      - name: Check the adoption binding against the job output
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        env:
+          BINDING_SHA256: ${{ needs.adopt.outputs.binding_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -I tools\ci\release_adopt.py binding-hash --file adopt\adopt-binding.json --expect $env:BINDING_SHA256
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Download the unsigned payload
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: unsigned-windows
           path: signed-output
+
+      - name: Check the unsigned payload against the binding
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -I tools\ci\release_adopt.py check-files --binding adopt\adopt-binding.json --artifact unsigned-windows --dir signed-output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Sign
         env:
@@ -2789,6 +3610,7 @@ jobs:
           name: signed-windows
           path: signed-output
           retention-days: 14
+          overwrite: true
           if-no-files-found: error
 
   # No secret, no environment: the installer is built from the signed
@@ -2801,6 +3623,10 @@ jobs:
     if: ${{ !cancelled() && needs.windows-ready.result == 'success' && (needs.version.outputs.dry_run == 'true' || needs.windows-sign.result == 'success') }}
     runs-on: windows-2022
     timeout-minutes: 30
+    outputs:
+      # The hash of the installer this job built, which msi-sign compares
+      # with the installer it downloads in an adopting run.
+      msi_sha256: ${{ steps.build.outputs.msi_sha256 }}
     defaults:
       run:
         shell: powershell
@@ -2889,6 +3715,7 @@ jobs:
           Get-ChildItem msi-old -Filter *.msi | Format-Table Name, Length
 
       - name: Build the installer
+        id: build
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path 'msi-out' -Force | Out-Null
@@ -2907,6 +3734,8 @@ jobs:
             exit 1
           }
           Get-ChildItem msi-out | Format-Table Name, Length
+          $msiHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $found[0].FullName).Hash.ToLower()
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_sha256=$msiHash" -Encoding ascii
 
       - name: Upload the older installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -2925,6 +3754,7 @@ jobs:
           name: msi-unsigned
           path: msi-out/*.msi
           retention-days: 14
+          overwrite: true
           if-no-files-found: error
 
       - name: Upload the installer (dry run, unsigned)
@@ -2937,9 +3767,9 @@ jobs:
           if-no-files-found: error
 
   msi-sign:
-    name: Sign the Windows installer
-    needs: [version, msi-build]
-    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.version.outputs.dry_run == 'false' }}
+    name: "Sign the Windows installer${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, msi-build, adopt]
+    if: ${{ !cancelled() && needs.msi-build.result == 'success' && needs.adopt.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
     runs-on: windows-2022
     timeout-minutes: 20
     environment: release
@@ -2960,6 +3790,22 @@ jobs:
         with:
           name: msi-unsigned
           path: msi
+
+      # The installer is built in this run, so the record of what it should be
+      # is msi-build's own output.
+      - name: Check the installer against the one msi-build built
+        if: ${{ needs.adopt.outputs.adopted == 'true' }}
+        env:
+          WANT_SHA256: ${{ needs.msi-build.outputs.msi_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = @(Get-ChildItem msi -Filter *.msi)
+          if ($msi.Count -ne 1) { Write-Host "::error::expected exactly one installer, found $($msi.Count)"; exit 1 }
+          $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi[0].FullName).Hash.ToLower()
+          if (-not $env:WANT_SHA256 -or $got -ne $env:WANT_SHA256) {
+            Write-Host "::error::the installer hashes to $got, msi-build built $($env:WANT_SHA256)"
+            exit 1
+          }
 
       - name: Sign
         env:
@@ -3058,6 +3904,7 @@ jobs:
       - ci-release-gate
       - linux-ready
       - linux-arm64-release-build
+      - nginx-x64-plan
       - nginx-ready
       - nginx-arm64-plan
       - nginx-distro-build-arm64
@@ -3096,11 +3943,17 @@ jobs:
       - ea4-build-hosted
       - ea4-el10-build
       - ea4-el10-build-hosted
+      - adopt
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       NEEDS: ${{ toJSON(needs) }}
+      ADOPTED: ${{ needs.adopt.outputs.adopted }}
+      BINDING_SHA256: ${{ needs.adopt.outputs.binding_sha256 }}
+      BUILD_RUN_ID: ${{ needs.adopt.outputs.candidate_run }}
+      BUILD_RUN_ATTEMPT: ${{ needs.adopt.outputs.candidate_attempt }}
       TAG: ${{ needs.version.outputs.tag }}
       VERSION: ${{ needs.version.outputs.version }}
       PKG_VERSION: ${{ needs.version.outputs.pkg_version }}
@@ -3109,13 +3962,44 @@ jobs:
       PAIR_VERSION: ${{ needs.optimizer-fetch.outputs.pair_pkg_version }}
       RELEASE_SHA: ${{ needs.version.outputs.sha }}
       DRY_RUN: ${{ needs.version.outputs.dry_run }}
+      BUILD_PROFILE: ${{ needs.version.outputs.build_profile }}
       FLEET_ENABLED: ${{ vars.FLEET_ENABLED }}
     steps:
+      - name: Checkout master (tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          persist-credentials: false
+
+      # In an adopting run the build, smoke, unit-test and scan jobs were
+      # skipped here and ran in the candidate. Their verdicts are taken from
+      # the sealed job list of the binding (which is checked against the hash
+      # adopt published), under one rule: every upstream job succeeded in this
+      # run, or was skipped here and succeeded in the candidate, and of a pair
+      # of runner and hosted twin jobs exactly one succeeded in the candidate.
+      - name: Download the adoption binding (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: adopt-binding
+          path: ${{ runner.temp }}/adopt
+
+      - name: Upstream jobs of an adopting run
+        if: ${{ env.ADOPTED == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py binding-hash --file "${RUNNER_TEMP}/adopt/adopt-binding.json" --expect "$BINDING_SHA256"
+          printf '%s' "$NEEDS" > "${RUNNER_TEMP}/adopt/needs.json"
+          python3 -I tools/ci/release_adopt.py check-needs --binding "${RUNNER_TEMP}/adopt/adopt-binding.json" \
+            --needs "${RUNNER_TEMP}/adopt/needs.json" --out "${RUNNER_TEMP}/adopt/needs-adopted.json"
+
       # Every upstream job succeeded, except that of each build runner pair
-      # exactly the leg that ran may have, and the other was skipped.
+      # exactly the leg that ran may have, and the other was skipped. In an
+      # adopting run the adopted jobs read as the success the candidate had.
       - name: Every upstream job succeeded
         run: |
           set -euo pipefail
+          if [ "${ADOPTED}" = true ]; then NEEDS="$(cat "${RUNNER_TEMP}/adopt/needs-adopted.json")"; fi
           # name of the job, then the name of its hosted twin ("-" for none)
           PAIRS="
           nginx-distro-build-el10 nginx-distro-build-el10-hosted
@@ -3132,11 +4016,12 @@ jobs:
           bad=0
           in_pair=" "
           # The signing jobs run in a real run only: they must have
-          # succeeded there and been skipped in a dry run. The gates need the
-          # fleet-hyperv class and can succeed without testing anything, so in a
-          # real run each must have succeeded AND reported ran == true (the
+          # succeeded there and been skipped in a dry run (a candidate is a
+          # dry run). The gates need the fleet-hyperv class and can succeed
+          # without testing anything, so in a release build (a real run or a
+          # candidate) each must have succeeded AND reported ran == true (the
           # cPanel gates are exempt on a pre-release, which has no package);
-          # in a dry run a skipped gate is allowed.
+          # in a rehearsal a skipped gate is allowed.
           for j in windows-sign msi-sign; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             echo "${j}: ${r} (dry run: ${DRY_RUN})"
@@ -3146,9 +4031,9 @@ jobs:
           for j in gate-iis-msi-upgrade gate-cpanel-smoke-el9 gate-cpanel-smoke-el8; do
             r="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].result')"
             ran="$(printf '%s' "$NEEDS" | jq -r --arg j "$j" '.[$j].outputs.ran // "false"')"
-            echo "${j}: ${r}, ran: ${ran} (dry run: ${DRY_RUN}, pre-release: ${IS_PRERELEASE})"
+            echo "${j}: ${r}, ran: ${ran} (build profile: ${BUILD_PROFILE}, pre-release: ${IS_PRERELEASE})"
             in_pair="${in_pair}${j} "
-            if [ "$DRY_RUN" = false ]; then
+            if [ "$BUILD_PROFILE" = release ]; then
               [ "$r" = success ] || { echo "::error::the ${j} gate did not succeed"; bad=1; }
               if [ "$IS_PRERELEASE" = true ] && [ "${j#gate-cpanel-smoke-}" != "$j" ]; then continue; fi
               [ "$ran" = true ] || { echo "::error::the ${j} gate did not run its smoke (it needs the fleet and its guest); a skipped gate is not a pass"; bad=1; }
@@ -3172,17 +4057,31 @@ jobs:
           done
           [ "$bad" = 0 ] || { echo "::error::an upstream job did not succeed"; exit 1; }
 
-      - name: Checkout master (tooling)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: master
-          persist-credentials: false
-
       - name: Download the release files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ${{ runner.temp }}/stage
           pattern: asset-*
+
+      - name: Download the adopted Windows payload (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unsigned-windows
+          path: ${{ runner.temp }}/adopted-extra/unsigned-windows
+
+      # Every file of every adopted artifact is what the candidate sealed.
+      - name: Re-hash the adopted artifacts (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        run: |
+          set -euo pipefail
+          b="${RUNNER_TEMP}/adopt/adopt-binding.json"
+          for n in $(jq -r '.artifacts[] | select(.reupload) | .name' "$b"); do
+            d="${RUNNER_TEMP}/stage/${n}"
+            [ -d "$d" ] || d="${RUNNER_TEMP}/adopted-extra/${n}"
+            [ -d "$d" ] || { echo "::error::adopted artifact ${n} is not in this run"; exit 1; }
+            python3 -I tools/ci/release_adopt.py check-files --binding "$b" --artifact "$n" --dir "$d"
+          done
 
       # The manifest of the sidecar pair, from the two tarballs: one more
       # release file, so SHA256SUMS (and its signature) covers it.
@@ -3201,6 +4100,10 @@ jobs:
         run: |
           set -euo pipefail
           ls "${RUNNER_TEMP}/stage"
+          # The run that built the files is the candidate's when this run
+          # adopted them, and this run otherwise.
+          build_args=()
+          [ "$ADOPTED" != true ] || build_args=(--build-run-id "$BUILD_RUN_ID" --build-run-attempt "$BUILD_RUN_ATTEMPT")
           python3 -I tools/ci/release_manifest.py build \
             --stage "${RUNNER_TEMP}/stage" \
             --out "${RUNNER_TEMP}/release-assets" \
@@ -3208,7 +4111,19 @@ jobs:
             --prerelease "$IS_PRERELEASE" \
             --source-sha "$RELEASE_SHA" --run-id "$GITHUB_RUN_ID" \
             --repository "$GITHUB_REPOSITORY" --optimizer-tag "$OPTIMIZER_TAG" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" "${build_args[@]+"${build_args[@]}"}" \
             --profile part-b
+
+      # The release files an adopting run took over are the candidate's: each
+      # has the candidate's row. Only the Windows installer (rebuilt from the
+      # signed binaries) and the two manifests may differ, and each differing
+      # row is named.
+      - name: SHA256SUMS rows of the adopted files (adopted run)
+        if: ${{ env.ADOPTED == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 -I tools/ci/release_adopt.py check-sums \
+            --binding "${RUNNER_TEMP}/adopt/adopt-binding.json" --sums "${RUNNER_TEMP}/release-assets/SHA256SUMS"
 
       # The commit stamp is what ties a shipped module to the release commit.
       # Every Linux module (Apache deb, rpm, el10 rpm and standalone .so; nginx
@@ -3333,25 +4248,93 @@ jobs:
       # the protected `release` environment after this job and only when
       # needs.version.outputs.dry_run is 'false'. Nothing in this job holds a
       # secret or a write token.
+      # In a candidate run it is kept 14 days, like the other sealed artifacts.
       - name: Upload the validated asset set
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: ${{ runner.temp }}/release-assets/*
-          retention-days: 30
+          retention-days: ${{ needs.version.outputs.candidate == 'true' && 14 || 30 }}
+          overwrite: true
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # Candidate seal: only a candidate run, after `validate`. Hosted, no
+  # environment, no secret. It lists the artifacts of its own run through the
+  # Actions API, keeps the ones on the allowlist of tools/ci/release_adopt.py,
+  # downloads each by id, checks it against the API digest and records the
+  # hash of every file in `candidate-seal`. Names, ids and digests come from
+  # the API, never from job outputs (matrix jobs do not aggregate them), and
+  # the run's own title and commit must agree with the version job. The
+  # script is master's, not the tree being released.
+  # ---------------------------------------------------------------------
+  candidate-seal:
+    name: Seal the candidate artifacts
+    needs: [version, validate, nginx-x64-plan, nginx-arm64-plan, optimizer-fetch]
+    if: ${{ !cancelled() && needs.version.outputs.candidate == 'true' && needs.validate.result == 'success' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+      # The legs the two plan jobs published: run outputs are not in the
+      # Actions API, and an adopting run needs them to name the jobs the
+      # candidate had. The hash is of the pinned optimizer release's
+      # SHA256SUMS as `optimizer-fetch` verified it.
+      PLAN_X64: ${{ needs.nginx-x64-plan.outputs.distros }}
+      PLAN_ARM64: ${{ needs.nginx-arm64-plan.outputs.distros }}
+      OPTIMIZER_SUMS: ${{ needs.optimizer-fetch.outputs.sums_sha256 }}
+    steps:
+      - name: Checkout master (seal tooling)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          sparse-checkout: tools/ci
+          persist-credentials: false
+
+      - name: Write the seal
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/seal"
+          args=()
+          [ "$IS_PRERELEASE" != true ] || args+=(--prerelease)
+          python3 -I tools/ci/release_adopt.py seal \
+            --repo "$GITHUB_REPOSITORY" --run-id "$GITHUB_RUN_ID" \
+            --tag "$TAG" --version "$VERSION" --sha "$RELEASE_SHA" \
+            --plan "nginx-x64-plan=${PLAN_X64}" --plan "nginx-arm64-plan=${PLAN_ARM64}" \
+            --optimizer-sums-sha256 "$OPTIMIZER_SUMS" \
+            "${args[@]}" --out "${RUNNER_TEMP}/seal/candidate-seal.json"
+          cat "${RUNNER_TEMP}/seal/candidate-seal.json"
+
+      - name: Upload the seal
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: candidate-seal
+          path: ${{ runner.temp }}/seal/candidate-seal.json
+          retention-days: 14
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
   # Signing of the checksums and the release. Real runs only (dry_run
   # false), hosted, in the protected `release` environment, after `validate`
   # succeeded. The package signing key lives in this one job; the release job
-  # holds only the write token.
+  # holds only the write token. In an adopting run both names carry the
+  # binding, as the Windows signing jobs do, so the approver of these last two
+  # approvals sees which candidate the bytes came from.
   # ---------------------------------------------------------------------
   sign-checksums:
-    name: Sign SHA256SUMS
-    needs: [version, validate]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' }}
-    runs-on: ubuntu-latest
+    name: "Sign SHA256SUMS${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, adopt, validate]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
     env:
@@ -3489,10 +4472,11 @@ jobs:
   # beyond that: no repository publication, no dispatch to another
   # repository. A pre-release tag produces a pre-release.
   create-release:
-    name: Create the GitHub release
-    needs: [version, validate, sign-checksums]
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' }}
-    runs-on: ubuntu-latest
+    name: "Create the GitHub release${{ needs.adopt.outputs.adopted == 'true' && format(' (adopted: {0})', needs.adopt.outputs.binding) || '' }}"
+    needs: [version, adopt, validate, sign-checksums]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.sign-checksums.result == 'success' && needs.version.outputs.dry_run == 'false' && needs.version.outputs.candidate != 'true' && needs.version.outputs.rehearsal != 'true' }}
+    # pinned to 24.04: ubuntu-latest is 26.04 since 2026-11-07; migrate via https://github.com/We-Amp/mod_pagespeed/issues/671
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
     permissions:

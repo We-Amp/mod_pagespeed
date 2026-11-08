@@ -48,8 +48,8 @@ bool IsDate(std::string_view s) {
 
 }  // namespace
 
-RulePackDecisionLog::RulePackDecisionLog(std::string dir)
-    : dir_(std::move(dir)) {}
+RulePackDecisionLog::RulePackDecisionLog(std::string dir, std::string label)
+    : dir_(std::move(dir)), label_(std::move(label)) {}
 
 RulePackDecisionLog::~RulePackDecisionLog() { Close(); }
 
@@ -165,9 +165,9 @@ void RulePackDecisionLog::Open(const std::string& date, int64_t now_ms,
   if (ec) {
     if (handler != nullptr) {
       handler->Message(kWarning,
-                       "rule pack decision log: cannot create %s: %s; "
+                       "%s: cannot create %s: %s; "
                        "decisions of this day are not logged by this process",
-                       dir_.c_str(), ec.message().c_str());
+                       label_.c_str(), dir_.c_str(), ec.message().c_str());
     }
     return;
   }
@@ -188,10 +188,10 @@ void RulePackDecisionLog::Open(const std::string& date, int64_t now_ms,
   if (h == INVALID_HANDLE_VALUE) {
     if (handler != nullptr) {
       handler->Message(kWarning,
-                       "rule pack decision log: cannot open %s/%s (error "
+                       "%s: cannot open %s/%s (error "
                        "%lu); decisions of this day are not logged by this "
                        "process",
-                       dir_.c_str(), FileName(date).c_str(),
+                       label_.c_str(), dir_.c_str(), FileName(date).c_str(),
                        static_cast<unsigned long>(GetLastError()));
     }
     return;
@@ -213,9 +213,9 @@ void RulePackDecisionLog::Open(const std::string& date, int64_t now_ms,
   if (fd < 0) {
     if (handler != nullptr) {
       handler->Message(kWarning,
-                       "rule pack decision log: cannot open %s/%s: %s; "
+                       "%s: cannot open %s/%s: %s; "
                        "decisions of this day are not logged by this process",
-                       dir_.c_str(), FileName(date).c_str(),
+                       label_.c_str(), dir_.c_str(), FileName(date).c_str(),
                        std::strerror(errno));
     }
     return;
@@ -232,6 +232,15 @@ RulePackDecisionLog::Result RulePackDecisionLog::Write(
   const size_t key = std::hash<std::string_view>()(dedup_key);
   std::lock_guard<std::mutex> lock(mutex_);
   if (seen_.count(key) != 0) return Result::kDuplicate;
+
+  if (max_lines_per_second_ > 0) {
+    const int64_t second = now_ms / 1000;
+    if (second != rate_second_) {
+      rate_second_ = second;
+      rate_lines_ = 0;
+    }
+    if (rate_lines_ >= max_lines_per_second_) return Result::kDropped;
+  }
 
   const std::string date = UtcDate(now_ms);
   if (date != date_) Open(date, now_ms, handler);
@@ -254,15 +263,16 @@ RulePackDecisionLog::Result RulePackDecisionLog::Write(
   if (!Append(data)) {
     if (handler != nullptr) {
       handler->Message(kWarning,
-                       "rule pack decision log: a write to %s/%s failed; "
+                       "%s: a write to %s/%s failed; "
                        "decisions of this day are not logged by this process",
-                       dir_.c_str(), FileName(date_).c_str());
+                       label_.c_str(), dir_.c_str(), FileName(date_).c_str());
     }
     Close();
     return Result::kDropped;
   }
   if (seen_.size() >= kMaxDedupKeys) seen_.clear();
   seen_.insert(key);
+  ++rate_lines_;
   return Result::kWritten;
 }
 

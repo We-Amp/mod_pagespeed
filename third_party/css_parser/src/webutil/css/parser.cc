@@ -21,6 +21,7 @@
 
 #include <algorithm>  // std::min
 #include <cctype>     // isascii
+#include <climits>    // CHAR_MIN
 #include <cmath>      // std::isnan
 #include <memory>
 #include <string>
@@ -38,6 +39,13 @@
 #include "third_party/css_parser/src/webutil/css/string_util.h"
 #include "third_party/css_parser/src/webutil/css/util.h"
 #include "third_party/css_parser/src/webutil/css/value.h"
+
+// The parser compares UTF-8 bytes against 0x80 and friends and assumes plain
+// char is unsigned. third_party/css_parser/BUILD passes -funsigned-char (GCC,
+// clang) or /J (MSVC, clang-cl); fail the build if a compiler ignores it.
+static_assert(CHAR_MIN == 0,
+              "css_parser must be built with unsigned plain char "
+              "(-funsigned-char, or /J on Windows)");
 
 namespace Css {
 
@@ -81,6 +89,7 @@ Parser::Parser(const char* utf8text, const char* textend)
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),
       group_rule_depth_(0),
+      media_queries_bytes_(0),
       errors_seen_mask_(kNoError),
       unparseable_sections_seen_mask_(kNoError) {}
 
@@ -92,6 +101,7 @@ Parser::Parser(const char* utf8text)
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),
       group_rule_depth_(0),
+      media_queries_bytes_(0),
       errors_seen_mask_(kNoError),
       unparseable_sections_seen_mask_(kNoError) {}
 
@@ -103,6 +113,7 @@ Parser::Parser(CssStringPiece s)
       preservation_mode_(false),
       max_function_depth_(kDefaultMaxFunctionDepth),
       group_rule_depth_(0),
+      media_queries_bytes_(0),
       errors_seen_mask_(kNoError),
       unparseable_sections_seen_mask_(kNoError) {}
 
@@ -2886,6 +2897,7 @@ void Parser::ParseStatement(const MediaQueries* media_queries,
           DCHECK_EQ('{', *in_);
           in_++;
           SkipSpace();
+          const int64_t copy_bytes = media_queries->ApproximateBytes();
           while (in_ < end_ && *in_ != '}') {
             if (*in_ == ';') {
               // Browser-style recovery for a stray ';' at statement position,
@@ -2896,6 +2908,17 @@ void Parser::ParseStatement(const MediaQueries* media_queries,
               in_++;
               SkipSpace();
               continue;
+            }
+            // The statement gets its own copy of media_queries. Stop here if
+            // that is more than the stylesheet may have: running to EOF makes
+            // the error below a preserved one, so that downstream falls back
+            // to the original bytes.
+            media_queries_bytes_ += copy_bytes;
+            if (media_queries_bytes_ > MaxMediaQueriesBytes(end_ - begin_)) {
+              ReportParsingError(kMediaError,
+                                 "Too many copies of @media queries.");
+              in_ = end_;
+              break;
             }
             const char* oldin = in_;
             // Parse either a ruleset or at-rule.

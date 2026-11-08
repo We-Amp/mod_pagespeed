@@ -19,12 +19,17 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
 namespace Envoy {
+namespace Event {
+class Dispatcher;
+}
 namespace Http {
 class HttpPageSpeedDecoderFilter;
 }
@@ -37,11 +42,27 @@ class EnvoyServerContext;
 // AsyncFetch implementation for admin/statistics pages.
 // Buffers the response body from AdminSite handlers and sends
 // the complete response via Envoy's sendLocalReply().
+//
+// The reply is always sent on the dispatcher of the worker that owns the
+// request: a completion that arrives on any other thread (a fetcher, cache or
+// scheduler thread) posts the reply to that dispatcher. The fetch registers
+// itself with its filter, which detaches it when the filter is destroyed; a
+// reply that arrives after that is dropped.
+//
+// Lifetime: two references, one held by the filter (released by
+// DetachDecoder() followed by DecrementRefCount()) and one by the completion
+// (released once the reply has been sent or dropped). The fetch deletes
+// itself when both are gone.
 class EnvoyAdminFetch : public AsyncFetch {
  public:
   EnvoyAdminFetch(EnvoyServerContext* server_context,
                   Envoy::Http::HttpPageSpeedDecoderFilter* decoder);
   ~EnvoyAdminFetch() override;
+
+  // Called by the filter, on its dispatcher thread, before it is destroyed.
+  void DetachDecoder() { decoder_.store(nullptr, std::memory_order_release); }
+  // Releases one reference; deletes the fetch when none remain.
+  void DecrementRefCount();
 
  protected:
   bool HandleWrite(const StringPiece& sp, MessageHandler* handler) override;
@@ -50,7 +71,14 @@ class EnvoyAdminFetch : public AsyncFetch {
   void HandleDone(bool success) override;
 
  private:
-  Envoy::Http::HttpPageSpeedDecoderFilter* decoder_;
+  // Sends the buffered reply through the filter if it is still attached.
+  // Runs on the dispatcher thread only.
+  void SendReplyOnDispatcher();
+
+  std::atomic<Envoy::Http::HttpPageSpeedDecoderFilter*> decoder_{nullptr};
+  // The dispatcher of the worker that owns the request; outlives the filter.
+  Envoy::Event::Dispatcher* dispatcher_{nullptr};
+  std::atomic<int> references_{2};
   GoogleString buffer_;
 
   EnvoyAdminFetch(const EnvoyAdminFetch&) = delete;

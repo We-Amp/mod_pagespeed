@@ -692,6 +692,27 @@ TEST_F(JsCombineFilterTest, ModuleIsCombinationBarrier) {
                                              kJsUrl3, "></script>"));
 }
 
+// A script the origin does not label as JavaScript is never combined.
+TEST_F(JsCombineFilterTest, OriginTypeNotScriptIsCombinationBarrier) {
+  SetResponseWithDefaultHeaders("note.txt", kContentTypeText, kJsText1, 100);
+  ValidateNoChanges("origin_type_barrier",
+                    StrCat("<script src=", kJsUrl1,
+                           "></script>"
+                           "<script src=note.txt></script>"
+                           "<script src=",
+                           kJsUrl2, "></script>"));
+  GoogleString content;
+  EXPECT_FALSE(FetchResourceUrl(
+      Encode(kTestDomain, "jc", "0", MultiUrl(kJsUrl1, "note.txt"), "js"),
+      &content));
+
+  // The refused fetch must leave later pages with the same scripts intact.
+  ValidateNoChanges("origin_type_barrier_after_fetch",
+                    StrCat("<script src=", kJsUrl1,
+                           "></script>"
+                           "<script src=note.txt></script>"));
+}
+
 TEST_F(JsCombineFilterTest, ModulesNeverCombined) {
   ValidateNoChanges("modules_never_combined",
                     StrCat("<script type=\"module\" src=", kJsUrl1,
@@ -1327,6 +1348,13 @@ TEST_F(JsCombineFilterTest, NoCombineDataNoDeferAttribute) {
       "data-pagespeed-no-defer",
       StrCat("<script src=", kJsUrl1, " data-pagespeed-no-defer></script>",
              "<script src=", kJsUrl2, "></script>"));
+}
+
+// SVG script elements are not HTML scripts, so they are not combined.
+TEST_F(JsCombineFilterTest, NoCombineSvgScripts) {
+  ValidateNoChanges("svg_scripts",
+                    StrCat("<svg><script src=", kJsUrl1, "></script>",
+                           "<script src=", kJsUrl2, "></script></svg>"));
 }
 
 TEST_F(JsCombineFilterTest, PreserveUrlRelativity) {

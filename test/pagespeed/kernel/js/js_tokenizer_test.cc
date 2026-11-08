@@ -97,6 +97,30 @@ class JsTokenizerTest : public testing::Test {
     EXPECT_TRUE(tokenizer_->has_error());
   }
 
+  // Tokenizes all of input; expects an error token to be reached.
+  void ExpectErrorEventually(StringPiece input) {
+    BeginTokenizing(input);
+    StringPiece token;
+    JsKeywords::Type type;
+    do {
+      type = tokenizer_->NextToken(&token);
+    } while (type != JsKeywords::kError && type != JsKeywords::kEndOfInput);
+    EXPECT_EQ(JsKeywords::kError, type) << input;
+    EXPECT_TRUE(tokenizer_->has_error()) << input;
+  }
+
+  // Tokenizes all of input; expects it to end without an error.
+  void ExpectNoErrorEventually(StringPiece input) {
+    BeginTokenizing(input);
+    StringPiece token;
+    JsKeywords::Type type;
+    do {
+      type = tokenizer_->NextToken(&token);
+    } while (type != JsKeywords::kError && type != JsKeywords::kEndOfInput);
+    EXPECT_EQ(JsKeywords::kEndOfInput, type) << input;
+    EXPECT_FALSE(tokenizer_->has_error()) << input;
+  }
+
   void ExpectTokenizeFileSuccessfully(StringPiece filename) {
     // Read in the JavaScript file.
     GoogleString original;
@@ -1832,6 +1856,158 @@ TEST_F(JsTokenizerTest, UnclosedStringLiteral) {
   ExpectToken(JsKeywords::kIdentifier, "bar");
   ExpectToken(JsKeywords::kOperator, "=");
   ExpectError("'quux;");
+}
+
+TEST_F(JsTokenizerTest, UnclosedStringLiteralEndingInEscapedQuote) {
+  // The final quote is escaped (odd number of backslashes before it), so
+  // the literal is unterminated, not closed on that quote.
+  BeginTokenizing("bar='quux\\'");
+  ExpectToken(JsKeywords::kIdentifier, "bar");
+  ExpectToken(JsKeywords::kOperator, "=");
+  ExpectError("'quux\\'");
+}
+
+TEST_F(JsTokenizerTest, UnclosedDoubleQuotedStringEndingInEscapedQuote) {
+  BeginTokenizing("bar=\"quux\\\"");
+  ExpectToken(JsKeywords::kIdentifier, "bar");
+  ExpectToken(JsKeywords::kOperator, "=");
+  ExpectError("\"quux\\\"");
+}
+
+TEST_F(JsTokenizerTest, UnclosedStringLiteralThreeBackslashesBeforeQuote) {
+  // \\ is an escaped backslash and \' an escaped quote.
+  BeginTokenizing("'quux\\\\\\'");
+  ExpectError("'quux\\\\\\'");
+}
+
+TEST_F(JsTokenizerTest, UnclosedStringEscapedQuoteThenMoreInput) {
+  BeginTokenizing("a='b\\';c");
+  ExpectToken(JsKeywords::kIdentifier, "a");
+  ExpectToken(JsKeywords::kOperator, "=");
+  ExpectError("'b\\';c");
+}
+
+TEST_F(JsTokenizerTest, UnclosedStringEscapedQuoteAfterLineContinuation) {
+  BeginTokenizing("'a\\\n\\'");
+  ExpectError("'a\\\n\\'");
+}
+
+TEST_F(JsTokenizerTest, ClosedStringEvenBackslashesBeforeQuote) {
+  // An even number of backslashes before the closing quote escapes only
+  // each other; the quote closes the literal.
+  BeginTokenizing("'a\\\\'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\\\'");
+  ExpectEndOfInput();
+  BeginTokenizing("\"a\\\\\\\\\"");
+  ExpectToken(JsKeywords::kStringLiteral, "\"a\\\\\\\\\"");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, ClosedStringEscapedQuoteInside) {
+  BeginTokenizing("'a\\'b' + \"c\\\"d\"");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\'b'");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kOperator, "+");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kStringLiteral, "\"c\\\"d\"");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, ClosedStringLineContinuationBeforeQuote) {
+  BeginTokenizing("'a\\\n'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\\n'");
+  ExpectEndOfInput();
+  BeginTokenizing("'a\\\r\n'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\\r\n'");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, ClosedStringLineSeparatorBeforeQuote) {
+  // Raw and escaped U+2028 are legal inside strings since ES2019.
+  BeginTokenizing("'a\xE2\x80\xA8'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\xE2\x80\xA8'");
+  ExpectEndOfInput();
+  BeginTokenizing("'a\\\xE2\x80\xA9'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\\xE2\x80\xA9'");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, StringBoundaryCases) {
+  BeginTokenizing("''");
+  ExpectToken(JsKeywords::kStringLiteral, "''");
+  ExpectEndOfInput();
+  BeginTokenizing("'\\\\'");
+  ExpectToken(JsKeywords::kStringLiteral, "'\\\\'");
+  ExpectEndOfInput();
+  BeginTokenizing("'\\''");
+  ExpectToken(JsKeywords::kStringLiteral, "'\\''");
+  ExpectEndOfInput();
+  BeginTokenizing("'\\'");
+  ExpectError("'\\'");
+}
+
+TEST_F(JsTokenizerTest, EscapedQuoteThenSecondStringOnSameLine) {
+  // The escaped quote does not close the first literal; the second quote
+  // does, and the remainder is then an identifier and an unterminated string.
+  BeginTokenizing("'a\\' + 'b'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\' + '");
+  ExpectToken(JsKeywords::kIdentifier, "b");
+  ExpectError("'");
+  BeginTokenizing("\"a\\\" , \"b\"");
+  ExpectToken(JsKeywords::kStringLiteral, "\"a\\\" , \"");
+  ExpectToken(JsKeywords::kIdentifier, "b");
+  ExpectError("\"");
+}
+
+TEST_F(JsTokenizerTest, InvalidUtf8AroundClosingQuote) {
+  BeginTokenizing("'\xFF\\\\'");
+  ExpectToken(JsKeywords::kStringLiteral, "'\xFF\\\\'");
+  ExpectEndOfInput();
+  BeginTokenizing("'\\\\\xFF'");
+  ExpectToken(JsKeywords::kStringLiteral, "'\\\\\xFF'");
+  ExpectEndOfInput();
+  BeginTokenizing("'\xC3\\'");
+  ExpectError("'\xC3\\'");
+}
+
+TEST_F(JsTokenizerTest, ShiftJisTrailByteBackslashBeforeQuote) {
+  // In Shift-JIS the second byte of U+30BD is 0x5C.  With no later quote the
+  // string cannot be told from an escaped quote, so it is declined (the
+  // input is passed through unchanged).
+  BeginTokenizing("var s='\x83\x5C';");
+  ExpectToken(JsKeywords::kVar, "var");
+  ExpectToken(JsKeywords::kWhitespace, " ");
+  ExpectToken(JsKeywords::kIdentifier, "s");
+  ExpectToken(JsKeywords::kOperator, "=");
+  ExpectError("'\x83\x5C';");
+}
+
+TEST_F(JsTokenizerTest, ClosedStringLettersAndEscapesBeforeQuote) {
+  BeginTokenizing("'A'");
+  ExpectToken(JsKeywords::kStringLiteral, "'A'");
+  ExpectEndOfInput();
+  BeginTokenizing("'\\x41'");
+  ExpectToken(JsKeywords::kStringLiteral, "'\\x41'");
+  ExpectEndOfInput();
+  ExpectErrorEventually("'\\x41\\'");
+}
+
+TEST_F(JsTokenizerTest, ClosedStringLinebreakContinuationPairsBeforeQuote) {
+  BeginTokenizing("'a\\\n\r'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\\n\r'");
+  ExpectEndOfInput();
+  BeginTokenizing("'a\\\r'");
+  ExpectToken(JsKeywords::kStringLiteral, "'a\\\r'");
+  ExpectEndOfInput();
+}
+
+TEST_F(JsTokenizerTest, EscapedQuoteInOtherParseStates) {
+  ExpectErrorEventually("{\"a\\\":1");
+  ExpectNoErrorEventually("{\"a\\\\\":\"b\\\\\"}");
+  ExpectErrorEventually("import 'x\\'");
+  ExpectNoErrorEventually("import 'x\\\\'");
+  ExpectNoErrorEventually("`${'a\\''}`");
+  ExpectErrorEventually("`${'a\\'}`");
 }
 
 TEST_F(JsTokenizerTest, UnmatchedCloseParen) {

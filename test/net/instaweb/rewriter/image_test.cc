@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <vector>
 
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/image_data_lookup.h"
@@ -41,6 +42,7 @@
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/image/image_util.h"
 #include "pagespeed/kernel/image/jpeg_utils.h"
+#include "pagespeed/kernel/image/png_optimizer.h"
 #include "pagespeed/kernel/image/read_image.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
@@ -863,6 +865,54 @@ TEST_F(ImageTest, JpegTest) {
                      1023, 766, 241260, true);
 }
 
+// The reported dimensions are those libjpeg decodes.
+TEST_F(ImageTest, JpegDimensionsMatchDecoder) {
+  // SOF0 for an 8-bit, one-component frame of the given size.
+  auto sof0 = [](int width, int height) {
+    const char bytes[] = {'\xff',
+                          '\xc0',
+                          0,
+                          11,
+                          8,
+                          static_cast<char>(height >> 8),
+                          static_cast<char>(height),
+                          static_cast<char>(width >> 8),
+                          static_cast<char>(width),
+                          1,
+                          1,
+                          0x11,
+                          0};
+    return GoogleString(bytes, sizeof(bytes));
+  };
+  const GoogleString real_sof0 = sof0(64, 48);
+  GoogleString contents("\xff\xd8", 2);  // SOI
+  contents.append("\xff\x01", 2);
+  contents.push_back(0);
+  contents.push_back(static_cast<char>(2 + real_sof0.size()));
+  contents.append(real_sof0);
+  contents.append(sof0(1, 1).substr(1));
+  contents.append("\xff\xdb\x00\x43\x00", 5);  // DQT
+  contents.append(GoogleString(64, 1));
+  contents.append("\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00", 10);  // SOS
+  contents.append("\xff\xd9", 2);                                   // EOI
+
+  // What libjpeg makes of the header.
+  size_t libjpeg_width = 0, libjpeg_height = 0;
+  ASSERT_TRUE(ReadImage(pagespeed::image_compression::IMAGE_JPEG,
+                        contents.data(), contents.size(), nullptr, nullptr,
+                        &libjpeg_width, &libjpeg_height, nullptr,
+                        &message_handler_));
+  EXPECT_EQ(64, libjpeg_width);
+  EXPECT_EQ(48, libjpeg_height);
+
+  ImagePtr image(ImageFromString(IMAGE_JPEG, "markers.jpg", contents, false));
+  EXPECT_EQ(IMAGE_JPEG, image->image_type());
+  ImageDim dim;
+  image->Dimensions(&dim);
+  EXPECT_EQ(64, dim.width());
+  EXPECT_EQ(48, dim.height());
+}
+
 TEST_F(ImageTest, ProgressiveJpegTest) {
   options_->recompress_jpeg = true;
   options_->progressive_jpeg = true;
@@ -1648,6 +1698,131 @@ TEST_F(ImageTest, DrawImageDetails) {
   free(image1_pixels);
   free(image2_pixels);
   free(canvas_pixels);
+}
+
+// Writes a side x side RGB PNG whose pixels are derived from 'seed', so that
+// every seed gives a different image.
+GoogleString MakeSeededPng(int side, int seed, MessageHandler* handler) {
+  GoogleString png;
+  pagespeed::image_compression::PngCompressParams config(
+      /*try_best_compression=*/false, /*is_progressive=*/false);
+  std::unique_ptr<pagespeed::image_compression::ScanlineWriterInterface> writer(
+      pagespeed::image_compression::CreateScanlineWriter(
+          pagespeed::image_compression::IMAGE_PNG,
+          pagespeed::image_compression::RGB_888, side, side, &config, &png,
+          handler));
+  if (writer == nullptr) {
+    return GoogleString();
+  }
+  std::vector<uint8_t> line(side * 3);
+  for (int row = 0; row < side; ++row) {
+    for (int col = 0; col < side; ++col) {
+      line[col * 3] = static_cast<uint8_t>(seed * 7 + col);
+      line[col * 3 + 1] = static_cast<uint8_t>(seed * 13 + row);
+      line[col * 3 + 2] = static_cast<uint8_t>(seed);
+    }
+    if (!writer->WriteNextScanline(line.data())) {
+      return GoogleString();
+    }
+  }
+  if (!writer->FinalizeWrite()) {
+    return GoogleString();
+  }
+  return png;
+}
+
+// Draws 'count' distinct side x side images in a vertical strip and returns
+// the canvas pixel work it took, including encoding the result.
+int64 VerticalStripWork(int count, int side, Timer* timer,
+                        MessageHandler* handler) {
+  std::vector<GoogleString> pngs;
+  pngs.reserve(count);  // The images keep pointers into these strings.
+  for (int i = 0; i < count; ++i) {
+    pngs.push_back(MakeSeededPng(side, i, handler));
+    EXPECT_FALSE(pngs.back().empty());
+  }
+  std::vector<std::unique_ptr<Image>> images;
+  for (int i = 0; i < count; ++i) {
+    images.emplace_back(NewImage(pngs[i], StrCat("strip", i, ".png"),
+                                 GTestTempDir(), new Image::CompressionOptions(),
+                                 timer, handler));
+  }
+  Image::CompressionOptions* options = new Image::CompressionOptions();
+  options->recompress_png = true;
+  std::unique_ptr<Image> canvas(BlankImageWithOptions(
+      side, side * count, IMAGE_PNG, GTestTempDir(), timer, handler, options));
+  EXPECT_TRUE(canvas != nullptr);
+  if (canvas == nullptr) {
+    return 0;
+  }
+  for (int i = 0; i < count; ++i) {
+    EXPECT_TRUE(canvas->DrawImage(images[i].get(), 0, side * i)) << i;
+  }
+  EXPECT_FALSE(canvas->Contents().empty());
+  return ImageTestingPeer::CanvasPixelWork(canvas.get());
+}
+
+// Drawing twice as many images onto a canvas twice as large must cost about
+// twice the pixel work, not four times: each image is drawn once onto one
+// canvas, which is filled and encoded once.
+TEST_F(ImageTest, DrawImageWorkIsLinearInImageCount) {
+  constexpr int kSide = 16;
+  constexpr int kCount = 24;
+  const int64 work = VerticalStripWork(kCount, kSide, &timer_,
+                                       &message_handler_);
+  const int64 work_doubled = VerticalStripWork(2 * kCount, kSide, &timer_,
+                                               &message_handler_);
+  ASSERT_GT(work, 0);
+  // A small constant allowance (one image) for fixed costs.
+  EXPECT_LE(work_doubled, 2 * work + kSide * kSide) << work << " vs "
+                                                    << work_doubled;
+}
+
+// Reading the output between draws encodes the canvas; a later draw must
+// keep what was drawn before.
+TEST_F(ImageTest, DrawImageAfterReadingOutputKeepsEarlierDraws) {
+  constexpr int kSide = 8;
+  const GoogleString png1 = MakeSeededPng(kSide, 1, &message_handler_);
+  const GoogleString png2 = MakeSeededPng(kSide, 2, &message_handler_);
+  ImagePtr image1(NewImage(png1, "first.png", GTestTempDir(),
+                           new Image::CompressionOptions(), &timer_,
+                           &message_handler_));
+  ImagePtr image2(NewImage(png2, "second.png", GTestTempDir(),
+                           new Image::CompressionOptions(), &timer_,
+                           &message_handler_));
+  ImagePtr canvas(BlankImageWithOptions(kSide, 2 * kSide, IMAGE_PNG,
+                                        GTestTempDir(), &timer_,
+                                        &message_handler_,
+                                        new Image::CompressionOptions()));
+  ASSERT_TRUE(canvas != nullptr);
+  ASSERT_TRUE(canvas->DrawImage(image1.get(), 0, 0));
+  EXPECT_FALSE(canvas->Contents().empty());
+  ASSERT_TRUE(canvas->DrawImage(image2.get(), 0, kSide));
+
+  uint8_t* pixels[3] = {nullptr, nullptr, nullptr};
+  PixelFormat formats[3];
+  size_t widths[3], heights[3], strides[3];
+  const GoogleString canvas_png(canvas->Contents().data(),
+                                canvas->Contents().size());
+  const GoogleString* sources[3] = {&png1, &png2, &canvas_png};
+  for (int i = 0; i < 3; ++i) {
+    ASSERT_TRUE(ReadImage(pagespeed::image_compression::IMAGE_PNG,
+                          sources[i]->data(), sources[i]->length(),
+                          reinterpret_cast<void**>(&pixels[i]), &formats[i],
+                          &widths[i], &heights[i], &strides[i],
+                          &message_handler_));
+  }
+  EXPECT_EQ(static_cast<size_t>(kSide), widths[2]);
+  EXPECT_EQ(static_cast<size_t>(2 * kSide), heights[2]);
+  CompareImageRegions(pixels[0], formats[0], strides[0], 0, 0, pixels[2],
+                      formats[2], strides[2], 0, 0, kSide, kSide,
+                      &message_handler_);
+  CompareImageRegions(pixels[1], formats[1], strides[1], 0, 0, pixels[2],
+                      formats[2], strides[2], 0, kSide, kSide, kSide,
+                      &message_handler_);
+  for (uint8_t* p : pixels) {
+    free(p);
+  }
 }
 
 TEST_F(ImageTest, BlankTransparentImage) {

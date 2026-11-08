@@ -26,6 +26,18 @@ namespace net_instaweb
 	std::wstring s2ws(const std::string& s);
 	std::string ws2s(const std::wstring& s);
 
+	// Keeps a response out of the HTTP.sys kernel response cache and the IIS
+	// user-mode output cache, for good: an output-cache profile cannot turn
+	// the user cache back on later in the request.  Used for in-place
+	// responses the module could optimize and for the module's own fetches:
+	// a copy held by either cache is answered to every later request for the
+	// URL without the module.
+	void DisarmResponseCaches(IHttpResponse* response);
+
+	// True for a response content type the module may optimize in place:
+	// stylesheets, scripts and images.
+	bool IsInPlaceOptimizableType(const char* content_type, size_t length);
+
 	bool determine_request_options(
 		//IHttpContext * r,
 		IisInnerRequestContext* ctx,

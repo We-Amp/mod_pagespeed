@@ -59,6 +59,7 @@ class CssCombineFilter : public RewriteFilter {
   void Flush() override;
   void DetermineEnabled(GoogleString* disabled_reason) override;
   void IEDirective(HtmlIEDirectiveNode* directive) override;
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "CssCombine"; }
   const UrlSegmentEncoder* encoder() const override {
     return &multipart_encoder_;

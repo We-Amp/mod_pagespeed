@@ -23,9 +23,11 @@
 #define NGX_SERVER_CONTEXT_H_
 
 #include <memory>
+#include <mutex>
 
 #include "ngx_message_handler.h"
 #include "pagespeed/system/daemon_adapter.h"
+#include "pagespeed/system/daemon_html_report.h"
 #include "pagespeed/system/daemon_serve_arm.h"
 #include "pagespeed/system/system_server_context.h"
 
@@ -80,6 +82,10 @@ class NgxServerContext : public SystemServerContext {
   // run.  Borrowed; the record arm asks it for the per-process cache handle.
   DaemonAdapter* daemon_adapter() { return daemon_adapter_.get(); }
 
+  // The counters and decision log of DaemonHtmlCache report-only, built on
+  // first use so a server that never sets the option has none.
+  DaemonHtmlReporter* daemon_html_reporter();
+
   // The peer's serve-stats mmap for this server, or nullptr when no daemon
   // is configured.  Borrowed; PROCESS-lifetime, and deliberately not opened
   // here -- the object is built at module-init time and opens the file on
@@ -119,6 +125,8 @@ class NgxServerContext : public SystemServerContext {
   // In this order: the stats object borrows the adapter's bound library, so
   // it must be destroyed first.
   std::unique_ptr<DaemonAdapter> daemon_adapter_;
+  std::once_flag daemon_html_reporter_once_;
+  std::unique_ptr<DaemonHtmlReporter> daemon_html_reporter_;
   std::unique_ptr<DaemonServeStats> daemon_serve_stats_;
 
   NgxServerContext(const NgxServerContext&) = delete;

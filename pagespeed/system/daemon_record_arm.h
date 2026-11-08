@@ -93,6 +93,10 @@ inline constexpr char kNoOptionContext[] = "no-option-context";
 // HTML is never recorded: the serve arm serves none, and the classic chain
 // rewrites every HTML response.
 inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
+// The request carries no site id (IsSiteId): nothing is stored and nothing is
+// asked for, because an entry of the optimizer worker may be written only
+// under the site that admitted the request.
+inline constexpr char kNoSiteId[] = "no-site-id";
 }  // namespace daemon_record_reason
 
 // One origin response header, name and value, exactly as the origin sent it.
@@ -120,6 +124,11 @@ struct DaemonRecordInput {
   StringPiece url;
   StringPiece hostname;
   StringPiece scheme;
+  // The site of the server block, virtual host or IIS site that admitted the
+  // request (SiteIdFromServerFragment of its server-scope fragment).  The
+  // write and the notification are made in its keyspace; anything but a site
+  // id is refused before any call to the peer.
+  StringPiece site;
 
   StringPiece content_type;      // Content-Type field value.
   StringPiece content_encoding;  // Content-Encoding field value.

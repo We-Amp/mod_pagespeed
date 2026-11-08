@@ -19,10 +19,10 @@
 
 // Unit tests for InPlaceResourceRecorder.
 
+#include "pagespeed/system/in_place_resource_recorder.h"
+
 #include <memory>
 #include <vector>
-
-#include "pagespeed/system/in_place_resource_recorder.h"
 
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_cache_failure.h"
@@ -708,6 +708,133 @@ TEST_F(InPlaceResourceRecorderTest, WriteInflateFailureCountsFailed) {
   EXPECT_EQ(0, IproVar("ipro_recorder_empty"));
   ExpectTerminalInvariant();
   EXPECT_THAT(MessageDump(), ::testing::HasSubstr("write/inflate error"));
+}
+
+// The seam hands the recorder the caching headers as the origin sent them;
+// the final headers carry the server's.  Storing needs both to allow it, for
+// the shorter of the two lifetimes.
+class InPlaceResourceRecorderOriginCachingTest
+    : public InPlaceResourceRecorderTest {
+ protected:
+  // Records kHello with final headers whose Cache-Control the server set
+  // (`server_cache_control`), and, when `origin_cache_control` is not null,
+  // the origin's Cache-Control handed over by the seam.  Returns what the
+  // cache holds for the URL afterwards.
+  HTTPCache::FindResult RecordUnderDirective(
+      const char* origin_cache_control, ResponseHeaders* headers_out,
+      const char* server_cache_control = "max-age=3600") {
+    ResponseHeaders prelim_headers;
+    prelim_headers.set_status_code(HttpStatus::kOK);
+
+    ResponseHeaders final_headers;
+    SetDefaultLongCacheHeaders(&kContentTypeCss, &final_headers);
+    final_headers.Replace(HttpAttributes::kCacheControl, server_cache_control);
+    final_headers.ComputeCaching();
+
+    std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+    if (origin_cache_control != nullptr) {
+      ResponseHeaders origin;
+      origin.Add(HttpAttributes::kCacheControl, origin_cache_control);
+      recorder->SetOriginCachingHeaders(origin);
+    }
+    recorder->ConsiderResponseHeaders(
+        InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+    recorder->Write(kHello, message_handler());
+    recorder.release()->DoneAndSetHeaders(&final_headers,
+                                          true /* complete response */);
+
+    HTTPValue value_out;
+    return HttpBlockingFind(kTestUrl, http_cache(), &value_out, headers_out);
+  }
+};
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       ThePremiseTheDirectiveAloneIsStored) {
+  ResponseHeaders headers_out;
+  EXPECT_EQ(kFoundResult, RecordUnderDirective(nullptr, &headers_out));
+  EXPECT_EQ(3600 * Timer::kSecondMs, headers_out.cache_ttl_ms());
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       AnOriginPrivateResponseIsNotStored) {
+  ResponseHeaders headers_out;
+  EXPECT_NE(kFoundResult,
+            RecordUnderDirective("private, max-age=600", &headers_out));
+  EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+  EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+  ExpectTerminalInvariant();
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       AnOriginNoStoreResponseIsNotStored) {
+  ResponseHeaders headers_out;
+  EXPECT_NE(kFoundResult, RecordUnderDirective("no-store", &headers_out));
+  EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+  EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       AnOriginPublicResponseIsStoredWithTheOriginsLifetime) {
+  ResponseHeaders headers_out;
+  ASSERT_EQ(kFoundResult,
+            RecordUnderDirective("public, max-age=600", &headers_out));
+  EXPECT_EQ(600 * Timer::kSecondMs, headers_out.cache_ttl_ms());
+  EXPECT_TRUE(headers_out.HasValue(HttpAttributes::kCacheControl, "public"));
+  EXPECT_TRUE(
+      headers_out.HasValue(HttpAttributes::kCacheControl, "max-age=600"));
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       AServerNoStoreRefusesAnOriginPublicResponse) {
+  ResponseHeaders headers_out;
+  EXPECT_NE(kFoundResult, RecordUnderDirective("public, max-age=600",
+                                               &headers_out, "no-store"));
+  EXPECT_EQ(0, IproVar("ipro_recorder_inserted_into_cache"));
+  EXPECT_EQ(1, IproVar("ipro_recorder_not_cacheable"));
+  ExpectTerminalInvariant();
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest, TheShorterLifetimeIsStored) {
+  ResponseHeaders headers_out;
+  ASSERT_EQ(kFoundResult, RecordUnderDirective("public, max-age=600",
+                                               &headers_out, "max-age=60"));
+  EXPECT_EQ(60 * Timer::kSecondMs, headers_out.cache_ttl_ms());
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       AServerLifetimeClampsAnOriginThatStatesNone) {
+  // A storable origin with no lifetime would get the implicit one.
+  ResponseHeaders headers_out;
+  ASSERT_EQ(kFoundResult,
+            RecordUnderDirective("public", &headers_out, "max-age=60"));
+  EXPECT_EQ(60 * Timer::kSecondMs, headers_out.cache_ttl_ms());
+}
+
+TEST_F(InPlaceResourceRecorderOriginCachingTest,
+       TheOriginsHeadersOutrankASavedCacheControl) {
+  ResponseHeaders final_headers;
+  SetDefaultLongCacheHeaders(&kContentTypeCss, &final_headers);
+  final_headers.Replace(HttpAttributes::kCacheControl,
+                        "max-age=3600, s-maxage=10");
+  final_headers.ComputeCaching();
+
+  std::unique_ptr<InPlaceResourceRecorder> recorder(MakeRecorder(kTestUrl));
+  ResponseHeaders origin;
+  origin.Add(HttpAttributes::kCacheControl, "public, max-age=600");
+  recorder->SetOriginCachingHeaders(origin);
+  recorder->SaveCacheControl("max-age=3600");
+  ResponseHeaders prelim_headers;
+  prelim_headers.set_status_code(HttpStatus::kOK);
+  recorder->ConsiderResponseHeaders(
+      InPlaceResourceRecorder::kPreliminaryHeaders, &prelim_headers);
+  recorder->Write(kHello, message_handler());
+  recorder.release()->DoneAndSetHeaders(&final_headers, true);
+
+  HTTPValue value_out;
+  ResponseHeaders headers_out;
+  ASSERT_EQ(kFoundResult,
+            HttpBlockingFind(kTestUrl, http_cache(), &value_out, &headers_out));
+  EXPECT_EQ(600 * Timer::kSecondMs, headers_out.cache_ttl_ms());
 }
 
 }  // namespace

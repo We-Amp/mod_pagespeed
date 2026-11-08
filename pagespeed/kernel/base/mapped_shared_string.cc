@@ -30,16 +30,12 @@ MappedSharedString::MappedSharedString(const SharedString& owned)
     : storage_(owned) {}
 
 MappedSharedString::MappedSharedString(MappedSharedString&& other) noexcept
-    : storage_(std::move(other.storage_)) {
-  // Leave other in a valid empty state
-  other.storage_ = SharedString();
-}
+    : storage_(std::move(other.storage_)) {}
 
 MappedSharedString& MappedSharedString::operator=(
     MappedSharedString&& other) noexcept {
   if (this != &other) {
     storage_ = std::move(other.storage_);
-    other.storage_ = SharedString();
   }
   return *this;
 }
@@ -85,7 +81,7 @@ StringPiece MappedSharedString::Value() const {
     return std::get<SharedString>(storage_).Value();
   } else {
     const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
-    return StringPiece(view->data, view->size);
+    return view ? StringPiece(view->data, view->size) : StringPiece();
   }
 }
 
@@ -93,7 +89,8 @@ size_t MappedSharedString::size() const {
   if (std::holds_alternative<SharedString>(storage_)) {
     return std::get<SharedString>(storage_).size();
   } else {
-    return std::get<std::shared_ptr<MappedView>>(storage_)->size;
+    const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
+    return view ? view->size : 0;
   }
 }
 
@@ -101,7 +98,8 @@ const char* MappedSharedString::data() const {
   if (std::holds_alternative<SharedString>(storage_)) {
     return std::get<SharedString>(storage_).data();
   } else {
-    return std::get<std::shared_ptr<MappedView>>(storage_)->data;
+    const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
+    return view ? view->data : nullptr;
   }
 }
 
@@ -115,7 +113,8 @@ SharedString MappedSharedString::ToOwned() const {
   } else {
     // Copy the mapped data into a new SharedString
     const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
-    return SharedString(StringPiece(view->data, view->size));
+    return view ? SharedString(StringPiece(view->data, view->size))
+                : SharedString();
   }
 }
 
@@ -137,7 +136,7 @@ bool MappedSharedString::unique() const {
 bool MappedSharedString::RenewLease() const {
   if (std::holds_alternative<std::shared_ptr<MappedView>>(storage_)) {
     const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
-    if (view->renew_callback != nullptr) {
+    if (view && view->renew_callback != nullptr) {
       return view->renew_callback(view->release_data) != 0;
     }
   }
@@ -147,7 +146,7 @@ bool MappedSharedString::RenewLease() const {
 LeaseRenewal MappedSharedString::RenewLeaseStrict() const {
   if (std::holds_alternative<std::shared_ptr<MappedView>>(storage_)) {
     const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
-    if (view->renew_strict_callback != nullptr) {
+    if (view && view->renew_strict_callback != nullptr) {
       return static_cast<LeaseRenewal>(
           view->renew_strict_callback(view->release_data));
     }
@@ -158,7 +157,7 @@ LeaseRenewal MappedSharedString::RenewLeaseStrict() const {
 uint64_t MappedSharedString::NsUntilForcedWrap() const {
   if (std::holds_alternative<std::shared_ptr<MappedView>>(storage_)) {
     const auto& view = std::get<std::shared_ptr<MappedView>>(storage_);
-    if (view->ns_until_callback != nullptr) {
+    if (view && view->ns_until_callback != nullptr) {
       return view->ns_until_callback(view->release_data);
     }
   }

@@ -52,7 +52,7 @@ fi
 
 # Slurping is driven by headless Chrome via loadtest_collect/collect.js
 # (puppeteer-core). phantomjs (the old driver) has been unmaintained since 2018.
-if [ ! $(which node) ]; then
+if ! command -v node >/dev/null; then
   echo "node not found; install Node.js (>=18) to run the headless-Chrome" \
        "slurp driver (loadtest_collect/collect.js)." >&2
   exit 1

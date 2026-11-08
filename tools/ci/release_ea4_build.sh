@@ -26,6 +26,8 @@
 #     release version only.
 #   - el10: any mismatch is a skip (this operating system is additive).
 set -euo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/docker_pull_retry.sh"
 
 OS="" UPSTREAM="" VERSION_FILE="" OUT="" SPEC_DIR="packaging/cpanel" WORK=""
 
@@ -69,7 +71,47 @@ inner_script() {
   cat <<'INNER'
 #!/bin/bash
 set -euo pipefail
-dnf install -q -y rpm-build cpio findutils >/dev/null
+
+# dnf with retries, for the throwaway EL containers: a short mirror or
+# metadata outage (a Rocky/Alma mirror serving an empty repomd.xml, a curl
+# error, a 5xx) is waited out, anything else (a missing package, a conflict,
+# a dependency error) fails on the first attempt. Up to 3 tries, with
+# `dnf clean metadata` and a growing pause between them; a lasting outage
+# still fails loud with dnf's last output. Usage: dnf_retry install -y PKG...
+# or dnf_retry repoquery ... (stderr is shown after each attempt, stdout after
+# the last one). DNF_RETRY_SLEEP_UNIT (default 10) scales the pause. The function
+# is spliced into container commands with declare -f, so it runs in the
+# container's shell.
+dnf_retry() {
+  local attempt rc out err
+  out="$(mktemp)" && err="$(mktemp)" || return 1
+  for attempt in 1 2 3; do
+    rc=0
+    dnf "$@" --setopt=skip_if_unavailable=False >"$out" 2>"$err" || rc=$?
+    cat "$err" >&2
+    if [ "$rc" -eq 0 ]; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return 0
+    fi
+    if ! grep -Eqi 'Failed to download metadata|repomd\.xml parser error|Errors during downloading metadata|Curl error|Cannot download|Status code: 5[0-9][0-9]|Operation timed out|Timeout was reached|timed out|Could not resolve host|Cannot prepare internal mirrorlist|Failed to synchronize cache|Connection (reset|refused)' "$out" "$err"; then
+      cat "$out"
+      rm -f "$out" "$err"
+      return "$rc"
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::dnf $1 failed on a repository or network error (attempt $attempt of 3), retrying" >&2
+      dnf clean metadata >/dev/null 2>&1 || true
+      sleep $((attempt * ${DNF_RETRY_SLEEP_UNIT:-10}))
+    fi
+  done
+  echo "::error::dnf $1 failed after 3 attempts" >&2
+  cat "$out"
+  rm -f "$out" "$err"
+  return "$rc"
+}
+
+dnf_retry install -q -y rpm-build cpio findutils >/dev/null
 
 # The Apache module interface version the cPanel Apache provides. The spec
 # pins the package to it, so it is checked against the real repository below.
@@ -181,6 +223,7 @@ run() {
   cp "${rpms[0]}" "$WORK/upstream/"
   patch_spec "$WORK/spec/ea-apache24-mod_pagespeed.spec" "$(sed -n 's/^LASTCHANGE=//p' "$VERSION_FILE" | head -n 1 | sed 's/^$/1/')"
   inner_script > "$WORK/inner.sh"
+  docker_pull_retry "almalinux:${OS#el}" || return 1
   docker run --rm --init \
     -v "$WORK":/work -w /work \
     -e EA4_OS="$OS" -e EA4_REPO="$repo" \

@@ -191,10 +191,23 @@ run_tests() {
     # Lane fixtures rule_packs / rule_pack_log: the rulepacks*.example.com
     # vhosts are on the secondary port, and the decision log is under LogDir.
     export PAGESPEED_RULE_PACKS_PORT="${PAGESPEED_RULE_PACKS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    # Lane fixture self_fetch_access: the self-fetch-access.example.com vhost
+    # is on the secondary port too.
+    export PAGESPEED_SELF_FETCH_ACCESS_PORT="${PAGESPEED_SELF_FETCH_ACCESS_PORT:-$PAGESPEED_SECONDARY_PORT}"
+    # Where the virtual-host cache keyspace tests reach their two listeners.
+    export PAGESPEED_SITE_PORT_A="${PAGESPEED_SITE_PORT_A:-${APACHE_SITE_PORT_A:-8095}}"
+    export PAGESPEED_SITE_PORT_B="${PAGESPEED_SITE_PORT_B:-${APACHE_SITE_PORT_B:-8096}}"
     export PAGESPEED_RULE_PACK_LOG_DIR="${PAGESPEED_RULE_PACK_LOG_DIR:-/var/log/pagespeed}"
     # Lane fixture daemon_arm: the optimizer worker's notification socket
     # (setup_apache_test.sh), probed by conftest before the fixture is believed.
     export PAGESPEED_DAEMON_SOCKET="${PAGESPEED_DAEMON_SOCKET:-/tmp/apache_pagespeed_test/daemon/notify.sock}"
+    # Lane fixture daemon_arm, system/test_daemon_site.py: the two
+    # single-host listeners, the worker's management API, and the script that
+    # restarts the worker (setup_apache_test.sh).
+    export PAGESPEED_DAEMON_SITE_PORT_A="${PAGESPEED_DAEMON_SITE_PORT_A:-${APACHE_DAEMON_SITE_PORT_A:-8097}}"
+    export PAGESPEED_DAEMON_SITE_PORT_B="${PAGESPEED_DAEMON_SITE_PORT_B:-${APACHE_DAEMON_SITE_PORT_B:-8098}}"
+    export PAGESPEED_DAEMON_API="${PAGESPEED_DAEMON_API:-127.0.0.1:${APACHE_DAEMON_API_PORT:-8099}}"
+    export PAGESPEED_DAEMON_RESTART="${PAGESPEED_DAEMON_RESTART:-/tmp/apache_pagespeed_test/restart_daemon_worker.sh}"
     log_info "Lane fixtures: ${PAGESPEED_LANE_FIXTURES:-<none>}"
 
     log_info "Test server: http://$PAGESPEED_HOST:$PAGESPEED_PORT"

@@ -103,6 +103,9 @@ class InPlaceRewriteContext : public SingleRewriteContext {
                        GoogleUrlStarVector* url_vector) override;
   // Implements RewriteContext::StartFetchReconstruction().
   void StartFetchReconstruction() override;
+  // The in-place output is named by the URL of its own input, which is
+  // what DecodeFetchUrls() reads, so its result is always the one to store.
+  bool FetchWritesPartition() const override { return true; }
 
   static void InitStats(Statistics* statistics);
 
@@ -136,6 +139,9 @@ class InPlaceRewriteContext : public SingleRewriteContext {
                         const StringPiece& hash) override;
   // Implements RewriteContext::FetchCallbackDone().
   void FetchCallbackDone(bool success) override;
+  // The original is the requested URL itself, which the server admitted
+  // this client to.
+  bool FallbackToInputNeedsFetchedEntry() const override { return false; }
 
   RewriteFilter* GetRewriteFilter(const ContentType& type);
 
@@ -225,7 +231,14 @@ class RecordingFetch : public SharedAsyncFetch {
   }
 
  private:
+  class FetchedInputCallback;
+
   void FreeDriver();
+
+  // Called once the module's own load of the resource finished: optimizes
+  // what it loaded, or, if it could not load it, does not optimize and (when
+  // the response was held back) serves the recorded response as is.
+  void FetchedInputLoaded(bool loaded);
 
   bool CanInPlaceRewrite();
 

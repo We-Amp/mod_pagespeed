@@ -289,6 +289,23 @@ TEST_F(ResourceTagScannerTest, ImageNotAction) {
   EXPECT_EQ(semantic_type::kHyperlink, resource_category_[1]);
 }
 
+TEST_F(ResourceTagScannerTest, ManyAttributes) {
+  // An element with a very large number of attributes is left alone, while
+  // one with a large but reasonable number is scanned as usual.
+  GoogleString at_limit = "<img";
+  GoogleString past_limit = "<img";
+  for (int i = 0; i < 256; ++i) {
+    StrAppend(&at_limit, " src=a.jpg");
+  }
+  StrAppend(&past_limit, at_limit.substr(4), " src=a.jpg");
+  StrAppend(&at_limit, ">");
+  StrAppend(&past_limit, ">");
+  ValidateNoChanges("AtLimit", at_limit);
+  EXPECT_EQ(static_cast<size_t>(256), resources_.size());
+  ValidateNoChanges("PastLimit", past_limit);
+  EXPECT_EQ(static_cast<size_t>(0), resources_.size());
+}
+
 TEST_F(ResourceTagScannerTest, DoFindInputFormaction) {
   ValidateNoChanges("DoFindFormaction", "<input formaction=find-formaction>");
   ASSERT_EQ(static_cast<size_t>(1), resources_.size());

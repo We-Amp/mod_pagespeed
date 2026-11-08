@@ -344,22 +344,25 @@ class TestFlattenImportsLimits:
                 "Small imports should be flattened with default limit",
             )
 
+    @pytest.mark.skip(
+        reason="The flatten size limit is configuration only, and the IIS test "
+        "site has one pagespeed.config for the whole site, so a tiny limit "
+        "cannot be configured for one directory. Windows gate: check that "
+        "the shared automatic/ test is skipped on IIS."
+    )
     def test_tiny_limit_prevents_flattening(
         self, client: PageSpeedClient, test_root: str
     ):
         """Tiny byte limit should prevent CSS flattening.
 
-        When CssFlattenMaxBytes is set very low, the import
+        When CssFlattenMaxBytes is configured very low, the import
         should not be flattened.
         """
         url = f"{test_root}/pages/flatten_imports.html?PageSpeedFilters=flatten_css_imports"
 
         response = client.get(
             url,
-            headers={
-                "X-PSA-Blocking-Rewrite": "psatest",
-                "PageSpeedCssFlattenMaxBytes": "5",
-            },
+            headers={"X-PSA-Blocking-Rewrite": "psatest"},
         )
         assert_http_status(response, 200)
 

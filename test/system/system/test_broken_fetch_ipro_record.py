@@ -13,26 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""An optimized resource that exists only through in-place recording 404s
-once its cache is invalidated.
+"""A resource the module cannot fetch itself is not optimized.
 
 Ported from: pagespeed/system/system_tests/broken_fetch_ipro_record.sh
 
 broken-fetch.example.com cannot fetch anything (its fetch proxy is
-unreachable), so its optimized JavaScript exists only because the
-in-place recorder captured the origin response. When the cache is gone
-the optimized URL cannot be rebuilt and answers 404 -- a known limitation
-the bash suite records as the current contract. The bash removed the
-vhost's cache directory; this cache backend keeps no such directory, so
-the vhost's cache is invalidated through its own cache.flush file (written
-with sudo: the module owns that directory).
+unreachable). Optimized resources are built only from what the module
+fetches itself, so its JavaScript is served as the server serves it and is
+never optimized, in place or through the page, and that stays so after the
+vhost's cache is invalidated through its own cache.flush file (written with
+sudo: the module owns that directory).
 """
 
 import pathlib
 import re
 import subprocess
 import time
-from urllib.parse import urljoin, urlsplit
 
 import pytest
 
@@ -75,9 +71,20 @@ def _touch_cache_flush(cache_dir: pathlib.Path) -> None:
 @pytest.mark.requires_secondary
 @pytest.mark.requires_fixture("secondary_vhosts", "cache_flush")
 class TestBrokenFetchIproRecord:
-    """Bash: Broken fetches with ipro-recording 404 after cache flush."""
+    """Bash: Broken fetches with ipro-recording; now never optimized."""
 
-    def test_ipro_recorded_resource_404s_after_cache_invalidation(
+    def _assert_served_as_recorded(self, vhost, attempts: int) -> None:
+        for attempt in range(attempts):
+            js = vhost.get(f"{DIR}/broken-fetch.js")
+            require_status_ok(js, "broken-fetch.js")
+            assert "This comment should be eliminated" in js.text, (
+                f"broken-fetch.js was optimized (attempt {attempt}): "
+                f"{js.text[:300]!r}")
+            assert count_matching_lines(js.text, re.escape("var a = 0;")) == 1, (
+                js.text[:300])
+            time.sleep(0.5)
+
+    def test_unfetchable_resource_is_not_optimized(
         self, vhost_client, server_config
     ):
         if not server_config.cache_dir:
@@ -85,27 +92,18 @@ class TestBrokenFetchIproRecord:
         cache_dir = pathlib.Path(server_config.cache_dir) / "broken-fetch"
         vhost = vhost_client("broken-fetch.example.com")
 
-        vhost.fetch_until(
-            f"{DIR}/broken-fetch.js",
-            condition=lambda r: count_matching_lines(r.text, re.escape("a=0")) == 1,
-            timeout=100.0,
-        )
-        page = vhost.get(f"{DIR}/broken-fetch.html")
-        require_status_ok(page, "broken-fetch.html")
-        assert ".pagespeed." in page.text, page.text[:400]
-        src = require_match(r'<script src="([^"]+)"', page, "optimized JS URL").group(1)
-        opt_js = urlsplit(urljoin(f"http://broken-fetch.example.com{DIR}/broken-fetch.html", src)).path
-        optimized = vhost.get(opt_js)
-        require_status_ok(optimized, opt_js)
-        assert "a=0" in optimized.text, optimized.text[:300]
+        # Several reads: the server serves it, and in-place recording sees it.
+        self._assert_served_as_recorded(vhost, 8)
+        for _ in range(4):
+            page = vhost.get(f"{DIR}/broken-fetch.html")
+            require_status_ok(page, "broken-fetch.html")
+            src = require_match(r'<script src="([^"]+)"', page, "script URL").group(1)
+            assert ".pagespeed." not in src, (
+                f"broken-fetch.html links an optimized script: {src}")
+            time.sleep(0.5)
 
         _touch_cache_flush(cache_dir)
-        vhost.fetch_until(
-            opt_js,
-            condition=lambda r: r.status == 404,
-            timeout=30.0,
-            detail_fn=lambda r: f"status={r.status}",
-        )
+        self._assert_served_as_recorded(vhost, 4)
 
 
 if __name__ == "__main__":

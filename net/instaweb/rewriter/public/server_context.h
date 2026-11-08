@@ -173,6 +173,14 @@ class ServerContext {
   // implementation comment for the full reasoning.
   void ApplyRewrittenUrlCacheControl(ResponseHeaders* headers);
 
+  // Fills *headers with the 304 for a hash-committed URL whose output was
+  // recorded with the given Cache-Control (CachedResult::output_cache_control):
+  // Date, Expires, Cache-Control and, as on the full response, an ETag unless
+  // the value is private or no-cache. Applies ApplyRewrittenUrlCacheControl.
+  // Returns false, leaving *headers alone, if the value has no usable max-age.
+  bool SetNotModifiedHeadersFromCachedResult(StringPiece cache_control,
+                                             ResponseHeaders* headers);
+
   // Is this URL a ref to a Pagespeed resource?
   bool IsPagespeedResource(const GoogleUrl& url) const;
 

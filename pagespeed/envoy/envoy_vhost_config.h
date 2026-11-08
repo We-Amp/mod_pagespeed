@@ -53,7 +53,8 @@ class EnvoyVHostConfigManager {
   ~EnvoyVHostConfigManager();
 
   // Add a virtual host configuration. Must be called during initialization,
-  // before any lookups. The options are owned by this manager after the call.
+  // before any lookups. The options are owned by this manager after the call,
+  // and frozen: they are not changed after configuration.
   void AddVHost(StringPiece host_pattern, int32 priority,
                 std::unique_ptr<EnvoyRewriteOptions> options);
 

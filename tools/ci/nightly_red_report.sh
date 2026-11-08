@@ -42,6 +42,27 @@
 # `<job name>=<step name>`), GITHUB_SERVER_URL. Run from a checkout with full
 # history (for the commit count).
 #
+# The same script reports the weekly release-lane rehearsal
+# (.github/workflows/release-rehearsal.yml, docs/ci/release.md). It reads the
+# run's own job list the same way, but under another job prefix, label, title
+# and history, set by these optional variables; each default is the nightly's
+# value, so the nightly behaves as before:
+#   REPORT_LABEL           issue label (default nightly-red)
+#   REPORT_TITLE           issue title (default "Nightly full tier red")
+#   REPORT_LABEL_DESC      description of the label when it is created
+#   REPORT_INTRO           first words of the report
+#                          (default "The scheduled full tier is red")
+#   REPORT_JOB_PREFIX      prefix of the jobs judged (default "full / ")
+#   REPORT_HISTORY         the runs searched for the last green, one
+#                          "<workflow file>|<extra query>" a line
+#   REPORT_RUN_NOUN        what a history run is called (default "full-tier run")
+#   REPORT_SKIPPED         "off" leaves the skipped line out of the report
+#
+# Every read (the job lists, the runs lists, the run object, the issue list)
+# is retried on a transient failure (HTTP 5xx, a timeout, a dropped
+# connection): 5 tries, the delay doubling from REPORT_RETRY_BASE_SECONDS
+# (default 10). Writes are sent once, so a comment is never doubled.
+#
 # Exit 0 when done, 1 when an API call failed or its answer is unusable (the
 # job then shows red).
 
@@ -71,12 +92,46 @@ if [ -z "${repo}" ] || [ -z "${run}" ] || [ -z "${sha}" ] || [ -z "${branch}" ];
 fi
 export GH_REPO="${repo}"
 
-TITLE="Nightly full tier red"
-LABEL="nightly-red"
+TITLE="${REPORT_TITLE:-Nightly full tier red}"
+LABEL="${REPORT_LABEL:-nightly-red}"
+LABEL_DESC="${REPORT_LABEL_DESC:-The scheduled full tier is red}"
+INTRO="${REPORT_INTRO:-The scheduled full tier is red}"
+PREFIX="${REPORT_JOB_PREFIX:-full / }"
+RUN_NOUN="${REPORT_RUN_NOUN:-full-tier run}"
+HISTORY="${REPORT_HISTORY:-nightly.yml|
+ci.yml|&event=workflow_dispatch
+ci.yml|&event=push}"
 run_url="${server}/${repo}/actions/runs/${run}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
+
+retry_base="${REPORT_RETRY_BASE_SECONDS:-10}"
+case "${retry_base}" in ''|*[!0-9]*) retry_base=10 ;; esac
+TRANSIENT_RE='HTTP 5[0-9][0-9]|Bad Gateway|Service Unavailable|Gateway Time-?out|timed? ?out|timeout|connection (reset|refused)|EOF|temporar'
+
+# gh_read <gh arguments...>: a read-only gh call; the answer on stdout. A
+# transient failure is retried (see the header); any other failure, or the
+# fifth, returns gh's status with its error on stderr.
+gh_read() {
+  local try delay rc
+  delay="${retry_base}"
+  for try in 1 2 3 4 5; do
+    rc=0
+    gh "$@" < /dev/null > "${TMP}/gh-out" 2> "${TMP}/gh-err" || rc=$?
+    if [ "${rc}" -eq 0 ]; then
+      cat "${TMP}/gh-out"
+      return 0
+    fi
+    if [ "${try}" -eq 5 ] || ! grep -Eiq "${TRANSIENT_RE}" "${TMP}/gh-err"; then
+      cat "${TMP}/gh-err" >&2
+      return "${rc}"
+    fi
+    log "gh $1 $2 failed (try ${try}/5), retrying in ${delay}s: $(head -c 200 "${TMP}/gh-err")"
+    sleep "${delay}"
+    delay=$((delay * 2))
+  done
+}
 
 checks="$(printf '%s\n' "${RUNTIME_STEP_CHECKS:-}" | jq -R -s -c '
   [ split("\n")[] | sub("\r$"; "") | index("=") as $i | select($i != null)
@@ -104,7 +159,7 @@ def verdict($checks):
 # run_jobs <run id>: the run's latest-attempt jobs as one JSON array.
 run_jobs() {
   local raw
-  if ! raw="$(gh api --paginate "repos/${repo}/actions/runs/$1/jobs?filter=latest&per_page=100" < /dev/null)"; then
+  if ! raw="$(gh_read api --paginate "repos/${repo}/actions/runs/$1/jobs?filter=latest&per_page=100")"; then
     die "the jobs API call for run $1 failed"
   fi
   [ -n "${raw}" ] || die "the jobs API answer for run $1 is empty"
@@ -114,20 +169,20 @@ run_jobs() {
 
 # green_names <jobs json>: the names of its green `full / ` jobs, one a line.
 green_names() {
-  printf '%s' "$1" | jq -r --argjson checks "${checks}" "${JQ_DEFS}"'
-    .[] | select((.name // "") | startswith("full / "))
+  printf '%s' "$1" | jq -r --arg prefix "${PREFIX}" --argjson checks "${checks}" "${JQ_DEFS}"'
+    .[] | select((.name // "") | startswith($prefix))
     | select(verdict($checks).v == "green") | .name'
 }
 
 jobs="$(run_jobs "${run}")" || exit 1
-if ! rows="$(printf '%s' "${jobs}" | jq -r --argjson checks "${checks}" "${JQ_DEFS}"'
-    [ .[] | select((.name // "") | startswith("full / ")) ] | sort_by(.name) | .[]
+if ! rows="$(printf '%s' "${jobs}" | jq -r --arg prefix "${PREFIX}" --argjson checks "${checks}" "${JQ_DEFS}"'
+    [ .[] | select((.name // "") | startswith($prefix)) ] | sort_by(.name) | .[]
     | verdict($checks) as $v
     | [ (.id | tostring), .name, $v.v, $v.d, (.html_url // "") ] | @tsv')"; then
   die "the jobs API answer for run ${run} is unusable"
 fi
 if [ -z "${rows}" ]; then
-  log "run ${run} has no 'full / ' jobs: nothing to report"
+  log "run ${run} has no '${PREFIX}' jobs: nothing to report"
   exit 0
 fi
 greens="$(green_names "${jobs}")"
@@ -147,7 +202,7 @@ while IFS="$(printf '\t')" read -r id name verdict detail url; do
     skipped) skipped="${skipped}${skipped:+, }\`${name}\`" ;;
   esac
 done <<< "${rows}"
-log "run ${run} attempt ${attempt}: ${nfailed} failed 'full / ' job(s)"
+log "run ${run} attempt ${attempt}: ${nfailed} failed '${PREFIX}' job(s)"
 
 # Writes: printed instead of sent in a dry run.
 write() { # <what it does, for the dry-run line> <gh args...>
@@ -169,7 +224,7 @@ show_body() { # <file>: the text a dry run would have written
 # sets issue (empty when none) and issue_body.
 load_issue() {
   local issues
-  if ! issues="$(gh issue list --label "${LABEL}" --state open --json number,body --limit 5 < /dev/null)"; then
+  if ! issues="$(gh_read issue list --label "${LABEL}" --state open --json number,body --limit 5)"; then
     die "the issue list call failed"
   fi
   issue="$(printf '%s' "${issues}" | jq -r 'sort_by(.number) | .[0].number // empty' 2> /dev/null)" \
@@ -180,7 +235,7 @@ load_issue() {
 if [ "${nfailed}" -eq 0 ]; then
   load_issue
   if [ -z "${issue}" ]; then
-    log "every 'full / ' job is green or skipped and no ${LABEL} issue is open"
+    log "every '${PREFIX}' job is green or skipped and no ${LABEL} issue is open"
     exit 0
   fi
   listed="$(printf '%s\n' "${issue_body}" | sed -n 's/^<!-- nightly-red-job: \(.*\) -->$/\1/p')"
@@ -198,7 +253,7 @@ if [ "${nfailed}" -eq 0 ]; then
   note="${TMP}/comment.md"
   if [ "${attempt}" -gt 1 ]; then
     {
-      echo "Run [${run}](${run_url}), re-run attempt ${attempt}, has no failed \`full / \` job at \`${sha}\`."
+      echo "Run [${run}](${run_url}), re-run attempt ${attempt}, has no failed \`${PREFIX}\` job at \`${sha}\`."
       echo "A re-run that goes green is a flake signal, not evidence of a fix, so this issue stays open."
       [ -z "${not_green}" ] || echo "Not green in this attempt: ${not_green}."
     } > "${note}"
@@ -245,7 +300,7 @@ done
 # newest first, without this run and anything created after it. The cutoff is
 # the run's own creation time, which every re-run attempt keeps (its jobs get
 # new times).
-if ! cutoff="$(gh api "repos/${repo}/actions/runs/${run}" --jq .created_at < /dev/null)" \
+if ! cutoff="$(gh_read api "repos/${repo}/actions/runs/${run}" --jq .created_at)" \
     || [ -z "${cutoff}" ] || [ "${cutoff}" = "null" ]; then
   die "the run API call for run ${run} failed or named no created_at"
 fi
@@ -254,17 +309,18 @@ fi
 # appended to ${TMP}/hist as one array a line.
 hist="${TMP}/hist"
 : > "${hist}"
-for src in "nightly.yml|" "ci.yml|&event=workflow_dispatch" "ci.yml|&event=push"; do
+while IFS= read -r src; do
+  [ -n "${src}" ] || continue
   wf="${src%%|*}"
-  if ! gh api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" \
-      < /dev/null > "${TMP}/runs"; then
+  if ! gh_read api "repos/${repo}/actions/workflows/${wf}/runs?branch=${branch}&status=completed${src#*|}&per_page=20" \
+      > "${TMP}/runs"; then
     die "the runs API call for ${wf}${src#*|} failed"
   fi
   jq -c -n '[ (input.workflow_runs // error("no runs"))[]
               | { id, event, head_sha, html_url, created_at } ]' "${TMP}/runs" \
       >> "${hist}" 2> "${TMP}/err" \
     || die "the runs API answer for ${wf}${src#*|} is unusable: $(head -c 300 "${TMP}/err")"
-done
+done <<< "${HISTORY}"
 candidates="$(jq -r -s --arg run "${run}" --arg cut "${cutoff}" '
   [ add[] | select(((.id // "") | tostring | test("^[0-9]+$")) and (.id | tostring) != $run
                  and (.created_at // "") < $cut) ]
@@ -286,7 +342,7 @@ while IFS="$(printf '\t')" read -r hid hevent hsha hurl; do
   fi
   calls=$((calls + 1))
   hjobs="$(run_jobs "${hid}")" || exit 1
-  has_full="$(printf '%s' "${hjobs}" | jq -r 'any(.[]; (.name // "") | startswith("full / "))')"
+  has_full="$(printf '%s' "${hjobs}" | jq -r --arg prefix "${PREFIX}" 'any(.[]; (.name // "") | startswith($prefix))')"
   if [ "${has_full}" != "true" ]; then
     continue
   fi
@@ -308,7 +364,7 @@ done <<< "${candidates}"
 # The report.
 report="${TMP}/report.md"
 {
-  echo "The scheduled full tier is red in run [${run}](${run_url}) (attempt ${attempt}) at \`${sha}\`."
+  echo "${INTRO} in run [${run}](${run_url}) (attempt ${attempt}) at \`${sha}\`."
   for ((i = 0; i < nfailed; i++)); do
     echo
     echo "### ${f_name[i]}"
@@ -334,9 +390,9 @@ report="${TMP}/report.md"
     fi
     if [ -z "${g_run[i]}" ]; then
       if [ "${lookups}" -eq 1 ]; then
-        why="no green within 1 completed full-tier run"
+        why="no green within 1 completed ${RUN_NOUN}"
       else
-        why="no green within ${lookups} completed full-tier runs"
+        why="no green within ${lookups} completed ${RUN_NOUN}s"
       fi
       [ "${ceiling_hit}" = 0 ] || why="${why} (API call ceiling reached)"
       echo "- Last green: ${why}"
@@ -354,8 +410,10 @@ report="${TMP}/report.md"
       echo "- Last green: [run ${g_run[i]}](${g_url[i]}) (${g_event[i]}, \`${g_sha[i]}\`), ${since}"
     fi
   done
-  echo
-  echo "Skipped (neither failed nor green): ${skipped:-none}"
+  if [ "${REPORT_SKIPPED:-on}" != off ]; then
+    echo
+    echo "Skipped (neither failed nor green): ${skipped:-none}"
+  fi
 } > "${report}"
 
 load_issue
@@ -366,7 +424,7 @@ else
   if [ "${dry}" = "true" ]; then
     echo "dry run: would create label ${LABEL}"
   else
-    gh label create "${LABEL}" --color B60205 --description 'The scheduled full tier is red' \
+    gh label create "${LABEL}" --color B60205 --description "${LABEL_DESC}" \
       < /dev/null > /dev/null 2>&1 || log "label ${LABEL} not created (it may exist already)"
   fi
   write "create issue '${TITLE}' labelled ${LABEL}" issue create --title "${TITLE}" --label "${LABEL}" --body-file "${report}"

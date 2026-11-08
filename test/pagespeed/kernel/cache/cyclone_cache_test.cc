@@ -82,12 +82,18 @@ thread_local bool t_fail_next_allocation = false;
 // When >= 0: let this many allocations on the thread succeed, then fail the
 // next one, once (the hook then disarms itself).
 thread_local int t_allocations_before_failure = -1;
+// When set: every allocation on the thread fails until it is cleared.
+thread_local bool t_fail_all_allocations = false;
 thread_local int t_failed_allocations = 0;
 }  // namespace
 
 void* operator new(size_t size) {
   if (t_fail_next_allocation) {
     t_fail_next_allocation = false;
+    ++t_failed_allocations;
+    throw std::bad_alloc();
+  }
+  if (t_fail_all_allocations) {
     ++t_failed_allocations;
     throw std::bad_alloc();
   }
@@ -114,6 +120,8 @@ void operator delete(void* p, size_t) noexcept { std::free(p); }
 // volume.
 extern "C" void cyclone_cache_test_fail_next_read(int kind);
 extern "C" void cyclone_cache_test_fail_next_commit(int kind);
+// Read handles alive in the process; a leaked reference keeps one alive.
+extern "C" int cyclone_cache_test_live_read_handles(void);
 constexpr int kSeamBusy = 1;
 constexpr int kSeamIoError = 2;
 constexpr int kSeamCorrupted = 3;
@@ -638,6 +646,177 @@ TEST_F(CycloneCacheTest, AllocationFailureDoesNotEscape) {
   CheckGet(cache.get(), "other", "other value");
 
   cache->ShutDown();
+#endif
+}
+
+// The C API is not the only place an exception can start: CycloneCache's own
+// code around it allocates too (escaping the key for the failure log,
+// copying a hit).  With every allocation failing, the C API reports a failed
+// write and the wrapper then builds its log line, which throws; that must not
+// leave the cache.  Without the second barrier in CycloneCache the exception
+// from the log line escapes Put.  The read and delete cases below check the
+// same contract on their paths; with every allocation failing the C API
+// already fails those first, so they guard against regressions rather than
+// reproducing the original escape.
+TEST_F(CycloneCacheTest, ExceptionInCacheCodeDoesNotEscape) {
+#ifdef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
+  GTEST_SKIP() << "operator new is interposed by the sanitizer";
+#else
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+  std::unique_ptr<CycloneCache> cache =
+      MakeCountingCache(&stats, &handler, "escape");
+  ASSERT_TRUE(cache->IsHealthy());
+  CheckPut(cache.get(), "key", "value");
+
+  // Everything the armed calls need is built before arming.
+  const GoogleString write_key("other\n");
+  const SharedString write_value("other value");
+  const GoogleString read_key("key");
+  Callback* callback = NewCallback();
+
+  // The first failed write is the one that is logged, so it reaches the
+  // key-escaping code that runs after the C API has reported the failure.
+  bool escaped = false;
+  t_failed_allocations = 0;
+  t_fail_all_allocations = true;
+  try {
+    cache->Put(write_key, write_value);
+  } catch (...) {
+    escaped = true;
+  }
+  t_fail_all_allocations = false;
+  EXPECT_FALSE(escaped) << "an exception escaped CycloneCache::Put";
+  EXPECT_GT(t_failed_allocations, 0);
+  EXPECT_EQ(1, stats.GetVariable(CycloneCache::kFailures)->Get());
+
+  // A read that runs out of memory is a miss.
+  int64 misses = stats.GetVariable(CycloneCache::kMisses)->Get();
+  escaped = false;
+  cyclone_cache_test_fail_next_read(kSeamCorrupted);
+  t_failed_allocations = 0;
+  t_fail_all_allocations = true;
+  try {
+    cache->Get(read_key, callback);
+  } catch (...) {
+    escaped = true;
+  }
+  t_fail_all_allocations = false;
+  EXPECT_FALSE(escaped) << "an exception escaped CycloneCache::Get";
+  EXPECT_GT(t_failed_allocations, 0);
+  if (!escaped) {
+    WaitAndCheckNotFound(callback);
+  }
+  EXPECT_EQ(misses + 1, stats.GetVariable(CycloneCache::kMisses)->Get());
+
+  // A delete that fails the same way does not escape either.
+  escaped = false;
+  const GoogleString delete_key("key");
+  t_fail_all_allocations = true;
+  try {
+    cache->Delete(delete_key);
+  } catch (...) {
+    escaped = true;
+  }
+  t_fail_all_allocations = false;
+  EXPECT_FALSE(escaped) << "an exception escaped CycloneCache::Delete";
+
+  // The cache keeps working.
+  CheckPut(cache.get(), "after", "value");
+  CheckGet(cache.get(), "after", "value");
+
+  cache->ShutDown();
+#endif
+}
+
+// Fail each allocation of a zero-copy (mapped) hit in turn.  Whichever
+// allocation fails, the read is a hit or a miss, nothing escapes or
+// terminates the process, and no read handle stays alive: the extra
+// reference taken for the mapped value is given back on every path.
+TEST_F(CycloneCacheTest, MappedHitAllocationFailureKeepsHandlesBalanced) {
+#ifdef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
+  GTEST_SKIP() << "operator new is interposed by the sanitizer";
+#else
+  if (!IsHealthyTest()) {
+    GTEST_SKIP() << "CycloneCache not available";
+  }
+
+  std::unique_ptr<ThreadSystem> thread_system(Platform::CreateThreadSystem());
+  SimpleStats stats(thread_system.get());
+  CycloneCache::InitStats(&stats);
+  MockMessageHandler handler(new NullMutex);
+  std::unique_ptr<CycloneCache> cache =
+      MakeCountingCache(&stats, &handler, "mapped_sweep");
+  ASSERT_TRUE(cache->IsHealthy());
+  const GoogleString value(4096, 'm');
+  CheckPut(cache.get(), "key", value);
+  const GoogleString key("key");
+  const int baseline_handles = cyclone_cache_test_live_read_handles();
+
+  bool completed = false;
+  for (int skip = 0; skip < 256 && !completed; ++skip) {
+    // A hit is held by the callback, so the callback is released before the
+    // handle count is read.
+    std::unique_ptr<Callback> callback(NewCallback());
+    bool escaped = false;
+    t_failed_allocations = 0;
+    t_allocations_before_failure = skip;
+    try {
+      cache->Get(key, callback.get());
+    } catch (...) {
+      escaped = true;
+    }
+    t_allocations_before_failure = -1;
+    callback.reset();
+    EXPECT_FALSE(escaped) << "allocation " << skip;
+    if (baseline_handles >= 0) {  // -1: this build does not count handles.
+      EXPECT_EQ(baseline_handles, cyclone_cache_test_live_read_handles())
+          << "allocation " << skip << " leaked a read handle";
+    }
+    if (t_failed_allocations == 0) {
+      completed = true;
+    }
+  }
+  EXPECT_TRUE(completed);
+  CheckGet(cache.get(), "key", value);
+
+  cache->ShutDown();
+#endif
+}
+
+// Handing an owned value to a callback must not end the process when an
+// allocation fails: set_value(SharedString) wraps and moves the value, and the
+// moves are noexcept.  Every other cache's hit goes through this too.
+TEST_F(CycloneCacheTest, OwnedSetValueAllocationFailureDoesNotTerminate) {
+#ifdef CYCLONE_CACHE_TEST_NO_ALLOC_HOOK
+  GTEST_SKIP() << "operator new is interposed by the sanitizer";
+#else
+  const SharedString owned("owned value");
+  bool completed = false;
+  for (int skip = 0; skip < 64 && !completed; ++skip) {
+    std::unique_ptr<Callback> callback(NewCallback());
+    bool threw = false;
+    t_failed_allocations = 0;
+    t_allocations_before_failure = skip;
+    try {
+      callback->set_value(owned);
+    } catch (const std::bad_alloc&) {
+      threw = true;  // a failed allocation may throw; it must not terminate
+    }
+    t_allocations_before_failure = -1;
+    if (t_failed_allocations == 0) {
+      completed = true;
+      EXPECT_FALSE(threw);
+      EXPECT_EQ("owned value", callback->value_str());
+    }
+  }
+  EXPECT_TRUE(completed);
 #endif
 }
 

@@ -27,10 +27,12 @@
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/public/resource.h"  // for Resource, etc
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"  // for GoogleString
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/http_names.h"
@@ -208,8 +210,9 @@ TEST_F(CacheableResourceBaseTest, Fallback) {
   ResponseHeaders ok_response_headers;
   SetDefaultLongCacheHeaders(&kContentTypeText, &ok_response_headers);
 
+  // The stale copy the module stored from its own fetch.
   HTTPValue fallback;
-  fallback.SetHeaders(&ok_response_headers);
+  fallback.SetHeadersMarkingFetchedInput(ok_response_headers);
   EXPECT_TRUE(fallback.Write("fallback", server_context()->message_handler()));
   EXPECT_TRUE(fallback.Flush(server_context()->message_handler()));
   resource_->LinkFallbackValue(&fallback);
@@ -235,8 +238,9 @@ TEST_F(CacheableResourceBaseTest, FallbackEmpty) {
   ResponseHeaders ok_response_headers;
   SetDefaultLongCacheHeaders(&kContentTypeText, &ok_response_headers);
 
+  // The stale copy the module stored from its own fetch.
   HTTPValue fallback;
-  fallback.SetHeaders(&ok_response_headers);
+  fallback.SetHeadersMarkingFetchedInput(ok_response_headers);
   EXPECT_TRUE(fallback.Write("", server_context()->message_handler()));
   EXPECT_TRUE(fallback.Flush(server_context()->message_handler()));
   resource_->LinkFallbackValue(&fallback);
@@ -631,6 +635,209 @@ TEST_F(CacheableResourceBaseTest, PrepareHooks) {
   EXPECT_FALSE(resource_->response_headers()->HasValue(
       HttpAttributes::kCacheControl, "private"));
   EXPECT_EQ(4, counting_url_async_fetcher()->fetch_count());
+}
+
+// Reads the raw bytes the HTTP cache stored for kTestUrl.
+class RawValueCallback : public CacheInterface::Callback {
+ public:
+  void Done(CacheInterface::KeyState state) override {
+    found_ = (state == CacheInterface::kAvailable);
+    if (found_) {
+      raw_ = value().Value().as_string();
+    }
+  }
+  bool found_ = false;
+  GoogleString raw_;
+};
+
+class CacheableResourceBaseInputTest : public CacheableResourceBaseTest {
+ protected:
+  void SetUp() override {
+    CacheableResourceBaseTest::SetUp();
+    // Stored bodies stay readable in the raw entry.
+    http_cache()->SetCompressionLevel(0);
+  }
+
+  // Stores kTestUrl with 'body' the way a response served to some client is
+  // stored (as an in-place record is), not through the resource's fetch.
+  void StoreServedResponse(StringPiece body) {
+    ResponseHeaders headers;
+    SetDefaultLongCacheHeaders(&kContentTypeText, &headers);
+    headers.ComputeCaching();
+    http_cache()->Put(kTestUrl, rewrite_driver()->CacheFragment(),
+                      RequestHeaders::Properties(),
+                      ResponseHeaders::kRespectVaryOnResources, &headers, body,
+                      message_handler());
+  }
+
+  void SetFetchStatus(HttpStatus::Code code, StringPiece body) {
+    ResponseHeaders headers;
+    SetDefaultLongCacheHeaders(&kContentTypeText, &headers);
+    headers.SetStatusAndReason(code);
+    SetFetchResponse(kTestUrl, headers, body);
+  }
+
+  bool Load() {
+    resource_->Reset();
+    MockResourceCallback callback(ResourcePtr(resource_.get()),
+                                  server_context()->thread_system());
+    resource_->LoadAsync(Resource::kReportFailureIfNotCacheable,
+                         RequestContext::NewTestRequestContext(
+                             server_context()->thread_system()),
+                         &callback);
+    EXPECT_TRUE(callback.done());
+    return callback.success();
+  }
+
+  GoogleString RawStored() {
+    RawValueCallback callback;
+    lru_cache()->Get(HttpCacheKey(kTestUrl), &callback);
+    EXPECT_TRUE(callback.found_);
+    return callback.raw_;
+  }
+};
+
+// What the resource's own fetch stores is marked as such.
+TEST_F(CacheableResourceBaseInputTest, FetchStoresMarkedEntry) {
+  SetFetchStatus(HttpStatus::kOK, "fetched");
+  EXPECT_TRUE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_NE(GoogleString::npos, RawStored().find("@Fetched-Input"));
+
+  // The marked entry is used by the next load, and the mark is not part of
+  // the loaded headers.
+  EXPECT_TRUE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ("fetched", resource_->ExtractUncompressedContents());
+  EXPECT_FALSE(resource_->response_headers()->Has("@Fetched-Input"));
+}
+
+// An entry stored from a response served to some client is not an input:
+// the resource is fetched, and the fetched copy replaces it.
+TEST_F(CacheableResourceBaseInputTest, ServedEntryIsFetched) {
+  StoreServedResponse("served");
+  SetFetchStatus(HttpStatus::kOK, "fetched");
+  EXPECT_TRUE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ("fetched", resource_->ExtractUncompressedContents());
+
+  EXPECT_TRUE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ("fetched", resource_->ExtractUncompressedContents());
+}
+
+// A stale entry the module did not fetch itself is revalidated with a
+// conditional fetch: a 304 marks it and it is used; a 200 replaces it; a
+// refusal uses nothing.
+TEST_F(CacheableResourceBaseInputTest, StaleServedEntryRevalidated) {
+  ResponseHeaders headers;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &headers);
+  headers.SetDateAndCaching(timer()->NowMs(), 100 * Timer::kSecondMs);
+  headers.Replace(HttpAttributes::kEtag, "\"served-etag\"");
+  headers.ComputeCaching();
+  http_cache()->Put(kTestUrl, rewrite_driver()->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::kRespectVaryOnResources, &headers,
+                    "served", message_handler());
+  AdvanceTimeMs(200 * Timer::kSecondMs);
+
+  // 304: the stored body is used and the entry is now marked.
+  ResponseHeaders fetched;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &fetched);
+  fetched.Replace(HttpAttributes::kEtag, "\"served-etag\"");
+  fetched.ComputeCaching();
+  mock_url_fetcher()->SetConditionalResponse(kTestUrl, -1, "\"served-etag\"",
+                                             fetched, "full");
+  EXPECT_TRUE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_EQ(
+      1, server_context()->rewrite_stats()->num_conditional_refreshes()->Get());
+  EXPECT_EQ("served", resource_->ExtractUncompressedContents());
+  EXPECT_NE(GoogleString::npos, RawStored().find("@Fetched-Input"));
+  EXPECT_TRUE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+}
+
+TEST_F(CacheableResourceBaseInputTest, StaleServedEntryReplaced) {
+  ResponseHeaders headers;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &headers);
+  headers.SetDateAndCaching(timer()->NowMs(), 100 * Timer::kSecondMs);
+  headers.Replace(HttpAttributes::kEtag, "\"served-etag\"");
+  headers.ComputeCaching();
+  http_cache()->Put(kTestUrl, rewrite_driver()->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::kRespectVaryOnResources, &headers,
+                    "served", message_handler());
+  AdvanceTimeMs(200 * Timer::kSecondMs);
+
+  // 200: the new body replaces the entry, as any module fetch.
+  ResponseHeaders fresh;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &fresh);
+  fresh.Replace(HttpAttributes::kEtag, "\"fresh-etag\"");
+  fresh.ComputeCaching();
+  mock_url_fetcher()->SetConditionalResponse(kTestUrl, timer()->NowMs(),
+                                             "\"fresh-etag\"", fresh, "fresh");
+  EXPECT_TRUE(Load());
+  EXPECT_EQ("fresh", resource_->ExtractUncompressedContents());
+  EXPECT_NE(GoogleString::npos, RawStored().find("@Fetched-Input"));
+
+  // A refusal of a later revalidation uses nothing.
+  AdvanceTimeMs(400 * Timer::kDayMs);
+  ResponseHeaders refused;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &refused);
+  refused.SetStatusAndReason(HttpStatus::kForbidden);
+  refused.ComputeCaching();
+  mock_url_fetcher()->SetConditionalResponse(
+      kTestUrl, timer()->NowMs(), "\"other-etag\"", refused, "refused");
+  EXPECT_FALSE(Load());
+}
+
+// A stale entry the module did not fetch itself stays in place when the
+// module's revalidation is refused; the refusal is remembered on its own.
+TEST_F(CacheableResourceBaseInputTest, StaleServedEntryRefused) {
+  ResponseHeaders headers;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &headers);
+  headers.SetDateAndCaching(timer()->NowMs(), 100 * Timer::kSecondMs);
+  headers.Replace(HttpAttributes::kEtag, "\"served-etag\"");
+  headers.ComputeCaching();
+  http_cache()->Put(kTestUrl, rewrite_driver()->CacheFragment(),
+                    RequestHeaders::Properties(),
+                    ResponseHeaders::kRespectVaryOnResources, &headers,
+                    "served", message_handler());
+  AdvanceTimeMs(200 * Timer::kSecondMs);
+  ResponseHeaders refused;
+  SetDefaultLongCacheHeaders(&kContentTypeText, &refused);
+  refused.SetStatusAndReason(HttpStatus::kForbidden);
+  refused.ComputeCaching();
+  mock_url_fetcher()->SetConditionalResponse(
+      kTestUrl, timer()->NowMs(), "\"other-etag\"", refused, "refused");
+  EXPECT_FALSE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_NE(GoogleString::npos, RawStored().find("served"));
+  EXPECT_FALSE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_NE(GoogleString::npos, RawStored().find("served"));
+}
+
+// When the resource's own fetch is refused, the served entry is not used,
+// stays in the cache, and the refusal is remembered so the next load does
+// not fetch again.
+TEST_F(CacheableResourceBaseInputTest, RefusedFetchKeepsServedEntry) {
+  StoreServedResponse("served");
+  SetFetchStatus(HttpStatus::kForbidden, "refused");
+  EXPECT_FALSE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_NE(GoogleString::npos, RawStored().find("served"));
+
+  EXPECT_FALSE(Load());
+  EXPECT_EQ(1, counting_url_async_fetcher()->fetch_count());
+  EXPECT_NE(GoogleString::npos, RawStored().find("served"));
+
+  // Once the remembered failure has expired, the fetch is tried again.
+  AdvanceTimeMs(Timer::kDayMs);
+  StoreServedResponse("served");
+  EXPECT_FALSE(Load());
+  EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
 }
 
 }  // namespace net_instaweb

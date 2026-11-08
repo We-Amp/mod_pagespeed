@@ -21,6 +21,7 @@
 
 #include <vector>
 
+#include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
@@ -34,6 +35,7 @@
 #include "pagespeed/system/daemon_abi.h"
 #include "pagespeed/system/daemon_adapter.h"
 #include "pagespeed/system/daemon_health.h"
+#include "pagespeed/system/site_cache_fragment.h"
 
 namespace net_instaweb {
 
@@ -156,6 +158,7 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
   input->url = request_.url;
   input->hostname = request_.hostname;
   input->scheme = request_.scheme;
+  input->site = request_.site;
 
   const char* content_type =
       response_headers.Lookup1(HttpAttributes::kContentType);
@@ -196,11 +199,13 @@ void DaemonIproRecorder::BuildInput(const ResponseHeaders& response_headers,
 
   // THE ORIGIN'S Cache-Control, not the one on the wire.  The serving path
   // rewrites Cache-Control on an unoptimized response, and recording that
-  // would record our own answer as the origin's.  SaveCacheControl is how the
-  // original reaches us; only when it was never called does the header itself
-  // stand.
+  // would record our own answer as the origin's.  When the seam supplied the
+  // origin's caching headers, DoneAndSetHeaders has already put the stricter
+  // of them and the server's into `response_headers`, and that stands.
+  // Otherwise SaveCacheControl is how the original reaches us; only when it
+  // was never called does the header itself stand.
   input->cache_control_lines.clear();
-  if (cache_control_saved_) {
+  if (cache_control_saved_ && !has_origin_caching_headers()) {
     if (!saved_cache_control_.empty()) {
       input->cache_control_lines.push_back(saved_cache_control_);
     }
@@ -284,6 +289,17 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
     if (abi_ == nullptr || cache_ == nullptr || response_headers == nullptr) {
       break;
     }
+    // ---- the site -----------------------------------------------------
+    // First, before any call to the peer: an entry may be written, and a
+    // notification sent, only under the site that admitted the request.
+    if (!IsSiteId(request_.site)) {
+      outcome.verdict = DaemonRecordVerdict::kRefuse;
+      outcome.reason = daemon_record_reason::kNoSiteId;
+      if (stats_ != nullptr) {
+        stats_->daemon_record_declined_no_site()->Add(1);
+      }
+      break;
+    }
     if (failure_ || over_cap_ || !entire_response_received) {
       // A truncated response is not the origin's answer, and storing it as the
       // durable original would replace a good one with a partial one -- the
@@ -322,6 +338,22 @@ void DaemonIproRecorder::DoneAndSetHeaders(ResponseHeaders* response_headers,
       outcome.reason = daemon_record_reason::kContentEncoded;
       break;
     }
+
+    // ---- the stricter of the origin's and the server's caching headers -
+    // The final headers are judged as they stand, and then again with the
+    // origin's caching fields in their place when the seam supplied them:
+    // storing needs both to allow it, and the stored lifetime is the shorter
+    // of the two (ApplyOriginCachingHeaders).
+    if (has_origin_caching_headers() &&
+        !response_headers->IsProxyCacheable(
+            request_.request_properties,
+            ResponseHeaders::GetVaryOption(http_options_.respect_vary),
+            ResponseHeaders::kNoValidator)) {
+      break;
+    }
+    ApplyOriginCachingHeaders(response_headers, cache_control_saved_
+                                                    ? &saved_cache_control_
+                                                    : nullptr);
 
     // ---- this module's own cacheability judgement --------------------
     // EXACTLY the call the classic recorder makes, and each argument matters:

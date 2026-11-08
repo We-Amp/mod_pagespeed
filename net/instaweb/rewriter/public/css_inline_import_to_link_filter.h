@@ -62,6 +62,7 @@ class CssInlineImportToLinkFilter : public EmptyHtmlFilter {
   // HTML Events we expect to be in a <style> element.
   void Characters(HtmlCharactersNode* characters) override;
 
+  bool SkippedOnHydratedPages() const override { return true; }
   const char* Name() const override { return "InlineImportToLinkCss"; }
 
  private:

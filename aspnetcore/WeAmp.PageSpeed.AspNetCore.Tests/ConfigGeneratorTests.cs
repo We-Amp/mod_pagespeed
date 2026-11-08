@@ -168,6 +168,41 @@ public class ConfigGeneratorTests
         conf.Should().Contain("pagespeed JpegRecompressionQuality 85;");
     }
 
+    [Theory]
+    [InlineData("CssParseMaxBytes")]
+    [InlineData("DocumentImageInlineMaxBytes")]
+    public void CustomOptions_SizeKey_IsEmitted(string key)
+    {
+        var options = new PageSpeedOptions { CustomOptions = { [key] = "1048576" } };
+        Generate(options).Conf.Should().Contain($"pagespeed {key} 1048576;");
+    }
+
+    [Theory]
+    [InlineData("CssParseMaxBytes")]
+    [InlineData("DocumentImageInlineMaxBytes")]
+    public void CustomOptions_SizeKeyValueMetacharacter_FailsClosed(string key)
+    {
+        var options = new PageSpeedOptions { CustomOptions = { [key] = "1024;\n  } server { listen 82;" } };
+        Invoking(options).Should().Throw<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData("cssparsemaxbytes")]
+    [InlineData("Cssparsemaxbytes")]
+    [InlineData("documentimageinlinemaxbytes")]
+    public void CustomOptions_WrongCaseSizeKey_StillThrows(string key)
+    {
+        var options = new PageSpeedOptions { CustomOptions = { [key] = "1024" } };
+        Invoking(options).Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void CustomOptions_UnknownSizeKey_StillThrows()
+    {
+        var options = new PageSpeedOptions { CustomOptions = { ["CssParseMaxBytesX"] = "1024" } };
+        Invoking(options).Should().Throw<InvalidOperationException>();
+    }
+
     [Fact]
     public void HandlerLocations_AndHealthStub_ArePresent()
     {

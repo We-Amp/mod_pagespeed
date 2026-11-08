@@ -106,7 +106,8 @@ void DisableCachingRelatedHeaders(request_rec* request);
 // Updates caching headers to ensure the resulting response is not cached.
 // Removes any max-age specification, and adds max-age=0, no-cache.  The
 // computed value takes the Cache-Control directives of both headers_out and
-// err_headers_out into account, and is written to headers_out only.
+// err_headers_out into account, and is written to headers_out only.  A
+// private or no-store on any Cache-Control line of either table is kept.
 void DisableCacheControlHeader(request_rec* request);
 
 // Adds s-maxage to the response's Cache-Control for in-place resources.

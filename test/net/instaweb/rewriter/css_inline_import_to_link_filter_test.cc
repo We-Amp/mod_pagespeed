@@ -128,6 +128,22 @@ TEST_F(CssInlineImportToLinkFilterTest, DoNotConvertIntegrityStyle) {
       "<style INTEGRITY=\"sha384-x\">@import url(assets/styles.css);</style>");
 }
 
+// An SVG or MathML style element is not an HTML style element, so it is not
+// converted; an HTML style inside an integration point is.
+TEST_F(CssInlineImportToLinkFilterTest, DoNotConvertForeignStyle) {
+  AddFilter(RewriteOptions::kInlineImportToLink);
+  ValidateStyleUnchanged(
+      "<svg><style>@import url(assets/styles.css);</style></svg>");
+  ValidateStyleUnchanged(
+      "<math><style>@import url(assets/styles.css);</style></math>");
+  ValidateStyleToLink(
+      "<svg><foreignObject><style>@import url(assets/styles.css);</style>"
+      "</foreignObject></svg>",
+      "<svg><foreignObject>"
+      "<link rel=\"stylesheet\" href=\"assets/styles.css\">"
+      "</foreignObject></svg>");
+}
+
 TEST_F(CssInlineImportToLinkFilterTest, ConvertStyleWithMultipleImports) {
   AddFilter(RewriteOptions::kInlineImportToLink);
   ValidateStyleToLink(
@@ -293,6 +309,25 @@ TEST_F(CssInlineImportToLinkFilterTest, OnlyConvertPrefix) {
       "<link rel=\"stylesheet\" href=\"a.css\">"
       "<style>@font-face { src: url(b.woff) }\n"
       "@import url(c.css);</style>");
+}
+
+// A style whose leading text and remainder both hold a less-than sign is left
+// as it was.
+TEST_F(CssInlineImportToLinkFilterTest, KeepGuardedStyleWithMarkup) {
+  AddFilter(RewriteOptions::kInlineImportToLink);
+  ValidateNoChanges("guarded",
+                    "<style>/*<![CDATA[*/@import url(a.css);\n"
+                    "a:after { content: \"<b>\" }\n"
+                    "/*]]>*/</style>");
+  // Without markup in the remainder the leading part may go.
+  ValidateStyleToLink(
+      "<style>/*<![CDATA[*/ @import url(a.css);\n"
+      "a { color: red; }\n"
+      "/*]]>*/</style>",
+
+      "<link rel=\"stylesheet\" href=\"a.css\">"
+      "<style>a { color: red; }\n"
+      "/*]]>*/</style>");
 }
 
 TEST_F(CssInlineImportToLinkFilterTest, ConvertStyleWithAttributes) {

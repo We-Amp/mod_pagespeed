@@ -592,12 +592,13 @@ RewriteQuery::Status RewriteQuery::ScanNameValue(
 GoogleString RewriteQuery::GenerateResourceOption(StringPiece filter_id,
                                                   RewriteDriver* driver) {
   const RewriteFilter* filter = driver->FindFilter(filter_id);
-  // TODO(sligocki): We do not seem to be detecting Apache crashes in the
-  // system_test. We should detect and fail when these crashes occur.
-  CHECK(filter != nullptr)
-      << "Filter ID " << filter_id << " is not registered in RewriteDriver. "
-      << "You must register it with a call to RegisterRewriteFilter() in "
-      << "RewriteDriver::SetServerContext().";
+  if (filter == nullptr) {
+    // Some contexts name output resources with an ID that has no registered
+    // RewriteFilter (CSS import flattening, for example). Such an ID has no
+    // related filters or options to encode, so it gets no options segment,
+    // exactly as when no relevant setting differs from its default.
+    return GoogleString();
+  }
   StringPiece prefix("");
   GoogleString value;
   const RewriteOptions* options = driver->options();
@@ -635,6 +636,12 @@ GoogleString RewriteQuery::GenerateResourceOption(StringPiece filter_id,
     }
   }
   return value;
+}
+
+void RewriteQuery::LimitSizeThresholdsTo(const RewriteOptions& ceiling) {
+  if (options_ != nullptr) {
+    options_->LimitSizeThresholdsTo(ceiling);
+  }
 }
 
 RewriteQuery::Status RewriteQuery::ParseResourceOption(

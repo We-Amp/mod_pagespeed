@@ -263,6 +263,14 @@ class HTTPCache {
            const HttpOptions& http_options, HTTPValue* value,
            MessageHandler* handler);
 
+  // Like the Put above, for a response the module fetched itself as an
+  // anonymous client: marks the stored entry (HTTPValue::IsFetchedInput).
+  // Every other Put stores the entry unmarked.
+  void PutFetchedInput(const GoogleString& key, const GoogleString& fragment,
+                       RequestHeaders::Properties req_properties,
+                       const HttpOptions& http_options, HTTPValue* value,
+                       MessageHandler* handler);
+
   // Note that Put takes a non-const pointer for ResponseHeaders* so it
   // can update the caching fields prior to storing.
   // If you call this method, you must be certain that the outgoing
@@ -340,6 +348,11 @@ class HTTPCache {
 
   void set_max_cacheable_response_content_length(int64 value);
 
+  // The most a cached gzipped body may be inflated to when it is served or
+  // stored uncompressed: the cacheable body size limit if one is set, and
+  // never more than InflatingFetch::kMaxInflatedBytes.
+  int64 MaxInflatedBodyBytes() const;
+
   // Sets how many levels the cache has. Affects reporting of statistics ---
   // we don't want them for lower levels of multi-level setups.
   void set_cache_levels(int levels) { cache_levels_ = levels; }
@@ -412,11 +425,16 @@ class HTTPCache {
   // Applies changes to headers. If the headers are actually changed or if value
   // is NULL then it builds and returns a new HTTPValue. If content is NULL
   // then content is extracted from value.
+  // fetched_input marks the stored entry; otherwise any mark is dropped.
   HTTPValue* ApplyHeaderChangesForPut(int64 start_us,
                                       const StringPiece* content,
                                       ResponseHeaders* headers,
-                                      HTTPValue* value,
+                                      HTTPValue* value, bool fetched_input,
                                       MessageHandler* handler);
+  void PutValue(const GoogleString& key, const GoogleString& fragment,
+                RequestHeaders::Properties req_properties,
+                const HttpOptions& http_options, HTTPValue* value,
+                bool fetched_input, MessageHandler* handler);
   void UpdateStats(const GoogleString& key, const GoogleString& fragment,
                    CacheInterface::KeyState backend_state, FindResult result,
                    bool has_fallback, bool is_expired, MessageHandler* handler);

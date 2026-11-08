@@ -65,6 +65,10 @@ void JsDisableFilter::DetermineEnabled(GoogleString* disabled_reason) {
   }
 }
 
+bool JsDisableFilter::SkippedOnHydratedPages() const {
+  return driver()->SkipJsDeferralOnHydratedPage();
+}
+
 void JsDisableFilter::StartDocumentImpl() {
   index_ = 0;
   ie_meta_tag_written_ = false;
@@ -191,6 +195,7 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
       element->AddAttribute(
           driver()->MakeName(HtmlName::kDataPagespeedOrigIndex),
           IntegerToString(index_++), HtmlElement::DOUBLE_QUOTE);
+      driver()->set_js_deferral_started();
     }
   }
 
@@ -210,6 +215,7 @@ void JsDisableFilter::StartElementImpl(HtmlElement* element) {
     onload->set_name(driver()->MakeName("data-pagespeed-onload"));
     driver()->AddEscapedAttribute(element, HtmlName::kOnload,
                                   kElementOnloadCode);
+    driver()->set_js_deferral_started();
     // TODO(sligocki): Should we add onerror handler here too?
   }
 }

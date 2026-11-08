@@ -78,6 +78,8 @@ class DeferIframeFilter : public CommonFilter {
   void EndElementImpl(HtmlElement* element) override;
   void DetermineEnabled(GoogleString* disabled_reason) override;
 
+  // See RewriteDriver::SkipJsDeferralOnHydratedPage().
+  bool SkippedOnHydratedPages() const override;
   const char* Name() const override { return "DeferIframe"; }
   ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 

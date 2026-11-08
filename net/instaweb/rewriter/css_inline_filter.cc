@@ -194,8 +194,8 @@ ResourcePtr CssInlineFilter::CreateResource(const char* url,
                              is_authorized);
 }
 
-bool CssInlineFilter::HasClosingStyleTag(StringPiece contents) {
-  return FindIgnoreCase(contents, "</style") != StringPiece::npos;
+bool CssInlineFilter::MayContainMarkup(StringPiece contents) {
+  return contents.find('<') != StringPiece::npos;
 }
 
 bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
@@ -214,11 +214,11 @@ bool CssInlineFilter::ShouldInline(const ResourcePtr& resource,
     *reason = "CSS not inlined because it appears to be gzip-encoded";
     return false;
   }
-  // And also not if the contents contain "</style>" anywhere. If we inline an
-  // external stylesheet containing a "</style>", the <style> tag will be ended
-  // early.
-  if (HasClosingStyleTag(contents)) {
-    *reason = "CSS not inlined since it contains style closing tag";
+  // And also not if the contents contain a '<' anywhere. If we inline an
+  // external stylesheet containing, say, a "</style>", the <style> tag will be
+  // ended early.
+  if (MayContainMarkup(contents)) {
+    *reason = "CSS not inlined since it contains a less-than sign";
     return false;
   }
 

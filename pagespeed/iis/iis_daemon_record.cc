@@ -151,7 +151,9 @@ void IisCapabilityHeaders(IHttpContext* http_context, StringPiece* accept,
 
 void BuildDaemonRecordRequest(IHttpContext* http_context, const GoogleUrl& url,
                               const RewriteOptions* options,
+                              const GoogleString& site,
                               DaemonRecordRequest* request) {
+  request->site = site;
   request->request_properties = IisBeginRequestProperties(
       HasHeader(http_context, HttpAttributes::kCookie),
       HasHeader(http_context, HttpAttributes::kCookie2),
@@ -202,7 +204,8 @@ void IisCapabilityHeaders(IHttpContext*, StringPiece*, StringPiece*,
                           StringPiece*, StringPiece*, StringPiece*) {}
 
 void BuildDaemonRecordRequest(IHttpContext*, const GoogleUrl&,
-                              const RewriteOptions*, DaemonRecordRequest*) {}
+                              const RewriteOptions*, const GoogleString&,
+                              DaemonRecordRequest*) {}
 
 #endif  // _WIN32
 

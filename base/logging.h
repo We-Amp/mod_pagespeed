@@ -20,6 +20,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -141,7 +142,13 @@ DEFINE_CHECK_OP(GE, >=)
 
 #undef DEFINE_CHECK_OP
 
-// Check failure class that logs on destruction and aborts for FATAL
+// Check failure class that logs on destruction and aborts for FATAL.
+//
+// The object is built on every CHECK evaluation, passing or not, so it must
+// not allocate on the passing path: the stream for text streamed onto a
+// failed check is created on first use, which only happens when the check
+// failed.  (A std::ostringstream member costs a heap allocation per check
+// with some standard libraries.)
 class CheckOpResult {
  public:
   CheckOpResult(std::string* msg, const char* file, int line)
@@ -149,18 +156,21 @@ class CheckOpResult {
   ~CheckOpResult() {
     if (msg_) {
       ::pagespeed_logging::LogMessage(logging::LOG_FATAL, file_, line_).stream()
-          << *msg_ << extra_stream_.str();
+          << *msg_ << (extra_stream_ ? extra_stream_->str() : std::string());
       delete msg_;
     }
   }
   operator bool() const { return msg_ != nullptr; }
-  std::ostream& stream() { return extra_stream_; }
+  std::ostream& stream() {
+    if (!extra_stream_) extra_stream_ = std::make_unique<std::ostringstream>();
+    return *extra_stream_;
+  }
 
  private:
   std::string* msg_;
   const char* file_;
   int line_;
-  std::ostringstream extra_stream_;
+  std::unique_ptr<std::ostringstream> extra_stream_;
 };
 
 }  // namespace pagespeed_logging

@@ -45,7 +45,17 @@ const size_t kMaxCacheSize = 200;
 const char kCohortName1[] = "cohort1";
 const char kCohortName2[] = "cohort2";
 const char kUrl[] = "www.test.com/sample.html";
-const char kParsableContent[] = "value { name: 'prop1' value: 'value1' }";
+// The populated message the fixtures Put: one property, name prop1, body
+// value1. The proto is LITE_RUNTIME, so it has no text format; the old
+// fixtures parsed a text-format string with the wire parser and always
+// stored an empty message.
+PropertyCacheValues MakeParsableValues() {
+  PropertyCacheValues values;
+  PropertyValueProtobuf* property = values.add_value();
+  property->set_name("prop1");
+  property->set_body("value1");
+  return values;
+}
 const char kNonParsableContent[] = "random";
 const char kOptionsSignatureHash[] = "hash";
 const char kCacheKeySuffix[] = "CacheKeySuffix";
@@ -126,14 +136,16 @@ TEST_F(CachePropertyStoreTest, TestNoResultAvailable) {
 }
 
 TEST_F(CachePropertyStoreTest, TestResultAvailable) {
-  PropertyCacheValues values;
-  // kParsableContent is text format, so this wire-format parse fails and
-  // leaves `values` empty; the test only needs a message to Put.
-  (void)values.ParseFromString(kParsableContent);
+  PropertyCacheValues values = MakeParsableValues();
   cache_property_store_.Put(kUrl, kOptionsSignatureHash, kCacheKeySuffix,
                             cohort_, &values, nullptr);
   EXPECT_TRUE(ExecuteGet(page_.get()));
   EXPECT_EQ(CacheInterface::kAvailable, page_->GetCacheState(cohort_));
+  // The stored property must round-trip: read it back and check its value.
+  PropertyValue* property = page_->GetProperty(cohort_, "prop1");
+  ASSERT_NE(nullptr, property);
+  EXPECT_TRUE(property->has_value());
+  EXPECT_EQ(GoogleString("value1"), property->value().as_string());
   EXPECT_EQ(0, num_callback_with_false_called_);
   EXPECT_EQ(1, num_callback_with_true_called_);
 }
@@ -157,10 +169,7 @@ TEST_F(CachePropertyStoreTest, TestMultipleCohorts) {
   MockPropertyPage page(thread_system_.get(), &property_cache_, kUrl,
                         kOptionsSignatureHash, kCacheKeySuffix);
   property_cache_.Read(&page);
-  PropertyCacheValues values;
-  // kParsableContent is text format, so this wire-format parse fails and
-  // leaves `values` empty; the test only needs a message to Put.
-  (void)values.ParseFromString(kParsableContent);
+  PropertyCacheValues values = MakeParsableValues();
   cohort_list_.push_back(cohort2);
   lru_cache_.ClearStats();
   EXPECT_FALSE(ExecuteGet(&page));
@@ -203,10 +212,7 @@ TEST_F(CachePropertyStoreTest, TestMultipleCacheBackends) {
   MockPropertyPage page(thread_system_.get(), &property_cache_, kUrl,
                         kOptionsSignatureHash, kCacheKeySuffix);
   property_cache_.Read(&page);
-  PropertyCacheValues values;
-  // kParsableContent is text format, so this wire-format parse fails and
-  // leaves `values` empty; the test only needs a message to Put.
-  (void)values.ParseFromString(kParsableContent);
+  PropertyCacheValues values = MakeParsableValues();
   lru_cache_.ClearStats();
   second_cache.ClearStats();
   // Insert the value for cohort1.
@@ -242,10 +248,7 @@ TEST_F(CachePropertyStoreTest, TestPropertyCacheKeyMethod) {
 }
 
 TEST_F(CachePropertyStoreTest, TestPutHandlesNonNullCallback) {
-  PropertyCacheValues values;
-  // kParsableContent is text format, so this wire-format parse fails and
-  // leaves `values` empty; the test only needs a message to Put.
-  (void)values.ParseFromString(kParsableContent);
+  PropertyCacheValues values = MakeParsableValues();
   cache_property_store_.Put(
       kUrl, kOptionsSignatureHash, kCacheKeySuffix, cohort_, &values,
       NewCallback(this, &CachePropertyStoreTest::ResultCallback));

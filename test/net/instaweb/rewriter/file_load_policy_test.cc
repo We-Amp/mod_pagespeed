@@ -169,6 +169,39 @@ TEST_F(FileLoadPolicyTest, RegexpBackreferences) {
             LoadFromFile("https://example.com/~al/static/ie.css"));
 }
 
+TEST_F(FileLoadPolicyTest, RegexpBackreferencesDotSegments) {
+  GoogleString error;
+  policy_.Associate("http://example.com/", "/var/www/");
+  policy_.AssociateRegexp("^https?://example.com/~([^/]*)/static/",
+                          "/var/static/\\1/", &error);
+  EXPECT_TRUE(error.empty());
+  policy_.AssociateRegexp("^https?://example.com/-([^/]*)/static/",
+                          "/var/static/\\1", &error);
+  EXPECT_TRUE(error.empty());
+  policy_.AssociateRegexp("^https?://([^/]*)/vhost/", "/var/vhosts/\\1/",
+                          &error);
+  EXPECT_TRUE(error.empty());
+
+  // A regexp mapping whose result has a "." or ".." segment does not apply,
+  // which leaves these to the mapping for the whole site.
+  EXPECT_EQ("/var/www/~../static/cat.jpg",
+            LoadFromFile("http://example.com/~../static/cat.jpg"));
+  EXPECT_EQ("/var/www/~./static/cat.jpg",
+            LoadFromFile("http://example.com/~./static/cat.jpg"));
+  EXPECT_EQ("/var/www/-../static/cat.jpg",
+            LoadFromFile("http://example.com/-../static//cat.jpg"));
+  EXPECT_FALSE(TryLoadFromFile("https://example.com/~../static/cat.jpg"));
+  EXPECT_FALSE(TryLoadFromFile("http://%2e%2e/vhost/cat.jpg"));
+
+  // Dots that don't make up a whole segment of the filename are fine.
+  EXPECT_EQ("/var/static/..pat/cat.jpg",
+            LoadFromFile("http://example.com/~..pat/static/cat.jpg"));
+  EXPECT_EQ("/var/static/.../cat.jpg",
+            LoadFromFile("http://example.com/~.../static/cat.jpg"));
+  EXPECT_EQ("/var/static/..cat.jpg",
+            LoadFromFile("http://example.com/-../static/cat.jpg"));
+}
+
 TEST_F(FileLoadPolicyTest, RegexpNotPrefix) {
   GoogleString error;
   EXPECT_FALSE(policy_.AssociateRegexp("http://example.com/[^/]*/static",
@@ -231,6 +264,59 @@ TEST_F(FileLoadPolicyTest, Rules) {
   EXPECT_TRUE(error.empty());
   EXPECT_EQ("/www/cgi-bin/allow.ssi.js",
             LoadFromFile("http://example.com/cgi-bin/allow.ssi.js"));
+}
+
+// Rules see the normalised name.
+TEST_F(FileLoadPolicyTest, RulesWithEmptySegments) {
+  GoogleString error;
+  policy_.Associate("http://example.com/", "/www/");
+  policy_.AddRule("/www/cgi-bin/", false /* literal */, false /* disallow */,
+                  &error);
+  policy_.AddRule("^/www/private/", true /* regexp */, false /* disallow */,
+                  &error);
+  EXPECT_TRUE(error.empty());
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com//cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com////cgi-bin//a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/%2e//cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/js/%2e%2e//cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/js/..//cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/\\cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/private/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com//private/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com///private/a.js"));
+  EXPECT_EQ("/www/js/a.js", LoadFromFile("http://example.com//js///a.js"));
+
+  ASSERT_TRUE(policy_.AssociateRegexp("^http://example.com/~([^/]*)/static/",
+                                      "/www/\\1/", &error));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/~cgi-bin/static/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/~/static/cgi-bin/a.js"));
+  EXPECT_EQ("/www/js/a.js",
+            LoadFromFile("http://example.com/~/static/js/a.js"));
+}
+
+// Doubled slashes in the configuration itself keep working.
+TEST_F(FileLoadPolicyTest, EmptySegmentsInConfiguration) {
+  GoogleString error;
+  policy_.Associate("http://example.com/", "/var//www/");
+  policy_.AddRule("/var//www/cgi-bin/", false /* literal */,
+                  false /* disallow */, &error);
+  EXPECT_TRUE(error.empty());
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/cgi-bin/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com//cgi-bin/a.js"));
+  EXPECT_EQ("/var/www/js/a.js", LoadFromFile("http://example.com/js/a.js"));
+}
+
+// A regexp rule spelled with doubled slashes keeps its meaning.
+TEST_F(FileLoadPolicyTest, RegexpRuleWithEmptySegments) {
+  GoogleString error;
+  policy_.Associate("http://example.com/", "/var//www/");
+  policy_.AddRule("^/var//www/private/", true /* regexp */,
+                  false /* disallow */, &error);
+  EXPECT_TRUE(error.empty());
+  EXPECT_FALSE(TryLoadFromFile("http://example.com/private/a.js"));
+  EXPECT_FALSE(TryLoadFromFile("http://example.com//private/a.js"));
+  EXPECT_EQ("/var/www/js/a.js", LoadFromFile("http://example.com/js/a.js"));
 }
 
 TEST_F(FileLoadPolicyTest, Merge) {

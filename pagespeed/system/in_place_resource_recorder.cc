@@ -297,6 +297,19 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
   }
   full_response_headers_considered_ = true;
 
+  // Store decisions use the stricter of the origin's and the server's
+  // caching headers: the final headers are judged as they stand here, and
+  // again below with the origin's caching fields in their place, when the
+  // seam supplied them.
+  const bool server_allows_storing =
+      !has_origin_caching_headers() ||
+      response_headers->IsProxyCacheable(
+          request_properties_,
+          ResponseHeaders::GetVaryOption(http_options_.respect_vary),
+          ResponseHeaders::kNoValidator);
+  ApplyOriginCachingHeaders(response_headers,
+                            cache_control_set_ ? &cache_control_ : nullptr);
+
   // For 4xx and 5xx we can't IPRO, but we can also cache the failure so we
   // don't retry recording for a bit: five minutes for a 4xx, which describes
   // the resource, and the short transient window for a 5xx, which describes
@@ -334,10 +347,12 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
     return;
   }
 
-  bool is_cacheable = response_headers->IsProxyCacheable(
-      request_properties_,
-      ResponseHeaders::GetVaryOption(http_options_.respect_vary),
-      ResponseHeaders::kNoValidator);
+  bool is_cacheable =
+      server_allows_storing &&
+      response_headers->IsProxyCacheable(
+          request_properties_,
+          ResponseHeaders::GetVaryOption(http_options_.respect_vary),
+          ResponseHeaders::kNoValidator);
   if (!is_cacheable) {
     DroppedAsUncacheable();
     // Cache-Control forbids caching: an expected policy outcome, not a
@@ -397,6 +412,11 @@ void InPlaceResourceRecorder::DoneAndSetHeaders(
 
   if (!failure_ && !full_response_headers_considered_) {
     ConsiderResponseHeaders(kFullHeaders, response_headers);
+  } else if (!failure_) {
+    // A seam that offered its full headers early (IIS) hands a fresh copy
+    // here: what is stored carries the stricter caching headers as well.
+    ApplyOriginCachingHeaders(response_headers,
+                              cache_control_set_ ? &cache_control_ : nullptr);
   }
 
   // Ignore Empty 200 responses.
@@ -440,9 +460,11 @@ void InPlaceResourceRecorder::DoneAndSetHeaders(
     }
     response_headers->RemoveAll(HttpAttributes::kContentLength);
 
-    if (cache_control_set_) {
+    if (cache_control_set_ && !has_origin_caching_headers()) {
       // Use the cache control value from SaveCacheControl instead of the one in
-      // the response.
+      // the response.  When the seam supplied the origin's caching headers,
+      // `response_headers` already carries the stricter of them and the
+      // server's, and that stands.
       response_headers->RemoveAll(HttpAttributes::kCacheControl);
       if (!cache_control_.empty()) {
         response_headers->Add(HttpAttributes::kCacheControl, cache_control_);

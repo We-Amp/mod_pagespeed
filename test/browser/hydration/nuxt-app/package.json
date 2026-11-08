@@ -1,0 +1,6 @@
+{
+  "name": "pagespeed-hydration-nuxt",
+  "private": true,
+  "scripts": { "build": "nuxt generate" },
+  "dependencies": { "nuxt": "3.21.11", "vue": "3.5.44" }
+}

@@ -28,11 +28,32 @@
 #   EXPECTED_XPS    optional expected X-Page-Speed value; overrides the VERSION-file
 #                   derivation
 set -uo pipefail
+# shellcheck source=tools/ci/docker_pull_retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../tools/ci/docker_pull_retry.sh"
+
+# apt-get update + install with retries, for the smoke container below: a short
+# Debian or Ubuntu mirror outage is waited out, a lasting one still fails. The
+# function is spliced into the container command with declare -f, so it runs in
+# the container's shell. stdout is quiet; stderr is never redirected.
+apt_install_retry() {
+  local opts=() attempt
+  [ "${1:-}" = "--no-install-recommends" ] && opts=("$1") && shift
+  for attempt in 1 2 3; do
+    if apt-get update -qq -o Acquire::Retries=5 >/dev/null \
+       && apt-get install -y -qq "${opts[@]}" -o Acquire::Retries=5 "$@" >/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "::warning::check-sidecar-pair.sh: apt install of $* failed (attempt $attempt of 3), retrying" >&2
+      sleep $((attempt * 5))
+    fi
+  done
+  echo "::error::check-sidecar-pair.sh: apt install of $* failed after 3 attempts" >&2
+  return 1
+}
 
 PAIR="${1:?usage: check-sidecar-pair.sh <pairdir> <image>}"
 IMAGE="${2:?missing docker image}"
-PLAT_ARG=""
-[ -n "${DOCKER_PLATFORM:-}" ] && PLAT_ARG="--platform ${DOCKER_PLATFORM}"
 
 [ -f "$PAIR/nginx" ] && [ -f "$PAIR/ngx_pagespeed_module.so" ] || { echo "FATAL: missing pair in $PAIR"; exit 1; }
 
@@ -53,8 +74,8 @@ if [ -z "${EXPECTED_XPS:-}" ]; then
 fi
 
 echo "===== sidecar pair smoke: $IMAGE (expect X-Page-Speed ${EXPECTED_XPS}) ====="
-# shellcheck disable=SC2086
-docker run --rm --init $PLAT_ARG \
+docker_pull_retry "$IMAGE" ${DOCKER_PLATFORM:+--platform "$DOCKER_PLATFORM"} || exit 1
+docker run --rm --init ${DOCKER_PLATFORM:+--platform "$DOCKER_PLATFORM"} \
   -v "$PAIR:/p:ro" \
   -e EXPECTED_XPS="$EXPECTED_XPS" \
   "$IMAGE" bash -c '
@@ -71,9 +92,9 @@ docker run --rm --init $PLAT_ARG \
         > /etc/apt/sources.list
       printf "Acquire::Check-Valid-Until \"false\";\n" > /etc/apt/apt.conf.d/99archive
     fi
+    '"$(declare -f apt_install_retry)"'
     # stdout is noise; stderr stays visible so a mirror failure shows in the log.
-    apt-get update -qq >/dev/null
-    apt-get install -y -qq libpcre3 zlib1g curl procps >/dev/null
+    apt_install_retry zlib1g curl procps
     PN=$(grep -h "^PRETTY_NAME" /etc/os-release | cut -d= -f2)
     echo "  distro: $PN"
 

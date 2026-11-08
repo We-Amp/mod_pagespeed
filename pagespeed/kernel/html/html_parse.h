@@ -350,6 +350,12 @@ class HtmlParse {
   // Print the HtmlEvent queue_ to stdout for debugging.
   void DebugPrintQueue();
 
+  // Makes a name with the given spelling that is not a keyword, even when the
+  // spelling matches one.  The lexer uses this for elements in the SVG and
+  // MathML namespaces, which share some names with HTML elements (style,
+  // script, title, a, ...) but are not those HTML elements.
+  HtmlName MakeKeywordlessName(const StringPiece& str);
+
   // Implementation helper with detailed knowledge of html parsing libraries
   friend class HtmlLexer;
 
@@ -583,10 +589,14 @@ class HtmlParse {
   // called, and so during event-buffering mode, filters should not
   // be accessed.
   void set_buffer_events(bool x) { buffer_events_ = x; }
+  bool buffer_events() const { return buffer_events_; }
 
   // Disables any filter in this->filters_ whose GetScriptUsage() is
   // HtmlFilter::kWillInjectScripts.
   void DisableFiltersInjectingScripts();
+  // Disables the post-render filters that must not see a hydrated page, for
+  // the flush window about to render.
+  void DisableFiltersSkippedOnHydratedPages();
 
   // Same, but over a passed-in list of filters.
   void DisableFiltersInjectingScripts(const FilterList& filters);

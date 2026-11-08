@@ -379,6 +379,27 @@ function Initialize-TestEnvironment {
         Write-Status "Created no-cache web.config for $noCacheDir" "Gray"
     }
 
+    # Inputs an optimized resource must not grow more cacheable than, as
+    # Apache's debug.conf and the nginx test configuration set them.
+    foreach ($restrictive in @(
+            @{ Dir = "cc200p";  Custom = "private" },
+            @{ Dir = "cc200ns"; Custom = "no-store" })) {
+        $ccDir = "$WebRoot\mod_pagespeed_test\ipro\$($restrictive.Dir)"
+        if (Test-Path $ccDir) {
+            @"
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <system.webServer>
+    <staticContent>
+      <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="00:03:20" cacheControlCustom="$($restrictive.Custom)" />
+    </staticContent>
+  </system.webServer>
+</configuration>
+"@ | Set-Content "$ccDir\web.config" -Encoding UTF8
+            Write-Status "Created $($restrictive.Custom) web.config for $ccDir" "Gray"
+        }
+    }
+
     # Create a simple index.html for testing
     @"
 <!DOCTYPE html>
@@ -891,6 +912,16 @@ pagespeed RulePackFile "$rulePackDir\multi\a.json"
 pagespeed RulePackFile "$rulePackDir\multi\b.json"
 "@
 
+        # automatic/test_rewrite_css.py::test_rewrite_css_images inlines a
+        # small image into CSS; a request can only lower the threshold, so the
+        # page gets it from a path match block (after every site-scope line:
+        # the lines below a match line belong to it).
+        $pagespeedConfig += @"
+
+path:/mod_pagespeed_example/rewrite_css_images\.html
+pagespeed CssImageInlineMaxBytes 2048
+"@
+
         # Kept for New-DaemonSite, which derives the dedicated daemon site's
         # configuration from it. The main site and the server-level config
         # never carry the daemon directives: they keep classic in-place
@@ -917,6 +948,15 @@ pagespeed RulePackFile "$rulePackDir\multi\b.json"
         if (Test-Path $noCacheDir) {
             Copy-Item "$WebRoot\pagespeed.config" "$noCacheDir\pagespeed.config" -Force
             Write-Status "Copied pagespeed.config to $noCacheDir" "Gray"
+        }
+
+        # The restrictive-input directories carry their own web.config too.
+        foreach ($ccName in @("cc200p", "cc200ns")) {
+            $ccDir = "$WebRoot\mod_pagespeed_test\ipro\$ccName"
+            if (Test-Path $ccDir) {
+                Copy-Item "$WebRoot\pagespeed.config" "$ccDir\pagespeed.config" -Force
+                Write-Status "Copied pagespeed.config to $ccDir" "Gray"
+            }
         }
 
         # Same for the /aspnet application: the module engages only when
@@ -1295,6 +1335,19 @@ function Start-IISSite {
                 Write-Status "  PAGESPEED_IIS_REBOOT_ON_WEDGE=1 -- rebooting the runner to self-heal (this job fails; the next run gets a clean HTTP.sys)." "Yellow"
                 Start-Process shutdown.exe -ArgumentList @('/r','/t','10','/c','PageSpeed IIS: HTTP.sys [::] transport wedge -- auto-reboot to self-heal') -NoNewWindow
             }
+        }
+        # Tell CI this was the host, not the module: a site that cannot bind
+        # its ports fails before (or between) tests, whatever the change under
+        # test. tools/ci/iis_failure_class.py reads this file from the
+        # evidence directory and the IIS job retries once on another runner.
+        if ($env:PAGESPEED_EVIDENCE_DIR) {
+            try {
+                New-Item -ItemType Directory -Force -Path $env:PAGESPEED_EVIDENCE_DIR | Out-Null
+                $reason = if ($wedge) { 'httpsys-ipv6-wedge' } else { 'iis-site-start' }
+                Set-Content -LiteralPath (Join-Path $env:PAGESPEED_EVIDENCE_DIR 'infra-class.txt') -Encoding ascii -Value @(
+                    $reason,
+                    "site $SiteName did not reach Started after $maxStartAttempts attempts (state: $siteState)")
+            } catch { }
         }
         throw ("IIS site '$SiteName' did not reach Started after $maxStartAttempts attempts (state: $siteState). " +
                "Last appcmd start output: $siteStartOut. " +

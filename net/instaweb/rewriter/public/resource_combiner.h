@@ -122,6 +122,12 @@ class ResourceCombiner {
                           OutputResource* combination, Writer* writer,
                           MessageHandler* handler);
 
+  // Returns whether the origin labelled resource as CombinationContentType(),
+  // setting *failure_reason if not. The combination is labelled with
+  // CombinationContentType(), so only inputs of that type are accepted.
+  bool HasCombinationContentType(const Resource* resource,
+                                 GoogleString* failure_reason);
+
   // Override this if you need to remove some state whenever Reset() is called.
   // Your implementation must call the superclass.
   virtual void Clear();

@@ -43,16 +43,24 @@ bisect_vendor_cmd() {
 
 BISECT_ENV_COMMON="HOME=/workspace USER=dev PATH=/opt/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+# Variables the jobs set for services the bisect driver does not start (an
+# authenticated Redis and a Redis/memcached reached over a unix socket): the
+# driver starts only the services listed in _SERVICES, so it leaves these
+# unset and the test cases that need them skip rather than run against a
+# server that is not there. tools/ci/test_bisect_job.sh allows exactly these
+# names when it checks this table against pipeline-full.yml.
+BISECT_VARS_FOR_UNSTARTED_SERVICES="REDIS_AUTH_PORT REDIS_AUTH_PASSWORD REDIS_AUTH_USER REDIS_AUTH_USER_PASSWORD REDIS_AUTH_SOCKET MEMCACHED_SOCKET"
+
 BISECT_LINUX_ASAN_NAME="Linux ASan + UBSan"
 BISECT_LINUX_ASAN_KIND="test"
 BISECT_LINUX_ASAN_CONFIG=ci-asan
 BISECT_LINUX_ASAN_BAZEL_FLAGS="--config=ci"
 BISECT_LINUX_ASAN_OUTPUT_ROOT=/tmp/bazel-out-asan
 BISECT_LINUX_ASAN_DOCKER_FLAGS="--shm-size=512m"
-BISECT_LINUX_ASAN_ENV="${BISECT_ENV_COMMON} REDIS_AUTH_PASSWORD= REDIS_AUTH_USER_PASSWORD="
+BISECT_LINUX_ASAN_ENV="${BISECT_ENV_COMMON}"
 BISECT_LINUX_ASAN_PASSWD=1
 BISECT_LINUX_ASAN_SERVICES="redis memcached"
-BISECT_LINUX_ASAN_SERVICE_TEST_ENV="REDIS_PORT=6379 MEMCACHED_PORT=11211 REDIS_AUTH_PORT=6380 REDIS_AUTH_PASSWORD= REDIS_AUTH_USER=cacheuser REDIS_AUTH_USER_PASSWORD= REDIS_AUTH_SOCKET=/sock/redis.sock MEMCACHED_SOCKET=/sock/memcached.sock"
+BISECT_LINUX_ASAN_SERVICE_TEST_ENV="REDIS_PORT=6379 MEMCACHED_PORT=11211"
 
 BISECT_LINUX_TSAN_NAME="Linux TSan"
 BISECT_LINUX_TSAN_KIND="test"
@@ -60,10 +68,10 @@ BISECT_LINUX_TSAN_CONFIG=ci-tsan
 BISECT_LINUX_TSAN_BAZEL_FLAGS="--config=ci"
 BISECT_LINUX_TSAN_OUTPUT_ROOT=/tmp/bazel-out-tsan
 BISECT_LINUX_TSAN_DOCKER_FLAGS="--shm-size=512m --security-opt seccomp=unconfined --cap-drop=ALL"
-BISECT_LINUX_TSAN_ENV="${BISECT_ENV_COMMON} REDIS_AUTH_PASSWORD= REDIS_AUTH_USER_PASSWORD= TSAN_SYMBOLIZER_PATH=/opt/llvm/bin/llvm-symbolizer"
+BISECT_LINUX_TSAN_ENV="${BISECT_ENV_COMMON} TSAN_SYMBOLIZER_PATH=/opt/llvm/bin/llvm-symbolizer"
 BISECT_LINUX_TSAN_PASSWD=1
 BISECT_LINUX_TSAN_SERVICES="redis memcached"
-BISECT_LINUX_TSAN_SERVICE_TEST_ENV="REDIS_PORT=6379 MEMCACHED_PORT=11211 REDIS_AUTH_PORT=6380 REDIS_AUTH_PASSWORD= REDIS_AUTH_USER=cacheuser REDIS_AUTH_USER_PASSWORD= REDIS_AUTH_SOCKET=/sock/redis.sock MEMCACHED_SOCKET=/sock/memcached.sock"
+BISECT_LINUX_TSAN_SERVICE_TEST_ENV="REDIS_PORT=6379 MEMCACHED_PORT=11211"
 
 BISECT_LINUX_BUILD_NAME="Linux Build"
 BISECT_LINUX_BUILD_KIND="build"

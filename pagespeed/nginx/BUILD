@@ -24,7 +24,10 @@ NGINX_COPTS = [
 # compile ngx_segment_buffer.cc directly in their srcs instead of depending on
 # this target, because the --add-module archive (ngx_pagespeed_archive, an
 # alwayslink .lo) only bundles its own srcs — a dep would leave undefined
-# symbols at nginx's own link step.
+# symbols at nginx's own link step.  This applies to pagespeed/nginx-local
+# libraries only: deps elsewhere in the module .so's link closure (for example
+# //pagespeed/system:inplace_url_agreement) reach the merged PSOL archive that
+# install/nginx/build_module_in_container.sh assembles from that link.
 cc_library(
     name = "ngx_segment_buffer",
     srcs = ["ngx_segment_buffer.cc"],
@@ -73,6 +76,34 @@ cc_library(
     ],
 )
 
+# The Cache-Control the module writes on rewritten HTML keeps the operator's
+# and the origin's private and no-store. Deliberately nginx-free so it can be
+# unit tested standalone (//test/pagespeed/nginx:ngx_cache_control_merge_test).
+# The module targets below compile ngx_cache_control_merge.cc directly in
+# their srcs for the same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_cache_control_merge",
+    srcs = ["ngx_cache_control_merge.cc"],
+    hdrs = ["ngx_cache_control_merge.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Which caching headers of the server's response the module keeps for a
+# request (ModifyCachingHeaders, downstream cache integration) -- a pure
+# function, unit tested standalone
+# (//test/pagespeed/nginx:ngx_caching_header_policy_test). The module
+# targets below compile ngx_caching_header_policy.cc directly in their srcs
+# for the same archive-linking reason as ngx_etag_match above.
+cc_library(
+    name = "ngx_caching_header_policy",
+    srcs = ["ngx_caching_header_policy.cc"],
+    hdrs = ["ngx_caching_header_policy.h"],
+    visibility = ["//visibility:public"],
+)
+
 # The admin-style handler path lookup (exact / subtree, case-sensitive like
 # nginx `location` blocks) -- a pure function over StringPiece, unit tested
 # standalone (//test/pagespeed/nginx:ngx_admin_path_match_test). The module
@@ -85,6 +116,21 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
+    ],
+)
+
+# Whether a connection's peer is this server, and the relabel/restore of a
+# connection's client address that the POST_READ handler applies to the
+# module's own fetches -- nginx-free (templates over the connection type),
+# unit tested standalone (//test/pagespeed/nginx:ngx_self_fetch_label_test).
+# The module targets below compile ngx_self_fetch_label.cc directly.
+cc_library(
+    name = "ngx_self_fetch_label",
+    srcs = ["ngx_self_fetch_label.cc"],
+    hdrs = ["ngx_self_fetch_label.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pagespeed/system",
     ],
 )
 
@@ -101,23 +147,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pagespeed/kernel/base:pagespeed_base",
-    ],
-)
-
-# The in-place URL agreement: the server's reading of the request and the
-# module's must name the same path on the same host before a response is
-# looked up or recorded in place -- a pure function over StringPiece, unit
-# tested standalone (//test/pagespeed/nginx:ngx_inplace_url_agreement_test).
-# The module targets below compile ngx_inplace_url_agreement.cc directly in
-# their srcs for the same archive-linking reason as ngx_etag_match above.
-cc_library(
-    name = "ngx_inplace_url_agreement",
-    srcs = ["ngx_inplace_url_agreement.cc"],
-    hdrs = ["ngx_inplace_url_agreement.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pagespeed/kernel/base:pagespeed_base",
-        "//pagespeed/kernel/http",
     ],
 )
 
@@ -265,6 +294,8 @@ cc_library(
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
+        "ngx_cache_control_merge.cc",
+        "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
@@ -278,7 +309,6 @@ cc_library(
         "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
-        "ngx_inplace_url_agreement.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_pagespeed.cc",
@@ -286,6 +316,7 @@ cc_library(
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_segment_buffer.cc",
+        "ngx_self_fetch_label.cc",
         "ngx_server_context.cc",
         "ngx_static_asset_path.cc",
         "ngx_url_async_fetcher.cc",
@@ -294,6 +325,8 @@ cc_library(
     hdrs = [
         "log_message_handler.h",
         "ngx_base_fetch.h",
+        "ngx_cache_control_merge.h",
+        "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
@@ -307,7 +340,6 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
-        "ngx_inplace_url_agreement.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -315,6 +347,7 @@ cc_library(
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
         "ngx_segment_buffer.h",
+        "ngx_self_fetch_label.h",
         "ngx_server_context.h",
         "ngx_static_asset_path.h",
         "ngx_url_async_fetcher.h",
@@ -335,9 +368,12 @@ cc_library(
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:inplace_url_agreement",
         "//pagespeed/system:ipro_recorder",
         "//pagespeed/system:optimization_thread_policy",
+        "//pagespeed/system:site_cache_fragment",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",
         "//pagespeed/kernel/webbotauth:webbotauth_warmer",
@@ -409,6 +445,8 @@ cc_library(
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
+        "ngx_cache_control_merge.cc",
+        "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
@@ -422,7 +460,6 @@ cc_library(
         "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
-        "ngx_inplace_url_agreement.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_pagespeed.cc",
@@ -430,6 +467,7 @@ cc_library(
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_segment_buffer.cc",
+        "ngx_self_fetch_label.cc",
         "ngx_server_context.cc",
         "ngx_static_asset_path.cc",
         "ngx_url_async_fetcher.cc",
@@ -438,6 +476,8 @@ cc_library(
     hdrs = [
         "log_message_handler.h",
         "ngx_base_fetch.h",
+        "ngx_cache_control_merge.h",
+        "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
@@ -451,7 +491,6 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
-        "ngx_inplace_url_agreement.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -459,6 +498,7 @@ cc_library(
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
         "ngx_segment_buffer.h",
+        "ngx_self_fetch_label.h",
         "ngx_server_context.h",
         "ngx_static_asset_path.h",
         "ngx_url_async_fetcher.h",
@@ -481,7 +521,9 @@ cc_library(
         "//pagespeed/system:system_envoy",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:inplace_url_agreement",
         "//pagespeed/system:ipro_recorder",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",
@@ -548,6 +590,8 @@ cc_library(
     srcs = [
         "log_message_handler.cc",
         "ngx_base_fetch.cc",
+        "ngx_cache_control_merge.cc",
+        "ngx_caching_header_policy.cc",
         "ngx_caching_headers.cc",
         "ngx_daemon_record_completion.cc",
         "ngx_daemon_serve_emit.cc",
@@ -561,13 +605,13 @@ cc_library(
         "ngx_gzip_rollback.cc",
         "ngx_gzip_setter.cc",
         "ngx_gzip_type_match.cc",
-        "ngx_inplace_url_agreement.cc",
         "ngx_list_iterator.cc",
         "ngx_message_handler.cc",
         "ngx_request_body.cc",
         "ngx_rewrite_driver_factory.cc",
         "ngx_rewrite_options.cc",
         "ngx_segment_buffer.cc",
+        "ngx_self_fetch_label.cc",
         "ngx_server_context.cc",
         "ngx_static_asset_path.cc",
         "ngx_url_async_fetcher.cc",
@@ -576,6 +620,8 @@ cc_library(
     hdrs = [
         "log_message_handler.h",
         "ngx_base_fetch.h",
+        "ngx_cache_control_merge.h",
+        "ngx_caching_header_policy.h",
         "ngx_caching_headers.h",
         "ngx_daemon_record_completion.h",
         "ngx_daemon_serve_emit.h",
@@ -589,7 +635,6 @@ cc_library(
         "ngx_gzip_rollback.h",
         "ngx_gzip_setter.h",
         "ngx_gzip_type_match.h",
-        "ngx_inplace_url_agreement.h",
         "ngx_list_iterator.h",
         "ngx_message_handler.h",
         "ngx_pagespeed.h",
@@ -597,6 +642,7 @@ cc_library(
         "ngx_rewrite_driver_factory.h",
         "ngx_rewrite_options.h",
         "ngx_segment_buffer.h",
+        "ngx_self_fetch_label.h",
         "ngx_server_context.h",
         "ngx_static_asset_path.h",
         "ngx_url_async_fetcher.h",
@@ -621,7 +667,9 @@ cc_library(
         "//pagespeed/system",
         "//pagespeed/system:curl_fetcher",
         "//pagespeed/system:daemon_adapter",
+        "//pagespeed/system:daemon_html_report",
         "//pagespeed/system:daemon_serve_arm",
+        "//pagespeed/system:inplace_url_agreement",
         "//pagespeed/kernel/webbotauth:webbotauth_core",
         "//pagespeed/kernel/webbotauth:webbotauth_counter",
         "//pagespeed/kernel/webbotauth:webbotauth_warmer",

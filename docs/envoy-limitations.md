@@ -28,8 +28,9 @@ differences, not bugs:
   `implicit_cache_ttl_ms`
 - Cache lifetime behavior differs from Apache
 
-### CSS Flatten Max Bytes (1 test)
-- `CssFlattenMaxBytes` header handling differs
+### CSS Flatten Max Bytes (3 tests)
+- `CssFlattenMaxBytes` is configuration only (not a request header or query
+  parameter), and the Envoy test setup has no per-directory option configuration
 
 ### Query Params Header (1 test)
 - `PageSpeedFilters` header not respected for IPRO requests

@@ -325,6 +325,12 @@
    "output_sha256": "602e973bfea421fd4b55b6c48ec404d50c4e33199c8b38aaf74ef9389a13097f"
   },
   {
+   "input": "seeds/end-tag-syntax.html",
+   "input_sha256": "d86221c613663f4371c85341f3832972796a917ff1b77c35be438c6bfd05e656",
+   "status": "ok",
+   "output_sha256": "938e24c9423d3f6f0461756301ff9904077a9cab711157567ef457f0615c4306"
+  },
+  {
    "input": "seeds/entity-attr-8bit.html",
    "input_sha256": "271cef945fa62ad7a73239ab50f657c3b551f970f81965bfa3895b111cf000ec",
    "status": "ok",
@@ -383,6 +389,48 @@
    "input_sha256": "128431d1cb4837533aa6828c6c46238d945a58cd2559a759a005091bd5b8e244",
    "status": "ok",
    "output_sha256": "03a382b00e4484e7af6fc737f8bb69711d5414d6964030b078deba8795cf6434"
+  },
+  {
+   "input": "seeds/foreign-breakout.html",
+   "input_sha256": "109eaf1b4a17f0d90ec683b342f011d230896fb0a72e7739f4829a6fa723f225",
+   "status": "ok",
+   "output_sha256": "4f165e65b15e4caaf83320706d71d4693582edcb8d865d2e8f68c6a8e6a3517d"
+  },
+  {
+   "input": "seeds/foreign-cdata.html",
+   "input_sha256": "c882c508319f4aa5c3ad254f30f9adf8c008f422391bd5520d74f3a0f561d074",
+   "status": "ok",
+   "output_sha256": "aa5c9674c6125893d56f5e4bc5dcaa8af270f15772393421a38974c0415c5ad2"
+  },
+  {
+   "input": "seeds/foreign-end-tags-across.html",
+   "input_sha256": "0ed8775aa188b7e42728e1c0002e2c1f56e8c8a00d53c0496c451844cd224f56",
+   "status": "ok",
+   "output_sha256": "751d1a206f908ebcfa33c42bd0d58b1298a52879def45e9c5fe02ce7f6b632a6"
+  },
+  {
+   "input": "seeds/foreign-integration-points.html",
+   "input_sha256": "7dd8d5d5896e72649e1b98fcdd6296d2a234a3cdcbf8d9d138cb123b6ef0ab0b",
+   "status": "ok",
+   "output_sha256": "7c2c285880465f29c65334f79c779f104a59337bce27f80c7a4816024a3d449e"
+  },
+  {
+   "input": "seeds/foreign-nesting-and-end-tags.html",
+   "input_sha256": "ba52fd909a7ca5c61338cf7c73967342544af846390b851feca4b7f0a66df735",
+   "status": "ok",
+   "output_sha256": "1c379aa2e425d0be37460ce3404c7eb53cb9b0fad8e13f316d09148ee858f526"
+  },
+  {
+   "input": "seeds/foreign-raw-text-names.html",
+   "input_sha256": "75c628a63691a25a3fa3c6903061b3344df46dae80c57f3cb99febb07838ddfc",
+   "status": "ok",
+   "output_sha256": "bb5a0e11ce8da3d329d11b1405a74639f5c1340c76044f3754e342ba887f8cbf"
+  },
+  {
+   "input": "seeds/foreign-whitespace-and-eof.html",
+   "input_sha256": "08ed7bf5e0e3a44585f489ac9e6acbf2acf7760f78d5e6240561752c9f981ea6",
+   "status": "ok",
+   "output_sha256": "f1e43e37129c555376c209c563f8aabdaf9d3559300165a0acc3f2c4d3917823"
   },
   {
    "input": "seeds/high-bit-bytes.html",

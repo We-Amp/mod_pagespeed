@@ -27,6 +27,9 @@ filter; the etag filter after compression):
 - an expires directive cannot touch the module's own caching headers:
   rewritten HTML keeps max-age=0, no-cache and gains no Expires, and a
   .pagespeed. resource keeps its one-year cache extension;
+- rewritten HTML carries one Cache-Control line, which keeps the private
+  and no-store that add_header states (ModifyCachingHeaders off keeps
+  every line);
 - add_header applies exactly once to module-served responses;
 - the charset directive's decision survives on rewritten HTML;
 - an <img> inside an SSI-included fragment is optimized.
@@ -241,6 +244,66 @@ class TestExpiresAndAddHeader:
         x_test_order = _header_lines(header_lines, "X-Test-Order")
         assert x_test_order == ["yes"], (
             f"add_header must apply exactly once, got: {x_test_order}"
+        )
+
+
+def _cache_control_tokens(value: str):
+    """The directives of one Cache-Control line, lowercased, as a set."""
+    return {token.strip().lower() for token in value.split(",") if token.strip()}
+
+
+@pytest.mark.nginx_only
+class TestCacheControlLimitsKept:
+    """Rewritten HTML is never more storable than add_header said.
+
+    The module writes ONE Cache-Control line on rewritten HTML; the private
+    and no-store the operator states stay on it, and nothing else of the
+    operator's lines does.  With ModifyCachingHeaders off every line stays.
+    """
+
+    def _rewritten_lines(self, client: PageSpeedClient, test_root: str, name: str):
+        page_url = (
+            f"{test_root}/filter_order_cc/{name}.html?PageSpeedFilters=rewrite_css"
+        )
+        client.fetch_until(
+            page_url,
+            condition=lambda r: ".pagespeed.cf." in r.text,
+            timeout=30.0,
+        )
+        status, header_lines, _ = _raw_get(client, page_url)
+        assert status == 200, f"expected 200, got {status}"
+        return _header_lines(header_lines, "Cache-Control")
+
+    @pytest.mark.parametrize(
+        "name, expected",
+        [
+            ("no_store", {"max-age=0", "no-cache", "no-store"}),
+            ("private", {"max-age=0", "no-cache", "private"}),
+            ("both", {"max-age=0", "no-cache", "private", "no-store"}),
+            ("lines", {"max-age=0", "no-cache", "private", "no-store"}),
+            ("public", {"max-age=0", "no-cache"}),
+            ("no_store_long_html_cache", {"max-age=0", "no-cache", "no-store"}),
+        ],
+    )
+    def test_one_line_keeps_private_and_no_store(
+        self, client: PageSpeedClient, test_root: str, name: str, expected: set
+    ):
+        cache_control = self._rewritten_lines(client, test_root, name)
+        assert len(cache_control) == 1, (
+            f"rewritten HTML must carry ONE Cache-Control line, got: "
+            f"{cache_control}"
+        )
+        assert _cache_control_tokens(cache_control[0]) == expected, (
+            f"expected the directives {sorted(expected)}, got: {cache_control}"
+        )
+
+    def test_modify_caching_headers_off_keeps_every_line(
+        self, client: PageSpeedClient, test_root: str
+    ):
+        cache_control = self._rewritten_lines(client, test_root, "keep_all")
+        assert cache_control == ["public, max-age=600", "no-store"], (
+            f"ModifyCachingHeaders off must keep the operator's lines, got: "
+            f"{cache_control}"
         )
 
 

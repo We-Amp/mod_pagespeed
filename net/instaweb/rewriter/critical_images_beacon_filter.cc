@@ -103,9 +103,10 @@ void CriticalImagesBeaconFilter::InitStats(Statistics* statistics) {
 
 void CriticalImagesBeaconFilter::EndDocument() {
   // Re-checked here for pages without images, so the finder isn't told a
-  // beacon was initiated when CSP suppressed the beacon JS.
+  // beacon was initiated when CSP or a hydrated page suppressed the beacon JS.
   if (insert_beacon_js_ && !added_beacon_js_ &&
-      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute())) {
+      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute() ||
+       driver()->is_hydrated_document())) {
     insert_beacon_js_ = false;
   }
   CriticalImagesFinder* finder =
@@ -184,9 +185,13 @@ void CriticalImagesBeaconFilter::EndElementImpl(HtmlElement* element) {
   // page's CSP forbids either, don't instrument the page. The finder then
   // sees no beacon initiated and keeps following its usual no-data path.
   // Once the beacon JS is committed to the page we keep annotating images
-  // so the instrumentation stays consistent.
+  // so the instrumentation stays consistent. On a page a client-side framework
+  // hydrates, the script would land inside the framework's markup, which it
+  // compares with what it renders. The filter is not skipped there, because
+  // EndDocument() must still clear this document's beacon state.
   if (insert_beacon_js_ && !added_beacon_js_ &&
-      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute())) {
+      (!CspPermitsInlineScript() || !CspPermitsInlineScriptAttribute() ||
+       driver()->is_hydrated_document())) {
     insert_beacon_js_ = false;
   }
   if (element->keyword() != HtmlName::kImg &&

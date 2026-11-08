@@ -305,12 +305,21 @@ bool ResponseHeaders::CombineContentTypes(const StringPiece& orig,
       if (mime_type.empty()) {
         mime_type = fresh_mime_type;
       }
-      GoogleString full_type =
-          absl::StrFormat("%s;%s%s", mime_type.c_str(),
-                          charset.empty() ? "" : " charset=", charset.c_str());
+      GoogleString full_type;
+      if (charset.empty()) {
+        // No charset on either side, so the value is the mime type alone.
+        full_type = mime_type;
+      } else {
+        full_type = absl::StrFormat("%s; charset=%s", mime_type.c_str(),
+                                    charset.c_str());
+      }
       Replace(HttpAttributes::kContentType, full_type);
       ret = true;
     }
+  } else {
+    // The original already has a mime type and a charset, so there is
+    // nothing to fill in and the content type is left alone.
+    ret = false;
   }
   if (ret) {
     cache_fields_dirty_ = true;
@@ -735,6 +744,10 @@ void ResponseHeaders::ComputeCaching() {
   }
 
   HttpResponseHeaders* proto = mutable_proto();
+
+  // Forced caching is decided afresh on every recompute; do not carry it over
+  // from an earlier computation on the same headers.
+  force_cached_ = false;
 
   ConstStringStarVector values;
   int64 date_ms, last_modified_ms;

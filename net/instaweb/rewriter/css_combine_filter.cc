@@ -31,6 +31,7 @@
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
 #include "net/instaweb/rewriter/input_info.pb.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
@@ -41,6 +42,7 @@
 #include "net/instaweb/rewriter/public/rewrite_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_filter.h"
+#include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "net/instaweb/rewriter/public/server_context.h"
@@ -77,6 +79,8 @@ class CssCombineFilter::CssCombiner : public ResourceCombiner {
         combined_css_size_(0) {
     Statistics* stats = server_context_->statistics();
     css_file_count_reduction_ = stats->GetVariable(kCssFileCountReduction);
+    css_parse_max_bytes_exceeded_ =
+        stats->GetVariable(CssFilter::kParseMaxBytesExceeded);
   }
 
   bool CleanParse(const StringPiece& contents) {
@@ -93,6 +97,25 @@ class CssCombineFilter::CssCombiner : public ResourceCombiner {
 
   bool ResourceCombinable(Resource* resource, GoogleString* failure_reason,
                           MessageHandler* handler) override {
+    if (!HasCombinationContentType(resource, failure_reason)) {
+      return false;
+    }
+
+    // Parsing costs memory many times the size of the stylesheet, so one over
+    // CssParseMaxBytes is not parsed here either: it is left out of the
+    // combination, and its link is left alone.
+    if (CssFilter::OverParseMaxBytes(
+            rewrite_driver_->options(),
+            resource->ExtractUncompressedContents().size(),
+            resource->UrlForDebug(), "CSS not combined",
+            css_parse_max_bytes_exceeded_, handler, nullptr)) {
+      *failure_reason = StrCat(
+          "CSS larger than CssParseMaxBytes (",
+          Integer64ToString(rewrite_driver_->options()->css_parse_max_bytes()),
+          ")");
+      return false;
+    }
+
     // If this CSS file is not parseable it may have errors that will break
     // the rest of the files combined with this one. So we should not include
     // it in the combination.
@@ -169,6 +192,7 @@ class CssCombineFilter::CssCombiner : public ResourceCombiner {
                   MessageHandler* handler) override;
 
   GoogleString media_;
+  Variable* css_parse_max_bytes_exceeded_;
   Variable* css_file_count_reduction_;
   int64 combined_css_size_;
 };
@@ -526,7 +550,7 @@ void CssCombineFilter::StartElementImpl(HtmlElement* element) {
 void CssCombineFilter::NextCombination(StringPiece debug_failure_reason) {
   if (!context_->empty()) {
     if (DebugMode() && !debug_failure_reason.empty()) {
-      driver()->InsertComment(
+      driver()->InsertDebugCommentHere(
           StrCat("combine_css: Could not combine over "
                  "barrier: ",
                  debug_failure_reason));

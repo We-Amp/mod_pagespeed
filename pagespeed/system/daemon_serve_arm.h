@@ -127,6 +127,10 @@ inline constexpr char kSubstrateUnavailable[] = "substrate-unavailable";
 // `no-entry`: the entry exists (possibly stale, from an earlier store) and is
 // being declined on purpose.
 inline constexpr char kHtmlClassicChain[] = "html-classic-chain";
+// The request carries no site id (IsSiteId).  Nothing is read: an entry of
+// the optimizer worker may be served only under the site that admitted the
+// request, and without one there is no keyspace to read.
+inline constexpr char kNoSiteId[] = "no-site-id";
 }  // namespace daemon_serve_reason
 
 // Everything the arm reads about the request.  Every StringPiece is borrowed
@@ -144,6 +148,15 @@ struct DaemonServeRequest {
   StringPiece url;  // Path form; see UrlIsKeySafe.
   StringPiece hostname;
   StringPiece scheme;
+
+  // The site of the server block, virtual host or IIS site that admitted the
+  // request: SiteIdFromServerFragment of its SERVER-scope fragment, never of
+  // a fragment from per-directory or per-request options, and never anything
+  // the client sent.  Every read is made in its keyspace and every
+  // notification names it; a request without a site id is declined
+  // (daemon_serve_reason::kNoSiteId) before any read.  Borrowed: the port
+  // holds the string for as long as the request is served.
+  StringPiece site;
 
   StringPiece accept;
   StringPiece user_agent;
@@ -220,6 +233,12 @@ struct DaemonServeDecision {
   // against a real origin length (the saving is measured against it), and 0
   // is "not recorded", never "the origin sent nothing".
   uint32_t origin_content_length = 0;
+  // The origin bytes encoded the way the selected entry is served, when the
+  // entry records it (see DaemonAbi::ReadEncodedOriginLength); the saving is
+  // split against it.  encoded_origin_known is false for an entry written
+  // before it existed and for a daemon that cannot report it.
+  uint64_t encoded_origin_length = 0;
+  bool encoded_origin_known = false;
 
   // The peer's content-type class of the entry being served, in the kPsContent*
   // numbering.  Carried because a fallback re-notify names it; distinct from
@@ -257,6 +276,13 @@ struct DaemonServeDecision {
   // Consumed by the serving seam, which answers it with ONE worker re-notify;
   // see DaemonServeFallbackRenotify.
   bool fallback_hit = false;
+
+  // This response carries the shortened lifetime of an image made for another
+  // device (kServeDeviceFallbackMaxAgeSeconds).  Narrower than `fallback_hit`,
+  // which also covers the format axis and non-image content.  A port whose
+  // server can replace `Cache-Control` after this arm composed it must put
+  // this response's field back.
+  bool device_fallback_lifetime = false;
 
   // AGE-EXPIRED VARIANT: a SELECTED VARIANT was declined on freshness --
   // verdict revalidate or stale-retired -- and the peer's freshness evaluator
@@ -430,6 +456,18 @@ struct DaemonServeDecision {
 
   StringPiece body;
 };
+
+// The longest lifetime a downstream cache is given for an image variant served
+// to a client whose viewport, density or Save-Data value it was not made for.
+// The client's own variant is usually written within seconds, and from then on
+// a cache must not keep answering with this one.  A short lifetime rather than
+// an uncacheable response: when the client's own variant takes long or never
+// comes, a cache that does not read `Age` (nginx proxy_cache) still absorbs
+// the traffic and revalidates once a minute.  `Age` is sent as it is, so a
+// cache that reads it (Varnish) finds a stand-in from an entry older than
+// this already stale and passes such requests through; that costs it hits,
+// never correctness.
+inline constexpr uint32_t kServeDeviceFallbackMaxAgeSeconds = 60;
 
 class RewriteStats;
 
@@ -1039,11 +1077,12 @@ class DaemonHealNotifyLimiter {
   DaemonHealNotifyLimiter(const DaemonHealNotifyLimiter&) = delete;
   DaemonHealNotifyLimiter& operator=(const DaemonHealNotifyLimiter&) = delete;
 
-  // The URL as this limiter knows it: the keyed hash of scheme, host and
-  // path, with the host taken the way the cache key takes it (letters
-  // lowercased, one trailing dot and a default port dropped).  Allocates
+  // The URL as this limiter knows it: the keyed hash of the site, scheme,
+  // host and path, with the host taken the way the cache key takes it
+  // (letters lowercased, one trailing dot and a default port dropped).  The
+  // same URL in two sites is two keys, as it is two entries.  Allocates
   // nothing.
-  uint64 UrlKey(StringPiece scheme, StringPiece hostname,
+  uint64 UrlKey(StringPiece site, StringPiece scheme, StringPiece hostname,
                 StringPiece url) const;
 
   // True when the URL has not been looked at during the last
@@ -1056,7 +1095,8 @@ class DaemonHealNotifyLimiter {
   bool AdmitAskKey(uint64 url_key, int64 now_seconds);
 
   // The same two questions for a URL given as text, hashed exactly as
-  // written ("scheme://host/path", the host already in the cache's form).
+  // written ("<site>\nscheme://host/path", the host already in the cache's
+  // form).
   bool ShouldLook(StringPiece key, int64 now_seconds);
   bool AdmitAsk(StringPiece key, int64 now_seconds);
 
@@ -1270,6 +1310,14 @@ class DaemonServeStats {
   // records.  One record per call either way.
   void RecordHit(int content_type, uint64_t original_bytes,
                  uint64_t optimized_bytes, uint32_t mask, StringPiece host);
+
+  // The same, also accounted in the split of the saving into what the served
+  // encoding saved and what the rewrite saved, against `encoded_origin_bytes`
+  // (the entry's recorded encoded origin size).  An optimizer from before the
+  // split records exactly what the host form records.  One record per call.
+  void RecordHitSplit(int content_type, uint64_t original_bytes,
+                      uint64_t encoded_origin_bytes, uint64_t optimized_bytes,
+                      uint32_t mask, StringPiece host);
 
   // Whether the mmap is currently open.  Test seam and evidence only.
   bool open() const { return handle_ != nullptr; }

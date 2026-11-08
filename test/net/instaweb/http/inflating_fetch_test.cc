@@ -32,10 +32,12 @@
 #include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/util/gzip_inflater.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "test/pagespeed/kernel/base/gtest.h"
 
@@ -83,6 +85,37 @@ class MockFetch : public StringAsyncFetch {
   MockFetch& operator=(const MockFetch&) = delete;
 };
 
+// Counts the body bytes it is given rather than keeping them.
+class CountingFetch : public StringAsyncFetch {
+ public:
+  explicit CountingFetch(const RequestContextPtr& ctx)
+      : StringAsyncFetch(ctx) {}
+  ~CountingFetch() override {}
+
+  bool HandleWrite(const StringPiece& content,
+                   MessageHandler* handler) override {
+    bytes_ += content.size();
+    return true;
+  }
+
+  int64 bytes() const { return bytes_; }
+
+ private:
+  int64 bytes_ = 0;
+
+  CountingFetch(const CountingFetch&) = delete;
+  CountingFetch& operator=(const CountingFetch&) = delete;
+};
+
+// Returns the given number of blanks, gzipped.
+GoogleString GzippedBlanks(int64 size) {
+  GoogleString gzipped;
+  StringWriter writer(&gzipped);
+  EXPECT_TRUE(GzipInflater::Deflate(GoogleString(size, ' '),
+                                    GzipInflater::kGzip, &writer));
+  return gzipped;
+}
+
 class InflatingFetchTest : public testing::Test {
  protected:
   InflatingFetchTest()
@@ -97,7 +130,17 @@ class InflatingFetchTest : public testing::Test {
     inflating_fetch_ = new InflatingFetch(mock_fetch_.get());
   }
 
+  // Swaps the mock fetch for one that only counts the bytes it is given, so
+  // that a large inflated body is never held in memory.
+  void UseCountingFetch() {
+    inflating_fetch_->Done(false);  // Self-deletes.
+    counting_fetch_ = std::make_unique<CountingFetch>(
+        RequestContext::NewTestRequestContext(thread_system_.get()));
+    inflating_fetch_ = new InflatingFetch(counting_fetch_.get());
+  }
+
   std::unique_ptr<MockFetch> mock_fetch_;
+  std::unique_ptr<CountingFetch> counting_fetch_;
   // Self-deletes in Done(), so no need to deallocate.
   InflatingFetch* inflating_fetch_;
   GoogleMessageHandler message_handler_;
@@ -128,6 +171,40 @@ TEST_F(InflatingFetchTest, AutoInflateGarbage) {
   inflating_fetch_->Done(true);
   EXPECT_TRUE(mock_fetch_->done());
   EXPECT_FALSE(mock_fetch_->success());
+}
+
+const int64 kTestLimit = 1 << 20;
+
+// Tests that a body past the limit fails the fetch at the limit.
+TEST_F(InflatingFetchTest, AutoInflateStopsAtLimit) {
+  UseCountingFetch();
+  inflating_fetch_->set_max_inflated_bytes(kTestLimit);
+  inflating_fetch_->response_headers()->Add(HttpAttributes::kContentEncoding,
+                                            HttpAttributes::kGzip);
+  inflating_fetch_->response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  EXPECT_FALSE(inflating_fetch_->Write(
+      GzippedBlanks(16 * kTestLimit), &message_handler_));
+  EXPECT_FALSE(inflating_fetch_->Write("more", &message_handler_));
+  inflating_fetch_->Done(true);
+  EXPECT_LT(0, counting_fetch_->bytes());
+  EXPECT_GE(kTestLimit, counting_fetch_->bytes());
+  EXPECT_TRUE(counting_fetch_->done());
+  EXPECT_FALSE(counting_fetch_->success());
+}
+
+// Tests that a body that inflates to exactly the limit is let through.
+TEST_F(InflatingFetchTest, AutoInflateUpToLimit) {
+  UseCountingFetch();
+  inflating_fetch_->set_max_inflated_bytes(kTestLimit);
+  inflating_fetch_->response_headers()->Add(HttpAttributes::kContentEncoding,
+                                            HttpAttributes::kGzip);
+  inflating_fetch_->response_headers()->SetStatusAndReason(HttpStatus::kOK);
+  EXPECT_TRUE(inflating_fetch_->Write(
+      GzippedBlanks(kTestLimit), &message_handler_));
+  inflating_fetch_->Done(true);
+  EXPECT_EQ(kTestLimit, counting_fetch_->bytes());
+  EXPECT_TRUE(counting_fetch_->done());
+  EXPECT_TRUE(counting_fetch_->success());
 }
 
 // Tests that if we ask for clear text but get a properly compressed buffer,
@@ -359,6 +436,22 @@ TEST(StaticInflatingFetchTest, CompressUncompressValue) {
   uncompressed_value.ExtractContents(&contents);
   // We've unzipped the compressed value, it should now say "hello".
   EXPECT_EQ(kHello, contents);
+}
+
+// Tests that a value that inflates past the limit it is given is left
+// compressed.
+TEST(StaticInflatingFetchTest, UncompressValueStopsAtLimit) {
+  GoogleMessageHandler handler;
+  HTTPValue compressed_value;
+  compressed_value.Write(GzippedBlanks(16 * kTestLimit), &handler);
+  ResponseHeaders headers;
+  headers.Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
+  compressed_value.SetHeaders(&headers);
+  HTTPValue uncompressed_value;
+  EXPECT_FALSE(InflatingFetch::UnGzipValueIfCompressed(
+      compressed_value, &headers, &uncompressed_value, &handler, kTestLimit));
+  EXPECT_TRUE(uncompressed_value.Empty());
+  EXPECT_TRUE(headers.IsGzipped());
 }
 
 // TODO(jmarantz): test 'deflate' without gzip

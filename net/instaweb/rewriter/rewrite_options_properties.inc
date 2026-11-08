@@ -51,8 +51,12 @@
     kDirectoryScope, \
     "Base level of rewriting (PassThrough, CoreFilters)", true) \
   X(kDefaultCssFlattenMaxBytes, css_flatten_max_bytes_, "cf", \
-    kCssFlattenMaxBytes, kQueryScope, \
+    kCssFlattenMaxBytes, kDirectoryScope, \
     "Number of bytes below which stylesheets will be flattened.", true) \
+  X(kDefaultCssParseMaxBytes, css_parse_max_bytes_, "cpmb", \
+    kCssParseMaxBytes, kDirectoryScope, \
+    "Largest stylesheet, in bytes, that the CSS rewriter will parse; larger " \
+    "ones are passed through unmodified (<= 0 for no limit).", true) \
   X(kDefaultCssImageInlineMaxBytes, css_image_inline_max_bytes_, "cii", \
     kCssImageInlineMaxBytes, kQueryScope, \
     "Number of bytes below which CSS images will be inlined.", true) \
@@ -71,6 +75,14 @@
   X(kDefaultImageInlineMaxBytes, image_inline_max_bytes_, "ii", \
     kImageInlineMaxBytes, kQueryScope, \
     "Number of bytes below which images will be inlined.", true) \
+  X(kDefaultDocumentImageInlineMaxBytes, document_image_inline_max_bytes_, \
+    "dii", kDocumentImageInlineMaxBytes, kQueryScope, \
+    "Most image bytes inlined into one document; further images are " \
+    "left as links.", true) \
+  X(kDefaultDebugOutputMaxBytes, debug_output_max_bytes_, "dob", \
+    kDebugOutputMaxBytes, kDirectoryScope, \
+    "Most bytes of debug comments written into one document " \
+    "(0 = unbounded).", true) \
   X(kDefaultJsInlineMaxBytes, js_inline_max_bytes_, "ji", \
     kJsInlineMaxBytes, kQueryScope, \
     "Number of bytes below which javascript will be inlined.", true) \

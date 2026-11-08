@@ -785,6 +785,51 @@ TEST_F(IisConfigurationTest, LogDirWithLongExpansion) {
   EXPECT_EQ(expected, rwo.log_dir());
 }
 
+// The documented form sets the option; before the fix the line was skipped.
+TEST_F(IisConfigurationTest, RemoteConfigUrlPrefixedFormIsApplied) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig("pagespeed RemoteConfigurationUrl http://example.com/config\n",
+                    "", &rwo);
+  EXPECT_EQ("http://example.com/config", rwo.remote_configuration_url());
+}
+
+TEST_F(IisConfigurationTest, RemoteConfigUrlBareFormIsApplied) {
+  IisRewriteOptions rwo(nullptr);
+  ParseAndGetConfig("RemoteConfigurationUrl http://example.com/config\n", "",
+                    &rwo);
+  EXPECT_EQ("http://example.com/config", rwo.remote_configuration_url());
+}
+
+// Machine-wide settings that IIS does not apply are reported, not ignored
+// silently.
+TEST_F(IisConfigurationTest, UsePerVHostStatisticsIsReportedAsUnsupported) {
+  RecordingMessageHandler recorder;
+  IisRewriteOptions rwo(nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed UsePerVHostStatistics off\n", &recorder, global_config_,
+      nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(1, recorder.CountContaining(
+                   "UsePerVHostStatistics is not supported on IIS"));
+}
+
+TEST_F(IisConfigurationTest, SharedMemoryMetadataCacheIsReportedAsUnsupported) {
+  RecordingMessageHandler recorder;
+  IisRewriteOptions rwo(nullptr);
+  std::map<std::string, std::string> input;
+  input["config"] = "base";
+  ConfigurationFile* cf = CreateTestConfigFile(
+      "pagespeed CreateSharedMemoryMetadataCache /cache 8192\n", &recorder,
+      global_config_, nullptr);
+  TestConfigFileGetConfig(cf, input, rwo);
+  TestConfigFileRelease(cf);
+  EXPECT_EQ(1, recorder.CountContaining(
+                   "CreateSharedMemoryMetadataCache is not supported on IIS"));
+}
+
 TEST_F(IisConfigurationTest, RemoteConfigUrlMultipleSubsequentLines) {
   // Verify that RemoteConfigurationUrl doesn't disturb parsing of
   // multiple subsequent lines (not just the immediately following one).

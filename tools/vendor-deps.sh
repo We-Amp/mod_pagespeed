@@ -54,11 +54,11 @@ CYCLONE_BRANCH=$(grep -A2 'name = "cyclone"' bazel/repositories.bzl | grep 'bran
 rm -rf "$CYCLONE_DIR"
 if [ -n "$CYCLONE_COMMIT" ]; then
     echo "    Cyclone commit: $CYCLONE_COMMIT"
-    git clone git@github.com:We-Amp/cyclone-cache.git "$CYCLONE_DIR"
+    git clone https://github.com/We-Amp/cyclone-cache.git "$CYCLONE_DIR"
     (cd "$CYCLONE_DIR" && git checkout "$CYCLONE_COMMIT")
 elif [ -n "$CYCLONE_BRANCH" ]; then
     echo "    Cyclone branch: $CYCLONE_BRANCH"
-    git clone --depth 1 --branch "$CYCLONE_BRANCH" git@github.com:We-Amp/cyclone-cache.git "$CYCLONE_DIR"
+    git clone --depth 1 --branch "$CYCLONE_BRANCH" https://github.com/We-Amp/cyclone-cache.git "$CYCLONE_DIR"
 else
     echo "ERROR: Could not extract Cyclone commit or branch from bazel/repositories.bzl" >&2
     exit 1
@@ -124,7 +124,7 @@ else:
 # 2. Fetch all external deps (BCR modules, their registry files and the
 #    non_bcr_deps extension repos) into the repository cache.
 #    Use --override_repository for the git_repository deps we just vendored
-#    so bazel doesn't try to git-clone them (which would fail without SSH).
+#    so bazel doesn't try to git-clone them (the vendored copy is used instead).
 #    They are extension repos, so the override takes the canonical name.
 # -----------------------------------------------------------------------
 

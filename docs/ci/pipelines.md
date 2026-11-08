@@ -65,7 +65,7 @@ tier.
 | `lock-push` | hosted | `lock-check` | commits a stale lock to the branch of a same-repository pull request (or a branch dispatch). Holds the only write token of the pipeline, never runs for a merge group or a fork, and runs none of the tree's code |
 | `vendor` | `fleet-heavy` | `changes` | vendors the dependencies and asserts that every registry file `MODULE.bazel.lock` pins is in the repository cache; publishes the tarball (hub channel) or caches `vendor/` (cache channel). Runs only when the fleet scope is on (`needs.changes.outputs.fleet`), so a push the merge queue already proved can skip every build runner leg |
 | `linux-build` | `fleet-heavy` | `changes`, `vendor` | builds both server modules and the test targets in the dev image, checks the modules' symbols, uploads the `ci-artifacts-linux-x64` bundle |
-| `linux-unit-tests` | `fleet-heavy` | `changes`, `vendor`, `linux-build` | unit tests against throw-away Redis and memcached containers |
+| `linux-unit-tests` | `fleet-heavy` | `changes`, `vendor` | unit tests against throw-away Redis and memcached containers. Starts beside `linux-build`, not after it: it uses none of that job's outputs and builds its own test tree |
 | `lint` | `fleet-heavy` | `changes`, `vendor` | clang-tidy (scoped to the pull request) and clang-format |
 | `js-minify-corpus` | `fleet-heavy` | `changes`, `vendor` | JS minifier oracles and goldens freshness gate |
 | `html-parse-corpus` | `fleet-heavy` | `changes`, `vendor` | HTML parse goldens freshness gate |
@@ -75,6 +75,7 @@ tier.
 | `windows-build` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor` | builds the IIS module with clang-cl, uploads the `ci-artifacts-win-x64` bundle |
 | `windows-unit-tests` | `fleet-windows` (`windows-2022` for forks and hosted-routed merge groups) | `changes`, `vendor`, `windows-build` | Windows unit tests |
 | `iis-sys-tests` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests` | the IIS system tests against the module from the `windows-build` bundle, on the host's full IIS, with the pinned optimizer worker running beside it (fetched and verified like the installer does, loopback management API behind a per-run token; an extra site, with its own file cache directory and a one-hour client cache lifetime, gets `DaemonSocketPath` and `DaemonVolumePath`; the job waits until it answers, and its base URL is exported as `PAGESPEED_IIS_DAEMON_SITE_URL`. The main site keeps classic in-place optimization. Nothing sends requests to the extra site until the full purge test is changed to use that URL, and that test skips until the pinned optimizer carries the purge fixes; an unreachable pinned release fails the job; the worker volume is emptied at each start). Skipped (not failed) for fork and Dependabot pull requests, for a merge group routed to hosted runners, while `FLEET_ENABLED` is `false` and while `FLEET_IIS_ENABLED` is not `true`, and when the `iis` path filter finds no IIS-relevant change; carries the "only" guard below |
+| `iis-sys-tests-retry` | `fleet-iis`, no hosted side | `changes`, `windows-build`, `windows-unit-tests`, `iis-sys-tests` | runs only when `iis-sys-tests` failed for a reason of the host (see "IIS infrastructure failures"): two legs, `IIS System Tests (retry 1)` and `(retry 2)`; the leg that lands on the runner that just failed holds it until the other has a runner, so the tests run once more on a different one. Skipped otherwise |
 | `fleet-off-notice` | hosted | | runs only while `FLEET_ENABLED` is `false` and says what the switch changed |
 | `fleet-only-skip-check` | hosted | `windows-build`, `windows-unit-tests`, `iis-sys-tests` | fails when `iis-sys-tests` was skipped for none of the allowed reasons (switch off, fork or Dependabot, a merge group routed to hosted runners, `FLEET_IIS_ENABLED` not `true`, the `iis` path filter false, a failed prerequisite) |
 
@@ -159,12 +160,12 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   of `install/nginx/build_module_in_container.sh` in an Ubuntu 20.04 container
   pinned by digest (`FOCAL_IMAGE` in the script). Its glibc 2.31 is the
   compatibility floor of the sidecar, with libstdc++ linked statically. The
-  matched nginx also links `libpcre.so.3` (the `libpcre3` package), which is
-  what limits the hosts to Debian 11 and 12 and Ubuntu 20.04 to 24.04: Debian 13
-  and Ubuntu 26.04 no longer ship `libpcre3`, and Enterprise Linux and Amazon
-  Linux never had it under that name. (`libcrypt.so.1` is no obstacle: it is
-  `libcrypt1` on Debian and Ubuntu and `libxcrypt-compat` on EL9 and Amazon
-  Linux 2023.) Ubuntu 20.04 is past
+  matched nginx is built against PCRE2 10.49 (`PCRE2_VERSION` in the recipe,
+  compiled from the sha256-pinned upstream tarball, bumped with the nginx pin)
+  and links it statically, so the pair needs no PCRE library on the host. It is
+  tested on Debian 11, 12 and 13 and Ubuntu 26.04; Enterprise Linux and Amazon
+  Linux are not supported. (`libcrypt.so.1` is `libcrypt1` on
+  Debian and Ubuntu.) Ubuntu 20.04 is past
   its standard support (May 2025); it is only the build base, and nothing of
   it ships beyond what the glibc 2.31 floor implies. Moving to a newer base
   raises the floor and drops the hosts below it, so it is a support decision,
@@ -172,8 +173,8 @@ uses the same script for the pair it releases (`docs/ci/release.md`).
   with this paragraph if the base changes.
 - **Gates.** The module exports only the nginx module symbols and links no
   OpenSSL; nginx and the shim link no OpenSSL; none of the three needs
-  libstdc++ or a glibc above 2.31. The pair then loads, serves and optimizes in
-  Debian 11 and Debian 12 containers (`test/package-test/check-sidecar-pair.sh`:
+  libstdc++, a PCRE library of the host or a glibc above 2.31. The pair then loads, serves and optimizes in
+  Debian 11, 12 and 13 and Ubuntu 26.04 containers (`test/package-test/check-sidecar-pair.sh`:
   `X-Page-Speed` carries the version of the tree, no `X-PageSpeed-Warn`), is
   stripped (debug files kept apart), and goes through the gate and the smoke
   again.
@@ -386,7 +387,7 @@ pair (it succeeds when one of the two legs did) and the dependent jobs `need`
 the join. GitHub skips a job when any ancestor job was skipped, so those
 dependents state their status check themselves: a build runner job's `if:` is
 `${{ !cancelled() && needs.<job>.result == 'success' && (<fleet guard>) }}`
-(the workflow-shape gate accepts that form), a hosted one omits the guard. Steps shared by the two jobs, and by an arm64 job, are written once
+(the workflow-shape gate accepts that form; in the module release lane the prefix may also hold `needs.adopt.outputs.adopted != 'true'`, which skips the job in a run that adopts a candidate), a hosted one omits the guard. Steps shared by the two jobs, and by an arm64 job, are written once
 with a YAML anchor.
 
 ## Artifacts
@@ -445,6 +446,7 @@ Fuzz crash reproducers and corpora are uploaded as workflow artifacts of a publi
 | `apache-asan-stress` | fleet-heavy, fleet only | ASan module under graceful reload and restart load in the Apache rig; the sweep step is the gate |
 | `apache-daemon-lane` | fleet-heavy | the Apache system tests with the daemon lane required, then the admin console's live Playwright project (one worker) against the test server left running; the report is kept on failure |
 | `shared-cache-vary` | fleet-heavy, fleet only | the Apache and nginx modules built from the tree, in the packaged install of the pinned optimizer pair, behind nginx `proxy_cache` and Varnish (stock and device-class keyed): fails when a cache hands one client another's image variant (`test/system/shared_cache/run.sh`). By default the packaged install comes from the public package repository, with the fresh library swapped in; the `shared_cache_packages=local` dispatch input installs the module packages built from the tree and the pinned optimizer release (verified against the pin) instead, so the check can run before the pair is published; such a dispatch is titled `Nightly (local packages)` and its job summary names the mode. It does not show repository contents, signatures or the `install.sh` path |
+| `hydration-browser` | fleet-heavy, fleet only | the Apache and nginx modules built from the tree, in the packaged install of the pinned optimizer pair, serving pinned React, Next, Vue, Nuxt and Svelte fixtures to real Chromium with detection on and off (`test/browser/hydration/run_module_check.sh`) |
 | `nginx-asan-stress` | fleet-heavy, fleet only | the same for the nginx module |
 | `nginx-protocol-matrix` | fleet-heavy, fleet only | the proxy-cache race smoke over HTTP/1.1 and HTTP/2 (`protocols` input to change the list) |
 | `full-tree-lint` | fleet-heavy, three shards | clang-tidy over the whole tree, split into three matrix shards by a hash of the file path, the backstop for what the pull request lint's include graph cannot see |
@@ -551,8 +553,12 @@ The body names jobs, SHAs, targets and run links only.
 When no job failed, the open issue is closed, with a comment, once every job
 named by a marker line is green in this run. **A re-run never closes it:** on
 `GITHUB_RUN_ATTEMPT` 2 or later the script only comments, because a re-run
-that goes green is a flake signal and not evidence of a fix. An API failure
-fails the job, so a reporter that could not report is visible. A run on any
+that goes green is a flake signal and not evidence of a fix. Every read is
+retried on a transient failure (HTTP 5xx, a timeout, a dropped connection),
+up to 5 tries with a doubling delay from `REPORT_RETRY_BASE_SECONDS` (10 s);
+writes are sent once. An API failure that outlasts the retries, or one that
+is not transient, fails the job, so a reporter that could not report is
+visible. A run on any
 ref other than `master` is a dry run that prints what it would write.
 `tools/ci/test_nightly_red_report.sh` and `tools/ci/test_failing_targets.sh`
 (in `CI tooling self-tests`) pin this behaviour.
@@ -602,7 +608,7 @@ a failed or undecided scope job, no usable base or an API failure runs it.
 | `windows-build` | `fleet-windows` | general | release build of the IIS module; its bundle feeds `win-appverif` |
 | `win-asan` | `fleet-windows` | general | Windows ASan build and unit tests; skips with a notice when LLVM 19 with its sanitizer runtime is not found |
 | `win-appverif` | `fleet-iis` | only | Application Verifier, full page heap and concurrency fuzzing on the IIS worker process. Needs the IIS role, administrator rights and the Windows SDK debugging tools, so it has no hosted side and a fork or Dependabot pull request skips it |
-| `linux-arm64-build`, `linux-arm64-unit-tests`, `linux-arm64-apache-sys-tests`, `linux-arm64-nginx-sys-tests` | hosted (`ubuntu-24.04-arm`) | none | the arm64 build vendors for itself into `actions/cache` and uploads its module bundle; the unit tests restore that vendored tree (and vendor again on a miss) and the system tests use the bundle. The build and unit tests share one Bazel disk cache entry per ISO week (`mod-pagespeed-bazel-disk-arm64-<YYYY-Www>`, restored by prefix, capped at 3G before the save), so the hosted jobs add at most one multi-GB entry a week to the repository's 10 GB `actions/cache` quota instead of one per run |
+| `linux-arm64-build`, `linux-arm64-unit-tests`, `linux-arm64-apache-sys-tests`, `linux-arm64-nginx-sys-tests` | hosted (`ubuntu-24.04-arm`) | none | the arm64 build vendors for itself into `actions/cache` and uploads its module bundle; the unit tests start beside the build (they use none of its outputs), restore the same vendored tree (and vendor again on a miss), and the system tests use the bundle. The build and unit tests share one Bazel disk cache entry per ISO week (`mod-pagespeed-bazel-disk-arm64-<YYYY-Www>`, restored by prefix, capped at 3G before the save), so the hosted jobs add at most one multi-GB entry a week to the repository's 10 GB `actions/cache` quota instead of one per run |
 | `sidecar-pair` | `fleet-heavy` | switch, `sidecar_pair` filter | builds the sidecar's native pair for x64, gates it and runs the sidecar tests with the live nginx tests against it (see "The sidecar native pair") |
 | `sidecar-pair-arm64` | hosted (`ubuntu-24.04-arm`) | `sidecar_pair` filter | the same for arm64 |
 
@@ -618,6 +624,8 @@ Notes on the full tier:
   workflow. Change a job's flags in `.bazelrc`, not in the YAML.
 - Sanitizer jobs wait for `linux-build` (not only for `vendor`), so they never
   compete with the build for a heavy slot.
+- Running the same builds locally, in the dev container: see the compiler and
+  linker settings in [DEVELOPER.md](../../DEVELOPER.md).
 - Containers run as the host user. The job supplies a passwd file that names
   that user `dev`, the name the dev image's sudo rules know. No job mounts the
   container socket or runs a privileged container.
@@ -719,6 +727,41 @@ checkout of `master` with full history and tags, so the guard code is never the
 tree being released.
 `tools/ci/test_ref_guard.sh` is its self-test.
 
+Candidate mode (`candidate: true`, with the dispatch's `sha` and `dry_run`)
+lets a manual dispatch on `master` name a release tag that does not exist yet,
+so the module lane can build and check it without a pre-release tag. The guard
+then requires the event `workflow_dispatch`, the ref `refs/heads/master`,
+`dry_run` true, a tag absent from the remote that is `X.Y.Z` or `X.Y.Z-rc.N`,
+and a 40-hex `sha` equal to the commit the run is at; the ref it outputs is
+that commit. The run never enters the `release` environment, and ends with a
+seal of its artifacts (docs/ci/release.md, "A candidate run").
+`tools/ci/check-workflow-shape.sh` requires every `environment: release` job
+of the module lane to refuse a dry run, a candidate and a rehearsal in its
+`if:`.
+
+A real run of a tag whose message names a candidate run (the
+`Release-Candidate-*` trailers) adopts that run's artifacts instead of
+rebuilding them (docs/ci/release.md, "Adopting a candidate run"). The shape
+gate keeps that safe: the module lane's jobs whose `if:` has
+`needs.adopt.outputs.adopted != 'true'` must be exactly the adoptable jobs of
+`tools/ci/release_adopt.py schema --print`, a job without that condition may
+download only artifacts that the adopting run holds, and the `adopt` job
+uploads the schema's re-uploaded set and `adopt-binding` (rule adopt-shape,
+fixtures `good-adopt` and `bad-adopt-*`). `tools/ci/release_job_graph.py
+compare` renders the lane's conditions for a plain dry run and a tag push
+without trailers, where the adoption terms fold away.
+
+Rehearsal mode (`rehearsal: true`) is the weekly lane rehearsal
+(docs/ci/release.md, "The weekly rehearsal"). The guard then requires the
+event `schedule` or `workflow_dispatch`, the ref `refs/heads/master`, an empty
+tag, `dry_run` true and no candidate; the ref it outputs is the commit the run
+is at. A `schedule` event is refused unless it is a rehearsal. The event
+guards of the module lane and of the two gates it calls allow `schedule` for
+that reason. The weekly caller is `release-rehearsal.yml`; a red run is
+reported by the nightly's red reporter under the label `lane-rehearsal-red`
+(`REPORT_LABEL`, `REPORT_TITLE`, `REPORT_JOB_PREFIX` and `REPORT_HISTORY` of
+`tools/ci/nightly_red_report.sh`; the defaults are the nightly's).
+
 ## The queued-run sweep
 
 A job whose runner label nothing serves (a retired label, or a runner class
@@ -737,6 +780,91 @@ The threshold is a repository variable: set `SWEEP_MAX_AGE_MINUTES` (a whole
 number of minutes) to override the 30 minute default. The logic is tested
 against a fake `gh` by `tools/ci/test_sweep_queued_runs.sh`, which the sweep
 job runs first.
+
+## IIS infrastructure failures
+
+The IIS system tests run on a real IIS, and a host can fail them on its own:
+the test site cannot bind its ports (`appcmd start site` keeps failing with
+hresult 0x80070020), or HTTP.sys cannot bind its IPv6 transport until the
+host reboots. In the measurement of 2026-10-30 to 2026-11-06 all 9 merge-queue
+failures of `IIS System Tests` were of this kind, on one runner. Each one
+ejected a pull request from the queue and rebuilt the entries behind it.
+
+- **Classify.** When the setup script (`test/system/setup_iis_full.ps1`)
+  gives up on starting the site it writes `infra-class.txt` (a reason token:
+  `iis-site-start` or `httpsys-ipv6-wedge`) into the evidence directory.
+  After a failed test step, `tools/ci/iis_failure_class.py` reads it:
+  `infra <reason>` for a known token, `test` for anything else (no marker,
+  an unknown or malformed one).
+- **Retry once, elsewhere.** A `test` failure fails `iis-sys-tests` as
+  before. An `infra` failure ends it green, with a warning that names the
+  runner and the reason and the outputs `failure_class=infra`,
+  `failure_reason` and `runner`. Then `iis-sys-tests-retry` queues two legs
+  on `fleet-iis`. The leg that lands on the runner that just failed holds it
+  without testing until the other leg has a runner (it reads the run's job
+  list, hence `actions: read`), then ends green; with no other runner in 40
+  minutes it fails. Every leg that lands elsewhere runs all the tests, and
+  any failure there fails the job, an infrastructure failure included. A
+  marker can therefore cost one retry, but it cannot turn a failing test
+  green. The steps are shared with `iis-sys-tests` through a YAML anchor.
+  Before the tests start, the job deletes any marker left in the evidence
+  directory, so only this run's setup can write one.
+- **Required, not by convention.** `fleet-only-skip-check` (and so the `CI
+  gate`) fails when the first attempt ended with `failure_class=infra` and
+  `iis-sys-tests-retry` did not conclude `success`, whatever skipped it. The
+  release lane's gate reads the first attempt's step `Classify the failure`:
+  when it concluded `success` (the host failed and the job ended green), at
+  least one `IIS System Tests (retry N)` leg must be `success` and every leg
+  listed must be `success`.
+- **Re-running.** Re-run all jobs of the workflow. "Re-run failed jobs" after
+  a failed retry leg re-runs that leg alone, in a new run attempt that does
+  not hold its sibling: when it lands on a runner other than the one the
+  first attempt failed on, it tests as usual; when it lands on that runner,
+  it fails at once with an error that says to re-run all jobs (it could
+  never be placed elsewhere). The first attempt is not re-run, so its
+  outputs, the failed runner's name included, carry over.
+- **Drain signal.** `pipeline-pr.yml` runs on merge groups and holds no
+  write token (rule queue-route), so the hourly `runner-health` job of
+  `pipeline-sweep.yml` reads the `ci.yml` runs of the last 6 hours instead
+  (`tools/ci/runner_health.sh`): a green first try in a run attempt that
+  has retry legs, and a retry leg whose error says the host failed again,
+  are one record each against the runner they ran on. One open issue per
+  runner, labelled `runner-health` and titled `Runner health: <runner> (IIS
+  System Tests)`, holds the records (one marker line per job, so overlapping
+  sweeps count a job once). The second record while the issue is open
+  prefixes the title with `[drain]` and asks for the runner to be taken out
+  of the pool (docs/ci/runner-environment.md, "Draining a runner"). The
+  script changes no runner, label or registration. Closing the issue after
+  the repair starts the count again. It is tested against a fake `gh` by
+  `tools/ci/test_runner_health.sh`, which the job runs first.
+
+The release lane's gate (`tools/ci/ci_release_gate.sh`) keeps requiring
+`pr / IIS System Tests`; the retry legs are not in its list of required jobs:
+skipped is fine after a green first attempt, a failed leg refuses like any
+other failed job, and after a host failure the rule above applies.
+
+## Report-only jobs
+
+A job that fails for reasons nobody has fixed yet turns the default branch
+and the merge queue red for every change. It may be made report-only (a
+job-level `continue-on-error: true`): a failure still shows on the job, but
+not on the run or the `CI gate`. That state must end, so every report-only
+job has a line in `tools/ci/quarantine.txt`:
+
+    <workflow file>|<job id>|<job name>|<tracking issue>|<expires YYYY-MM-DD>
+
+`tools/ci/check_quarantine.py` runs in `CI tooling self-tests` on every pull
+request, merge group and push. It fails when a report-only job has no line,
+when a line names a missing job, another name, or a job that is no longer
+report-only (remove the line when the job is fixed), when the expiry is more
+than 28 days out, and, after the expiry date (UTC), on every run until the
+job is fixed or the expiry is moved with the reason written in the issue
+first. Three days before the expiry it warns. The release lane's gate does
+not read the file: a quarantined job that the release requires must still
+pass at the release commit. The nightly-red issue reads the run's job list,
+so a report-only job's failure in the nightly is still reported.
+
+As of 2026-11-06: `full / Windows AppVerif`, until 2026-11-20 (issue #656).
 
 ## The tidy sweep
 
@@ -923,9 +1051,11 @@ is `true`, and every other build runner leg needs `vendor`, so `fleet=false`
 skips them all. The hosted jobs of the PR tier, the inline jobs of `ci.yml`
 and the whole full tier run as before.
 
-- `merge_group` and `workflow_dispatch` always run the whole PR tier. The step
-  decides them inline, whatever `CI_SCOPE` says, so a merge group and the
-  release candidate dispatch (`full: true`) never skip a fleet job.
+- `workflow_dispatch` always runs the whole PR tier. The step decides it
+  inline, whatever `CI_SCOPE` says, so the release candidate dispatch
+  (`full: true`) never skips a fleet job. A merge group runs the whole PR
+  tier too, except a docs-only merge group under an ALLGREEN queue once
+  `DOCS_LANE` is `on` (see "DOCS_LANE: the docs-only lane").
 - For every other event the step reads `tools/ci/pr_tier_scope.sh` from
   `origin/master` with `git show`, never from the tree under test, and runs
   that copy. A missing script, a failing script or any output other than
@@ -964,6 +1094,53 @@ and the whole full tier run as before.
   the nightly tier's fuzz lanes and IIS lanes cover the rest every night.
   `tools/ci/test_pr_tier_scope.sh` covers the script against a fake `gh`, and
   the workflow-shape gate (`fleet-scope`) pins the step.
+
+## DOCS_LANE: the docs-only lane
+
+A pull request or merge group that changes documentation only does not need
+the fleet legs: no build, test or fleet job reads those paths. The
+`Decide the fleet scope` step hands a pull request and a merge group to
+`tools/ci/pr_tier_scope.sh` with `BASE` (the pull request's or merge group's
+base commit) and the repository variable `DOCS_LANE`.
+
+- **The classifier.** `tools/ci/docs_only.sh BASE HEAD` prints exactly
+  `docs_only=true` or `docs_only=false`. A change is docs-only when every path
+  of `git diff --no-renames --name-only BASE...HEAD` matches its allowlist:
+  `docs/`, `changelog.d/`, a Markdown file at the top level, a Markdown file directly under `.oss-scanner/`, `.github/ISSUE_TEMPLATE/` and `.github/pull_request_template.md`. Anything else is false: a path off the list (`tools/ci/` and
+  every workflow included), a rename out of a code path (renames are not
+  detected, so the old path is listed), a missing or unknown base, a failed
+  or empty diff. `pr_tier_scope.sh` reads the classifier from
+  `origin/master` with `git show`, like itself, so a pull request cannot
+  change its own lane; an unreadable classifier or any other output is false.
+  No workflow names the classifier (the workflow-shape gate's `docs-lane`
+  rule).
+- **Merge groups.** A docs-only merge group counts only while the merge queue
+  of `master` groups ALLGREEN, read from
+  `gh api repos/<repo>/rules/branches/master` (3 tries). Any other grouping,
+  no queue rule, more than one, or a failed read is the full tier. Under
+  ALLGREEN a code entry queued ahead of a docs entry merges only on its own
+  result, and the docs entry's range (`base_sha...head_sha`) is its own change.
+- **`DOCS_LANE`.** Unset, or any value other than `on` (lowercased), is shadow
+  mode: the decision is logged and the PR tier runs in full. `on` skips the
+  fleet legs (`fleet=false heavy=false reason=docs only`). The `ci:pr-full`
+  label always runs the full tier; `workflow_dispatch` and `push` never take
+  the lane.
+- **Log lines.** On every pull request and merge group:
+  `docs lane: mode=<on|shadow> would_skip=<bool> docs_only=<bool> queue=<grouping|none|mixed|error|n/a> pr_full=<bool>`,
+  the classifier's own `docs lane: docs_only=<bool> (<reason>)` line, and,
+  when the lane would skip, one line saying whether it did (`skipping vendor
+  and every fleet job that needs it`) or would have (`shadow: would skip
+  ...`).
+- **Push burst guard.** Once docs entries can pass the queue without the
+  fleet, the queue proof of a docs-only commit covers only that commit. With
+  `DOCS_LANE` on, a push whose tip commit is docs-only but whose
+  `BEFORE_SHA..SHA` range holds code drops the queue proof and runs the fleet
+  legs (`docs lane: burst guard: ...`); in shadow mode the line says what it
+  would do.
+- **Rollout and rollback.** Read the shadow lines on docs and code pull
+  requests first, then `gh variable set DOCS_LANE --body on --repo We-Amp/mod_pagespeed`.
+  Roll back with `gh variable delete DOCS_LANE --repo We-Amp/mod_pagespeed`; the next run
+  takes it.
 
 ## Required checks
 

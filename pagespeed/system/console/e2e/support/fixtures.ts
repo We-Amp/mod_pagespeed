@@ -235,6 +235,9 @@ export const HISTOGRAMS = ok({
 });
 
 /** The entry every detail fixture describes: https://www.example.test/hero.png. */
+/** The per-site cache namespace the optimizer reports on the hero list entry (64 lowercase hex). */
+export const HERO_SITE = "0123456789abcdef".repeat(4);
+
 export const HERO_KEY = { url: "/hero.png", host: "www.example.test", scheme: "https" } as const;
 
 /** Page 1/2 of a two-page index (the daemon's shape: path urls), branching on `offset`. */
@@ -244,7 +247,7 @@ export const URLS_TWO_PAGES: Responder = (_call, request) => {
     ? ok({
         urls: [
           { url: "/", hostname: "www.example.test", scheme: "https", alternate_count: 3, cache_key: "https://www.example.test/" },
-          { url: "/hero.png", hostname: "www.example.test", scheme: "https", alternate_count: 2, cache_key: "https://www.example.test/hero.png" },
+          { url: "/hero.png", hostname: "www.example.test", scheme: "https", site: HERO_SITE, alternate_count: 2, cache_key: "https://www.example.test/hero.png" },
         ],
         offset: 0, limit: 50, next_offset: 2, has_more: true, total: 3,
       })

@@ -71,6 +71,21 @@ TEST_F(CssMoveToHeadFilterTest, MovesCssToHead) {
   ValidateExpected("move_css_to_head", html_input, expected_output);
 }
 
+// An svg element opened in head and never closed is still open where the
+// page writes </head>, so the end of head is inside that svg.  The style is
+// left in body rather than moved into the svg.
+TEST_F(CssMoveToHeadFilterTest, DoesntMoveIntoUnclosedSvgInHead) {
+  AddFilter(RewriteOptions::kMoveCssToHead);
+  ValidateNoChanges("svg_in_head",
+                    "<head><svg><g></head>"
+                    "<body><p>x</p><style>.a{color:red}</style></body>");
+  ValidateExpected("no_svg",
+                   "<head></head>"
+                   "<body><p>x</p><style>.a{color:red}</style></body>",
+                   "<head><style>.a{color:red}</style></head>"
+                   "<body><p>x</p></body>");
+}
+
 TEST_F(CssMoveToHeadFilterTest, DoesntMoveOutOfNoScript) {
   AddFilter(RewriteOptions::kMoveCssToHead);
 

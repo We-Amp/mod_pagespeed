@@ -43,6 +43,7 @@
 #include "net/instaweb/rewriter/public/critical_images_beacon_filter.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
 #include "net/instaweb/rewriter/public/csp.h"
+#include "net/instaweb/rewriter/public/css_filter.h"
 #include "net/instaweb/rewriter/public/css_url_encoder.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
@@ -189,6 +190,9 @@ bool ShouldInlinePreview(const int64 low_res_size, const int64 full_res_size,
   return (low_res_is_small && low_res_smaller_than_full_res);
 }
 
+// Options that a URL's options segment may set. List only options that shape
+// the optimized bytes, never limits on the work the server accepts: those
+// must come from the configuration alone.
 const char* const kRelatedOptions[] = {
     RewriteOptions::kImageJpegNumProgressiveScans,
     RewriteOptions::kImageJpegNumProgressiveScansForSmallScreens,
@@ -197,10 +201,8 @@ const char* const kRelatedOptions[] = {
     RewriteOptions::kImageJpegQualityForSaveData,
     RewriteOptions::kImageLimitOptimizedPercent,
     RewriteOptions::kImageLimitResizeAreaPercent,
-    RewriteOptions::kImageMaxRewritesAtOnce,
     RewriteOptions::kImagePreserveURLs,
     RewriteOptions::kImageRecompressionQuality,
-    RewriteOptions::kImageResolutionLimitBytes,
     RewriteOptions::kImageWebpRecompressionQuality,
     RewriteOptions::kImageWebpRecompressionQualityForSmallScreens,
     RewriteOptions::kImageWebpAnimatedRecompressionQuality,
@@ -437,6 +439,11 @@ const char* MessageForInlineResult(InlineResult inline_result) {
       message =
           "The image was not inlined because the internal data was "
           "corrupted.";
+      break;
+    case INLINE_DOCUMENT_BUDGET_SPENT:
+      message =
+          "The image was not inlined because the document already holds "
+          "the most inlined image bytes allowed.";
       break;
   }
   return message;
@@ -753,18 +760,21 @@ void ImageRewriteFilter::Context::Render() {
       // the output bytes identical for every client.
       int64 css_image_inline_max_bytes =
           HasInPlaceRewriteAncestor() ? 0 : css_image_inline_max_bytes_;
+      CachedResult* css_result = (parent() != nullptr)
+                                     ? parent()->mutable_output_partition(0)
+                                     : nullptr;
       rewrote_url = filter_->FinishRewriteCssImageUrl(
-          css_image_inline_max_bytes, result, resource_slot, &inline_result);
-      if (Driver()->options()->Enabled(RewriteOptions::kInlineImages)) {
+          css_image_inline_max_bytes, result, resource_slot, css_result,
+          &inline_result);
+      if (Driver()->DebugMode() &&
+          Driver()->options()->Enabled(RewriteOptions::kInlineImages)) {
         const char* message = MessageForInlineResult(inline_result);
         if (message != nullptr) {
-          RewriteContext* context = parent();
-          if (context != nullptr) {
-            CachedResult* css_result = context->mutable_output_partition(0);
-            // We want to have the CSS context retain this, so we can
-            // annotate the HTML that references the CSS with the image.
-            // So we write the debug message into the CSS context.
-            filter_->SaveDebugMessageToCache(message, css_result);
+          // The stylesheet's context keeps the message, so the HTML that
+          // references the stylesheet can show it, within the document's
+          // debug budget.
+          if (has_parent() && message[0] != 0) {
+            AddDebugMessageToParent(message);
           }
         }
       }
@@ -825,6 +835,8 @@ ImageRewriteFilter::ImageRewriteFilter(RewriteDriver* driver)
     : RewriteFilter(driver), image_counter_(0), saw_end_document_(false) {
   Statistics* stats = server_context()->statistics();
   image_rewrites_ = stats->GetVariable(kImageRewrites);
+  parse_max_bytes_exceeded_ =
+      stats->GetVariable(CssFilter::kParseMaxBytesExceeded);
   image_resized_using_rendered_dimensions_ =
       stats->GetVariable(kImageResizedUsingRenderedDimensions);
   image_norewrites_high_resolution_ =
@@ -1169,9 +1181,12 @@ bool ImageRewriteFilter::ResizeImageIfNecessary(
   image->Dimensions(&image_dim);
 
   if (image_dim.width() <= 0 || image_dim.height() <= 0) {
-    cached->add_debug_message(
-        absl::StrFormat("Cannot resize %s: Image must be at least 1x1",
-                        UrlForDebugMessages(rewrite_context).c_str()));
+    if (driver()->DebugMode()) {
+      SaveDebugMessageToCache(
+          absl::StrFormat("Cannot resize %s: Image must be at least 1x1",
+                          UrlForDebugMessages(rewrite_context).c_str()),
+          cached);
+    }
     return false;
   }
 
@@ -1198,11 +1213,12 @@ bool ImageRewriteFilter::ResizeImageIfNecessary(
                      message, url.c_str(), image_dim.width(),
                      image_dim.height(), desired_dim->width(),
                      desired_dim->height());
-    cached->add_debug_message(image->resize_debug_message());
-  } else {
-    cached->add_debug_message(
+    SaveDebugMessageToCache(image->resize_debug_message(), cached);
+  } else if (driver()->DebugMode()) {
+    SaveDebugMessageToCache(
         absl::StrFormat("Image %s does not appear to need resizing.",
-                        UrlForDebugMessages(rewrite_context).c_str()));
+                        UrlForDebugMessages(rewrite_context).c_str()),
+        cached);
   }
 
   // Cache image dimensions, including any resizing we did.
@@ -1803,11 +1819,11 @@ void ImageRewriteFilter::BeginRewriteSrcSet(HtmlElement* element,
 
 bool ImageRewriteFilter::FinishRewriteCssImageUrl(
     int64 css_image_inline_max_bytes, const CachedResult* cached,
-    ResourceSlot* slot, InlineResult* inline_result) {
+    ResourceSlot* slot, CachedResult* css_result, InlineResult* inline_result) {
   GoogleString data_url;
-  *inline_result =
-      TryInline(false /*not html*/, false /*not critical*/,
-                css_image_inline_max_bytes, cached, slot, &data_url);
+  *inline_result = TryInline(false /*not html*/, false /*not critical*/,
+                             css_image_inline_max_bytes, cached, slot,
+                             css_result, &data_url);
 
   if (*inline_result == INLINE_SUCCESS) {
     // TODO(jmaessen): Can we make output URL reflect actual *usage*
@@ -1908,9 +1924,9 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
     // src->SetValue() copies implicitly.
     GoogleString data_url;
     // TODO(sligocki): Use different threshold for responsive images?
-    *inline_result =
-        TryInline(true /*in html*/, is_critical_image,
-                  options->ImageInlineMaxBytes(), cached, slot, &data_url);
+    *inline_result = TryInline(true /*in html*/, is_critical_image,
+                               options->ImageInlineMaxBytes(), cached, slot,
+                               nullptr /*css_result*/, &data_url);
 
     if (*inline_result == INLINE_SUCCESS) {
       DCHECK(!options->cache_small_images_unrewritten())
@@ -1987,7 +2003,11 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
           Image::TypeToContentType(low_res_image_type);
       DCHECK(content_type != nullptr)
           << "Invalid Image Type: " << low_res_image_type;
-      if (content_type != nullptr) {
+      if (content_type == nullptr) {
+        driver()->message_handler()->Message(
+            kError, "Invalid low res image type: %d", low_res_image_type);
+      } else if (driver()->ReserveInlinedImageBytes(
+                     cached->low_resolution_inlined_data().size())) {
         GoogleString data_url;
         DataUrl(*content_type, BASE64, cached->low_resolution_inlined_data(),
                 &data_url);
@@ -1995,9 +2015,6 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
                                data_url);
         driver()->increment_num_inline_preview_images();
         low_res_src_inserted = true;
-      } else {
-        driver()->message_handler()->Message(
-            kError, "Invalid low res image type: %d", low_res_image_type);
       }
     }
   }
@@ -2016,9 +2033,11 @@ bool ImageRewriteFilter::FinishRewriteImageUrl(
 
 void ImageRewriteFilter::SaveDebugMessageToCache(const GoogleString& message,
                                                  CachedResult* cached_result) {
-  if (!message.empty()) {
-    // We always save our result to our cache entry, since it will be propagated
-    // to the parent automatically, and we need to be replayable independently.
+  // Debug messages are kept only for a request with debug on, so a page
+  // without it does not hold one per image. When kept, they go into our cache
+  // entry, since they are propagated to the parent automatically and must be
+  // replayable independently.
+  if (!message.empty() && driver()->DebugMode()) {
     cached_result->add_debug_message(message);
   }
 }
@@ -2091,6 +2110,22 @@ bool ImageRewriteFilter::StoreUrlInPropertyCache(const StringPiece& url) {
   return true;
 }
 
+int64 ImageRewriteFilter::StyleParseBound(HtmlElement* element,
+                                          bool count_over_bound) {
+  const RewriteOptions* options = driver()->options();
+  const HtmlElement::Attribute* style =
+      element->FindAttribute(HtmlName::kStyle);
+  if (count_over_bound && style != nullptr &&
+      style->DecodedValueOrNull() != nullptr) {
+    // A style attribute over CssParseMaxBytes is not parsed here either.
+    CssFilter::OverParseMaxBytes(
+        options, strlen(style->DecodedValueOrNull()),
+        driver()->google_url().Spec(), "Image style attribute not read",
+        parse_max_bytes_exceeded_, driver()->message_handler(), nullptr);
+  }
+  return options->css_parse_max_bytes();
+}
+
 bool ImageRewriteFilter::HasAnyDimensions(HtmlElement* element) {
   if (element->FindAttribute(HtmlName::kWidth)) {
     return true;
@@ -2098,7 +2133,7 @@ bool ImageRewriteFilter::HasAnyDimensions(HtmlElement* element) {
   if (element->FindAttribute(HtmlName::kHeight)) {
     return true;
   }
-  css_util::StyleExtractor extractor(element);
+  css_util::StyleExtractor extractor(element, StyleParseBound(element, false));
   return extractor.HasAnyDimensions();
 }
 
@@ -2166,7 +2201,7 @@ bool ImageRewriteFilter::ParseDimensionAttribute(const char* position,
 void ImageRewriteFilter::GetDimensions(
     HtmlElement* element, ImageDim* page_dim, const HtmlElement::Attribute* src,
     bool* is_resized_using_rendered_dimensions) {
-  css_util::StyleExtractor extractor(element);
+  css_util::StyleExtractor extractor(element, StyleParseBound(element, true));
   css_util::DimensionState state = extractor.state();
   int32 width = extractor.width();
   int32 height = extractor.height();
@@ -2243,6 +2278,7 @@ InlineResult ImageRewriteFilter::TryInline(bool is_html, bool is_critical,
                                            int64 image_inline_max_bytes,
                                            const CachedResult* cached_result,
                                            ResourceSlot* slot,
+                                           CachedResult* css_result,
                                            GoogleString* data_url) {
   int32 image_type_value = cached_result->inlined_image_type();
   if (!ImageType_IsValid(image_type_value)) {
@@ -2303,6 +2339,23 @@ InlineResult ImageRewriteFilter::TryInline(bool is_html, bool is_critical,
     slot->set_disable_rendering(true);
     return INLINE_CACHE_SMALL_IMAGES_UNREWRITTEN;
   }
+
+  // However small each image, the bytes inlined into one document are
+  // bounded. An image inlined into a stylesheet counts toward that
+  // stylesheet, which counts toward the HTML it is inlined into when it is
+  // rendered there (CssFilter::Context::Render).
+  const int64 size = data.size();
+  if (css_result == nullptr) {
+    if (!driver()->ReserveInlinedImageBytes(size)) {
+      return INLINE_DOCUMENT_BUDGET_SPENT;
+    }
+  } else {
+    const int64 used = css_result->inlined_image_bytes();
+    if (size > options->document_image_inline_max_bytes() - used) {
+      return INLINE_DOCUMENT_BUDGET_SPENT;
+    }
+    css_result->set_inlined_image_bytes(used + size);
+  }
   DataUrl(*Image::TypeToContentType(image_type), BASE64, data, data_url);
   return INLINE_SUCCESS;
 }
@@ -2323,6 +2376,7 @@ void ImageRewriteFilter::StartElementImpl(HtmlElement* element) {
   // Rewrite any image-valued attributes we find.
   resource_tag_scanner::UrlCategoryVector attributes;
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
+  bool began_rewrite = false;
   for (auto& attribute : attributes) {
     if (attribute.category != semantic_type::kImage ||
         attribute.url->DecodedValueOrNull() == nullptr) {
@@ -2330,7 +2384,12 @@ void ImageRewriteFilter::StartElementImpl(HtmlElement* element) {
     }
 
     BeginRewriteImageUrl(element, attribute.url);
+    began_rewrite = true;
+  }
 
+  // The srcset belongs to the element, not to any one of its image-valued
+  // attributes (there can be several), so start its rewrite once per element.
+  if (began_rewrite) {
     HtmlElement::Attribute* srcset = element->FindAttribute(HtmlName::kSrcset);
     HtmlElement::Attribute* datasrcset =
         element->FindAttribute(HtmlName::kDataSrcset);

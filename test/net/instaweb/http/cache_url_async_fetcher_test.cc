@@ -1456,6 +1456,39 @@ TEST_F(CacheUrlAsyncFetcherTest, Check304FresheningModifiedImplicitCacheTtl) {
   EXPECT_EQ(cache_body_, contents);
 }
 
+// A proxy's cache hit on an entry the module fetched itself keeps the max-age
+// derived for a response that stated no lifetime, as the proxy's own stored
+// responses carry it.
+TEST_F(CacheUrlAsyncFetcherTest, ProxyHitOnModuleFetchedEntryKeepsMaxAge) {
+  const char kUrl[] = "http://www.example.com/fetched.css";
+  ResponseHeaders headers(http_options_);
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.Add(HttpAttributes::kContentType, kContentTypeCss.mime_type());
+  headers.SetDate(timer_.NowMs());
+  headers.ComputeCaching();
+  ASSERT_TRUE(headers.Has(HttpAttributes::kExpires));
+  HTTPValue value;
+  value.SetHeaders(&headers);
+  value.Write("fetched", &handler_);
+  http_cache_->PutFetchedInput(kUrl, fragment_, RequestHeaders::Properties(),
+                               http_options_, &value, &handler_);
+
+  GoogleString content;
+  bool done = false, success = false, cacheable = false;
+  ResponseHeaders served(http_options_);
+  MockFetch* fetch = new MockFetch(
+      RequestContextPtr(
+          new RequestContext(http_options_, thread_system_->NewMutex(), nullptr)),
+      &content, &done, &success, &cacheable);
+  fetch->set_response_headers(&served);
+  cache_fetcher_->Fetch(kUrl, &handler_, fetch);
+  ASSERT_TRUE(done);
+  EXPECT_EQ("fetched", content);
+  const char* cache_control = served.Lookup1(HttpAttributes::kCacheControl);
+  ASSERT_NE(nullptr, cache_control);
+  EXPECT_TRUE(StringCaseStartsWith(cache_control, "max-age=")) << cache_control;
+}
+
 TEST_F(CacheUrlAsyncFetcherTest, FetchFailedNoIgnore) {
   cache_fetcher_->set_ignore_recent_fetch_failed(false);
 

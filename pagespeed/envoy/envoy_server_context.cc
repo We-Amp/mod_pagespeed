@@ -25,6 +25,7 @@
 #include "pagespeed/envoy/envoy_message_handler.h"
 #include "pagespeed/envoy/envoy_rewrite_driver_factory.h"
 #include "pagespeed/envoy/envoy_rewrite_options.h"
+#include "pagespeed/kernel/cache/purge_set.h"
 #include "pagespeed/system/add_headers_fetcher.h"
 #include "pagespeed/system/loopback_route_fetcher.h"
 #include "pagespeed/system/system_request_context.h"
@@ -104,11 +105,21 @@ const RewriteOptions* EnvoyServerContext::GetOptionsForHost(
   // Create merged options: global + VHost.
   auto* merged = EnvoyRewriteOptions::DynamicCast(global_options()->Clone());
   merged->Merge(*vhost_options);
+  merged->Freeze();
 
   // Cache the merged options.
   merged_options_cache_[hostname_str] =
       std::unique_ptr<EnvoyRewriteOptions>(merged);
   return merged_options_cache_[hostname_str].get();
+}
+
+RewriteOptions* EnvoyServerContext::NewRequestOptions(
+    const RewriteOptions& base) {
+  RewriteOptions* options = base.Clone();
+  if (&base != global_options()) {
+    options->UpdateCachePurgeSet(global_options()->purge_set());
+  }
+  return options;
 }
 
 }  // namespace net_instaweb

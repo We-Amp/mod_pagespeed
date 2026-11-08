@@ -224,6 +224,7 @@ try {
     Write-Host "=== Revert to '$Snapshot' and start ==="
     $script:VmTouched = $true
     Restore-VMSnapshot -VMName $VMName -Name $Snapshot -Confirm:$false -ErrorAction Stop
+    Repair-VmSeedIsoPath -VMName $VMName
     Start-VM -Name $VMName -ErrorAction Stop
     $mac = Wait-VmMac -VMName $VMName
     Write-Host "Waiting for guest IP (MAC $mac) ..."

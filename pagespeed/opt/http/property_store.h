@@ -65,7 +65,8 @@ class PropertyStore {
 
   // Write to storage system for the given key.
   // Callback done can be NULL. BoolCallback done will be called with true if
-  // Insert operation is successful.
+  // Insert operation is successful. If non-NULL, done is called exactly once,
+  // possibly on another thread, and not with internal locks of this class held.
   // TODO(pulkitg): Remove UserAgentMatcher dependency.
   virtual void Put(const GoogleString& url,
                    const GoogleString& options_signature_hash,

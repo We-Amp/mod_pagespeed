@@ -160,8 +160,19 @@ inline constexpr int kPsErrNotFound = 1;
 // on it, is a silent behaviour change for every entry written before the
 // allocation -- so the library is refused at startup, in the operator's log,
 // rather than used with one statement quietly meaning something else.
+//
+// THE FLOOR IS 12 BECAUSE EVERY CACHE CALL THIS MODULE MAKES IS SITED.  1.12
+// publishes the _site cache entry points and the `site` and `notify_flags`
+// fields of the notification.  A worker cache entry is read or written for a
+// request only under the site of the server block, virtual host or IIS site
+// that admitted it, and every notification names that site and says it comes
+// from this module.  There is no unsited fallback to degrade to: the unsited
+// entry points share one keyspace across every site on the worker, which is
+// exactly what the site exists to prevent, so a library without the _site
+// entry points is refused here -- whatever version it reports -- and the
+// unsited ones are never bound.
 inline constexpr int kRequiredAbiMajor = 1;
-inline constexpr int kRequiredAbiMinor = 8;
+inline constexpr int kRequiredAbiMinor = 12;
 
 // The durable-originals entry class: the bytes the origin sent, before any
 // optimization.  The ONLY class this module writes.  The optimizer owns every
@@ -401,6 +412,17 @@ uint32_t ApplySecChDprHint(uint32_t mask, StringPiece sec_ch_dpr);
 // no longer reads as the sentinel.
 inline constexpr uint32_t kOriginRefreshedSentinel = 0xFFFFFFFC;
 
+// The site a cache call or a notification belongs to: the peer's
+// PS_SITE_ID_CHARS lowercase hex characters (SiteIdFromServerFragment).
+inline constexpr size_t kPsSiteIdChars = 64;
+
+// The peer's PS_NOTIFY_FLAG_* bits (published at 1.12), mirrored.  This
+// module sends exactly kPsNotifyFlagFromModule on every notification: it
+// never vouches for a host, and the peer refuses a notification from the
+// module that carries HTML, an agent request, no site, or the vouched bit.
+inline constexpr uint32_t kPsNotifyFlagHostVouched = 0x1u;
+inline constexpr uint32_t kPsNotifyFlagFromModule = 0x2u;
+
 // Content types, as the peer numbers them.
 enum PsContentType {
   kPsContentHtml = 0,
@@ -484,6 +506,9 @@ struct PsNotifyParams {
   const char* option_context;
   size_t option_context_length;
   const char* option_signature;
+  // 1.12.  Set only through BuildModuleNotifyParams (daemon_notify_params.h).
+  const char* site;
+  uint32_t notify_flags;
 };
 
 // ---------------------------------------------------------------------------
@@ -620,11 +645,19 @@ static_assert(sizeof(PsWriteParams) == 80,
 static_assert(sizeof(PsCacheControl) == 24,
               "the Cache-Control state layout no longer matches the published "
               "one");
-static_assert(sizeof(PsNotifyParams) == 72,
+static_assert(sizeof(PsNotifyParams) == 88,
               "the notification parameter layout no longer matches the "
               "published one; short of the full size the peer drops the "
-              "options context and processes the notification under the "
-              "default one");
+              "site and the options context and processes the notification "
+              "unsited, under the default one");
+// The size alone does not catch two fields trading places.
+static_assert(offsetof(PsNotifyParams, option_signature) == 64,
+              "the notification parameter layout no longer matches the "
+              "published one");
+static_assert(offsetof(PsNotifyParams, site) == 72,
+              "the notification's site is not where the peer reads it");
+static_assert(offsetof(PsNotifyParams, notify_flags) == 80,
+              "the notification's flags are not where the peer reads them");
 static_assert(sizeof(PsFreshnessConfig) == 32,
               "the freshness-configuration layout no longer matches the "
               "published one");
@@ -710,6 +743,44 @@ class DaemonAbi {
   // refusing.
   virtual bool PublishesGeneration() const = 0;
 
+  // The HTML cacheability policy (PS_API 1.12), bound OPTIONALLY and as a
+  // set: all three entry points or none.  False means a library older than
+  // the policy, for which DaemonHtmlCache reports "unavailable"; nothing else
+  // depends on them.  Not pure, so a stand-in for an older library says so by
+  // saying nothing.
+  virtual bool PublishesHtmlStorePolicy() const { return false; }
+
+  // ps_html_store_classify: a pure function of its arguments.  Returns the
+  // action, or a negative value for a malformed call or an unbound policy.
+  virtual int HtmlStoreClassify(
+      int /*mode*/, const char* /*method*/, const char* /*url_path*/,
+      uint32_t /*request_flags*/, int /*status*/, const char* const* /*names*/,
+      const char* const* /*values*/, size_t /*count*/, uint64_t /*body_bytes*/,
+      int /*body_complete*/, const char* /*body_prefix*/,
+      size_t /*body_prefix_len*/, uint64_t /*max_body_bytes*/,
+      uint32_t /*now_seconds*/, int* /*out_reason*/,
+      uint32_t* /*out_lifetime_s*/, uint32_t* /*out_flags*/,
+      uint16_t* /*out_cc_flags*/, int* /*out_sidecar*/, char* /*detail_buf*/,
+      size_t /*detail_capacity*/, size_t* /*out_detail_len*/) const {
+    return -1;
+  }
+
+  // ps_html_decision_format: 0 on success, the library's negative code
+  // otherwise, -1 for an unbound policy.
+  virtual int HtmlDecisionFormat(const char* const* /*keys*/,
+                                 const char* const* /*values*/,
+                                 size_t /*count*/, char* /*buf*/,
+                                 size_t /*capacity*/,
+                                 size_t* /*out_len*/) const {
+    return -1;
+  }
+
+  // ps_html_store_reason_name, or nullptr for an unknown reason or an unbound
+  // policy.
+  virtual const char* HtmlStoreReasonName(int /*reason*/) const {
+    return nullptr;
+  }
+
   // Returns kPsOk and stores an opaque cache handle in *out_cache, or an
   // error code.  A successful open must be matched with CacheClose.
   virtual int CacheOpen(const PsCacheConfig* config,
@@ -769,13 +840,16 @@ class DaemonAbi {
   virtual void WriteParamsInit(PsWriteParams* params) const = 0;
   virtual void NotifyParamsInit(PsNotifyParams* params) const = 0;
 
-  // Opens a streaming write of the DURABLE ORIGINAL for `url`.  The peer
-  // refuses any alternate id but the originals class, which is what makes
-  // this the only writer this module can be.
-  virtual int CacheWriteOriginal(void* cache, const char* url,
-                                 const char* hostname, const char* scheme,
-                                 const PsWriteParams* params,
-                                 void** out_handle) const = 0;
+  // Opens a streaming write of the DURABLE ORIGINAL for `url`, in the
+  // keyspace of `site` (ps_cache_write_original_site).  The peer refuses any
+  // alternate id but the originals class, which is what makes this the only
+  // writer this module can be.  The callers never pass anything but a site
+  // id (IsSiteId); the unsited entry point is not bound.
+  virtual int CacheWriteOriginalSite(void* cache, const char* url,
+                                     const char* hostname, const char* scheme,
+                                     const char* site,
+                                     const PsWriteParams* params,
+                                     void** out_handle) const = 0;
   virtual int WriteData(void* handle, const void* data,
                         size_t length) const = 0;
   virtual int WriteClose(void* handle) const = 0;
@@ -841,10 +915,10 @@ class DaemonAbi {
   // ---------------------------------------------------------------------
   // The serve arm.
   //
-  // Bound unconditionally beside the record arm's: every entry point here was
-  // published at or before 1.2 and so predates every floor this module has
-  // had, which means a daemon this module will record into always exports all
-  // of it.  See the floor discussion above for why that matters.
+  // Bound unconditionally beside the record arm's: the two sited reads are
+  // published at 1.12 with the sited writer, and everything else here at or
+  // before 1.2, which means a daemon this module will record into always
+  // exports all of it.  See the floor discussion above for why that matters.
   //
   // A read RESULT is an opaque handle the peer owns until ReadFree; the
   // bytes and every `const char*` accessor below borrow from it and are
@@ -862,17 +936,22 @@ class DaemonAbi {
   // yet optimized.  Read the original with ReadAlternate and
   // kPsSentinelOriginal instead; the peer's own header blesses that as the
   // way to read the class.
-  virtual int CacheReadBest(void* cache, const char* url, const char* hostname,
-                            const char* scheme, uint32_t mask,
-                            void** out_result) const = 0;
+  //
+  // In the keyspace of `site` (ps_cache_read_best_site); see
+  // CacheWriteOriginalSite.
+  virtual int CacheReadBestSite(void* cache, const char* url,
+                                const char* hostname, const char* scheme,
+                                const char* site, uint32_t mask,
+                                void** out_result) const = 0;
 
   // Reads ONE stored entry by its exact alternate id.  This is how the
   // durable-originals class is read back, and it is the only read that can
   // reach it.
-  virtual int CacheReadAlternate(void* cache, const char* url,
-                                 const char* hostname, const char* scheme,
-                                 uint8_t alternate_id,
-                                 void** out_result) const = 0;
+  // In the keyspace of `site` (ps_cache_read_alternate_site).
+  virtual int CacheReadAlternateSite(void* cache, const char* url,
+                                     const char* hostname, const char* scheme,
+                                     const char* site, uint8_t alternate_id,
+                                     void** out_result) const = 0;
 
   // The stored bytes.  `*out_data` borrows from `result`.
   virtual int ReadContent(const void* result, const uint8_t** out_data,
@@ -908,6 +987,16 @@ class DaemonAbi {
   // origin content length.
   virtual int ReadIsWorkerProcessed(const void* result) const = 0;
   virtual uint32_t ReadOriginContentLength(const void* result) const = 0;
+
+  // The size of the origin bytes encoded the way this entry is served (the
+  // origin length for an identity entry; the gzip or brotli size of the origin
+  // for a coded copy).  Published at 1.12, so an older daemon lacks it: this
+  // then returns false and leaves *out alone, as it does when the entry does
+  // not carry the value.  The default implementation is that older daemon.
+  virtual bool ReadEncodedOriginLength(const void* /*result*/,
+                                       uint64_t* /*out*/) const {
+    return false;
+  }
 
   virtual void ReadFree(void* result) const = 0;
 
@@ -954,6 +1043,20 @@ class DaemonAbi {
                                           uint64_t /*optimized_bytes*/,
                                           uint32_t /*mask*/,
                                           StringPiece /*host*/) const {
+    return false;
+  }
+
+  // ONE serve HIT as ServeStatsRecordHitForHost records it, also accounted in
+  // the split of the saving into what the served encoding saved and what the
+  // rewrite saved (`encoded_origin_bytes`: the value ReadEncodedOriginLength
+  // returned).  Published at 1.12: an older daemon lacks it, this records
+  // nothing and returns false, and the caller falls back to the forms above.
+  virtual bool ServeStatsRecordHitSplit(void* /*handle*/, int /*content_type*/,
+                                        uint64_t /*original_bytes*/,
+                                        uint64_t /*encoded_origin_bytes*/,
+                                        uint64_t /*optimized_bytes*/,
+                                        uint32_t /*mask*/,
+                                        StringPiece /*host*/) const {
     return false;
   }
   virtual void ServeStatsClose(void* handle) const = 0;

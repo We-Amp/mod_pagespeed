@@ -20,6 +20,7 @@
 #ifndef PAGESPEED_APACHE_APACHE_REWRITE_DRIVER_FACTORY_H_
 #define PAGESPEED_APACHE_APACHE_REWRITE_DRIVER_FACTORY_H_
 
+#include <map>
 #include <memory>
 #include <set>
 
@@ -85,6 +86,22 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   }
   void set_stated_server_names(std::set<const server_rec*> names) {
     stated_server_names_ = std::move(names);
+  }
+
+  // The cache fragment derived for a server record whose configuration sets
+  // no CacheFragment (pagespeed_post_config); null for a record that has
+  // one, set or inherited.  Records can share a server context, so the value
+  // belongs to the record, and requests apply it to their own options.  Like
+  // stated_server_names, the map is replaced only by the post-config hook,
+  // which runs in the parent before it starts any child, and is only read
+  // afterwards; each child holds its own copy, under every MPM.
+  const GoogleString* site_cache_fragment(const server_rec* server) const {
+    auto found = site_cache_fragments_.find(server);
+    return found == site_cache_fragments_.end() ? nullptr : &found->second;
+  }
+  void set_site_cache_fragments(
+      std::map<const server_rec*, GoogleString> fragments) {
+    site_cache_fragments_ = std::move(fragments);
   }
 
   // Notification of apache tearing down a context (vhost or top-level)
@@ -166,6 +183,7 @@ class ApacheRewriteDriverFactory : public SystemRewriteDriverFactory {
   apr_pool_t* pool_;
   server_rec* server_rec_;
   std::set<const server_rec*> stated_server_names_;
+  std::map<const server_rec*, GoogleString> site_cache_fragments_;
   // Event-based scheduling using LibeventDispatcher.
   // LibeventDispatcher runs its own background event loop thread; once
   // SetNeedSchedulerThread() attaches it, it drives the EventScheduler's
