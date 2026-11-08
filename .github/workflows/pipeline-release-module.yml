@@ -306,14 +306,13 @@ jobs:
             BUILD_PROFILE=release
           fi
           # The paired optimizer release may not exist yet: a rehearsal, and
-          # a candidate of a release candidate version (which has no pair),
-          # take the pinned release as the pair; every other build needs the
-          # pin to be the pair of this version.
+          # a release candidate version (module-vX.Y.Z-rc.N, which has no
+          # pair), whether a real run or a candidate, take the pinned
+          # release as the pair; every other build needs the pin to be the
+          # pair of this version.
           PAIR_LENIENT=false
           [ "$BUILD_PROFILE" != rehearsal ] || PAIR_LENIENT=true
-          if [ "$CANDIDATE" = true ]; then
-            case "$TAG" in module-v*-*) PAIR_LENIENT=true ;; esac
-          fi
+          case "$TAG" in module-v*-rc.*) PAIR_LENIENT=true ;; esac
           {
             bash tools/ci/release_version.sh parse "$TAG"
             echo "ref=$REF"
@@ -786,12 +785,12 @@ jobs:
           bash tools/ci/release_version.sh stamp "$RELEASE_TAG" net/instaweb/public/VERSION
           cat net/instaweb/public/VERSION
 
-      # A rehearsal may name a version whose paired optimizer release does not
-      # exist yet; the pin then names an older one and the packages depend on
-      # that. The file tells the package build which version to depend on. A
-      # real run and a candidate of a final version have none and depend on
-      # the tag's version.
-      - name: Record the optimizer pair version of a rehearsal
+      # A rehearsal or a release candidate version may name a version whose
+      # paired optimizer release does not exist; the pin then names an older
+      # one and the packages depend on that. The file tells the package build
+      # which version to depend on. A real run and a candidate of a final
+      # version have none and depend on the tag's version.
+      - name: Record the optimizer pair version when there is no pair release
         run: |
           set -euo pipefail
           rm -f optimizer-pair-version
@@ -1134,11 +1133,12 @@ jobs:
             PLACEHOLDER*) echo "::error::optimizer-pin.json is a placeholder: cut the optimizer release first and record the pin"; exit 1 ;;
           esac
           # The pinned optimizer tag must be the pair of this module version.
-          # In a rehearsal the paired release cannot exist yet, so the pin is
-          # taken as it is and the packages are checked against it.
+          # In a rehearsal or for a release candidate version the paired
+          # release cannot exist, so the pin is taken as it is and the
+          # packages are checked against it.
           if [ "$PIN_TAG" != "$OPTIMIZER_TAG" ]; then
             if [ "$PAIR_LENIENT" = true ]; then
-              echo "::warning::rehearsal: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
+              echo "::warning::no paired optimizer release for this version: optimizer-pin.json pins '$PIN_TAG' but a release of this version needs '$OPTIMIZER_TAG'; continuing with the pinned release"
             else
               echo "::error::optimizer-pin.json pins '$PIN_TAG' but this release needs '$OPTIMIZER_TAG'"; exit 1
             fi
@@ -1163,7 +1163,7 @@ jobs:
           python3 tools/ci/check_optimizer_pin_pair.py "$PIN" optimizer-MODULE.bazel bazel/repositories.bzl
           # From 2.5.0 on the module version equals the pinned optimizer's
           # VERSION.txt. Only while the pin is not yet the pair this release
-          # needs (a rehearsal, see above) does a mismatch warn instead of fail.
+          # needs (see above) does a mismatch warn instead of fail.
           GUARD=lane-tools/tools/ci/check_module_optimizer_version.py
           if python3 "$GUARD" --enforced --module-version "$RELEASE_VERSION"; then
             curl -fsSL --retry 5 --retry-all-errors \
